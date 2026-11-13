@@ -14,8 +14,8 @@
 //! summaries in the context of each new harness.
 //!
 //! A conversation carries no exposure for what she reads: her gate is the person's confirmation, and
-//! exposure is for a Mission's Session. Tool results stay framed in `<ai6-data>`, which tells her
-//! what is data. Only a memory entry an exposed Session wrote leaves a mark on the conversation,
+//! exposure is for a Mission's Run. Tool results stay framed in `<ai6-data>`, which tells her
+//! what is data. Only a memory entry an exposed Run wrote leaves a mark on the conversation,
 //! which what she writes after it carries, so the mark is not washed out by passing through her.
 //!
 //! `show` and `navigate` only add an entry for the app: a view, or an app page offered as a
@@ -271,7 +271,7 @@ fn control_job(
         // Never accepted anywhere: a control starts no harness.
         mcp_token: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
         token_expires_at: now() + 60.0,
-        session_id: conversation.session_id.clone(),
+        run_id: conversation.run_id.clone(),
         route: conversation.route.clone(),
         close: *control == Control::Close,
         interrupt: *control == Control::Interrupt,
@@ -792,7 +792,7 @@ impl Assistant {
                 .registry
                 .as_ref()
                 .map_or(Limit::UNBOUNDED, |registry| {
-                    registry.limits().sessions.exposures
+                    registry.limits().runs.exposures
                 });
             conversation.note_memory_marks(marks, marks_kept);
             let mut context = guide::context();
@@ -837,7 +837,7 @@ impl Assistant {
                 // Set when the job is placed: the token is bound to its Station.
                 mcp_token: String::new(),
                 token_expires_at: 0.0,
-                session_id: conversation.session_id.clone(),
+                run_id: conversation.run_id.clone(),
                 route: conversation.route.clone(),
                 close: false,
                 interrupt: false,
@@ -1199,11 +1199,11 @@ impl Assistant {
                 return Err(StatusCode::FORBIDDEN);
             }
             conversation.hear_run(&report);
-            if let Some(session_id) = report
-                .session_id
+            if let Some(run_id) = report
+                .run_id
                 .filter(|id| ai6::directorates::section_00::assistant::valid_identity(id))
             {
-                conversation.session_id = Some(session_id);
+                conversation.run_id = Some(run_id);
                 conversation.route = report.route.clone();
             }
             for event in report
@@ -1308,7 +1308,7 @@ impl Assistant {
             draft,
             status: "pending",
             created_at: now(),
-            session: digest(&granted.bearer),
+            run: digest(&granted.bearer),
             result: None,
             work: None,
             cable: None,
@@ -1337,7 +1337,7 @@ impl Assistant {
     }
 
     /// Runs a pending proposal the person confirmed on a socket signed in with `token`, the
-    /// session it was proposed in, and tells Moneypenny how it went.
+    /// run it was proposed in, and tells Moneypenny how it went.
     async fn confirm(
         &self,
         gateway: &Gateway,
@@ -1361,10 +1361,10 @@ impl Assistant {
             if proposal.status != "pending" {
                 return Err(("conflict", format!("The proposal is {}.", proposal.status)));
             }
-            if proposal.session != digest(token) {
+            if proposal.run != digest(token) {
                 return Err((
                     "forbidden",
-                    "Only the signed-in session it was proposed in can confirm it.".to_owned(),
+                    "Only the signed-in run it was proposed in can confirm it.".to_owned(),
                 ));
             }
             proposal.status = "confirming";
@@ -1816,7 +1816,7 @@ impl Assistant {
         }
     }
 
-    /// Turns a submitted form into a proposal of its tool, made in this socket's session.
+    /// Turns a submitted form into a proposal of its tool, made in this socket's run.
     async fn submit(
         &self,
         gateway: &Gateway,
@@ -2061,7 +2061,7 @@ fn room_for_proposal(conversation: &mut Conversation, limits: &AssistantGatewayL
 /// for the person (its message, every file's new text), `needs` what it rests on.
 fn commit_proposal(
     tool: &'static str,
-    session: String,
+    run: String,
     target: String,
     scope: actions::Scope,
     needs: &'static str,
@@ -2087,7 +2087,7 @@ fn commit_proposal(
         },
         status: "pending",
         created_at: now(),
-        session,
+        run,
         result: None,
         work: Some(commit),
         cable: None,
@@ -2155,7 +2155,7 @@ fn ready(
 }
 
 /// The end of the conversation so far, for a harness that starts without its provider
-/// Session's own memory of it: at most `[assistant.gateway] recap_bytes`, and under half of
+/// Run's own memory of it: at most `[assistant.gateway] recap_bytes`, and under half of
 /// `[assistant.limits] context_bytes`, the rest being her standing context.
 fn recap(conversation: &Conversation, config: &AssistantConfig) -> Option<String> {
     let mut lines = Vec::new();
@@ -2178,7 +2178,7 @@ fn recap(conversation: &Conversation, config: &AssistantConfig) -> Option<String
     }
     lines.reverse();
     let recap = format!(
-        "Earlier in this conversation (a recap; the app restarted your session):\n\n{}",
+        "Earlier in this conversation (a recap; the app restarted your run):\n\n{}",
         lines.join("\n\n")
     );
     let half = config
@@ -2284,7 +2284,7 @@ fn apply(conversation: &mut Conversation, event: &AssistantEvent, max_entries: B
                 entry(
                     Role::Error,
                     format!(
-                        "Moneypenny's session closed before she answered: {}",
+                        "Moneypenny's run closed before she answered: {}",
                         or_unknown(&text)
                     ),
                 ),

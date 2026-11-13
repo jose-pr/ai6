@@ -1,4 +1,4 @@
-//! Filing a Session's context in the Registry: the harness's own record of the Session, read
+//! Filing a Run's context in the Registry: the harness's own record of the Run, read
 //! where its handler says it keeps one, else the events the Station saw, said so in the record.
 //! Either is held to `[registry.limits.contexts] context_bytes`, its newest part kept.
 
@@ -13,11 +13,11 @@ use serde_json::json;
 use super::{DaemonState, unix_now};
 use crate::bounds::Limit;
 use crate::directorates::registry::contexts::{
-    ContextOwner, ContextSource, EVENTS_FORMAT, SessionContext,
+    ContextOwner, ContextSource, EVENTS_FORMAT, RunContext,
 };
-use crate::directorates::section_00::agent::SessionRecordFile;
+use crate::directorates::section_00::agent::RunRecordFile;
 
-/// The events a Session reported, one JSON object per line, the newest that fit a bound.
+/// The events a Run reported, one JSON object per line, the newest that fit a bound.
 #[derive(Debug)]
 pub(super) struct EventTape {
     lines: VecDeque<String>,
@@ -89,14 +89,14 @@ fn read_tail(path: &Path, limit: Limit) -> io::Result<(String, Option<u64>)> {
     ))
 }
 
-/// Files the context of provider Session `session` for `owner`: the harness's `record` when
-/// its file can be read, else `tape`. A failure is logged, never fatal to the Session.
+/// Files the context of provider Run `run` for `owner`: the harness's `record` when
+/// its file can be read, else `tape`. A failure is logged, never fatal to the Run.
 pub(super) fn file(
     state: &DaemonState,
     owner: ContextOwner,
-    session: &str,
+    run: &str,
     handler: &str,
-    record: Option<SessionRecordFile>,
+    record: Option<RunRecordFile>,
     tape: &EventTape,
 ) {
     let limit = state.intake.limits().contexts.context_bytes;
@@ -104,7 +104,7 @@ pub(super) fn file(
         Ok(read) => Some((record.format, read)),
         Err(error) => {
             eprintln!(
-                "ai6: Session {session}: its harness record could not be read, so its events \
+                "ai6: Run {run}: its harness record could not be read, so its events \
                      are kept instead: {error}"
             );
             None
@@ -118,8 +118,8 @@ pub(super) fn file(
             (tape.content(), None),
         ),
     };
-    let mut context = SessionContext::new(
-        session,
+    let mut context = RunContext::new(
+        run,
         owner,
         state.station_id.as_str(),
         handler,
@@ -129,8 +129,8 @@ pub(super) fn file(
         content,
     );
     context.cut_from = cut_from;
-    if let Err(error) = state.intake.file_session_context(&context) {
-        eprintln!("ai6: Session {session}: its context was not filed: {error}");
+    if let Err(error) = state.intake.file_run_context(&context) {
+        eprintln!("ai6: Run {run}: its context was not filed: {error}");
     }
 }
 

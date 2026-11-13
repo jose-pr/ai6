@@ -1,13 +1,13 @@
-//! One running agy: its stream decoded into AI6's events, and what a Session's clearance needs
+//! One running agy: its stream decoded into AI6's events, and what a Run's clearance needs
 //! watched there.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use ai6::directorates::m::identity::SessionId;
+use ai6::directorates::m::identity::RunId;
 use ai6::directorates::q::terminal::{
-    AgentTerminal, ExitInfo, JsonLines, READ_TIMED_OUT, StreamLine, TerminalSession, exit_code_text,
+    AgentTerminal, ExitInfo, JsonLines, READ_TIMED_OUT, StreamLine, TerminalRun, exit_code_text,
 };
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Status};
@@ -16,10 +16,10 @@ use ai6::{
 };
 use serde_json::{Value, json};
 
-use crate::files::SessionFiles;
+use crate::files::RunFiles;
 use crate::{AntigravityConfig, refuse, spawn};
 
-/// What a restricted (answer-only or assistant) Session may call.
+/// What a restricted (answer-only or assistant) Run may call.
 #[derive(Debug, Clone)]
 pub(crate) struct Restriction {
     pub(crate) servers: Vec<String>,
@@ -27,7 +27,7 @@ pub(crate) struct Restriction {
 }
 
 /// How to run agy again after an interrupt ended it. It has no way to stop a turn and go on: on a
-/// pipe a signal cannot be sent, and a `control_request` line ends the session with exit code 2.
+/// pipe a signal cannot be sent, and a `control_request` line ends the run with exit code 2.
 pub(crate) struct Respawn {
     pub(crate) terminal: Object<dyn AgentTerminal>,
     pub(crate) argv: Vec<String>,
@@ -44,11 +44,11 @@ fn is_denial(message: &str) -> bool {
         || message.starts_with("JSON hook ")
 }
 
-pub(crate) struct AntigravitySession {
-    terminal: Mutex<Arc<Object<dyn TerminalSession>>>,
+pub(crate) struct AntigravityRun {
+    terminal: Mutex<Arc<Object<dyn TerminalRun>>>,
     output: Mutex<JsonLines>,
-    session_id: Mutex<Option<SessionId>>,
-    expected_session_id: Mutex<Option<SessionId>>,
+    run_id: Mutex<Option<RunId>>,
+    expected_run_id: Mutex<Option<RunId>>,
     restricted: Option<Restriction>,
     limit_phrases: Vec<String>,
     /// What the model calls of this process have used: agy reports each call, and its own total
@@ -73,11 +73,11 @@ pub(crate) struct AntigravitySession {
     /// Set when agy's end has been accounted for: nothing more is reported until it runs again.
     ended: AtomicBool,
     eof: AtomicBool,
-    /// Set once a restricted Session called a tool it may not, and was ended.
+    /// Set once a restricted Run called a tool it may not, and was ended.
     tripped: AtomicBool,
     tail: Mutex<VecDeque<String>>,
     respawn: Respawn,
-    files: Mutex<Option<SessionFiles>>,
+    files: Mutex<Option<RunFiles>>,
     json_line_bytes: u64,
     csi_bytes: u64,
     tail_lines: usize,
@@ -93,22 +93,22 @@ fn lines(json_line_bytes: u64, csi_bytes: u64) -> JsonLines {
     JsonLines::new(&limits)
 }
 
-impl AntigravitySession {
+impl AntigravityRun {
     pub(crate) fn new(
-        terminal: Object<dyn TerminalSession>,
-        expected_session_id: Option<SessionId>,
+        terminal: Object<dyn TerminalRun>,
+        expected_run_id: Option<RunId>,
         restricted: Option<Restriction>,
         config: &AntigravityConfig,
         limit_phrases: Vec<String>,
-        files: SessionFiles,
+        files: RunFiles,
         respawn: Respawn,
     ) -> Self {
         let live = crate::usage::Live::new(&respawn.environment, terminal.pid());
         Self {
             terminal: Mutex::new(Arc::new(terminal)),
             output: Mutex::new(lines(config.json_line_bytes, config.csi_bytes)),
-            session_id: Mutex::new(None),
-            expected_session_id: Mutex::new(expected_session_id),
+            run_id: Mutex::new(None),
+            expected_run_id: Mutex::new(expected_run_id),
             restricted,
             limit_phrases,
             spent: Mutex::new(Spend::new("")),
@@ -136,7 +136,7 @@ impl AntigravitySession {
         }
     }
 
-    fn current(&self) -> Result<Arc<Object<dyn TerminalSession>>, ProviderError> {
+    fn current(&self) -> Result<Arc<Object<dyn TerminalRun>>, ProviderError> {
         Ok(lock(&self.terminal)?.clone())
     }
 
@@ -161,7 +161,7 @@ impl AntigravitySession {
     /// Runs agy again on the conversation an interrupt or a failed turn ended.
     fn run_again(&self) -> Result<(), ProviderError> {
         let _ = self.current()?.kill();
-        let id = lock(&self.session_id)?.clone().ok_or_else(|| {
+        let id = lock(&self.run_id)?.clone().ok_or_else(|| {
             refuse(
                 Status::GUATIAO_ERR_UNSUPPORTED,
                 "agy was interrupted before it named its conversation, so it cannot go on",
@@ -186,7 +186,7 @@ impl AntigravitySession {
         *lock(&self.live)? = crate::usage::Live::new(&self.respawn.environment, terminal.pid());
         *lock(&self.terminal)? = Arc::new(terminal);
         *lock(&self.output)? = lines(self.json_line_bytes, self.csi_bytes);
-        *lock(&self.expected_session_id)? = Some(id);
+        *lock(&self.expected_run_id)? = Some(id);
         self.initialized.store(false, Ordering::Release);
         self.ended.store(false, Ordering::Release);
         self.eof.store(false, Ordering::Release);
@@ -203,7 +203,7 @@ impl AntigravitySession {
             .filter(|exit| !exit.running))
     }
 
-    /// Why the Session ended without a `result`: the exit status and what agy last wrote.
+    /// Why the Run ended without a `result`: the exit status and what agy last wrote.
     fn exit_reason(&self) -> Result<String, ProviderError> {
         let how = match self.exited(self.exit_wait_ms)? {
             Some(ExitInfo {
@@ -216,7 +216,7 @@ impl AntigravitySession {
             Some(_) => "exited".to_owned(),
             None => "closed its terminal".to_owned(),
         };
-        let mut reason = format!("The Antigravity CLI {how} before completing the Session");
+        let mut reason = format!("The Antigravity CLI {how} before completing the Run");
         let tail = lock(&self.tail)?;
         if !tail.is_empty() {
             reason.push_str("; its last output:\n");
@@ -372,13 +372,13 @@ impl AntigravitySession {
         let Some(id) = id.and_then(Value::as_str) else {
             return Ok(());
         };
-        let session_id = SessionId::try_from(id.to_owned())
+        let run_id = RunId::try_from(id.to_owned())
             .map_err(|error| refuse(Status::GUATIAO_ERR_BAD_VALUE, error))?;
-        let different = lock(&self.expected_session_id)?
+        let different = lock(&self.expected_run_id)?
             .as_ref()
-            .is_some_and(|expected| expected != &session_id);
-        // Kept even when it is the wrong one: `session_id` is how the Station learns that.
-        *lock(&self.session_id)? = Some(session_id);
+            .is_some_and(|expected| expected != &run_id);
+        // Kept even when it is the wrong one: `run_id` is how the Station learns that.
+        *lock(&self.run_id)? = Some(run_id);
         if different {
             lock(&self.held)?.clear();
             let _ = self.current()?.kill();
@@ -386,7 +386,7 @@ impl AntigravitySession {
             self.tripped.store(true, Ordering::Release);
             return Err(refuse(
                 Status::GUATIAO_ERR_BAD_VALUE,
-                "agy resumed a different Session than requested",
+                "agy resumed a different Run than requested",
             ));
         }
         Ok(())
@@ -466,7 +466,7 @@ impl AntigravitySession {
         Ok(Some(called))
     }
 
-    /// The `failed` event that ends a restricted Session whose step calls what it may not, after
+    /// The `failed` event that ends a restricted Run whose step calls what it may not, after
     /// closing it. The agent's tool list and the rules are meant to make this impossible; this
     /// backs them up.
     fn tripped_by(&self, step: &Value, name: &str) -> Result<Option<AgentEvent>, ProviderError> {
@@ -486,8 +486,8 @@ impl AntigravitySession {
             return Ok(None);
         }
         let reason = format!(
-            "the restricted Antigravity CLI Session called {name}, which it may not use; the \
-             Session was ended"
+            "the restricted Antigravity CLI Run called {name}, which it may not use; the \
+             Run was ended"
         );
         eprintln!("ai6: {reason}");
         let _ = self.current()?.kill();
@@ -559,9 +559,9 @@ impl AntigravitySession {
     }
 }
 
-impl ai6::AgentSession for AntigravitySession {
+impl ai6::AgentSession for AntigravityRun {
     fn session_id(&self) -> Result<Option<String>, ProviderError> {
-        Ok(lock(&self.session_id)?.clone().map(String::from))
+        Ok(lock(&self.run_id)?.clone().map(String::from))
     }
 
     /// A message while agy runs goes to it as the next turn, once it has named its conversation.
@@ -651,5 +651,5 @@ fn event(kind: &str, text: Option<String>) -> AgentEvent {
 fn lock<T>(mutex: &Mutex<T>) -> Result<MutexGuard<'_, T>, ProviderError> {
     mutex
         .lock()
-        .map_err(|_| refuse(Status::GUATIAO_ERR_INTERNAL, "session lock was poisoned"))
+        .map_err(|_| refuse(Status::GUATIAO_ERR_INTERNAL, "run lock was poisoned"))
 }

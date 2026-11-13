@@ -1,4 +1,4 @@
-//! Pool accounts for a Session: which pools its Agent may draw from, the account claimed for
+//! Pool accounts for a Run: which pools its Agent may draw from, the account claimed for
 //! it in the Registry, and the one credential that reaches its harness.
 //!
 //! An environment kind's value is leased like a loadout secret and lives only in the harness
@@ -24,13 +24,13 @@ use crate::directorates::q::{
 use crate::directorates::registry::accounts::{
     AccountClaimRequest, AccountProfile, AccountRef, AccountState, QuotaWindow, choose_account,
 };
-use crate::directorates::registry::sessions::SessionRecord;
+use crate::directorates::registry::runs::RunRecord;
 use crate::directorates::registry::timeline::TimelineEvent;
 use coqui_acp_api::{Bucket, Coverage, Refill, Status as BucketStatus, UsageReport};
 
 use super::DaemonState;
 
-/// What holds an account: a Mission, or an assistant conversation under the Session name it
+/// What holds an account: a Mission, or an assistant conversation under the Run name it
 /// starts its harness with, which belongs to no Operation.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Holder<'a> {
@@ -49,9 +49,9 @@ impl<'a> From<&'a Mission> for Holder<'a> {
     }
 }
 
-/// A claim on an account for `state`'s Session of `mission_id`, held for `[accounts]
+/// A claim on an account for `state`'s Run of `mission_id`, held for `[accounts]
 /// claim_ttl` unless the Station renews it at its check-in, so a dark Station's accounts free
-/// up with its Session leases.
+/// up with its Run leases.
 fn claim_request(state: &DaemonState, pool: &AccountPool, mission_id: &str) -> AccountClaimRequest {
     let limits = &state.station.limits().accounts;
     AccountClaimRequest::new(
@@ -166,23 +166,23 @@ fn horizon_secs(state: &DaemonState) -> i64 {
     i64::try_from(state.station.limits().accounts.limit_horizon.0.as_secs()).unwrap_or(i64::MAX)
 }
 
-/// The account a Mission's Session holds on this Station.
+/// The account a Mission's Run holds on this Station.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Held {
     account: AccountRef,
     kind: AccountKind,
 }
 
-/// Where a Session's harness runs and whether it continues a provider Session.
+/// Where a Run's harness runs and whether it continues a provider Run.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Site {
-    /// The Session resumes a provider Session rather than starting one.
+    /// The Run resumes a provider Run rather than starting one.
     pub(super) resuming: bool,
     /// The harness runs on the Station's own host, where a `CODEX_HOME` it makes is visible.
     pub(super) on_station: bool,
 }
 
-/// Where a route's Session gets its account.
+/// Where a route's Run gets its account.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Source {
     /// No pool serves it.
@@ -249,8 +249,8 @@ pub(super) fn no_room(pools: &[&AccountPool], states: &[AccountState], now: f64)
     placement::no_account_headroom("", &ids, frees_at(pools, states, now)).reason
 }
 
-/// Whether a provider Session can move to an account of `route`'s pools.
-pub(super) fn route_carries_session(
+/// Whether a provider Run can move to an account of `route`'s pools.
+pub(super) fn route_carries_run(
     state: &DaemonState,
     operation: Option<&str>,
     agent: &Agent,
@@ -271,12 +271,12 @@ pub(super) fn route_carries_session(
         &states,
         (now, unknown_use),
         &state.station_id,
-        |account| account.kind().carries_session(),
+        |account| account.kind().carries_run(),
     )
 }
 
-/// Whether the account `earlier` names is of a kind a provider Session can move away from.
-pub(super) fn carries_session(state: &DaemonState, earlier: Option<&AccountRef>) -> bool {
+/// Whether the account `earlier` names is of a kind a provider Run can move away from.
+pub(super) fn carries_run(state: &DaemonState, earlier: Option<&AccountRef>) -> bool {
     let Some(earlier) = earlier else {
         return false;
     };
@@ -286,7 +286,7 @@ pub(super) fn carries_session(state: &DaemonState, earlier: Option<&AccountRef>)
         .catalog()
         .and_then(|catalog| catalog.pool(&earlier.pool))
         .and_then(|pool| pool.get(&earlier.account))
-        .is_some_and(|account| account.kind().carries_session())
+        .is_some_and(|account| account.kind().carries_run())
 }
 
 /// What `agent`, on the route it works on, may draw from: its handler's pools that admit
@@ -334,7 +334,7 @@ pub(super) fn credential_variables(
     Some(variables)
 }
 
-/// Claims the account of a route with no pool for `holder`'s Session: it hands over nothing, and
+/// Claims the account of a route with no pool for `holder`'s Run: it hands over nothing, and
 /// the claim fails when the route's limit stands, so a limit one Station saw holds on every one.
 pub(super) fn claim_implicit(
     state: &DaemonState,
@@ -361,13 +361,13 @@ pub(super) fn claim_implicit(
     Ok(())
 }
 
-/// Claims an account for `mission`'s Session and puts its credential in `environment`,
+/// Claims an account for `mission`'s Run and puts its credential in `environment`,
 /// after removing every other credential variable, so the harness sees exactly one account.
-/// Returns the lease to revoke with the Session's, if the credential is a secret.
+/// Returns the lease to revoke with the Run's, if the credential is a secret.
 ///
 /// An Agent no pool serves gets nothing here. A pool that may not be used, or no account
-/// with room, fails the start with the reason. A Session that continues a provider Session
-/// keeps its account when that Session cannot move (Codex, `config-dir`), and moves only to
+/// with room, fails the start with the reason. A Run that continues a provider Run
+/// keeps its account when that Run cannot move (Codex, `config-dir`), and moves only to
 /// an account of a kind that carries it.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn issue(
@@ -428,7 +428,7 @@ fn claim_and_hand_over(
     let now = state.clock.now() as f64;
     let earlier = state
         .intake
-        .latest_session(mission_id)
+        .latest_run(mission_id)
         .ok()
         .flatten()
         .and_then(|record| record.account);
@@ -467,7 +467,7 @@ fn kind_of(catalog: &LoadoutCatalog, earlier: &AccountRef) -> Option<AccountKind
 }
 
 /// Claims the first account with room, pool by pool, preferring the account the Mission's
-/// last Session used. A resumed provider Session keeps an account of a kind that cannot carry
+/// last Run used. A resumed provider Run keeps an account of a kind that cannot carry
 /// it, and otherwise moves only to accounts of a kind that can.
 fn claim<'a>(
     state: &DaemonState,
@@ -487,25 +487,25 @@ fn claim<'a>(
     let earlier_kind = earlier.and_then(|earlier| kind_of(catalog, earlier));
     if site.resuming
         && let (Some(earlier), Some(kind)) = (earlier, earlier_kind)
-        && !kind.carries_session()
+        && !kind.carries_run()
         && let Some(pool) = pools.iter().find(|pool| pool.id() == earlier.pool)
     {
         let only = request(pool).only(&earlier.account);
         return match state.intake.claim_account(&only, now) {
             Ok(Some(chosen)) => Ok((pool, chosen)),
             Ok(None) => Err(format!(
-                "the Mission's provider Session lives with account {earlier}, which has no \
+                "the Mission's provider Run lives with account {earlier}, which has no \
                  room now"
             )),
             Err(error) => Err(failed(pool, error)),
         };
     }
-    let carried = site.resuming && earlier_kind.is_some_and(AccountKind::carries_session);
+    let carried = site.resuming && earlier_kind.is_some_and(AccountKind::carries_run);
     for pool in pools {
         let mut wanted = request(pool);
         if carried {
             for account in pool.accounts() {
-                if !account.kind().carries_session() {
+                if !account.kind().carries_run() {
                     wanted = wanted.excluding(account.name());
                 }
             }
@@ -647,7 +647,7 @@ pub(super) fn path_component(id: &str) -> String {
         .collect()
 }
 
-/// Frees the account `mission_id`'s Session holds on this Station, once it stops here.
+/// Frees the account `mission_id`'s Run holds on this Station, once it stops here.
 pub(super) fn release(state: &DaemonState, mission_id: &str) {
     if lock(&state.station.credentials.accounts.held)
         .remove(mission_id)
@@ -658,19 +658,19 @@ pub(super) fn release(state: &DaemonState, mission_id: &str) {
     }
 }
 
-/// The account `mission_id`'s Session holds on this Station.
+/// The account `mission_id`'s Run holds on this Station.
 pub(super) fn held(state: &DaemonState, mission_id: &str) -> Option<AccountRef> {
     lock(&state.station.credentials.accounts.held)
         .get(mission_id)
         .map(|held| held.account.clone())
 }
 
-/// Takes the account a re-attached Session (after a restart or an adoption) already runs on,
-/// as its Session record names it: the harness keeps the credential it started with, so the
+/// Takes the account a re-attached Run (after a restart or an adoption) already runs on,
+/// as its Run record names it: the harness keeps the credential it started with, so the
 /// claim is recorded even past the account's `max_concurrent` or a limit, and said so on the
 /// timeline.
-pub(super) fn reattach(state: &DaemonState, mission: &Mission, session: &SessionRecord) {
-    let Some(account) = &session.account else {
+pub(super) fn reattach(state: &DaemonState, mission: &Mission, run: &RunRecord) {
+    let Some(account) = &run.account else {
         return;
     };
     let mission_id = mission.mission_id.as_str();
@@ -679,7 +679,7 @@ pub(super) fn reattach(state: &DaemonState, mission: &Mission, session: &Session
         Some((pool.clone(), pool.get(&account.account)?.kind()))
     });
     let own_account = || {
-        let handler = session.launch.as_ref()?.handler.as_str();
+        let handler = run.launch.as_ref()?.handler.as_str();
         super::routes::is_implicit(&account.pool).then(|| {
             (
                 super::routes::implicit_pool_named(&account.pool, handler),
@@ -725,7 +725,7 @@ pub(super) fn reattach(state: &DaemonState, mission: &Mission, session: &Session
                 .detail("account", account.to_string())
                 .detail(
                     "note",
-                    "a re-attached Session keeps its account, even past max_concurrent or a limit",
+                    "a re-attached Run keeps its account, even past max_concurrent or a limit",
                 ),
         );
     }
@@ -812,7 +812,7 @@ fn lineage(state: &DaemonState, operation: Option<&str>) -> Vec<String> {
 
 /// Records this Station's view of each configured account in the Registry, with the
 /// Operations of its roster that may draw from the pool, so the board can show it before any
-/// Session claims it, and withdraws its profile of every account its configuration no longer
+/// Run claims it, and withdraws its profile of every account its configuration no longer
 /// declares. Run when the Station starts and whenever its roster or loadouts change.
 pub(super) fn declare(state: &DaemonState) {
     let mut declared = std::collections::BTreeSet::new();
@@ -859,7 +859,7 @@ pub(super) fn declare(state: &DaemonState) {
             }
             if cfg!(windows) && account.keeps_login_files() {
                 eprintln!(
-                    "ai6: account {}/{}: on Windows a Session's home keeps the access list it \
+                    "ai6: account {}/{}: on Windows a Run's home keeps the access list it \
                      inherits from the Station's state directory",
                     pool.id(),
                     account.name()
@@ -905,7 +905,7 @@ pub(super) fn declare(state: &DaemonState) {
     }
 }
 
-/// Adds `tokens` to the day's count of the account `mission_id`'s Session holds.
+/// Adds `tokens` to the day's count of the account `mission_id`'s Run holds.
 pub(super) fn record_usage(state: &DaemonState, mission_id: &str, tokens: u64) {
     if tokens == 0 {
         return;
@@ -944,7 +944,7 @@ pub(crate) fn window_of(bucket: &Bucket, now: f64) -> QuotaWindow {
     window
 }
 
-/// Records the quota buckets a provider reported on the account `mission_id`'s Session holds.
+/// Records the quota buckets a provider reported on the account `mission_id`'s Run holds.
 pub(super) fn observe_quota(state: &DaemonState, mission_id: &str, buckets: &[Bucket]) {
     if buckets.is_empty() {
         return;
@@ -962,21 +962,21 @@ pub(super) fn observe_quota(state: &DaemonState, mission_id: &str, buckets: &[Bu
     }
 }
 
-/// What happens to a Session whose account hit a provider limit.
+/// What happens to a Run whose account hit a provider limit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Rotation {
-    /// The Session holds no pool account.
+    /// The Run holds no pool account.
     Unpooled,
-    /// Another account of a kind that carries the provider Session has room: resume it there.
+    /// Another account of a kind that carries the provider Run has room: resume it there.
     Resume,
-    /// Another account has room but the provider Session cannot move to it: start a new
+    /// Another account has room but the provider Run cannot move to it: start a new
     /// attempt.
     Retry,
     /// No account has room: wait for the limit to reset.
     Wait,
 }
 
-/// Marks the account `holder`'s Session holds limited until `resets_at` (or `fallback_secs` from
+/// Marks the account `holder`'s Run holds limited until `resets_at` (or `fallback_secs` from
 /// now, and never past the Station's limit horizon) and frees it. The account and its kind, and
 /// until when; `None` when it holds none.
 pub(super) fn mark_limited(
@@ -999,10 +999,10 @@ pub(super) fn mark_limited(
     if let Err(error) = state.intake.release_account(&state.station_id, mission_id) {
         eprintln!("ai6: account claim of Mission {mission_id:?} not released: {error}");
     }
-    Some((held.account, held.kind.carries_session(), until))
+    Some((held.account, held.kind.carries_run(), until))
 }
 
-/// Marks the account `mission_id`'s Session holds limited ([`mark_limited`]) and says whether
+/// Marks the account `mission_id`'s Run holds limited ([`mark_limited`]) and says whether
 /// another account of the Mission's pools, or another of its Agent's routes, has room.
 pub(super) fn on_limit(
     state: &DaemonState,
@@ -1058,7 +1058,7 @@ pub(super) fn on_limit(
                 (
                     has_room(&pools, &states, (now, unknown_use), station, |_| true),
                     has_room(&pools, &states, (now, unknown_use), station, |account| {
-                        account.kind().carries_session()
+                        account.kind().carries_run()
                     }),
                 )
             }),
@@ -1258,7 +1258,7 @@ pub(super) mod testing {
     use std::collections::{BTreeMap, BTreeSet};
     use std::sync::Mutex;
 
-    use crate::directorates::m::identity::SessionId;
+    use crate::directorates::m::identity::RunId;
     use crate::directorates::q::terminal::AgentTerminal;
     use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
     use crate::guatiao::library::{Object, ProviderError};
@@ -1266,7 +1266,7 @@ pub(super) mod testing {
     use coqui_acp_api::{Bucket, LimitHit, Refill, Spend, UsageReport};
     use coqui_acp_provider::{AgentEvent, AgentSession, LIMIT_EVENT};
 
-    use super::super::tests::MockSession;
+    use super::super::tests::MockRun;
 
     /// The reset time the pooled mock reports with its limit.
     pub(in crate::station::server) const POOLED_RESET: i64 = 1_790_003_600;
@@ -1278,7 +1278,7 @@ pub(super) mod testing {
     pub(in crate::station::server) static POOLED_CALLS: Mutex<Vec<PooledCall>> =
         Mutex::new(Vec::new());
     static LIMITED: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
-    /// Each start is a new provider Session.
+    /// Each start is a new provider Run.
     static STARTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
     #[derive(Default, Provider)]
@@ -1365,7 +1365,7 @@ pub(super) mod testing {
             ))
         }
 
-        /// Stands for a handler that cannot hold a `desk` Session, as `acp` cannot.
+        /// Stands for a handler that cannot hold a `desk` Run, as `acp` cannot.
         fn clearance_refusal(&self, clearance: String) -> Result<Option<String>, ProviderError> {
             Ok((clearance == "desk").then(|| "it cannot keep commands from one".to_owned()))
         }
@@ -1383,9 +1383,9 @@ pub(super) mod testing {
                 request.initial_context,
             ));
             let started = STARTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let session = SessionId::try_new(format!("provider-session-pooled-{started}"))
+            let run = RunId::try_new(format!("provider-id-pooled-{started}"))
                 .map_err(|failure| error(&failure.to_string()))?;
-            Ok(MockSession::with_event(session, event).into_object())
+            Ok(MockRun::with_event(run, event).into_object())
         }
 
         fn resume(
@@ -1400,7 +1400,7 @@ pub(super) mod testing {
                 request.environment,
                 Vec::new(),
             ));
-            Ok(MockSession::with_event(request.session_id, event).into_object())
+            Ok(MockRun::with_event(request.run_id, event).into_object())
         }
     }
 }
@@ -1417,14 +1417,14 @@ mod tests {
     use super::*;
     use crate::directorates::m::identity::MissionId;
     use crate::directorates::m::mission::MissionState;
-    use crate::directorates::registry::sessions::SessionStatus;
+    use crate::directorates::registry::runs::RunStatus;
     use crate::directorates::registry::timeline::TimelineEvent;
 
     use super::super::routes;
     use super::super::tests::{limited_state, start_mission_by_id, wait_for_done, wait_for_state};
     use super::super::{
         StartMission, publish_station_check_in, schedule_intake_once, schedule_parked_once,
-        schedule_queued_once, session_hold, start_mission,
+        schedule_queued_once, run_hold, start_mission,
     };
 
     const START: i64 = POOLED_RESET - 3_600;
@@ -1533,7 +1533,7 @@ mod tests {
             .collect()
     }
 
-    /// Waits until no account is claimed: a Session's account is freed just after its
+    /// Waits until no account is claimed: a Run's account is freed just after its
     /// Mission is marked done.
     async fn until_released(state: &DaemonState) {
         tokio::time::timeout(Duration::from_secs(60), async {
@@ -1667,11 +1667,11 @@ priority = 2
     fn launch_of(
         state: &DaemonState,
         id: &str,
-    ) -> crate::directorates::registry::sessions::SessionLaunch {
-        let hold = session_hold(state, id).unwrap();
+    ) -> crate::directorates::registry::runs::RunLaunch {
+        let hold = run_hold(state, id).unwrap();
         state
             .intake
-            .session(&hold.id)
+            .run(&hold.id)
             .unwrap()
             .unwrap()
             .launch
@@ -1847,7 +1847,7 @@ secret = "env-alpha"
                 launch.pool.as_deref()
             ),
             ("mock-pooled", Some("name-two"), Some("two")),
-            "the Session record says which route ran"
+            "the Run record says which route ran"
         );
         // The mock reports 300 on the account it ran on, so `two` stays ahead of 800.
         report_use(&state, "two", "b", 900);
@@ -2083,7 +2083,7 @@ handler = "mock-agent"
     }
 
     #[tokio::test]
-    async fn a_route_brings_its_own_env_and_secret_even_to_an_exposed_session_and_its_pool_serves_by_name()
+    async fn a_route_brings_its_own_env_and_secret_even_to_an_exposed_run_and_its_pool_serves_by_name()
      {
         let root = tempfile::tempdir().unwrap();
         let agents = r#"[agent.007]
@@ -2118,7 +2118,7 @@ handler = "mock-pooled"
         );
         assert_eq!(
             environment["ANTHROPIC_AUTH_TOKEN"], "fake-gateway-0451",
-            "what reaches its model is issued whatever the Session read"
+            "what reaches its model is issued whatever the Run read"
         );
         assert!(!environment.contains_key("OTHER"));
         assert!(
@@ -2149,7 +2149,7 @@ handler = "mock-pooled"
         assert_eq!(
             state
                 .intake
-                .session(&session_hold(&state, "route-plain-1").unwrap().id)
+                .run(&run_hold(&state, "route-plain-1").unwrap().id)
                 .unwrap()
                 .unwrap()
                 .account,
@@ -2197,7 +2197,7 @@ pool = "nowhere"
     }
 
     #[tokio::test]
-    async fn a_limit_moves_a_resumable_session_to_a_route_of_the_same_handler_and_says_so() {
+    async fn a_limit_moves_a_resumable_run_to_a_route_of_the_same_handler_and_says_so() {
         let root = tempfile::tempdir().unwrap();
         let loadouts = r#"
 [pool.one]
@@ -2227,7 +2227,7 @@ secret = "two-b"
         assert_eq!(
             made.iter().map(|call| call.1).collect::<Vec<_>>(),
             ["start", "resume"],
-            "the same provider Session, since this kind carries it"
+            "the same provider Run, since this kind carries it"
         );
         assert_eq!(made[1].2["CLAUDE_CODE_OAUTH_TOKEN"], "fake-two-b-0451");
         let launch = launch_of(&state, "route-move");
@@ -2406,13 +2406,13 @@ secrets = ["second"]
     }
 
     #[tokio::test]
-    async fn a_reattached_session_keeps_the_account_of_its_route_with_no_pool() {
+    async fn a_reattached_run_keeps_the_account_of_its_route_with_no_pool() {
         let root = tempfile::tempdir().unwrap();
         let agents = "[agent.007]\n[[agent.007.route]]\nhandler = \"mock-pooled\"\nmodel = \"m\"\n";
         let (state, _now) = routed_state(root.path(), "", agents, ROUTE_POOLS);
         run(&state, "route-again").await;
-        let hold = session_hold(&state, "route-again").unwrap();
-        let record = state.intake.session(&hold.id).unwrap().unwrap();
+        let hold = run_hold(&state, "route-again").unwrap();
+        let record = state.intake.run(&hold.id).unwrap().unwrap();
         let own = record.account.clone().expect("its own account is recorded");
         assert!(routes::is_implicit(&own.pool));
         let mission = state
@@ -2426,10 +2426,10 @@ secrets = ["second"]
         assert_eq!(held(&state, "route-again"), Some(own));
     }
 
-    /// Strict exposure takes an exposed Session's secrets, not the credential its harness reaches
+    /// Strict exposure takes an exposed Run's secrets, not the credential its harness reaches
     /// its model with: without that one no Source Mission could run at all.
     #[tokio::test]
-    async fn an_exposed_session_gets_its_harness_credential_and_no_other_secret() {
+    async fn an_exposed_run_gets_its_harness_credential_and_no_other_secret() {
         for (mission, loadouts, wanted) in [
             (
                 "exposed-pooled",
@@ -2473,7 +2473,7 @@ secrets = ["second"]
     }
 
     #[tokio::test]
-    async fn a_session_gets_exactly_one_account_credential_and_frees_it_when_done() {
+    async fn a_run_gets_exactly_one_account_credential_and_frees_it_when_done() {
         let root = tempfile::tempdir().unwrap();
         let (state, _now, _) = pooled_state(
             root.path(),
@@ -2507,8 +2507,8 @@ secrets = ["second"]
             environment["GH_TOKEN"], "fake-forge-0451",
             "a loadout secret outside the credential variables is still issued"
         );
-        let hold = session_hold(&state, "pooled-env").unwrap();
-        let record = state.intake.session(&hold.id).unwrap().unwrap();
+        let hold = run_hold(&state, "pooled-env").unwrap();
+        let record = state.intake.run(&hold.id).unwrap().unwrap();
         assert_eq!(record.account, Some(AccountRef::new("team", "alpha")));
         until_released(&state).await;
         let alpha = account(&state, "team", "alpha");
@@ -2524,7 +2524,7 @@ secrets = ["second"]
         assert_eq!(
             alpha.tokens_on_day(START),
             120,
-            "the Session's tokens count for it"
+            "the Run's tokens count for it"
         );
         assert_eq!(
             alpha.profile().unwrap().operations,
@@ -2590,7 +2590,7 @@ secrets = ["second"]
     }
 
     #[tokio::test]
-    async fn a_limit_resumes_the_same_claude_session_on_another_account_until_the_reset() {
+    async fn a_limit_resumes_the_same_claude_run_on_another_account_until_the_reset() {
         let root = tempfile::tempdir().unwrap();
         let loadouts = r#"
 [pool.rotate]
@@ -2630,7 +2630,7 @@ secret = "rotate-b"
         assert_eq!(
             made.iter().map(|call| call.1).collect::<Vec<_>>(),
             ["start", "resume"],
-            "the same provider Session resumes"
+            "the same provider Run resumes"
         );
         assert_eq!(
             made[0].2["CLAUDE_CODE_OAUTH_TOKEN"],
@@ -2643,12 +2643,12 @@ secret = "rotate-b"
             .unwrap()
             .get("pooled-rotate")
             .unwrap()
-            .session_ids
+            .run_ids
             .len();
-        assert_eq!(provider_ids, 1, "one provider Session");
-        let hold = session_hold(&state, "pooled-rotate").unwrap();
+        assert_eq!(provider_ids, 1, "one provider Run");
+        let hold = run_hold(&state, "pooled-rotate").unwrap();
         assert_eq!(
-            state.intake.session(&hold.id).unwrap().unwrap().account,
+            state.intake.run(&hold.id).unwrap().unwrap().account,
             Some(AccountRef::new("rotate", "b"))
         );
         until_released(&state).await;
@@ -2700,10 +2700,10 @@ secret = "codex-b"
         })
         .await
         .expect("the limited Mission is queued again");
-        let first = session_hold(&state, "pooled-codex").unwrap();
+        let first = run_hold(&state, "pooled-codex").unwrap();
         // The Mission is queued again before the attempt it replaces is closed.
         tokio::time::timeout(Duration::from_secs(60), async {
-            while state.intake.session(&first.id).unwrap().unwrap().status != SessionStatus::Ended {
+            while state.intake.run(&first.id).unwrap().unwrap().status != RunStatus::Ended {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
         })
@@ -2736,10 +2736,10 @@ secret = "codex-b"
             CODEX_CONFIG,
             "the login stays in the home, out of the OS keyring"
         );
-        let second = session_hold(&state, "pooled-codex").unwrap();
+        let second = run_hold(&state, "pooled-codex").unwrap();
         assert_eq!(second.attempt, 2);
         assert_eq!(
-            state.intake.session(&second.id).unwrap().unwrap().account,
+            state.intake.run(&second.id).unwrap().unwrap().account,
             Some(AccountRef::new("codex-team", "b"))
         );
         assert_eq!(
@@ -2815,7 +2815,7 @@ secret = "codex-b"
     }
 
     #[tokio::test]
-    async fn a_session_on_a_sealed_login_has_its_own_home_and_what_it_renews_comes_back() {
+    async fn a_run_on_a_sealed_login_has_its_own_home_and_what_it_renews_comes_back() {
         use base64::Engine as _;
         let root = tempfile::tempdir().unwrap();
         let (state, other) = login_state(root.path(), &["own", "other"]);
@@ -2832,7 +2832,7 @@ secret = "codex-b"
         assert_eq!(
             state
                 .intake
-                .session(&session_hold(&state, "login-1").unwrap().id)
+                .run(&run_hold(&state, "login-1").unwrap().id)
                 .unwrap()
                 .unwrap()
                 .account,
@@ -2907,7 +2907,7 @@ secret = "codex-b"
     }
 
     #[test]
-    fn a_failed_session_names_the_renewal_under_it() {
+    fn a_failed_run_names_the_renewal_under_it() {
         let root = tempfile::tempdir().unwrap();
         let (state, other) = login_state(root.path(), &["own", "other"]);
         let pool = state
@@ -3132,7 +3132,7 @@ secret = "race-only"
     }
 
     #[test]
-    fn a_reattached_session_takes_its_recorded_account_even_past_its_limit() {
+    fn a_reattached_run_takes_its_recorded_account_even_past_its_limit() {
         let root = tempfile::tempdir().unwrap();
         let loadouts = "[pool.solo]\nhandler = \"mock-pooled\"\n[pool.solo.account.only]\n\
                         kind = \"claude-oauth-token\"\nmax_concurrent = 1\n";
@@ -3162,8 +3162,8 @@ secret = "race-only"
             .clone();
         let record = state
             .intake
-            .open_session(
-                crate::directorates::registry::sessions::NewSession::new(
+            .open_run(
+                crate::directorates::registry::runs::NewRun::new(
                     "record-reattach",
                     "pooled-reattach",
                     "test",
@@ -3194,7 +3194,7 @@ secret = "race-only"
     }
 
     #[tokio::test]
-    async fn a_claude_session_is_not_resumed_on_a_config_dir_account_but_tried_again() {
+    async fn a_claude_run_is_not_resumed_on_a_config_dir_account_but_tried_again() {
         let root = tempfile::tempdir().unwrap();
         let loadouts = r#"
 [pool.mixed]

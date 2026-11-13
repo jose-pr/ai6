@@ -139,14 +139,14 @@ impl Desk {
     /// Files a report in the Station's logbook: the next check-in publishes it and the next
     /// round reads it. `filing` is the same report as a Report of this Station, linked to the
     /// round's Mission; why it was not stored is the second answer, and leaves the logbook as
-    /// filed. `session` is the round's provider Session once known. Blocks; call from
+    /// filed. `run` is the round's provider Run once known. Blocks; call from
     /// `spawn_blocking`.
     pub(super) fn file(
         &self,
         summary: String,
         findings: Vec<StationFinding>,
         filing: crate::directorates::m::reports::ReportFiling,
-        session: Option<String>,
+        run: Option<String>,
     ) -> Result<(StationReport, Result<String, String>), String> {
         use crate::directorates::registry::reports::{ReportFiler, ReportLink, ReportScope};
 
@@ -208,7 +208,7 @@ impl Desk {
                 (
                     ReportFiler::Agent {
                         agent: mission.agent_id.clone().unwrap_or_default(),
-                        session: session.unwrap_or_else(|| mission_id.clone()),
+                        run: run.unwrap_or_else(|| mission_id.clone()),
                         mission: mission_id.clone(),
                     },
                     vec![ReportLink::mission(mission_id)],
@@ -219,7 +219,7 @@ impl Desk {
                 (
                     ReportFiler::Watch {
                         agent: agent.clone(),
-                        session: session.unwrap_or_else(|| scope.clone()),
+                        run: run.unwrap_or_else(|| scope.clone()),
                         scope,
                     },
                     Vec::new(),
@@ -255,11 +255,11 @@ impl Desk {
     }
 
     /// Applies `action` (`caches` or `remove`) to the safe house of `target`, within the
-    /// limits [`hygiene`] fixes. `session` is the round's provider Session, which a green ink
+    /// limits [`hygiene`] fixes. `run` is the round's provider Run, which a green ink
     /// request names. Blocks; call from `spawn_blocking`.
     pub(super) fn tidy(
         &self,
-        session: &str,
+        run: &str,
         target: &str,
         action: &str,
         reason: Option<String>,
@@ -270,7 +270,7 @@ impl Desk {
             &self.state,
             &hygiene::Round {
                 mission: &round,
-                session,
+                run,
             },
             target,
             action,
@@ -688,7 +688,7 @@ pub(super) mod tests {
             StreamableHttpClientTransport,
             streamable_http_client::StreamableHttpClientTransportConfig,
         };
-        let environment = state.sessions.lock().unwrap()[mission_id]
+        let environment = state.runs.lock().unwrap()[mission_id]
             .environment
             .clone();
         let transport = StreamableHttpClientTransport::from_config(
@@ -720,7 +720,7 @@ pub(super) mod tests {
             StreamableHttpClientTransport,
             streamable_http_client::StreamableHttpClientTransportConfig,
         };
-        let environment = state.sessions.lock().unwrap()[mission_id]
+        let environment = state.runs.lock().unwrap()[mission_id]
             .environment
             .clone();
         let transport = StreamableHttpClientTransport::from_config(
@@ -740,7 +740,7 @@ pub(super) mod tests {
         names
     }
 
-    /// Starts a leased Mission and waits until its mock Session reports itself blocked.
+    /// Starts a leased Mission and waits until its mock Run reports itself blocked.
     pub(in super::super) async fn start(state: &DaemonState, mission_id: &str) {
         start_mission_by_id(state, mission_id).await;
         wait_for_state(state, mission_id, MissionState::Blocked).await;
@@ -817,7 +817,7 @@ pub(super) mod tests {
         );
         assert!(!logbook.contains("Not this Station"));
         // A round that reads earlier reports is exposed: they quote other Missions' text.
-        let exposure = state.sessions.lock().unwrap()[&round].exposure.clone();
+        let exposure = state.runs.lock().unwrap()[&round].exposure.clone();
         assert!(
             exposure.exposures().iter().any(|exposure| exposure.source
                 == crate::directorates::medical::exposure::STATION_LOGBOOK)
@@ -951,7 +951,7 @@ pub(super) mod tests {
         assert_eq!(published["agent"], "M");
         assert_eq!(state.intake.logbook("test").unwrap().len(), 1);
 
-        // A Session of another role has no Station tools, even narrowed to this Station.
+        // A Run of another role has no Station tools, even narrowed to this Station.
         let other = tools(&state, &analyst).await;
         assert!(!other.contains(&"station_report".to_owned()), "{other:?}");
         assert!(
@@ -1020,9 +1020,9 @@ pub(super) mod tests {
         lease_sleeper_round(&state, &round);
         start(&state, &round).await;
         // Its turn ends while the Mission waits, as when it waits for green ink.
-        let ended = state.sessions.lock().unwrap().remove(&round).unwrap();
+        let ended = state.runs.lock().unwrap().remove(&round).unwrap();
         ended.gate.close();
-        let _ = ended.session.lock().unwrap().close();
+        let _ = ended.run.lock().unwrap().close();
         drop(ended);
         let _resumed = super::super::resume_mission(
             State(state.clone()),

@@ -8,12 +8,12 @@
 
 DipTels: the native and WebAssembly wire contract between a Station, Universal Exports
 and Outer Office, the operator app. **One identity contract and one guatiao frame format** carry
-Session lifecycle events, terminal bytes, terminal geometry and operator controls. See the
+Run lifecycle events, terminal bytes, terminal geometry and operator controls. See the
 [crate API header](https://github.com/jose-pr/ai6/blob/main/crates/ai6-diptel/AGENTS.md).
 
 ## Features
 
-- Distinct validated Operation ID, Mission ID and provider Session ID types.
+- Distinct validated Operation ID, Mission ID and provider ID types.
 - Schema-checked guatiao lifecycle, binary terminal, resize and operator control frames.
 - Native and `wasm32-unknown-unknown` support with no unsafe code.
 - No process-global state or custom wire codec.
@@ -37,14 +37,14 @@ There are no Cargo feature flags.
 
 ```rust
 use ai6_diptel::{
-    LifecycleEvent, MissionId, OperationId, SessionId, SessionState, lifecycle_frames,
+    LifecycleEvent, MissionId, OperationId, RunId, RunState, lifecycle_frames,
 };
 
 let event = LifecycleEvent {
     operation_id: OperationId::new("operation-a")?,
     mission_id: MissionId::new("mission-17")?,
-    session_id: SessionId::new("provider-run-3")?,
-    state: SessionState::Working,
+    run_id: RunId::new("provider-run-3")?,
+    state: RunState::Working,
     reason: None,
     sequence: 4,
 };
@@ -53,16 +53,16 @@ assert!(!schema_frame.is_empty() && !value_frame.is_empty());
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-A Mission ID identifies one unit of work and may group several Sessions. A
-provider-issued Session ID identifies one resumable agent operation and stays
+A Mission ID identifies one unit of work and may group several Runs. A
+provider ID identifies one resumable agent operation and stays
 the same when that operation resumes. An A2A Task ID is external protocol data.
 
 ## API overview
 
 | Item | Purpose |
 | --- | --- |
-| `OperationId`, `MissionId`, `SessionId`, `ControlId` | Validated identities for project, work unit, provider operation and operator control. |
-| `SessionSnapshot`, `LifecycleEvent`, `SessionState` | Board state keyed by Operation, Mission and Session. |
+| `OperationId`, `MissionId`, `RunId`, `ControlId` | Validated identities for project, work unit, provider operation and operator control. |
+| `RunSnapshot`, `LifecycleEvent`, `RunState` | Board state keyed by Operation, Mission and Run. |
 | `TerminalData`, `TerminalDirection`, `TerminalResize` | Bounded binary input/output and terminal geometry. |
 | `ControlAction`, `MissionControl` | An operator control (cancel, retry, resume, interrupt) for the Station holding a Mission. |
 | `lifecycle_frames`, `terminal_frames`, `resize_frames`, `control_frames` | guatiao schema announcement and schema-checked value frames. |

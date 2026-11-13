@@ -8,10 +8,10 @@ use serde::{Deserialize, Serialize};
 use guatiao::value::convert::{FromValue, MapError, ToValue};
 use guatiao::{Alloc, Schema, Value, ValueError};
 
-/// The largest accepted Mission or provider Session identity, in UTF-8 bytes.
+/// The largest accepted Mission or provider Run identity, in UTF-8 bytes.
 pub const MAX_ID_BYTES: usize = 256;
 
-/// A Mission or Session identifier is empty, over limit, or contains a control character.
+/// A Mission or Run identifier is empty, over limit, or contains a control character.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct InvalidIdentity;
@@ -24,7 +24,7 @@ impl fmt::Display for InvalidIdentity {
 
 impl core::error::Error for InvalidIdentity {}
 
-/// AI6's identifier for one unit of work; a Mission may group several Sessions.
+/// AI6's identifier for one unit of work; a Mission may group several Runs.
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Schema, serde::Serialize, serde::Deserialize,
 )]
@@ -38,7 +38,7 @@ pub struct MissionId(String);
 )]
 #[map(crate = ::guatiao, transparent)]
 #[serde(try_from = "String", into = "String")]
-pub struct SessionId(String);
+pub struct RunId(String);
 
 /// Shared metadata for one host-issued device token; it never contains the bearer secret.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -50,10 +50,10 @@ pub struct AccessTokenRecord {
     issued_at: f64,
     expires_at: f64,
     revoked_at: Option<f64>,
-    /// The token ID of the session cookie this token's sign-in holds; revoking either ends both.
+    /// The token ID of the run cookie this token's sign-in holds; revoking either ends both.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     sign_in: Option<String>,
-    /// This record is a sign-in's session cookie, whose secret is no bearer.
+    /// This record is a sign-in's run cookie, whose secret is no bearer.
     #[serde(default, skip_serializing_if = "core::ops::Not::not")]
     session_cookie: bool,
 }
@@ -99,7 +99,7 @@ impl AccessTokenRecord {
         })
     }
 
-    /// The same record as a sign-in's session cookie. [`find_access_token`] never answers with
+    /// The same record as a sign-in's run cookie. [`find_access_token`] never answers with
     /// one.
     ///
     /// [`find_access_token`]: crate::AccessTokenStore::find_access_token
@@ -110,7 +110,7 @@ impl AccessTokenRecord {
         self
     }
 
-    /// The same record as a bearer token of the sign-in holding the session cookie `sign_in`,
+    /// The same record as a bearer token of the sign-in holding the run cookie `sign_in`,
     /// a token ID: the token stops being accepted when that sign-in is revoked.
     pub fn in_sign_in(mut self, sign_in: impl Into<String>) -> Result<Self, InvalidIdentity> {
         let sign_in = sign_in.into();
@@ -150,12 +150,12 @@ impl AccessTokenRecord {
         })
     }
 
-    /// The session cookie's token ID when this token belongs to such a sign-in.
+    /// The run cookie's token ID when this token belongs to such a sign-in.
     pub fn sign_in(&self) -> Option<&str> {
         self.sign_in.as_deref()
     }
 
-    /// Whether this record is a sign-in's session cookie rather than a bearer token.
+    /// Whether this record is a sign-in's run cookie rather than a bearer token.
     pub fn is_session_cookie(&self) -> bool {
         self.session_cookie
     }
@@ -294,7 +294,7 @@ macro_rules! identity {
 }
 
 identity!(MissionId);
-identity!(SessionId);
+identity!(RunId);
 
 #[cfg(test)]
 mod tests {
@@ -303,18 +303,18 @@ mod tests {
     #[test]
     fn identities_display_and_parse_without_changing_the_value() {
         let mission = MissionId::try_new("mission-42").unwrap();
-        let session = SessionId::try_new("provider-session-9").unwrap();
+        let run = RunId::try_new("provider-id-9").unwrap();
 
         assert_eq!(mission.to_string().parse::<MissionId>().unwrap(), mission);
-        assert_eq!(session.to_string().parse::<SessionId>().unwrap(), session);
+        assert_eq!(run.to_string().parse::<RunId>().unwrap(), run);
         assert_eq!(mission.as_ref(), "mission-42");
-        assert_eq!(session.as_ref(), "provider-session-9");
+        assert_eq!(run.as_ref(), "provider-id-9");
     }
 
     #[test]
     fn identity_constructors_reject_empty_unbounded_and_control_values() {
         assert!(MissionId::try_new("").is_err());
-        assert!(SessionId::try_new("x".repeat(MAX_ID_BYTES + 1)).is_err());
+        assert!(RunId::try_new("x".repeat(MAX_ID_BYTES + 1)).is_err());
         assert!(MissionId::try_new("mission\n42").is_err());
     }
 

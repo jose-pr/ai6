@@ -1,4 +1,4 @@
-//! Operator controls: typed Mission and Session actions, queued for the Station that holds
+//! Operator controls: typed Mission and Run actions, queued for the Station that holds
 //! the Mission and reported back when it has acted.
 //!
 //! The gateway decides who may ask and which Station is asked; the Station decides whether
@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use ai6::directorates::registry::backend::*;
 use ai6::{AuditRecord, StationSettings};
 use ai6_diptel::{
-    ControlAction, ControlId, MissionControl, MissionId, OperationId, SessionId, control_frames,
+    ControlAction, ControlId, MissionControl, MissionId, OperationId, RunId, control_frames,
 };
 use axum::Json;
 use axum::body::Body;
@@ -51,8 +51,8 @@ pub struct ControlStatus {
     pub operation_id: String,
     /// The Mission the control acts on.
     pub mission_id: String,
-    /// The provider Session expected to be the Mission's current one, when known.
-    pub session_id: Option<String>,
+    /// The provider Run expected to be the Mission's current one, when known.
+    pub run_id: Option<String>,
     /// `cancel`, `retry`, `resume` or `interrupt`.
     pub action: String,
     /// The Agent a retry is given to, when one was named.
@@ -93,7 +93,7 @@ struct Asked {
     action: ControlAction,
     agent: Option<String>,
     message: Option<String>,
-    session: Option<String>,
+    run: Option<String>,
 }
 
 struct Entry {
@@ -315,7 +315,7 @@ pub(crate) struct ControlRequest {
     #[serde(default)]
     message: Option<String>,
     #[serde(default)]
-    session_id: Option<String>,
+    run_id: Option<String>,
     /// The Station to ask, whether or not it holds the Mission's claim: for the entries of its
     /// own queue (`drop`, `reload`).
     #[serde(default)]
@@ -323,10 +323,10 @@ pub(crate) struct ControlRequest {
     idempotency_key: String,
 }
 
-/// Where a control goes: the Station holding the Mission, and its current provider Session.
+/// Where a control goes: the Station holding the Mission, and its current provider Run.
 struct Target {
     station: String,
-    session: Option<String>,
+    run: Option<String>,
 }
 
 /// Where a control for a Mission goes.
@@ -340,10 +340,10 @@ enum Routing {
     Ended(String),
 }
 
-/// The Station that should act on a Mission: the one holding its latest Session record, else
+/// The Station that should act on a Mission: the one holding its latest Run record, else
 /// the one holding its brief's lease, else the Headquarters Station. A Station that has gone
 /// dark is passed over. The Mission is known only when something names `operation` as its
-/// Operation (a Session record, its lease, its brief in any state, or the board: `on_board`) and
+/// Operation (a Run record, its lease, its brief in any state, or the board: `on_board`) and
 /// nothing names another; otherwise it is unknown, so nothing about a Mission of another
 /// Operation is routed to, counted or told.
 fn control_target(
@@ -358,7 +358,7 @@ fn control_target(
         .map(|record| record.station().to_owned())
         .collect::<Vec<_>>();
     let records: Vec<_> = registry
-        .sessions()?
+        .runs()?
         .into_iter()
         .filter(|record| record.mission_id == mission_id)
         .collect();
@@ -396,15 +396,15 @@ fn control_target(
             .cmp(&right.attempt)
             .then(left.lease_expires.total_cmp(&right.lease_expires))
     });
-    let session = latest
+    let run = latest
         .as_ref()
-        .and_then(|record| record.provider_session_id.clone());
+        .and_then(|record| record.provider_id.clone());
     if let Some(record) = &latest
         && live.contains(&record.station)
     {
         return Ok(Routing::To(Target {
             station: record.station.clone(),
-            session,
+            run,
         }));
     }
     if let Some(lease) = &leased
@@ -412,7 +412,7 @@ fn control_target(
     {
         return Ok(Routing::To(Target {
             station: lease.station().to_owned(),
-            session,
+            run,
         }));
     }
     let now = std::time::SystemTime::now()
@@ -430,7 +430,7 @@ fn control_target(
         .map_or(nobody, |lease| {
             Routing::To(Target {
                 station: lease.station().to_owned(),
-                session,
+                run,
             })
         }))
 }
@@ -456,7 +456,7 @@ fn audit_action(action: ControlAction) -> &'static str {
         ControlAction::Cancel => "mission.cancel",
         ControlAction::Retry => "mission.retry",
         ControlAction::Resume => "mission.resume",
-        ControlAction::Interrupt => "session.interrupt",
+        ControlAction::Interrupt => "run.interrupt",
         ControlAction::Drop => "station.queue.drop",
         ControlAction::Reload => "station.queue.reload",
         _ => "mission.control",
@@ -492,17 +492,17 @@ pub(crate) async fn request_control(
     {
         return Err(ApiError::bad_request());
     }
-    let expected_session = request
-        .session_id
+    let expected_run = request
+        .run_id
         .clone()
-        .map(SessionId::new)
+        .map(RunId::new)
         .transpose()
         .map_err(|_| ApiError::bad_request())?;
     let asked = Asked {
         action,
         agent: request.agent.clone(),
         message: request.message.clone(),
-        session: request.session_id.clone(),
+        run: request.run_id.clone(),
     };
     authorize_operation_action(&gateway, person.clone(), &operation, "mission.control").await?;
     let key = IdempotencyKey {
@@ -534,7 +534,7 @@ pub(crate) async fn request_control(
             control_id: control_id.to_string(),
             operation_id: operation.to_string(),
             mission_id: mission.to_string(),
-            session_id: None,
+            run_id: None,
             action: action.as_str().to_owned(),
             agent: None,
             station_id: String::new(),
@@ -558,16 +558,16 @@ pub(crate) async fn request_control(
     let on_board = {
         let inner = gateway.inner.lock().await;
         let elsewhere = inner
-            .sessions
+            .runs
             .values()
-            .any(|session| session.mission_id == mission && session.operation_id != operation);
+            .any(|run| run.mission_id == mission && run.operation_id != operation);
         if elsewhere {
             return Err(ApiError::not_found());
         }
         inner
-            .sessions
+            .runs
             .values()
-            .any(|session| session.mission_id == mission)
+            .any(|run| run.mission_id == mission)
             || inner
                 .missions
                 .contains_key(&(operation.clone(), mission.clone()))
@@ -585,7 +585,7 @@ pub(crate) async fn request_control(
             Ok(if known {
                 Routing::To(Target {
                     station,
-                    session: None,
+                    run: None,
                 })
             } else {
                 Routing::Unknown
@@ -622,7 +622,7 @@ pub(crate) async fn request_control(
                 control_id: control_id.to_string(),
                 operation_id: operation.to_string(),
                 mission_id: mission.to_string(),
-                session_id: None,
+                run_id: None,
                 action: action.as_str().to_owned(),
                 agent: None,
                 station_id: String::new(),
@@ -651,12 +651,12 @@ pub(crate) async fn request_control(
         }
         Routing::NoStation | Routing::Ended(_) => return Err(no_station()),
     };
-    let session = match (expected_session, &target.session) {
+    let run = match (expected_run, &target.run) {
         (Some(expected), Some(current)) if expected.as_str() != current => {
             return Err(ApiError::from(GatewayError::Conflict));
         }
         (Some(expected), _) => Some(expected),
-        (None, Some(current)) => SessionId::new(current.clone()).ok(),
+        (None, Some(current)) => RunId::new(current.clone()).ok(),
         (None, None) => None,
     };
     let control_id =
@@ -667,8 +667,8 @@ pub(crate) async fn request_control(
         mission.clone(),
         action,
     );
-    if let Some(session) = &session {
-        control = control.with_session(session.clone());
+    if let Some(run) = &run {
+        control = control.with_run(run.clone());
     }
     if let Some(agent) = &request.agent {
         control = control
@@ -707,7 +707,7 @@ pub(crate) async fn request_control(
         control_id: control_id.to_string(),
         operation_id: operation.to_string(),
         mission_id: mission.to_string(),
-        session_id: session.map(|session| session.to_string()),
+        run_id: run.map(|run| run.to_string()),
         action: action.as_str().to_owned(),
         agent: request.agent,
         station_id: target.station,
@@ -857,7 +857,7 @@ pub(crate) mod tests {
     use ai6::FileRegistry;
     use ai6::guatiao::library::ProviderError;
     use ai6::{
-        Attempt, Authenticator, Directory, Lookup, NewSession, Person, Verdict, access_from_toml,
+        Attempt, Authenticator, Directory, Lookup, NewRun, Person, Verdict, access_from_toml,
     };
     use ai6_diptel::{FrameReceiver, IncomingFrame};
 
@@ -888,8 +888,8 @@ pub(crate) mod tests {
         }
     }
 
-    /// A served gateway over a Registry where Station `worker` holds `mission-g`'s Session
-    /// `session-g` in Operation G and `hq` is the Headquarters Station.
+    /// A served gateway over a Registry where Station `worker` holds `mission-g`'s Run
+    /// `run-g` in Operation G and `hq` is the Headquarters Station.
     pub(crate) struct Served {
         pub(crate) base: String,
         pub(crate) registry: FileRegistry,
@@ -959,10 +959,10 @@ pub(crate) mod tests {
         }
         registry.elect("hq", Duration::from_secs(120)).unwrap();
         registry
-            .open_session(
-                NewSession::new("record-g", "mission-g", "worker")
+            .open_run(
+                NewRun::new("record-g", "mission-g", "worker")
                     .with_operation("G")
-                    .with_provider_session("session-g"),
+                    .with_provider_id("run-g"),
                 Duration::from_secs(60),
             )
             .unwrap();
@@ -983,16 +983,16 @@ pub(crate) mod tests {
             Some(roster) => gateway.with_roster(roster),
             None => gateway,
         };
-        for (operation, mission, session) in [
-            ("G", "mission-g", "session-g"),
-            ("L", "mission-l", "session-l"),
+        for (operation, mission, run) in [
+            ("G", "mission-g", "run-g"),
+            ("L", "mission-l", "run-l"),
         ] {
             gateway
-                .register_session(
+                .register_run(
                     STATION_TOKEN,
                     OperationId::new(operation).unwrap(),
                     MissionId::new(mission).unwrap(),
-                    SessionId::new(session).unwrap(),
+                    RunId::new(run).unwrap(),
                 )
                 .await
                 .unwrap();
@@ -1172,7 +1172,7 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn a_control_reaches_the_station_holding_the_session_and_reports_its_outcome() {
+    async fn a_control_reaches_the_station_holding_the_run_and_reports_its_outcome() {
         let served = served().await;
         let asked = ask(
             &served,
@@ -1186,7 +1186,7 @@ pub(crate) mod tests {
         let queued: serde_json::Value = asked.json().await.unwrap();
         assert_eq!(queued["status"], "queued");
         assert_eq!(queued["station_id"], "worker");
-        assert_eq!(queued["session_id"], "session-g");
+        assert_eq!(queued["run_id"], "run-g");
         assert_eq!(queued["requested_by"], "operator-007");
         let control_id = queued["control_id"].as_str().unwrap().to_owned();
 
@@ -1212,7 +1212,7 @@ pub(crate) mod tests {
         .await;
         assert_eq!(reused.status(), StatusCode::CONFLICT);
 
-        // Only the Station holding the Session is handed the control, once.
+        // Only the Station holding the Run is handed the control, once.
         assert!(take(&served, "hq").await.is_none());
         let control = take(&served, "worker").await.unwrap();
         assert!(take(&served, "worker").await.is_none());
@@ -1220,7 +1220,7 @@ pub(crate) mod tests {
         assert_eq!(control.action(), ControlAction::Cancel);
         assert_eq!(control.operation_id().as_str(), "G");
         assert_eq!(control.mission_id().as_str(), "mission-g");
-        assert_eq!(control.session_id().unwrap().as_str(), "session-g");
+        assert_eq!(control.run_id().unwrap().as_str(), "run-g");
         assert_eq!(status(&served, &control_id).await["status"], "delivered");
 
         let wrong_station = report(
@@ -1309,7 +1309,7 @@ pub(crate) mod tests {
             &served.operator,
             "G",
             "mission-g",
-            serde_json::json!({"action": "interrupt", "session_id": "session-old", "idempotency_key": "k"}),
+            serde_json::json!({"action": "interrupt", "run_id": "run-old", "idempotency_key": "k"}),
         )
         .await;
         assert_eq!(stale.status(), StatusCode::CONFLICT);
@@ -1452,7 +1452,7 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn a_mission_without_a_session_goes_to_the_headquarters_station() {
+    async fn a_mission_without_a_run_goes_to_the_headquarters_station() {
         let served = served().await;
         let brief = ai6::Brief {
             title: "Queued".to_owned(),
@@ -1489,7 +1489,7 @@ pub(crate) mod tests {
         assert_eq!(queued["agent"], "008");
         let control = take(&served, "hq").await.unwrap();
         assert_eq!(control.agent(), Some("008"));
-        assert_eq!(control.session_id(), None);
+        assert_eq!(control.run_id(), None);
 
         let empty = tempfile::tempdir().unwrap();
         let alone = Gateway::with_registry(
@@ -1544,15 +1544,15 @@ pub(crate) mod tests {
             ("record-z1", "mission-z", Some("G"), 1),
             ("record-z2", "mission-z", Some("L"), 2),
         ] {
-            let mut new = NewSession::new(record, mission, "worker")
-                .with_provider_session("p-1")
+            let mut new = NewRun::new(record, mission, "worker")
+                .with_provider_id("p-1")
                 .with_attempt(attempt, None);
             if let Some(operation) = operation {
                 new = new.with_operation(operation);
             }
             served
                 .registry
-                .open_session(new, Duration::from_secs(60))
+                .open_run(new, Duration::from_secs(60))
                 .unwrap();
         }
         for mission in ["mission-x", "mission-y", "mission-z"] {
@@ -1577,8 +1577,8 @@ pub(crate) mod tests {
         // The Registry naming the Operation asked about is enough.
         served
             .registry
-            .open_session(
-                NewSession::new("record-w", "mission-w", "worker").with_operation("G"),
+            .open_run(
+                NewRun::new("record-w", "mission-w", "worker").with_operation("G"),
                 Duration::from_secs(60),
             )
             .unwrap();
@@ -1599,7 +1599,7 @@ pub(crate) mod tests {
                 control_id: format!("control-{id}"),
                 operation_id: "G".to_owned(),
                 mission_id: "mission-g".to_owned(),
-                session_id: None,
+                run_id: None,
                 action: "cancel".to_owned(),
                 agent: None,
                 station_id: format!("station-{}", id % 32),
@@ -1620,7 +1620,7 @@ pub(crate) mod tests {
                 action: ControlAction::Cancel,
                 agent: None,
                 message: None,
-                session: None,
+                run: None,
             },
             key: IdempotencyKey {
                 actor: "operator-007".to_owned(),
@@ -1635,7 +1635,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn a_queue_control_names_the_station_that_acts_on_it() {
         let served = served().await;
-        // No claim, Session or board entry ties this Mission to `worker`.
+        // No claim, Run or board entry ties this Mission to `worker`.
         let asked = ask(
             &served,
             &served.operator,

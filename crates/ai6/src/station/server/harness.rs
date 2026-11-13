@@ -1,4 +1,4 @@
-//! The harness policy on the Station: whether a Session's harness may load the configuration
+//! The harness policy on the Station: whether a Run's harness may load the configuration
 //! its working directory carries.
 
 use std::path::PathBuf;

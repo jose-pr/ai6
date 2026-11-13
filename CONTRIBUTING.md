@@ -44,7 +44,7 @@ flutter test
 All checks must pass. See [`AGENTS.md`](AGENTS.md) for the repository's layout
 and the rules every change keeps:
 
-- M owns policy, the Station owns provider Sessions, and Universal Exports owns user access;
-- Mission IDs and provider Session IDs are distinct durable identities;
+- M owns policy, the Station owns provider Runs, and Universal Exports owns user access;
+- Mission IDs and provider IDs are distinct durable identities;
 - a secret value never reaches a worktree, a log or a terminal stream;
 - files are LF, on every platform.

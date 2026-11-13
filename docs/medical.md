@@ -1,7 +1,7 @@
 # Medical: usage, exposure and quarantine
 
-Medical watches the health of Agents. The [watchdog](watchdog.md) catches a Session that
-stalls or loops. This page covers the rest: what Sessions consume, which Sessions have read
+Medical watches the health of Agents. The [watchdog](watchdog.md) catches a Run that
+stalls or loops. This page covers the rest: what Runs consume, which Runs have read
 input an attacker could have written, and how an Agent that misbehaves is stopped
 everywhere. Every setting here has a default and can be overridden; weakening a default is
 a choice the configuration makes visible, never a silent one.
@@ -10,9 +10,9 @@ a choice the configuration makes visible, never a silent one.
 
 Handlers report what the provider reports. Claude Code's `result` events carry token counts
 and `total_cost_usd`; Codex reports tokens per model request (it reports no cost, so Codex
-Sessions are limited by tokens only). The Station turns the reports into additions and keeps
+Runs are limited by tokens only). The Station turns the reports into additions and keeps
 one ledger per Mission in the shared Registry (`usage/<operation>/<mission>.json`), so every
-Station sees the same spend and a resumed Session is never counted twice.
+Station sees the same spend and a resumed Run is never counted twice.
 
 Measuring is always on. The Mission detail of Universal Exports shows the ledger:
 
@@ -20,7 +20,7 @@ Measuring is always on. The Mission detail of Universal Exports shows the ledger
 GET /v1/operations/G/missions/mission-7
 { "usage": { "total": { "input": 1200, "output": 340, "cache_read": 90000,
                          "cache_write": 6000, "cost_micro_usd": 48000 },
-             "sessions": { "<session id>": { "...": 0 } },
+             "runs": { "<run id>": { "...": 0 } },
              "daily_cost_micro_usd": { "2026-10-26": 48000 } } }
 ```
 
@@ -40,33 +40,33 @@ operation_cost_usd_per_day = 40.0 # a UTC day, summed over the Operation's Missi
 warn_at = 0.8                     # fraction of a limit that raises a warning
 
 [agent.007.budget]
-session_tokens = 2000000
+run_tokens = 2000000
 mission_tokens = 5000000
 ```
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `session_tokens` | unset | Tokens one Session may use |
-| `mission_tokens` | unset | Tokens all of a Mission's Sessions may use |
-| `mission_cost_usd` | unset | Dollars all of a Mission's Sessions may spend |
+| `run_tokens` | unset | Tokens one Run may use |
+| `mission_tokens` | unset | Tokens all of a Mission's Runs may use |
+| `mission_cost_usd` | unset | Dollars all of a Mission's Runs may spend |
 | `operation_cost_usd_per_day` | unset | Dollars an Operation's Missions may spend per UTC day |
 | `warn_at` | `0.8` | Fraction (above 0, at most 1) of a limit that raises a warning |
-| `preset` | none | `strict` sets conservative limits (2M tokens per Session, 5M per Mission, $10 per Mission, $50 per Operation per day); keys written beside it override it |
+| `preset` | none | `strict` sets conservative limits (2M tokens per Run, 5M per Mission, $10 per Mission, $50 per Operation per day); keys written beside it override it |
 
 No limit is set unless you set one or choose `strict`: subscription quotas are already
 handled by [parking](missions.md#provider-limits-park-and-resume). A negative, fractional
 (for token counts) or non-numeric value fails the load with an error naming the key.
 
 Crossing `warn_at` emits a `budget` event on the Mission and writes an audit record
-(`budget.warn`). Reaching a limit writes `budget.limit`, interrupts the Session and moves the
+(`budget.warn`). Reaching a limit writes `budget.limit`, interrupts the Run and moves the
 Mission to `blocked` with `blocked_reason: "budget"`, never `failed`. The safe house and the
-provider Session stay, so an operator who raises the limit can resume the same work. When a
+provider Run stay, so an operator who raises the limit can resume the same work. When a
 Mission cost limit is set, Claude Code is also started with `--max-budget-usd` for what the
 Mission may still spend, as a second stop.
 
 ## Exposure
 
-A Session is **exposed** once it has read input someone else could have written:
+A Run is **exposed** once it has read input someone else could have written:
 
 | Source | When |
 | --- | --- |
@@ -75,16 +75,16 @@ A Session is **exposed** once it has read input someone else could have written:
 | `brief:compartment` | Its Mission was proposed from another Operation through a [compartment](compartments.md#agents) |
 | `product:OPERATION` | It read a brief or a product of that Operation through a [compartment](compartments.md#agents) |
 | `tool:NAME` | It called a tool the Operation lists (default `WebFetch` and `WebSearch`) |
-| `cable:SENDER` | It read a Cable from another Operation or from an exposed Session |
+| `cable:SENDER` | It read a Cable from another Operation or from an exposed Run |
 | `issue:TRACKER` | It was given a reply from a linked issue of that tracker instance, or read an issue's text with `issue_read` |
 | `review` | It read review text written by someone else |
 
 This is for an Agent doing work: [Moneypenny's conversations carry no exposure](assistant.md#what-she-reads-and-what-that-gives-up),
 and a Cable from her exposes no one.
 
-Exposure is recorded in the Session's Registry record, never goes away, and is inherited by
-a later attempt at the same Mission. Outer Office shows an `EXPOSED` chip on the Session and
-`ai6ctl` lists the sources. Marking is always on; what an exposed Session may then do is the
+Exposure is recorded in the Run's Registry record, never goes away, and is inherited by
+a later attempt at the same Mission. Outer Office shows an `EXPOSED` chip on the Run and
+`ai6ctl` lists the sources. Marking is always on; what an exposed Run may then do is the
 Operation's policy:
 
 ```toml
@@ -94,7 +94,7 @@ restrict = ["proposals", "cables"]     # choose restrictions one by one (optiona
 tools = ["WebFetch", "WebSearch", "Browse"]
 ```
 
-| Restriction | Effect on an exposed Session |
+| Restriction | Effect on an exposed Run |
 | --- | --- |
 | `proposals` | Mission proposals carry its exposure into the Mission they become, so they are never auto-promoted |
 | `cables` | It may send a Cable only as a reply inside an existing conversation (`send_cable` is refused, naming the exposure) |
@@ -104,7 +104,7 @@ tools = ["WebFetch", "WebSearch", "Browse"]
 
 `strict` applies all five; `restrict` replaces that set. The Station enforces `proposals`,
 `cables` and `approvals` (a [green ink](missions.md#green-ink) request from an exposed
-Session waits for a person even when a class authorisation would cover it) itself;
+Run waits for a person even when a class authorisation would cover it) itself;
 `secrets` is carried by `ExposureGate::restricts` for the part of AI6 that issues leases to
 ask.
 
@@ -113,7 +113,7 @@ ask.
 A quarantine stops an Agent in an Operation (or in every Operation). It is a record in the
 shared Registry, so it takes effect on every Station:
 
-- the Agent's running Sessions are interrupted and its Missions become `quarantined`, with
+- the Agent's running Runs are interrupted and its Missions become `quarantined`, with
   their safe houses kept (never finished or cleaned up);
 - Cables the Agent sends are held until an authorized release;
 - the roster skips the Agent, so the next qualified Agent takes new briefs and queued Missions.

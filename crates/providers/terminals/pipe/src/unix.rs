@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Unix: the child leads a session and a process group of its own, its tree is found from
+//! Unix: the child leads a run and a process group of its own, its tree is found from
 //! them, and it inherits no descriptor but its standard streams.
 
 #![allow(unsafe_code)]
@@ -38,9 +38,9 @@ impl Process {
     }
 }
 
-/// Starts the program as the leader of a new session, and so of a new process group, with no
+/// Starts the program as the leader of a new run, and so of a new process group, with no
 /// controlling terminal and no descriptor but its standard streams; the standard library
-/// searches the child's `PATH` when it has one. Its tree is rooted at that session and group,
+/// searches the child's `PATH` when it has one. Its tree is rooted at that run and group,
 /// whose id is the child's pid.
 pub(crate) fn spawn(launch: Launch<'_>) -> io::Result<(Process, ProcessTree)> {
     let mut cmd = Command::new(launch.program);

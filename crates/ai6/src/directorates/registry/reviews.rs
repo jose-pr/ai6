@@ -26,7 +26,7 @@ pub enum ReviewStatus {
     Waiting,
     /// A person decides; `why` says what brought it to them.
     Person,
-    /// Sent back; the author's Session is to be resumed with the reasons.
+    /// Sent back; the author's Run is to be resumed with the reasons.
     SendingBack,
     /// The author is working on what it was sent back with.
     Redoing,

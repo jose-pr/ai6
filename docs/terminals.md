@@ -1,11 +1,11 @@
 # Terminals and providers
 
-An AgentHandler runs inside an AI6 terminal Session so the watchdog can observe its output
-and an authorized operator can attach without restarting the provider Session.
+An AgentHandler runs inside an AI6 terminal Run so the watchdog can observe its output
+and an authorized operator can attach without restarting the provider Run.
 
 ## The Station chooses the terminal
 
-Which terminal provider a Session gets is decided by the Station, from what the Agent's
+Which terminal provider a Run gets is decided by the Station, from what the Agent's
 handler declares about its harness (`AgentHandler::stdio`), never from a provider the Agent or
 handler names:
 
@@ -19,12 +19,12 @@ handler names:
 The `station` record's `terminal`, or `StationConfig::with_terminal` in Rust, pins one. A pin is used
 when it suits the harness; a pin that gives a JSON harness a terminal is refused at Mission
 start with the reason, never silently replaced. A field runner chooses the same way among the
-providers it loads, under its own `terminal` setting or the Station's. A resumed Session
+providers it loads, under its own `terminal` setting or the Station's. A resumed Run
 reuses the terminal it started with.
 
 The Station's log names the handler and terminal of every harness it starts or resumes, for
 Missions and Moneypenny alike (`ai6: Mission "mission-007": started the claude harness in the
-pipe terminal`); a Mission's Session record keeps both as well. A program's exit code is
+pipe terminal`); a Mission's Run record keeps both as well. A program's exit code is
 reported as a signed 32-bit number on every platform, so a Windows status such as
 `0xC000013A` reads `-1073741510`, which the Claude Code and Codex handlers show with its hex
 (`exited with code -1073741510 (0xC000013A)`).
@@ -36,7 +36,7 @@ reported as a signed 32-bit number on every platform, so a Windows status such a
 | `pty` | Linux, macOS, Windows | yes | `openpty` on Unix; ConPTY and a Job Object on Windows |
 | `pipe` | Linux, macOS, Windows | no | Plain pipes; a process group on Unix, a Job Object on Windows |
 
-`ai6-terminal-pty` and `ai6-terminal-pipe` are one crate each: the session logic is shared,
+`ai6-terminal-pty` and `ai6-terminal-pipe` are one crate each: the run logic is shared,
 and the platform parts (owning the child's process tree, and for `pty` translating input) live
 in `src/unix.rs` and `src/windows.rs`. Build them with the daemon:
 
@@ -64,7 +64,7 @@ With no terminal, a written `^C` is one more byte of input, not a signal, so a J
 interrupted over its own protocol: Claude Code with a stream-json `control_request` of subtype
 `interrupt`, Codex with `turn/interrupt`.
 
-The program starts alone: it inherits only its standard streams. On Unix it leads a session
+The program starts alone: it inherits only its standard streams. On Unix it leads a run
 and process group of its own, and every other descriptor is closed when it executes; on
 Windows only its three standard handles are inherited, it is in its Job Object from its first
 instruction, and it starts with no console window. Kill takes the whole tree: on Unix the
@@ -131,7 +131,7 @@ first byte no CSI holds or after 64 bytes.
 
 A terminal attaches with the sequence of the last event it received, starting from 0, and Universal
 Exports replays what it still holds past that. It holds the last `scrollback_events` frames of a
-Session, in memory. Older ones are gone, and a gateway that restarted holds none. When what it holds
+Run, in memory. Older ones are gone, and a gateway that restarted holds none. When what it holds
 starts later than the position, or skips a sequence, the replay says so with a gap frame, and it does
-so live when a Session's next event skips one: a Station dropped output while the gateway was away.
+so live when a Run's next event skips one: a Station dropped output while the gateway was away.
 Outer Office shows `[AI6: output is missing here]` at that point in the terminal.

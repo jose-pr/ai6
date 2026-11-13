@@ -602,7 +602,7 @@ const graphNodeKinds = {
   'station',
   'theater',
   'mission',
-  'session',
+  'run',
   'agent',
   'other',
 };
@@ -687,7 +687,7 @@ class GraphBlock extends ViewBlock {
       final kind = node['kind'];
       if (kind != null && !graphNodeKinds.contains(kind)) {
         throw const FormatException(
-          "a node's kind is operation, station, theater, mission, session, agent or other",
+          "a node's kind is operation, station, theater, mission, run, agent or other",
         );
       }
       parsedNodes.add(

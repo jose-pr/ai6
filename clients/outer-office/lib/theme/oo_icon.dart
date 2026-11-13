@@ -26,7 +26,7 @@ enum OoIconName {
   resume('resume'),
   roster('roster'),
   search('search'),
-  sessions('sessions'),
+  runs('runs'),
   settings('settings'),
   sleeper('sleeper'),
   stations('stations'),
@@ -69,7 +69,7 @@ class OoIcon extends StatelessWidget {
   }
 }
 
-/// The kit icon for a Mission or Session state, where one fits; the state's name is always
+/// The kit icon for a Mission or Run state, where one fits; the state's name is always
 /// shown beside it.
 OoIconName? ooStateIcon(String state, {String? reason}) => switch (state) {
   'working' => OoIconName.resume,

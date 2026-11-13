@@ -10,7 +10,7 @@ use ai6::{
 };
 use ai6_diptel::{
     ControlAction, ControlId, FrameReceiver, IncomingFrame, LifecycleEvent, MissionControl,
-    MissionId, OperationId, SessionId, SessionState, control_frames,
+    MissionId, OperationId, RunId, RunState, control_frames,
 };
 use tokio::sync::oneshot;
 use universal_exports::{AccessProviders, Gateway, GatewayConfig, GatewayLimits};
@@ -108,9 +108,9 @@ async fn start_gateway() -> (String, oneshot::Sender<()>, String, tempfile::Temp
     );
     let station = OperationId::new("station-01").unwrap();
     let mission = MissionId::new("mission-007").unwrap();
-    let session = SessionId::new("provider-session-007").unwrap();
+    let run = RunId::new("provider-id-007").unwrap();
     gateway
-        .register_session(token, station.clone(), mission.clone(), session.clone())
+        .register_run(token, station.clone(), mission.clone(), run.clone())
         .await
         .unwrap();
     gateway
@@ -119,8 +119,8 @@ async fn start_gateway() -> (String, oneshot::Sender<()>, String, tempfile::Temp
             LifecycleEvent {
                 operation_id: station,
                 mission_id: mission,
-                session_id: session,
-                state: SessionState::Working,
+                run_id: run,
+                state: RunState::Working,
                 reason: None,
                 sequence: 1,
             },
@@ -178,7 +178,7 @@ async fn ai6ctl(server: String, token: Option<String>, args: &[&str]) -> std::pr
 }
 
 #[tokio::test]
-async fn health_stations_missions_and_session_commands_use_the_public_gateway() {
+async fn health_stations_missions_and_run_commands_use_the_public_gateway() {
     let (server, shutdown, access_token, _registry_dir) = start_gateway().await;
 
     let response = reqwest::get(format!("{server}/health")).await.unwrap();
@@ -255,7 +255,7 @@ async fn health_stations_missions_and_session_commands_use_the_public_gateway() 
         String::from_utf8_lossy(&missions.stderr)
     );
     let missions = String::from_utf8(missions.stdout).unwrap();
-    assert!(missions.contains("STATION\tMISSION\tSESSIONS"));
+    assert!(missions.contains("STATION\tMISSION\tRUNS"));
     assert!(missions.contains("station-01\tmission-007\t1"));
 
     let mission = ai6ctl(
@@ -266,51 +266,51 @@ async fn health_stations_missions_and_session_commands_use_the_public_gateway() 
     .await;
     assert!(mission.status.success());
     let mission = String::from_utf8(mission.stdout).unwrap();
-    assert!(mission.contains("SESSION\tSTATE\tREASON\tSEQUENCE\tEXPOSURE"));
-    assert!(mission.contains("provider-session-007\tworking\t-\t1\t-"));
+    assert!(mission.contains("RUN\tSTATE\tREASON\tSEQUENCE\tEXPOSURE"));
+    assert!(mission.contains("provider-id-007\tworking\t-\t1\t-"));
 
-    let sessions = ai6ctl(
+    let runs = ai6ctl(
         server.clone(),
         Some(access_token.clone()),
-        &["sessions", "--state", "working"],
+        &["runs", "--state", "working"],
     )
     .await;
     assert!(
-        sessions.status.success(),
+        runs.status.success(),
         "{}",
-        String::from_utf8_lossy(&sessions.stderr)
+        String::from_utf8_lossy(&runs.stderr)
     );
-    let sessions = String::from_utf8(sessions.stdout).unwrap();
-    assert!(sessions.contains("STATION\tMISSION\tSESSION\tSTATE\tSEQUENCE\tEXPOSURE"));
-    assert!(sessions.contains("station-01\tmission-007\tprovider-session-007\tworking\t1\t-"));
+    let runs = String::from_utf8(runs.stdout).unwrap();
+    assert!(runs.contains("STATION\tMISSION\tRUN\tSTATE\tSEQUENCE\tEXPOSURE"));
+    assert!(runs.contains("station-01\tmission-007\tprovider-id-007\tworking\t1\t-"));
 
-    let session = ai6ctl(
+    let run = ai6ctl(
         server.clone(),
         Some(access_token.clone()),
-        &["session", "provider-session-007"],
+        &["run", "provider-id-007"],
     )
     .await;
-    assert!(session.status.success());
+    assert!(run.status.success());
     assert!(
-        String::from_utf8(session.stdout)
+        String::from_utf8(run.stdout)
             .unwrap()
-            .contains("provider-session-007")
+            .contains("provider-id-007")
     );
 
     let missing = ai6ctl(
         server.clone(),
         Some(access_token),
-        &["session", "not-a-session"],
+        &["run", "not-a-run"],
     )
     .await;
     assert_eq!(missing.status.code(), Some(1));
     assert!(
         String::from_utf8(missing.stderr)
             .unwrap()
-            .contains("Session was not found")
+            .contains("Run was not found")
     );
 
-    let no_token = ai6ctl(server.clone(), None, &["sessions"]).await;
+    let no_token = ai6ctl(server.clone(), None, &["runs"]).await;
     assert_eq!(no_token.status.code(), Some(1));
     assert!(
         String::from_utf8(no_token.stderr)
@@ -332,11 +332,11 @@ async fn health_stations_missions_and_session_commands_use_the_public_gateway() 
 const STATION_TOKEN: &str = "exports-test-credential-with-more-than-32-bytes";
 
 #[tokio::test]
-async fn mission_prints_the_reason_a_station_gave_for_a_sessions_state() {
+async fn mission_prints_the_reason_a_station_gave_for_a_runs_state() {
     let (server, shutdown, access_token, _registry_dir) = start_gateway().await;
     let published = reqwest::Client::new()
         .post(format!(
-            "{server}/v1/station/sessions/provider-session-007/lifecycle/2"
+            "{server}/v1/station/runs/provider-id-007/lifecycle/2"
         ))
         .bearer_auth(STATION_TOKEN)
         .json(&serde_json::json!({
@@ -358,7 +358,7 @@ async fn mission_prints_the_reason_a_station_gave_for_a_sessions_state() {
     );
     let mission = String::from_utf8(mission.stdout).unwrap();
     assert!(
-        mission.contains("provider-session-007\tdone\tpermission-denied\t2\t-"),
+        mission.contains("provider-id-007\tdone\tpermission-denied\t2\t-"),
         "{mission}"
     );
     let _ = shutdown.send(());
@@ -415,7 +415,7 @@ async fn fake_station(server: String, stop: tokio::sync::watch::Receiver<bool>) 
             _ => serde_json::json!({
                 "outcome": "rejected",
                 "state": "blocked",
-                "reason": "only a working Session can be interrupted"
+                "reason": "only a working Run can be interrupted"
             }),
         };
         report["station"] = serde_json::json!("station-01");
@@ -434,7 +434,7 @@ async fn fake_station(server: String, stop: tokio::sync::watch::Receiver<bool>) 
 }
 
 #[tokio::test]
-async fn mission_and_session_controls_reach_the_station_and_report_its_outcome() {
+async fn mission_and_run_controls_reach_the_station_and_report_its_outcome() {
     let (server, shutdown, access_token, _registry_dir) = start_gateway().await;
     let (stop, stopped) = tokio::sync::watch::channel(false);
     let station = tokio::spawn(fake_station(server.clone(), stopped));
@@ -501,12 +501,12 @@ async fn mission_and_session_controls_reach_the_station_and_report_its_outcome()
     let interrupt = ai6ctl(
         server.clone(),
         token.clone(),
-        &["session", "interrupt", "provider-session-007"],
+        &["run", "interrupt", "provider-id-007"],
     )
     .await;
     assert_eq!(interrupt.status.code(), Some(1));
     assert!(String::from_utf8(interrupt.stdout).unwrap().contains(
-        "\tinterrupt\tmission-007\tstation-01\trejected\tblocked\tonly a working Session can be interrupted"
+        "\tinterrupt\tmission-007\tstation-01\trejected\tblocked\tonly a working Run can be interrupted"
     ));
     assert!(
         String::from_utf8(interrupt.stderr)
@@ -541,7 +541,7 @@ fn asked(registry: &FileRegistry, target: &str, key: &str) -> ai6::ApprovalReque
     let request = ai6::ApprovalRequest::try_new(
         "operation-01",
         ai6::MissionId::try_new("mission-007").unwrap(),
-        ai6::SessionId::try_new("provider-session-007").unwrap(),
+        ai6::RunId::try_new("provider-id-007").unwrap(),
         "007",
         ai6::ActionScope::try_new("push", target).unwrap(),
         "the release branch is green",
@@ -597,7 +597,7 @@ async fn pools_lists_an_operations_accounts_and_their_quota() {
     let printed = lines(&output);
     assert_eq!(
         printed[0],
-        "POOL\tACCOUNT\tKIND\tSESSIONS\tWINDOWS\tREAD_UNIX\tLIMITED_UNTIL_UNIX\tTOKENS_TODAY"
+        "POOL\tACCOUNT\tKIND\tRUNS\tWINDOWS\tREAD_UNIX\tLIMITED_UNTIL_UNIX\tTOKENS_TODAY"
     );
     assert_eq!(
         printed[1],
@@ -866,11 +866,11 @@ async fn agents_scorecard_prints_each_row_and_the_attempts_behind_a_judgment() {
     let registry = FileRegistry::open(directory.path());
     for (mission, state) in [("m-1", "done"), ("m-2", "failed"), ("m-3", "abandoned")] {
         let record = registry
-            .open_session(
-                ai6::NewSession::new(format!("{mission}.1"), mission, "station-01")
+            .open_run(
+                ai6::NewRun::new(format!("{mission}.1"), mission, "station-01")
                     .with_operation("operation-01")
                     .with_launch(
-                        ai6::SessionLaunch::new("claude", "pipe", "/w")
+                        ai6::RunLaunch::new("claude", "pipe", "/w")
                             .with_model(Some("opus".to_owned()), None)
                             .with_agent(Some("007".to_owned())),
                     ),
@@ -878,13 +878,13 @@ async fn agents_scorecard_prints_each_row_and_the_attempts_behind_a_judgment() {
             )
             .unwrap();
         registry
-            .update_session(
-                &record.session_id,
+            .update_run(
+                &record.run_id,
                 "station-01",
                 record.fence,
-                ai6::SessionUpdate::default()
-                    .result(ai6::SessionResult::new(state))
-                    .status(ai6::SessionStatus::Ended),
+                ai6::RunUpdate::default()
+                    .result(ai6::RunResult::new(state))
+                    .status(ai6::RunStatus::Ended),
             )
             .unwrap();
     }
@@ -916,7 +916,7 @@ async fn agents_scorecard_prints_each_row_and_the_attempts_behind_a_judgment() {
     assert_eq!(
         &printed[5..],
         [
-            "AGENT\tROUTE\tJUDGMENT\tMISSION\tSESSION",
+            "AGENT\tROUTE\tJUDGMENT\tMISSION\tRUN",
             "007\tall\tfailed\tm-2\tm-2.1",
             "007\tclaude opus -\tfailed\tm-2\tm-2.1",
             "(model)\topus\tfailed\tm-2\tm-2.1",
@@ -1221,9 +1221,9 @@ async fn start_tree_gateway() -> (String, oneshot::Sender<()>, String, tempfile:
     for (operation, mission) in [("SOUTH", "m-south"), ("OTHER", "m-other")] {
         let operation = OperationId::new(operation).unwrap();
         let mission = MissionId::new(mission).unwrap();
-        let session = SessionId::new(format!("session-{mission}")).unwrap();
+        let run = RunId::new(format!("run-{mission}")).unwrap();
         gateway
-            .register_session(token, operation.clone(), mission.clone(), session.clone())
+            .register_run(token, operation.clone(), mission.clone(), run.clone())
             .await
             .unwrap();
         gateway
@@ -1232,8 +1232,8 @@ async fn start_tree_gateway() -> (String, oneshot::Sender<()>, String, tempfile:
                 LifecycleEvent {
                     operation_id: operation,
                     mission_id: mission,
-                    session_id: session,
-                    state: SessionState::Working,
+                    run_id: run,
+                    state: RunState::Working,
                     reason: None,
                     sequence: 1,
                 },
@@ -1323,7 +1323,7 @@ async fn operations_prints_the_tree_shows_an_effective_policy_and_missions_take_
     assert_eq!(
         subtree,
         [
-            "STATION\tMISSION\tSESSIONS\tNAME\tUID",
+            "STATION\tMISSION\tRUNS\tNAME\tUID",
             "SOUTH\tm-south\t1\t-\tm-south"
         ]
     );
@@ -1335,7 +1335,7 @@ async fn operations_prints_the_tree_shows_an_effective_policy_and_missions_take_
         )
         .await,
     );
-    assert_eq!(own, ["STATION\tMISSION\tSESSIONS\tNAME\tUID"]);
+    assert_eq!(own, ["STATION\tMISSION\tRUNS\tNAME\tUID"]);
     let _ = shutdown.send(());
 }
 
@@ -1529,10 +1529,10 @@ async fn a_mission_is_found_by_any_handle_it_had_and_renamed_through_the_gateway
     let uid = entered.key();
     assert_eq!(entered.handle.as_deref(), Some("station-01-1"));
     let registered = reqwest::Client::new()
-        .post(format!("{server}/v1/station/sessions"))
+        .post(format!("{server}/v1/station/runs"))
         .bearer_auth("exports-test-credential-with-more-than-32-bytes")
         .json(&serde_json::json!({
-            "operation_id": "station-01", "mission_id": uid, "session_id": "provider-session-8"
+            "operation_id": "station-01", "mission_id": uid, "run_id": "provider-id-8"
         }))
         .send()
         .await
@@ -1564,7 +1564,7 @@ async fn a_mission_is_found_by_any_handle_it_had_and_renamed_through_the_gateway
         );
         let shown = String::from_utf8(shown.stdout).unwrap();
         assert!(
-            shown.contains("STATION\tMISSION\tSESSIONS\tNAME\tUID"),
+            shown.contains("STATION\tMISSION\tRUNS\tNAME\tUID"),
             "{shown}"
         );
         assert!(
@@ -1572,15 +1572,15 @@ async fn a_mission_is_found_by_any_handle_it_had_and_renamed_through_the_gateway
             "{id}: {shown}"
         );
     }
-    let sessions = ai6ctl(
+    let runs = ai6ctl(
         server.clone(),
         Some(access_token.clone()),
-        &["sessions", "--mission", "station-01-1"],
+        &["runs", "--mission", "station-01-1"],
     )
     .await;
-    let sessions = String::from_utf8(sessions.stdout).unwrap();
-    assert!(sessions.contains("provider-session-8"), "{sessions}");
-    assert!(!sessions.contains("provider-session-007"), "{sessions}");
+    let runs = String::from_utf8(runs.stdout).unwrap();
+    assert!(runs.contains("provider-id-8"), "{runs}");
+    assert!(!runs.contains("provider-id-007"), "{runs}");
 
     let other = registry
         .enter_brief(&brief, &ai6::MissionEntry::person(Some("station-01")))
@@ -1700,19 +1700,19 @@ async fn a_verifying_mission_is_probed_and_decided_from_the_command_line() {
         .unwrap();
     let verifying = |key: &str, state: &str| {
         let opened = registry
-            .open_session(
-                ai6::NewSession::new(format!("{key}-run"), key, "worker-01")
+            .open_run(
+                ai6::NewRun::new(format!("{key}-run"), key, "worker-01")
                     .with_operation("station-01"),
                 Duration::from_secs(60),
             )
             .unwrap();
         registry
-            .update_session(
-                &opened.session_id,
+            .update_run(
+                &opened.run_id,
                 "worker-01",
                 opened.fence,
-                ai6::SessionUpdate::default()
-                    .result(ai6::SessionResult::new(state))
+                ai6::RunUpdate::default()
+                    .result(ai6::RunResult::new(state))
                     .deliverables(vec![
                         ai6::directorates::m::deliverables::Deliverable::parse("branch:fix-1")
                             .unwrap(),
@@ -1747,16 +1747,16 @@ async fn a_verifying_mission_is_probed_and_decided_from_the_command_line() {
         said.contains("no findings yet") && said.contains("has not answered"),
         "{said}"
     );
-    let record = registry.latest_session(key).unwrap().unwrap();
+    let record = registry.latest_run(key).unwrap().unwrap();
     assert!(record.probe_requested.is_some());
 
     // The Station's findings are printed.
     registry
-        .update_session(
-            &record.session_id,
+        .update_run(
+            &record.run_id,
             "worker-01",
             record.fence,
-            ai6::SessionUpdate::default()
+            ai6::RunUpdate::default()
                 .evidence(vec![ai6::Evidence::new(
                     ai6::directorates::m::deliverables::Deliverable::parse("branch:fix-1").unwrap(),
                     ai6::ProbeResult::Missing,
@@ -1809,7 +1809,7 @@ async fn a_verifying_mission_is_probed_and_decided_from_the_command_line() {
         format!("{key} attempt 1: redispatch by viewer-007\n")
     );
     let verdict = registry
-        .latest_session(key)
+        .latest_run(key)
         .unwrap()
         .unwrap()
         .verdict

@@ -1,5 +1,5 @@
-//! The Station's side of a runner: how it reaches one, and the [`AgentSession`] through which
-//! it drives a Session the runner supervises, over ACP.
+//! The Station's side of a runner: how it reaches one, and the [`AgentRun`] through which
+//! it drives a Run the runner supervises, over ACP.
 //!
 //! On the Station's own host the connection is the runner's loopback port. On another host it is
 //! `ai6 runner connect` on a terminal the Theater's transport opens: it authenticates with the
@@ -15,17 +15,17 @@ use guatiao::Bytes;
 use guatiao::Status;
 use guatiao::library::{Object, ProviderError};
 
-use super::{Launch, RunnerHandoff, SETTINGS_FILE, SessionReport};
-use crate::directorates::m::identity::SessionId;
+use super::{Launch, RunnerHandoff, SETTINGS_FILE, RunReport};
+use crate::directorates::m::identity::RunId;
 use crate::directorates::m::theaters::{RunnerSettings, Theater, TheaterAccess};
-use crate::directorates::q::terminal::{STREAM_COLS, Spec, TerminalSession};
+use crate::directorates::q::terminal::{STREAM_COLS, Spec, TerminalRun};
 use crate::directorates::q::transport::{RunSpec, TransportClient, describe};
 use crate::directorates::section_00::acp::{
-    AcpOptions, AcpSession, Authenticate, Exchange, ExtensionHandler, HandlerSpec, LAUNCH_META_KEY,
+    AcpOptions, AcpRun, Authenticate, Exchange, ExtensionHandler, HandlerSpec, LAUNCH_META_KEY,
     LaunchMeta, RUNNER_TOKEN_METHOD, ResumeMeta, RpcFailure, TerminalIo, UNBOUNDED_LINE_BYTES,
     UNBOUNDED_MS, duration_of,
 };
-use crate::directorates::section_00::agent::provider_session_id;
+use crate::directorates::section_00::agent::provider_id;
 use crate::station::limits::RunnerLimits;
 use crate::station::reach::ReachWatch;
 use coqui_acp::lines::{IoLines, over_io};
@@ -89,10 +89,10 @@ pub(crate) struct RunnerLink {
 #[derive(Debug, Clone)]
 pub(crate) struct Unreachable(pub(crate) String);
 
-/// Why a Session could not be attached to.
+/// Why a Run could not be attached to.
 pub(crate) enum AttachError {
     /// The runner does not have it.
-    NoSession(String),
+    NoRun(String),
     /// The runner could not be reached.
     Unreachable(String),
 }
@@ -242,7 +242,7 @@ impl RunnerLink {
                     rows: 24,
                     cols: STREAM_COLS,
                 };
-                let process: Arc<Object<dyn TerminalSession>> = Arc::new(
+                let process: Arc<Object<dyn TerminalRun>> = Arc::new(
                     client
                         .open_terminal(&spec)
                         .map_err(|error| Unreachable(describe(&error)))?,
@@ -387,7 +387,7 @@ impl RunnerLink {
     }
 
     /// Launches a harness on the runner under `key`, and answers what it reports with the
-    /// Session that drives it. With `cables`, the runner gives the harness a Cable endpoint and
+    /// Run that drives it. With `cables`, the runner gives the harness a Cable endpoint and
     /// `cables` answers what it relays.
     pub(crate) fn launch(
         &self,
@@ -395,7 +395,7 @@ impl RunnerLink {
         handler: &HandlerSpec,
         launch: Launch,
         cables: Option<Arc<dyn ExtensionHandler>>,
-    ) -> Result<(SessionReport, AcpSession), String> {
+    ) -> Result<(RunReport, AcpRun), String> {
         let connection = self.connect().map_err(|Unreachable(why)| why)?;
         let relayed = cables.is_some();
         let mut options = AcpOptions {
@@ -425,7 +425,7 @@ impl RunnerLink {
             }
             Launch::Resume(resume) => {
                 options.cwd = resume.working_directory.clone();
-                options.resume = Some(resume.session_id.to_string());
+                options.resume = Some(resume.run_id.to_string());
                 options.meta.insert(
                     LAUNCH_META_KEY.to_owned(),
                     ResumeMeta::from_resume(&resume)
@@ -437,10 +437,10 @@ impl RunnerLink {
                 );
             }
         }
-        let session = AcpSession::connect(connection.lines, options, connection.on_close)
+        let run = AcpRun::connect(connection.lines, options, connection.on_close)
             .map_err(|error| error.to_string())?;
-        let info = session.start_info().unwrap_or_default();
-        let report = SessionReport {
+        let info = run.start_info().unwrap_or_default();
+        let report = RunReport {
             key: key.to_owned(),
             handler: handler.id.clone(),
             terminal: info
@@ -448,7 +448,7 @@ impl RunnerLink {
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or_default()
                 .to_owned(),
-            session_id: provider_session_id(session.session_id())
+            run_id: provider_id(run.session_id())
                 .map_err(|error| error.to_string())?,
             ended: false,
             last: info
@@ -457,17 +457,17 @@ impl RunnerLink {
                 .unwrap_or_default(),
             cursor: 0,
         };
-        Ok((report, session))
+        Ok((report, run))
     }
 
-    /// Attaches to Session `key`, asking the runner to replay what followed event `after`;
+    /// Attaches to Run `key`, asking the runner to replay what followed event `after`;
     /// `cables` answers the Cable requests the runner relays over the connection.
     pub(crate) fn attach(
         &self,
         key: &str,
         after: u64,
         cables: Option<Arc<dyn ExtensionHandler>>,
-    ) -> Result<AcpSession, AttachError> {
+    ) -> Result<AcpRun, AttachError> {
         let connection = self
             .connect()
             .map_err(|Unreachable(why)| AttachError::Unreachable(why))?;
@@ -485,21 +485,21 @@ impl RunnerLink {
             extensions: cables,
             ..AcpOptions::default()
         };
-        AcpSession::connect(connection.lines, options, connection.on_close).map_err(|error| {
+        AcpRun::connect(connection.lines, options, connection.on_close).map_err(|error| {
             let why = error.to_string();
             if why.to_lowercase().contains("not found") {
-                AttachError::NoSession(why)
+                AttachError::NoRun(why)
             } else {
                 AttachError::Unreachable(why)
             }
         })
     }
 
-    /// What the runner knows of Session `key`; `None` when it has no such Session.
-    pub(crate) fn status(&self, key: &str) -> Result<Option<SessionReport>, String> {
+    /// What the runner knows of Run `key`; `None` when it has no such Run.
+    pub(crate) fn status(&self, key: &str) -> Result<Option<RunReport>, String> {
         let mut answers = self
             .exchange(vec![(
-                "_ai6/session_status".to_owned(),
+                "_ai6/run_status".to_owned(),
                 serde_json::json!({"key": key}),
             )])
             .map_err(|Unreachable(why)| why)?;
@@ -513,8 +513,8 @@ impl RunnerLink {
         }
     }
 
-    /// Ends Session `key` on the runner, attached or not.
-    pub(crate) fn close_session(&self, key: &str) -> Result<(), String> {
+    /// Ends Run `key` on the runner, attached or not.
+    pub(crate) fn close_run(&self, key: &str) -> Result<(), String> {
         let mut answers = self
             .exchange(vec![(
                 "session/close".to_owned(),
@@ -538,7 +538,7 @@ fn millis(duration: Duration) -> u64 {
 /// Reads the terminal until `ai6 runner connect` says it is ready, or `timeout` passes, each
 /// read waiting up to `poll_ms`.
 fn await_ready(
-    process: &Arc<Object<dyn TerminalSession>>,
+    process: &Arc<Object<dyn TerminalRun>>,
     timeout: Duration,
     poll_ms: i64,
 ) -> Result<(), String> {
@@ -578,14 +578,14 @@ fn refuse(message: impl std::fmt::Display) -> ProviderError {
     ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &message.to_string())
 }
 
-/// A Session on a runner, driven over ACP.
+/// A Run on a runner, driven over ACP.
 ///
 /// A connection that drops costs only time: the next `next_event` that can reach the runner
 /// attaches again and the runner replays what followed the last event taken. A runner out of
-/// reach past its [`ReachWatch`] grace, one that no longer has the Session, or one that
-/// restarted without its harness gives the Session up as lost through the watch. A Station that
+/// reach past its [`ReachWatch`] grace, one that no longer has the Run, or one that
+/// restarted without its harness gives the Run up as lost through the watch. A Station that
 /// another Station's connection supersedes stops reading and says so.
-pub(crate) struct RemoteSession {
+pub(crate) struct RemoteRun {
     link: Arc<RunnerLink>,
     key: String,
     inner: Mutex<Inner>,
@@ -596,8 +596,8 @@ pub(crate) struct RemoteSession {
 }
 
 struct Inner {
-    session: Option<AcpSession>,
-    session_id: Option<SessionId>,
+    run: Option<AcpRun>,
+    run_id: Option<RunId>,
     /// The newest event taken, which a re-attach asks the runner to continue after; `u64::MAX`
     /// until one is, to continue from what the runner last had acknowledged.
     after: u64,
@@ -605,14 +605,14 @@ struct Inner {
     superseded: bool,
 }
 
-impl RemoteSession {
-    /// Drives `session`, a Session `link`'s runner supervises under `key`, noting in `reach`
+impl RemoteRun {
+    /// Drives `run`, a Run `link`'s runner supervises under `key`, noting in `reach`
     /// whether the runner answers.
     pub(crate) fn drive(
         link: Arc<RunnerLink>,
         key: impl Into<String>,
-        session: Option<AcpSession>,
-        session_id: Option<SessionId>,
+        run: Option<AcpRun>,
+        run_id: Option<RunId>,
         detached: Arc<AtomicBool>,
         reach: ReachWatch,
     ) -> Self {
@@ -620,9 +620,9 @@ impl RemoteSession {
             link,
             key: key.into(),
             inner: Mutex::new(Inner {
-                after: if session.is_some() { 0 } else { u64::MAX },
-                session,
-                session_id,
+                after: if run.is_some() { 0 } else { u64::MAX },
+                run,
+                run_id,
                 unreachable: false,
                 superseded: false,
             }),
@@ -633,7 +633,7 @@ impl RemoteSession {
     }
 
     /// Answers the harness's Cable requests with `cables` on each connection made from now on;
-    /// a Session launched with them was given them at its launch.
+    /// a Run launched with them was given them at its launch.
     #[must_use]
     pub(crate) fn with_cables(mut self, cables: Option<Arc<dyn ExtensionHandler>>) -> Self {
         self.cables = cables;
@@ -646,9 +646,9 @@ impl RemoteSession {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// What the Station is handed for an event: the event a restarted runner ends the Session
-    /// with is taken as the Session lost instead, and the notice that another connection took
-    /// the Session over ends this one's reading.
+    /// What the Station is handed for an event: the event a restarted runner ends the Run
+    /// with is taken as the Run lost instead, and the notice that another connection took
+    /// the Run over ends this one's reading.
     fn take(&self, inner: &mut Inner, event: AgentEvent) -> Option<AgentEvent> {
         if event.kind == super::LOST_EVENT {
             self.reach.lose(
@@ -660,34 +660,34 @@ impl RemoteSession {
         }
         if event.kind == super::DETACHED_EVENT {
             inner.superseded = true;
-            inner.session = None;
+            inner.run = None;
         }
         Some(event)
     }
 
-    /// Asks the runner, through the Theater's transport, whether it still has the Session.
+    /// Asks the runner, through the Theater's transport, whether it still has the Run.
     fn probe(&self) -> Result<(), String> {
         match self.link.status(&self.key) {
             Ok(Some(_)) => Ok(()),
-            Ok(None) => Err(format!("the runner no longer has Session {:?}", self.key)),
+            Ok(None) => Err(format!("the runner no longer has Run {:?}", self.key)),
             Err(why) => Err(why),
         }
     }
 }
 
-impl AgentSession for RemoteSession {
+impl AgentSession for RemoteRun {
     fn session_id(&self) -> Result<Option<String>, ProviderError> {
         let inner = self.inner();
         Ok(inner
-            .session
+            .run
             .as_ref()
-            .and_then(|session| session.session_id().ok().flatten())
-            .or_else(|| inner.session_id.clone().map(String::from)))
+            .and_then(|run| run.session_id().ok().flatten())
+            .or_else(|| inner.run_id.clone().map(String::from)))
     }
 
     fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {
-        match &self.inner().session {
-            Some(session) => session.send_message(message),
+        match &self.inner().run {
+            Some(run) => run.send_message(message),
             None => Err(refuse("the runner is unreachable")),
         }
     }
@@ -702,15 +702,15 @@ impl AgentSession for RemoteSession {
             std::thread::sleep(Duration::from_millis(wait));
             return Ok(None);
         }
-        if let Some(session) = inner.session.take() {
-            let event = match session.next_event(i64::try_from(wait).unwrap_or(i64::MAX)) {
+        if let Some(run) = inner.run.take() {
+            let event = match run.next_event(i64::try_from(wait).unwrap_or(i64::MAX)) {
                 Ok(event) => event,
                 Err(error) => {
-                    inner.session = Some(session);
+                    inner.run = Some(run);
                     return Err(error);
                 }
             };
-            let seen = session.last_seq();
+            let seen = run.last_seq();
             if seen > 0 {
                 inner.after = if inner.after == u64::MAX {
                     seen
@@ -718,9 +718,9 @@ impl AgentSession for RemoteSession {
                     inner.after.max(seen)
                 };
             }
-            let lost = session.connection_lost();
+            let lost = run.connection_lost();
             if !lost {
-                inner.session = Some(session);
+                inner.run = Some(run);
             }
             if let Some(event) = event {
                 return Ok(self.take(&mut inner, event));
@@ -729,7 +729,7 @@ impl AgentSession for RemoteSession {
                 inner.unreachable = self.reach.missed(|| self.probe());
                 if inner.unreachable {
                     eprintln!(
-                        "ai6: runner Session {:?} is unreachable; waiting up to {}s for it",
+                        "ai6: runner Run {:?} is unreachable; waiting up to {}s for it",
                         self.key,
                         self.reach.grace().as_secs()
                     );
@@ -741,22 +741,22 @@ impl AgentSession for RemoteSession {
             .link
             .attach(&self.key, inner.after, self.cables.clone())
         {
-            Ok(session) => {
+            Ok(run) => {
                 self.reach.reached();
-                inner.session = Some(session);
+                inner.run = Some(run);
                 if std::mem::take(&mut inner.unreachable) {
-                    eprintln!("ai6: runner Session {:?} is reachable again", self.key);
+                    eprintln!("ai6: runner Run {:?} is reachable again", self.key);
                 }
             }
-            Err(AttachError::NoSession(why)) => self.reach.lose(format!(
-                "the runner on its Theater no longer has Session {:?} ({why})",
+            Err(AttachError::NoRun(why)) => self.reach.lose(format!(
+                "the runner on its Theater no longer has Run {:?} ({why})",
                 self.key
             )),
             Err(AttachError::Unreachable(why)) => {
                 if self.reach.missed(|| self.probe()) {
                     inner.unreachable = true;
                     eprintln!(
-                        "ai6: runner Session {:?} is unreachable; waiting up to {}s for it: {why}",
+                        "ai6: runner Run {:?} is unreachable; waiting up to {}s for it: {why}",
                         self.key,
                         self.reach.grace().as_secs()
                     );
@@ -774,8 +774,8 @@ impl AgentSession for RemoteSession {
         if self.detached.load(Ordering::Acquire) {
             return Ok(());
         }
-        match &self.inner().session {
-            Some(session) => session.interrupt(),
+        match &self.inner().run {
+            Some(run) => run.interrupt(),
             None => Err(refuse("the runner is unreachable")),
         }
     }
@@ -784,10 +784,10 @@ impl AgentSession for RemoteSession {
         if self.detached.load(Ordering::Acquire) {
             return Ok(());
         }
-        let session = self.inner().session.take();
-        match session {
-            Some(session) => session.close(),
-            None => self.link.close_session(&self.key).map_err(refuse),
+        let run = self.inner().run.take();
+        match run {
+            Some(run) => run.close(),
+            None => self.link.close_run(&self.key).map_err(refuse),
         }
     }
 }
@@ -829,7 +829,7 @@ pub(crate) fn authenticated_stream(
             limits.answer_wait.0.as_secs_f64()
         )
     })?;
-    // The stream goes on to carry a Session, which may be silent for as long as it likes.
+    // The stream goes on to carry a Run, which may be silent for as long as it likes.
     reader
         .get_ref()
         .set_read_timeout(None)
@@ -886,7 +886,7 @@ mod tests {
         waits: Arc<Mutex<Vec<i64>>>,
     }
 
-    impl TerminalSession for RecordingTerminal {
+    impl TerminalRun for RecordingTerminal {
         fn pid(&self) -> i64 {
             0
         }
@@ -975,7 +975,7 @@ mod tests {
                 },
                 std::collections::BTreeMap::new(),
             ));
-        let session = RemoteSession::drive(
+        let run = RemoteRun::drive(
             Arc::new(link),
             "k",
             None,
@@ -984,7 +984,7 @@ mod tests {
             ReachWatch::default(),
         );
         let started = Instant::now();
-        assert!(session.next_event(0).unwrap().is_none());
+        assert!(run.next_event(0).unwrap().is_none());
         assert!(
             started.elapsed() >= pause,
             "tried again after {:?}",

@@ -1,4 +1,4 @@
-//! Monotonic Session activity, prompt and repeated-output monitoring.
+//! Monotonic Run activity, prompt and repeated-output monitoring.
 
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
@@ -9,12 +9,12 @@ use sha2::{Digest, Sha256};
 
 use crate::bounds::Seconds;
 
-/// Default time without provider or terminal activity before a Session is stalled.
+/// Default time without provider or terminal activity before a Run is stalled.
 pub const DEFAULT_STALL_TIMEOUT: Duration = Duration::from_secs(300);
 
-/// Default delay before a quiet prompt-shaped Session is marked blocked.
+/// Default delay before a quiet prompt-shaped Run is marked blocked.
 pub const DEFAULT_BLOCKED_AFTER: Duration = Duration::from_secs(10);
-/// Default number of repeated lines required before a Session is considered looping.
+/// Default number of repeated lines required before a Run is considered looping.
 pub const DEFAULT_LOOP_MIN_LINES: usize = 50;
 /// Default number of distinct terminal lines retained for loop detection.
 pub const DEFAULT_LINE_HISTORY: usize = 4096;
@@ -33,19 +33,19 @@ pub const DEFAULT_LINE_HISTORY: usize = 4096;
 )]
 #[map(deny_unknown_fields)]
 pub struct WatchdogOverrides {
-    /// How long a Session may stay quiet before it counts as stalled.
+    /// How long a Run may stay quiet before it counts as stalled.
     #[schema(title = "Stalled after")]
     pub stall_timeout: Option<Seconds>,
-    /// How long a Session repeating itself may go on before it counts as looping.
+    /// How long a Run repeating itself may go on before it counts as looping.
     #[schema(title = "Looping after")]
     pub loop_timeout: Option<Seconds>,
     /// How many lines must repeat before it can count as looping.
     #[schema(title = "Repeated lines")]
     pub loop_min_lines: Option<usize>,
-    /// How long a Session showing a prompt may wait before it counts as blocked.
+    /// How long a Run showing a prompt may wait before it counts as blocked.
     #[schema(title = "Blocked after")]
     pub blocked_after: Option<Seconds>,
-    /// The longest a Session may run. Leave it empty for no limit of its own.
+    /// The longest a Run may run. Leave it empty for no limit of its own.
     #[schema(title = "Longest run")]
     pub max_runtime: Option<Seconds>,
     /// How many different lines of output are remembered to spot repeats.
@@ -97,7 +97,7 @@ impl WatchdogOverrides {
     }
 }
 
-/// Thresholds used to detect quiet, blocked and looping Agent Sessions.
+/// Thresholds used to detect quiet, blocked and looping Agent Runs.
 #[must_use]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WatchdogConfig {
@@ -153,7 +153,7 @@ impl WatchdogConfig {
         self
     }
 
-    /// Sets an optional maximum Session runtime; `None` disables this limit.
+    /// Sets an optional maximum Run runtime; `None` disables this limit.
     pub fn with_max_runtime(mut self, timeout: Option<Duration>) -> Self {
         self.max_runtime = timeout;
         self
@@ -205,7 +205,7 @@ impl WatchdogConfig {
         self.blocked_after
     }
 
-    /// Returns the optional maximum Session runtime.
+    /// Returns the optional maximum Run runtime.
     pub fn max_runtime(&self) -> Option<Duration> {
         self.max_runtime
     }
@@ -221,7 +221,7 @@ impl WatchdogConfig {
     }
 }
 
-/// Measures activity, prompt waits and repeated terminal output for an Agent Session.
+/// Measures activity, prompt waits and repeated terminal output for an Agent Run.
 #[derive(Debug, Clone)]
 pub struct Watchdog {
     config: WatchdogConfig,
@@ -292,8 +292,8 @@ impl Watchdog {
         )
     }
 
-    /// Stops judging the Session while it waits on a person, such as for green ink: a paused
-    /// Session is never stalled, looping, blocked at a prompt or past its maximum runtime.
+    /// Stops judging the Run while it waits on a person, such as for green ink: a paused
+    /// Run is never stalled, looping, blocked at a prompt or past its maximum runtime.
     /// Pausing again is harmless.
     pub fn pause(&self) {
         let mut state = self.lock_state();
@@ -302,7 +302,7 @@ impl Watchdog {
         }
     }
 
-    /// Judges the Session again as if it had just been active; the time spent paused does
+    /// Judges the Run again as if it had just been active; the time spent paused does
     /// not count toward the maximum runtime.
     pub fn resume(&self) {
         let now = Instant::now();
@@ -315,12 +315,12 @@ impl Watchdog {
         state.lines_since_novel = 0;
     }
 
-    /// Whether the Session is paused.
+    /// Whether the Run is paused.
     pub fn is_paused(&self) -> bool {
         self.lock_state().paused_since.is_some()
     }
 
-    /// Records provider output or operator input as Session activity.
+    /// Records provider output or operator input as Run activity.
     pub fn record_activity(&self) {
         self.lock_state().last_activity = Instant::now();
     }
@@ -374,7 +374,7 @@ impl Watchdog {
         self.config.stall_timeout
     }
 
-    /// Returns the optional maximum Session runtime.
+    /// Returns the optional maximum Run runtime.
     pub fn max_runtime(&self) -> Option<Duration> {
         self.config.max_runtime
     }
@@ -387,7 +387,7 @@ impl Watchdog {
         self.config.loop_timeout
     }
 
-    /// Returns whether the Session exceeded its optional maximum runtime.
+    /// Returns whether the Run exceeded its optional maximum runtime.
     pub fn is_max_runtime_exceeded(&self) -> bool {
         self.config.max_runtime.is_some_and(|timeout| {
             let state = self.lock_state();
@@ -395,7 +395,7 @@ impl Watchdog {
         })
     }
 
-    /// Returns whether the Session has exceeded its quiet period.
+    /// Returns whether the Run has exceeded its quiet period.
     pub fn is_stalled(&self) -> bool {
         let state = self.lock_state();
         state.paused_since.is_none() && state.last_activity.elapsed() >= self.config.stall_timeout
@@ -580,7 +580,7 @@ mod tests {
     }
 
     #[test]
-    fn a_paused_session_is_not_judged_and_resumes_with_a_fresh_deadline() {
+    fn a_paused_run_is_not_judged_and_resumes_with_a_fresh_deadline() {
         let monitor = loop {
             let monitor = Watchdog::with_config(
                 WatchdogConfig::default()

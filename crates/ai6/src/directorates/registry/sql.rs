@@ -6,7 +6,7 @@
 //! file Registry writes, beside the columns a lookup needs. Every write transaction first
 //! advances the Registry's clock row, a row lock that serializes writers across Stations as
 //! the file Registry's directory lock does; the brief leases, the Headquarters election and
-//! Session fencing therefore keep the file Registry's guarantees, terms and fences. Each
+//! Run fencing therefore keep the file Registry's guarantees, terms and fences. Each
 //! row carries the revision of the write that last changed it. Leases expire on the
 //! database's clock, read in the transaction that writes them, so the Stations' own clocks
 //! do not decide who holds a lease.
@@ -38,7 +38,7 @@ mod records;
 mod reports;
 mod reviews;
 mod sealed;
-mod sessions;
+mod runs;
 mod stations;
 mod steps;
 mod transcripts;
@@ -65,7 +65,7 @@ use crate::bounds::Limit;
 ///
 /// From a lease `L`: a statement, a wait for a lock and an idle open transaction are ended
 /// after `L/4` (`statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`,
-/// set on each session); connecting gives up and TCP keepalives start after `L/6`
+/// set on each run); connecting gives up and TCP keepalives start after `L/6`
 /// (`connect_timeout`, `keepalives_idle`), probe every `L/60` (`keepalives_interval`), and
 /// unacknowledged data drops the connection after `L/4` (`tcp_user_timeout`, where the
 /// platform has it). A location that sets one of them
@@ -335,7 +335,7 @@ pub fn weakenings(location: &str) -> Vec<String> {
     weaker
 }
 
-/// Runs `sql` on a session of its own at the PostgreSQL `location`.
+/// Runs `sql` on a run of its own at the PostgreSQL `location`.
 #[cfg(all(test, feature = "postgres"))]
 pub(crate) fn postgres_admin(location: &str, sql: &str) -> io::Result<()> {
     postgres::admin(location, sql)

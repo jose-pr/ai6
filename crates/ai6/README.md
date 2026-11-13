@@ -8,7 +8,7 @@
 
 The AI6 Station daemon and its public contracts, as a Rust library and the `ai6`
 command. **Directorates decide (`ai6::directorates`); the Station runs their decisions
-(`ai6::station`)**: it schedules Missions, starts Agent Sessions through Guatiao
+(`ai6::station`)**: it schedules Missions, starts Agent Runs through Guatiao
 providers, keeps their state across restarts and publishes them to Universal Exports.
 See the [API header](https://github.com/jose-pr/ai6/blob/main/crates/ai6/AGENTS.md)
 and the [guides](https://jose-pr.github.io/ai6/).
@@ -17,14 +17,14 @@ and the [guides](https://jose-pr.github.io/ai6/).
 
 - AgentHandler, terminal, Source and access contracts as Guatiao kinds, usable without the daemon.
 - A Station daemon: private loopback API, Registry-leased intake, Mission scheduling,
-  durable Mission records and automatic provider-Session reattachment after a restart.
+  durable Mission records and automatic provider-Run reattachment after a restart.
 - A field runner (`ai6 runner`) that supervises harnesses on a Theater and spools their
-  events, so a Session outlives its Station and a Station that comes back replays what it
+  events, so a Run outlives its Station and a Station that comes back replays what it
   missed.
 - Agent selection by role and priority; when an Agent's handler is unavailable, the next
   qualified Agent is posted instead.
-- Isolated Mission workspaces (safe houses, made by providers such as `git`), commit cover audits and Session watchdogs.
-- Scoped agent-to-agent Cables with per-Session MCP tools.
+- Isolated Mission workspaces (safe houses, made by providers such as `git`), commit cover audits and Run watchdogs.
+- Scoped agent-to-agent Cables with per-Run MCP tools.
 - Station identities with pinned-peer or CA mutual TLS.
 
 ## Installation
@@ -40,7 +40,7 @@ cargo add ai6 --git https://github.com/jose-pr/ai6
 | (none) | Contracts: AgentHandler, terminal, access, roster, Mission, Registry, Cables, Q loadouts. | Yes |
 | `daemon` | The Station's private HTTP service, scheduler, Guatiao provider host and watchdogs, and the field runner. | No |
 | `publisher` | Bounded publication of lifecycle events and raw terminal bytes to Universal Exports. | No |
-| `cables-mcp` | Per-Session authenticated MCP tools for Agent-to-Agent Cables. | No |
+| `cables-mcp` | Per-Run authenticated MCP tools for Agent-to-Agent Cables. | No |
 | `station-tls` | Persistent Station certificate identities and pinned-peer or CA mutual TLS, on `coqui-peer-tls`. | No |
 | `sqlite` | The Registry and roster in a SQLite file (`SqlRegistry`, `SqlProvider`). | No |
 | `postgres` | The Registry and roster in PostgreSQL, shared by the Stations of an HA deployment. | No |
@@ -168,22 +168,22 @@ Exit status is `0` on success and `1` on a configuration, listener or identity f
 | `ai6::directorates::m::theaters` | Theaters (`theaters.toml`): the hosts a Station reaches, through a transport |
 | `ai6::directorates::q::transport` | The Transport kind: how a Station reaches a Theater (terminal, run, files, forward) and the contract suite for it |
 | `ai6::directorates::m::placement` | Placement: eligible (Station, Theater, Agent) choices with a reason for every rejection |
-| `ai6::directorates::m::mission` | Durable Mission lifecycle, provider Session association and resume settings |
+| `ai6::directorates::m::mission` | Durable Mission lifecycle, provider Run association and resume settings |
 | `ai6::directorates::m::limits` | `OnLimit` and the parking rule for provider usage limits |
-| `ai6::directorates::m::identity` | Validated `MissionId`, provider-issued `SessionId` and access-token records |
+| `ai6::directorates::m::identity` | Validated `MissionId`, provider-issued `RunId` and access-token records |
 | `ai6::directorates::m::cover` | Built-in and TOML cover policies, Agent briefings and commit audits |
 | `ai6::directorates::m::access` | The shared `coqui-access` kinds and `coqui-roles` authorizer, AI6's scope kinds and actions, the access policy (built-in roles, the chief, the guards on changing it) and the `access.toml` reader |
 | `ai6::directorates::m::vetting` | Vetting: deterministic checks on a brief before it is placed, and the Operation's settings for them |
 | `ai6::directorates::registry::store` | The Registry: briefs, leases, Station check-ins, Headquarters election, audit and role overrides |
-| `ai6::directorates::registry::sessions` | Shared, fenced Session records: lease, fencing token, attempt and predecessor |
+| `ai6::directorates::registry::runs` | Shared, fenced Run records: lease, fencing token, attempt and predecessor |
 | `ai6::directorates::registry::sleepers` | Sleepers: cron standing orders, their authorization and per-window briefs |
 | `ai6::directorates::registry::sources` | The Source kind (trackers and CI), brief ingestion, cursors and CX reports |
 | `ai6::directorates::registry::cables` | Permission-scoped Agent-to-Agent Cable relay |
 | `ai6::directorates::registry::vetting` | Held briefs and the clearances that keep vetting from holding a brief again |
 | `ai6::directorates::q` | Loadouts, Mission-scoped secret leases, MCP config and sandbox arguments |
-| `ai6::directorates::q::terminal` | Terminal and terminal-session kinds and the Session bridge |
-| `ai6::directorates::section_00::agent` | AgentHandler, AgentSession and provider-neutral events |
-| `ai6::directorates::medical::watchdog` | Stall, loop and blocked-prompt detection for Sessions |
+| `ai6::directorates::q::terminal` | Terminal and terminal-run kinds and the Run bridge |
+| `ai6::directorates::section_00::agent` | AgentHandler, AgentRun and provider-neutral events |
+| `ai6::directorates::medical::watchdog` | Stall, loop and blocked-prompt detection for Runs |
 | `ai6::station::server` | `ServeConfig`, `StationConfig` and the `serve*` entry points |
 | `ai6::station::plugins` | Guatiao provider discovery and typed construction |
 | `ai6::station::safehouse` | Opens a Mission's safe house through a provider; state directory |
@@ -202,19 +202,19 @@ The service lists providers (`GET /internal/agent-handlers`, `/internal/terminal
 messages, interrupts and resumes them. A start resolves the Operation and Agent, then runs
 the Agent's handler in the Station's terminal provider. Mission records persist atomically
 in `missions.json` under the state directory; on startup, Missions that were working
-become blocked and the scheduler reattaches them through their provider Session ID.
-Graceful shutdown interrupts active Sessions and keeps their safe houses for recovery.
+become blocked and the scheduler reattaches them through their provider ID.
+Graceful shutdown interrupts active Runs and keeps their safe houses for recovery.
 On a Theater with a runner the harness runs under the runner instead: the Station reads its
 spooled events, a Station that stops or dies leaves it running, and the next start
 re-attaches to it and replays the events it missed. On a POSIX Theater with no runner the
 Station starts the harness over the transport in a detached wrapper, so it outlives a
 dropped link.
-Each Session also has a record in the shared Registry, held by a lease whose fencing token
-refuses a Station that lost it. When a provider usage limit stops a Session the Mission is
-parked until the quota resets and resumes the same provider Session; an Operation may instead
+Each Run also has a record in the shared Registry, held by a lease whose fencing token
+refuses a Station that lost it. When a provider usage limit stops a Run the Mission is
+parked until the quota resets and resumes the same provider Run; an Operation may instead
 set `on_limit = "backup"` to post the next qualified Agent as a new attempt.
-Medical records what Sessions consume and enforces optional budgets (a Mission that reaches
-one is blocked, not failed), marks Sessions that read untrusted input and restricts them under
+Medical records what Runs consume and enforces optional budgets (a Mission that reaches
+one is blocked, not failed), marks Runs that read untrusted input and restricts them under
 the default `strict` policy, and quarantines an Agent that keeps stalling, loops, blows its
 cover or overspends: its Missions stop on every Station and new work goes to the next
 qualified Agent until an operator releases it (`ai6 quarantine`).
@@ -240,11 +240,11 @@ Theater and Agent and can say why it ruled the others out.
 Each Mission snapshots its Operation's cover policy and starting commit; at completion AI6
 audits commit authors and messages and attaches a `cover` report. A violation marks the
 Mission `blown` when the Operation sets `on_blown = "fail"`. With `cables-mcp`, Claude and
-Codex Sessions receive a per-Session MCP endpoint with a random bearer token that is never
+Codex Runs receive a per-Run MCP endpoint with a random bearer token that is never
 persisted or passed as an argument. With `publisher` and the bootstrap file's `[unex] url`
-and `token` set, the Station registers Sessions with Universal Exports, publishes
+and `token` set, the Station registers Runs with Universal Exports, publishes
 lifecycle and terminal output through a bounded queue, and dispatches authorized terminal
-input back to the live Session; its state is at `GET /internal/publisher`.
+input back to the live Run; its state is at `GET /internal/publisher`.
 
 ## Access policy
 
@@ -257,7 +257,7 @@ input back to the live Session; its state is at `GET /internal/publisher`.
 actions = ["mission.read"]
 
 [role.operator]
-actions = ["mission.read", "mission.create", "session.input"]
+actions = ["mission.read", "mission.create", "run.input"]
 
 [[rule]]
 subject = "person:person-007"

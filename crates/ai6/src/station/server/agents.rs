@@ -2,7 +2,7 @@
 //! nor retired, the clearance each works at, and counting each Mission's outcome and each
 //! incident charged to its Agent.
 
-use super::promotion::{PROMOTION_SESSION, promotion_mission, promotion_target};
+use super::promotion::{PROMOTION_RUN, promotion_mission, promotion_target};
 use super::{DaemonState, medical};
 use crate::directorates::m::mission::{Mission, MissionState};
 use crate::directorates::m::promotion::CLEARANCE_KIND;
@@ -108,7 +108,7 @@ fn backing(state: &DaemonState, grant: &ClearanceGrant) -> std::io::Result<bool>
         && request.id == *id
         && request.agent == grant.agent
         && request.operation == grant.operation
-        && request.session.as_str() == PROMOTION_SESSION
+        && request.run.as_str() == PROMOTION_RUN
         && request.mission.as_str() == promotion_mission(&grant.agent)
         && request.scope.kind == CLEARANCE_KIND
         && request.scope.target
@@ -162,23 +162,23 @@ fn clearance_shown(state: &DaemonState, operation: &str, key: &str) -> Option<St
 /// way. A harness a runner kept counts from the clearance it was launched at, whenever this Station
 /// took it up.
 pub(super) fn enforce_clearances(state: &DaemonState) {
-    let running: Vec<_> = state.sessions.lock().map_or_else(
+    let running: Vec<_> = state.runs.lock().map_or_else(
         |_| Vec::new(),
-        |sessions| {
-            sessions
+        |runs| {
+            runs
                 .iter()
                 .map(|(mission_id, operation)| {
                     (
                         mission_id.clone(),
                         operation.clearance.clone(),
-                        operation.session.clone(),
+                        operation.run.clone(),
                     )
                 })
                 .collect()
         },
     );
     let rank = |clearance: &str| clearance_rank(clearance).unwrap_or(0);
-    for (mission_id, launched, session) in running {
+    for (mission_id, launched, run) in running {
         let Some((operation, agent)) = state.missions.lock().ok().and_then(|missions| {
             let mission = missions.get(&mission_id)?;
             Some((mission.operation_id.clone()?, mission.agent_id.clone()?))
@@ -189,7 +189,7 @@ pub(super) fn enforce_clearances(state: &DaemonState) {
             continue;
         };
         if rank(&now) < rank(&launched) {
-            super::stop_for_clearance(state, &mission_id, &operation, &session, &launched, &now);
+            super::stop_for_clearance(state, &mission_id, &operation, &run, &launched, &now);
         }
     }
 }
@@ -371,7 +371,7 @@ pub(super) fn clearances(state: &DaemonState) -> serde_json::Value {
 /// Logs each Agent whose retirement is due or near at `now`.
 /// Each way an Agent's `handler_settings` are looser than its handler's default, as the handler
 /// says. An Agent whose handler this Station cannot build is left out: a field runner hosting that
-/// handler logs the same lines at each launch, and starting a Session reports settings that do
+/// handler logs the same lines at each launch, and starting a Run reports settings that do
 /// not read.
 pub(super) fn handler_weakenings(plugins: &Plugins, roster: &Roster) -> Vec<String> {
     let mut weakened = Vec::new();
@@ -428,7 +428,7 @@ fn mission_outcome(state: MissionState) -> Option<AgentOutcome> {
     })
 }
 
-/// The Mission and the model its Session was launched with.
+/// The Mission and the model its Run was launched with.
 fn launched(state: &DaemonState, mission_id: &str) -> Option<(Mission, Option<String>)> {
     let missions = state.missions.lock().ok()?;
     let mission = missions.get(mission_id).cloned()?;
@@ -439,8 +439,8 @@ fn launched(state: &DaemonState, mission_id: &str) -> Option<(Mission, Option<St
 }
 
 /// Counts the Mission's state into its Agent's record when it is a finished or stalled one,
-/// for Session `attempt`, which this Station holds. The Mission, the attempt and the outcome
-/// name the event, so a state seen twice, or by the Station that adopted the Session, counts
+/// for Run `attempt`, which this Station holds. The Mission, the attempt and the outcome
+/// name the event, so a state seen twice, or by the Station that adopted the Run, counts
 /// once. Chief of Staff reviews are not the Agent's own work and are not counted.
 pub(super) fn count_mission(state: &DaemonState, mission_id: &str, attempt: u32) {
     let Some((mission, launched)) = launched(state, mission_id) else {
@@ -462,7 +462,7 @@ pub(super) fn count_mission(state: &DaemonState, mission_id: &str, attempt: u32)
     );
 }
 
-/// Counts Session `attempt` of a Mission as lost with its Station or runner: the
+/// Counts Run `attempt` of a Mission as lost with its Station or runner: the
 /// infrastructure's doing, never charged as the Agent's failure, even when the Mission fails.
 pub(super) fn count_lost(state: &DaemonState, mission_id: &str, attempt: u32) {
     let Some((mission, launched)) = launched(state, mission_id) else {
@@ -484,7 +484,7 @@ pub(super) fn count_lost(state: &DaemonState, mission_id: &str, attempt: u32) {
     );
 }
 
-/// Counts `outcome` for `agent` in `operation`, at the clearance it works at, for a Session
+/// Counts `outcome` for `agent` in `operation`, at the clearance it works at, for a Run
 /// launched with `model` (`None`: the handler's default); `key` names the event. A record that
 /// cannot be written is logged: counting never stops work.
 pub(super) fn count(
@@ -564,8 +564,8 @@ mod tests {
     use super::super::{Clock, apply_event_state, resolve_brief_assignment};
     use super::handler_weakenings;
     use crate::MissionId;
-    use crate::directorates::m::mission::{LaunchManifest, MissionState, SessionHold};
-    use crate::directorates::registry::sessions::NewSession;
+    use crate::directorates::m::mission::{LaunchManifest, MissionState, RunHold};
+    use crate::directorates::registry::runs::NewRun;
     use crate::directorates::registry::store::Brief;
     use coqui_acp_provider::AgentEvent;
 
@@ -731,13 +731,13 @@ mod tests {
             .unwrap();
     }
 
-    /// Gives `mission` a Session record held by this Station, attempt `attempt`, launched with
+    /// Gives `mission` a Run record held by this Station, attempt `attempt`, launched with
     /// `model`.
     fn launch(state: &super::DaemonState, mission: &str, model: &str, attempt: u32) {
         let record = state
             .intake
-            .open_session(
-                NewSession::new(format!("s-{mission}-{attempt}"), mission, "test")
+            .open_run(
+                NewRun::new(format!("s-{mission}-{attempt}"), mission, "test")
                     .with_attempt(attempt, None),
                 std::time::Duration::from_secs(600),
             )
@@ -753,8 +753,8 @@ mod tests {
             station_id: Some("test".to_owned()),
             theater_id: None,
             mode: Default::default(),
-            session: Some(SessionHold {
-                id: record.session_id,
+            run: Some(RunHold {
+                id: record.run_id,
                 attempt: record.attempt,
                 fence: record.fence,
             }),
@@ -799,9 +799,9 @@ mod tests {
     }
 
     #[test]
-    fn a_held_session_counts_once_per_attempt_and_outcome_under_its_launch_model() {
+    fn a_held_run_counts_once_per_attempt_and_outcome_under_its_launch_model() {
         let root = tempfile::tempdir().unwrap();
-        // The roster now names sonnet; the Sessions were launched with opus.
+        // The roster now names sonnet; the Runs were launched with opus.
         let state = test_state(root.path(), "", &AGENTS.replace("opus", "sonnet"));
         launch(&state, "mission-1", "opus", 1);
         work(&state, "mission-1");
@@ -826,7 +826,7 @@ mod tests {
             .collect();
         assert_eq!(models, [Some("opus")], "the launch record names the model");
 
-        // A Mission this Station holds no Session for, or no longer holds, counts nothing.
+        // A Mission this Station holds no Run for, or no longer holds, counts nothing.
         create(&state, "mission-3", None);
         work(&state, "mission-3");
         apply_event_state(&state, "mission-3", &event("completed"));
@@ -835,7 +835,7 @@ mod tests {
         {
             let mut missions = state.missions.lock().unwrap();
             let mut manifest = missions.operation("mission-4").unwrap();
-            let hold = manifest.session.as_mut().unwrap();
+            let hold = manifest.run.as_mut().unwrap();
             hold.fence += 1;
             missions.set_operation("mission-4", manifest).unwrap();
         }
@@ -847,7 +847,7 @@ mod tests {
             "fenced out or unheld: not counted"
         );
 
-        // The next occupant's Sessions open a second tenure.
+        // The next occupant's Runs open a second tenure.
         create(&state, "mission-5", None);
         launch(&state, "mission-5", "sonnet", 1);
         work(&state, "mission-5");
@@ -858,15 +858,15 @@ mod tests {
     }
 
     #[test]
-    fn a_session_record_names_its_agent_and_how_its_mission_ended() {
-        use crate::directorates::registry::sessions::SessionStatus;
+    fn a_run_record_names_its_agent_and_how_its_mission_ended() {
+        use crate::directorates::registry::runs::RunStatus;
 
         let root = tempfile::tempdir().unwrap();
         let state = test_state(root.path(), "", AGENTS);
-        let session = |mission: &str| {
+        let run = |mission: &str| {
             state
                 .intake
-                .session(&format!("s-{mission}-1"))
+                .run(&format!("s-{mission}-1"))
                 .unwrap()
                 .unwrap()
         };
@@ -876,7 +876,7 @@ mod tests {
         }
         super::super::recovery::record_launch(&state, "mission-1");
         assert_eq!(
-            session("mission-1")
+            run("mission-1")
                 .launch
                 .and_then(|launch| launch.agent)
                 .as_deref(),
@@ -885,14 +885,14 @@ mod tests {
         );
 
         apply_event_state(&state, "mission-1", &event("completed"));
-        let done = session("mission-1");
-        assert_eq!(done.status, SessionStatus::Ended);
+        let done = run("mission-1");
+        assert_eq!(done.status, RunStatus::Ended);
         assert_eq!(done.result.as_ref().unwrap().state, "done");
         assert!(done.closed_at.is_some());
 
         apply_event_state(&state, "mission-2", &event("stalled"));
-        let stalled = session("mission-2");
-        assert_eq!(stalled.status, SessionStatus::Active, "a stall can resume");
+        let stalled = run("mission-2");
+        assert_eq!(stalled.status, RunStatus::Active, "a stall can resume");
         assert_eq!(stalled.result.unwrap().state, "stalled");
         assert_eq!(
             crate::directorates::m::scorecard::judge(&done),
@@ -920,7 +920,7 @@ mod tests {
     }
 
     #[test]
-    fn a_lost_session_is_not_the_agents_failure_and_reviews_do_not_count() {
+    fn a_lost_run_is_not_the_agents_failure_and_reviews_do_not_count() {
         let root = tempfile::tempdir().unwrap();
         let state = test_state(root.path(), "", AGENTS);
         launch(&state, "mission-1", "opus", 2);

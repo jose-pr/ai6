@@ -1,7 +1,7 @@
 //! Conversations with Moneypenny, kept per person in the gateway's memory.
 //!
 //! A conversation remembers what was said (for the app to show again when the person comes
-//! back), which Station runs its harness and which provider Session that harness is, so a
+//! back), which Station runs its harness and which provider Run that harness is, so a
 //! later message resumes it. It holds the person's access token while the person uses it:
 //! the tools run with it, so they can do no more than the person could, and stop when the
 //! person's sign-in ends.
@@ -78,9 +78,9 @@ pub(crate) struct Conversation {
     pub(crate) entries: VecDeque<Entry>,
     /// The Station that runs (or last ran) the harness.
     pub(crate) station: Option<String>,
-    /// The provider Session of the harness, for a resume.
-    pub(crate) session_id: Option<String>,
-    /// The route that Session runs on, when the assistant Agent has routes.
+    /// The provider Run of the harness, for a resume.
+    pub(crate) run_id: Option<String>,
+    /// The route that Run runs on, when the assistant Agent has routes.
     pub(crate) route: Option<ai6::RouteRef>,
     /// A message is being answered.
     pub(crate) busy: bool,
@@ -108,7 +108,7 @@ pub(crate) struct Conversation {
     /// `[assistant.gateway] proposal_reads`: what a proposal made now is based on.
     pub(crate) turn_reads: Vec<ReadCall>,
     /// How the memory entries she was shown here were marked: each `memory:<id>` of one an exposed
-    /// Session wrote. What she writes from this conversation carries them.
+    /// Run wrote. What she writes from this conversation carries them.
     pub(crate) memory_marks: Vec<String>,
     /// What the Station running the harness reported each shared change call was made from,
     /// oldest first, until the call takes it; at most `[assistant.limits] shared_bases`.
@@ -190,7 +190,7 @@ impl Conversation {
             updated_at: now,
             entries: VecDeque::new(),
             station: None,
-            session_id: None,
+            run_id: None,
             route: None,
             busy: false,
             answered: false,
@@ -235,7 +235,7 @@ impl Conversation {
     }
 
     /// The turn the harness is on, as far as the gateway knows: the Station reporting now or
-    /// the one running it, its provider Session, route, account and model.
+    /// the one running it, its provider Run, route, account and model.
     fn turn(&mut self) -> AssistantTurn {
         let (station, tokens) = match &mut self.reporting {
             Some((station, tokens)) => (Some(station.clone()), tokens.take()),
@@ -243,7 +243,7 @@ impl Conversation {
         };
         let mut turn = AssistantTurn::default();
         turn.station = station;
-        turn.session.clone_from(&self.session_id);
+        turn.run.clone_from(&self.run_id);
         turn.agent.clone_from(&self.agent);
         turn.route.clone_from(&self.route);
         turn.account.clone_from(&self.account);

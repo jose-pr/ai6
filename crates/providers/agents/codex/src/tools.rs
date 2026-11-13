@@ -642,8 +642,8 @@ impl Probe<'_> {
             cols: STREAM_COLS,
         };
         // `codex mcp list --json` prints each server's environment values and `debug prompt-input`
-        // the thread's instructions, so none of this may reach the Session's viewers.
-        let session = self
+        // the thread's instructions, so none of this may reach the Run's viewers.
+        let run = self
             .terminal
             .spawn_private(&spec.to_value().map_err(internal)?)?;
         let deadline = Instant::now() + Duration::from_millis(self.config.tool_command_timeout_ms);
@@ -652,13 +652,13 @@ impl Probe<'_> {
         let mut exited = false;
         loop {
             if Instant::now() >= deadline {
-                let _ = session.kill();
+                let _ = run.kill();
                 return Err(refuse(
                     Status::GUATIAO_ERR_INTERNAL,
                     format!("`{}` did not finish", argv[1..].join(" ")),
                 ));
             }
-            let count = session.read(&mut buffer, 100)?;
+            let count = run.read(&mut buffer, 100)?;
             if count > 0 {
                 output.extend_from_slice(&buffer[..count as usize]);
                 continue;
@@ -668,13 +668,13 @@ impl Probe<'_> {
             if count == 0 || (count == READ_TIMED_OUT && exited) {
                 break;
             }
-            exited = session
+            exited = run
                 .exit_status(0)
                 .ok()
                 .and_then(|value| ExitInfo::from_value(&value).ok())
                 .is_some_and(|exit| !exit.running);
         }
-        let _ = session.kill();
+        let _ = run.kill();
         Ok(output)
     }
 }

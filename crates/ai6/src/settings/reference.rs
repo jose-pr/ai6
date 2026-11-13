@@ -382,7 +382,7 @@ mod tests {
             "static const chatTransitionMs = 200;",
             "static const chatConnectTimeout = Duration(seconds: 10);",
             "static const routesTextBytes = 128;",
-            "static const refreshSessions = Duration(seconds: 3);",
+            "static const refreshRuns = Duration(seconds: 3);",
             "static const controlsPoll = Duration(milliseconds: 500);",
             "static const pagesSearch = 24;",
             "static const terminalScrollbackLines = 10000;",

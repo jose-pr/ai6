@@ -435,7 +435,7 @@ fn instructions(shared: &[String], skills: &[String]) -> String {
          there. After each answer everything you changed in it is committed to its `main`, \
          authored by the person.\n\
          - {shared}\n\
-         - `{SCRATCH}/` is for anything temporary; it goes when this conversation's session \
+         - `{SCRATCH}/` is for anything temporary; it goes when this conversation's run \
          closes.\n\
          {skills}\
          - Nothing else here is yours to change.\n"

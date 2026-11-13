@@ -44,7 +44,7 @@ MissionBoard _signedIn(
   );
   board.accessToken = 'token';
   board.loading = false;
-  board.userSession = UserSessionSummary(
+  board.userRun = UserRunSummary(
     personId: 'p-1',
     name: 'p-1',
     displayName: null,
@@ -68,12 +68,12 @@ void main() {
     OoTablePreferences.missionsAsTable.value = true;
     addTearDown(() => OoTablePreferences.missionsAsTable.value = false);
     final board = demoBoard();
-    board.sessions = [
-      ...board.sessions,
-      SessionSummary(
+    board.runs = [
+      ...board.runs,
+      RunSummary(
         operationId: 'G',
         missionId: 'mission-review',
-        sessionId: 'review-session',
+        runId: 'review-run',
         state: 'done',
         sequence: 1,
         updatedAt: 1,
@@ -124,12 +124,12 @@ void main() {
     OoTablePreferences.missionsAsTable.value = true;
     addTearDown(() => OoTablePreferences.missionsAsTable.value = false);
     final board = demoBoard();
-    board.sessions = [
-      ...board.sessions,
-      SessionSummary(
+    board.runs = [
+      ...board.runs,
+      RunSummary(
         operationId: 'G',
         missionId: 'mission-review',
-        sessionId: 'review-session',
+        runId: 'review-run',
         state: 'done',
         sequence: 1,
         updatedAt: 1,
@@ -161,25 +161,25 @@ void main() {
     expect(_rows(tester), contains('G/mission-review'));
   });
 
-  testWidgets('Sessions: search narrows the table and goes to the link', (
+  testWidgets('Runs: search narrows the table and goes to the link', (
     tester,
   ) async {
     final reported = await openAt(
       tester,
       demoBoard(),
-      '/sessions',
+      '/runs',
       size: const Size(1800, 1200),
     );
     expect(_rows(tester).length, 3);
     await tester.enterText(
       find.byKey(const ValueKey('table-search')),
-      'session-021',
+      'run-021',
     );
     await tester.pump(const Duration(milliseconds: 400));
     await tester.pumpAndSettle();
-    expect(_rows(tester), ['preview-session-021']);
+    expect(_rows(tester), ['preview-run-021']);
     expect(
-      reported.any((call) => '${call.arguments}'.contains('text=session-021')),
+      reported.any((call) => '${call.arguments}'.contains('text=run-021')),
       isTrue,
     );
   });

@@ -12,7 +12,7 @@ use ai6::{
     Directory, FileRegistry, Lookup, Person, Roster, RosterError, Settings, Verdict,
     guatiao::library::ProviderError,
 };
-use ai6_diptel::{LifecycleEvent, MissionId, OperationId, SessionId, SessionState};
+use ai6_diptel::{LifecycleEvent, MissionId, OperationId, RunId, RunState};
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
 use universal_exports::{AccessProviders, Gateway, GatewayConfig, GatewayLimits};
@@ -163,13 +163,13 @@ async fn start() -> (String, String, oneshot::Sender<()>, tempfile::TempDir) {
         AccessProviders::new(Arc::new(Everyone), Arc::new(Everyone), Arc::new(Everyone)),
     )
     .with_roster(provider);
-    let (operation, mission, session) = (
+    let (operation, mission, run) = (
         OperationId::new("G").unwrap(),
         MissionId::new("G-1").unwrap(),
-        SessionId::new("session-1").unwrap(),
+        RunId::new("run-1").unwrap(),
     );
     gateway
-        .register_session(token, operation.clone(), mission.clone(), session.clone())
+        .register_run(token, operation.clone(), mission.clone(), run.clone())
         .await
         .unwrap();
     gateway
@@ -178,8 +178,8 @@ async fn start() -> (String, String, oneshot::Sender<()>, tempfile::TempDir) {
             LifecycleEvent {
                 operation_id: operation,
                 mission_id: mission,
-                session_id: session,
-                state: SessionState::Working,
+                run_id: run,
+                state: RunState::Working,
                 reason: None,
                 sequence: 1,
             },

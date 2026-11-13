@@ -1305,7 +1305,7 @@ fn fence_for(parts: &[&str]) -> String {
 /// Everything the author wrote, or read, is quoted between markers no line of it contains, as data
 /// the reviewer must not follow; so are the other reviewers' reasons in a later round. In round one
 /// it sees no other verdict. It answers with one JSON object [`read_vote`] reads. The brief carries
-/// the `brief:source` exposure, since its Session reads text that may hold an instruction, and a
+/// the `brief:source` exposure, since its Run reads text that may hold an instruction, and a
 /// `review` provenance received by `received_by` at `received_at` (Unix seconds).
 pub fn panel_brief(
     review: &MissionReview,

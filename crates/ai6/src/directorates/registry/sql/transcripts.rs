@@ -1,5 +1,5 @@
-//! Moneypenny's conversation log and each Session's context in SQL: one row per log entry, and
-//! one row per provider Session's context with its content as text.
+//! Moneypenny's conversation log and each Run's context in SQL: one row per log entry, and
+//! one row per provider Run's context with its content as text.
 
 use std::io;
 
@@ -9,7 +9,7 @@ use crate::bounds::Limit;
 use crate::directorates::registry::assistant_log::{
     AssistantConversation, AssistantLogEntry, AssistantLogStore, entry_text,
 };
-use crate::directorates::registry::contexts::{SessionContext, SessionContextStore};
+use crate::directorates::registry::contexts::{RunContext, RunContextStore};
 use crate::directorates::registry::store::invalid_data;
 
 fn micros_to_seconds(micros: i64) -> f64 {
@@ -120,29 +120,29 @@ impl AssistantLogStore for SqlRegistry {
     }
 }
 
-fn context_of(row: &Row) -> io::Result<SessionContext> {
-    let mut context: SessionContext = from_json(&row.text(0)?, "Session context")?;
+fn context_of(row: &Row) -> io::Result<RunContext> {
+    let mut context: RunContext = from_json(&row.text(0)?, "Run context")?;
     context.content = row.text(1)?;
     Ok(context)
 }
 
-impl SessionContextStore for SqlRegistry {
-    fn file_session_context(&self, context: &SessionContext) -> io::Result<()> {
+impl RunContextStore for SqlRegistry {
+    fn file_run_context(&self, context: &RunContext) -> io::Result<()> {
         context.validate()?;
         let limits = &self.limits.contexts;
         let context = context.clone().cut_to(limits.context_bytes);
         let record = to_json(&context)?;
         self.write(|tx, revision| {
             tx.execute(
-                "INSERT INTO ai6_session_contexts \
-                 (session, conversation, operation, filed_micros, record, content, revision) \
+                "INSERT INTO ai6_run_contexts \
+                 (run, conversation, operation, filed_micros, record, content, revision) \
                  VALUES ($1, $2, $3, $4, $5, $6, $7) \
-                 ON CONFLICT (session) DO UPDATE SET conversation = excluded.conversation, \
+                 ON CONFLICT (run) DO UPDATE SET conversation = excluded.conversation, \
                  operation = excluded.operation, filed_micros = excluded.filed_micros, \
                  record = excluded.record, content = excluded.content, \
                  revision = excluded.revision",
                 &[
-                    context.session.as_str().into(),
+                    context.run.as_str().into(),
                     context.conversation().unwrap_or_default().into(),
                     context.operation().unwrap_or_default().into(),
                     context.micros().into(),
@@ -152,13 +152,13 @@ impl SessionContextStore for SqlRegistry {
                 ],
             )?;
             let count = tx
-                .query_opt("SELECT count(*) FROM ai6_session_contexts", &[])?
+                .query_opt("SELECT count(*) FROM ai6_run_contexts", &[])?
                 .map_or(Ok(0), |row| row.int(0))?;
             let excess = count.saturating_sub(row_limit(limits.records));
             if excess > 0 {
                 tx.execute(
-                    "DELETE FROM ai6_session_contexts WHERE session IN (SELECT session FROM \
-                     ai6_session_contexts ORDER BY filed_micros, session LIMIT $1)",
+                    "DELETE FROM ai6_run_contexts WHERE run IN (SELECT run FROM \
+                     ai6_run_contexts ORDER BY filed_micros, run LIMIT $1)",
                     &[excess.into()],
                 )?;
             }
@@ -166,22 +166,22 @@ impl SessionContextStore for SqlRegistry {
         })
     }
 
-    fn session_context(&self, session: &str) -> io::Result<Option<SessionContext>> {
+    fn run_context(&self, run: &str) -> io::Result<Option<RunContext>> {
         self.read(|tx| {
             tx.query_opt(
-                "SELECT record, content FROM ai6_session_contexts WHERE session = $1",
-                &[session.into()],
+                "SELECT record, content FROM ai6_run_contexts WHERE run = $1",
+                &[run.into()],
             )
         })?
         .map(|row| context_of(&row))
         .transpose()
     }
 
-    fn conversation_contexts(&self, conversation: &str) -> io::Result<Vec<SessionContext>> {
+    fn conversation_contexts(&self, conversation: &str) -> io::Result<Vec<RunContext>> {
         self.read(|tx| {
             tx.query(
-                "SELECT record, content FROM ai6_session_contexts WHERE conversation = $1 \
-                 ORDER BY filed_micros, session",
+                "SELECT record, content FROM ai6_run_contexts WHERE conversation = $1 \
+                 ORDER BY filed_micros, run",
                 &[conversation.into()],
             )
         })?

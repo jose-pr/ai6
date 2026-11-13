@@ -647,7 +647,7 @@ mod tests {
         assert!(taken.text().await.unwrap().contains("`mission cancel`"));
     }
 
-    /// A Mission whose brief is filed and which has no Session record: what the withdraw's refusal
+    /// A Mission whose brief is filed and which has no Run record: what the withdraw's refusal
     /// sends an operator to must work, here through Headquarters.
     #[tokio::test]
     async fn a_cancel_of_a_mission_whose_brief_ended_reaches_a_station() {
@@ -713,7 +713,7 @@ mod tests {
         assert_eq!(status["state"], "failed");
     }
 
-    /// Files `id`'s brief as failed, with no Session record and no lease left.
+    /// Files `id`'s brief as failed, with no Run record and no lease left.
     fn ended(served: &Served, id: &str) -> String {
         let key = queue(served, id);
         let claimed = served.registry.claim_new(Some(&key)).unwrap().unwrap();

@@ -17,7 +17,7 @@ Map<String, Object?> pendingRequest() => {
   'id': requestId,
   'operation': 'G',
   'mission': 'mission-007',
-  'session': 'provider-session-007',
+  'run': 'provider-id-007',
   'agent': '007',
   'scope': {'kind': 'push', 'target': 'origin:refs/heads/main'},
   'reason': 'The release branch passed review.',
@@ -133,7 +133,7 @@ Future<MissionBoard> signedIn(
           {
             'operation_id': 'G',
             'mission_id': 'mission-007',
-            'session_id': 'provider-session-007',
+            'run_id': 'provider-id-007',
             'state': 'blocked',
             'reason': 'green-ink',
             'sequence': 3,
@@ -175,13 +175,13 @@ Future<void> openAdministration(WidgetTester tester, MissionBoard board) async {
 }
 
 void main() {
-  testWidgets('the board says a blocked Session waits for green ink', (
+  testWidgets('the board says a blocked Run waits for green ink', (
     tester,
   ) async {
     final gateway = FakeGreenInk();
     final board = await signedIn(gateway);
     addTearDown(board.dispose);
-    expect(board.sessions.single.reason, 'green-ink');
+    expect(board.runs.single.reason, 'green-ink');
     await tester.pumpWidget(
       OuterOfficeApp(board: board, desktopWindows: false),
     );

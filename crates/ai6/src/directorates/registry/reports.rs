@@ -160,23 +160,23 @@ pub enum ReportFiler {
         /// The provider-local item.
         item: String,
     },
-    /// An Agent, in the Session of a Mission.
+    /// An Agent, in the Run of a Mission.
     Agent {
         /// The Agent codename.
         agent: String,
-        /// The provider Session, or the Mission's ID until the harness has reported one.
-        session: String,
+        /// The provider Run, or the Mission's ID until the harness has reported one.
+        run: String,
         /// The Mission.
         mission: String,
     },
-    /// A standing watch's Agent, in the watch's own Session: no Mission.
+    /// A standing watch's Agent, in the watch's own Run: no Mission.
     Watch {
         /// The Agent codename.
         agent: String,
         /// The watch's scope (`m`, `operation:P`, `station:S`).
         scope: String,
-        /// The provider Session, or the scope until the harness has reported one.
-        session: String,
+        /// The provider Run, or the scope until the harness has reported one.
+        run: String,
     },
     /// A person, by subject.
     Person {
@@ -203,10 +203,10 @@ impl ReportFiler {
         matches!(self, Self::Person { .. })
     }
 
-    /// The Session of an Agent's filing, which the rate limit counts.
-    pub fn session(&self) -> Option<&str> {
+    /// The Run of an Agent's filing, which the rate limit counts.
+    pub fn run(&self) -> Option<&str> {
         match self {
-            Self::Agent { session, .. } | Self::Watch { session, .. } => Some(session),
+            Self::Agent { run, .. } | Self::Watch { run, .. } => Some(run),
             _ => None,
         }
     }
@@ -229,14 +229,14 @@ impl ReportFiler {
             Self::Source { source, item } => vec![source, item],
             Self::Agent {
                 agent,
-                session,
+                run,
                 mission,
-            } => vec![agent, session, mission],
+            } => vec![agent, run, mission],
             Self::Watch {
                 agent,
                 scope,
-                session,
-            } => vec![agent, scope, session],
+                run,
+            } => vec![agent, scope, run],
             Self::Person { person } => vec![person],
             Self::Probe { probe } => vec![probe],
             Self::Review { mission } => vec![mission],
@@ -999,13 +999,13 @@ pub type ReportChange<'a> = &'a mut dyn FnMut(&mut Report) -> io::Result<()>;
 
 /// Reports: what was observed, per scope.
 pub trait ReportStore {
-    /// Stores a new Report. An Agent's filing is counted against `per_session` and
+    /// Stores a new Report. An Agent's filing is counted against `per_run` and
     /// `per_operation` over `window`; Reports closed longer than `keep_closed` are dropped.
     ///
     /// # Errors
     ///
     /// `InvalidInput` for a Report out of bounds ([`Report::validate`]); `AlreadyExists` for an
-    /// ID in use; `QuotaExceeded` when the Agent's Session or the scope filed too many in the
+    /// ID in use; `QuotaExceeded` when the Agent's Run or the scope filed too many in the
     /// window; `InvalidData` past `[registry.limits.reports] reports`; I/O errors otherwise.
     fn file_report(&self, report: &Report) -> io::Result<()>;
 
@@ -1069,22 +1069,22 @@ pub trait ReportStore {
     fn revoke_report_clearance(&self, subject: &str) -> io::Result<bool>;
 }
 
-/// Refuses `report` when its Agent's Session, or its scope, filed too much in the window.
-/// `recent` is the Sessions of the Agent-filed Reports of the scope inside the window.
+/// Refuses `report` when its Agent's Run, or its scope, filed too much in the window.
+/// `recent` is the Runs of the Agent-filed Reports of the scope inside the window.
 pub(super) fn check_rate(
     limits: &ReportLimits,
     report: &Report,
     recent: &[String],
 ) -> io::Result<()> {
-    let Some(session) = report.filer.session() else {
+    let Some(run) = report.filer.run() else {
         return Ok(());
     };
-    let mine = recent.iter().filter(|other| *other == session).count();
+    let mine = recent.iter().filter(|other| *other == run).count();
     let refuse = |what: String| io::Error::new(io::ErrorKind::QuotaExceeded, what);
-    if !limits.per_session.allows(mine + 1) {
+    if !limits.per_run.allows(mine + 1) {
         return Err(refuse(format!(
-            "this Session filed {} reports in the window: wait",
-            limits.per_session
+            "this Run filed {} reports in the window: wait",
+            limits.per_run
         )));
     }
     if !limits.per_operation.allows(recent.len() + 1) {
@@ -1238,7 +1238,7 @@ impl ReportStore for FileRegistry {
         let recent: Vec<String> = all
             .iter()
             .filter(|(_, other)| other.scope == report.scope && other.created >= since)
-            .filter_map(|(_, other)| other.filer.session().map(str::to_owned))
+            .filter_map(|(_, other)| other.filer.run().map(str::to_owned))
             .collect();
         check_rate(limits, report, &recent)?;
         if let Some(before) = closed_before(limits, report.created) {
@@ -1372,15 +1372,15 @@ mod tests {
         credibility_one_needs_a_corroborating_link,
         a_new_source_is_f_until_rated,
         a_change_keeps_what_was_filed_and_stays_in_bounds,
-        an_agents_storm_is_refused_per_session_and_per_scope,
+        an_agents_storm_is_refused_per_run_and_per_scope,
         closed_reports_go_after_their_age_and_the_count_is_bounded,
         a_clearance_is_kept_per_subject_and_revoked_at_once
     );
 
-    fn agent(session: &str, mission: &str) -> ReportFiler {
+    fn agent(run: &str, mission: &str) -> ReportFiler {
         ReportFiler::Agent {
             agent: "007".to_owned(),
-            session: session.to_owned(),
+            run: run.to_owned(),
             mission: mission.to_owned(),
         }
     }
@@ -1686,10 +1686,10 @@ mod tests {
         );
     }
 
-    fn an_agents_storm_is_refused_per_session_and_per_scope(store: &dyn Store) {
+    fn an_agents_storm_is_refused_per_run_and_per_scope(store: &dyn Store) {
         let registry = store.handle_with(RegistryLimits {
             reports: ReportLimits {
-                per_session: Limit::at(3),
+                per_run: Limit::at(3),
                 per_operation: Limit::at(5),
                 ..ReportLimits::default()
             },
@@ -1697,7 +1697,7 @@ mod tests {
         });
         let limits = registry.limits().reports.clone();
         assert!(
-            ReportLimits::default().per_session.get().is_some(),
+            ReportLimits::default().per_run.get().is_some(),
             "a default bounds a storm"
         );
         for index in 0..3 {
@@ -1715,7 +1715,7 @@ mod tests {
             registry.file_report(&storm).unwrap_err().kind(),
             io::ErrorKind::QuotaExceeded
         );
-        // Another Session, another scope and a person are counted apart.
+        // Another Run, another scope and a person are counted apart.
         for (id, scope, filer) in [
             ("other", operation("G"), agent("s2", "G-1")),
             ("other-2", operation("G"), agent("s3", "G-1")),
@@ -1732,7 +1732,7 @@ mod tests {
                 .file_report(&report(id, scope, filer, 200.0))
                 .unwrap();
         }
-        // The Operation's five are used: a fresh Session is refused too.
+        // The Operation's five are used: a fresh Run is refused too.
         assert_eq!(
             registry
                 .file_report(&report("sixth", operation("G"), agent("s4", "G-1"), 201.0))
@@ -1740,7 +1740,7 @@ mod tests {
                 .kind(),
             io::ErrorKind::QuotaExceeded
         );
-        // Past the window, the Session files again.
+        // Past the window, the Run files again.
         let later = 200.0 + limits.window.0.as_secs_f64() + 1.0;
         registry
             .file_report(&report("later", operation("G"), agent("s1", "G-1"), later))

@@ -4,10 +4,10 @@ use agent_client_protocol::{
     Agent, Channel, Client, ConnectionTo, Responder, UntypedMessage, on_receive_notification,
     on_receive_request,
 };
-use ai6::directorates::m::identity::{MissionId, SessionId};
+use ai6::directorates::m::identity::{MissionId, RunId};
 use ai6::directorates::q::terminal::AgentTerminal;
 use ai6::directorates::section_00::acp::{
-    AcpFacade, AcpOptions, AcpSession, LAUNCH_META_KEY, LaunchMeta, PermissionDecider,
+    AcpFacade, AcpOptions, AcpRun, LAUNCH_META_KEY, LaunchMeta, PermissionDecider,
     PermissionDecision, PermissionRequest, ResumeMeta, duplex,
 };
 use ai6::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
@@ -48,7 +48,7 @@ struct FakeHandler {
     fail_start: bool,
 }
 
-struct FakeSession {
+struct FakeRun {
     log: Arc<Log>,
     id: String,
     events: Mutex<VecDeque<AgentEvent>>,
@@ -67,7 +67,7 @@ impl AgentHandler for FakeHandler {
             ));
         }
         self.log.starts.lock().unwrap().push(request);
-        Ok(FakeSession {
+        Ok(FakeRun {
             log: self.log.clone(),
             id: "provider-1".to_owned(),
             events: Mutex::new(self.script.iter().cloned().collect()),
@@ -80,9 +80,9 @@ impl AgentHandler for FakeHandler {
         request: AgentResume,
         _terminal: Object<dyn AgentTerminal>,
     ) -> Result<Object<dyn AgentSession>, ProviderError> {
-        let id = request.session_id.to_string();
+        let id = request.run_id.to_string();
         self.log.resumes.lock().unwrap().push(request);
-        Ok(FakeSession {
+        Ok(FakeRun {
             log: self.log.clone(),
             id,
             events: Mutex::new(VecDeque::from([event("text", Some("resumed"))])),
@@ -91,7 +91,7 @@ impl AgentHandler for FakeHandler {
     }
 }
 
-impl AgentSession for FakeSession {
+impl AgentSession for FakeRun {
     fn session_id(&self) -> Result<Option<String>, ProviderError> {
         Ok(Some(self.id.clone()))
     }
@@ -126,7 +126,7 @@ impl AgentTerminal for NoTerminal {
     fn spawn(
         &self,
         _spec: &GuatiaoValue,
-    ) -> Result<Object<dyn ai6::directorates::q::terminal::TerminalSession>, ProviderError> {
+    ) -> Result<Object<dyn ai6::directorates::q::terminal::TerminalRun>, ProviderError> {
         Err(ProviderError::new(
             Status::GUATIAO_ERR_INTERNAL,
             "no terminal in this test",
@@ -136,7 +136,7 @@ impl AgentTerminal for NoTerminal {
     fn spawn_private(
         &self,
         spec: &GuatiaoValue,
-    ) -> Result<Object<dyn ai6::directorates::q::terminal::TerminalSession>, ProviderError> {
+    ) -> Result<Object<dyn ai6::directorates::q::terminal::TerminalRun>, ProviderError> {
         self.spawn(spec)
     }
 }
@@ -193,11 +193,11 @@ fn options_for(start: &AgentStart) -> AcpOptions {
 }
 
 /// Events until one of `kinds` arrives, within a deadline.
-fn until(session: &AcpSession, kinds: &[&str]) -> Vec<AgentEvent> {
+fn until(run: &AcpRun, kinds: &[&str]) -> Vec<AgentEvent> {
     let deadline = Instant::now() + Duration::from_secs(120);
     let mut seen = Vec::new();
     while Instant::now() < deadline {
-        if let Some(event) = session.next_event(100).unwrap() {
+        if let Some(event) = run.next_event(100).unwrap() {
             let stop = kinds.contains(&event.kind.as_str());
             seen.push(event);
             if stop {
@@ -212,10 +212,10 @@ fn connect_facade(
     facade: &AcpFacade,
     options: AcpOptions,
     closed: Option<Arc<AtomicBool>>,
-) -> Result<AcpSession, ProviderError> {
+) -> Result<AcpRun, ProviderError> {
     let (agent_end, client_end) = duplex();
     facade.serve(agent_end);
-    AcpSession::connect(
+    AcpRun::connect(
         client_end,
         options,
         closed.map(|flag| {
@@ -267,11 +267,11 @@ fn a_handler_runs_through_the_facade_with_every_event_verbatim() {
     ];
     let (facade, log) = facade(script.clone());
     let begun = start();
-    let session = connect_facade(&facade, options_for(&begun), None).unwrap();
-    let seen = until(&session, &["completed"]);
+    let run = connect_facade(&facade, options_for(&begun), None).unwrap();
+    let seen = until(&run, &["completed"]);
     assert_eq!(seen, script);
     assert_eq!(
-        session.session_id().unwrap().unwrap().as_str(),
+        run.session_id().unwrap().unwrap().as_str(),
         "provider-1"
     );
     // The handler got the AgentStart the Station built, prompt and working directory included.
@@ -291,21 +291,21 @@ fn a_start_that_fails_is_a_start_failure() {
 fn messages_interrupts_and_close_reach_the_handler() {
     let (facade, log) = facade(vec![event("text", Some("hi"))]);
     let closed = Arc::new(AtomicBool::new(false));
-    let session = connect_facade(&facade, options_for(&start()), Some(closed.clone())).unwrap();
-    until(&session, &["text"]);
-    session
+    let run = connect_facade(&facade, options_for(&start()), Some(closed.clone())).unwrap();
+    until(&run, &["text"]);
+    run
         .send_message(AgentMessage {
             text: "and then?".to_owned(),
         })
         .unwrap();
-    session.interrupt().unwrap();
+    run.interrupt().unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     while log.interrupts.load(Ordering::SeqCst) == 0 || log.messages.lock().unwrap().is_empty() {
         assert!(Instant::now() < deadline, "the handler was not reached");
         std::thread::sleep(Duration::from_millis(20));
     }
     assert_eq!(*log.messages.lock().unwrap(), vec!["and then?".to_owned()]);
-    session.close().unwrap();
+    run.close().unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     while log.closes.load(Ordering::SeqCst) == 0 {
         assert!(Instant::now() < deadline, "close was not forwarded");
@@ -385,12 +385,12 @@ fn a_cancel_answers_the_waiting_prompt_cancelled() {
 }
 
 #[test]
-fn a_session_resumes_through_the_facade() {
+fn a_run_resumes_through_the_facade() {
     let (facade, log) = facade(Vec::new());
     let begun = start();
     let resume = AgentResume {
         mission_id: begun.mission_id.clone(),
-        session_id: SessionId::try_new("provider-9").unwrap(),
+        run_id: RunId::try_new("provider-9").unwrap(),
         message: Some("carry on".to_owned()),
         working_directory: begun.working_directory.clone(),
         clearance: "desk".to_owned(),
@@ -416,8 +416,8 @@ fn a_session_resumes_through_the_facade() {
     );
     let (agent_end, client_end) = duplex();
     facade.serve(agent_end);
-    let session = AcpSession::connect(client_end, options, None).unwrap();
-    until(&session, &["text"]);
+    let run = AcpRun::connect(client_end, options, None).unwrap();
+    until(&run, &["text"]);
     assert_eq!(*log.resumes.lock().unwrap(), vec![resume]);
 }
 
@@ -545,7 +545,7 @@ fn agent_request(
             );
             respond!(json!({}));
         }
-        "session/set_config_option" => respond!(json!({"configOptions": []})),
+        "run/set_config_option" => respond!(json!({"configOptions": []})),
         "session/close" => respond!(json!({})),
         "session/prompt" => {
             let script = script.clone();
@@ -666,11 +666,11 @@ fn agent_request(
 fn connect_agent(
     script: Script,
     options: AcpOptions,
-) -> (Result<AcpSession, ProviderError>, Arc<Seen>) {
+) -> (Result<AcpRun, ProviderError>, Arc<Seen>) {
     let seen = Arc::new(Seen::default());
     let (agent_end, client_end) = duplex();
     serve_agent(script, seen.clone(), agent_end);
-    (AcpSession::connect(client_end, options, None), seen)
+    (AcpRun::connect(client_end, options, None), seen)
 }
 
 fn external(prompt: &str) -> AcpOptions {
@@ -687,9 +687,9 @@ fn an_external_agents_turn_becomes_text_cost_and_completion() {
         cost: Some(0.25),
         ..Script::default()
     };
-    let (session, seen) = connect_agent(script, external("go"));
-    let session = session.unwrap();
-    let seen_events = until(&session, &["completed"]);
+    let (run, seen) = connect_agent(script, external("go"));
+    let run = run.unwrap();
+    let seen_events = until(&run, &["completed"]);
     assert_eq!(seen_events[0].kind, "text");
     assert_eq!(seen_events[0].text.as_deref(), Some("hello"));
     let usage = seen_events[1]
@@ -699,7 +699,7 @@ fn an_external_agents_turn_becomes_text_cost_and_completion() {
         .expect("cost is reported");
     assert_eq!(usage.cost_micro_usd, Some(250_000));
     assert_eq!(seen_events.last().unwrap().kind, "completed");
-    assert_eq!(session.session_id().unwrap().unwrap().as_str(), "ext-1");
+    assert_eq!(run.session_id().unwrap().unwrap().as_str(), "ext-1");
     let calls = seen.calls.lock().unwrap();
     let prompt = calls
         .iter()
@@ -709,19 +709,19 @@ fn an_external_agents_turn_becomes_text_cost_and_completion() {
 }
 
 #[test]
-fn an_agents_rate_limit_stops_the_session_as_limited_when_its_words_are_named() {
+fn an_agents_rate_limit_stops_the_run_as_limited_when_its_words_are_named() {
     let script = || Script {
         rate_limited: true,
         ..Script::default()
     };
-    let (session, _) = connect_agent(
+    let (run, _) = connect_agent(
         script(),
         AcpOptions {
             limit_phrases: vec!["RATE LIMITED".to_owned()],
             ..external("go")
         },
     );
-    let events = until(&session.unwrap(), &["failed", "completed", "limit"]);
+    let events = until(&run.unwrap(), &["failed", "completed", "limit"]);
     let last = events.last().unwrap();
     assert_eq!(last.kind, "limit", "a limit, not a failure");
     let limit = last.limit.as_ref().expect("the limit says what it knows");
@@ -744,7 +744,7 @@ fn an_agents_rate_limit_stops_the_session_as_limited_when_its_words_are_named() 
 
 #[test]
 fn a_limit_read_from_a_refusal_keeps_the_wait_it_states_and_the_default_words_apply() {
-    let (session, _) = connect_agent(
+    let (run, _) = connect_agent(
         Script {
             rate_limited: true,
             says_wait: true,
@@ -758,7 +758,7 @@ fn a_limit_read_from_a_refusal_keeps_the_wait_it_states_and_the_default_words_ap
             ..external("go")
         },
     );
-    let events = until(&session.unwrap(), &["failed", "completed", "limit"]);
+    let events = until(&run.unwrap(), &["failed", "completed", "limit"]);
     let last = events.last().unwrap();
     assert_eq!(last.kind, "limit");
     let hit = last.limit.as_ref().unwrap();
@@ -812,19 +812,19 @@ fn model_and_effort_use_the_agents_options() {
     let mut options = external("go");
     options.model = Some("Haiku".to_owned());
     options.effort = Some("high".to_owned());
-    let (session, seen) = connect_agent(
+    let (run, seen) = connect_agent(
         Script {
             model_option: true,
             ..Script::default()
         },
         options,
     );
-    let session = session.unwrap();
-    let events = until(&session, &["completed"]);
+    let run = run.unwrap();
+    let events = until(&run, &["completed"]);
     let calls = seen.calls.lock().unwrap();
     let set = calls
         .iter()
-        .find(|(method, _)| method == "session/set_config_option")
+        .find(|(method, _)| method == "run/set_config_option")
         .expect("the model was set");
     assert_eq!(set.1["configId"], "model");
     assert_eq!(set.1["value"], "haiku");
@@ -839,13 +839,13 @@ fn model_and_effort_use_the_agents_options() {
 }
 
 #[test]
-fn an_agent_without_http_mcp_refuses_a_session_that_needs_it() {
+fn an_agent_without_http_mcp_refuses_a_run_that_needs_it() {
     let mut options = external("go");
     options.mcp_servers.push(
         json!({"type": "http", "name": "cables", "url": "http://127.0.0.1:1/mcp", "headers": []}),
     );
-    let (session, _) = connect_agent(Script::default(), options);
-    let error = session.err().expect("refused");
+    let (run, _) = connect_agent(Script::default(), options);
+    let error = run.err().expect("refused");
     assert!(error.to_string().contains("MCP"), "{error}");
 }
 
@@ -853,15 +853,15 @@ fn an_agent_without_http_mcp_refuses_a_session_that_needs_it() {
 fn a_load_replay_is_not_surfaced_and_a_resume_continues() {
     let mut options = external("again");
     options.resume = Some("ext-1".to_owned());
-    let (session, seen) = connect_agent(
+    let (run, seen) = connect_agent(
         Script {
             load: true,
             ..Script::default()
         },
         options.clone_for_test(),
     );
-    let session = session.unwrap();
-    let events = until(&session, &["completed"]);
+    let run = run.unwrap();
+    let events = until(&run, &["completed"]);
     assert!(
         events
             .iter()
@@ -941,15 +941,15 @@ fn a_permission_request_reaches_the_decider_and_both_answers_work() {
         });
         let mut options = external("go");
         options.decider = decider.clone();
-        let (session, seen) = connect_agent(
+        let (run, seen) = connect_agent(
             Script {
                 ask: Some("execute"),
                 ..Script::default()
             },
             options,
         );
-        let session = session.unwrap();
-        until(&session, &["completed"]);
+        let run = run.unwrap();
+        until(&run, &["completed"]);
         let asked = decider.asked.lock().unwrap();
         assert_eq!(asked.len(), 1);
         assert_eq!(asked[0].kind.as_deref(), Some("execute"));
@@ -972,14 +972,14 @@ fn a_permission_request_that_does_not_parse_is_refused_with_an_outcome_not_an_er
     });
     let mut options = external("go");
     options.decider = decider.clone();
-    let (session, seen) = connect_agent(
+    let (run, seen) = connect_agent(
         Script {
             ask_malformed: true,
             ..Script::default()
         },
         options,
     );
-    let events = until(&session.unwrap(), &["completed"]);
+    let events = until(&run.unwrap(), &["completed"]);
     assert_eq!(outcome(&seen), json!({"outcome": {"outcome": "cancelled"}}));
     assert!(decider.asked.lock().unwrap().is_empty());
     assert!(
@@ -993,7 +993,7 @@ fn a_permission_request_that_does_not_parse_is_refused_with_an_outcome_not_an_er
 }
 
 #[test]
-fn a_restricted_session_refuses_what_changes_things_without_asking_the_decider() {
+fn a_restricted_run_refuses_what_changes_things_without_asking_the_decider() {
     let decider = Arc::new(Decider {
         allow: true,
         ..Decider::default()
@@ -1001,23 +1001,23 @@ fn a_restricted_session_refuses_what_changes_things_without_asking_the_decider()
     let mut options = external("go");
     options.decider = decider.clone();
     options.restricted = true;
-    let (session, seen) = connect_agent(
+    let (run, seen) = connect_agent(
         Script {
             ask: Some("edit"),
             ..Script::default()
         },
         options,
     );
-    until(&session.unwrap(), &["completed"]);
+    until(&run.unwrap(), &["completed"]);
     assert!(decider.asked.lock().unwrap().is_empty());
     assert_eq!(outcome(&seen)["outcome"]["optionId"], "no");
 }
 
 #[test]
-fn a_restricted_session_ends_when_a_refused_tool_runs_anyway() {
+fn a_restricted_run_ends_when_a_refused_tool_runs_anyway() {
     let mut options = external("go");
     options.restricted = true;
-    let (session, _seen) = connect_agent(
+    let (run, _seen) = connect_agent(
         Script {
             ask: Some("edit"),
             run_regardless: true,
@@ -1025,7 +1025,7 @@ fn a_restricted_session_ends_when_a_refused_tool_runs_anyway() {
         },
         options,
     );
-    let events = until(&session.unwrap(), &["failed", "completed"]);
+    let events = until(&run.unwrap(), &["failed", "completed"]);
     let last = events.last().unwrap();
     assert_eq!(last.kind, "failed");
     assert!(last.text.as_deref().unwrap().contains("without leave"));
@@ -1040,7 +1040,7 @@ fn an_agent_cannot_relabel_a_restricted_tool_before_asking() {
     let mut options = external("go");
     options.decider = decider.clone();
     options.restricted = true;
-    let (session, seen) = connect_agent(
+    let (run, seen) = connect_agent(
         Script {
             announce: Some("edit"),
             ask: Some("read"),
@@ -1048,23 +1048,23 @@ fn an_agent_cannot_relabel_a_restricted_tool_before_asking() {
         },
         options,
     );
-    until(&session.unwrap(), &["completed"]);
+    until(&run.unwrap(), &["completed"]);
     assert!(decider.asked.lock().unwrap().is_empty());
     assert_eq!(outcome(&seen)["outcome"]["optionId"], "no");
 }
 
 #[test]
-fn a_restricted_session_ends_when_a_tool_runs_without_asking() {
+fn a_restricted_run_ends_when_a_tool_runs_without_asking() {
     let mut options = external("go");
     options.restricted = true;
-    let (session, seen) = connect_agent(
+    let (run, seen) = connect_agent(
         Script {
             run_unasked: Some("edit"),
             ..Script::default()
         },
         options,
     );
-    let events = until(&session.unwrap(), &["failed", "completed"]);
+    let events = until(&run.unwrap(), &["failed", "completed"]);
     let last = events.last().unwrap();
     assert_eq!(last.kind, "failed");
     assert!(last.text.as_deref().unwrap().contains("without leave"));
@@ -1090,7 +1090,7 @@ fn launch_meta_round_trips_and_never_prints_the_environment() {
     assert!(!shown.contains("hunter2-secret"), "{shown}");
     let resume = ResumeMeta::from_resume(&AgentResume {
         mission_id: begun.mission_id.clone(),
-        session_id: SessionId::try_new("provider-3").unwrap(),
+        run_id: RunId::try_new("provider-3").unwrap(),
         message: Some("m".to_owned()),
         working_directory: "/w".to_owned(),
         clearance: "field".to_owned(),

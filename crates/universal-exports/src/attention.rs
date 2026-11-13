@@ -50,7 +50,7 @@ enum Condition {
 /// The thing an item is about, with the route that opens it.
 #[derive(Debug, Clone, Serialize)]
 struct Entity {
-    /// `session`, `mission`, `station`, `approval`, `brief` or `proposal`.
+    /// `run`, `mission`, `station`, `approval`, `brief` or `proposal`.
     kind: &'static str,
     id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -64,7 +64,7 @@ struct Entity {
 struct Item {
     /// Stable for the same condition, so a page can keep its place.
     id: String,
-    /// `blocked_session`, `green_ink`, `held_brief`, `mission_proposal`, `station_dark` or
+    /// `blocked_run`, `green_ink`, `held_brief`, `mission_proposal`, `station_dark` or
     /// `config_refused`.
     kind: &'static str,
     condition: Condition,
@@ -241,8 +241,8 @@ pub(crate) async fn read(
         })
         .collect();
 
-    // Sessions: the Mission list, which also names each Mission.
-    let mut sessions_read = Coverage::new("sessions", "Sessions", now);
+    // Runs: the Mission list, which also names each Mission.
+    let mut runs_read = Coverage::new("runs", "Runs", now);
     let missions: Vec<BoardMission> = match Read::of(
         crate::missions(
             State(gateway.clone()),
@@ -256,17 +256,17 @@ pub(crate) async fn read(
         .map(|Json(missions)| missions),
     ) {
         Read::Done(missions) => {
-            sessions_read.checked.push(scope_of(wanted.as_deref()));
+            runs_read.checked.push(scope_of(wanted.as_deref()));
             missions
         }
         Read::NotPermitted => {
-            sessions_read
+            runs_read
                 .not_permitted
                 .push(scope_of(wanted.as_deref()));
             Vec::new()
         }
         Read::Unavailable => {
-            sessions_read.unavailable.push(scope_of(wanted.as_deref()));
+            runs_read.unavailable.push(scope_of(wanted.as_deref()));
             Vec::new()
         }
     };
@@ -313,7 +313,7 @@ pub(crate) async fn read(
             Read::Done(Json(requests)) => {
                 green_read.checked.push(scope.clone());
                 for request in requests {
-                    asked.insert((operation.clone(), request.session.to_string()));
+                    asked.insert((operation.clone(), request.run.to_string()));
                     let (title, entity) = (
                         format!(
                             "Agent {} waits for green ink to {} {} in Operation {operation}",
@@ -410,28 +410,28 @@ pub(crate) async fn read(
         }
     }
 
-    // Blocked Sessions; one held for green ink is the request waiting for it, not a second item.
+    // Blocked Runs; one held for green ink is the request waiting for it, not a second item.
     for mission in &missions {
-        for session in &mission.sessions {
-            if session.state.as_deref() != Some("blocked") {
+        for run in &mission.runs {
+            if run.state.as_deref() != Some("blocked") {
                 continue;
             }
-            let green = session.reason.as_deref() == Some("green-ink");
-            if green && asked.contains(&(mission.operation_id.clone(), session.session_id.clone()))
+            let green = run.reason.as_deref() == Some("green-ink");
+            if green && asked.contains(&(mission.operation_id.clone(), run.run_id.clone()))
             {
                 continue;
             }
             let handle = plain(&mission.handle);
             let title = if green {
                 format!(
-                    "Session {} of Mission {handle} waits for green ink",
-                    session.session_id
+                    "Run {} of Mission {handle} waits for green ink",
+                    run.run_id
                 )
             } else {
                 format!(
-                    "Session {} of Mission {handle} is blocked{}",
-                    session.session_id,
-                    session
+                    "Run {} of Mission {handle} is blocked{}",
+                    run.run_id,
+                    run
                         .reason
                         .as_deref()
                         .map(|reason| format!(": {}", plain(reason)))
@@ -445,17 +445,17 @@ pub(crate) async fn read(
                        "mission_id": mission.mission_id})
             };
             let entity = Entity {
-                kind: "session",
-                id: session.session_id.clone(),
+                kind: "run",
+                id: run.run_id.clone(),
                 operation_id: Some(mission.operation_id.clone()),
-                station_id: session.station_id.clone(),
+                station_id: run.station_id.clone(),
             };
             found.push(item(
                 format!(
-                    "blocked_session:{}:{}",
-                    mission.operation_id, session.session_id
+                    "blocked_run:{}:{}",
+                    mission.operation_id, run.run_id
                 ),
-                "blocked_session",
+                "blocked_run",
                 Condition::Current,
                 title,
                 None,
@@ -464,7 +464,7 @@ pub(crate) async fn read(
                 &format!("operation:{}", mission.operation_id),
                 now,
                 None,
-                session.updated_at,
+                run.updated_at,
             ));
         }
     }
@@ -603,7 +603,7 @@ pub(crate) async fn read(
 
     for read in [
         stations_read,
-        sessions_read,
+        runs_read,
         green_read,
         held_read,
         proposals_read,

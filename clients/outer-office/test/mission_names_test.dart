@@ -7,10 +7,10 @@ import 'package:outer_office/shell/oo_shell.dart' show OoPage;
 
 import 'work_views_test.dart' show demoBoard;
 
-SessionSummary session(String mission, String provider) => SessionSummary(
+RunSummary run(String mission, String provider) => RunSummary(
   operationId: 'ai6',
   missionId: mission,
-  sessionId: provider,
+  runId: provider,
   state: 'working',
   sequence: 1,
   updatedAt: 50,
@@ -53,7 +53,7 @@ void main() {
     expect(parsed!.name, 'Fix the build');
     final attempt = MissionAttemptSummary.fromJson({
       'attempt': 2,
-      'session_id': 'ai6-gh-63.2',
+      'run_id': 'ai6-gh-63.2',
       'station': 'hq',
       'status': 'active',
     });
@@ -82,7 +82,7 @@ void main() {
 
   test('search matches the ID, the run and the name', () {
     final board = demoBoard()
-      ..sessions = [session('ai6-gh-63', 'p-1'), session('ai6-42', 'p-2')]
+      ..runs = [run('ai6-gh-63', 'p-1'), run('ai6-42', 'p-2')]
       ..missionBriefs = [brief('ai6-gh-63', name: 'Fix the build')]
       ..missionAttempts = {
         ('ai6', 'ai6-42'): const [
@@ -109,9 +109,9 @@ void main() {
 
   test('the Mission order counts as a person does', () {
     final ids = groupMissions([
-      session('ai6-10', 'a'),
-      session('ai6-9', 'b'),
-      session('ai6-100', 'c'),
+      run('ai6-10', 'a'),
+      run('ai6-9', 'b'),
+      run('ai6-100', 'c'),
     ]).map((mission) => mission.missionId);
     expect(ids, ['ai6-9', 'ai6-10', 'ai6-100']);
   });

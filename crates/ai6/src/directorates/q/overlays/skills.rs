@@ -44,7 +44,7 @@ pub const SKILL_INERT_KEYS: [&str; 12] = [
 /// `file_bytes`, UTF-8, opening with `---` front matter that parses as YAML with `name` equal
 /// to `name` and a non-empty `description`. Unless `allow_tools`, its front matter has only
 /// [`SKILL_INERT_KEYS`] and it has no injected command (`` !`command` ``, or a fenced block
-/// opened with `` ```! ``), since those grant tools or run commands in the Session; a refusal
+/// opened with `` ```! ``), since those grant tools or run commands in the Run; a refusal
 /// names `tools_setting` as what would let it load. Reads the file; never follows a link.
 ///
 /// # Errors
@@ -100,7 +100,7 @@ pub fn check_skill(
     {
         return Err(format!(
             "SKILL.md front matter sets {key:?}, which can grant tools, run commands or change \
-             the Session; only {tools_setting} = true lets it load"
+             the Run; only {tools_setting} = true lets it load"
         ));
     }
     if injects_commands(text) {

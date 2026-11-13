@@ -7,17 +7,17 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/jose-pr/ai6/test.yml)](https://github.com/jose-pr/ai6/actions/workflows/test.yml)
 
 The AI6 operator command. **`ai6ctl` reads and controls Stations, Agent roles, Missions
-and Sessions through Universal Exports, AI6's authenticated public API** — never on a
+and Runs through Universal Exports, AI6's authenticated public API** — never on a
 Station directly. See the [command header](AGENTS.md).
 
 ## Features
 
 - Reads health, Stations and the Headquarters Station, Operation-scoped Agent roles,
-  Missions and provider Sessions.
+  Missions and provider Runs.
 - Manages the configuration records kubectl-style: `get`, `apply -f` (any documents, all or
   none, `--dry-run`), `edit`, `set`, `unset`, `delete` and `api-resources`, each under the
   person's own actions.
-- Cancels, retries and resumes Missions and interrupts Sessions; the Station holding the
+- Cancels, retries and resumes Missions and interrupts Runs; the Station holding the
   Mission decides and reports, and `ai6ctl` waits for its outcome.
 - Signs green ink: lists the steps Agents wait to take, approves, rejects or revokes them,
   and lists or revokes class authorisations.
@@ -44,9 +44,9 @@ ai6ctl station station-007
 ai6ctl agent-roles --operation G
 ai6ctl missions --operation G
 ai6ctl mission mission-007
-ai6ctl sessions --state working
-ai6ctl session provider-session-007
-ai6ctl session interrupt provider-session-007
+ai6ctl runs --state working
+ai6ctl run provider-id-007
+ai6ctl run interrupt provider-id-007
 ai6ctl mission resume mission-007 --message "The review is unblocked; carry on."
 ai6ctl mission cancel mission-007
 ai6ctl mission retry mission-007 --agent 008
@@ -65,21 +65,21 @@ ai6ctl held-briefs release source_jira--OPS-12 --operation G
 | `health` | `GET /health` |
 | `stations`, `station <STATION_ID>` | Station health, HQS status, capacity, roles, authorized Operations, and the host's CPU, load and memory with their sample time (`unknown` when not reported) |
 | `agent-roles --operation <ID>` | Role purpose and policy visible with `agent.read` |
-| `pools --operation <ID>` | Pool accounts the Operation may draw from: Sessions, quota used, limited until and tokens today (`pool.read`) |
+| `pools --operation <ID>` | Pool accounts the Operation may draw from: Runs, quota used, limited until and tokens today (`pool.read`) |
 | `pools clear-limit <POOL> <ACCOUNT> --operation <ID>` | Lifts an account's provider limit (`pool.manage`, audited) |
-| `missions [--operation <ID>]` | Visible Missions and their Session counts |
-| `mission <MISSION_ID> [--operation <ID>]` | One Mission and its provider Sessions; `--operation` disambiguates a repeated ID |
-| `sessions [--operation <ID>] [--mission <ID>] [--state <STATE>]` | Authorized provider Sessions, filtered |
-| `session <SESSION_ID>` | One provider Session |
-| `mission cancel <MISSION_ID>` | Stops the live Session, if any, and abandons the Mission |
+| `missions [--operation <ID>]` | Visible Missions and their Run counts |
+| `mission <MISSION_ID> [--operation <ID>]` | One Mission and its provider Runs; `--operation` disambiguates a repeated ID |
+| `runs [--operation <ID>] [--mission <ID>] [--state <STATE>]` | Authorized provider Runs, filtered |
+| `run <RUN_ID>` | One provider Run |
+| `mission cancel <MISSION_ID>` | Stops the live Run, if any, and abandons the Mission |
 | `mission retry <MISSION_ID> [--agent <CODENAME>]` | Queues a stalled or finished Mission again as a new attempt |
 | `mission resume <MISSION_ID> [--message <TEXT>]` | Resumes a parked, blocked or stalled Mission now |
-| `session interrupt <SESSION_ID>` | Stops the Session's current turn; its Mission waits, blocked |
+| `run interrupt <RUN_ID>` | Stops the Run's current turn; its Mission waits, blocked |
 | `green-ink list --operation <ID> [--expired]` | The steps Agents wait to take with green ink (`approval.decide`), or those that expired undecided |
 | `green-ink rearm <REQUEST_ID> --operation <ID> [--expires-in <SECONDS>] [--note <TEXT>]` | Opens an expired, undecided step again |
 | `missions verdict <MISSION> <confirmed\|disputed\|failed-verification> [--note <TEXT>] [--operation <ID>]` | Says what you found when you checked a Mission's outcome (`mission.verify`) |
 | `missions probe <MISSION> [--wait <SECS>] [--operation <ID>]` | Asks the Station to read back what a verifying Mission was to deliver and prints what it found (`mission.verify`) |
-| `missions verify <MISSION> <done\|redispatch\|failed> --reason <TEXT> [--amend <TEXT>] [--operation <ID>]` | Decides a Mission whose Session ended done: settles it, fails it, or queues its next attempt (`mission.verify`) |
+| `missions verify <MISSION> <done\|redispatch\|failed> --reason <TEXT> [--amend <TEXT>] [--operation <ID>]` | Decides a Mission whose Run ended done: settles it, fails it, or queues its next attempt (`mission.verify`) |
 | `green-ink approve <REQUEST_ID> --operation <ID> [--expires-in <SECONDS>] [--note <TEXT>]` | Signs a waiting step as you, for an hour unless chosen |
 | `green-ink reject <REQUEST_ID> --operation <ID> [--reason <TEXT>]` | Refuses a waiting step; the Agent is told the reason |
 | `green-ink revoke <REQUEST_ID> --operation <ID> [--reason <TEXT>]` | Withdraws an approval before it expires |

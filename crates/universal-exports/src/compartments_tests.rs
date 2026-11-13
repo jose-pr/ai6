@@ -546,7 +546,7 @@ async fn a_manager_cannot_put_policy_authority_in_a_compartment() {
 }
 
 #[tokio::test]
-async fn reading_people_in_needs_access_manage_and_sessions_do_not() {
+async fn reading_people_in_needs_access_manage_and_runs_do_not() {
     let fixture_without = fixture(ROLES).await;
     fixture_without.store(
         "KESTREL",
@@ -636,7 +636,7 @@ fn finished(fixture: &Fixture, id: &str, operation: &str) {
         .registry
         .finish(
             &brief,
-            &json!({"state": "done", "summary": "é".repeat(10), "session_ids": ["secret-session"]}),
+            &json!({"state": "done", "summary": "é".repeat(10), "run_ids": ["secret-run"]}),
             true,
             None,
             None,
@@ -685,7 +685,7 @@ async fn products_are_read_through_product_read_and_anything_else_is_not_found()
         .await
         .unwrap();
     assert_eq!(product["outcome_untrusted"]["summary"], "éé… [cut]");
-    assert!(!product.to_string().contains("secret-session"), "{product}");
+    assert!(!product.to_string().contains("secret-run"), "{product}");
     assert!(
         fixture
             .audits("compartment.read")

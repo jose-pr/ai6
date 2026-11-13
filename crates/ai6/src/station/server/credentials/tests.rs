@@ -16,16 +16,16 @@ use crate::station::plugins::Plugins;
 
 const PLANTED: &str = "pl4nted-s3cret-value";
 
-/// The sessions each built vault was given, and the leases it revoked.
-static SESSIONS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// The runs each built vault was given, and the leases it revoked.
+static RUNS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static REVOKED: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 #[derive(ToValue, FromValue, Schema, Debug, Clone, Default)]
 #[map(crate = ::guatiao)]
 struct TestVaultConfig {
     /// The vault's own credential.
-    #[schema(title = "Session")]
-    session: Secret<String>,
+    #[schema(title = "Run")]
+    run: Secret<String>,
 }
 
 /// A vault that leases `leased-<key>-in-<mount>` and declares one field, `mount`.
@@ -41,10 +41,10 @@ struct TestVault;
 
 impl From<TestVaultConfig> for TestVault {
     fn from(config: TestVaultConfig) -> Self {
-        SESSIONS
+        RUNS
             .lock()
             .unwrap()
-            .push(config.session.expose().clone());
+            .push(config.run.expose().clone());
         Self
     }
 }
@@ -157,11 +157,11 @@ fn request() -> SecretLeaseRequest {
 #[test]
 fn a_provider_from_a_library_is_built_once_with_its_credential_and_leases() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("vault-session"), format!("{PLANTED}\n")).unwrap();
+    std::fs::write(dir.path().join("vault-run"), format!("{PLANTED}\n")).unwrap();
     let (desk, catalog) = desk_of(
         "[loadout.007]\nsecrets = ['db', 'api', 'refused']\n\
          [secret_provider.vault]\nprovider = 'test-vault'\n\
-         session = { provider = 'file', key = 'vault-session' }\n\
+         run = { provider = 'file', key = 'vault-run' }\n\
          [secret.db]\nprovider = 'vault'\nkey = 'db'\nmount = 'prod'\n\
          [secret.api]\nprovider = 'vault'\nkey = 'api'\n\
          [secret.refused]\nprovider = 'vault'\nkey = 'refused'\n",
@@ -183,11 +183,11 @@ fn a_provider_from_a_library_is_built_once_with_its_credential_and_leases() {
         "leased-api-in-root"
     );
     // One instance, built once, with its credential read from the file its settings name.
-    let built = SESSIONS
+    let built = RUNS
         .lock()
         .unwrap()
         .iter()
-        .filter(|session| *session == PLANTED)
+        .filter(|run| *run == PLANTED)
         .count();
     assert_eq!(built, 1);
     lease.revoke().unwrap();
@@ -231,11 +231,11 @@ fn a_reserved_field_a_cycle_a_taken_name_and_an_unknown_field_are_refused() {
     );
 
     let (desk, catalog) = desk_of(
-        "[secret_provider.a]\nprovider = 'test-vault'\nsession = { provider = 'b', key = 'x' }\n\
-         [secret_provider.b]\nprovider = 'test-vault'\nsession = { provider = 'a', key = 'y' }\n\
+        "[secret_provider.a]\nprovider = 'test-vault'\nrun = { provider = 'b', key = 'x' }\n\
+         [secret_provider.b]\nprovider = 'test-vault'\nrun = { provider = 'a', key = 'y' }\n\
          [secret_provider.fake-secrets]\nprovider = 'test-vault'\n\
-         session = { provider = 'inline', value = 'v' }\n\
-         [secret_provider.c]\nprovider = 'test-vault'\nsession = { provider = 'inline', value = 'v' }\n\
+         run = { provider = 'inline', value = 'v' }\n\
+         [secret_provider.c]\nprovider = 'test-vault'\nrun = { provider = 'inline', value = 'v' }\n\
          [loadout.007]\nsecrets = ['odd']\n\
          [secret.odd]\nprovider = 'c'\nshelf = 'x'\n",
     );
@@ -286,7 +286,7 @@ fn the_built_ins_are_registered_first_and_appear_with_their_schemas() {
     assert!(file["properties"].get("dir").is_some(), "{file}");
     let vault = plugins.config_schema("test-vault").unwrap();
     assert_eq!(
-        vault["properties"]["session"]["x-sensitive"], true,
+        vault["properties"]["run"]["x-sensitive"], true,
         "{vault}"
     );
 }

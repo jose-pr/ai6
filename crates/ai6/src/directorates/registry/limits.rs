@@ -59,8 +59,8 @@ pub struct RegistryLimits {
     #[schema(title = "Clearance grants")]
     #[map(default)]
     pub clearance: ClearanceLimits,
-    /// `[registry.limits.contexts]`: each Session's harness context.
-    #[schema(title = "Session contexts")]
+    /// `[registry.limits.contexts]`: each Run's harness context.
+    #[schema(title = "Run contexts")]
     #[map(default)]
     pub contexts: ContextLimits,
     /// `[registry.limits.files]`: the file Registry's own waits.
@@ -103,10 +103,10 @@ pub struct RegistryLimits {
     #[schema(title = "Reports")]
     #[map(default)]
     pub reports: ReportLimits,
-    /// `[registry.limits.sessions]`: Session records.
-    #[schema(title = "Session records")]
+    /// `[registry.limits.runs]`: Run records.
+    #[schema(title = "Run records")]
     #[map(default)]
-    pub sessions: SessionLimits,
+    pub runs: RunLimits,
     /// `[registry.limits.sleepers]`: Sleepers.
     #[schema(title = "Sleepers")]
     #[map(default)]
@@ -392,13 +392,13 @@ impl Default for AssistantLogLimits {
 #[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
 #[map(deny_unknown_fields)]
 pub struct ContextLimits {
-    /// Bytes of one Session's context kept; a longer one keeps its newest part and says how
+    /// Bytes of one Run's context kept; a longer one keeps its newest part and says how
     /// large it was.
-    #[schema(title = "Largest Session context", format = "bytes")]
+    #[schema(title = "Largest Run context", format = "bytes")]
     #[map(default = ContextLimits::default().context_bytes)]
     pub context_bytes: Limit,
-    /// Session contexts kept; the oldest filed go first.
-    #[schema(title = "Session contexts kept")]
+    /// Run contexts kept; the oldest filed go first.
+    #[schema(title = "Run contexts kept")]
     #[map(default = ContextLimits::default().records)]
     pub records: Limit,
 }
@@ -684,10 +684,10 @@ pub struct ReportLimits {
     #[schema(title = "Reports in one list")]
     #[map(default = ReportLimits::default().page)]
     pub page: Limit,
-    /// Reports one Agent Session may file in the window.
-    #[schema(title = "Reports per Session in the window")]
-    #[map(default = ReportLimits::default().per_session)]
-    pub per_session: Limit,
+    /// Reports one Agent Run may file in the window.
+    #[schema(title = "Reports per Run in the window")]
+    #[map(default = ReportLimits::default().per_run)]
+    pub per_run: Limit,
     /// Reports Agents together may file against one scope in the window.
     #[schema(title = "Agent Reports per scope in the window")]
     #[map(default = ReportLimits::default().per_operation)]
@@ -711,7 +711,7 @@ impl Default for ReportLimits {
             name_bytes: Limit::at(256),
             links: Limit::at(64),
             page: Limit::at(1_000),
-            per_session: Limit::at(20),
+            per_run: Limit::at(20),
             per_operation: Limit::at(200),
             window: Seconds::new(3_600),
             keep_closed: TimeLimit::UNBOUNDED,
@@ -1013,71 +1013,71 @@ impl QuarantineLimits {
     }
 }
 
-/// `[registry.limits.sessions]`.
+/// `[registry.limits.runs]`.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
 #[map(deny_unknown_fields)]
-pub struct SessionLimits {
-    /// Bytes of one Session record.
-    #[schema(title = "Largest Session record", format = "bytes")]
-    #[map(default = SessionLimits::default().record_bytes)]
+pub struct RunLimits {
+    /// Bytes of one Run record.
+    #[schema(title = "Largest Run record", format = "bytes")]
+    #[map(default = RunLimits::default().record_bytes)]
     pub record_bytes: Limit,
-    /// Session records.
-    #[schema(title = "Session records")]
-    #[map(default = SessionLimits::default().records)]
+    /// Run records.
+    #[schema(title = "Run records")]
+    #[map(default = RunLimits::default().records)]
     pub records: Limit,
-    /// Bytes of a Session ID.
-    #[schema(title = "Longest Session ID", format = "bytes")]
-    #[map(default = SessionLimits::default().id_bytes)]
+    /// Bytes of a Run ID.
+    #[schema(title = "Longest Run ID", format = "bytes")]
+    #[map(default = RunLimits::default().id_bytes)]
     pub id_bytes: Limit,
-    /// Exposures recorded per Session.
-    #[schema(title = "Exposures per Session")]
-    #[map(default = SessionLimits::default().exposures)]
+    /// Exposures recorded per Run.
+    #[schema(title = "Exposures per Run")]
+    #[map(default = RunLimits::default().exposures)]
     pub exposures: Limit,
     /// Bytes of an exposure's source.
     #[schema(title = "Longest exposure source", format = "bytes")]
-    #[map(default = SessionLimits::default().exposure_source_bytes)]
+    #[map(default = RunLimits::default().exposure_source_bytes)]
     pub exposure_source_bytes: Limit,
-    /// Recent event lines kept per Session.
-    #[schema(title = "Recent event lines per Session")]
-    #[map(default = SessionLimits::default().recent_events)]
+    /// Recent event lines kept per Run.
+    #[schema(title = "Recent event lines per Run")]
+    #[map(default = RunLimits::default().recent_events)]
     pub recent_events: Limit,
-    /// Characters kept of each recent event line and of a lost Session's reason.
+    /// Characters kept of each recent event line and of a lost Run's reason.
     #[schema(title = "Longest recent event line")]
-    #[map(default = SessionLimits::default().recent_event_chars)]
+    #[map(default = RunLimits::default().recent_event_chars)]
     pub recent_event_chars: Limit,
-    /// Sources of exposure one Session's brief records; the rest are not kept.
+    /// Sources of exposure one Run's brief records; the rest are not kept.
     #[schema(title = "Sources of exposure per brief")]
-    #[map(default = SessionLimits::default().exposure_sources)]
+    #[map(default = RunLimits::default().exposure_sources)]
     pub exposure_sources: Limit,
     /// Bytes kept of an Agent's final message for its Mission's outcome; a longer one is cut and
     /// says so.
     #[schema(title = "Longest final report", format = "bytes")]
-    #[map(default = SessionLimits::default().final_report_bytes)]
+    #[map(default = RunLimits::default().final_report_bytes)]
     pub final_report_bytes: Limit,
     /// Bytes of the note a person gives with a verdict on a Mission's outcome.
     #[schema(title = "Longest verdict note", format = "bytes")]
-    #[map(default = SessionLimits::default().verdict_note_bytes)]
+    #[map(default = RunLimits::default().verdict_note_bytes)]
     pub verdict_note_bytes: Limit,
     /// Bytes of what a redispatch adds to the next attempt's task.
     #[schema(title = "Longest redispatch amendment", format = "bytes")]
-    #[map(default = SessionLimits::default().amendment_bytes)]
+    #[map(default = RunLimits::default().amendment_bytes)]
     pub amendment_bytes: Limit,
     /// Deliverables kept on one attempt.
     #[schema(title = "Deliverables per attempt")]
-    #[map(default = SessionLimits::default().deliverables)]
+    #[map(default = RunLimits::default().deliverables)]
     pub deliverables: Limit,
     /// Probe findings kept on one attempt; the oldest go first.
     #[schema(title = "Probe findings per attempt")]
-    #[map(default = SessionLimits::default().evidence_entries)]
+    #[map(default = RunLimits::default().evidence_entries)]
     pub evidence_entries: Limit,
     /// Characters kept of a probe finding's detail.
     #[schema(title = "Longest probe finding")]
-    #[map(default = SessionLimits::default().evidence_detail_chars)]
+    #[map(default = RunLimits::default().evidence_detail_chars)]
     pub evidence_detail_chars: Limit,
 }
 
-impl Default for SessionLimits {
+impl Default for RunLimits {
     fn default() -> Self {
         Self {
             record_bytes: Limit::at(64 * KIB),
@@ -1262,7 +1262,7 @@ pub struct TimelineLimits {
     #[schema(title = "Longest kind, action or detail key", format = "bytes")]
     #[map(default = TimelineLimits::default().name_bytes)]
     pub name_bytes: Limit,
-    /// Bytes of an event's Operation, Station, Mission, Session, actor and detail values.
+    /// Bytes of an event's Operation, Station, Mission, Run, actor and detail values.
     #[schema(title = "Longest event text", format = "bytes")]
     #[map(default = TimelineLimits::default().text_bytes)]
     pub text_bytes: Limit,
@@ -1372,18 +1372,18 @@ mod tests {
     #[test]
     fn a_table_reads_partially_and_names_what_it_loosens() {
         let limits: RegistryLimits = crate::directorates::m::records::from_toml(
-            "[sessions]\nrecords = \"none\"\n[files]\nlock_wait = 5\n",
+            "[runs]\nrecords = \"none\"\n[files]\nlock_wait = 5\n",
         )
         .unwrap();
-        assert_eq!(limits.sessions.records, Limit::UNBOUNDED);
-        assert_eq!(limits.sessions.id_bytes, Limit::at(128));
+        assert_eq!(limits.runs.records, Limit::UNBOUNDED);
+        assert_eq!(limits.runs.id_bytes, Limit::at(128));
         assert_eq!(
             limits.weakenings(),
-            ["registry.limits.sessions.records none is looser than the default 100000"]
+            ["registry.limits.runs.records none is looser than the default 100000"]
         );
         assert!(
             crate::directorates::m::records::from_toml::<RegistryLimits>(
-                "[sessions]\nrecordz = 1\n"
+                "[runs]\nrecordz = 1\n"
             )
             .is_err()
         );

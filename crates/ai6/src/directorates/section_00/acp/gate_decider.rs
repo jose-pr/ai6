@@ -9,7 +9,7 @@ use serde_json::Value;
 use super::{PermissionDecider, PermissionDecision, PermissionRequest};
 use crate::directorates::section_00::gate::{GateClient, GateVerdict, gate};
 
-/// Asks the Station, through the Session's own Cable endpoint, whether a command may run.
+/// Asks the Station, through the Run's own Cable endpoint, whether a command may run.
 ///
 /// A request for a tool that is not a shell command (`read`, `edit`, `search`, ...) is
 /// allowed: green ink governs the steps a command takes, as it does for a hook. An `execute`
@@ -21,7 +21,7 @@ pub struct GateDecider {
 }
 
 impl GateDecider {
-    /// A decider for a Session started with `environment`, whose commands run in `cwd`. Without
+    /// A decider for a Run started with `environment`, whose commands run in `cwd`. Without
     /// a Cable endpoint in the environment, a governed step is held.
     pub fn from_environment(
         environment: &BTreeMap<String, String>,

@@ -10,21 +10,21 @@
 
 AI6 is a self-hosted control plane for coding agents. **Register your projects as
 Operations, hand AI6 Missions, and its Stations post an Agent to each one and run it as
-a Claude Code or Codex Session in its own Git worktree, under a watchdog** — while
+a Claude Code or Codex Run in its own Git worktree, under a watchdog** — while
 operators follow and steer the work from Outer Office, the operator app. Read the
 [documentation](https://jose-pr.github.io/ai6/).
 
 ## Features
 
 - **Stations** - each node runs the `ai6` daemon: it leases Missions from a shared
-  Registry, posts the best available Agent, and reattaches to running Sessions after a
+  Registry, posts the best available Agent, and reattaches to running Runs after a
   restart. Control Stations elect a Headquarters Station.
 - **Agents and roles** - an Agent is a codename that owns its harness, model and effort;
   roles describe the job. When an Agent's harness is unavailable, the next qualified Agent
   is its backup.
 - **Safe houses** - every Mission gets an isolated Git worktree; its commits are audited
   against the Operation's cover policy.
-- **Cables** - permission-scoped agent-to-agent messages through per-Session MCP tools.
+- **Cables** - permission-scoped agent-to-agent messages through per-Run MCP tools.
 - **Universal Exports** - the authenticated public API: pluggable authentication and
   directories, per-Operation authorization, read-first terminal attachment, audit.
 - **Outer Office** - the Flutter desktop and web operator app, where Moneypenny, the AI
@@ -102,9 +102,9 @@ ai6ctl agent-roles --operation OPERATION
 ai6ctl missions [--operation OPERATION]
 ai6ctl mission MISSION_ID [--operation OPERATION]
 ai6ctl mission cancel|retry|resume MISSION_ID [--operation OPERATION]
-ai6ctl sessions [--operation OPERATION] [--mission MISSION_ID] [--state STATE]
-ai6ctl session SESSION_ID
-ai6ctl session interrupt SESSION_ID
+ai6ctl runs [--operation OPERATION] [--mission MISSION_ID] [--state STATE]
+ai6ctl run RUN_ID
+ai6ctl run interrupt RUN_ID
 ```
 
 Every program reads what it needs before it reaches its configuration provider from one
@@ -123,10 +123,10 @@ and a user bearer from `UNEX_ACCESS_TOKEN`. A Station publishes to Universal Exp
 | `ai6::directorates::registry` | The Registry (briefs, leases, check-ins, audit) and the Cable relay |
 | `ai6::directorates::q` | Terminals, loadouts, secret leases, MCP config, sandbox arguments |
 | `ai6::directorates::section_00` | The AgentHandler contract |
-| `ai6::directorates::medical` | The Session watchdog |
+| `ai6::directorates::medical` | The Run watchdog |
 | `ai6::station` | The Station: server, provider host, safe houses, publisher, mTLS identity |
 | `universal-exports` | The public API gateway: authentication, authorization, attachment, audit |
-| `ai6-diptel` | The wire contract for Session lifecycle and terminal frames |
+| `ai6-diptel` | The wire contract for Run lifecycle and terminal frames |
 | `ai6-agent-claude`, `ai6-agent-codex`, `ai6-agent-antigravity`, `ai6-agent-acp` | AgentHandler providers (`acp` runs any Agent Client Protocol agent) |
 | `ai6-terminal-pty` | The `pty` terminal provider |
 | `ai6-terminal-pipe` | The `pipe` terminal provider, for harnesses that speak JSON |
@@ -138,13 +138,13 @@ and a user bearer from `UNEX_ACCESS_TOKEN`. A Station publishes to Universal Exp
 The work and the infrastructure are separate shapes:
 
 ```text
-Work            Operation ──► Mission ──► Session   (provider-issued Session ID)
-Infrastructure  Station ──────────────────► Theater   (where the Session runs)
+Work            Operation ──► Mission ──► Run   (provider ID)
+Infrastructure  Station ──────────────────► Theater   (where the Run runs)
 ```
 
 An **Operation** is a global project and its policy; Stations serve it, none owns it. A
-**Mission** is one brief; a **Session** is one resumable provider run. A **Station** is a
-node running `ai6 serve`; a **Theater** is the host a Session works on, reached through a
+**Mission** is one brief; a **Run** is one resumable provider run. A **Station** is a
+node running `ai6 serve`; a **Theater** is the host a Run works on, reached through a
 transport (`local`, `ssh`). The directorates (M, the Registry, Q Branch, 00 Section, Medical) decide; the
 Station runs their decisions; Universal Exports is the only public door. See
 [Architecture](https://jose-pr.github.io/ai6/architecture/) and

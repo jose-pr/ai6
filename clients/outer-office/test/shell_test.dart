@@ -16,7 +16,7 @@ const railPages = [
   'Overview',
   'Operations',
   'Missions',
-  'Sessions',
+  'Runs',
   'Agents',
   'Stations',
   'Green Ink',
@@ -107,10 +107,10 @@ void main() {
       ),
       findsNWidgets(12),
     );
-    await tester.tap(navLabel('Sessions'));
+    await tester.tap(navLabel('Runs'));
     await tester.pumpAndSettle();
     expect(find.byType(NavigationDrawer), findsNothing);
-    expect(find.byType(OoDataTable<SessionSummary>), findsOneWidget);
+    expect(find.byType(OoDataTable<RunSummary>), findsOneWidget);
   });
 
   testWidgets('Overview counts what the board holds and links what needs '
@@ -123,7 +123,7 @@ void main() {
     expect(find.byType(OoBackdrop), findsNothing);
     expect(find.text('2 online · 0 dark'), findsNothing);
     expect(find.text('1 online · 1 dark'), findsOneWidget);
-    expect(find.text('of 3 Sessions'), findsOneWidget);
+    expect(find.text('of 3 Runs'), findsOneWidget);
     expect(
       find.text('Station station-remote-02 has gone dark'),
       findsOneWidget,
@@ -147,37 +147,37 @@ void main() {
     expect(find.text('working 1'), findsOneWidget);
   });
 
-  testWidgets('Sessions sort by state or update time and open without a '
+  testWidgets('Runs sort by state or update time and open without a '
       'wallpaper', (tester) async {
     final board = await demoAt(tester, const Size(1400, 900));
-    board.sessions = [
-      for (final (session, at) in [
-        (board.sessions[0], 300.0),
-        (board.sessions[1], 100.0),
-        (board.sessions[2], 200.0),
+    board.runs = [
+      for (final (run, at) in [
+        (board.runs[0], 300.0),
+        (board.runs[1], 100.0),
+        (board.runs[2], 200.0),
       ])
-        SessionSummary(
-          operationId: session.operationId,
-          missionId: session.missionId,
-          sessionId: session.sessionId,
-          state: session.state,
-          sequence: session.sequence,
+        RunSummary(
+          operationId: run.operationId,
+          missionId: run.missionId,
+          runId: run.runId,
+          state: run.state,
+          sequence: run.sequence,
           updatedAt: at,
-          stationId: session.stationId,
-          agent: session.agent,
+          stationId: run.stationId,
+          agent: run.agent,
         ),
     ];
-    await openPage(tester, 'Sessions');
-    expectNoBackdrop(find.byType(OoDataTable<SessionSummary>));
+    await openPage(tester, 'Runs');
+    expectNoBackdrop(find.byType(OoDataTable<RunSummary>));
     expect(find.byType(OoBackdrop), findsNothing);
     List<String> order() =>
         [
-          for (final session in [
-            'preview-session-007',
-            'preview-session-008',
-            'preview-session-021',
+          for (final run in [
+            'preview-run-007',
+            'preview-run-008',
+            'preview-run-021',
           ])
-            session,
+            run,
         ]..sort(
           (a, b) => tester
               .getTopLeft(find.text(a))
@@ -185,46 +185,46 @@ void main() {
               .compareTo(tester.getTopLeft(find.text(b)).dy),
         );
     expect(order(), [
-      'preview-session-007',
-      'preview-session-008',
-      'preview-session-021',
+      'preview-run-007',
+      'preview-run-008',
+      'preview-run-021',
     ]);
     await tester.tap(find.text('Updated'));
     await tester.pumpAndSettle();
     expect(order(), [
-      'preview-session-008',
-      'preview-session-021',
-      'preview-session-007',
+      'preview-run-008',
+      'preview-run-021',
+      'preview-run-007',
     ]);
     expect(find.text('Sorted by: updated'), findsOneWidget);
     await tester.tap(find.text('Updated'));
     await tester.pumpAndSettle();
-    expect(order().first, 'preview-session-007');
+    expect(order().first, 'preview-run-007');
     await tester.tap(find.text('State'));
     await tester.pumpAndSettle();
     expect(order(), [
-      'preview-session-007',
-      'preview-session-008',
-      'preview-session-021',
+      'preview-run-007',
+      'preview-run-008',
+      'preview-run-021',
     ]);
     // Every column sorts through the route.
-    await tester.tap(find.text('Session'));
+    await tester.tap(find.text('Run'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Session'));
+    await tester.tap(find.text('Run'));
     await tester.pumpAndSettle();
-    expect(find.text('Sorted by: session'), findsOneWidget);
+    expect(find.text('Sorted by: run'), findsOneWidget);
     expect(order(), [
-      'preview-session-021',
-      'preview-session-008',
-      'preview-session-007',
+      'preview-run-021',
+      'preview-run-008',
+      'preview-run-007',
     ]);
     await tester.tap(find.text('Operation'));
     await tester.pumpAndSettle();
-    expect(order().last, 'preview-session-021', reason: 'Operation L after G');
+    expect(order().last, 'preview-run-021', reason: 'Operation L after G');
 
-    await tester.tap(find.text('preview-session-008'));
+    await tester.tap(find.text('preview-run-008'));
     await tester.pumpAndSettle();
-    expectNoBackdrop(find.byType(SessionWindow));
+    expectNoBackdrop(find.byType(RunWindow));
   });
 
   testWidgets('Theaters are a tab of Stations', (tester) async {

@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! `ai6-terminal-pty`: the `pty` terminal provider, on `portable-pty`, which is
-//! `openpty` on Unix and ConPTY on Windows. The session logic is shared; what differs
+//! `openpty` on Unix and ConPTY on Windows. The run logic is shared; what differs
 //! per platform (owning the child's process tree, the terminal's mode, translating input) is
 //! in `unix.rs` and `windows.rs` behind one `os` interface.
 //!
@@ -37,7 +37,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use ai6::directorates::q::terminal::{ExitInfo, READ_TIMED_OUT, Spec, Terminal, TerminalSession};
+use ai6::directorates::q::terminal::{ExitInfo, READ_TIMED_OUT, Spec, Terminal, TerminalRun};
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Schema, Status, ToValue, Value};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
@@ -127,13 +127,13 @@ impl TryFrom<PtyConfig> for Pty {
 }
 
 impl Terminal for Pty {
-    fn spawn(&self, spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError> {
+    fn spawn(&self, spec: &Value) -> Result<Object<dyn TerminalRun>, ProviderError> {
         let spec = Spec::from_value(spec).map_err(|e| refuse(Status::GUATIAO_ERR_BAD_VALUE, e))?;
-        Ok(PtySession::start(&spec, self.config)?.into_object())
+        Ok(PtyRun::start(&spec, self.config)?.into_object())
     }
 }
 
-struct PtySession {
+struct PtyRun {
     pid: i64,
     chunks: Mutex<Receiver<Vec<u8>>>,
     /// The part of a chunk that did not fit the caller's buffer.
@@ -152,7 +152,7 @@ struct PtySession {
     kill_wait: Duration,
 }
 
-impl PtySession {
+impl PtyRun {
     fn start(spec: &Spec, config: PtyConfig) -> Result<Self, ProviderError> {
         let read_chunk = usize::try_from(config.read_chunk_bytes).unwrap_or(usize::MAX);
         let (program, args) = spec
@@ -278,7 +278,7 @@ impl PtySession {
     }
 }
 
-impl TerminalSession for PtySession {
+impl TerminalRun for PtyRun {
     fn pid(&self) -> i64 {
         self.pid
     }
@@ -383,9 +383,9 @@ impl TerminalSession for PtySession {
     }
 }
 
-impl Drop for PtySession {
+impl Drop for PtyRun {
     fn drop(&mut self) {
-        let _ = TerminalSession::kill(self);
+        let _ = TerminalRun::kill(self);
         if let Ok(mut child) = self.child.lock() {
             let _ = child.wait();
         }
@@ -496,7 +496,7 @@ fn dimension(n: i64) -> Result<u16, ProviderError> {
 
 fn lock<T>(m: &Mutex<T>) -> Result<std::sync::MutexGuard<'_, T>, ProviderError> {
     m.lock()
-        .map_err(|_| refuse(Status::GUATIAO_ERR_INTERNAL, "a session lock was poisoned"))
+        .map_err(|_| refuse(Status::GUATIAO_ERR_INTERNAL, "a run lock was poisoned"))
 }
 
 fn refuse(status: Status, message: impl std::fmt::Display) -> ProviderError {

@@ -154,7 +154,7 @@ pub(crate) fn redact_value(value: &Value, secrets: &[String]) -> Value {
 }
 
 /// A conversation as its log left it, for a gateway that no longer holds it: what the app
-/// shows, within `bounds`, and the Station, provider Session and route of its last turn, so
+/// shows, within `bounds`, and the Station, provider Run and route of its last turn, so
 /// its next message resumes there. A proposal still waiting is shown as expired: the gateway
 /// that held it is gone.
 pub(crate) fn rebuild(
@@ -176,8 +176,8 @@ pub(crate) fn rebuild(
             if turn.station.is_some() {
                 conversation.station.clone_from(&turn.station);
             }
-            if turn.session.is_some() {
-                conversation.session_id.clone_from(&turn.session);
+            if turn.run.is_some() {
+                conversation.run_id.clone_from(&turn.run);
                 conversation.route.clone_from(&turn.route);
             }
             if turn.account.is_some() {
@@ -282,7 +282,7 @@ mod tests {
     fn a_conversation_is_rebuilt_from_its_log_with_its_last_turn() {
         let mut turn = ai6::AssistantTurn::default();
         turn.station = Some("hq".to_owned());
-        turn.session = Some("provider-1".to_owned());
+        turn.run = Some("provider-1".to_owned());
         turn.route = Some(ai6::RouteRef::new("acp", None, Some("team".to_owned())));
         let proposal = serde_json::json!({"id": "proposal-1", "status": "pending"});
         let rows = vec![
@@ -315,7 +315,7 @@ mod tests {
             ]
         );
         assert_eq!(conversation.station.as_deref(), Some("hq"));
-        assert_eq!(conversation.session_id.as_deref(), Some("provider-1"));
+        assert_eq!(conversation.run_id.as_deref(), Some("provider-1"));
         assert_eq!(conversation.person_id, "eve");
         let statuses: Vec<&str> = conversation
             .entries

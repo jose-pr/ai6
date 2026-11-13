@@ -6,7 +6,7 @@ use serde_json::{Map, Value, json};
 /// Builds Claude Code's stdio MCP configuration for one exact Agent loadout.
 ///
 /// The output contains only static command and argument declarations. It does not include
-/// environment values, secret references, Mission IDs or provider Session IDs.
+/// environment values, secret references, Mission IDs or provider IDs.
 pub fn claude_mcp_config(catalog: &LoadoutCatalog, loadout: &Loadout) -> Result<Value, QError> {
     let servers = catalog.servers_for(loadout)?;
     let mut entries = Map::new();

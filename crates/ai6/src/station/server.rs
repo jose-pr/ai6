@@ -88,7 +88,7 @@ use crate::directorates::m::limits::{
     DEFAULT_LIMIT_FALLBACK_SECS, OnLimit, lifts_at, parked_until,
 };
 use crate::directorates::m::mission::{
-    LaunchManifest, Mission, MissionError, MissionState, MissionStore, SessionHold,
+    LaunchManifest, Mission, MissionError, MissionState, MissionStore, RunHold,
 };
 use crate::directorates::m::placement::{
     self, ExecutionMode, OperationPolicy, PlacementChoice, PlacementRequest, ResourceLimits,
@@ -113,31 +113,31 @@ use crate::directorates::registry::cables::{
 };
 use crate::directorates::registry::contexts::ContextOwner;
 use crate::directorates::registry::mission_ids::new_uid;
-use crate::directorates::registry::sessions::{
-    NewSession, SessionError, SessionRecord, SessionResult, SessionStatus, SessionUpdate,
+use crate::directorates::registry::runs::{
+    NewRun, RunError, RunRecord, RunResult, RunStatus, RunUpdate,
 };
 use crate::directorates::registry::store::{
     Brief, DEFAULT_LEASE, Lease, LeaseRecovery, StationRecord,
 };
 use crate::directorates::registry::timeline::TimelineEvent;
-use crate::directorates::section_00::acp::{AcpSession, HandlerSpec};
+use crate::directorates::section_00::acp::{AcpRun, HandlerSpec};
 use crate::directorates::section_00::agent::READ_CLEARANCE;
 use crate::directorates::section_00::agent::{
-    AgentResume, AgentStart, SessionRecordQuery, provider_session_id,
+    AgentResume, AgentStart, RunRecordQuery, provider_id,
 };
 use crate::station::limits::StationLimits;
 use crate::station::plugins;
 #[cfg(feature = "publisher")]
 use crate::station::publisher::MissionPublication;
 #[cfg(feature = "publisher")]
-use crate::station::publisher::{self, Config as PublisherConfig, Publisher, SessionTelemetry};
+use crate::station::publisher::{self, Config as PublisherConfig, Publisher, RunTelemetry};
 use crate::station::reach::ReachWatch;
-use crate::station::runner::client::{RemoteSession, RunnerLink};
-use crate::station::runner::{Launch, SessionReport};
+use crate::station::runner::client::{RemoteRun, RunnerLink};
+use crate::station::runner::{Launch, RunReport};
 use crate::station::safehouse::SafeHouse;
 use crate::station::sources::SourceDesk;
 use crate::station::transports::Transports;
-use crate::{MissionId, SessionId};
+use crate::{MissionId, RunId};
 use coqui_acp_provider::{
     AgentEvent, AgentMessage, AgentSession, CANCELLED_EVENT, DENIED_EVENT, LIMIT_EVENT,
 };
@@ -145,7 +145,7 @@ use coqui_acp_provider::{
 /// The loopback address used by the daemon's private health endpoint.
 pub const DEFAULT_LISTEN: SocketAddr =
     SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 7081);
-/// Default number of Agent Sessions this daemon may start concurrently.
+/// Default number of Agent Runs this daemon may start concurrently.
 pub const DEFAULT_MAX_CONCURRENT_MISSIONS: usize = 4;
 /// How often a Station samples the resources of each Theater other than its own host, unless
 /// [`StationConfig::with_resources_every`] says otherwise. The full requirements probe, which
@@ -184,7 +184,7 @@ pub struct StationConfig {
     /// Theaters declared in code; `serve` merges them over `theaters.toml` into `theaters`.
     extra_theaters: Vec<Theater>,
     theaters: Theaters,
-    /// Q's loadouts and secret backend, and the credential leases issued to Sessions.
+    /// Q's loadouts and secret backend, and the credential leases issued to Runs.
     credentials: credentials::CredentialDesk,
     headquarters_lease: Duration,
     resources_every: Duration,
@@ -196,7 +196,7 @@ pub struct StationConfig {
     sealing_dir: Option<PathBuf>,
     /// What a relative `path` in an `[overlay.<name>]` is read against.
     overlay_base: Option<PathBuf>,
-    /// What overlays' deliveries keep between Sessions.
+    /// What overlays' deliveries keep between Runs.
     overlay_keeper: Arc<crate::station::overlays::Keeper>,
     /// What the bootstrap file gives up against the defaults, reported at check-in.
     bootstrap_weakened: Vec<String>,
@@ -340,7 +340,7 @@ impl StationConfig {
     }
 
     /// Issues credentials from `catalog` instead of the configuration directory's
-    /// `loadouts.toml`: each Session gets its Agent's loadout secrets as leases.
+    /// `loadouts.toml`: each Run gets its Agent's loadout secrets as leases.
     #[must_use]
     pub fn with_loadouts(mut self, catalog: crate::directorates::q::LoadoutCatalog) -> Self {
         self.credentials = self.credentials.with_catalog(catalog);
@@ -527,7 +527,7 @@ impl ServeConfig {
         self
     }
 
-    /// Sets the thresholds used to detect stalled, blocked and looping Agent Sessions.
+    /// Sets the thresholds used to detect stalled, blocked and looping Agent Runs.
     pub fn with_watchdog(mut self, watchdog: WatchdogConfig) -> Self {
         self.watchdog = watchdog;
         self
@@ -902,14 +902,14 @@ where
         loadouts_from_provider.then(|| config.station.credentials.shared_catalog()),
     ));
     let missions = Arc::new(Mutex::new(missions));
-    let sessions = Arc::new(Mutex::new(BTreeMap::new()));
+    let runs = Arc::new(Mutex::new(BTreeMap::new()));
     let cable_live = live_config.clone();
     let cable_roster = roster.clone();
     let (lineage_live, lineage_roster) = (live_config.clone(), roster.clone());
     let (resident_live, resident_roster, resident_site) =
         (live_config.clone(), roster.clone(), station_id.clone());
     let cable_missions = missions.clone();
-    let cable_sessions = sessions.clone();
+    let cable_runs = runs.clone();
     let cable_site = station_id.clone();
     let (sender_rate, sender_burst, scope_rate, scope_burst) = cable_config.quota_limits();
     let (audit_registry, audit_station) = (intake.clone(), station_id.clone());
@@ -921,7 +921,7 @@ where
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?,
         move || {
             let roster = cable_live.roster().unwrap_or_else(|| cable_roster.clone());
-            cable_endpoints(&roster, &cable_missions, &cable_sessions, &cable_site)
+            cable_endpoints(&roster, &cable_missions, &cable_runs, &cable_site)
         },
         cable_config.channels().clone(),
     )
@@ -1003,7 +1003,7 @@ where
         config: live_config,
         intake,
         missions,
-        sessions,
+        runs,
         cables: Arc::new(cables),
         station_id,
         station: config.station,
@@ -1107,8 +1107,8 @@ fn api(state: DaemonState, token: String) -> Router {
             axum::routing::post(transition_mission),
         )
         .route(
-            "/internal/missions/{mission_id}/sessions",
-            axum::routing::post(attach_session),
+            "/internal/missions/{mission_id}/runs",
+            axum::routing::post(attach_run),
         )
         .route(
             "/internal/missions/{mission_id}/start",
@@ -1321,36 +1321,36 @@ fn person_cable_audit(
 fn cable_endpoints(
     roster: &Roster,
     missions: &Mutex<MissionStore>,
-    sessions: &Mutex<BTreeMap<String, AgentOperation>>,
+    runs: &Mutex<BTreeMap<String, AgentOperation>>,
     station_id: &str,
 ) -> Vec<CableEndpoint> {
     let Ok(missions) = missions.lock() else {
         return Vec::new();
     };
-    let Ok(sessions) = sessions.lock() else {
+    let Ok(runs) = runs.lock() else {
         return Vec::new();
     };
     let active: Vec<_> = missions
         .list()
         .into_iter()
         .filter_map(|mission| {
-            // A Session waiting at a prompt is between turns, not gone: a Cable reaches it.
+            // A Run waiting at a prompt is between turns, not gone: a Cable reaches it.
             let between_turns =
                 mission.state == MissionState::Blocked && mission.blocked_reason.is_none();
             if mission.state != MissionState::Working && !between_turns {
                 return None;
             }
             let (operation, agent) = (mission.operation_id.as_ref()?, mission.agent_id.as_ref()?);
-            let session_id = sessions
+            let run_id = runs
                 .get(mission.mission_id.as_str())?
-                .session_id
+                .run_id
                 .as_ref()?
                 .to_string();
             Some((
                 operation.clone(),
                 agent.clone(),
                 mission.mission_id.to_string(),
-                session_id,
+                run_id,
             ))
         })
         .collect();
@@ -1361,19 +1361,19 @@ fn cable_endpoints(
             continue;
         };
         for agent in agents {
-            let active_sessions: Vec<_> = active
+            let active_runs: Vec<_> = active
                 .iter()
                 .filter(|(operation_id, agent_id, _, _)| {
                     operation_id == &operation.id && agent_id == &agent.id
                 })
                 .collect();
-            for (_, _, mission_id, session_id) in active_sessions {
+            for (_, _, mission_id, run_id) in active_runs {
                 if let Ok(endpoint) = CableEndpoint::try_new(
                     agent.id.clone(),
                     operation.id.clone(),
                     operation.theater.clone(),
                     station_id.to_owned(),
-                    Some(session_id.clone()),
+                    Some(run_id.clone()),
                     Some(mission_id.clone()),
                 ) {
                     endpoints.push(endpoint);
@@ -1384,7 +1384,7 @@ fn cable_endpoints(
     endpoints
 }
 
-/// Where a Cable waits when its addressee has no live Session: the Agent `target` names in each
+/// Where a Cable waits when its addressee has no live Run: the Agent `target` names in each
 /// Operation it serves, or for the Operation it names (its coordinating role) the Agent of its
 /// watch or, with no watch, its 00 Agents.
 fn cable_residents(roster: &Roster, station: &str, target: &CableTarget) -> Vec<CableEndpoint> {
@@ -1463,13 +1463,13 @@ fn cable_principal(
         .agent_id
         .as_deref()
         .ok_or_else(|| configuration_error("Cable access requires an assigned Agent"))?;
-    let session_id = state
-        .sessions
+    let run_id = state
+        .runs
         .lock()
         .map_err(|_| internal_error())?
         .get(mission_id)
-        .and_then(|operation| operation.session_id.as_ref())
-        .ok_or_else(|| conflict("Cable access requires a managed Agent Session"))?
+        .and_then(|operation| operation.run_id.as_ref())
+        .ok_or_else(|| conflict("Cable access requires a managed Agent Run"))?
         .to_string();
     let operation = state
         .roster
@@ -1480,7 +1480,7 @@ fn cable_principal(
         operation.id.clone(),
         operation.theater.clone(),
         state.station_id.clone(),
-        Some(session_id),
+        Some(run_id),
         Some(mission_id.to_owned()),
     )
     .map_err(|_| configuration_error("Mission has invalid Cable identity"))
@@ -1501,7 +1501,7 @@ async fn discover_cables(
             operation: endpoint.operation().to_owned(),
             theater: endpoint.theater().map(str::to_owned),
             station: endpoint.station().to_owned(),
-            session_id: endpoint.session_id().map(str::to_owned),
+            run_id: endpoint.run_id().map(str::to_owned),
             mission_id: endpoint.mission_id().map(str::to_owned),
         })
         .collect();
@@ -1626,7 +1626,7 @@ struct DaemonState {
     config: Arc<reload::LiveConfig>,
     intake: Arc<dyn RegistryBackend>,
     missions: Arc<Mutex<MissionStore>>,
-    sessions: Arc<Mutex<BTreeMap<String, AgentOperation>>>,
+    runs: Arc<Mutex<BTreeMap<String, AgentOperation>>>,
     cables: Arc<CableRelay>,
     station_id: String,
     station: StationConfig,
@@ -1654,7 +1654,7 @@ struct DaemonState {
 }
 
 impl DaemonState {
-    /// How long a lease on a Mission's brief or Session lasts between renewals.
+    /// How long a lease on a Mission's brief or Run lasts between renewals.
     fn mission_lease(&self) -> Duration {
         self.station.limits().scheduler.lease.0
     }
@@ -1704,16 +1704,16 @@ fn reserve_mission_start(
         return Err(conflict("Mission is already starting"));
     }
 
-    let sessions = state.sessions.lock().map_err(|_| internal_error())?;
+    let runs = state.runs.lock().map_err(|_| internal_error())?;
     let active_ids: BTreeSet<String> = starting
         .iter()
         .cloned()
-        .chain(sessions.keys().cloned())
+        .chain(runs.keys().cloned())
         .collect();
     if active_ids.len() >= state.mission_capacity() {
         return Err(capacity_error("daemon Mission capacity is full"));
     }
-    drop(sessions);
+    drop(runs);
 
     let active_missions = state
         .missions
@@ -1760,7 +1760,7 @@ fn reserve_mission_start(
     })
 }
 
-fn reserve_existing_session_resume(
+fn reserve_existing_run_resume(
     state: &DaemonState,
     mission_id: &str,
 ) -> Result<StartReservation, ApiErrorResponse> {
@@ -1786,7 +1786,7 @@ async fn scheduler_loop(base: DaemonState) {
     while !base.stopping.load(Ordering::Acquire) {
         let state = base.current();
         // Registry calls block on files or a database: they run on the blocking pool, so a
-        // slow Registry never stalls the async workers that serve Sessions.
+        // slow Registry never stalls the async workers that serve Runs.
         let check_in = Instant::now() >= next_station_check_in;
         if check_in {
             next_station_check_in = Instant::now() + state.station.limits().scheduler.check_in.0;
@@ -2117,7 +2117,7 @@ async fn schedule_recovered_once(state: &DaemonState) {
 }
 
 /// Settles a Mission the restart found working when nothing is left to resume: its brief ended
-/// or went to another Station, or its Session record is gone, ended, lost or another Station's.
+/// or went to another Station, or its Run record is gone, ended, lost or another Station's.
 /// The Mission ends here, an attempt lost at restart is handed back to the Registry under the
 /// Operation's `on_lost`, and `true` is answered. `false` leaves the Mission to be resumed.
 async fn settle_at_restart(state: &DaemonState, mission_id: &str) -> bool {
@@ -2128,15 +2128,15 @@ async fn settle_at_restart(state: &DaemonState, mission_id: &str) -> bool {
         if let Some(why) = superseded_by_registry(&worker, &mission) {
             return Some((why, false));
         }
-        let gone = match session_hold(&worker, &id) {
-            None => Some("no Session was recorded".to_owned()),
-            Some(hold) => match worker.intake.session(&hold.id) {
-                Ok(None) => Some("its Session record is gone".to_owned()),
+        let gone = match run_hold(&worker, &id) {
+            None => Some("no Run was recorded".to_owned()),
+            Some(hold) => match worker.intake.run(&hold.id) {
+                Ok(None) => Some("its Run record is gone".to_owned()),
                 Ok(Some(record))
                     if record.station != worker.station_id
-                        || matches!(record.status, SessionStatus::Ended | SessionStatus::Lost) =>
+                        || matches!(record.status, RunStatus::Ended | RunStatus::Lost) =>
                 {
-                    Some("its Session record is no longer this Station's to run".to_owned())
+                    Some("its Run record is no longer this Station's to run".to_owned())
                 }
                 _ => None,
             },
@@ -2152,9 +2152,9 @@ async fn settle_at_restart(state: &DaemonState, mission_id: &str) -> bool {
     let worker = state.clone();
     let id = mission_id.to_owned();
     if lost {
-        eprintln!("ai6: Mission {mission_id:?} lost its Session at restart: {why}");
+        eprintln!("ai6: Mission {mission_id:?} lost its Run at restart: {why}");
         let _ = tokio::task::spawn_blocking(move || {
-            recovery::give_up(&worker, &id, None, "Session lost at restart")
+            recovery::give_up(&worker, &id, None, "Run lost at restart")
         })
         .await;
         return true;
@@ -2190,22 +2190,22 @@ async fn settle_at_restart(state: &DaemonState, mission_id: &str) -> bool {
     true
 }
 
-/// The Registry lease this Station holds on a Mission's Session, if any.
-fn session_hold(state: &DaemonState, mission_id: &str) -> Option<SessionHold> {
+/// The Registry lease this Station holds on a Mission's Run, if any.
+fn run_hold(state: &DaemonState, mission_id: &str) -> Option<RunHold> {
     state
         .missions
         .lock()
         .ok()?
         .operation(mission_id)
-        .and_then(|manifest| manifest.session)
+        .and_then(|manifest| manifest.run)
 }
 
-/// Mirrors a Mission's state into its shared Session record, fenced by this Station's token,
-/// and, while it holds the Session, counts a finished or stalled state on its Agent's record.
+/// Mirrors a Mission's state into its shared Run record, fenced by this Station's token,
+/// and, while it holds the Run, counts a finished or stalled state on its Agent's record.
 ///
-/// A refused token means another Station took the Session, so this Station stops acting on it.
-fn sync_session_record(state: &DaemonState, mission_id: &str) {
-    let Some(hold) = session_hold(state, mission_id) else {
+/// A refused token means another Station took the Run, so this Station stops acting on it.
+fn sync_run_record(state: &DaemonState, mission_id: &str) {
+    let Some(hold) = run_hold(state, mission_id) else {
         return;
     };
     let Some(mission) = state
@@ -2216,74 +2216,74 @@ fn sync_session_record(state: &DaemonState, mission_id: &str) {
     else {
         return;
     };
-    let mut update = SessionUpdate::default();
-    if let Some(provider) = mission.session_ids.last() {
-        update = update.provider_session(provider.as_str());
+    let mut update = RunUpdate::default();
+    if let Some(provider) = mission.run_ids.last() {
+        update = update.provider_id(provider.as_str());
     }
     if let Some(account) = accounts::held(state, mission_id) {
         update = update.account(account);
     }
     update = update.result(
-        SessionResult::new(mission.state.as_str())
+        RunResult::new(mission.state.as_str())
             .with_reason(mission.blocked_reason.clone())
             .with_denied_tools(mission.denied_tools.len()),
     );
     update = match mission.state {
         MissionState::Queued => return,
         MissionState::Parked => update
-            .status(SessionStatus::Parked)
+            .status(RunStatus::Parked)
             .parked_until(mission.parked_until.unwrap_or_default() as f64),
-        state if is_terminal_state(state) => update.status(SessionStatus::Ended),
-        _ => update.status(SessionStatus::Active),
+        state if is_terminal_state(state) => update.status(RunStatus::Ended),
+        _ => update.status(RunStatus::Active),
     };
     match state
         .intake
-        .update_session(&hold.id, &state.station_id, hold.fence, update)
+        .update_run(&hold.id, &state.station_id, hold.fence, update)
     {
-        // Only the Station that holds the Session counts what its Agent did.
-        Ok(_) | Err(SessionError::Ended) => agents::count_mission(state, mission_id, hold.attempt),
-        Err(SessionError::Stale | SessionError::HeldBy(_)) => fence_out(state, mission_id),
-        Err(error) => eprintln!("ai6: Session record {:?} not updated: {error}", hold.id),
+        // Only the Station that holds the Run counts what its Agent did.
+        Ok(_) | Err(RunError::Ended) => agents::count_mission(state, mission_id, hold.attempt),
+        Err(RunError::Stale | RunError::HeldBy(_)) => fence_out(state, mission_id),
+        Err(error) => eprintln!("ai6: Run record {:?} not updated: {error}", hold.id),
     }
 }
 
-/// Takes (or renews) this Station's lease on the Session a Mission is about to resume.
+/// Takes (or renews) this Station's lease on the Run a Mission is about to resume.
 ///
 /// Another Station's live lease refuses the resume. A Mission whose record predates shared
-/// Session records, or whose record is gone, gets a new one.
-fn acquire_session_hold(
+/// Run records, or whose record is gone, gets a new one.
+fn acquire_run_hold(
     state: &DaemonState,
     mission: &Mission,
-    provider_session: &SessionId,
-) -> Result<SessionHold, ApiErrorResponse> {
+    provider_id: &RunId,
+) -> Result<RunHold, ApiErrorResponse> {
     let mission_id = mission.mission_id.as_str();
-    let existing = session_hold(state, mission_id);
+    let existing = run_hold(state, mission_id);
     let taken = match &existing {
         Some(hold) => state
             .intake
-            .take_session(&hold.id, &state.station_id, state.mission_lease()),
-        None => Err(SessionError::NotFound),
+            .take_run(&hold.id, &state.station_id, state.mission_lease()),
+        None => Err(RunError::NotFound),
     };
     let record = match taken {
         Ok(record) => record,
-        Err(SessionError::NotFound) => {
+        Err(RunError::NotFound) => {
             let attempt = existing.as_ref().map_or(1, |hold| hold.attempt);
-            let mut new_session = NewSession::new(new_uid(), mission_id, state.station_id.as_str())
+            let mut new_run = NewRun::new(new_uid(), mission_id, state.station_id.as_str())
                 .with_handle(current_handle(state, mission_id))
-                .with_provider_session(provider_session.as_str())
+                .with_provider_id(provider_id.as_str())
                 .with_attempt(attempt, None);
             if let Some(operation) = &mission.operation_id {
-                new_session = new_session.with_operation(operation.as_str());
+                new_run = new_run.with_operation(operation.as_str());
             }
-            if let Ok(theater) = session_theater(state, mission.operation_id.as_deref()) {
-                new_session = new_session.with_theater(theater);
+            if let Ok(theater) = run_theater(state, mission.operation_id.as_deref()) {
+                new_run = new_run.with_theater(theater);
             }
-            open_run(state, new_session).map_err(session_error)?
+            open_run(state, new_run).map_err(run_error)?
         }
-        Err(error) => return Err(session_error(error)),
+        Err(error) => return Err(run_error(error)),
     };
-    let hold = SessionHold {
-        id: record.session_id,
+    let hold = RunHold {
+        id: record.run_id,
         attempt: record.attempt,
         fence: record.fence,
     };
@@ -2314,46 +2314,46 @@ fn current_handle(state: &DaemonState, mission_id: &str) -> String {
         .unwrap_or_else(|| mission_id.to_owned())
 }
 
-/// Opens a run's Session record, as the next attempt when this one already has a record: one
+/// Opens a run's Run record, as the next attempt when this one already has a record: one
 /// another Station wrote, for a Mission this Station knows of no earlier attempt at.
-fn open_run(state: &DaemonState, mut run: NewSession) -> Result<SessionRecord, SessionError> {
+fn open_run(state: &DaemonState, mut run: NewRun) -> Result<RunRecord, RunError> {
     loop {
         match state
             .intake
-            .open_session(run.clone(), state.mission_lease())
+            .open_run(run.clone(), state.mission_lease())
         {
-            Err(SessionError::Exists) => {
-                run = run.next_attempt().ok_or(SessionError::Exists)?;
+            Err(RunError::Exists) => {
+                run = run.next_attempt().ok_or(RunError::Exists)?;
             }
             opened => return opened,
         }
     }
 }
 
-fn session_error(error: SessionError) -> ApiErrorResponse {
+fn run_error(error: RunError) -> ApiErrorResponse {
     match error {
-        SessionError::HeldBy(station) => {
-            conflict(&format!("Station {station:?} holds this Session's lease"))
+        RunError::HeldBy(station) => {
+            conflict(&format!("Station {station:?} holds this Run's lease"))
         }
-        SessionError::Stale
-        | SessionError::Ended
-        | SessionError::Exists
-        | SessionError::NotFound => {
-            conflict("the Session's Registry lease is no longer available to this Station")
+        RunError::Stale
+        | RunError::Ended
+        | RunError::Exists
+        | RunError::NotFound => {
+            conflict("the Run's Registry lease is no longer available to this Station")
         }
         error => runtime_error(error),
     }
 }
 
-/// Stops acting on a Session whose lease another Station now holds.
+/// Stops acting on a Run whose lease another Station now holds.
 ///
 /// The harness is closed but its safe house is left alone: the new holder resumes from it.
 fn fence_out(state: &DaemonState, mission_id: &str) {
     let operation = state
-        .sessions
+        .runs
         .lock()
         .ok()
-        .and_then(|mut sessions| sessions.remove(mission_id))
+        .and_then(|mut runs| runs.remove(mission_id))
         .inspect(|operation| operation.gate.close());
     credentials::release(state, mission_id);
     // The Station that took the lease re-attaches to a runner's harness, so it keeps running.
@@ -2364,10 +2364,10 @@ fn fence_out(state: &DaemonState, mission_id: &str) {
         runner.detached.store(true, Ordering::Release);
     }
     if let Some(operation) = operation
-        && let Ok(session) = operation.session.lock()
+        && let Ok(run) = operation.run.lock()
     {
-        let _ = session.interrupt();
-        let _ = session.close();
+        let _ = run.interrupt();
+        let _ = run.close();
     }
     if let Ok(mut missions) = state.missions.lock()
         && missions
@@ -2376,13 +2376,13 @@ fn fence_out(state: &DaemonState, mission_id: &str) {
     {
         let _ = missions.transition(mission_id, MissionState::Abandoned);
     }
-    eprintln!("ai6: Mission {mission_id:?} fenced out: another Station holds its Session");
+    eprintln!("ai6: Mission {mission_id:?} fenced out: another Station holds its Run");
 }
 
 /// What a Station does with the Registry at each check-in. The lease renewals come first: the
 /// rest of the round is slow on a distant Registry and must not make them late.
 fn check_in_round(state: &DaemonState) {
-    renew_session_leases(state);
+    renew_run_leases(state);
     publish_station_check_in(state);
     accounts::tend(state);
     recovery::checkpoint_due(state);
@@ -2390,8 +2390,8 @@ fn check_in_round(state: &DaemonState) {
     agents::enforce_clearances(state);
 }
 
-/// Extends the lease on every Session this Station holds, fencing out any it has lost.
-fn renew_session_leases(state: &DaemonState) {
+/// Extends the lease on every Run this Station holds, fencing out any it has lost.
+fn renew_run_leases(state: &DaemonState) {
     let held = state
         .missions
         .lock()
@@ -2401,29 +2401,29 @@ fn renew_session_leases(state: &DaemonState) {
                 .into_iter()
                 .filter(|mission| !is_terminal_state(mission.state))
                 .filter_map(|mission| {
-                    let hold = missions.operation(mission.mission_id.as_str())?.session?;
+                    let hold = missions.operation(mission.mission_id.as_str())?.run?;
                     Some((mission.mission_id.to_string(), hold))
                 })
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
     for (mission_id, hold) in held {
-        match state.intake.renew_session(
+        match state.intake.renew_run(
             &hold.id,
             &state.station_id,
             hold.fence,
             state.mission_lease(),
         ) {
-            Ok(_) | Err(SessionError::Ended) => {}
-            Err(SessionError::Stale | SessionError::HeldBy(_)) => fence_out(state, &mission_id),
-            Err(error) => eprintln!("ai6: Session lease {:?} not renewed: {error}", hold.id),
+            Ok(_) | Err(RunError::Ended) => {}
+            Err(RunError::Stale | RunError::HeldBy(_)) => fence_out(state, &mission_id),
+            Err(error) => eprintln!("ai6: Run lease {:?} not renewed: {error}", hold.id),
         }
     }
 }
 
 /// The default Station identity, stable across restarts: read from `station-id` in the
 /// AI6 state directory, or created there as `<host>-<random>` on first start. A restarted
-/// daemon must keep its identity to renew its own Session leases and Registry records.
+/// daemon must keep its identity to renew its own Run leases and Registry records.
 fn daemon_station_id(dir: &Path) -> String {
     let host = std::env::var("HOSTNAME")
         .or_else(|_| std::env::var("COMPUTERNAME"))
@@ -2460,10 +2460,10 @@ fn publish_station_check_in(state: &DaemonState) {
     let host = std::env::var("HOSTNAME")
         .or_else(|_| std::env::var("COMPUTERNAME"))
         .unwrap_or_else(|_| "localhost".to_owned());
-    let active_sessions = state
-        .sessions
+    let active_runs = state
+        .runs
         .lock()
-        .map(|sessions| sessions.len())
+        .map(|runs| runs.len())
         .unwrap_or_default();
     let mut labels = BTreeMap::from([
         ("station".to_owned(), state.station_id.clone()),
@@ -2538,7 +2538,7 @@ fn publish_station_check_in(state: &DaemonState) {
             0
         }),
     );
-    info.insert("running".to_owned(), serde_json::json!(active_sessions));
+    info.insert("running".to_owned(), serde_json::json!(active_runs));
     // Another Station placing work here leaves these out of this Station's load.
     info.insert(
         "waiting_missions".to_owned(),
@@ -2613,9 +2613,9 @@ fn publish_station_check_in(state: &DaemonState) {
     let mut theaters = state
         .transports
         .summaries(station_terminal(state, HarnessStdio::Terminal).is_ok());
-    let running = sessions_by_theater(state);
+    let running = runs_by_theater(state);
     for theater in &mut theaters {
-        theater.sessions = running.get(&theater.id).copied().unwrap_or_default();
+        theater.runs = running.get(&theater.id).copied().unwrap_or_default();
     }
     info.insert("theaters".to_owned(), serde_json::json!(theaters));
     if state.cables.cross_operation() == CrossOperation::StationGrants {
@@ -2688,18 +2688,18 @@ fn publish_station_check_in(state: &DaemonState) {
     }
 }
 
-/// How many of this Station's running Sessions are on each Theater, from their Registry
+/// How many of this Station's running Runs are on each Theater, from their Registry
 /// records.
-fn sessions_by_theater(state: &DaemonState) -> BTreeMap<String, usize> {
+fn runs_by_theater(state: &DaemonState) -> BTreeMap<String, usize> {
     let running = state
-        .sessions
+        .runs
         .lock()
-        .map(|sessions| sessions.keys().cloned().collect::<Vec<_>>())
+        .map(|runs| runs.keys().cloned().collect::<Vec<_>>())
         .unwrap_or_default();
     let mut counts = BTreeMap::new();
     for mission_id in running {
-        let theater = session_hold(state, &mission_id)
-            .and_then(|hold| state.intake.session(&hold.id).ok().flatten())
+        let theater = run_hold(state, &mission_id)
+            .and_then(|hold| state.intake.run(&hold.id).ok().flatten())
             .and_then(|record| record.theater);
         if let Some(theater) = theater {
             *counts.entry(theater).or_default() += 1;
@@ -2708,7 +2708,7 @@ fn sessions_by_theater(state: &DaemonState) -> BTreeMap<String, usize> {
     counts
 }
 
-/// The Theater an Operation's Sessions run in when that Theater is this Station's own host:
+/// The Theater an Operation's Runs run in when that Theater is this Station's own host:
 /// the Operation's `theater`, or `local` when it names none. `None` when the named Theater
 /// is not reached with local access, so this Station cannot run the Operation itself.
 fn local_theater_of(theaters: &Theaters, operation: &roster::Operation) -> Option<String> {
@@ -2719,7 +2719,7 @@ fn local_theater_of(theaters: &Theaters, operation: &roster::Operation) -> Optio
         .map(|theater| theater.id)
 }
 
-/// Where a Session runs and how, decided from the Theater's capabilities.
+/// Where a Run runs and how, decided from the Theater's capabilities.
 struct LaunchPlan {
     theater_id: String,
     mode: ExecutionMode,
@@ -2743,14 +2743,14 @@ impl LaunchPlan {
             .err()
             .map(|reason| {
                 format!(
-                    "Theater {:?} cannot host this Session: {reason}",
+                    "Theater {:?} cannot host this Run: {reason}",
                     self.theater_id
                 )
             })
     }
 }
 
-/// The Theater a Session for `operation_id` runs in on this Station and the mode it runs in,
+/// The Theater a Run for `operation_id` runs in on this Station and the mode it runs in,
 /// or why it cannot run.
 fn launch_plan(state: &DaemonState, operation_id: Option<&str>) -> Result<LaunchPlan, String> {
     launch_plan_in(state, operation_id, None)
@@ -2774,7 +2774,7 @@ fn launch_plan_in(
         .summary(&theater_id, terminal_available)
         .ok_or_else(|| format!("this Station does not reach a Theater {theater_id:?}"))?;
     let mode = placement::execution_mode(&summary)
-        .map_err(|reason| format!("Theater {theater_id:?} cannot host this Session: {reason}"))?;
+        .map_err(|reason| format!("Theater {theater_id:?} cannot host this Run: {reason}"))?;
     let own_host = state
         .transports
         .theater(&theater_id)
@@ -2851,7 +2851,7 @@ fn theater_area(
     })
 }
 
-/// A Session a runner supervises. The Station's side of it can go away without stopping it.
+/// A Run a runner supervises. The Station's side of it can go away without stopping it.
 struct RunnerAttachment {
     key: String,
     /// Set when this Station lets go: closing its side then leaves the harness running.
@@ -2895,7 +2895,7 @@ async fn route_cables(
     Ok(Some(route))
 }
 
-/// What answers a runner Session's Cable requests: this Station's endpoint for the Session.
+/// What answers a runner Run's Cable requests: this Station's endpoint for the Run.
 /// The endpoint's own address and bearer stay here; the harness is given the runner's relay.
 #[cfg(feature = "cables-mcp")]
 fn runner_cables(
@@ -2913,7 +2913,7 @@ fn runner_cables(
     ))
 }
 
-/// The tunnel that answers runner Session `key`'s Cable requests, if it has an endpoint.
+/// The tunnel that answers runner Run `key`'s Cable requests, if it has an endpoint.
 #[cfg(feature = "cables-mcp")]
 fn cable_tunnel(
     key: &str,
@@ -2965,22 +2965,22 @@ fn reopen_forward(
     Ok(url)
 }
 
-/// The Station's side of a Session on a runner; `cables` answers the harness's Cable requests
+/// The Station's side of a Run on a runner; `cables` answers the harness's Cable requests
 /// on every connection to the runner.
-fn runner_session(
+fn runner_run(
     link: Arc<RunnerLink>,
     key: &str,
-    session_id: Option<SessionId>,
-    session: Option<AcpSession>,
+    run_id: Option<RunId>,
+    run: Option<AcpRun>,
     attachment: &RunnerAttachment,
     reach: ReachWatch,
     cables: Option<Arc<dyn crate::directorates::section_00::acp::ExtensionHandler>>,
 ) -> guatiao::library::Object<dyn AgentSession> {
-    RemoteSession::drive(
+    RemoteRun::drive(
         link,
         key,
-        session,
-        session_id,
+        run,
+        run_id,
         attachment.detached.clone(),
         reach,
     )
@@ -2990,7 +2990,7 @@ fn runner_session(
 
 /// Whether the harness of Mission `mission_id` on `theater_id` reaches its Cable endpoint. Only
 /// the detached wrapper's harness can lack a way, on a transport without `forward`; placement
-/// rules that out unless the Theater says `cables = "optional"`, and then the Session starts
+/// rules that out unless the Theater says `cables = "optional"`, and then the Run starts
 /// without Cables, which is logged.
 #[cfg(feature = "cables-mcp")]
 fn cables_reachable(
@@ -3020,7 +3020,7 @@ fn cables_reachable(
     false
 }
 
-/// Tells the harness gate of a Session with a Cable endpoint how long to wait for this
+/// Tells the harness gate of a Run with a Cable endpoint how long to wait for this
 /// Station and how deep to read commands, as the `station` record says.
 #[cfg(feature = "cables-mcp")]
 fn gate_environment(state: &DaemonState, environment: &mut BTreeMap<String, String>) {
@@ -3101,8 +3101,8 @@ impl HarnessTerminal {
 }
 
 /// Notes in the Station's log the handler and terminal provider a harness started with, as
-/// `ai6: WHO: HOW the HANDLER harness in the TERMINAL terminal`. A Mission's Session record
-/// also keeps them (`SessionLaunch`); an assistant Session has no record.
+/// `ai6: WHO: HOW the HANDLER harness in the TERMINAL terminal`. A Mission's Run record
+/// also keeps them (`RunLaunch`); an assistant Run has no record.
 pub(super) fn log_harness_start(who: &str, how: &str, handler: &str, terminal: &str) {
     eprintln!("{}", harness_start_line(who, how, handler, terminal));
 }
@@ -3129,11 +3129,11 @@ fn harness_start_line(who: &str, how: &str, handler: &str, terminal: &str) -> St
     )
 }
 
-/// Records which runner Session a Mission's harness is, and the terminal the runner chose.
-fn record_runner_session(state: &DaemonState, mission_id: &str, report: &SessionReport) {
+/// Records which runner Run a Mission's harness is, and the terminal the runner chose.
+fn record_runner_run(state: &DaemonState, mission_id: &str, report: &RunReport) {
     log_harness_start(
         &format!("Mission {mission_id:?}"),
-        &format!("runner Session {:?} runs", report.key),
+        &format!("runner Run {:?} runs", report.key),
         &report.handler,
         &report.terminal,
     );
@@ -3144,7 +3144,7 @@ fn record_runner_session(state: &DaemonState, mission_id: &str, report: &Session
         manifest.runner = Some(report.key.clone());
         manifest.terminal_provider = report.terminal.clone();
         if let Err(error) = missions.set_operation(mission_id, manifest) {
-            eprintln!("ai6: Mission {mission_id:?} runner Session not recorded: {error:?}");
+            eprintln!("ai6: Mission {mission_id:?} runner Run not recorded: {error:?}");
         }
     }
 }
@@ -3215,8 +3215,8 @@ fn requested_environment(mut environment: BTreeMap<String, String>) -> BTreeMap<
     environment
 }
 
-/// The Theater a Session for `operation_id` runs in on this Station, or why it cannot.
-fn session_theater(state: &DaemonState, operation_id: Option<&str>) -> Result<String, String> {
+/// The Theater a Run for `operation_id` runs in on this Station, or why it cannot.
+fn run_theater(state: &DaemonState, operation_id: Option<&str>) -> Result<String, String> {
     launch_plan(state, operation_id).map(|plan| plan.theater_id)
 }
 
@@ -3272,15 +3272,15 @@ fn has_assignment_capacity(state: &DaemonState, operation_id: &str, agent_id: &s
     let Ok(starting) = state.starting.lock() else {
         return false;
     };
-    let Ok(sessions) = state.sessions.lock() else {
+    let Ok(runs) = state.runs.lock() else {
         return false;
     };
     let active_ids: BTreeSet<String> = starting
         .iter()
         .cloned()
-        .chain(sessions.keys().cloned())
+        .chain(runs.keys().cloned())
         .collect();
-    drop(sessions);
+    drop(runs);
     drop(starting);
 
     let Ok(operation) = state.roster.operation(operation_id) else {
@@ -3364,7 +3364,7 @@ fn has_assignment_capacity(state: &DaemonState, operation_id: &str, agent_id: &s
 }
 
 /// Chooses the Station and Agent for a brief with M's placement, judged on what each Station
-/// published: its capacity and running Sessions, handlers, Theaters and resources. `agent` is
+/// published: its capacity and running Runs, handlers, Theaters and resources. `agent` is
 /// the Agent the brief names; without one, each Station is offered the posted Agents its own
 /// handlers can run, quarantined and retired ones left out. The best choice whose Agent and Operation
 /// still have room is taken; an error, why nothing can take it, leaves the brief queued.
@@ -3432,7 +3432,7 @@ fn place_request(
 }
 
 /// How many of `leases` take up a place at `record`'s Station. A Mission whose harness is not
-/// running (verifying, held, or blocked with its Session closed) waits for a person, not for a
+/// running (verifying, held, or blocked with its Run closed) waits for a person, not for a
 /// place, so its lease does not count: this Station knows its own, and another Station names
 /// its own in its check-in (`waiting_missions`).
 fn station_load(state: &DaemonState, leases: &[Lease], record: &StationRecord) -> usize {
@@ -3467,13 +3467,13 @@ fn station_load(state: &DaemonState, leases: &[Lease], record: &StationRecord) -
 }
 
 /// This Station's Missions that wait for a person with no harness running: verifying, held, or
-/// blocked with its Session closed. None when its state cannot be read.
+/// blocked with its Run closed. None when its state cannot be read.
 fn waiting_missions(state: &DaemonState) -> Option<BTreeSet<String>> {
-    let live: BTreeSet<String> = match (state.starting.lock(), state.sessions.lock()) {
-        (Ok(starting), Ok(sessions)) => starting
+    let live: BTreeSet<String> = match (state.starting.lock(), state.runs.lock()) {
+        (Ok(starting), Ok(runs)) => starting
             .iter()
             .cloned()
-            .chain(sessions.keys().cloned())
+            .chain(runs.keys().cloned())
             .collect(),
         _ => return None,
     };
@@ -3709,7 +3709,7 @@ fn available_handlers(state: &DaemonState) -> Vec<String> {
         .collect()
 }
 
-/// The part of a Session's start-up context that holds for its whole life: the Agent's own
+/// The part of a Run's start-up context that holds for its whole life: the Agent's own
 /// context, then its role's purpose and policy. A resume passes it again
 /// ([`AgentResume::initial_context`]).
 fn standing_context(agent_context: &str, role: Option<&AgentRole>) -> Vec<String> {
@@ -3841,7 +3841,7 @@ fn create_intake_mission(
     missions
         .expose(
             mission_id.as_str(),
-            &medical::brief_exposure(brief, &state.intake.limits().sessions),
+            &medical::brief_exposure(brief, &state.intake.limits().runs),
         )
         .map_err(|error| format!("could not record the Mission's exposure: {error:?}"))?;
     let named = naming.is_some();
@@ -3951,7 +3951,7 @@ fn terminal_outcome(state: &DaemonState, mission_id: &str, mission: &Mission) ->
     let mut outcome = serde_json::json!({
         "state": format!("{:?}", mission.state).to_lowercase(),
         "mission_id": mission.mission_id.as_str(),
-        "session_ids": mission.session_ids,
+        "run_ids": mission.run_ids,
         "agent": mission.agent_id,
         "branch": mission.safe_house.as_ref().map(|safe_house| safe_house.branch.clone()),
         "denied_tools": mission.denied_tools,
@@ -3968,13 +3968,13 @@ fn terminal_outcome(state: &DaemonState, mission_id: &str, mission: &Mission) ->
         }
         (None, None) => {}
     }
-    if let Some(hold) = session_hold(state, mission_id) {
+    if let Some(hold) = run_hold(state, mission_id) {
         if let Ok(Some(report)) = state.intake.final_report(&hold.id) {
             outcome["final_report"] = serde_json::json!(report.text);
         }
         if let Ok(Some(verdict)) = state
             .intake
-            .session(&hold.id)
+            .run(&hold.id)
             .map(|record| record.and_then(|record| record.verdict))
         {
             outcome["verdict"] = serde_json::json!(verdict);
@@ -4238,7 +4238,7 @@ fn queue_entries(state: &DaemonState) -> Vec<serde_json::Value> {
 
 /// The Missions of this Station's book that failed before any harness started, as its check-in
 /// lists them, at most as many as `[registry.limits.briefs] records` allows: the Registry's
-/// brief for each is filed failed and the app has no Session to show them by.
+/// brief for each is filed failed and the app has no Run to show them by.
 fn failed_start_entries(state: &DaemonState) -> Vec<serde_json::Value> {
     let Ok(missions) = state.missions.lock() else {
         return Vec::new();
@@ -4250,7 +4250,7 @@ fn failed_start_entries(state: &DaemonState) -> Vec<serde_json::Value> {
         .rev()
         .filter(|mission| {
             mission.state == MissionState::Failed
-                && mission.session_ids.is_empty()
+                && mission.run_ids.is_empty()
                 && mission.failure.is_some()
         })
         .filter_map(|mission| {
@@ -4369,7 +4369,7 @@ async fn fail_unstartable(state: &DaemonState, mission_id: &str, reason: &str) {
     if let Ok(mut retries) = state.retry_after.lock() {
         retries.remove(mission_id);
     }
-    sync_session_record(state, mission_id);
+    sync_run_record(state, mission_id);
     publish_lifecycle(state, mission_id, MissionState::Failed);
     // The failed start already finished the safe house it made.
     let _ = finalize_mission_resources(state, mission_id, false, true).await;
@@ -4384,15 +4384,15 @@ struct AgentOperation {
     effort: Option<String>,
     cover: Option<CoverAudit>,
     safe_house: Option<SafeHouse>,
-    session: Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
+    run: Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
     watchdog: Watchdog,
     exposure: ExposureGate,
-    gate: SessionGate,
-    session_id: Option<SessionId>,
+    gate: RunGate,
+    run_id: Option<RunId>,
     /// The clearance the harness was launched at, which fixed its tools. One taken up from a
     /// runner holds what its launch gave it, or `00` when no record says.
     clearance: String,
-    /// Whether `session_id` is the Session this harness was asked to resume, which what its stream
+    /// Whether `run_id` is the Run this harness was asked to resume, which what its stream
     /// reports must match.
     resumed: bool,
     /// Set when a runner on the Theater supervises the harness.
@@ -4404,37 +4404,37 @@ struct AgentOperation {
     #[cfg(feature = "cables-mcp")]
     _theater_mcp: Option<theater_mcp::Endpoint>,
     #[cfg(feature = "publisher")]
-    telemetry: Option<Arc<SessionTelemetry>>,
+    telemetry: Option<Arc<RunTelemetry>>,
 }
 
-/// Coordinates operator requests with a Session's event pump.
+/// Coordinates operator requests with a Run's event pump.
 ///
-/// The pump holds the Session lock for up to a second per poll and takes it again at once,
+/// The pump holds the Run lock for up to a second per poll and takes it again at once,
 /// and `std::sync::Mutex` is not fair: without a turn, an operator message can wait for as
-/// long as the Session stays quiet.
+/// long as the Run stays quiet.
 #[derive(Clone, Default)]
-struct SessionGate {
+struct RunGate {
     waiting: Arc<AtomicUsize>,
     closing: Arc<AtomicBool>,
 }
 
-impl SessionGate {
-    /// Takes the Session lock for an operator request, ahead of the pump's next poll.
-    fn lock<'a, T: ?Sized>(&self, session: &'a Mutex<T>) -> LockResult<MutexGuard<'a, T>> {
+impl RunGate {
+    /// Takes the Run lock for an operator request, ahead of the pump's next poll.
+    fn lock<'a, T: ?Sized>(&self, run: &'a Mutex<T>) -> LockResult<MutexGuard<'a, T>> {
         self.waiting.fetch_add(1, Ordering::AcqRel);
-        let guard = session.lock();
+        let guard = run.lock();
         self.waiting.fetch_sub(1, Ordering::AcqRel);
         guard
     }
 
-    /// Waits until no operator request is queued for the Session lock.
+    /// Waits until no operator request is queued for the Run lock.
     fn yield_to_operator(&self) {
         while self.waiting.load(Ordering::Acquire) > 0 {
             std::thread::sleep(Duration::from_millis(1));
         }
     }
 
-    /// Marks the Session as ending, before its Mission's final transition.
+    /// Marks the Run as ending, before its Mission's final transition.
     fn close(&self) {
         self.closing.store(true, Ordering::Release);
     }
@@ -4461,8 +4461,8 @@ struct TransitionMission {
 }
 
 #[derive(Debug, Deserialize)]
-struct AttachSession {
-    session_id: SessionId,
+struct AttachRun {
+    run_id: RunId,
 }
 
 #[derive(Debug, Deserialize)]
@@ -4508,7 +4508,7 @@ struct CablePeer {
     operation: String,
     theater: Option<String>,
     station: String,
-    session_id: Option<String>,
+    run_id: Option<String>,
     mission_id: Option<String>,
 }
 
@@ -4889,7 +4889,7 @@ async fn transition_mission(
             .map_err(mission_error)?;
         (mission, was_final)
     };
-    sync_session_record(&state, &mission_id);
+    sync_run_record(&state, &mission_id);
     publish_lifecycle(&state, &mission_id, mission.state);
     if matches!(
         mission.state,
@@ -4907,14 +4907,14 @@ async fn transition_mission(
     Ok(Json(mission))
 }
 
-async fn attach_session(
+async fn attach_run(
     State(state): State<DaemonState>,
     axum::extract::Path(mission_id): axum::extract::Path<String>,
-    Json(request): Json<AttachSession>,
+    Json(request): Json<AttachRun>,
 ) -> Result<Json<Mission>, ApiErrorResponse> {
     let mut missions = state.missions.lock().map_err(|_| internal_error())?;
     missions
-        .attach_session(&mission_id, request.session_id)
+        .attach_run(&mission_id, request.run_id)
         .map(Json)
         .map_err(mission_error)
 }
@@ -5004,7 +5004,7 @@ async fn start_mission(
             "a Chief of Staff review runs only on this Station's own host",
         ));
     }
-    // Before anything is opened for the Session: a Mission that cannot have what it is issued
+    // Before anything is opened for the Run: a Mission that cannot have what it is issued
     // waits with the reason, and an operator's fix lets it go on.
     let overlay_commands = !review
         && !review::in_plan_stage(&state, &mission)
@@ -5017,7 +5017,7 @@ async fn start_mission(
             agent.id.clone(),
             mission.operation_id.clone(),
         );
-        let worker_environment = credentials::session_environment(&state, &agent.id, &agent.env);
+        let worker_environment = credentials::run_environment(&state, &agent.id, &agent.env);
         let (worker_theater, here, harness_here) = (
             plan.theater_id.clone(),
             plan.mode == ExecutionMode::Field && plan.own_host,
@@ -5160,7 +5160,7 @@ async fn start_mission(
         mission
             .operation_id
             .as_ref()
-            .map(|operation_id| publisher.session(operation_id.clone(), mission.mission_id.clone()))
+            .map(|operation_id| publisher.run(operation_id.clone(), mission.mission_id.clone()))
     });
     let watchdog = Watchdog::with_config(agent.limits.apply_to(&state.watchdog));
     let in_process = match handler {
@@ -5178,14 +5178,14 @@ async fn start_mission(
     let remote_hands = plan.mode == ExecutionMode::RemoteHands;
     let (area_theater, area_root) = (theater_id.clone(), plan.root.clone());
     // An earlier attempt another Station recorded, when this Station holds none of its own.
-    let earlier = match session_hold(&state, &mission_id) {
+    let earlier = match run_hold(&state, &mission_id) {
         Some(_) => None,
         None => recovery::predecessor(&state, &mission.mission_id),
     };
     // A lost attempt's checkpoint, when there is no safe house here to continue in.
     let checkpoint = earlier
         .as_ref()
-        .filter(|record| record.status == SessionStatus::Lost && mission.safe_house.is_none())
+        .filter(|record| record.status == RunStatus::Lost && mission.safe_house.is_none())
         .and_then(|record| record.checkpoint.clone());
     let area_checkpoint = checkpoint.clone();
     let area_state = state.station.state_dir();
@@ -5237,7 +5237,7 @@ async fn start_mission(
     if plan_stage {
         initial_context.push(review::PLAN_CONTEXT.to_owned());
     }
-    if session_hold(&state, &mission_id).is_some() {
+    if run_hold(&state, &mission_id).is_some() {
         initial_context.push(
             "This Mission continues an earlier attempt that stopped before finishing. \
              Its work is in your working directory: inspect it, then continue the task."
@@ -5245,7 +5245,7 @@ async fn start_mission(
         );
     } else if let Some(lost) = earlier
         .as_ref()
-        .filter(|record| record.status == SessionStatus::Lost)
+        .filter(|record| record.status == RunStatus::Lost)
     {
         let isolated = area.safe_house.as_ref().filter(|house| house.is_isolated());
         // Only a provider with history starts from a checkpoint.
@@ -5269,7 +5269,7 @@ async fn start_mission(
         initial_context.push(recovery::hand_off(lost, work));
     }
     initial_context.extend(request.initial_context);
-    let configured = credentials::session_environment(&state, &agent.id, &agent.env);
+    let configured = credentials::run_environment(&state, &agent.id, &agent.env);
     let mut environment = if review {
         vetting::review_environment(&configured)
     } else {
@@ -5283,7 +5283,7 @@ async fn start_mission(
         environment.extend(requested_environment(request.environment));
     }
     // Before what is the Station's to set, which an overlay's environment does not override.
-    let mut issued_overlays = crate::directorates::section_00::agent::SessionOverlays::default();
+    let mut issued_overlays = crate::directorates::section_00::agent::RunOverlays::default();
     let mut issued_digests = Vec::new();
     let mut theater_environment = None;
     if let Some((issued, fit)) = issued {
@@ -5297,7 +5297,7 @@ async fn start_mission(
         let delivered = tokio::task::spawn_blocking(move || {
             issued.deliver(
                 &fit,
-                crate::station::overlays::SessionFacts {
+                crate::station::overlays::RunFacts {
                     environment: worker_environment,
                     handler: &worker_handler,
                     working_directory: &worker_directory,
@@ -5475,8 +5475,8 @@ async fn start_mission(
         return Err(start_failure(&state, &mission_id, error, area.safe_house.clone()).await);
     }
     // A Mission started again (a later attempt) keeps the lease of the attempt it replaces
-    // until the new Session is recorded.
-    let previous_hold = session_hold(&state, &mission_id);
+    // until the new Run is recorded.
+    let previous_hold = run_hold(&state, &mission_id);
     // Recorded before the harness starts, so a Station that dies while it starts can find it.
     let runner_key = runner
         .as_ref()
@@ -5499,7 +5499,7 @@ async fn start_mission(
         station_id: Some(state.station_id.clone()),
         theater_id: Some(theater_id.clone()),
         mode: plan.mode,
-        session: previous_hold.clone(),
+        run: previous_hold.clone(),
         runner: runner_key.clone(),
         clearance: Some(launch_clearance.clone()),
         overlays: issued_digests,
@@ -5551,7 +5551,7 @@ async fn start_mission(
         .await;
         (project.load, project.mcp)
     };
-    // A standing Sleeper's window may take up the provider Session its last attempt left.
+    // A standing Sleeper's window may take up the provider Run its last attempt left.
     let window_run = standing::of(&state, mission_id.as_str());
     let resume_from = window_run.as_ref().and_then(|run| {
         standing::resume_from(
@@ -5566,7 +5566,7 @@ async fn start_mission(
             ),
         )
     });
-    // The Cables that waited for this Agent while it had no Session, now that it has one that
+    // The Cables that waited for this Agent while it had no Run, now that it has one that
     // can answer them.
     #[cfg(feature = "cables-mcp")]
     if cables_mcp.is_some()
@@ -5601,7 +5601,7 @@ async fn start_mission(
     };
     let resuming = resume_from.is_some();
     let launch = match resume_from {
-        Some(session_id) => Launch::Resume(standing::resume_request(start_request, session_id)),
+        Some(run_id) => Launch::Resume(standing::resume_request(start_request, run_id)),
         None => Launch::Start(start_request),
     };
     let attachment = runner_key.clone().map(|key| RunnerAttachment {
@@ -5610,10 +5610,10 @@ async fn start_mission(
     });
     let reach = recovery::reach_watch(&state, mission.operation_id.as_deref());
     // The lost attempt's harness, if its runner kept it, must not work beside this one.
-    let stale_runner_session = earlier
+    let stale_runner_run = earlier
         .as_ref()
         .filter(|record| {
-            record.status == SessionStatus::Lost && record.theater.as_deref() == Some(&theater_id)
+            record.status == RunStatus::Lost && record.theater.as_deref() == Some(&theater_id)
         })
         .and_then(|record| record.launch.as_ref()?.runner.clone());
     #[cfg(feature = "publisher")]
@@ -5664,7 +5664,7 @@ async fn start_mission(
                 ),
             );
             let key = attachment.key.clone();
-            let session_attachment = RunnerAttachment {
+            let run_attachment = RunnerAttachment {
                 key: key.clone(),
                 detached: attachment.detached.clone(),
             };
@@ -5676,24 +5676,24 @@ async fn start_mission(
             let worker_reach = reach.clone();
             tokio::task::spawn_blocking(move || {
                 link.ensure()?;
-                if let Some(stale) = stale_runner_session {
-                    let _ = link.close_session(&stale);
+                if let Some(stale) = stale_runner_run {
+                    let _ = link.close_run(&stale);
                 }
                 let (report, started) = link.launch(&key, &handler, launch, cables.clone())?;
-                record_runner_session(&worker_state, &worker_mission, &report);
-                Ok(runner_session(
+                record_runner_run(&worker_state, &worker_mission, &report);
+                Ok(runner_run(
                     link,
                     &key,
-                    report.session_id,
+                    report.run_id,
                     Some(started),
-                    &session_attachment,
+                    &run_attachment,
                     worker_reach,
                     cables,
                 ))
             })
             .await
         }
-        // A Session runs in this process or on a runner; nothing else builds a launch.
+        // A Run runs in this process or on a runner; nothing else builds a launch.
         _ => return Err(internal_error()),
     };
     let started = match started {
@@ -5708,8 +5708,8 @@ async fn start_mission(
             .await);
         }
     };
-    let session = match started {
-        Ok(session) => session,
+    let run = match started {
+        Ok(run) => run,
         Err(error) => {
             if resuming {
                 standing::resume_refused(&state, &mission_id, &error);
@@ -5726,30 +5726,30 @@ async fn start_mission(
         );
     }
     let identity = tokio::task::spawn_blocking(move || {
-        let session_id = provider_session_id(session.session_id());
-        (session, session_id)
+        let run_id = provider_id(run.session_id());
+        (run, run_id)
     })
     .await;
-    let (session, session_id) = match identity {
+    let (run, run_id) = match identity {
         Ok(identity) => identity,
         Err(error) => {
             return Err(start_failure(
                 &state,
                 &mission_id,
-                format!("provider Session identity worker failed: {error}"),
+                format!("provider Run identity worker failed: {error}"),
                 area.safe_house.clone(),
             )
             .await);
         }
     };
-    let session_id = match session_id {
-        Ok(session_id) => session_id,
+    let run_id = match run_id {
+        Ok(run_id) => run_id,
         Err(error) => {
-            return Err(start_failure_with_session(
+            return Err(start_failure_with_run(
                 &state,
                 &mission_id,
                 error,
-                session,
+                run,
                 area.safe_house.clone(),
             )
             .await);
@@ -5757,13 +5757,13 @@ async fn start_mission(
     };
     #[cfg(feature = "cables-mcp")]
     if let Some(endpoint) = &mut cables_mcp
-        && endpoint.bind_session(session_id.as_ref()).is_err()
+        && endpoint.bind_run(run_id.as_ref()).is_err()
     {
-        return Err(start_failure_with_session(
+        return Err(start_failure_with_run(
             &state,
             &mission_id,
-            "Cable Session binding failed".to_owned(),
-            session,
+            "Cable Run binding failed".to_owned(),
+            run,
             area.safe_house.clone(),
         )
         .await);
@@ -5775,26 +5775,26 @@ async fn start_mission(
         .or_else(|| {
             earlier
                 .as_ref()
-                .map(|record| (record.attempt, record.session_id.clone()))
+                .map(|record| (record.attempt, record.run_id.clone()))
         })
         .map_or((1, None), |(attempt, id)| (attempt + 1, Some(id)));
-    let mut new_session =
-        NewSession::new(new_uid(), mission_id.as_str(), state.station_id.as_str())
+    let mut new_run =
+        NewRun::new(new_uid(), mission_id.as_str(), state.station_id.as_str())
             .with_handle(current_handle(&state, mission_id.as_str()))
             .with_theater(theater_id.as_str())
             .with_attempt(attempt, predecessor)
             .with_exposure(exposure.exposures());
     if let Some(run) = &window_run {
-        new_session = new_session.with_window(run.window.as_str());
+        new_run = new_run.with_window(run.window.as_str());
     }
     if let Some(account) = accounts::held(&state, &mission_id) {
-        new_session = new_session.with_account(account);
+        new_run = new_run.with_account(account);
     }
     if let Some(operation) = &mission.operation_id {
-        new_session = new_session.with_operation(operation.as_str());
+        new_run = new_run.with_operation(operation.as_str());
     }
-    if let Some(provider) = &session_id {
-        new_session = new_session.with_provider_session(provider.as_str());
+    if let Some(provider) = &run_id {
+        new_run = new_run.with_provider_id(provider.as_str());
     }
     // Read back after the runner reported its terminal, so another Station re-attaches to
     // exactly what runs.
@@ -5804,21 +5804,21 @@ async fn start_mission(
         .ok()
         .and_then(|missions| missions.operation(&mission_id))
     {
-        new_session =
-            new_session.with_launch(recovery::launch_of(&manifest, mission.agent_id.as_deref()));
+        new_run =
+            new_run.with_launch(recovery::launch_of(&manifest, mission.agent_id.as_deref()));
     }
-    let hold = match open_run(&state, new_session) {
-        Ok(record) => SessionHold {
-            id: record.session_id,
+    let hold = match open_run(&state, new_run) {
+        Ok(record) => RunHold {
+            id: record.run_id,
             attempt: record.attempt,
             fence: record.fence,
         },
         Err(error) => {
-            return Err(start_failure_with_session(
+            return Err(start_failure_with_run(
                 &state,
                 &mission_id,
-                format!("Session record could not be written to the Registry: {error}"),
-                session,
+                format!("Run record could not be written to the Registry: {error}"),
+                run,
                 area.safe_house.clone(),
             )
             .await);
@@ -5839,10 +5839,10 @@ async fn start_mission(
         (|| {
             missions.set_hold(&mission_id, hold.clone())?;
             let working = missions.transition(&mission_id, MissionState::Working)?;
-            // A resumed provider Session is one the Mission already has.
-            let working = match session_id.clone() {
-                Some(session_id) if !working.session_ids.contains(&session_id) => {
-                    missions.attach_session(&mission_id, session_id)?
+            // A resumed provider Run is one the Mission already has.
+            let working = match run_id.clone() {
+                Some(run_id) if !working.run_ids.contains(&run_id) => {
+                    missions.attach_run(&mission_id, run_id)?
                 }
                 _ => working,
             };
@@ -5856,31 +5856,31 @@ async fn start_mission(
     let working = match working {
         Ok(working) => working,
         Err(error) => {
-            let _ = state.intake.update_session(
+            let _ = state.intake.update_run(
                 &hold.id,
                 &state.station_id,
                 hold.fence,
-                SessionUpdate::default().status(SessionStatus::Ended),
+                RunUpdate::default().status(RunStatus::Ended),
             );
-            return Err(start_failure_with_session(
+            return Err(start_failure_with_run(
                 &state,
                 &mission_id,
                 format!("Mission transition failed: {error:?}"),
-                session,
+                run,
                 area.safe_house.clone(),
             )
             .await);
         }
     };
-    let session = Arc::new(Mutex::new(session));
+    let run = Arc::new(Mutex::new(run));
     #[cfg(feature = "publisher")]
     if !raw_input && let Some(telemetry) = &telemetry {
         telemetry.attach_terminal_target(Arc::new(crate::station::acp::MessageInput::new(
-            session.clone(),
+            run.clone(),
             typed_interrupt(&state, &mission_id),
         )));
     }
-    state.sessions.lock().map_err(|_| internal_error())?.insert(
+    state.runs.lock().map_err(|_| internal_error())?.insert(
         mission_id.clone(),
         AgentOperation {
             handler_provider: handler_provider.clone(),
@@ -5891,11 +5891,11 @@ async fn start_mission(
             effort,
             cover: cover_audit,
             safe_house: area.safe_house,
-            session: session.clone(),
+            run: run.clone(),
             watchdog,
             exposure,
-            gate: SessionGate::default(),
-            session_id: session_id.clone(),
+            gate: RunGate::default(),
+            run_id: run_id.clone(),
             clearance: launch_clearance.clone(),
             resumed: false,
             runner: attachment,
@@ -5910,24 +5910,24 @@ async fn start_mission(
     );
     #[cfg(feature = "publisher")]
     if let Some(telemetry) = &telemetry {
-        if let Some(session_id) = session_id.clone() {
-            telemetry.bind(session_id);
+        if let Some(run_id) = run_id.clone() {
+            telemetry.bind(run_id);
         }
         telemetry.publish_lifecycle("working");
     }
-    spawn_event_pump(state.clone(), mission_id, session);
+    spawn_event_pump(state.clone(), mission_id, run);
     Ok((
         StatusCode::ACCEPTED,
         Json(StartedMission {
             mission: working,
             handler_provider,
             terminal_provider,
-            provider_session_id: session_id,
+            provider_id: run_id,
         }),
     ))
 }
 
-/// The route `mission`'s resume runs on, for a routed `agent`: the one its Session ran on, while
+/// The route `mission`'s resume runs on, for a routed `agent`: the one its Run ran on, while
 /// its harness is still held here or by a runner; otherwise by the resume rule
 /// ([`routes::for_resume`]), which may leave it on the route with room, move it, queue a new
 /// attempt or leave it waiting. The last two refuse this resume with the reason.
@@ -5957,7 +5957,7 @@ fn resume_route(
         manifest.pool.clone(),
     );
     let active = state
-        .sessions
+        .runs
         .lock()
         .map_err(|_| internal_error())?
         .contains_key(mission_id);
@@ -5991,11 +5991,11 @@ fn resume_route(
     };
     let last_account = state
         .intake
-        .latest_session(mission_id)
+        .latest_run(mission_id)
         .ok()
         .flatten()
         .and_then(|record| record.account);
-    let carried = accounts::carries_session(state, last_account.as_ref());
+    let carried = accounts::carries_run(state, last_account.as_ref());
     match routes::for_resume(state, operation, agent, &earlier, carried, &place) {
         routes::ResumeOn::Stay(on) => Ok(Some(on)),
         routes::ResumeOn::Move(on) => {
@@ -6046,12 +6046,12 @@ async fn resume_mission(
         None => unrouted_agent.clone(),
     };
     let _reservation = if state
-        .sessions
+        .runs
         .lock()
         .map_err(|_| internal_error())?
         .contains_key(&mission_id)
     {
-        reserve_existing_session_resume(&state, &mission_id)?
+        reserve_existing_run_resume(&state, &mission_id)?
     } else {
         reserve_mission_start(&state, &mission, &resume_agent)?
     };
@@ -6064,12 +6064,12 @@ async fn resume_mission(
         effort,
         cover_audit,
         safe_house,
-        old_session,
-        stored_session_id,
+        old_run,
+        stored_run_id,
     ) = {
         let active = {
-            let sessions = state.sessions.lock().map_err(|_| internal_error())?;
-            sessions.get(&mission_id).map(|operation| {
+            let runs = state.runs.lock().map_err(|_| internal_error())?;
+            runs.get(&mission_id).map(|operation| {
                 (
                     operation.handler_provider.clone(),
                     operation.terminal_provider.clone(),
@@ -6079,8 +6079,8 @@ async fn resume_mission(
                     operation.effort.clone(),
                     operation.cover.clone(),
                     operation.safe_house.clone(),
-                    Some(operation.session.clone()),
-                    operation.session_id.clone(),
+                    Some(operation.run.clone()),
+                    operation.run_id.clone(),
                 )
             })
         };
@@ -6100,7 +6100,7 @@ async fn resume_mission(
                 operation.handler_provider.clone(),
                 operation.terminal_provider.clone(),
                 operation.working_directory.clone(),
-                credentials::session_environment(&state, &resume_agent.id, &resume_agent.env),
+                credentials::run_environment(&state, &resume_agent.id, &resume_agent.env),
                 operation.model,
                 operation.effort,
                 operation.cover,
@@ -6180,8 +6180,8 @@ async fn resume_mission(
         }
         ExecutionMode::RemoteHands => None,
     };
-    // A Session its runner still supervises, or still has unread events of, is re-attached
-    // instead of started again. A parked Mission's Session ended at its limit, and one stopped for
+    // A Run its runner still supervises, or still has unread events of, is re-attached
+    // instead of started again. A parked Mission's Run ended at its limit, and one stopped for
     // its clearance must start again under the new one.
     let stopped_for_clearance = mission.blocked_reason.as_deref() == Some(CLEARANCE_REASON);
     let reattach = match (
@@ -6189,7 +6189,7 @@ async fn resume_mission(
         resume_manifest
             .as_ref()
             .and_then(|manifest| manifest.runner.clone()),
-        &old_session,
+        &old_run,
     ) {
         (Some(link), Some(key), None)
             if mission.state != MissionState::Parked && !stopped_for_clearance =>
@@ -6220,7 +6220,7 @@ async fn resume_mission(
         resume_agent.clearance.clone()
     };
     // A harness started again is given its overlays again; one still running keeps what it has.
-    let mut resumed_overlays = crate::directorates::section_00::agent::SessionOverlays::default();
+    let mut resumed_overlays = crate::directorates::section_00::agent::RunOverlays::default();
     let mut resumed_digests = None;
     let mut resumed_context = None;
     let mut resumed_theater_environment = None;
@@ -6262,7 +6262,7 @@ async fn resume_mission(
                 .map(|(issued, fit)| {
                     issued.deliver(
                         &fit,
-                        crate::station::overlays::SessionFacts {
+                        crate::station::overlays::RunFacts {
                             environment: worker_environment,
                             handler: &worker_handler,
                             working_directory: &worker_directory,
@@ -6312,20 +6312,20 @@ async fn resume_mission(
             .map_err(configuration_error)?;
         }
     }
-    let session_id = stored_session_id
-        .or_else(|| mission.session_ids.last().cloned())
+    let run_id = stored_run_id
+        .or_else(|| mission.run_ids.last().cloned())
         .or_else(|| {
             reattach
                 .as_ref()
-                .and_then(|report| report.session_id.clone())
+                .and_then(|report| report.run_id.clone())
         })
-        .ok_or_else(|| conflict("Provider has not issued a Session ID yet"))?;
-    acquire_session_hold(&state, &mission, &session_id)?;
+        .ok_or_else(|| conflict("Provider has not issued a Run ID yet"))?;
+    acquire_run_hold(&state, &mission, &run_id)?;
     let exposure = medical::open_gate(&state, &mission);
     #[cfg(feature = "publisher")]
     let telemetry = state.publisher.as_ref().and_then(|publisher| {
         mission.operation_id.as_ref().map(|operation_id| {
-            let telemetry = publisher.session(operation_id.clone(), mission.mission_id.clone());
+            let telemetry = publisher.run(operation_id.clone(), mission.mission_id.clone());
             telemetry.set_mission_publication(MissionPublication {
                 name: mission.name.clone(),
                 prompt: mission.prompt.clone(),
@@ -6338,11 +6338,11 @@ async fn resume_mission(
                 effort: effort.clone(),
                 environment_keys: environment.keys().cloned().collect(),
                 station_id: Some(state.station_id.clone()),
-                theater_id: session_theater(&state, Some(operation_id)).ok(),
+                theater_id: run_theater(&state, Some(operation_id)).ok(),
                 mode: resume_mode,
                 provenance: mission.provenance.clone(),
             });
-            telemetry.bind(session_id.clone());
+            telemetry.bind(run_id.clone());
             telemetry
         })
     });
@@ -6419,8 +6419,8 @@ async fn resume_mission(
         endpoint.add_environment(&mut environment);
         gate_environment(&state, &mut environment);
         endpoint
-            .bind_session(Some(&session_id))
-            .map_err(|_| runtime_error("Cable Session binding failed"))?;
+            .bind_run(Some(&run_id))
+            .map_err(|_| runtime_error("Cable Run binding failed"))?;
         Some(endpoint)
     } else {
         None
@@ -6477,10 +6477,10 @@ async fn resume_mission(
         .as_ref()
         .and_then(|_| runner_cables(&state, cables_mcp.as_ref(), &mut environment));
     // A harness a runner still supervises keeps the environment it started with, and the
-    // account its Session record names.
+    // account its Run record names.
     if reattach.is_some() {
-        let record = session_hold(&state, &mission_id)
-            .and_then(|hold| state.intake.session(&hold.id).ok().flatten());
+        let record = run_hold(&state, &mission_id)
+            .and_then(|hold| state.intake.run(&hold.id).ok().flatten());
         if let Some(record) = record {
             accounts::reattach(&state, &mission, &record);
         }
@@ -6520,7 +6520,7 @@ async fn resume_mission(
     };
     let resume_request = AgentResume {
         mission_id: mission.mission_id.clone(),
-        session_id: session_id.clone(),
+        run_id: run_id.clone(),
         message: message.clone(),
         working_directory: working_directory.clone(),
         // What the Agent works at now, not at the start: a lowered clearance reaches the harness
@@ -6595,12 +6595,12 @@ async fn resume_mission(
             let terminal_handle =
                 TerminalBridge::agent_terminal_with_watchdog(terminal, watchdog.clone());
             tokio::task::spawn_blocking(move || {
-                let expected_session_id = resume_request.session_id.clone();
+                let expected_run_id = resume_request.run_id.clone();
                 let resumed = crate::station::acp::resume(handler, terminal_handle, resume_request)
                     .map_err(|error| error.to_string())?;
                 let reported =
-                    provider_session_id(resumed.session_id()).map_err(|error| error.to_string())?;
-                if another_session(reported.as_ref(), &expected_session_id) {
+                    provider_id(resumed.session_id()).map_err(|error| error.to_string())?;
+                if another_run(reported.as_ref(), &expected_run_id) {
                     let _ = resumed.close();
                     return Err(RESUME_NOT_RETAINED.to_owned());
                 }
@@ -6617,7 +6617,7 @@ async fn resume_mission(
                 ),
             );
             let key = attachment.key.clone();
-            let session_attachment = RunnerAttachment {
+            let run_attachment = RunnerAttachment {
                 key: key.clone(),
                 detached: attachment.detached.clone(),
             };
@@ -6626,11 +6626,11 @@ async fn resume_mission(
             #[cfg(not(feature = "cables-mcp"))]
             let cables = None;
             let reattaching = reattach.is_some();
-            let mut resumed_over: Option<AcpSession> = None;
+            let mut resumed_over: Option<AcpRun> = None;
             let (worker_state, worker_mission) = (state.clone(), mission_id.clone());
             let worker_reach = reach.clone();
             tokio::task::spawn_blocking(move || {
-                let expected_session_id = resume_request.session_id.clone();
+                let expected_run_id = resume_request.run_id.clone();
                 if !reattaching {
                     link.ensure()?;
                     let (report, started) = link.launch(
@@ -6639,19 +6639,19 @@ async fn resume_mission(
                         Launch::Resume(resume_request),
                         cables.clone(),
                     )?;
-                    record_runner_session(&worker_state, &worker_mission, &report);
-                    if another_session(report.session_id.as_ref(), &expected_session_id) {
-                        let _ = link.close_session(&key);
+                    record_runner_run(&worker_state, &worker_mission, &report);
+                    if another_run(report.run_id.as_ref(), &expected_run_id) {
+                        let _ = link.close_run(&key);
                         return Err(RESUME_NOT_RETAINED.to_owned());
                     }
                     resumed_over = Some(started);
                 }
-                let resumed = runner_session(
+                let resumed = runner_run(
                     link,
                     &key,
-                    Some(expected_session_id),
+                    Some(expected_run_id),
                     resumed_over,
-                    &session_attachment,
+                    &run_attachment,
                     worker_reach,
                     cables,
                 );
@@ -6665,7 +6665,7 @@ async fn resume_mission(
             })
             .await
         }
-        // A Session runs in this process or on a runner; nothing else builds a launch.
+        // A Run runs in this process or on a runner; nothing else builds a launch.
         _ => return Err(internal_error()),
     };
     let resumed = match resumed {
@@ -6698,17 +6698,17 @@ async fn resume_mission(
             typed_interrupt(&state, &mission_id),
         )));
     }
-    // The sessions lock orders this against a pump finishing the replaced Session: either the pump
+    // The runs lock orders this against a pump finishing the replaced Run: either the pump
     // took it first and the resume is refused, or the pump finds it is no longer the Mission's.
     let replaced = {
-        let mut sessions = state.sessions.lock().map_err(|_| internal_error())?;
-        let ended = old_session.as_ref().is_some_and(|old| {
-            !sessions
+        let mut runs = state.runs.lock().map_err(|_| internal_error())?;
+        let ended = old_run.as_ref().is_some_and(|old| {
+            !runs
                 .get(&mission_id)
-                .is_some_and(|operation| Arc::ptr_eq(&operation.session, old))
+                .is_some_and(|operation| Arc::ptr_eq(&operation.run, old))
         });
         (!ended).then(|| {
-            sessions.insert(
+            runs.insert(
                 mission_id.clone(),
                 AgentOperation {
                     handler_provider: handler_provider.clone(),
@@ -6719,11 +6719,11 @@ async fn resume_mission(
                     effort,
                     cover: cover_audit,
                     safe_house,
-                    session: resumed.clone(),
+                    run: resumed.clone(),
                     watchdog,
                     exposure,
-                    gate: SessionGate::default(),
-                    session_id: Some(session_id.clone()),
+                    gate: RunGate::default(),
+                    run_id: Some(run_id.clone()),
                     clearance: launched_clearance.clone(),
                     resumed: true,
                     runner: attachment,
@@ -6741,7 +6741,7 @@ async fn resume_mission(
     let Some(replaced) = replaced else {
         stop_refused_resume(&state, &mission_id, resumed).await;
         return Err(conflict(
-            "The Mission's Session ended while it was being resumed",
+            "The Mission's Run ended while it was being resumed",
         ));
     };
     let working = state
@@ -6757,7 +6757,7 @@ async fn resume_mission(
             return Err(mission_error(error));
         }
     };
-    sync_session_record(&state, &mission_id);
+    sync_run_record(&state, &mission_id);
     if let Ok(mut missions) = state.missions.lock()
         && let Some(mut manifest) = missions.operation(&mission_id)
     {
@@ -6796,19 +6796,19 @@ async fn resume_mission(
             mission: working,
             handler_provider,
             terminal_provider,
-            provider_session_id: Some(session_id),
+            provider_id: Some(run_id),
         }),
     ))
 }
 
 /// Publishes the Mission's state on the telemetry of a resume that returns without running: the
-/// gateway shows a Session it hears of as working until told otherwise, and the resume binds the
-/// Session before anything can refuse it. A resume that runs takes `telemetry` away.
+/// gateway shows a Run it hears of as working until told otherwise, and the resume binds the
+/// Run before anything can refuse it. A resume that runs takes `telemetry` away.
 #[cfg(feature = "publisher")]
 struct RefusedResume {
     state: DaemonState,
     mission_id: String,
-    telemetry: Option<Arc<SessionTelemetry>>,
+    telemetry: Option<Arc<RunTelemetry>>,
 }
 
 #[cfg(feature = "publisher")]
@@ -6843,20 +6843,20 @@ pub(crate) const CLEARANCE_REASON: &str = "clearance-lowered";
 /// What a resume that names no message tells the Agent.
 const RESUMED_MESSAGE: &str = "Carry on with the Mission from where it stopped.";
 
-/// Why a resume is refused when the harness reports another Session than it was asked for.
-const RESUME_NOT_RETAINED: &str = "AgentHandler resume did not retain the provider Session ID";
+/// Why a resume is refused when the harness reports another Run than it was asked for.
+const RESUME_NOT_RETAINED: &str = "AgentHandler resume did not retain the provider ID";
 
-/// Why a Mission is blocked after its harness turned out to have resumed another Session.
+/// Why a Mission is blocked after its harness turned out to have resumed another Run.
 const RESUME_REFUSED_REASON: &str = "resume-refused";
 
-/// Whether a harness has reported a Session other than `expected`. Not having reported one is not
+/// Whether a harness has reported a Run other than `expected`. Not having reported one is not
 /// that: a harness may say nothing until it has read a message, so what it resumed is checked
-/// again each time its Session is read, in the event pump.
-fn another_session(reported: Option<&SessionId>, expected: &SessionId) -> bool {
+/// again each time its Run is read, in the event pump.
+fn another_run(reported: Option<&RunId>, expected: &RunId) -> bool {
     reported.is_some_and(|reported| reported != expected)
 }
 
-/// Stops the harness of a Session a resume has replaced. Not before: a harness answers being
+/// Stops the harness of a Run a resume has replaced. Not before: a harness answers being
 /// stopped with the end of its turn, which must not read as the Mission's. The resume stands
 /// whatever this says, since its own harness already runs.
 async fn close_replaced(mission_id: &str, replaced: Option<AgentOperation>) {
@@ -6865,13 +6865,13 @@ async fn close_replaced(mission_id: &str, replaced: Option<AgentOperation>) {
     };
     replaced.gate.close();
     let closed = tokio::task::spawn_blocking(move || {
-        let session = replaced
-            .session
+        let run = replaced
+            .run
             .lock()
-            .map_err(|_| "provider Session lock was poisoned".to_owned())?;
+            .map_err(|_| "provider Run lock was poisoned".to_owned())?;
         // A harness that already exited cannot be interrupted, and need not be.
-        let _ = session.interrupt();
-        session.close().map_err(|error| error.to_string())
+        let _ = run.interrupt();
+        run.close().map_err(|error| error.to_string())
     })
     .await
     .map_err(|error| error.to_string())
@@ -6887,17 +6887,17 @@ async fn stop_refused_resume(
     mission_id: &str,
     resumed: Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
 ) {
-    if let Ok(mut sessions) = state.sessions.lock()
-        && sessions
+    if let Ok(mut runs) = state.runs.lock()
+        && runs
             .get(mission_id)
-            .is_some_and(|operation| Arc::ptr_eq(&operation.session, &resumed))
+            .is_some_and(|operation| Arc::ptr_eq(&operation.run, &resumed))
     {
-        sessions.remove(mission_id);
+        runs.remove(mission_id);
     }
     credentials::release(state, mission_id);
     let closed = tokio::task::spawn_blocking(move || {
-        if let Ok(session) = resumed.lock() {
-            let _ = session.close();
+        if let Ok(run) = resumed.lock() {
+            let _ = run.close();
         }
     })
     .await;
@@ -6911,14 +6911,14 @@ async fn send_message(
     axum::extract::Path(mission_id): axum::extract::Path<String>,
     Json(request): Json<SendMessage>,
 ) -> Result<StatusCode, ApiErrorResponse> {
-    let (session, watchdog, gate) = state
-        .sessions
+    let (run, watchdog, gate) = state
+        .runs
         .lock()
         .map_err(|_| internal_error())?
         .get(&mission_id)
         .map(|operation| {
             (
-                operation.session.clone(),
+                operation.run.clone(),
                 operation.watchdog.clone(),
                 operation.gate.clone(),
             )
@@ -6927,8 +6927,8 @@ async fn send_message(
     let worker_gate = gate.clone();
     tokio::task::spawn_blocking(move || {
         worker_gate
-            .lock(&session)
-            .map_err(|_| "provider Session lock was poisoned".to_owned())?
+            .lock(&run)
+            .map_err(|_| "provider Run lock was poisoned".to_owned())?
             .send_message(AgentMessage { text: request.text })
             .map_err(|error| error.to_string())
     })
@@ -6950,8 +6950,8 @@ async fn send_message(
                 )
             })
             .ok_or_else(|| mission_error(MissionError::NotFound))?;
-        // Checked under the Mission book lock: a closing Session sets its gate before its
-        // final transition, so this cannot undo a stall or leave a Mission without a Session.
+        // Checked under the Mission book lock: a closing Run sets its gate before its
+        // final transition, so this cannot undo a stall or leave a Mission without a Run.
         // A message does not end a wait for green ink; only the decision does.
         let revive = matches!(current, MissionState::Blocked | MissionState::Stalled)
             && !waits_for_green_ink
@@ -6974,12 +6974,12 @@ async fn interrupt_mission(
     State(state): State<DaemonState>,
     axum::extract::Path(mission_id): axum::extract::Path<String>,
 ) -> Result<Json<Mission>, ApiErrorResponse> {
-    let (session, gate) = state
-        .sessions
+    let (run, gate) = state
+        .runs
         .lock()
         .map_err(|_| internal_error())?
         .get(&mission_id)
-        .map(|operation| (operation.session.clone(), operation.gate.clone()))
+        .map(|operation| (operation.run.clone(), operation.gate.clone()))
         .ok_or_else(|| mission_error(MissionError::NotFound))?;
     let before = state
         .missions
@@ -6991,8 +6991,8 @@ async fn interrupt_mission(
     // the end of its turn as the end of an interrupted one.
     let mission = hold_for_interrupt(&state, &mission_id).map_err(mission_error)?;
     let interrupted = tokio::task::spawn_blocking(move || {
-        gate.lock(&session)
-            .map_err(|_| "provider Session lock was poisoned".to_owned())?
+        gate.lock(&run)
+            .map_err(|_| "provider Run lock was poisoned".to_owned())?
             .interrupt()
             .map_err(|error| error.to_string())
     })
@@ -7014,7 +7014,7 @@ async fn interrupt_mission(
     Ok(Json(mission))
 }
 
-/// What Ctrl-C typed in a Session view does before it interrupts the harness.
+/// What Ctrl-C typed in a Run view does before it interrupts the harness.
 #[cfg(feature = "publisher")]
 fn typed_interrupt(state: &DaemonState, mission_id: &str) -> Box<dyn Fn() + Send + Sync> {
     let (state, mission_id) = (state.clone(), mission_id.to_owned());
@@ -7026,7 +7026,7 @@ fn typed_interrupt(state: &DaemonState, mission_id: &str) -> Box<dyn Fn() + Send
 }
 
 /// Blocks a Mission whose turn is being interrupted, unless it already waits on something else,
-/// and stops judging its Session: waiting for an operator is not a stall.
+/// and stops judging its Run: waiting for an operator is not a stall.
 fn hold_for_interrupt(state: &DaemonState, mission_id: &str) -> Result<Mission, MissionError> {
     let mission = {
         let mut missions = state.missions.lock().map_err(|_| MissionError::NotFound)?;
@@ -7043,12 +7043,12 @@ fn hold_for_interrupt(state: &DaemonState, mission_id: &str) -> Result<Mission, 
         }
     };
     if mission.blocked_reason.as_deref() == Some(INTERRUPTED_REASON)
-        && let Ok(sessions) = state.sessions.lock()
-        && let Some(operation) = sessions.get(mission_id)
+        && let Ok(runs) = state.runs.lock()
+        && let Some(operation) = runs.get(mission_id)
     {
         operation.watchdog.pause();
     }
-    sync_session_record(state, mission_id);
+    sync_run_record(state, mission_id);
     Ok(mission)
 }
 
@@ -7057,32 +7057,32 @@ fn release_interrupt_hold(state: &DaemonState, mission_id: &str) {
     if let Ok(mut missions) = state.missions.lock() {
         let _ = missions.transition(mission_id, MissionState::Working);
     }
-    if let Ok(sessions) = state.sessions.lock()
-        && let Some(operation) = sessions.get(mission_id)
+    if let Ok(runs) = state.runs.lock()
+        && let Some(operation) = runs.get(mission_id)
     {
         operation.watchdog.resume();
     }
-    sync_session_record(state, mission_id);
+    sync_run_record(state, mission_id);
 }
 
-/// Stops the Session of a Mission whose interrupted turn just ended, however the harness reported
+/// Stops the Run of a Mission whose interrupted turn just ended, however the harness reported
 /// that: a turn cut short is not the Mission's end. `false` when the Mission is not waiting on an
-/// interrupt, or when no Session was reported and so nothing could ever resume it.
+/// interrupt, or when no Run was reported and so nothing could ever resume it.
 fn end_interrupted_turn(
     state: &DaemonState,
     mission_id: &str,
-    session: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
+    run: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
 ) -> bool {
     let interrupted = state.missions.lock().is_ok_and(|missions| {
         missions.get(mission_id).is_some_and(|mission| {
             mission.state == MissionState::Blocked
                 && mission.blocked_reason.as_deref() == Some(INTERRUPTED_REASON)
-                && !mission.session_ids.is_empty()
+                && !mission.run_ids.is_empty()
         })
     });
     if interrupted {
-        stop_session_keeping_mission(state, mission_id, session);
-        sync_session_record(state, mission_id);
+        stop_run_keeping_mission(state, mission_id, run);
+        sync_run_record(state, mission_id);
     }
     interrupted
 }
@@ -7132,30 +7132,30 @@ async fn next_event(
 fn spawn_event_pump(
     state: DaemonState,
     mission_id: String,
-    session: Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
+    run: Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
 ) {
     let monitor = state
-        .sessions
+        .runs
         .lock()
         .ok()
-        .and_then(|sessions| {
-            sessions
+        .and_then(|runs| {
+            runs
                 .get(&mission_id)
                 .map(|operation| operation.watchdog.clone())
         })
         .unwrap_or_default();
-    spawn_event_pump_with_monitor(state, mission_id, session, monitor);
+    spawn_event_pump_with_monitor(state, mission_id, run, monitor);
 }
 
 fn spawn_event_pump_with_monitor(
     state: DaemonState,
     mission_id: String,
-    session: Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
+    run: Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
     monitor: Watchdog,
 ) {
-    if let Ok(mut sessions) = state.sessions.lock()
-        && let Some(operation) = sessions.get_mut(&mission_id)
-        && Arc::ptr_eq(&operation.session, &session)
+    if let Ok(mut runs) = state.runs.lock()
+        && let Some(operation) = runs.get_mut(&mission_id)
+        && Arc::ptr_eq(&operation.run, &run)
     {
         operation.watchdog = monitor.clone();
     }
@@ -7165,11 +7165,11 @@ fn spawn_event_pump_with_monitor(
         let mut usage_tracker = UsageTracker::default();
         let mut budget_notices = BTreeSet::new();
         let (exposure, gate, reach) = state
-            .sessions
+            .runs
             .lock()
             .ok()
-            .and_then(|sessions| {
-                sessions.get(&mission_id).map(|operation| {
+            .and_then(|runs| {
+                runs.get(&mission_id).map(|operation| {
                     (
                         operation.exposure.clone(),
                         operation.gate.clone(),
@@ -7180,48 +7180,48 @@ fn spawn_event_pump_with_monitor(
             .unwrap_or_default();
         let mut announced = exposure.exposures().len();
         medical::persist_exposure(&state, &mission_id, &exposure.exposures());
-        let mut notes = recovery::Notes::new(&state.intake.limits().sessions);
+        let mut notes = recovery::Notes::new(&state.intake.limits().runs);
         let mut tape = contexts::EventTape::new(state.intake.limits().contexts.context_bytes);
-        let mut last_session: Option<SessionId> = None;
+        let mut last_run: Option<RunId> = None;
         let launched = Launched::of(&state, &mission_id);
         loop {
             medical::sync_exposure(&state, &mission_id, &exposure, &mut announced);
             if state.stopping.load(Ordering::Acquire) {
-                stop_operation(&state, &mission_id, &session);
+                stop_operation(&state, &mission_id, &run);
                 break;
             }
-            if !is_current_session(&state, &mission_id, &session) {
+            if !is_current_run(&state, &mission_id, &run) {
                 break;
             }
             gate.yield_to_operator();
             let result = (|| {
-                let session = session
+                let run = run
                     .lock()
-                    .map_err(|_| "provider Session lock was poisoned".to_owned())?;
-                let event = session
+                    .map_err(|_| "provider Run lock was poisoned".to_owned())?;
+                let event = run
                     .next_event(1_000)
                     .map_err(|error| error.to_string())?;
-                let session_id =
-                    provider_session_id(session.session_id()).map_err(|error| error.to_string())?;
-                Ok::<_, String>((event, session_id))
+                let run_id =
+                    provider_id(run.session_id()).map_err(|error| error.to_string())?;
+                Ok::<_, String>((event, run_id))
             })();
-            if !is_current_session(&state, &mission_id, &session) {
+            if !is_current_run(&state, &mission_id, &run) {
                 break;
             }
             if let Ok((_, Some(reported))) = &result
-                && resumed_another_session(&state, &mission_id, reported)
+                && resumed_another_run(&state, &mission_id, reported)
             {
-                refuse_resumed_session(&state, &mission_id, &session);
+                refuse_resumed_run(&state, &mission_id, &run);
                 break;
             }
             match result {
-                Ok((Some(event), session_id)) => {
+                Ok((Some(event), run_id)) => {
                     monitor.record_activity();
                     tape.record(&event);
-                    if session_id.is_some() {
-                        last_session.clone_from(&session_id);
+                    if run_id.is_some() {
+                        last_run.clone_from(&run_id);
                     }
-                    attach_observed_session(&state, &mission_id, &session, session_id);
+                    attach_observed_run(&state, &mission_id, &run, run_id);
                     notes.record(&event);
                     notes.write_if_due(&state, &mission_id);
                     medical::expose_by_tools(&state, &exposure, &event);
@@ -7247,16 +7247,16 @@ fn spawn_event_pump_with_monitor(
                         )
                     {
                         queue_event(&state, &mission_id, event);
-                        medical::stop_for_budget(&state, &mission_id, &session);
+                        medical::stop_for_budget(&state, &mission_id, &run);
                         break;
                     }
-                    // The writes above take time, in which a resume can replace this Session; what
+                    // The writes above take time, in which a resume can replace this Run; what
                     // its harness says from here on would be taken for the Mission's.
-                    if !is_current_session(&state, &mission_id, &session) {
+                    if !is_current_run(&state, &mission_id, &run) {
                         break;
                     }
                     if event.kind == LIMIT_EVENT {
-                        handle_limit(&state, &mission_id, &session, event);
+                        handle_limit(&state, &mission_id, &run, event);
                         break;
                     }
                     if event.kind == DENIED_EVENT {
@@ -7265,7 +7265,7 @@ fn spawn_event_pump_with_monitor(
                     if matches!(
                         event.kind.as_str(),
                         "completed" | "failed" | CANCELLED_EVENT
-                    ) && end_interrupted_turn(&state, &mission_id, &session)
+                    ) && end_interrupted_turn(&state, &mission_id, &run)
                     {
                         queue_event(
                             &state,
@@ -7283,7 +7283,7 @@ fn spawn_event_pump_with_monitor(
                     }
                     #[cfg(feature = "cables-mcp")]
                     if event.kind == "completed"
-                        && green_ink::end_turn_waiting(&state, &mission_id, &session)
+                        && green_ink::end_turn_waiting(&state, &mission_id, &run)
                     {
                         queue_event(&state, &mission_id, event);
                         break;
@@ -7292,11 +7292,11 @@ fn spawn_event_pump_with_monitor(
                         verdicts::file_final_report(&state, &mission_id, event.text.as_deref());
                         vetting::review_completed(&state, &mission_id, event.text.as_deref());
                         review::reviewer_answered(&state, &mission_id, event.text.as_deref());
-                        if review::holds_plan(&state, &mission_id, &session, event.text.as_deref())
+                        if review::holds_plan(&state, &mission_id, &run, event.text.as_deref())
                             || review::holds_output(
                                 &state,
                                 &mission_id,
-                                &session,
+                                &run,
                                 event.text.as_deref(),
                             )
                         {
@@ -7304,7 +7304,7 @@ fn spawn_event_pump_with_monitor(
                         }
                     }
                     if matches!(event.kind.as_str(), "completed" | "failed") {
-                        let finished = finish_operation(&state, &mission_id, &session);
+                        let finished = finish_operation(&state, &mission_id, &run);
                         let event = with_login_note(&state, &mission_id, event);
                         publish_finished_event(&state, &mission_id, event, finished);
                         break;
@@ -7312,12 +7312,12 @@ fn spawn_event_pump_with_monitor(
                     apply_event_state(&state, &mission_id, &event);
                     queue_event(&state, &mission_id, event);
                 }
-                Ok((None, session_id)) => {
-                    attach_observed_session(&state, &mission_id, &session, session_id);
+                Ok((None, run_id)) => {
+                    attach_observed_run(&state, &mission_id, &run, run_id);
                     notes.write_if_due(&state, &mission_id);
                     if let Some(reason) = reach.lost() {
                         notes.write_now(&state, &mission_id);
-                        recovery::give_up(&state, &mission_id, Some(&session), &reason);
+                        recovery::give_up(&state, &mission_id, Some(&run), &reason);
                         break;
                     }
                 }
@@ -7325,7 +7325,7 @@ fn spawn_event_pump_with_monitor(
                 Err(_) if reach.lost().is_some() => {
                     let reason = reach.lost().unwrap_or_default();
                     notes.write_now(&state, &mission_id);
-                    recovery::give_up(&state, &mission_id, Some(&session), &reason);
+                    recovery::give_up(&state, &mission_id, Some(&run), &reason);
                     break;
                 }
                 Err(error) => {
@@ -7337,14 +7337,14 @@ fn spawn_event_pump_with_monitor(
                         tools: Vec::new(),
                         report: None,
                     };
-                    let finished = finish_operation(&state, &mission_id, &session);
+                    let finished = finish_operation(&state, &mission_id, &run);
                     let event = with_login_note(&state, &mission_id, event);
                     publish_finished_event(&state, &mission_id, event, finished);
                     break;
                 }
             }
 
-            if !is_current_session(&state, &mission_id, &session) {
+            if !is_current_run(&state, &mission_id, &run) {
                 break;
             }
             let current_output_revision = monitor.output_revision();
@@ -7408,7 +7408,7 @@ fn spawn_event_pump_with_monitor(
             if max_runtime || looping || monitor.is_stalled() {
                 let reason = if max_runtime {
                     format!(
-                        "maximum Session runtime of {:.1} seconds was reached",
+                        "maximum Run runtime of {:.1} seconds was reached",
                         monitor.max_runtime().unwrap_or_default().as_secs_f64()
                     )
                 } else if looping {
@@ -7438,11 +7438,11 @@ fn spawn_event_pump_with_monitor(
                 gate.close();
                 apply_event_state(&state, &mission_id, &event);
                 queue_event(&state, &mission_id, event);
-                if let Ok(session) = session.lock() {
-                    let _ = session.interrupt();
+                if let Ok(run) = run.lock() {
+                    let _ = run.interrupt();
                 }
                 // Not an end: the safe house stays for the resume or retry that goes on from here.
-                stop_session_keeping_mission(&state, &mission_id, &session);
+                stop_run_keeping_mission(&state, &mission_id, &run);
                 if !max_runtime {
                     let kind = if looping {
                         IncidentKind::Loop
@@ -7454,8 +7454,8 @@ fn spawn_event_pump_with_monitor(
                 break;
             }
         }
-        if let (Some(launched), Some(session_id)) = (launched, last_session) {
-            launched.file_context(&state, &mission_id, session_id.as_str(), &tape);
+        if let (Some(launched), Some(run_id)) = (launched, last_run) {
+            launched.file_context(&state, &mission_id, run_id.as_str(), &tape);
         }
     });
     if let Ok(mut event_pumps) = event_pumps.lock() {
@@ -7464,7 +7464,7 @@ fn spawn_event_pump_with_monitor(
     }
 }
 
-/// How a Mission's harness was launched, for asking its handler where it keeps the Session.
+/// How a Mission's harness was launched, for asking its handler where it keeps the Run.
 struct Launched {
     handler: String,
     working_directory: String,
@@ -7475,8 +7475,8 @@ struct Launched {
 
 impl Launched {
     fn of(state: &DaemonState, mission_id: &str) -> Option<Self> {
-        let sessions = state.sessions.lock().ok()?;
-        let operation = sessions.get(mission_id)?;
+        let runs = state.runs.lock().ok()?;
+        let operation = runs.get(mission_id)?;
         Some(Self {
             handler: operation.handler_provider.clone(),
             working_directory: operation.working_directory.clone(),
@@ -7485,13 +7485,13 @@ impl Launched {
         })
     }
 
-    /// Files the context of `session_id`, which ran Mission `mission_id`: its harness's record,
+    /// Files the context of `run_id`, which ran Mission `mission_id`: its harness's record,
     /// asked of the handler built with its defaults, or the events in `tape`.
     fn file_context(
         self,
         state: &DaemonState,
         mission_id: &str,
-        session_id: &str,
+        run_id: &str,
         tape: &contexts::EventTape,
     ) {
         let operation = state.missions.lock().ok().and_then(|missions| {
@@ -7511,8 +7511,8 @@ impl Launched {
                 .ok()
                 .and_then(|handler| {
                     handler
-                        .session_record(SessionRecordQuery {
-                            session_id: session_id.to_owned(),
+                        .run_record(RunRecordQuery {
+                            run_id: run_id.to_owned(),
                             working_directory: self.working_directory,
                             environment: self.environment,
                         })
@@ -7526,7 +7526,7 @@ impl Launched {
                 operation,
                 mission: mission_id.to_owned(),
             },
-            session_id,
+            run_id,
             &self.handler,
             record,
             tape,
@@ -7534,52 +7534,52 @@ impl Launched {
     }
 }
 
-fn is_current_session(
+fn is_current_run(
     state: &DaemonState,
     mission_id: &str,
-    session: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
+    run: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
 ) -> bool {
     state
-        .sessions
+        .runs
         .lock()
         .ok()
-        .and_then(|sessions| {
-            sessions
+        .and_then(|runs| {
+            runs
                 .get(mission_id)
-                .map(|operation| Arc::ptr_eq(&operation.session, session))
+                .map(|operation| Arc::ptr_eq(&operation.run, run))
         })
         .unwrap_or(false)
 }
 
-/// Whether the live Session of `mission_id` was resumed on another Session than `reported`.
-fn resumed_another_session(state: &DaemonState, mission_id: &str, reported: &SessionId) -> bool {
-    state.sessions.lock().is_ok_and(|sessions| {
-        sessions.get(mission_id).is_some_and(|operation| {
+/// Whether the live Run of `mission_id` was resumed on another Run than `reported`.
+fn resumed_another_run(state: &DaemonState, mission_id: &str, reported: &RunId) -> bool {
+    state.runs.lock().is_ok_and(|runs| {
+        runs.get(mission_id).is_some_and(|operation| {
             operation.resumed
                 && operation
-                    .session_id
+                    .run_id
                     .as_ref()
-                    .is_some_and(|expected| another_session(Some(reported), expected))
+                    .is_some_and(|expected| another_run(Some(reported), expected))
         })
     })
 }
 
-/// Stops a harness that resumed another Session than it was asked for. The Mission gets no final
-/// state from it and records nothing of that Session: it waits, blocked, for another resume.
-fn refuse_resumed_session(
+/// Stops a harness that resumed another Run than it was asked for. The Mission gets no final
+/// state from it and records nothing of that Run: it waits, blocked, for another resume.
+fn refuse_resumed_run(
     state: &DaemonState,
     mission_id: &str,
-    session: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
+    run: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
 ) {
     eprintln!("ai6: Mission {mission_id:?}: {RESUME_NOT_RETAINED}; the resume is refused");
-    stop_session_keeping_mission(state, mission_id, session);
+    stop_run_keeping_mission(state, mission_id, run);
     let blocked = state.missions.lock().is_ok_and(|mut missions| {
         missions
             .block_for(mission_id, RESUME_REFUSED_REASON)
             .is_ok()
     });
     if blocked {
-        sync_session_record(state, mission_id);
+        sync_run_record(state, mission_id);
         publish_lifecycle(state, mission_id, MissionState::Blocked);
     }
     queue_event(
@@ -7602,7 +7602,7 @@ fn stop_for_clearance(
     state: &DaemonState,
     mission_id: &str,
     operation: &str,
-    session: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
+    run: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
     launched: &str,
     now: &str,
 ) {
@@ -7613,20 +7613,20 @@ fn stop_for_clearance(
     eprintln!("ai6: Mission {mission_id:?}: {text}");
     #[cfg(feature = "publisher")]
     let telemetry = state
-        .sessions
+        .runs
         .lock()
         .ok()
-        .and_then(|sessions| sessions.get(mission_id)?.telemetry.clone());
-    if let Ok(session) = session.lock() {
-        let _ = session.interrupt();
+        .and_then(|runs| runs.get(mission_id)?.telemetry.clone());
+    if let Ok(run) = run.lock() {
+        let _ = run.interrupt();
     }
-    stop_session_keeping_mission(state, mission_id, session);
+    stop_run_keeping_mission(state, mission_id, run);
     let blocked = state
         .missions
         .lock()
         .is_ok_and(|mut missions| missions.block_for(mission_id, CLEARANCE_REASON).is_ok());
     if blocked {
-        sync_session_record(state, mission_id);
+        sync_run_record(state, mission_id);
         #[cfg(feature = "publisher")]
         if let Some(telemetry) = &telemetry {
             telemetry.publish_lifecycle_for("blocked", Some(CLEARANCE_REASON));
@@ -7658,18 +7658,18 @@ fn stop_for_clearance(
     );
 }
 
-/// Stops a Session whose Mission goes on waiting: its harness is closed and its credentials
+/// Stops a Run whose Mission goes on waiting: its harness is closed and its credentials
 /// released, while the Mission's state and safe house stay for the resume that continues it.
-fn stop_session_keeping_mission(
+fn stop_run_keeping_mission(
     state: &DaemonState,
     mission_id: &str,
-    session: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
+    run: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
 ) {
-    let operation = state.sessions.lock().ok().and_then(|mut sessions| {
-        sessions
+    let operation = state.runs.lock().ok().and_then(|mut runs| {
+        runs
             .get(mission_id)
-            .is_some_and(|operation| Arc::ptr_eq(&operation.session, session))
-            .then(|| sessions.remove(mission_id))
+            .is_some_and(|operation| Arc::ptr_eq(&operation.run, run))
+            .then(|| runs.remove(mission_id))
             .flatten()
             .inspect(|operation| operation.gate.close())
     });
@@ -7677,50 +7677,50 @@ fn stop_session_keeping_mission(
         return;
     };
     credentials::release(state, mission_id);
-    if let Ok(session) = operation.session.lock() {
-        let _ = session.close();
+    if let Ok(run) = operation.run.lock() {
+        let _ = run.close();
     }
 }
 
-fn attach_observed_session(
+fn attach_observed_run(
     state: &DaemonState,
     mission_id: &str,
-    session: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
-    session_id: Option<SessionId>,
+    run: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
+    run_id: Option<RunId>,
 ) {
-    let Some(session_id) = session_id else {
+    let Some(run_id) = run_id else {
         return;
     };
     #[cfg(feature = "cables-mcp")]
-    bind_observed_endpoint(state, mission_id, session, &session_id);
+    bind_observed_endpoint(state, mission_id, run, &run_id);
     let should_attach = state
-        .sessions
+        .runs
         .lock()
         .ok()
-        .and_then(|mut sessions| {
-            let operation = sessions.get_mut(mission_id)?;
-            if !Arc::ptr_eq(&operation.session, session) || operation.session_id.is_some() {
+        .and_then(|mut runs| {
+            let operation = runs.get_mut(mission_id)?;
+            if !Arc::ptr_eq(&operation.run, run) || operation.run_id.is_some() {
                 return None;
             }
-            operation.session_id = Some(session_id.clone());
+            operation.run_id = Some(run_id.clone());
             Some(())
         })
         .is_some();
     if should_attach {
         if let Ok(mut missions) = state.missions.lock() {
-            let _ = missions.attach_session(mission_id, session_id.clone());
+            let _ = missions.attach_run(mission_id, run_id.clone());
         }
-        sync_session_record(state, mission_id);
+        sync_run_record(state, mission_id);
     }
     #[cfg(feature = "publisher")]
     if should_attach {
         let telemetry = state
-            .sessions
+            .runs
             .lock()
             .ok()
-            .and_then(|sessions| sessions.get(mission_id)?.telemetry.clone());
+            .and_then(|runs| runs.get(mission_id)?.telemetry.clone());
         if let Some(telemetry) = telemetry {
-            telemetry.bind(session_id);
+            telemetry.bind(run_id);
             let current = state
                 .missions
                 .lock()
@@ -7733,21 +7733,21 @@ fn attach_observed_session(
     }
 }
 
-/// Binds a Session's Cable endpoint to the provider Session once its stream has reported it: a
+/// Binds a Run's Cable endpoint to the provider Run once its stream has reported it: a
 /// harness that reports it only after reading its first message starts with an unbound endpoint,
-/// and every tool that answers for the Session refuses until this. The endpoint leaves the
-/// Session's entry for the Registry write, so no other Mission waits on it; a failed bind is tried
+/// and every tool that answers for the Run refuses until this. The endpoint leaves the
+/// Run's entry for the Registry write, so no other Mission waits on it; a failed bind is tried
 /// again on the next read.
 #[cfg(feature = "cables-mcp")]
 fn bind_observed_endpoint(
     state: &DaemonState,
     mission_id: &str,
-    session: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
-    session_id: &SessionId,
+    run: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
+    run_id: &RunId,
 ) {
-    let endpoint = state.sessions.lock().ok().and_then(|mut sessions| {
-        let operation = sessions.get_mut(mission_id)?;
-        if !Arc::ptr_eq(&operation.session, session)
+    let endpoint = state.runs.lock().ok().and_then(|mut runs| {
+        let operation = runs.get_mut(mission_id)?;
+        if !Arc::ptr_eq(&operation.run, run)
             || operation
                 .cables_mcp
                 .as_ref()
@@ -7760,12 +7760,12 @@ fn bind_observed_endpoint(
     let Some(mut endpoint) = endpoint else {
         return;
     };
-    if let Err(error) = endpoint.bind_session(Some(session_id)) {
-        eprintln!("ai6: Mission {mission_id:?}: Cable Session binding failed: {error:?}");
+    if let Err(error) = endpoint.bind_run(Some(run_id)) {
+        eprintln!("ai6: Mission {mission_id:?}: Cable Run binding failed: {error:?}");
     }
-    if let Ok(mut sessions) = state.sessions.lock()
-        && let Some(operation) = sessions.get_mut(mission_id)
-        && Arc::ptr_eq(&operation.session, session)
+    if let Ok(mut runs) = state.runs.lock()
+        && let Some(operation) = runs.get_mut(mission_id)
+        && Arc::ptr_eq(&operation.run, run)
     {
         operation.cables_mcp = Some(endpoint);
     }
@@ -7831,7 +7831,7 @@ fn apply_event_state(
             .flatten()
             .map(|said| {
                 said.chars()
-                    .take(state.intake.limits().sessions.recent_event_chars.or_max())
+                    .take(state.intake.limits().runs.recent_event_chars.or_max())
                     .collect::<String>()
             })
             .filter(|said| !said.trim().is_empty());
@@ -7849,7 +7849,7 @@ fn apply_event_state(
         .map(|mission| mission.state)
         .unwrap_or(target);
     drop(missions);
-    sync_session_record(state, mission_id);
+    sync_run_record(state, mission_id);
     publish_lifecycle(state, mission_id, published_state);
     Some(target)
 }
@@ -7907,10 +7907,10 @@ fn publish_lifecycle(state: &DaemonState, mission_id: &str, mission_state: Missi
     #[cfg(feature = "publisher")]
     if let Some(state_name) = lifecycle_name(mission_state) {
         let telemetry = state
-            .sessions
+            .runs
             .lock()
             .ok()
-            .and_then(|sessions| sessions.get(mission_id)?.telemetry.clone());
+            .and_then(|runs| runs.get(mission_id)?.telemetry.clone());
         if let Some(telemetry) = telemetry {
             let reason = held_reason(state, mission_id).or_else(|| {
                 (mission_state == MissionState::Failed)
@@ -7984,26 +7984,26 @@ fn lifecycle_name(state: MissionState) -> Option<&'static str> {
     }
 }
 
-/// Sent to a resumed provider Session so it carries on after its quota reset; a resumed
+/// Sent to a resumed provider Run so it carries on after its quota reset; a resumed
 /// harness otherwise waits for input.
 const LIMIT_RESET_MESSAGE: &str =
     "The provider usage limit has reset. Continue the task where you left off.";
 
-/// Stops a Session a provider limit ended, then parks the Mission until the quota resets or,
+/// Stops a Run a provider limit ended, then parks the Mission until the quota resets or,
 /// when the Operation asks for it and another qualified Agent is available, hands it to
 /// that Agent as a new attempt. The safe house stays: either way the work continues in it.
 fn handle_limit(
     state: &DaemonState,
     mission_id: &str,
-    session: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
+    run: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
     event: AgentEvent,
 ) {
-    let operation = state.sessions.lock().ok().and_then(|mut sessions| {
-        if sessions
+    let operation = state.runs.lock().ok().and_then(|mut runs| {
+        if runs
             .get(mission_id)
-            .is_some_and(|operation| Arc::ptr_eq(&operation.session, session))
+            .is_some_and(|operation| Arc::ptr_eq(&operation.run, run))
         {
-            sessions
+            runs
                 .remove(mission_id)
                 .inspect(|operation| operation.gate.close())
         } else {
@@ -8013,9 +8013,9 @@ fn handle_limit(
     let Some(operation) = operation else {
         return;
     };
-    if let Ok(session) = operation.session.lock() {
-        let _ = session.interrupt();
-        let _ = session.close();
+    if let Ok(run) = operation.run.lock() {
+        let _ = run.interrupt();
+        let _ = run.close();
     }
     let Some(mission) = state
         .missions
@@ -8053,7 +8053,7 @@ fn handle_limit(
                 let now = state.clock.now();
                 if park_mission(state, mission_id, now) {
                     eprintln!(
-                        "ai6: Mission {mission_id:?} hit a provider limit; resuming its Session on another account"
+                        "ai6: Mission {mission_id:?} hit a provider limit; resuming its Run on another account"
                     );
                     queue_event(state, mission_id, event);
                     return;
@@ -8104,23 +8104,23 @@ fn handle_limit(
 /// it replaces; the next start records the replacement. Whether it was queued.
 fn hand_off(state: &DaemonState, mission_id: &str, agent: String) -> bool {
     // Taken before the requeue: once queued, a scheduler pass may record the next attempt.
-    let replaced = session_hold(state, mission_id);
+    let replaced = run_hold(state, mission_id);
     let handed_off = state
         .missions
         .lock()
         .ok()
         .is_some_and(|mut missions| missions.requeue_for(mission_id, agent).is_ok());
     if handed_off && let Some(hold) = replaced {
-        let _ = state.intake.update_session(
+        let _ = state.intake.update_run(
             &hold.id,
             &state.station_id,
             hold.fence,
-            SessionUpdate::default()
+            RunUpdate::default()
                 .result(
-                    SessionResult::new("abandoned")
-                        .with_reason(Some(SessionResult::HANDED_OFF.to_owned())),
+                    RunResult::new("abandoned")
+                        .with_reason(Some(RunResult::HANDED_OFF.to_owned())),
                 )
-                .status(SessionStatus::Ended),
+                .status(RunStatus::Ended),
         );
     }
     handed_off
@@ -8145,7 +8145,7 @@ fn park_mission_on(
         .ok()
         .is_some_and(|mut missions| missions.park_on(mission_id, until, on).is_ok());
     if parked {
-        sync_session_record(state, mission_id);
+        sync_run_record(state, mission_id);
         publish_lifecycle(state, mission_id, MissionState::Parked);
     }
     parked
@@ -8172,7 +8172,7 @@ fn backup_agent(
     .ok()
 }
 
-/// Resumes parked Missions whose quota reset time has passed, on the same provider Session.
+/// Resumes parked Missions whose quota reset time has passed, on the same provider Run.
 async fn schedule_parked_once(state: &DaemonState) {
     if !state.station.roles.contains(&StationRole::Execution) {
         return;
@@ -8236,20 +8236,20 @@ struct FinishOutcome {
     fail_on_blow: bool,
     failure: Option<String>,
     #[cfg(feature = "publisher")]
-    telemetry: Option<Arc<SessionTelemetry>>,
+    telemetry: Option<Arc<RunTelemetry>>,
 }
 
 fn finish_operation(
     state: &DaemonState,
     mission_id: &str,
-    session: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
+    run: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
 ) -> Option<FinishOutcome> {
-    let operation = state.sessions.lock().ok().and_then(|mut sessions| {
-        if sessions
+    let operation = state.runs.lock().ok().and_then(|mut runs| {
+        if runs
             .get(mission_id)
-            .is_some_and(|operation| Arc::ptr_eq(&operation.session, session))
+            .is_some_and(|operation| Arc::ptr_eq(&operation.run, run))
         {
-            sessions
+            runs
                 .remove(mission_id)
                 .inspect(|operation| operation.gate.close())
         } else {
@@ -8258,8 +8258,8 @@ fn finish_operation(
     });
     let operation = operation?;
     credentials::release(state, mission_id);
-    if let Ok(session) = operation.session.lock() {
-        let _ = session.close();
+    if let Ok(run) = operation.run.lock() {
+        let _ = run.close();
     }
 
     let mut failure = None;
@@ -8354,7 +8354,7 @@ fn publish_finished_event(
     event: AgentEvent,
     finished: Option<FinishOutcome>,
 ) {
-    // Nothing was finished: the Session is no longer the Mission's, and whoever took it over says
+    // Nothing was finished: the Run is no longer the Mission's, and whoever took it over says
     // how the Mission goes on. A resume's new harness may be running by now.
     let Some(finished) = finished else {
         return;
@@ -8390,7 +8390,7 @@ fn publish_finished_event(
     }
 }
 
-/// A failed Session's words, with what its login did under it when that may be why.
+/// A failed Run's words, with what its login did under it when that may be why.
 fn with_login_note(state: &DaemonState, mission_id: &str, mut event: AgentEvent) -> AgentEvent {
     if event.kind == "failed"
         && let Some(note) = logins::stale_note(state, mission_id)
@@ -8417,14 +8417,14 @@ fn apply_finish_outcome(mut event: AgentEvent, finished: &FinishOutcome) -> Agen
 fn stop_operation(
     state: &DaemonState,
     mission_id: &str,
-    session: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
+    run: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
 ) {
-    let operation = state.sessions.lock().ok().and_then(|mut sessions| {
-        if sessions
+    let operation = state.runs.lock().ok().and_then(|mut runs| {
+        if runs
             .get(mission_id)
-            .is_some_and(|operation| Arc::ptr_eq(&operation.session, session))
+            .is_some_and(|operation| Arc::ptr_eq(&operation.run, run))
         {
-            sessions
+            runs
                 .remove(mission_id)
                 .inspect(|operation| operation.gate.close())
         } else {
@@ -8440,14 +8440,14 @@ fn stop_operation(
     if let Some(runner) = &operation.runner {
         runner.detached.store(true, Ordering::Release);
         eprintln!(
-            "ai6: Mission {mission_id:?} keeps running on its runner (Session {:?})",
+            "ai6: Mission {mission_id:?} keeps running on its runner (Run {:?})",
             runner.key
         );
         return;
     }
-    if let Ok(session) = operation.session.lock() {
-        let _ = session.interrupt();
-        let _ = session.close();
+    if let Ok(run) = operation.run.lock() {
+        let _ = run.interrupt();
+        let _ = run.close();
     }
     let blocked = if let Ok(mut missions) = state.missions.lock()
         && missions
@@ -8501,7 +8501,7 @@ async fn finalize_mission_resources(
     was_final: bool,
 ) -> Result<(), ApiErrorResponse> {
     let operation = state
-        .sessions
+        .runs
         .lock()
         .map_err(|_| internal_error())?
         .remove(mission_id)
@@ -8515,19 +8515,19 @@ async fn finalize_mission_resources(
         return Ok(());
     };
     let report = tokio::task::spawn_blocking(move || {
-        let session = operation
-            .session
+        let run = operation
+            .run
             .lock()
-            .map_err(|_| "provider Session lock was poisoned".to_owned())?;
+            .map_err(|_| "provider Run lock was poisoned".to_owned())?;
         if interrupt {
-            session
+            run
                 .interrupt()
                 .map_err(|error| format!("provider interrupt failed: {error}"))?;
         }
-        session
+        run
             .close()
             .map_err(|error| format!("provider close failed: {error}"))?;
-        drop(session);
+        drop(run);
         operation
             .safe_house
             .filter(SafeHouse::is_isolated)
@@ -8549,7 +8549,7 @@ async fn finalize_mission_resources(
     Ok(())
 }
 
-/// Opens again the safe house of a Mission with no live Session, when it left one: the one its
+/// Opens again the safe house of a Mission with no live Run, when it left one: the one its
 /// report says it kept, or for work in place what its launch's cover audit remembers.
 async fn reopen_left_safe_house(
     state: &DaemonState,
@@ -8607,7 +8607,7 @@ async fn reopen_left_safe_house(
     .map_err(configuration_error)
 }
 
-/// Finishes the safe house a Mission with no live Session left waiting (one that stalled, or
+/// Finishes the safe house a Mission with no live Run left waiting (one that stalled, or
 /// whose turn ended while it waited), now that the Mission has ended. What goes wrong is logged:
 /// the Mission has ended either way, and its house stays where its report says.
 async fn finish_left_safe_house(state: &DaemonState, mission_id: &str) {
@@ -8690,15 +8690,15 @@ async fn start_failure(
     provider_error(message)
 }
 
-async fn start_failure_with_session(
+async fn start_failure_with_run(
     state: &DaemonState,
     mission_id: &str,
     error: impl std::fmt::Display,
-    session: guatiao::library::Object<dyn AgentSession>,
+    run: guatiao::library::Object<dyn AgentSession>,
     safe_house: Option<SafeHouse>,
 ) -> ApiErrorResponse {
     let mut message = error.to_string();
-    match tokio::task::spawn_blocking(move || session.close().map_err(|error| error.to_string()))
+    match tokio::task::spawn_blocking(move || run.close().map_err(|error| error.to_string()))
         .await
     {
         Ok(Ok(())) => {}
@@ -8713,7 +8713,7 @@ struct StartedMission {
     mission: Mission,
     handler_provider: String,
     terminal_provider: String,
-    provider_session_id: Option<SessionId>,
+    provider_id: Option<RunId>,
 }
 
 #[derive(Debug)]
@@ -8731,7 +8731,7 @@ fn mission_error(error: MissionError) -> ApiErrorResponse {
         MissionError::AlreadyExists
         | MissionError::InvalidTransition { .. }
         | MissionError::TerminalMission
-        | MissionError::SessionAlreadyAttached => StatusCode::CONFLICT,
+        | MissionError::RunAlreadyAttached => StatusCode::CONFLICT,
         MissionError::EmptyPrompt | MissionError::InvalidOperation => StatusCode::BAD_REQUEST,
         MissionError::Persistence => StatusCode::INTERNAL_SERVER_ERROR,
     };
@@ -8906,7 +8906,7 @@ queue = 1
         );
         let forged = harness_start_line(
             "Mission \"m\"",
-            "runner Session \"k\" runs",
+            "runner Run \"k\" runs",
             "claude\nai6: weakening: none",
             "pty\r",
         );
@@ -8965,9 +8965,9 @@ queue = 1
     }
     use crate::directorates::m::config::MemoryProvider;
     use crate::directorates::q::safehouse::{
-        ChangeLog, SafeHouseInfo, SafeHouseProvider, SafeHouseSession,
+        ChangeLog, SafeHouseInfo, SafeHouseProvider, SafeHouseRun,
     };
-    use crate::directorates::q::terminal::{ExitInfo, Terminal, TerminalSession};
+    use crate::directorates::q::terminal::{ExitInfo, Terminal, TerminalRun};
     use crate::directorates::registry::cables::{
         CableAction, CableGrant, CablePolicy, CableScope, CableTarget,
     };
@@ -9009,7 +9009,7 @@ queue = 1
             }
         })
         .await
-        .expect("daemon should queue the Session event")
+        .expect("daemon should queue the Run event")
     }
 
     #[tokio::test]
@@ -9025,7 +9025,7 @@ queue = 1
             roster: Arc::new(Roster::default()),
             intake: Arc::new(FileRegistry::open(root.path())),
             missions: Arc::new(Mutex::new(MissionStore::default())),
-            sessions: Arc::new(Mutex::new(BTreeMap::new())),
+            runs: Arc::new(Mutex::new(BTreeMap::new())),
             cables: no_op_cables(),
             station_id: "test".to_owned(),
             station: StationConfig::default().with_terminal("mock-terminal"),
@@ -9069,9 +9069,9 @@ queue = 1
         )
         .unwrap();
 
-        let session_id = SessionId::try_new("session-007").unwrap();
+        let run_id = RunId::try_new("run-007").unwrap();
         let mission_id = MissionId::try_new("mission-007").unwrap();
-        let receiver_session_id = SessionId::try_new("session-008").unwrap();
+        let receiver_run_id = RunId::try_new("run-008").unwrap();
         let receiver_mission_id = MissionId::try_new("mission-008").unwrap();
         let mut missions = MissionStore::default();
         missions
@@ -9087,7 +9087,7 @@ queue = 1
             .transition(mission_id.as_str(), MissionState::Working)
             .unwrap();
         missions
-            .attach_session(mission_id.as_str(), session_id.clone())
+            .attach_run(mission_id.as_str(), run_id.clone())
             .unwrap();
         missions
             .create(
@@ -9102,15 +9102,15 @@ queue = 1
             .transition(receiver_mission_id.as_str(), MissionState::Working)
             .unwrap();
         missions
-            .attach_session(receiver_mission_id.as_str(), receiver_session_id.clone())
+            .attach_run(receiver_mission_id.as_str(), receiver_run_id.clone())
             .unwrap();
 
         let roster = Arc::new(Roster::load(dir.path()).unwrap());
         let missions = Arc::new(Mutex::new(missions));
         let mut operations = BTreeMap::new();
-        for (mission, session) in [
-            (mission_id.as_str(), session_id.clone()),
-            (receiver_mission_id.as_str(), receiver_session_id.clone()),
+        for (mission, run) in [
+            (mission_id.as_str(), run_id.clone()),
+            (receiver_mission_id.as_str(), receiver_run_id.clone()),
         ] {
             operations.insert(
                 mission.to_owned(),
@@ -9123,13 +9123,13 @@ queue = 1
                     effort: None,
                     cover: None,
                     safe_house: None,
-                    session: Arc::new(Mutex::new(
-                        MockSession::new(session.clone(), "working").into_object(),
+                    run: Arc::new(Mutex::new(
+                        MockRun::new(run.clone(), "working").into_object(),
                     )),
                     watchdog: Watchdog::default(),
                     exposure: ExposureGate::default(),
-                    gate: SessionGate::default(),
-                    session_id: Some(session),
+                    gate: RunGate::default(),
+                    run_id: Some(run),
                     clearance: "field".to_owned(),
                     resumed: false,
                     runner: None,
@@ -9143,14 +9143,14 @@ queue = 1
                 },
             );
         }
-        let sessions = Arc::new(Mutex::new(operations));
+        let runs = Arc::new(Mutex::new(operations));
 
         let registry = Arc::new(FileRegistry::open(dir.path().join("registry")));
         let station_target =
             CableTarget::try_new(CableScope::Station, Some("local".to_owned())).unwrap();
         let endpoint_roster = roster.clone();
         let endpoint_missions = missions.clone();
-        let endpoint_sessions = sessions.clone();
+        let endpoint_runs = runs.clone();
         let relay = CableRelay::new(
             registry,
             CablePolicy::try_new(
@@ -9181,7 +9181,7 @@ queue = 1
                 cable_endpoints(
                     &endpoint_roster,
                     &endpoint_missions,
-                    &endpoint_sessions,
+                    &endpoint_runs,
                     "local",
                 )
             },
@@ -9193,7 +9193,7 @@ queue = 1
             roster,
             intake: Arc::new(FileRegistry::open(dir.path().join("registry"))),
             missions,
-            sessions,
+            runs,
             cables: Arc::new(relay),
             station_id: "local".to_owned(),
             station: StationConfig::default().with_terminal("mock-terminal"),
@@ -9255,14 +9255,14 @@ queue = 1
             "G".to_owned(),
             None,
             "local".to_owned(),
-            Some("session-008".to_owned()),
+            Some("run-008".to_owned()),
             Some("mission-008".to_owned()),
         )
         .unwrap();
         let deliveries = state.cables.inbox(&receiver, 10).unwrap();
         assert_eq!(deliveries.len(), 1);
         assert_eq!(deliveries[0].from_agent, "007");
-        assert_eq!(deliveries[0].session_id.as_deref(), Some("session-007"));
+        assert_eq!(deliveries[0].run_id.as_deref(), Some("run-007"));
         assert_eq!(deliveries[0].mission_id.as_deref(), Some("mission-007"));
         assert_eq!(deliveries[0].body, "Please review the API change");
         assert!(
@@ -9287,8 +9287,8 @@ queue = 1
             _terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
         ) -> Result<Object<dyn AgentSession>, ProviderError> {
             std::thread::sleep(std::time::Duration::from_millis(100));
-            Ok(MockSession::new(
-                SessionId::try_new("provider-session-007")
+            Ok(MockRun::new(
+                RunId::try_new("provider-id-007")
                     .map_err(|error| test_provider_error(&error.to_string()))?,
                 "blocked",
             )
@@ -9300,19 +9300,19 @@ queue = 1
             request: AgentResume,
             _terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
         ) -> Result<Object<dyn AgentSession>, ProviderError> {
-            Ok(MockSession::new(request.session_id, "completed").into_object())
+            Ok(MockRun::new(request.run_id, "completed").into_object())
         }
     }
 
-    pub(super) struct MockSession {
-        session_id: SessionId,
+    pub(super) struct MockRun {
+        run_id: RunId,
         events: Mutex<VecDeque<AgentEvent>>,
     }
 
-    impl MockSession {
-        pub(super) fn new(session_id: SessionId, event: &str) -> Self {
+    impl MockRun {
+        pub(super) fn new(run_id: RunId, event: &str) -> Self {
             Self::with_event(
-                session_id,
+                run_id,
                 AgentEvent {
                     kind: event.to_owned(),
                     text: None,
@@ -9324,9 +9324,9 @@ queue = 1
             )
         }
 
-        pub(super) fn with_event(session_id: SessionId, event: AgentEvent) -> Self {
+        pub(super) fn with_event(run_id: RunId, event: AgentEvent) -> Self {
             Self {
-                session_id,
+                run_id,
                 events: Mutex::new(VecDeque::from([event])),
             }
         }
@@ -9392,8 +9392,8 @@ queue = 1
                 tools: Vec::new(),
                 report: None,
             };
-            Ok(MockSession {
-                session_id: SessionId::try_new("provider-session-denied")
+            Ok(MockRun {
+                run_id: RunId::try_new("provider-id-denied")
                     .map_err(|error| test_provider_error(&error.to_string()))?,
                 events: Mutex::new(VecDeque::from([
                     event(DENIED_EVENT, "Write, Bash"),
@@ -9408,8 +9408,8 @@ queue = 1
             request: AgentResume,
             _terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
         ) -> Result<Object<dyn AgentSession>, ProviderError> {
-            let mut session = MockSession::new(request.session_id, "completed");
-            if let Ok(events) = session.events.get_mut()
+            let mut run = MockRun::new(request.run_id, "completed");
+            if let Ok(events) = run.events.get_mut()
                 && !self.notice.is_empty()
             {
                 events.push_front(AgentEvent {
@@ -9421,7 +9421,7 @@ queue = 1
                     report: None,
                 });
             }
-            Ok(session.into_object())
+            Ok(run.into_object())
         }
 
         fn weakenings(&self) -> Result<Vec<String>, ProviderError> {
@@ -9474,7 +9474,7 @@ queue = 1
                     .to_owned();
                 let response = if path.starts_with("/v1/station/inputs/next") {
                     "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                } else if path == "/v1/station/sessions" {
+                } else if path == "/v1/station/runs" {
                     "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: 19\r\nConnection: close\r\n\r\n{\"next_sequence\":1}"
                 } else {
                     "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
@@ -9507,16 +9507,16 @@ queue = 1
     }
 
     #[tokio::test]
-    async fn a_finished_sessions_events_are_filed_as_its_context_when_its_harness_keeps_none() {
+    async fn a_finished_runs_events_are_filed_as_its_context_when_its_harness_keeps_none() {
         let root = tempfile::tempdir().unwrap();
         let state = test_state(root.path(), "", "[agent.007]\nhandler = \"mock-denied\"\n");
         start_mission_by_id(&state, "mission-1").await;
         wait_for_done(&state, "mission-1").await;
         let mission = mission_state(&state, "mission-1");
-        let session = mission.session_ids[0].as_str().to_owned();
+        let run = mission.run_ids[0].as_str().to_owned();
         let deadline = std::time::Instant::now() + Duration::from_secs(120);
         let context = loop {
-            if let Some(context) = state.intake.session_context(&session).unwrap() {
+            if let Some(context) = state.intake.run_context(&run).unwrap() {
                 break context;
             }
             assert!(std::time::Instant::now() < deadline, "no context was filed");
@@ -9607,8 +9607,8 @@ queue = 1
                 Some(value) if value == "none" => None,
                 _ => Some(MOCK_RESET),
             };
-            Ok(MockSession::with_event(
-                SessionId::try_new("provider-session-limited")
+            Ok(MockRun::with_event(
+                RunId::try_new("provider-id-limited")
                     .map_err(|error| test_provider_error(&error.to_string()))?,
                 AgentEvent {
                     kind: LIMIT_EVENT.to_owned(),
@@ -9639,13 +9639,13 @@ queue = 1
         ) -> Result<Object<dyn AgentSession>, ProviderError> {
             assert!(
                 request.message.is_some(),
-                "a Session resumed after a limit is told to carry on"
+                "a Run resumed after a limit is told to carry on"
             );
-            Ok(MockSession::new(request.session_id, "completed").into_object())
+            Ok(MockRun::new(request.run_id, "completed").into_object())
         }
     }
 
-    /// A provider whose Session reports the cumulative usage listed in its Agent's
+    /// A provider whose Run reports the cumulative usage listed in its Agent's
     /// `MOCK_USAGE` (`input:output:cost_micro_usd`, comma separated) and then stays quiet.
     #[derive(Default, Provider)]
     #[provider(AgentHandler, id = "mock-spend", name = "Mock Spend", crate = crate::guatiao)]
@@ -9699,10 +9699,10 @@ queue = 1
                     report: None,
                 });
             }
-            let session_id = SessionId::try_new("provider-session-spend")
+            let run_id = RunId::try_new("provider-id-spend")
                 .map_err(|error| test_provider_error(&error.to_string()))?;
-            Ok(MockSession {
-                session_id,
+            Ok(MockRun {
+                run_id,
                 events: Mutex::new(events),
             }
             .into_object())
@@ -9713,20 +9713,20 @@ queue = 1
             request: AgentResume,
             _terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
         ) -> Result<Object<dyn AgentSession>, ProviderError> {
-            Ok(MockSession::new(request.session_id, "completed").into_object())
+            Ok(MockRun::new(request.run_id, "completed").into_object())
         }
     }
 
-    impl AgentSession for MockSession {
+    impl AgentSession for MockRun {
         fn session_id(&self) -> Result<Option<String>, ProviderError> {
-            Ok(Some(self.session_id.to_string()))
+            Ok(Some(self.run_id.to_string()))
         }
 
         fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {
             RECORDED_MESSAGES
                 .lock()
                 .unwrap()
-                .push((self.session_id.to_string(), message.text));
+                .push((self.run_id.to_string(), message.text));
             Ok(())
         }
 
@@ -9734,7 +9734,7 @@ queue = 1
             let event = self
                 .events
                 .lock()
-                .map_err(|_| test_provider_error("mock session lock was poisoned"))?
+                .map_err(|_| test_provider_error("mock run lock was poisoned"))?
                 .pop_front();
             if event.is_none() {
                 // An idle provider waits for its timeout instead of spinning the event pump.
@@ -9757,14 +9757,14 @@ queue = 1
     struct MockTerminalProvider;
 
     impl Terminal for MockTerminalProvider {
-        fn spawn(&self, _spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError> {
-            Ok(MockTerminalSession.into_object())
+        fn spawn(&self, _spec: &Value) -> Result<Object<dyn TerminalRun>, ProviderError> {
+            Ok(MockTerminalRun.into_object())
         }
     }
 
-    struct MockTerminalSession;
+    struct MockTerminalRun;
 
-    impl TerminalSession for MockTerminalSession {
+    impl TerminalRun for MockTerminalRun {
         fn pid(&self) -> i64 {
             0
         }
@@ -9801,7 +9801,7 @@ queue = 1
         Mutex::new(Vec::new());
 
     impl SafeHouseProvider for MockSafeHouseProvider {
-        fn open(&self, spec: &Value) -> Result<Object<dyn SafeHouseSession>, ProviderError> {
+        fn open(&self, spec: &Value) -> Result<Object<dyn SafeHouseRun>, ProviderError> {
             let spec = SafeHouseSpec::from_value(spec)
                 .map_err(|error| test_provider_error(&error.to_string()))?;
             SAFE_HOUSE_OPENS
@@ -9840,7 +9840,7 @@ queue = 1
     struct MockPlainProvider;
 
     impl SafeHouseProvider for MockPlainProvider {
-        fn open(&self, spec: &Value) -> Result<Object<dyn SafeHouseSession>, ProviderError> {
+        fn open(&self, spec: &Value) -> Result<Object<dyn SafeHouseRun>, ProviderError> {
             let spec = SafeHouseSpec::from_value(spec)
                 .map_err(|error| test_provider_error(&error.to_string()))?;
             Ok(MockSafeHouse {
@@ -9860,7 +9860,7 @@ queue = 1
         info: SafeHouseInfo,
     }
 
-    impl SafeHouseSession for MockSafeHouse {
+    impl SafeHouseRun for MockSafeHouse {
         fn info(&self) -> Result<Value, ProviderError> {
             self.info
                 .to_value()
@@ -10216,7 +10216,7 @@ queue = 1
             roster: Arc::new(Roster::load(root).unwrap()),
             intake: Arc::new(FileRegistry::open(root.join("registry"))),
             missions: Arc::new(Mutex::new(missions)),
-            sessions: Arc::new(Mutex::new(BTreeMap::new())),
+            runs: Arc::new(Mutex::new(BTreeMap::new())),
             cables: no_op_cables(),
             station_id: "test".to_owned(),
             station: StationConfig::default().with_terminal("mock-terminal"),
@@ -10359,7 +10359,7 @@ queue = 1
         );
     }
 
-    /// Waits for a Mission to be verifying, in the book and in its Session record, which is
+    /// Waits for a Mission to be verifying, in the book and in its Run record, which is
     /// written just after: a decision is taken on the record.
     pub(super) async fn wait_for_verifying(state: &DaemonState, mission_id: &str) {
         wait_for_state(state, mission_id, MissionState::Verifying).await;
@@ -10367,7 +10367,7 @@ queue = 1
             loop {
                 let result = state
                     .intake
-                    .latest_session(mission_id)
+                    .latest_run(mission_id)
                     .unwrap()
                     .and_then(|record| record.result);
                 if result.is_some_and(|result| result.state == "verifying") {
@@ -10383,7 +10383,7 @@ queue = 1
         );
     }
 
-    /// Waits for a Mission of an Operation to settle done: its Session ends and it goes verifying,
+    /// Waits for a Mission of an Operation to settle done: its Run ends and it goes verifying,
     /// a person confirms it as the gateway would record, and the Station settles it.
     pub(super) async fn wait_for_done(state: &DaemonState, mission_id: &str) {
         wait_for_verifying(state, mission_id).await;
@@ -10394,8 +10394,8 @@ queue = 1
             .get(mission_id)
             .and_then(|mission| mission.operation_id.clone())
             .expect("a verifying Mission has an Operation");
-        let confirmed = crate::directorates::registry::sessions::MissionVerdict::new(
-            crate::directorates::registry::sessions::OutcomeVerdict::Confirmed,
+        let confirmed = crate::directorates::registry::runs::MissionVerdict::new(
+            crate::directorates::registry::runs::OutcomeVerdict::Confirmed,
             "person-test",
             state.clock.now() as f64,
             Some("checked".to_owned()),
@@ -10409,26 +10409,26 @@ queue = 1
     }
 
     #[tokio::test]
-    async fn a_started_session_is_recorded_in_the_shared_registry() {
+    async fn a_started_run_is_recorded_in_the_shared_registry() {
         let root = tempfile::tempdir().unwrap();
         let state = capacity_test_state(root.path(), 2, 2);
         start_first_mission(&state).await;
 
-        let hold = session_hold(&state, "mission-1").expect("the Station holds the lease");
-        let record = state.intake.session(&hold.id).unwrap().unwrap();
+        let hold = run_hold(&state, "mission-1").expect("the Station holds the lease");
+        let record = state.intake.run(&hold.id).unwrap().unwrap();
         assert_eq!(record.mission_id, "mission-1");
         assert_eq!(record.station, "test");
         assert_eq!(record.theater.as_deref(), Some(LOCAL_THEATER));
         assert_eq!(
-            record.provider_session_id.as_deref(),
-            Some("provider-session-007")
+            record.provider_id.as_deref(),
+            Some("provider-id-007")
         );
         assert_eq!((record.attempt, record.predecessor), (1, None));
         assert_eq!(record.fence, hold.fence);
 
         // Another Station opening the same Registry sees the same record.
         let other = FileRegistry::open(root.path().join("registry"));
-        assert_eq!(other.session(&hold.id).unwrap().unwrap().station, "test");
+        assert_eq!(other.run(&hold.id).unwrap().unwrap().station, "test");
 
         // Finishing the Mission closes the record.
         let _ = transition_mission(
@@ -10441,22 +10441,22 @@ queue = 1
         .await
         .unwrap_or_else(|error| panic!("transition failed: {:?}", error.1.0.error));
         assert_eq!(
-            state.intake.session(&hold.id).unwrap().unwrap().status,
-            SessionStatus::Ended
+            state.intake.run(&hold.id).unwrap().unwrap().status,
+            RunStatus::Ended
         );
     }
 
     #[tokio::test]
-    async fn a_station_that_lost_the_session_lease_is_fenced_out() {
+    async fn a_station_that_lost_the_run_lease_is_fenced_out() {
         let root = tempfile::tempdir().unwrap();
         let state = capacity_test_state(root.path(), 2, 2);
         start_first_mission(&state).await;
-        let hold = session_hold(&state, "mission-1").unwrap();
+        let hold = run_hold(&state, "mission-1").unwrap();
 
         // The lease lapsed while this Station was paused and another Station took it.
         let later = unix_now() + 3_600.0;
         let taken = FileRegistry::open(root.path().join("registry"))
-            .take_session_at(&hold.id, "other-station", DEFAULT_LEASE, later)
+            .take_run_at(&hold.id, "other-station", DEFAULT_LEASE, later)
             .unwrap();
         assert!(taken.fence > hold.fence);
 
@@ -10476,8 +10476,8 @@ queue = 1
         ));
 
         // Its next write or renewal presents the old token and is refused; it stops acting.
-        renew_session_leases(&state);
-        assert!(state.sessions.lock().unwrap().is_empty());
+        renew_run_leases(&state);
+        assert!(state.runs.lock().unwrap().is_empty());
         assert_eq!(
             state
                 .missions
@@ -10488,7 +10488,7 @@ queue = 1
                 .state,
             MissionState::Abandoned
         );
-        let record = state.intake.session(&hold.id).unwrap().unwrap();
+        let record = state.intake.run(&hold.id).unwrap().unwrap();
         assert_eq!(record.station, "other-station");
         assert_eq!(record.fence, taken.fence);
     }
@@ -10522,7 +10522,7 @@ queue = 1
     }
 
     #[tokio::test]
-    async fn a_limit_parks_the_mission_and_a_fake_clock_resumes_the_same_provider_session() {
+    async fn a_limit_parks_the_mission_and_a_fake_clock_resumes_the_same_provider_id() {
         let root = tempfile::tempdir().unwrap();
         let (state, now) = limited_state(
             root.path(),
@@ -10543,7 +10543,7 @@ queue = 1
             .clone();
         assert_eq!(parked.parked_until, Some(resume_at));
         assert!(
-            state.sessions.lock().unwrap().is_empty(),
+            state.runs.lock().unwrap().is_empty(),
             "the harness is closed"
         );
         let event = tokio::time::timeout(Duration::from_secs(60), async {
@@ -10558,9 +10558,9 @@ queue = 1
         .expect("the limit is reported");
         assert_eq!(event.kind, LIMIT_EVENT);
         assert_eq!(event.limit.unwrap().resets_at, Some(MOCK_RESET));
-        let hold = session_hold(&state, "mission-1").unwrap();
-        let record = state.intake.session(&hold.id).unwrap().unwrap();
-        assert_eq!(record.status, SessionStatus::Parked);
+        let hold = run_hold(&state, "mission-1").unwrap();
+        let record = state.intake.run(&hold.id).unwrap().unwrap();
+        assert_eq!(record.status, RunStatus::Parked);
         assert_eq!(record.parked_until, Some(resume_at as f64));
 
         // Before the reset nothing resumes.
@@ -10577,9 +10577,9 @@ queue = 1
                 .state,
             MissionState::Parked
         );
-        assert!(state.sessions.lock().unwrap().is_empty());
+        assert!(state.runs.lock().unwrap().is_empty());
 
-        // Once the clock passes the reset the same provider Session resumes.
+        // Once the clock passes the reset the same provider Run resumes.
         now.store(resume_at, Ordering::SeqCst);
         schedule_parked_once(&state).await;
         wait_for_done(&state, "mission-1").await;
@@ -10591,17 +10591,17 @@ queue = 1
             .unwrap()
             .clone();
         assert_eq!(done.parked_until, None);
-        let provider_ids: Vec<_> = done.session_ids.iter().map(SessionId::as_str).collect();
-        assert_eq!(provider_ids, ["provider-session-limited"]);
-        assert_eq!(session_hold(&state, "mission-1").unwrap().id, hold.id);
+        let provider_ids: Vec<_> = done.run_ids.iter().map(RunId::as_str).collect();
+        assert_eq!(provider_ids, ["provider-id-limited"]);
+        assert_eq!(run_hold(&state, "mission-1").unwrap().id, hold.id);
         // The record is closed just after the Mission book says Done.
         tokio::time::timeout(Duration::from_secs(60), async {
-            while state.intake.session(&hold.id).unwrap().unwrap().status != SessionStatus::Ended {
+            while state.intake.run(&hold.id).unwrap().unwrap().status != RunStatus::Ended {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
         })
         .await
-        .expect("the Session record is closed");
+        .expect("the Run record is closed");
     }
 
     #[tokio::test]
@@ -10681,10 +10681,10 @@ queue = 1
         })
         .await
         .expect("the limited Mission is handed to Agent 008");
-        let first = session_hold(&state, "mission-1").unwrap();
-        // The hand-off queues the Mission before it ends the Session.
+        let first = run_hold(&state, "mission-1").unwrap();
+        // The hand-off queues the Mission before it ends the Run.
         tokio::time::timeout(Duration::from_secs(60), async {
-            while state.intake.session(&first.id).unwrap().unwrap().status != SessionStatus::Ended {
+            while state.intake.run(&first.id).unwrap().unwrap().status != RunStatus::Ended {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
         })
@@ -10693,11 +10693,11 @@ queue = 1
 
         schedule_queued_once(&state).await;
         wait_for_state(&state, "mission-1", MissionState::Blocked).await;
-        let second = session_hold(&state, "mission-1").unwrap();
+        let second = run_hold(&state, "mission-1").unwrap();
         assert_eq!((second.attempt, first.attempt), (2, 1));
-        let record = state.intake.session(&second.id).unwrap().unwrap();
+        let record = state.intake.run(&second.id).unwrap().unwrap();
         assert_eq!(record.predecessor.as_deref(), Some(first.id.as_str()));
-        assert_eq!(record.status, SessionStatus::Active);
+        assert_eq!(record.status, RunStatus::Active);
         assert_eq!(
             state
                 .missions
@@ -10705,10 +10705,10 @@ queue = 1
                 .unwrap()
                 .get("mission-1")
                 .unwrap()
-                .session_ids
+                .run_ids
                 .len(),
             2,
-            "a new provider Session, not a resume"
+            "a new provider Run, not a resume"
         );
 
         let _ = transition_mission(
@@ -10784,7 +10784,7 @@ queue = 1
             roster: Arc::new(Roster::load(&dir).unwrap()),
             intake: Arc::new(FileRegistry::open(dir.join("registry"))),
             missions: Arc::new(Mutex::new(missions)),
-            sessions: Arc::new(Mutex::new(BTreeMap::new())),
+            runs: Arc::new(Mutex::new(BTreeMap::new())),
             cables: no_op_cables(),
             station_id: "test".to_owned(),
             station: StationConfig::default().with_terminal("mock-terminal"),
@@ -10835,7 +10835,7 @@ queue = 1
                 .state,
             MissionState::Queued
         );
-        assert_eq!(state.sessions.lock().unwrap().len(), 1);
+        assert_eq!(state.runs.lock().unwrap().len(), 1);
 
         let Json(completed) = require(
             transition_mission(
@@ -10868,7 +10868,7 @@ queue = 1
         })
         .await
         .expect("released capacity should schedule the next Mission");
-        assert_eq!(state.sessions.lock().unwrap().len(), 1);
+        assert_eq!(state.runs.lock().unwrap().len(), 1);
         state.stopping.store(true, Ordering::Release);
         let event_pumps = std::mem::take(&mut *state.event_pumps.lock().unwrap());
         for event_pump in event_pumps {
@@ -10916,7 +10916,7 @@ queue = 1
             roster: Arc::new(Roster::load(&dir).unwrap()),
             intake: Arc::new(FileRegistry::open(dir.join("registry"))),
             missions: Arc::new(Mutex::new(MissionStore::default())),
-            sessions: Arc::new(Mutex::new(BTreeMap::new())),
+            runs: Arc::new(Mutex::new(BTreeMap::new())),
             cables: no_op_cables(),
             station_id: "test".to_owned(),
             station: StationConfig::default().with_terminal("mock-terminal"),
@@ -11142,7 +11142,7 @@ queue = 1
             roster: Arc::new(source.load("").unwrap().roster),
             intake: registry,
             missions: Arc::new(Mutex::new(MissionStore::default())),
-            sessions: Arc::new(Mutex::new(BTreeMap::new())),
+            runs: Arc::new(Mutex::new(BTreeMap::new())),
             cables: no_op_cables(),
             station_id: "test".to_owned(),
             station: StationConfig::default().with_terminal("mock-terminal"),
@@ -11176,10 +11176,10 @@ queue = 1
         assert_eq!(lease.meta()["agent"], "007");
         schedule_queued_once(&state).await;
         wait_for_state(&state, &mission_id, MissionState::Blocked).await;
-        let session = state.intake.latest_session(&mission_id).unwrap().unwrap();
+        let run = state.intake.latest_run(&mission_id).unwrap().unwrap();
         assert_eq!(
-            session.provider_session_id.as_deref(),
-            Some("provider-session-007")
+            run.provider_id.as_deref(),
+            Some("provider-id-007")
         );
 
         {
@@ -11288,7 +11288,7 @@ queue = 1
             roster: Arc::new(Roster::load(dir.path()).unwrap()),
             intake,
             missions: Arc::new(Mutex::new(MissionStore::default())),
-            sessions: Arc::new(Mutex::new(BTreeMap::new())),
+            runs: Arc::new(Mutex::new(BTreeMap::new())),
             cables: no_op_cables(),
             station_id: "hq".to_owned(),
             station: StationConfig::default().with_roles([StationRole::Control]),
@@ -11347,7 +11347,7 @@ queue = 1
             roster: Arc::new(Roster::load(root).unwrap()),
             intake: Arc::new(FileRegistry::open(root.join("registry"))),
             missions: Arc::new(Mutex::new(MissionStore::default())),
-            sessions: Arc::new(Mutex::new(BTreeMap::new())),
+            runs: Arc::new(Mutex::new(BTreeMap::new())),
             cables: no_op_cables(),
             station_id: "hq".to_owned(),
             station: StationConfig::default().with_roles([StationRole::Control]),
@@ -11449,7 +11449,7 @@ queue = 1
         assert_eq!(
             state.intake.lease(&first).unwrap().unwrap().station(),
             "worker-b",
-            "worker-a published that it runs as many Sessions as it may"
+            "worker-a published that it runs as many Runs as it may"
         );
 
         let second = queue_brief(&state, "second", Some("007"));
@@ -11576,7 +11576,7 @@ theater = \"other-box\"
             roster: Arc::new(Roster::load(&dir).unwrap()),
             intake: Arc::new(FileRegistry::open(dir.join("registry"))),
             missions: Arc::new(Mutex::new(MissionStore::default())),
-            sessions: Arc::new(Mutex::new(BTreeMap::new())),
+            runs: Arc::new(Mutex::new(BTreeMap::new())),
             cables: no_op_cables(),
             station_id: "test".to_owned(),
             station: StationConfig::default().with_terminal("mock-terminal"),
@@ -11653,7 +11653,7 @@ theater = \"other-box\"
     }
 
     #[tokio::test]
-    async fn mock_provider_lifecycle_keeps_runtime_responsive_and_reuses_session_id() {
+    async fn mock_provider_lifecycle_keeps_runtime_responsive_and_reuses_run_id() {
         let scratch = tempfile::Builder::new()
             .prefix("ai6-server-lifecycle-")
             .tempdir()
@@ -11696,7 +11696,7 @@ theater = \"other-box\"
             roster: Arc::new(Roster::load(&dir).unwrap()),
             intake,
             missions: Arc::new(Mutex::new(MissionStore::open(&mission_path).unwrap())),
-            sessions: Arc::new(Mutex::new(BTreeMap::new())),
+            runs: Arc::new(Mutex::new(BTreeMap::new())),
             cables: no_op_cables(),
             station_id: "test".to_owned(),
             station: StationConfig::default().with_terminal("mock-terminal"),
@@ -11773,8 +11773,8 @@ theater = \"other-box\"
         let (status, Json(started)) = require(result, "mock AgentHandler should start");
         assert_eq!(status, StatusCode::ACCEPTED);
         assert_eq!(
-            started.provider_session_id.as_ref().map(SessionId::as_str),
-            Some("provider-session-007")
+            started.provider_id.as_ref().map(RunId::as_str),
+            Some("provider-id-007")
         );
         assert_eq!(started.mission.state, MissionState::Working);
         let selected_settings = state
@@ -11838,7 +11838,7 @@ theater = \"other-box\"
             .unwrap()
             .transition(mission_id.as_str(), MissionState::Working)
             .unwrap();
-        state.sessions.lock().unwrap().clear();
+        state.runs.lock().unwrap().clear();
         let mut recovered = MissionStore::open(&mission_path).unwrap();
         let startup_recovery = recover_startup_missions(&mut recovered).unwrap();
         assert_eq!(startup_recovery, BTreeSet::from([mission_id.to_string()]));
@@ -11858,8 +11858,8 @@ theater = \"other-box\"
             .clone();
         assert!(state.startup_recovery.lock().unwrap().is_empty());
         assert_eq!(
-            resumed.session_ids.last().map(SessionId::as_str),
-            Some("provider-session-007"),
+            resumed.run_ids.last().map(RunId::as_str),
+            Some("provider-id-007"),
         );
         assert!(matches!(
             resumed.state,
@@ -11891,14 +11891,14 @@ theater = \"other-box\"
             event.event.as_ref().map(|event| event.kind.as_str()),
             Some("completed")
         );
-        // The Session ended done; the Mission waits for someone to verify it.
+        // The Run ended done; the Mission waits for someone to verify it.
         assert_eq!(event.mission.state, MissionState::Verifying);
     }
 
     #[tokio::test]
     async fn shutdown_stops_event_workers_and_blocks_active_missions() {
         let mission_id = MissionId::try_new("mission-shutdown").unwrap();
-        let session_id = SessionId::try_new("provider-session-shutdown").unwrap();
+        let run_id = RunId::try_new("provider-id-shutdown").unwrap();
         let mut missions = MissionStore::default();
         missions
             .create(
@@ -11913,10 +11913,10 @@ theater = \"other-box\"
             .transition(mission_id.as_str(), MissionState::Working)
             .unwrap();
         missions
-            .attach_session(mission_id.as_str(), session_id.clone())
+            .attach_run(mission_id.as_str(), run_id.clone())
             .unwrap();
-        let session = Arc::new(Mutex::new(
-            MockSession::new(session_id.clone(), "completed").into_object(),
+        let run = Arc::new(Mutex::new(
+            MockRun::new(run_id.clone(), "completed").into_object(),
         ));
         let state = DaemonState {
             config: Default::default(),
@@ -11924,7 +11924,7 @@ theater = \"other-box\"
             roster: Arc::new(Roster::default()),
             intake: Arc::new(FileRegistry::open(scratch_registry_dir())),
             missions: Arc::new(Mutex::new(missions)),
-            sessions: Arc::new(Mutex::new(BTreeMap::new())),
+            runs: Arc::new(Mutex::new(BTreeMap::new())),
             cables: no_op_cables(),
             station_id: "test".to_owned(),
             station: StationConfig::default().with_terminal("mock-terminal"),
@@ -11946,7 +11946,7 @@ theater = \"other-box\"
             usage_watch: Default::default(),
             watches: Default::default(),
         };
-        state.sessions.lock().unwrap().insert(
+        state.runs.lock().unwrap().insert(
             mission_id.to_string(),
             AgentOperation {
                 handler_provider: "mock-agent".to_owned(),
@@ -11957,11 +11957,11 @@ theater = \"other-box\"
                 effort: None,
                 cover: None,
                 safe_house: None,
-                session: session.clone(),
+                run: run.clone(),
                 watchdog: Watchdog::default(),
                 exposure: ExposureGate::default(),
-                gate: SessionGate::default(),
-                session_id: Some(session_id),
+                gate: RunGate::default(),
+                run_id: Some(run_id),
                 clearance: "field".to_owned(),
                 resumed: false,
                 runner: None,
@@ -11975,7 +11975,7 @@ theater = \"other-box\"
             },
         );
 
-        spawn_event_pump(state.clone(), mission_id.to_string(), session);
+        spawn_event_pump(state.clone(), mission_id.to_string(), run);
         let event_pumps = std::mem::take(&mut *state.event_pumps.lock().unwrap());
         tokio::time::timeout(std::time::Duration::from_secs(60), async {
             for event_pump in event_pumps {
@@ -11985,7 +11985,7 @@ theater = \"other-box\"
         .await
         .expect("event worker should stop promptly");
 
-        assert!(state.sessions.lock().unwrap().is_empty());
+        assert!(state.runs.lock().unwrap().is_empty());
         assert_eq!(
             state
                 .missions
@@ -12001,7 +12001,7 @@ theater = \"other-box\"
     #[tokio::test]
     async fn terminal_prompt_blocks_and_new_output_resumes_the_mission() {
         let mission_id = MissionId::try_new("mission-terminal-prompt").unwrap();
-        let session_id = SessionId::try_new("provider-session-terminal-prompt").unwrap();
+        let run_id = RunId::try_new("provider-id-terminal-prompt").unwrap();
         let mut missions = MissionStore::default();
         missions
             .create(
@@ -12016,11 +12016,11 @@ theater = \"other-box\"
             .transition(mission_id.as_str(), MissionState::Working)
             .unwrap();
         missions
-            .attach_session(mission_id.as_str(), session_id.clone())
+            .attach_run(mission_id.as_str(), run_id.clone())
             .unwrap();
-        let session = Arc::new(Mutex::new(
-            MockSession {
-                session_id: session_id.clone(),
+        let run = Arc::new(Mutex::new(
+            MockRun {
+                run_id: run_id.clone(),
                 events: Mutex::new(VecDeque::new()),
             }
             .into_object(),
@@ -12031,7 +12031,7 @@ theater = \"other-box\"
             roster: Arc::new(Roster::default()),
             intake: Arc::new(FileRegistry::open(scratch_registry_dir())),
             missions: Arc::new(Mutex::new(missions)),
-            sessions: Arc::new(Mutex::new(BTreeMap::new())),
+            runs: Arc::new(Mutex::new(BTreeMap::new())),
             cables: no_op_cables(),
             station_id: "test".to_owned(),
             station: StationConfig::default().with_terminal("mock-terminal"),
@@ -12060,7 +12060,7 @@ theater = \"other-box\"
             1,
         );
         monitor.record_terminal_output(b"Continue? [y/N] ");
-        state.sessions.lock().unwrap().insert(
+        state.runs.lock().unwrap().insert(
             mission_id.to_string(),
             AgentOperation {
                 handler_provider: "mock-agent".to_owned(),
@@ -12071,11 +12071,11 @@ theater = \"other-box\"
                 effort: None,
                 cover: None,
                 safe_house: None,
-                session: session.clone(),
+                run: run.clone(),
                 watchdog: monitor.clone(),
                 exposure: ExposureGate::default(),
-                gate: SessionGate::default(),
-                session_id: Some(session_id),
+                gate: RunGate::default(),
+                run_id: Some(run_id),
                 clearance: "field".to_owned(),
                 resumed: false,
                 runner: None,
@@ -12092,7 +12092,7 @@ theater = \"other-box\"
         spawn_event_pump_with_monitor(
             state.clone(),
             mission_id.to_string(),
-            session,
+            run,
             monitor.clone(),
         );
         tokio::time::timeout(std::time::Duration::from_secs(60), async {
@@ -12170,7 +12170,7 @@ theater = \"other-box\"
         tokio::time::timeout(std::time::Duration::from_secs(60), async {
             loop {
                 if !state
-                    .sessions
+                    .runs
                     .lock()
                     .unwrap()
                     .contains_key(mission_id.as_str())
@@ -12181,7 +12181,7 @@ theater = \"other-box\"
             }
         })
         .await
-        .expect("stalled Session should be removed after the event is published");
+        .expect("stalled Run should be removed after the event is published");
 
         let event_pumps = std::mem::take(&mut *state.event_pumps.lock().unwrap());
         tokio::time::timeout(std::time::Duration::from_secs(60), async {
@@ -12193,16 +12193,16 @@ theater = \"other-box\"
         .expect("event worker should stop promptly");
     }
 
-    /// A Working Mission with a quiet mock Session registered under `gate`.
-    fn quiet_session_state(
+    /// A Working Mission with a quiet mock Run registered under `gate`.
+    fn quiet_run_state(
         mission_id: &str,
-        gate: SessionGate,
+        gate: RunGate,
     ) -> (
         DaemonState,
         Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
     ) {
         let mission_id = MissionId::try_new(mission_id).unwrap();
-        let session_id = SessionId::try_new("provider-session-quiet").unwrap();
+        let run_id = RunId::try_new("provider-id-quiet").unwrap();
         let mut missions = MissionStore::default();
         missions
             .create(
@@ -12217,11 +12217,11 @@ theater = \"other-box\"
             .transition(mission_id.as_str(), MissionState::Working)
             .unwrap();
         missions
-            .attach_session(mission_id.as_str(), session_id.clone())
+            .attach_run(mission_id.as_str(), run_id.clone())
             .unwrap();
-        let session = Arc::new(Mutex::new(
-            MockSession {
-                session_id: session_id.clone(),
+        let run = Arc::new(Mutex::new(
+            MockRun {
+                run_id: run_id.clone(),
                 events: Mutex::new(VecDeque::new()),
             }
             .into_object(),
@@ -12232,7 +12232,7 @@ theater = \"other-box\"
             roster: Arc::new(Roster::default()),
             intake: Arc::new(FileRegistry::open(scratch_registry_dir())),
             missions: Arc::new(Mutex::new(missions)),
-            sessions: Arc::new(Mutex::new(BTreeMap::new())),
+            runs: Arc::new(Mutex::new(BTreeMap::new())),
             cables: no_op_cables(),
             station_id: "test".to_owned(),
             station: StationConfig::default().with_terminal("mock-terminal"),
@@ -12254,7 +12254,7 @@ theater = \"other-box\"
             usage_watch: Default::default(),
             watches: Default::default(),
         };
-        state.sessions.lock().unwrap().insert(
+        state.runs.lock().unwrap().insert(
             mission_id.to_string(),
             AgentOperation {
                 handler_provider: "mock-agent".to_owned(),
@@ -12265,11 +12265,11 @@ theater = \"other-box\"
                 effort: None,
                 cover: None,
                 safe_house: None,
-                session: session.clone(),
+                run: run.clone(),
                 watchdog: Watchdog::default(),
                 exposure: ExposureGate::default(),
                 gate,
-                session_id: Some(session_id),
+                run_id: Some(run_id),
                 clearance: "field".to_owned(),
                 resumed: false,
                 runner: None,
@@ -12283,22 +12283,22 @@ theater = \"other-box\"
             },
         );
 
-        (state, session)
+        (state, run)
     }
 
     #[test]
-    fn session_gate_gives_an_operator_the_lock_before_the_next_poll() {
-        let session = Arc::new(Mutex::new(()));
-        let gate = SessionGate::default();
+    fn run_gate_gives_an_operator_the_lock_before_the_next_poll() {
+        let run = Arc::new(Mutex::new(()));
+        let gate = RunGate::default();
         let stop = Arc::new(AtomicBool::new(false));
         let polls = Arc::new(AtomicUsize::new(0));
         let poller = {
-            let (session, gate, stop, polls) =
-                (session.clone(), gate.clone(), stop.clone(), polls.clone());
+            let (run, gate, stop, polls) =
+                (run.clone(), gate.clone(), stop.clone(), polls.clone());
             std::thread::spawn(move || {
                 while !stop.load(Ordering::Acquire) {
                     gate.yield_to_operator();
-                    let _poll = session.lock().unwrap();
+                    let _poll = run.lock().unwrap();
                     polls.fetch_add(1, Ordering::AcqRel);
                     std::thread::sleep(Duration::from_millis(50));
                 }
@@ -12310,7 +12310,7 @@ theater = \"other-box\"
             std::thread::yield_now();
         }
         let before = polls.load(Ordering::Acquire);
-        drop(gate.lock(&session).unwrap());
+        drop(gate.lock(&run).unwrap());
         let after = polls.load(Ordering::Acquire);
         stop.store(true, Ordering::Release);
         poller.join().unwrap();
@@ -12322,9 +12322,9 @@ theater = \"other-box\"
     }
 
     #[tokio::test]
-    async fn operator_message_does_not_revive_a_closing_session() {
-        let gate = SessionGate::default();
-        let (state, _session) = quiet_session_state("mission-closing", gate.clone());
+    async fn operator_message_does_not_revive_a_closing_run() {
+        let gate = RunGate::default();
+        let (state, _run) = quiet_run_state("mission-closing", gate.clone());
         gate.close();
         state
             .missions
@@ -12357,14 +12357,14 @@ theater = \"other-box\"
     }
 
     #[tokio::test]
-    async fn operator_message_resets_the_watchdog_before_the_session_stalls() {
+    async fn operator_message_resets_the_watchdog_before_the_run_stalls() {
         let mission_id = MissionId::try_new("mission-quiet").unwrap();
-        let (state, session) = quiet_session_state(mission_id.as_str(), SessionGate::default());
+        let (state, run) = quiet_run_state(mission_id.as_str(), RunGate::default());
 
         spawn_event_pump_with_monitor(
             state.clone(),
             mission_id.to_string(),
-            session,
+            run,
             // Wide margins: on a loaded runner the test task can lag the pump by a second.
             Watchdog::new(std::time::Duration::from_secs(3)),
         );
@@ -12400,7 +12400,7 @@ theater = \"other-box\"
             }
         })
         .await
-        .expect("quiet Session should reach the Watchdog deadline");
+        .expect("quiet Run should reach the Watchdog deadline");
 
         let events = state
             .events
@@ -12422,9 +12422,9 @@ theater = \"other-box\"
                 .unwrap()
                 .state,
             MissionState::Stalled,
-            "events seen: {events:?}; Session still registered: {}; Mission: {:?}",
+            "events seen: {events:?}; Run still registered: {}; Mission: {:?}",
             state
-                .sessions
+                .runs
                 .lock()
                 .unwrap()
                 .contains_key(mission_id.as_str()),
@@ -12432,7 +12432,7 @@ theater = \"other-box\"
         );
         assert!(
             state
-                .sessions
+                .runs
                 .lock()
                 .unwrap()
                 .get(mission_id.as_str())
@@ -12593,7 +12593,7 @@ theater = \"other-box\"
 
     #[test]
     fn finishing_a_mission_without_history_records_cover_as_not_checkable() {
-        let session_id = SessionId::try_new("session-plain").unwrap();
+        let run_id = RunId::try_new("run-plain").unwrap();
         let mission_id = MissionId::try_new("mission-plain").unwrap();
         let mut missions = MissionStore::default();
         missions
@@ -12608,9 +12608,9 @@ theater = \"other-box\"
         missions
             .transition(mission_id.as_str(), MissionState::Working)
             .unwrap();
-        let session = Arc::new(Mutex::new(
-            MockSession {
-                session_id: session_id.clone(),
+        let run = Arc::new(Mutex::new(
+            MockRun {
+                run_id: run_id.clone(),
                 events: Mutex::new(VecDeque::new()),
             }
             .into_object(),
@@ -12621,7 +12621,7 @@ theater = \"other-box\"
             roster: Arc::new(Roster::default()),
             intake: Arc::new(FileRegistry::open(scratch_registry_dir())),
             missions: Arc::new(Mutex::new(missions)),
-            sessions: Arc::new(Mutex::new(BTreeMap::new())),
+            runs: Arc::new(Mutex::new(BTreeMap::new())),
             cables: no_op_cables(),
             station_id: "test".to_owned(),
             station: StationConfig::default().with_terminal("mock-terminal"),
@@ -12657,7 +12657,7 @@ theater = \"other-box\"
             clone: None,
         };
         let house = SafeHouse::open(&MockPlainProvider, &spec).unwrap();
-        state.sessions.lock().unwrap().insert(
+        state.runs.lock().unwrap().insert(
             mission_id.to_string(),
             AgentOperation {
                 handler_provider: "mock-agent".to_owned(),
@@ -12673,11 +12673,11 @@ theater = \"other-box\"
                     fail_on_blow: true,
                 }),
                 safe_house: Some(house),
-                session: session.clone(),
+                run: run.clone(),
                 watchdog: Watchdog::default(),
                 exposure: ExposureGate::default(),
-                gate: SessionGate::default(),
-                session_id: Some(session_id),
+                gate: RunGate::default(),
+                run_id: Some(run_id),
                 clearance: "field".to_owned(),
                 resumed: false,
                 runner: None,
@@ -12691,7 +12691,7 @@ theater = \"other-box\"
             },
         );
 
-        let outcome = finish_operation(&state, mission_id.as_str(), &session).unwrap();
+        let outcome = finish_operation(&state, mission_id.as_str(), &run).unwrap();
 
         assert!(outcome.failure.is_none() && !outcome.cover_blown);
         let report = state
@@ -12768,32 +12768,32 @@ theater = \"other-box\"
         .unwrap();
         // Another Station's first attempt: this one holds nothing and its record is closed to
         // nobody's knowledge here, so the start must not fail on the ID it would have used.
-        let other = NewSession::new("mission-t.1", "mission-t", "other").with_attempt(1, None);
-        let open = state.intake.open_session(other, DEFAULT_LEASE).unwrap();
+        let other = NewRun::new("mission-t.1", "mission-t", "other").with_attempt(1, None);
+        let open = state.intake.open_run(other, DEFAULT_LEASE).unwrap();
         state
             .intake
-            .update_session(
-                &open.session_id,
+            .update_run(
+                &open.run_id,
                 "other",
                 open.fence,
-                SessionUpdate::default().status(SessionStatus::Ended),
+                RunUpdate::default().status(RunStatus::Ended),
             )
             .unwrap();
         start_mission_by_id(&state, "mission-t").await;
-        let hold = session_hold(&state, "mission-t").unwrap();
+        let hold = run_hold(&state, "mission-t").unwrap();
         assert_eq!(hold.attempt, 2);
         assert!(crate::is_uid(&hold.id), "{}", hold.id);
-        let record = state.intake.session(&hold.id).unwrap().unwrap();
+        let record = state.intake.run(&hold.id).unwrap().unwrap();
         assert_eq!(record.predecessor.as_deref(), Some("mission-t.1"));
         assert_eq!(record.handle.as_deref(), Some("mission-t.2"));
 
         let opened = open_run(
             &state,
-            NewSession::new(crate::new_uid(), "mission-t", "here").with_attempt(2, None),
+            NewRun::new(crate::new_uid(), "mission-t", "here").with_attempt(2, None),
         )
         .unwrap();
         assert_eq!(opened.attempt, 3, "a Mission has one record per attempt");
-        assert_ne!(opened.session_id, hold.id);
+        assert_ne!(opened.run_id, hold.id);
         state.stopping.store(true, Ordering::Release);
     }
 
@@ -12911,12 +12911,12 @@ theater = \"other-box\"
         assert_eq!(resumed["PATH"], "/opt/tools/bin");
         assert!(!resumed.contains_key("FORGE_TOKEN"));
 
-        // A Station with no live Session of it, after a restart, starts from the records again.
+        // A Station with no live Run of it, after a restart, starts from the records again.
         RECORDED_RESUMES
             .lock()
             .unwrap()
             .retain(|request| request.mission_id.as_str() != mission_id);
-        state.sessions.lock().unwrap().remove(&mission_id);
+        state.runs.lock().unwrap().remove(&mission_id);
         let _ = resume_mission(
             State(state.clone()),
             axum::extract::Path(mission_id.clone()),
@@ -12943,7 +12943,7 @@ theater = \"other-box\"
     }
 
     #[tokio::test]
-    async fn a_source_born_mission_has_an_exposed_session_from_the_start() {
+    async fn a_source_born_mission_has_an_exposed_run_from_the_start() {
         let root = tempfile::tempdir().unwrap();
         let state = test_state(root.path(), "", "[agent.007]\nhandler = \"mock-spend\"\n");
         let item = crate::SourceItem {
@@ -12992,13 +12992,13 @@ theater = \"other-box\"
 
         start_mission_by_id(&state, "mission-s").await;
         assert_eq!(exposure_sources(&state, "mission-s"), ["brief:source"]);
-        let hold = session_hold(&state, "mission-s").unwrap();
+        let hold = run_hold(&state, "mission-s").unwrap();
         assert!(
             crate::is_uid(&hold.id),
             "a run has a UID of its own: {}",
             hold.id
         );
-        let record = state.intake.session(&hold.id).unwrap().unwrap();
+        let record = state.intake.run(&hold.id).unwrap().unwrap();
         assert_eq!(
             record.handle.as_deref(),
             Some("mission-s.1"),
@@ -13013,7 +13013,7 @@ theater = \"other-box\"
     }
 
     #[tokio::test]
-    async fn a_tool_the_operation_lists_exposes_the_session_and_a_later_attempt_inherits_it() {
+    async fn a_tool_the_operation_lists_exposes_the_run_and_a_later_attempt_inherits_it() {
         let root = tempfile::tempdir().unwrap();
         let state = test_state(
             root.path(),
@@ -13030,7 +13030,7 @@ theater = \"other-box\"
             }
         })
         .await
-        .expect("the tool call exposes the Session");
+        .expect("the tool call exposes the Run");
         assert_eq!(
             seen,
             ["tool:WebFetch"],
@@ -13050,7 +13050,7 @@ theater = \"other-box\"
         .expect("the exposure is announced");
         assert_eq!(announced.as_deref(), Some("tool:WebFetch"));
 
-        // The Mission's next Session starts with the same exposure.
+        // The Mission's next Run starts with the same exposure.
         let mission = state
             .missions
             .lock()
@@ -13070,7 +13070,7 @@ theater = \"other-box\"
     }
 
     #[test]
-    fn a_proposal_from_an_exposed_session_carries_its_exposure_into_the_mission() {
+    fn a_proposal_from_an_exposed_run_carries_its_exposure_into_the_mission() {
         let mut brief = crate::Brief {
             title: "Child".to_owned(),
             body: String::new(),
@@ -13182,8 +13182,8 @@ theater = \"other-box\"
             );
         }
         assert!(
-            state.sessions.lock().unwrap().is_empty(),
-            "the Agent's running Sessions are stopped"
+            state.runs.lock().unwrap().is_empty(),
+            "the Agent's running Runs are stopped"
         );
         let mut kinds = Vec::new();
         while let Some(event) = pop_event(&state, "mission-2") {
@@ -13277,8 +13277,8 @@ theater = \"other-box\"
             .clone();
         assert_eq!(mission.blocked_reason.as_deref(), Some("budget"));
         assert!(
-            state.sessions.lock().unwrap().is_empty(),
-            "the Session is stopped"
+            state.runs.lock().unwrap().is_empty(),
+            "the Run is stopped"
         );
         let mut notices = Vec::new();
         while let Some(event) = pop_event(&state, "mission-1") {
@@ -13358,7 +13358,7 @@ theater = \"other-box\"
     }
 
     #[tokio::test]
-    async fn cumulative_provider_usage_is_recorded_once_per_session_and_mission() {
+    async fn cumulative_provider_usage_is_recorded_once_per_run_and_mission() {
         let root = tempfile::tempdir().unwrap();
         let state = test_state(
             root.path(),
@@ -13370,9 +13370,9 @@ theater = \"other-box\"
 
         assert_eq!(usage.total.output, 30);
         assert_eq!(usage.total.cost_micro_usd, 12_000);
-        assert_eq!(usage.sessions.len(), 1);
-        let hold = session_hold(&state, "mission-1").unwrap();
-        assert_eq!(usage.sessions[&hold.id], usage.total);
+        assert_eq!(usage.runs.len(), 1);
+        let hold = run_hold(&state, "mission-1").unwrap();
+        assert_eq!(usage.runs[&hold.id], usage.total);
         assert_eq!(
             usage.daily_cost_micro_usd.values().sum::<u64>(),
             12_000,
@@ -13384,7 +13384,7 @@ theater = \"other-box\"
     /// What the Station handed the recording handler, one entry per start or resume.
     pub(super) static RECORDED_STARTS: Mutex<Vec<AgentStart>> = Mutex::new(Vec::new());
     pub(super) static RECORDED_RESUMES: Mutex<Vec<AgentResume>> = Mutex::new(Vec::new());
-    /// Every message a mock Session was sent, with its provider Session ID.
+    /// Every message a mock Run was sent, with its provider ID.
     pub(super) static RECORDED_MESSAGES: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
 
     #[derive(Default, Provider)]
@@ -13398,8 +13398,8 @@ theater = \"other-box\"
             _terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
         ) -> Result<Object<dyn AgentSession>, ProviderError> {
             RECORDED_STARTS.lock().unwrap().push(request);
-            Ok(MockSession::new(
-                SessionId::try_new("provider-session-remote")
+            Ok(MockRun::new(
+                RunId::try_new("provider-id-remote")
                     .map_err(|error| test_provider_error(&error.to_string()))?,
                 "blocked",
             )
@@ -13411,9 +13411,9 @@ theater = \"other-box\"
             request: AgentResume,
             _terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
         ) -> Result<Object<dyn AgentSession>, ProviderError> {
-            let session_id = request.session_id.clone();
+            let run_id = request.run_id.clone();
             RECORDED_RESUMES.lock().unwrap().push(request);
-            Ok(MockSession::new(session_id, "blocked").into_object())
+            Ok(MockRun::new(run_id, "blocked").into_object())
         }
     }
 
@@ -13571,7 +13571,7 @@ theater = \"other-box\"
         );
         assert!(!root.path().join("checkout").join("hello.txt").exists());
 
-        // A resumed Session gets the same tools again.
+        // A resumed Run gets the same tools again.
         let _ = resume_mission(
             State(state.clone()),
             axum::extract::Path(mission_id.clone()),
@@ -13593,7 +13593,7 @@ theater = \"other-box\"
             call_theater_tool(&resumed.environment, "theater_list", serde_json::json!({})).await;
         assert_eq!(listing["entries"][0]["name"], "hello.txt");
 
-        // Ending the Mission closes the Session, which stops its event pump.
+        // Ending the Mission closes the Run, which stops its event pump.
         finalize_mission_resources(&state, &mission_id, true, false)
             .await
             .unwrap_or_else(|error| panic!("finalize failed: {:?}", error.1.0.error));
@@ -13635,7 +13635,7 @@ theater = \"other-box\"
         .await
         .unwrap_or_else(|error| panic!("start failed: {:?}", error.1.0.error));
         wait_for_state(&state, &mission, MissionState::Blocked).await;
-        let live = |state: &DaemonState| state.sessions.lock().unwrap().contains_key(&mission);
+        let live = |state: &DaemonState| state.runs.lock().unwrap().contains_key(&mission);
         assert!(live(&state));
 
         // What the Agent still holds stops nothing, nor does what cannot be read.
@@ -13783,7 +13783,7 @@ theater = \"other-box\"
             .put_clearance_grant(&ClearanceGrant::lower("007", "G", "desk", "ops", now))
             .unwrap();
         tokio::time::timeout(Duration::from_secs(120), async {
-            while state.sessions.lock().unwrap().contains_key(&mission) {
+            while state.runs.lock().unwrap().contains_key(&mission) {
                 tokio::time::sleep(Duration::from_millis(20)).await;
             }
         })
@@ -13829,12 +13829,12 @@ theater = \"other-box\"
         .unwrap_or_else(|error| panic!("start failed: {:?}", error.1.0.error));
         wait_for_state(&state, &mission, MissionState::Blocked).await;
         agents::enforce_clearances(&state);
-        assert!(state.sessions.lock().unwrap().contains_key(&mission));
+        assert!(state.runs.lock().unwrap().contains_key(&mission));
 
         // Past it.
         state.clock = Clock(Arc::new(|| 1_900_000_000));
         agents::enforce_clearances(&state);
-        assert!(!state.sessions.lock().unwrap().contains_key(&mission));
+        assert!(!state.runs.lock().unwrap().contains_key(&mission));
         assert_eq!(
             state
                 .missions
@@ -14003,7 +14003,7 @@ theater = \"other-box\"
 
     #[cfg(feature = "cables-mcp")]
     #[tokio::test]
-    async fn a_session_gets_its_leased_credentials_and_a_green_ink_one_only_with_an_approval() {
+    async fn a_run_gets_its_leased_credentials_and_a_green_ink_one_only_with_an_approval() {
         let root = tempfile::tempdir().unwrap();
         let theater_root = tempfile::tempdir().unwrap();
         fs::create_dir_all(theater_root.path().join("work")).unwrap();
@@ -14079,7 +14079,7 @@ theater = \"other-box\"
 
         // An approval of another kind does not unlock it; a release approval does, once.
         let now = state.clock.now() as f64;
-        let session = SessionId::try_new("provider-session-remote").unwrap();
+        let run = RunId::try_new("provider-id-remote").unwrap();
         for (kind, target) in [
             ("push", "origin:refs/heads/main"),
             ("release", "tag v1.0.0"),
@@ -14087,7 +14087,7 @@ theater = \"other-box\"
             let request = crate::directorates::registry::approvals::ApprovalRequest::try_new(
                 "G",
                 MissionId::try_new(&mission_id).unwrap(),
-                session.clone(),
+                run.clone(),
                 "007",
                 crate::ActionScope::try_new(kind, target).unwrap(),
                 "ship it",
@@ -14211,7 +14211,7 @@ theater = \"other-box\"
             let request = crate::directorates::registry::approvals::ApprovalRequest::try_new(
                 "G",
                 MissionId::try_new(&mission_id).unwrap(),
-                SessionId::try_new("provider-session-remote").unwrap(),
+                RunId::try_new("provider-id-remote").unwrap(),
                 "007",
                 crate::ActionScope::try_new("release", format!("tag v1.{round}.0")).unwrap(),
                 "ship it",
@@ -14366,7 +14366,7 @@ theater = \"other-box\"
             let request = crate::directorates::registry::approvals::ApprovalRequest::try_new(
                 "G",
                 MissionId::try_new(&mission_id).unwrap(),
-                SessionId::try_new("provider-session-remote").unwrap(),
+                RunId::try_new("provider-id-remote").unwrap(),
                 "007",
                 crate::ActionScope::try_new("release", target).unwrap(),
                 "ship it",
@@ -14504,7 +14504,7 @@ theater = \"other-box\"
         let request = crate::directorates::registry::approvals::ApprovalRequest::try_new(
             "G",
             MissionId::try_new(&mission_id).unwrap(),
-            SessionId::try_new("provider-session-remote").unwrap(),
+            RunId::try_new("provider-id-remote").unwrap(),
             "007",
             crate::ActionScope::try_new("push", "origin:main").unwrap(),
             "release 2.0",
@@ -14684,7 +14684,7 @@ theater = \"other-box\"
         );
         let reason = launch_plan(&state, Some("G")).err().unwrap();
         assert!(
-            reason.contains("Theater \"phone\" cannot host this Session"),
+            reason.contains("Theater \"phone\" cannot host this Run"),
             "{reason}"
         );
         assert!(
@@ -14738,11 +14738,11 @@ theater = \"other-box\"
         ) -> Result<Object<dyn AgentSession>, ProviderError> {
             let hold = request.environment.get("AI6_DRIP_HOLD").cloned();
             RECORDED_STARTS.lock().unwrap().push(request);
-            // Each start is a new provider Session, so a later attempt can be told apart.
+            // Each start is a new provider Run, so a later attempt can be told apart.
             static STARTS: AtomicUsize = AtomicUsize::new(0);
             let start = STARTS.fetch_add(1, Ordering::Relaxed);
-            Ok(DripSession::new(
-                SessionId::try_new(format!("provider-session-drip-{start}"))
+            Ok(DripRun::new(
+                RunId::try_new(format!("provider-id-drip-{start}"))
                     .map_err(|error| test_provider_error(&error.to_string()))?,
                 hold,
             )
@@ -14754,29 +14754,29 @@ theater = \"other-box\"
             request: AgentResume,
             _terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
         ) -> Result<Object<dyn AgentSession>, ProviderError> {
-            Ok(DripSession::new(request.session_id, None).into_object())
+            Ok(DripRun::new(request.run_id, None).into_object())
         }
     }
 
-    struct DripSession {
-        session_id: SessionId,
+    struct DripRun {
+        run_id: RunId,
         next: Mutex<(u32, std::time::Instant)>,
         hold: Option<String>,
     }
 
-    impl DripSession {
-        fn new(session_id: SessionId, hold: Option<String>) -> Self {
+    impl DripRun {
+        fn new(run_id: RunId, hold: Option<String>) -> Self {
             Self {
-                session_id,
+                run_id,
                 hold,
                 next: Mutex::new((1, std::time::Instant::now() + DRIP_INTERVAL)),
             }
         }
     }
 
-    impl AgentSession for DripSession {
+    impl AgentSession for DripRun {
         fn session_id(&self) -> Result<Option<String>, ProviderError> {
-            Ok(Some(self.session_id.to_string()))
+            Ok(Some(self.run_id.to_string()))
         }
 
         fn send_message(&self, _message: AgentMessage) -> Result<(), ProviderError> {
@@ -14891,7 +14891,7 @@ theater = \"other-box\"
         state
     }
 
-    /// The tick numbers among `events`, and whether the Session completed.
+    /// The tick numbers among `events`, and whether the Run completed.
     pub(super) fn ticks(events: &[AgentEvent]) -> (Vec<u32>, bool) {
         let ticks = events
             .iter()
@@ -14901,13 +14901,13 @@ theater = \"other-box\"
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_session_on_a_runner_outlives_its_station_and_a_restarted_station_replays_what_it_missed()
+    async fn a_run_on_a_runner_outlives_its_station_and_a_restarted_station_replays_what_it_missed()
      {
         let root = tempfile::tempdir().unwrap();
         let runner_dir = root.path().join("runner");
         let _runner = start_test_runner(&runner_dir).await;
         // The harness is held a few ticks past what A needs, then only as far as the test says,
-        // so neither A nor the runner can finish the Session before the test is ready for it.
+        // so neither A nor the runner can finish the Run before the test is ready for it.
         let hold = root.path().to_string_lossy().into_owned();
         DRIP_HOLDS.lock().unwrap().insert(hold.clone(), 8);
 
@@ -14933,7 +14933,7 @@ theater = \"other-box\"
         let key = manifest
             .runner
             .clone()
-            .expect("the runner Session is recorded");
+            .expect("the runner Run is recorded");
         assert_eq!(manifest.terminal_provider, "mock-terminal");
         let mut seen = Vec::new();
         while ticks(&seen).0.len() < 5 {
@@ -14941,10 +14941,10 @@ theater = \"other-box\"
         }
 
         // Station A dies: it lets go of nothing and tells the runner nothing.
-        let removed = first.sessions.lock().unwrap().remove("mission-1");
+        let removed = first.runs.lock().unwrap().remove("mission-1");
         let crashed = removed.unwrap_or_else(|| {
             panic!(
-                "Station A dropped the Session before it crashed: Mission {:?}; events {:?}",
+                "Station A dropped the Run before it crashed: Mission {:?}; events {:?}",
                 first.missions.lock().unwrap().get("mission-1"),
                 std::iter::from_fn(|| pop_event(&first, "mission-1")).collect::<Vec<_>>()
             )
@@ -14959,7 +14959,7 @@ theater = \"other-box\"
             }
         })
         .await
-        .expect("Station A's event pump stops once its Session is gone");
+        .expect("Station A's event pump stops once its Run is gone");
         while let Some(event) = pop_event(&first, "mission-1") {
             seen.push(event);
         }
@@ -15011,7 +15011,7 @@ theater = \"other-box\"
         schedule_recovered_once(&second).await;
         assert!(
             second
-                .sessions
+                .runs
                 .lock()
                 .unwrap()
                 .get("mission-1")
@@ -15019,7 +15019,7 @@ theater = \"other-box\"
                     |operation| operation.runner.as_ref().map(|r| r.key.as_str())
                         == Some(key.as_str())
                 ),
-            "the restarted Station re-attached to the same runner Session"
+            "the restarted Station re-attached to the same runner Run"
         );
         DRIP_HOLDS.lock().unwrap().remove(&hold);
         let mut replayed = Vec::new();
@@ -15033,7 +15033,7 @@ theater = \"other-box\"
             }
         })
         .await
-        .expect("the restarted Station receives the rest of the Session");
+        .expect("the restarted Station receives the rest of the Run");
         wait_for_done(&second, "mission-1").await;
 
         // Every tick arrives: what A did not take is replayed, at most the last one twice.
@@ -15072,7 +15072,7 @@ theater = \"other-box\"
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_station_that_shuts_down_leaves_its_runner_session_running() {
+    async fn a_station_that_shuts_down_leaves_its_runner_run_running() {
         let root = tempfile::tempdir().unwrap();
         let runner_dir = root.path().join("runner");
         let _runner = start_test_runner(&runner_dir).await;
@@ -15099,12 +15099,12 @@ theater = \"other-box\"
 
         state.stopping.store(true, Ordering::Release);
         tokio::time::timeout(Duration::from_secs(60), async {
-            while state.sessions.lock().unwrap().contains_key("mission-1") {
+            while state.runs.lock().unwrap().contains_key("mission-1") {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
         })
         .await
-        .expect("the event pump lets go of the Session");
+        .expect("the event pump lets go of the Run");
         assert_eq!(
             state
                 .missions
@@ -15126,7 +15126,7 @@ theater = \"other-box\"
     const LINES: u32 = 40;
 
     /// A harness that is a real process: `sh` printing `tick N` lines, read through the
-    /// terminal the Station hands the handler. End of output completes the Session.
+    /// terminal the Station hands the handler. End of output completes the Run.
     #[derive(Default, Provider)]
     #[provider(AgentHandler, id = "mock-lines", name = "Mock Lines", crate = crate::guatiao)]
     struct MockLinesHandler;
@@ -15157,7 +15157,7 @@ theater = \"other-box\"
                     .to_value()
                     .map_err(|error| test_provider_error(&error.to_string()))?,
             )?;
-            Ok(LineSession {
+            Ok(LineRun {
                 terminal,
                 pending: Mutex::new(Vec::new()),
                 done: AtomicBool::new(false),
@@ -15170,19 +15170,19 @@ theater = \"other-box\"
             request: AgentResume,
             _terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
         ) -> Result<Object<dyn AgentSession>, ProviderError> {
-            Ok(MockSession::new(request.session_id, "completed").into_object())
+            Ok(MockRun::new(request.run_id, "completed").into_object())
         }
     }
 
-    struct LineSession {
-        terminal: Object<dyn TerminalSession>,
+    struct LineRun {
+        terminal: Object<dyn TerminalRun>,
         pending: Mutex<Vec<u8>>,
         done: AtomicBool,
     }
 
-    impl AgentSession for LineSession {
+    impl AgentSession for LineRun {
         fn session_id(&self) -> Result<Option<String>, ProviderError> {
-            Ok(Some("provider-session-lines".to_owned()))
+            Ok(Some("provider-id-lines".to_owned()))
         }
 
         fn send_message(&self, _message: AgentMessage) -> Result<(), ProviderError> {
@@ -15303,7 +15303,7 @@ theater = \"other-box\"
             }
         })
         .await
-        .unwrap_or_else(|_| panic!("the Session did not complete: {lines:?}"));
+        .unwrap_or_else(|_| panic!("the Run did not complete: {lines:?}"));
         assert_eq!(
             lines,
             [
@@ -15352,7 +15352,7 @@ theater = \"other-box\"
             }
         })
         .await
-        .unwrap_or_else(|_| panic!("the Session did not complete: {:?}", ticks(&events).0));
+        .unwrap_or_else(|_| panic!("the Run did not complete: {:?}", ticks(&events).0));
         ticks(&events)
     }
 
@@ -15453,7 +15453,7 @@ theater = \"other-box\"
             .lock()
             .unwrap()
             .operation("mission-1")
-            .and_then(|manifest| manifest.session)
+            .and_then(|manifest| manifest.run)
             .unwrap();
         let state_of = |state: &DaemonState| {
             state
@@ -15471,7 +15471,7 @@ theater = \"other-box\"
         .await
         .expect("the wrapped harness speaks");
 
-        // The link drops and stays down: the Station gives the Session up after the grace.
+        // The link drops and stays down: the Station gives the Run up after the grace.
         // With no brief to hand back, the Mission fails.
         link.store(true, Ordering::Release);
         tokio::time::timeout(Duration::from_secs(30), async {
@@ -15481,17 +15481,17 @@ theater = \"other-box\"
         })
         .await
         .unwrap_or_else(|_| panic!("the Mission is {:?}", state_of(&state)));
-        let record = state.intake.session(&hold.id).unwrap().unwrap();
-        assert_eq!(record.status, SessionStatus::Lost);
+        let record = state.intake.run(&hold.id).unwrap().unwrap();
+        assert_eq!(record.status, RunStatus::Lost);
         let reason = record.lost.unwrap();
         assert!(reason.contains("out of reach for 1s"), "{reason}");
-        assert!(!state.sessions.lock().unwrap().contains_key("mission-1"));
+        assert!(!state.runs.lock().unwrap().contains_key("mission-1"));
         link.store(false, Ordering::Release);
     }
 
     #[cfg(unix)]
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_runner_reached_through_a_transport_keeps_its_session_across_a_dropped_link() {
+    async fn a_runner_reached_through_a_transport_keeps_its_run_across_a_dropped_link() {
         let root = tempfile::tempdir().unwrap();
         let runner_dir = root.path().join("runner");
         let _runner = start_test_runner(&runner_dir).await;
@@ -15540,7 +15540,7 @@ theater = \"other-box\"
         assert_eq!(
             forwards.load(Ordering::Acquire),
             0,
-            "a runner's Session reaches its Cables over the runner's connection, with no forward"
+            "a runner's Run reaches its Cables over the runner's connection, with no forward"
         );
     }
 }

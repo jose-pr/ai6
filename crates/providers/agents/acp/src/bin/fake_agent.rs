@@ -6,10 +6,10 @@
 //! `FAKE_ERROR_DATA=JSON` fails it as an internal error carrying that `data`,
 //! `FAKE_NO_HTTP=1` leaves out HTTP MCP support, `FAKE_INIT_DELAY_MS=N` delays `initialize`,
 //! `FAKE_RESUME=1` advertises `session/resume`, `FAKE_DIE=1` exits mid-turn after writing
-//! `FAKE_LAST_WORDS` (or its own) to standard error, and `FAKE_OPTIONS=1` says what a Session
-//! can start with before any Session: a model option of two values.
+//! `FAKE_LAST_WORDS` (or its own) to standard error, and `FAKE_OPTIONS=1` says what a Run
+//! can start with before any Run: a model option of two values.
 //!
-//! `FAKE_CABLES=JSON` has it use the `ai6-cables` MCP server its Session was given: it lists
+//! `FAKE_CABLES=JSON` has it use the `ai6-cables` MCP server its Run was given: it lists
 //! the tools, then makes each call of the array (`{"tool", "args"}`), repeating one that has
 //! `"until": TEXT` until the answers so far hold TEXT or `FAKE_CABLES_WAIT_MS` (30000) pass.
 //! A call with `"reply_to": TEXT` is given the `cable_id` of a Cable read earlier whose body holds
@@ -38,13 +38,13 @@ fn var(name: &str) -> Option<String> {
 struct Mcp {
     url: String,
     headers: Vec<(String, String)>,
-    session: Option<String>,
+    run: Option<String>,
     agent: ureq::Agent,
     next: u64,
 }
 
 impl Mcp {
-    /// The server named `name` among a Session's `mcpServers`.
+    /// The server named `name` among a Run's `mcpServers`.
     fn of(servers: &Value, name: &str) -> Option<Self> {
         let server = servers
             .as_array()?
@@ -64,7 +64,7 @@ impl Mcp {
         Some(Self {
             url: server["url"].as_str()?.to_owned(),
             headers,
-            session: None,
+            run: None,
             agent: ureq::Agent::config_builder()
                 .http_status_as_error(false)
                 .build()
@@ -89,16 +89,16 @@ impl Mcp {
         for (name, value) in &self.headers {
             request = request.header(name, value);
         }
-        if let Some(session) = &self.session {
+        if let Some(run) = &self.run {
             request = request
-                .header("mcp-session-id", session)
+                .header("mcp-session-id", run)
                 .header("mcp-protocol-version", "2025-06-18");
         }
         let mut response = request
             .send(message.to_string())
             .map_err(|error| format!("{method}: {error}"))?;
-        if let Some(session) = response.headers().get("mcp-session-id") {
-            self.session = session.to_str().ok().map(str::to_owned);
+        if let Some(run) = response.headers().get("mcp-session-id") {
+            self.run = run.to_str().ok().map(str::to_owned);
         }
         let status = response.status().as_u16();
         let body = response

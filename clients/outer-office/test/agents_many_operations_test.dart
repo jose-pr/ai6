@@ -52,7 +52,7 @@ MissionBoard _board(Map<String, int> answers) {
   );
   board.accessToken = 'operator-token';
   board.loading = false;
-  board.userSession = UserSessionSummary(
+  board.userRun = UserRunSummary(
     personId: 'operator-007',
     name: 'operator-007',
     displayName: null,

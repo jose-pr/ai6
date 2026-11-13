@@ -5,7 +5,7 @@
 //! Terminal contracts used by AI6's supervisor and AgentHandlers, as Guatiao kinds.
 //!
 //! A [`Terminal`] provider starts a program on a terminal and hands back a
-//! [`TerminalSession`] the caller owns. A provider is a guatiao library in any
+//! [`TerminalRun`] the caller owns. A provider is a guatiao library in any
 //! language; the supervisor finds it on a search path and drives it through
 //! these tables. Slot order is the ABI: append, never reorder.
 
@@ -405,8 +405,8 @@ fn parse(bytes: &[u8]) -> Parsed {
 /// Starts programs on terminals.
 #[guatiao::kind(name = "ai6_terminal")]
 pub trait Terminal: Send + Sync {
-    /// Starts `spec` (a [`Spec`] as a value) and hands over its session.
-    fn spawn(&self, spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError>;
+    /// Starts `spec` (a [`Spec`] as a value) and hands over its run.
+    fn spawn(&self, spec: &Value) -> Result<Object<dyn TerminalRun>, ProviderError>;
 
     /// Whether a program started here has a terminal for its standard input and output. A
     /// provider that gives it plain pipes (`pipe`) answers `false`; the default is `true`.
@@ -530,11 +530,11 @@ pub fn choose_terminal(
 #[guatiao::kind(object, name = "ai6_agent_terminal")]
 pub trait AgentTerminal: Send + Sync {
     /// Starts a terminal process through AI6's selected Terminal provider.
-    fn spawn(&self, spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError>;
+    fn spawn(&self, spec: &Value) -> Result<Object<dyn TerminalRun>, ProviderError>;
     /// Starts a command the handler runs for itself, through the same provider: its output goes
-    /// to the handler alone, never to the Session's viewers, its watchdog or operator input. For
+    /// to the handler alone, never to the Run's viewers, its watchdog or operator input. For
     /// a probe, whose output can hold what no viewer may read.
-    fn spawn_private(&self, spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError>;
+    fn spawn_private(&self, spec: &Value) -> Result<Object<dyn TerminalRun>, ProviderError>;
 }
 
 /// Wraps an AI6-discovered terminal provider in the object handle passed to AgentHandlers.
@@ -542,7 +542,7 @@ pub struct TerminalBridge {
     provider: Box<dyn Terminal>,
     watchdog: Option<crate::directorates::medical::watchdog::Watchdog>,
     #[cfg(feature = "publisher")]
-    telemetry: Option<std::sync::Arc<crate::station::publisher::SessionTelemetry>>,
+    telemetry: Option<std::sync::Arc<crate::station::publisher::RunTelemetry>>,
     /// Whether operator input is written to the program as typed. Off for a harness that
     /// speaks JSON on its pipes, which takes messages instead.
     #[cfg(feature = "publisher")]
@@ -591,7 +591,7 @@ impl TerminalBridge {
     #[cfg(feature = "publisher")]
     pub(crate) fn agent_terminal_with_watchdog_and_telemetry(
         provider: Box<dyn Terminal>,
-        telemetry: std::sync::Arc<crate::station::publisher::SessionTelemetry>,
+        telemetry: std::sync::Arc<crate::station::publisher::RunTelemetry>,
         watchdog: crate::directorates::medical::watchdog::Watchdog,
         raw_input: bool,
     ) -> Object<dyn AgentTerminal> {
@@ -606,73 +606,73 @@ impl TerminalBridge {
 }
 
 impl AgentTerminal for TerminalBridge {
-    fn spawn(&self, spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError> {
-        let session = Arc::new(self.provider.spawn(spec)?);
+    fn spawn(&self, spec: &Value) -> Result<Object<dyn TerminalRun>, ProviderError> {
+        let run = Arc::new(self.provider.spawn(spec)?);
         #[cfg(feature = "publisher")]
         if let Some(telemetry) = &self.telemetry {
             if self.raw_input {
                 telemetry.attach_terminal_target(Arc::new(TerminalInputBridge {
-                    session: session.clone(),
+                    run: run.clone(),
                 }));
             }
-            return Ok(TerminalSessionBridge {
-                session,
+            return Ok(TerminalRunBridge {
+                run,
                 watchdog: self.watchdog.clone(),
                 telemetry: Some(telemetry.clone()),
             }
             .into_object());
         }
         if let Some(watchdog) = &self.watchdog {
-            return Ok(TerminalSessionBridge {
-                session,
+            return Ok(TerminalRunBridge {
+                run,
                 watchdog: Some(watchdog.clone()),
                 #[cfg(feature = "publisher")]
                 telemetry: None,
             }
             .into_object());
         }
-        Ok(Arc::try_unwrap(session).unwrap_or_else(|_| unreachable!("no shared terminal handle")))
+        Ok(Arc::try_unwrap(run).unwrap_or_else(|_| unreachable!("no shared terminal handle")))
     }
 
-    fn spawn_private(&self, spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError> {
+    fn spawn_private(&self, spec: &Value) -> Result<Object<dyn TerminalRun>, ProviderError> {
         self.provider.spawn(spec)
     }
 }
 
 #[cfg(feature = "publisher")]
 struct TerminalInputBridge {
-    session: Arc<Object<dyn TerminalSession>>,
+    run: Arc<Object<dyn TerminalRun>>,
 }
 
 #[cfg(feature = "publisher")]
 impl TerminalInputTarget for TerminalInputBridge {
     fn write(&self, data: &[u8]) -> Result<(), &'static str> {
-        self.session
+        self.run
             .write(data)
             .map_err(|_| "terminal input failed")
     }
 
     fn resize(&self, rows: i64, cols: i64) -> Result<(), &'static str> {
-        self.session
+        self.run
             .resize(rows, cols)
             .map_err(|_| "terminal resize failed")
     }
 }
 
-struct TerminalSessionBridge {
-    session: Arc<Object<dyn TerminalSession>>,
+struct TerminalRunBridge {
+    run: Arc<Object<dyn TerminalRun>>,
     watchdog: Option<crate::directorates::medical::watchdog::Watchdog>,
     #[cfg(feature = "publisher")]
-    telemetry: Option<std::sync::Arc<crate::station::publisher::SessionTelemetry>>,
+    telemetry: Option<std::sync::Arc<crate::station::publisher::RunTelemetry>>,
 }
 
-impl TerminalSession for TerminalSessionBridge {
+impl TerminalRun for TerminalRunBridge {
     fn pid(&self) -> i64 {
-        self.session.pid()
+        self.run.pid()
     }
 
     fn read(&self, dst: &mut [u8], timeout_ms: i64) -> Result<i64, ProviderError> {
-        let read = self.session.read(dst, timeout_ms)?;
+        let read = self.run.read(dst, timeout_ms)?;
         let Some(output) = usize::try_from(read)
             .ok()
             .filter(|&length| length > 0 && length <= dst.len())
@@ -691,26 +691,26 @@ impl TerminalSession for TerminalSessionBridge {
     }
 
     fn write(&self, data: &[u8]) -> Result<(), ProviderError> {
-        self.session.write(data)
+        self.run.write(data)
     }
 
     fn resize(&self, rows: i64, cols: i64) -> Result<(), ProviderError> {
-        self.session.resize(rows, cols)
+        self.run.resize(rows, cols)
     }
 
     fn kill(&self) -> Result<(), ProviderError> {
-        self.session.kill()
+        self.run.kill()
     }
 
     fn exit_status(&self, timeout_ms: i64) -> Result<Value, ProviderError> {
-        self.session.exit_status(timeout_ms)
+        self.run.exit_status(timeout_ms)
     }
 }
 
 /// One running program on one terminal. Every slot takes `&self`, so a caller may
 /// write, resize or kill from one thread while another blocks in `read`.
-#[guatiao::kind(object, name = "ai6_terminal_session")]
-pub trait TerminalSession: Send + Sync {
+#[guatiao::kind(object, name = "ai6_terminal_run")]
+pub trait TerminalRun: Send + Sync {
     /// The program's process id.
     fn pid(&self) -> i64;
     /// Copies output into `dst`: the byte count, `0` once no more can ever arrive, or
@@ -743,7 +743,7 @@ mod tests {
     #[test]
     fn floor_hashes_are_pinned() {
         assert_eq!(TerminalVtable::FLOOR_HASH, 621856063);
-        assert_eq!(TerminalSessionVtable::FLOOR_HASH, 3148381037);
+        assert_eq!(TerminalRunVtable::FLOOR_HASH, 3148381037);
     }
 
     fn offers(list: &[(&str, bool)]) -> Vec<TerminalOffer> {
@@ -959,7 +959,7 @@ mod tests {
     #[test]
     fn json_lines_arrive_whole_whatever_the_chunks() {
         let mut stream = CONPTY_START.to_vec();
-        stream.extend_from_slice(b"{\"type\":\"system\",\"session_id\":\"s-1\"}\r\n");
+        stream.extend_from_slice(b"{\"type\":\"system\",\"run_id\":\"s-1\"}\r\n");
         stream.extend_from_slice(
             "{\"type\":\"result\",\"result\":\"d\u{e9}j\u{e0}\"}\r\n".as_bytes(),
         );
@@ -967,7 +967,7 @@ mod tests {
         assert_eq!(
             lines_of(&chunks),
             [
-                json("{\"type\":\"system\",\"session_id\":\"s-1\"}"),
+                json("{\"type\":\"system\",\"run_id\":\"s-1\"}"),
                 json("{\"type\":\"result\",\"result\":\"d\u{e9}j\u{e0}\"}"),
             ]
         );
@@ -1012,14 +1012,14 @@ mod tests {
     struct MockTerminal;
 
     impl Terminal for MockTerminal {
-        fn spawn(&self, _spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError> {
-            Ok(MockTerminalSession.into_object())
+        fn spawn(&self, _spec: &Value) -> Result<Object<dyn TerminalRun>, ProviderError> {
+            Ok(MockTerminalRun.into_object())
         }
     }
 
-    struct MockTerminalSession;
+    struct MockTerminalRun;
 
-    impl TerminalSession for MockTerminalSession {
+    impl TerminalRun for MockTerminalRun {
         fn pid(&self) -> i64 {
             17
         }
@@ -1048,7 +1048,7 @@ mod tests {
     }
 
     #[test]
-    fn agent_terminal_bridge_owns_the_provider_and_returns_a_terminal_session() {
+    fn agent_terminal_bridge_owns_the_provider_and_returns_a_terminal_run() {
         let terminal = TerminalBridge::agent_terminal(Box::new(MockTerminal));
         let spec = Spec {
             argv: vec!["mock".to_owned()],
@@ -1083,24 +1083,24 @@ mod tests {
         }
         .to_value()
         .unwrap();
-        let session = terminal.spawn(&spec).unwrap();
+        let run = terminal.spawn(&spec).unwrap();
         let mut output = [0; 32];
 
-        assert_eq!(session.read(&mut output, 100).unwrap(), 12);
+        assert_eq!(run.read(&mut output, 100).unwrap(), 12);
         assert!(watchdog.is_looping());
     }
 
     struct OutputTerminal;
 
     impl Terminal for OutputTerminal {
-        fn spawn(&self, _spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError> {
-            Ok(OutputTerminalSession.into_object())
+        fn spawn(&self, _spec: &Value) -> Result<Object<dyn TerminalRun>, ProviderError> {
+            Ok(OutputTerminalRun.into_object())
         }
     }
 
-    struct OutputTerminalSession;
+    struct OutputTerminalRun;
 
-    impl TerminalSession for OutputTerminalSession {
+    impl TerminalRun for OutputTerminalRun {
         fn pid(&self) -> i64 {
             18
         }

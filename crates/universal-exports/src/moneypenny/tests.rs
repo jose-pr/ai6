@@ -140,14 +140,14 @@ impl Directory for People {
     }
 }
 
-/// Operator 007 reads and audits Operation G, reads its Sessions' contexts, manages the roster
+/// Operator 007 reads and audits Operation G, reads its Runs' contexts, manages the roster
 /// and may read anyone's memory (`assistant.memory.admin`); viewer 007 only reads G; admin 007
 /// administers everything; member 007 holds no rule.
 const ROLES: &str = r#"
     [role.admin]
     actions = [
         "mission.read", "mission.control", "audit.read", "roster.read", "roster.manage",
-        "assistant.memory.admin", "session.context",
+        "assistant.memory.admin", "run.context",
     ]
 
     [[rule]]
@@ -161,7 +161,7 @@ const ROLES: &str = r#"
     [role.operator]
     actions = [
         "mission.read", "mission.control", "audit.read", "cable.send", "cable.read",
-        "issue.link", "issue.comment", "issue.update", "issue.create", "session.context",
+        "issue.link", "issue.comment", "issue.update", "issue.create", "run.context",
     ]
 
     [role.roster-reader]
@@ -440,11 +440,11 @@ async fn served_setup(setup: Setup) -> Served {
         ai6_diptel::MissionId::new("mission-g").unwrap(),
     );
     gateway
-        .register_session(
+        .register_run(
             STATION_TOKEN,
             operation.clone(),
             mission.clone(),
-            ai6_diptel::SessionId::new("session-g").unwrap(),
+            ai6_diptel::RunId::new("run-g").unwrap(),
         )
         .await
         .unwrap();
@@ -618,7 +618,7 @@ async fn report(
             station_id: station.to_owned(),
             conversation_id: job.conversation_id.clone(),
             job_id: job_id.map(str::to_owned),
-            session_id: Some("provider-assistant-1".to_owned()),
+            run_id: Some("provider-assistant-1".to_owned()),
             events,
         })
         .send()
@@ -628,21 +628,21 @@ async fn report(
 }
 
 #[tokio::test]
-async fn a_conversation_sends_each_job_the_route_its_session_ran_on() {
+async fn a_conversation_sends_each_job_the_route_its_run_ran_on() {
     let served = served(AssistantConfig::default()).await;
     let (mut app, _ready) = open(&served, &served.operator).await;
     say(&mut app, "First.", None).await;
     let job = take(&served, "hq").await;
     assert_eq!(job.route, None, "a new conversation has run on none");
     let route = ai6::RouteRef::new("acp", Some("grok-4.7".to_owned()), None);
-    let sent = |route: Option<ai6::RouteRef>, session: Option<&str>, kinds: Vec<AssistantEvent>| {
+    let sent = |route: Option<ai6::RouteRef>, run: Option<&str>, kinds: Vec<AssistantEvent>| {
         AssistantReport {
             route,
             run: None,
             station_id: "hq".to_owned(),
             conversation_id: job.conversation_id.clone(),
             job_id: None,
-            session_id: session.map(str::to_owned),
+            run_id: run.map(str::to_owned),
             events: kinds,
         }
     };
@@ -683,10 +683,10 @@ async fn a_conversation_sends_each_job_the_route_its_session_ran_on() {
 
     say(&mut app, "Second.", None).await;
     let second = take(&served, "hq").await;
-    assert_eq!(second.session_id.as_deref(), Some("provider-on-grok"));
+    assert_eq!(second.run_id.as_deref(), Some("provider-on-grok"));
     assert_eq!(second.route, Some(route), "it resumes only there");
 
-    // A new Session on another route replaces both together.
+    // A new Run on another route replaces both together.
     let moved = ai6::RouteRef::new("claude", Some("gemini-free".to_owned()), None);
     assert_eq!(
         report(
@@ -715,7 +715,7 @@ async fn a_conversation_sends_each_job_the_route_its_session_ran_on() {
     .await;
     say(&mut app, "Third.", None).await;
     let third = take(&served, "hq").await;
-    assert_eq!(third.session_id.as_deref(), Some("provider-on-gemini"));
+    assert_eq!(third.run_id.as_deref(), Some("provider-on-gemini"));
     assert_eq!(third.route, Some(moved));
 }
 
@@ -796,7 +796,7 @@ async fn which_stations_are_busy_is_answered_through_the_board_tool() {
     );
     assert!(job.context[0].contains("You are Moneypenny"));
     assert!(job.context[1].contains("field dictionary"));
-    assert!(job.session_id.is_none());
+    assert!(job.run_id.is_none());
     assert_eq!(
         report(
             &served,
@@ -909,10 +909,10 @@ async fn which_stations_are_busy_is_answered_through_the_board_tool() {
         "the final answer is not shown twice"
     );
 
-    // A second message goes to the same Station and names the provider Session.
+    // A second message goes to the same Station and names the provider Run.
     say(&mut app, "And the HQS?", None).await;
     let second = take(&served, "hq").await;
-    assert_eq!(second.session_id.as_deref(), Some("provider-assistant-1"));
+    assert_eq!(second.run_id.as_deref(), Some("provider-assistant-1"));
     assert!(
         second
             .recap
@@ -1442,8 +1442,8 @@ async fn a_confirmed_roster_edit_goes_through_the_roster_with_its_checks_and_aud
     assert_eq!(proposals.len(), 2);
     let (good_id, bad_id) = (proposals[0]["id"].clone(), proposals[1]["id"].clone());
 
-    // Another signed-in session of the same person cannot confirm it.
-    let other_session = issue_access_token_record(
+    // Another signed-in run of the same person cannot confirm it.
+    let other_run = issue_access_token_record(
         Arc::new(served.registry.clone()),
         "operator-007".to_owned(),
         Duration::from_secs(600),
@@ -1460,7 +1460,7 @@ async fn a_confirmed_roster_edit_goes_through_the_roster_with_its_checks_and_aud
     let (mut elsewhere, _) = tokio_tungstenite::connect_async(url).await.unwrap();
     elsewhere
         .send(WsMessage::Text(
-            json!({"type": "hello", "token": other_session, "conversation": job.conversation_id})
+            json!({"type": "hello", "token": other_run, "conversation": job.conversation_id})
                 .to_string()
                 .into(),
         ))
@@ -1479,7 +1479,7 @@ async fn a_confirmed_roster_edit_goes_through_the_roster_with_its_checks_and_aud
     assert_eq!(frames.last().unwrap()["code"], "forbidden");
     assert!(source.load("").unwrap().roster.agent(None, "008").is_err());
 
-    // The session it was proposed in confirms it: the roster takes it, and both are audited.
+    // The run it was proposed in confirms it: the roster takes it, and both are audited.
     app.send(WsMessage::Text(
         json!({"type": "confirm", "proposal": good_id})
             .to_string()
@@ -1893,20 +1893,20 @@ async fn configured_view_limits_bound_her_views_and_reach_the_app() {
     assert_eq!(graph["properties"]["nodes"]["maxItems"], 2);
 }
 
-/// Registers Mission `mission` of Operation G with Session `session`, which reports `state`.
-async fn session_in_state(served: &Served, mission: &str, session: &str, state: &str) {
+/// Registers Mission `mission` of Operation G with Run `run`, which reports `state`.
+async fn run_in_state(served: &Served, mission: &str, run: &str, state: &str) {
     let client = reqwest::Client::new();
     let registered = client
-        .post(format!("{}/v1/station/sessions", served.base))
+        .post(format!("{}/v1/station/runs", served.base))
         .bearer_auth(STATION_TOKEN)
-        .json(&json!({"operation_id": "G", "mission_id": mission, "session_id": session}))
+        .json(&json!({"operation_id": "G", "mission_id": mission, "run_id": run}))
         .send()
         .await
         .unwrap();
     assert_eq!(registered.status(), StatusCode::CREATED);
     let reported = client
         .post(format!(
-            "{}/v1/station/sessions/{session}/lifecycle/1",
+            "{}/v1/station/runs/{run}/lifecycle/1",
             served.base
         ))
         .bearer_auth(STATION_TOKEN)
@@ -2118,7 +2118,7 @@ async fn navigation_after_reading_a_brief_is_the_same_as_before() {
 #[tokio::test]
 async fn the_missions_tool_filters_by_state_station_and_agent() {
     let served = served(AssistantConfig::default()).await;
-    session_in_state(&served, "mission-f", "session-f", "failed").await;
+    run_in_state(&served, "mission-f", "run-f", "failed").await;
     let (_app, job) = accepted(&served, &served.operator, "Which Missions failed?").await;
     let ids = |result: &Value| -> Vec<String> {
         let text = result["content"][0]["text"].as_str().unwrap();
@@ -2132,8 +2132,8 @@ async fn the_missions_tool_filters_by_state_station_and_agent() {
             .map(|mission| mission["mission_id"].as_str().unwrap().to_owned())
             .collect()
     };
-    // mission-g's one Session has reported no state, so it is working; its brief names Agent
-    // 007, and no Registry record places it on a Station. mission-f's Session failed. The
+    // mission-g's one Run has reported no state, so it is working; its brief names Agent
+    // 007, and no Registry record places it on a Station. mission-f's Run failed. The
     // rest is the shared fixture.
     for (filter, expected) in [
         (json!({}), vec!["mission-f", "mission-g"]),
@@ -2297,7 +2297,7 @@ async fn a_harness_that_fails_releases_its_conversation_at_once() {
     let frames = receive_until(&mut third, |frame| frame["type"] == "error").await;
     assert_eq!(frames.last().unwrap()["code"], "busy_elsewhere");
 
-    let reason = "Claude Code exited with code 1 before completing the Session; its last \
+    let reason = "Claude Code exited with code 1 before completing the Run; its last \
                   output:\nError: the stored login has expired";
     assert_eq!(
         report(
@@ -3501,7 +3501,7 @@ async fn her_memory_is_kept_at_once_and_shown_with_no_repository_and_no_station(
     let id = entry["id"].as_str().unwrap().to_owned();
     assert_eq!(entry["source"]["by"], "moneypenny:operator-007");
     assert_eq!(
-        entry["source"]["session"].as_str(),
+        entry["source"]["run"].as_str(),
         Some(job.conversation_id.as_str())
     );
     assert_eq!(entry["revision"], 1);
@@ -6247,18 +6247,18 @@ impl Browser {
         }
     }
 
-    /// One DevTools call, on `session` when given; events in between are dropped.
+    /// One DevTools call, on `run` when given; events in between are dropped.
     async fn call(
         &mut self,
-        session: Option<&str>,
+        run: Option<&str>,
         method: &str,
         params: Value,
     ) -> Result<Value, String> {
         self.next += 1;
         let id = self.next;
         let mut message = json!({"id": id, "method": method, "params": params});
-        if let Some(session) = session {
-            message["sessionId"] = json!(session);
+        if let Some(run) = run {
+            message["sessionId"] = json!(run);
         }
         self.socket
             .send(WsMessage::Text(message.to_string().into()))
@@ -6279,7 +6279,7 @@ impl Browser {
     }
 
     /// Opens `url` in a new tab, closing every other, so the frame read is this tab's;
-    /// answers the tab's session.
+    /// answers the tab's run.
     async fn open(&mut self, url: &str) -> String {
         let target = self
             .call(None, "Target.createTarget", json!({"url": url}))
@@ -6316,9 +6316,9 @@ impl Browser {
     }
 
     /// `expression` evaluated in the tab's top document.
-    async fn evaluate(&mut self, session: &str, expression: &str) -> Value {
+    async fn evaluate(&mut self, run: &str, expression: &str) -> Value {
         self.call(
-            Some(session),
+            Some(run),
             "Runtime.evaluate",
             json!({"expression": expression, "returnByValue": true, "awaitPromise": true}),
         )
@@ -6330,10 +6330,10 @@ impl Browser {
     /// The title of the document framed in the tab, wherever the browser runs it: in the tab's
     /// process, read through an isolated world, or in a process of its own (a sandboxed frame
     /// may be), read through its own target.
-    async fn framed_title(&mut self, session: &str) -> Option<String> {
+    async fn framed_title(&mut self, run: &str) -> Option<String> {
         // The frame this tab's document names: a closed tab's frame may linger a moment.
         let src = self
-            .evaluate(session, "document.querySelector('iframe').src")
+            .evaluate(run, "document.querySelector('iframe').src")
             .await;
         let src = src.as_str()?;
         let targets = self.call(None, "Target.getTargets", json!({})).await.ok()?;
@@ -6361,7 +6361,7 @@ impl Browser {
                 .map(str::to_owned);
         }
         let tree = self
-            .call(Some(session), "Page.getFrameTree", json!({}))
+            .call(Some(run), "Page.getFrameTree", json!({}))
             .await
             .ok()?;
         let frame = tree["frameTree"]["childFrames"][0]["frame"]["id"]
@@ -6369,14 +6369,14 @@ impl Browser {
             .to_owned();
         let world = self
             .call(
-                Some(session),
+                Some(run),
                 "Page.createIsolatedWorld",
                 json!({"frameId": frame}),
             )
             .await
             .ok()?;
         self.call(
-            Some(session),
+            Some(run),
             "Runtime.evaluate",
             json!({"expression": "document.title", "returnByValue": true,
                    "contextId": world["executionContextId"]}),
@@ -6388,9 +6388,9 @@ impl Browser {
     }
 
     /// The record the probe page framed in the tab writes in its title, within 20 seconds.
-    async fn probe(&mut self, session: &str) -> Value {
+    async fn probe(&mut self, run: &str) -> Value {
         for _ in 0..100 {
-            if let Some(title) = self.framed_title(session).await
+            if let Some(title) = self.framed_title(run).await
                 && let Some(record) = title.strip_prefix("PROBE ")
             {
                 return serde_json::from_str(record).unwrap();
@@ -6398,19 +6398,19 @@ impl Browser {
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
         let top = self
-            .evaluate(session, "document.documentElement.outerHTML")
+            .evaluate(run, "document.documentElement.outerHTML")
             .await;
         panic!("the framed probe did not finish; the tab holds {top}");
     }
 
     /// What the tab's top document is, once it has loaded: whether it frames anything and
     /// shows the bar.
-    async fn top(&mut self, session: &str) -> Value {
+    async fn top(&mut self, run: &str) -> Value {
         let mut last = Value::Null;
         for _ in 0..100 {
             let state = self
                 .evaluate(
-                    session,
+                    run,
                     "JSON.stringify({ready: document.readyState, url: location.href, \
                      iframe: !!document.querySelector('iframe'), \
                      bar: !!document.querySelector('.bar')})",
@@ -6462,7 +6462,7 @@ fn assert_probe(record: &Value, open: bool, feed: &str, what: &str) {
     }
 }
 
-/// Links `gh:o/r#1` to Mission `mission-g`, which the served Registry holds a Session of.
+/// Links `gh:o/r#1` to Mission `mission-g`, which the served Registry holds a Run of.
 fn linked_issue(served: &Served) {
     use ai6::directorates::registry::mission_issues::{IssueLink, LinkRelation, LinkState};
     served

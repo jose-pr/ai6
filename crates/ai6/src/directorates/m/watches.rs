@@ -1,4 +1,4 @@
-//! Watches: one standing Session per scope that supervises its area, woken by the area's events.
+//! Watches: one standing Run per scope that supervises its area, woken by the area's events.
 //!
 //! M's watch (`m`) keeps the whole deployment from the Headquarters Station, an Operation's watch
 //! (`operation:P`) its Operation from a Station the Operation allows, and a Station's watch
@@ -99,7 +99,7 @@ impl FromStr for WatchScope {
 #[map(deny_unknown_fields)]
 pub struct WatchDefinition {
     /// The Agent that keeps the watch, by codename: its handler, model, effort, route and pool
-    /// account run the watch's Session.
+    /// account run the watch's Run.
     #[schema(title = "Agent")]
     pub agent: String,
     /// For M's or a Station's watch, the Operation its Cables are sent and received in, under

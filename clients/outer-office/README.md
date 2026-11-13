@@ -11,17 +11,17 @@ The AI6 operator app for desktop and web (short name OO), where operators deal w
 Moneypenny, the AI assistant. **Outer Office talks only to Universal Exports,
 AI6's authenticated public API; it never reaches a Station, a provider or M's
 credentials.** It shows Station health and the Headquarters Station, the Operation →
-Mission → Session board, Mission briefs, live Session terminals, administration and audit.
+Mission → Run board, Mission briefs, live Run terminals, administration and audit.
 
 ## Features
 
-- A name opens what it names: an Operation, Mission, Session, Station, Theater, Agent, role or
+- A name opens what it names: an Operation, Mission, Run, Station, Theater, Agent, role or
   pool anywhere on a page is a link through the typed routes (keyboard reachable, underlined under
   the pointer, announced as a link, a full tap target on a phone), and plain text where the person
   may not open that page. A count on Overview opens its page filtered to what it counted. Each
   page has one heading and a line on what it is for, and an empty one says what to do first.
 - Stations: health, roles, capacity and the elected Headquarters Station (HQS).
-- Operations → Missions → Sessions, with state filters; queue a Mission on an Operation
+- Operations → Missions → Runs, with state filters; queue a Mission on an Operation
   you hold `mission.create` for, and review Agent-proposed Missions.
 - The Missions page is the queue (with no Mission yet, **New Mission in …** starts the first):
   one row per Mission with its state as a word and icon
@@ -29,23 +29,23 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   current attempt, when the board last heard of it (relative, the exact local time and zone
   on hover) and the Agent and role its brief names, newest update first unless the route
   sorts, ties in Operation and Mission order so rows stay put between refreshes. Its state filter
-  and counts go by a Mission's state, that of the Session updated last, as Overview and an
-  Operation's counts do; the Sessions page filters each Session by its own. With the
+  and counts go by a Mission's state, that of the Run updated last, as Overview and an
+  Operation's counts do; the Runs page filters each Run by its own. With the
   `queued` state a strip counts the briefs vetting holds and the Mission proposals waiting,
-  each linking to Briefings; neither is ever a row. A Mission no Session has been recorded for is
+  each linking to Briefings; neither is ever a row. A Mission no Run has been recorded for is
   a row too: queued, waiting for a place, retrying a start (its failures and next try), a brief no
   Station has taken, or failed before it started, each with the reason the Station gave; Overview's
   Upcoming lists the queued ones. **Mission details** (route
   `missions?operation_id=…&mission_id=…`) opens a read-only detail beside the queue, or in
-  place of it in a narrow window: the state and the Session that sets it, every attempt (its
-  Station and Theater as links, why it was lost, its checkpoint branch, the Sessions on it
+  place of it in a narrow window: the state and the Run that sets it, every attempt (its
+  Station and Theater as links, why it was lost, its checkpoint branch, the Runs on it
   to open), the brief and the Timeline, the actions the person has and, for a queued
   Mission, the Operation's placement now (what it rules out; hidden when the gateway refuses
   the preview). Closing it returns focus to the row.
 - Mission brief view: the exact prompt and a sanitized launch manifest (environment
   variable names only, never values).
 - Live terminals: read-only by default; **Request input lease** takes a write lease.
-  Closing a view never stops the provider Session.
+  Closing a view never stops the provider Run.
 - Mission actions: each Mission card's menu cancels, retries (optionally for another
   Agent), resumes (optionally with a message) or interrupts, offering only what the
   Mission's current state allows and saying why the rest are unavailable; it needs
@@ -53,7 +53,7 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
 - Timeline: an Operation's activity newest first (lifecycle, controls, Cables, Sleepers,
   audit), filtered by Operation and Mission, with older pages on request and new activity
   added on top every ten seconds; it needs `audit.read`.
-- Account pools: the pool accounts each Operation may draw from, with the Sessions using
+- Account pools: the pool accounts each Operation may draw from, with the Runs using
   each against its limit (other Operations' counted, not named), quota used per window, tokens today and until when a limited
   account waits, refreshed every fifteen seconds; it needs `pool.read`.
 - Agents (`agent.read`): each Agent of an Operation with its record there
@@ -62,8 +62,8 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   ink; with `agent.configure`, lower its clearance there or restore the configured one.
   Its Roles tab holds the Operation-scoped Agent roles (purpose and policy).
 - A Station (route `stations?station_id=…`) is a watch: Online or Dark, the last check-in,
-  its roles, running Sessions of its capacity, resources as last sampled (**Not reported**
-  when it sends none), and **Sessions here**, each Mission with an active attempt there as a
+  its roles, running Runs of its capacity, resources as last sampled (**Not reported**
+  when it sends none), and **Runs here**, each Mission with an active attempt there as a
   link to its detail.
 - An Operation (route `operations?operation_id=…`) opens a summary: what the person may do
   there, its Missions counted by state (each count links to the Missions in that state), the
@@ -74,19 +74,19 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   Missions; 0 MiB and 100% turn them off) and a placement preview.
 - Overview, the page Outer Office opens on: the theme's hero art beside the person's
   Operations (each with the share of its Missions done) and the Stations; counts of
-  Operations, Stations online and dark, active Missions and waiting Sessions; recent
+  Operations, Stations online and dark, active Missions and waiting Runs; recent
   activity from the Operations' timelines (with `audit.read`); Upcoming, the Missions
   waiting to run (queued Missions oldest first, then held briefs, each labelled); a
   Moneypenny card whose quick questions and field open her chat and ask her; and what needs
-  attention (blocked Sessions, green ink requests waiting where the person has
+  attention (blocked Runs, green ink requests waiting where the person has
   `approval.decide`, briefs vetting holds and Mission proposals waiting where the person has
   `mission.create`, dark Stations), each saying what, where and when and linking to its page
   or request. It says nothing needs the person only when every source was read; otherwise
   "Nothing found in what loaded" and the sources it could not read by name. With no visible
   Operation it says "No Operations you can see" and that a controller grants access, never
   whether any exist. Operations: each Operation's Missions by
-  state; Sessions: every Session in a table sorted by any column (a list on a phone).
-- The top bar: the OO wordmark, search across the Operations, Missions, Sessions and
+  state; Runs: every Run in a table sorted by any column (a list on a phone).
+- The top bar: the OO wordmark, search across the Operations, Missions, Runs and
   Stations on the board (Ctrl+K, or ⌘K on macOS, opens it unless the key would type a
   character into a text field; results say they are "in the loaded board", each opens what it
   names, and a miss says "No matches in the loaded board"), **Ask Moneypenny**, the bell **Needs attention** (a
@@ -95,7 +95,7 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
   not yet applied or refused, offering **Check again** on an outcome unknown), a **Demo
   data** chip in the demo, Settings, and the person's chip (initials, name and
   first directory group) opening the operator menu.
-- Freshness: each source (Stations, Sessions, Missions, held briefs, green ink, Mission
+- Freshness: each source (Stations, Runs, Missions, held briefs, green ink, Mission
   proposals, timeline) is read on its own. A failed read keeps that source's last data and
   the page says "Last updated 14:02:31"; while the gateway is unreachable a strip says so
   and when the data is from; a 403 hides a source (it is not shown empty); a 401 signs the
@@ -133,7 +133,7 @@ Mission → Session board, Mission briefs, live Session terminals, administratio
 - Green ink: the irreversible steps Agents wait to take (scope, Agent, Mission, reason,
   expiry), each approved for a chosen time with an optional note or rejected with a reason
   (`approval.decide`), and the Operation's class authorisations with their uses, revoking
-  the live ones (`approval.class`). A Session held for green ink shows `BLOCKED · GREEN INK`.
+  the live ones (`approval.class`). A Run held for green ink shows `BLOCKED · GREEN INK`.
   Reasons are rendered as Markdown, what they name links to the Operation's Sources, and a request's
   links follow them. The Expired tab lists what no one decided in time, and re-arms it. A Mission's
   page shows its Agent's final message and any verdict, and takes one with `mission.verify`.
@@ -226,7 +226,7 @@ desktop the library its build hook bundles.
 The app builds for Linux, Windows and the web; a checkout has no macOS runner, so on macOS it runs
 `flutter test` and the web build.
 
-Native desktop Session windows use Flutter's first-party Desktop Windowing API, which is
+Native desktop Run windows use Flutter's first-party Desktop Windowing API, which is
 experimental and only on Flutter `main`, so the app builds with the Flutter commit
 [`tools/sdk/sdk.lock`](../../tools/sdk/README.md) names. From the repository root:
 
@@ -287,7 +287,7 @@ sign-in](https://jose-pr.github.io/ai6/access/#signing-in-from-a-browser) lists 
 pass. The sign-in page asks `GET /v1/auth/methods` what the gateway accepts and shows its name and
 password form, the button of an organization proxy that vouches for the person, or both, on web
 and desktop alike. The bearer token is kept in memory only, and signing out revokes it. On the web
-a sign-in also gets an HttpOnly session cookie that this code cannot read, nothing else is kept, and
+a sign-in also gets an HttpOnly run cookie that this code cannot read, nothing else is kept, and
 a reload asks `POST /v1/auth/resume` for a new token and goes back to the page the URL names and the
 last conversation. So someone with the browser open on that machine stays signed in while it is used and up to `[gateway]
 session_idle` (thirty minutes) after, until they sign out; `[gateway] session_cookie = false`
@@ -296,13 +296,13 @@ open app renews its token `[refresh] renew_before` ahead of the idle deadline wh
 works, and with no input asks "Stay signed in?" with a countdown instead. Signing in again goes back to the last conversation, kept per person on the device
 ([Staying signed in](https://jose-pr.github.io/ai6/access/#staying-signed-in)).
 
-The board reads what the page shown displays every three seconds (`[refresh] sessions`), such
+The board reads what the page shown displays every three seconds (`[refresh] runs`), such
 as `/v1/missions` on Missions and nothing on Audit; what only the bell and the search need
 every fifteen (`[refresh] slow`); and the person's profile every minute (`[refresh] profile`).
 While the tab or window cannot be seen it reads everything once a minute (`[refresh] hidden`),
 and it catches up as soon as it can be seen again or another page opens. Universal Exports
-filters them by `mission.read` per Operation. A Session view exchanges a
-Session-scoped grant for a one-use HttpOnly cookie, attaches over the WebSocket, decodes
+filters them by `mission.read` per Operation. A Run view exchanges a
+Run-scoped grant for a one-use HttpOnly cookie, attaches over the WebSocket, decodes
 DipTel frames with Guatiao's Dart receiver and renders them with `xterm2`, resuming from
 its last event after a disconnect.
 
@@ -396,7 +396,7 @@ pages and may load what they need.
 ## Layout
 
 A top bar, a rail of pages and the page, Overview after sign-in. The rail groups its pages by
-what a person is asking: **Work** (Overview, Missions, Sessions, Green Ink, Briefings), **People
+what a person is asking: **Work** (Overview, Missions, Runs, Green Ink, Briefings), **People
 and policy** (Operations, Agents, Roster, Account Pools, Access), **Machines** (Stations) and
 **Record** (Timeline, Audit). A page shows only with its permission, and a group with no page
 left does not show. From 1200 px wide the rail has labels beside its icons; from 900 px it is
@@ -438,9 +438,9 @@ device under `oo.chat.<person ID>`; a phone starts with the chat hidden. **Open
 Moneypenny's links at once** in her menu (`oo.chat.<person ID>.follow`, off by default) opens
 each page card as it arrives, except while a dialog covers the page.
 
-Web is one Flutter app view: wide windows keep the board beside the selected Session,
+Web is one Flutter app view: wide windows keep the board beside the selected Run,
 narrow windows navigate to it in-page with browser back. It opens no browser popups and
-no embedded Flutter views. Native desktop opens each Session, and Moneypenny when popped
+no embedded Flutter views. Native desktop opens each Run, and Moneypenny when popped
 out, in its own window sharing the board's state.
 
 ## Development
@@ -451,7 +451,7 @@ flutter analyze --fatal-infos
 flutter test
 ```
 
-`test/session_connection_test.dart` decodes the protocol vectors in
+`test/run_connection_test.dart` decodes the protocol vectors in
 `crates/ai6-diptel/tests/vectors/`, so run tests from this directory inside the repository.
 
 ## License

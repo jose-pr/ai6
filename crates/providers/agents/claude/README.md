@@ -7,18 +7,18 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/jose-pr/ai6/test.yml)](https://github.com/jose-pr/ai6/actions/workflows/test.yml)
 
 `ai6-agent-claude` implements AI6's Guatiao `AgentHandler` for Claude Code. It uses
-Claude's stream-json interface over an AI6-owned terminal Session, preserving Claude's
-provider-issued Session ID for resume.
+Claude's stream-json interface over an AI6-owned terminal Run, preserving Claude's
+provider ID for resume.
 
 ## Features
 
 - Establishes initial context as provider system instructions before sending the Mission prompt.
-- Resumes an existing Claude Session and accepts later Cable/message text.
-- Connects to the AI6 per-Session Cable MCP endpoint using environment-substituted
+- Resumes an existing Claude Run and accepts later Cable/message text.
+- Connects to the AI6 per-Run Cable MCP endpoint using environment-substituted
   Streamable HTTP configuration; the bearer token is not included in process arguments.
 - Converts provider stream events into AI6 `AgentEvent` values.
 - Reports a usage or rate limit, with its reset time when Claude gives one, as an `AgentEvent`
-  of kind `limit` so AI6 can park the Session instead of failing it.
+  of kind `limit` so AI6 can park the Run instead of failing it.
 - Reports the tokens and cost of a finished turn, names the tools an assistant message calls,
   and passes a Mission spend ceiling to Claude Code as `--max-budget-usd`.
 - Holds a shell command that pushes to a protected ref, merges or releases until green ink
@@ -30,7 +30,7 @@ provider-issued Session ID for resume.
 - Leaves out the working directory's own settings and `.mcp.json` unless AI6 allows them
   (`--setting-sources user --strict-mcp-config`), so a checkout cannot add hooks or MCP
   servers to an Agent.
-- Starts an answer-only Session (`AgentStart::answer_only`, for a Chief of Staff review) with
+- Starts an answer-only Run (`AgentStart::answer_only`, for a Chief of Staff review) with
   `--restricted`, no built-in tools and no MCP servers, so it can read and answer and do
   nothing else.
 
@@ -43,7 +43,7 @@ Guatiao provider entry point and `ClaudeHandler` implementation ship together.
 
 | Module | Purpose |
 | --- | --- |
-| `ai6_agent_claude` | `ClaudeHandler`, `ClaudeConfig` and stream-json Session implementation |
+| `ai6_agent_claude` | `ClaudeHandler`, `ClaudeConfig` and stream-json Run implementation |
 
 ## Development
 

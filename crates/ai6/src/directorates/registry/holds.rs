@@ -1,7 +1,7 @@
 //! Holds: an Agent, or one route of an Agent, taken out of use in an Operation.
 //!
 //! A hold only stops new work: the Agent is passed over by selection, or the route is not
-//! chosen, until a person lifts it. A Session already running is left to finish. M files one
+//! chosen, until a person lifts it. A Run already running is left to finish. M files one
 //! when a person signs its proposal, or by itself where the Operation lets it (`auto_hold`), and
 //! says why. It never widens anything. Every Station reads the same records:
 //! `holds/OPERATION/AGENT--ROUTE.json`.

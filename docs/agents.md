@@ -1,18 +1,18 @@
 # Agents and clearance
 
 An **Agent** is a configured codename that AI6 can post to a Mission. It is separate
-from the roles it is qualified for and from the provider-issued Session ID of any run.
+from the roles it is qualified for and from the provider ID of any run.
 
 ## AgentHandler providers
 
-The `AgentHandler` provider owns harness startup, Session resume, initial context,
+The `AgentHandler` provider owns harness startup, Run resume, initial context,
 follow-up messages and event decoding. A command-line process is one implementation
 detail; the handler contract can support other harness transports.
 
 Claude and Codex handlers are Guatiao providers under `crates/providers/agents/`.
 AI6 resolves an Agent from the roster and the Operation's policy, then supplies the
 Mission ID, task prompt, initial context and working directory. The handler returns the
-provider-issued Session ID; AI6 retains that ID when resuming the same Session. A Station
+provider ID; AI6 retains that ID when resuming the same Run. A Station
 loads handler libraries the way it loads every provider: by pin or publisher signature
 under the `strict` profile ([Stations](stations.md#provider-libraries-pins-and-publishers)).
 
@@ -40,7 +40,7 @@ that declares nothing gets `terminal`, and `pty` is preferred for it
 
 An Agent is a codename that owns its occupant: the `handler` provider, `model` and
 `effort`. A **role** is a job description, `[role.<id>]` with a `purpose` and a `policy`,
-passed to the Session as initial context. A role holds no model settings and grants no
+passed to the Run as initial context. A role holds no model settings and grants no
 clearance or permissions. An Agent's `roles` lists what it is qualified for.
 
 When a Mission asks for a role, M posts the highest-priority qualified Agent whose handler
@@ -135,11 +135,11 @@ in the first two rows (`--tools`), so anything else is not there to call.
 
 `PowerShell` is allowed but only there when Claude Code has it on: set
 `CLAUDE_CODE_USE_POWERSHELL_TOOL=1` in the Agent's `env`. [Green ink](missions.md#green-ink) stays
-the check on commands: its hook decides each `Bash` and `PowerShell` call of a gated Session, under
+the check on commands: its hook decides each `Bash` and `PowerShell` call of a gated Run, under
 the same list. In remote-hands mode Claude's own shell and file tools are neither offered nor
 allowed, whatever the settings say, so that nothing lands on the Station; at `desk` it is also
 denied `theater_run`, a command, and `theater_write`, which takes any path on the Theater, so it
-reads the Theater with `theater_read` and `theater_list`. Answer-only Sessions and
+reads the Theater with `theater_read` and `theater_list`. Answer-only Runs and
 [Moneypenny](assistant.md) have lists of their own, which this does not change.
 
 **What this does not give.** `Bash` runs as the Theater's OS user. On a local Theater that is the
@@ -184,9 +184,9 @@ same way; a resume clears the list, so a held command that later ran is not in t
 
 ## What an Antigravity CLI Mission may call
 
-The `antigravity` handler holds a Session to a list the same way, with agy's own means, measured on
+The `antigravity` handler holds a Run to a list the same way, with agy's own means, measured on
 agy 1.4.12 on x86-64 Linux. agy is closed source and updates itself, so the handler turns its updater
-off during a Session (`auto_update = true` in `handler_settings` lets it run), and its crate's
+off during a Run (`auto_update = true` in `handler_settings` lets it run), and its crate's
 `AGENTS.md` says what a new version could break. `HOME` in the Agent's `env` is where its login is.
 
 | | By default |
@@ -197,7 +197,7 @@ off during a Session (`auto_update = true` in `handler_settings` lets it run), a
 Each launch gets a directory of its own beside the working directory, `<working
 directory>.ai6-agy-<unique>`, with what agy has no flag for: a custom agent fixing the tools and
 carrying the standing context as its system prompt, the MCP config and the green ink hook. So that
-directory's parent must be writable. It is removed when the Session closes. It holds the Session's MCP
+directory's parent must be writable. It is removed when the Run closes. It holds the Run's MCP
 tokens, since agy expands no variable in that file: it is private to the OS user and denied to the
 file tools, and a command can read it, as a command can read the harness's environment.
 
@@ -205,7 +205,7 @@ file tools, and a command can read it, as a command can read the harness's envir
   resume is held by a deny rule, which is read at each launch; one that widens adds no tool.
 - **A checkout's own agy files.** agy runs `.agents/hooks.json` and `.agent/hooks.json` and connects
   `.agents/mcp_config.json` in any working directory, trusted or not, and no flag keeps them out. A
-  Session in a checkout that carries them is refused unless the Operation allows its project settings
+  Run in a checkout that carries them is refused unless the Operation allows its project settings
   ([`harness.project_settings`](operations.md#harness-project-settings)), and they are in the manifest
   a pin covers.
 - **A refused call.** With no rule for it agy ends the turn there and still says `SUCCESS`, exit code
@@ -225,25 +225,25 @@ file tools, and a command can read it, as a command can read the harness's envir
 not `executable`, which only the `station` record's `[providers.antigravity]` sets. The tool lists are as above, each entry an agy [permission
 rule](https://antigravity.google/docs/permissions?tab=cli) (`command(git status)`) or a tool's name
 (`search_web`), weakenings reported the same way, and `settings`, further `settings.json` keys for the
-Session (`modelProvider`), never those that decide what it may do.
+Run (`modelProvider`), never those that decide what it may do.
 
 ## 00 coordination
 
 The 00 Agent in charge of an Operation is the Operation's [watch](watches.md): an Agent with `00`
 clearance that the Operation's `[watch."operation:CODENAME"]` table names, kept as one standing
-Session that is not a Mission. It replaces the 00 coordinator that was the Session of one Mission.
+Run that is not a Mission. It replaces the 00 coordinator that was the Run of one Mission.
 It decides the Operation's Missions that are verifying, takes Cables to the Operation, and has
 `propose_mission` among its tools: it submits a child-Mission brief to the Operation's pending
-proposal inbox, naming the watch's own Session where a Mission's Session would be named. An
-Agent whose clearance is not `00` is refused when the watch is configured. A Mission's own Session
+proposal inbox, naming the watch's own Run where a Mission's Run would be named. An
+Agent whose clearance is not `00` is refused when the watch is configured. A Mission's own Run
 at `00` clearance keeps `propose_mission` too. AI6 binds the
-proposer, parent Mission, provider Session and Operation; proposals stay outside runnable I
+proposer, parent Mission, provider Run and Operation; proposals stay outside runnable I
 intake until M explicitly authorizes and promotes them. Universal Exports' authenticated
 `mission.create` review endpoints let an operator inspect, approve and queue, or reject a
 proposal; approval follows M's normal assignment and scheduling path. Headquarters vets each
 proposal and shows what it found in the inbox, and promotes a clean one from an unexposed
-Session itself only when a class authorisation of kind `proposal` covers it
-([Green ink](missions.md#green-ink)). Proposal submission does not start a child Session. Clearance does not grant authorization, override Operation
+Run itself only when a class authorisation of kind `proposal` covers it
+([Green ink](missions.md#green-ink)). Proposal submission does not start a child Run. Clearance does not grant authorization, override Operation
 cover or Agent eligibility, or bypass Q leases,
 Station policy, or the Cable relay. Q Branch, the Registry and Heads of Station retain their own capability
 boundaries. The Chief of Staff reviews briefs before they are placed (below).
@@ -305,21 +305,21 @@ unless `review = "all"`.
 
 Mission proposals are reviewed the same way before a [class authorisation](missions.md#green-ink)
 may promote them, at most `max_proposal_reviews_per_hour` per Operation and
-`max_proposal_reviews_per_session_per_hour` per proposing Session; a proposal past either is
+`max_proposal_reviews_per_run_per_hour` per proposing Run; a proposal past either is
 held for an operator with a `rate` finding.
 
-When a resumed Session continues, the Station gives the handler the standing part of its
+When a resumed Run continues, the Station gives the handler the standing part of its
 start-up context again (the Agent's `context`, its role's purpose and policy; for Moneypenny
-her instructions, never the recap of the conversation the Session holds). Claude Code 2.1.310
-records the system prompt with the Session (`--system-prompt-snapshot`, on by default) and
-reuses it until the Session is compacted; after that it builds the prompt from the resuming
+her instructions, never the recap of the conversation the Run holds). Claude Code 2.1.310
+records the system prompt with the Run (`--system-prompt-snapshot`, on by default) and
+reuses it until the Run is compacted; after that it builds the prompt from the resuming
 launch, which carries it as `--append-system-prompt`. Codex keeps a thread's instructions.
 
-A restricted Session (answer-only, or Moneypenny's assistant mode) that uses a tool outside
+A restricted Run (answer-only, or Moneypenny's assistant mode) that uses a tool outside
 its MCP servers anyway is killed and ends with a `failed` event naming the tool, and nothing
 it wrote afterwards is read: for Claude Code a `tool_use` not named `mcp__<server>__<tool>`,
 or any tool the model's API runs itself (a `server_tool_use` or `mcp_tool_use` block, such as
-the advisor), which a restricted Claude Code Session also runs without
+the advisor), which a restricted Claude Code Run also runs without
 (`CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1`); for Codex any request from the app server but token refresh and attestation, or a thread item
 other than messages, reasoning, a plan, compaction and review-mode markers, or an MCP call to
 another server. This backs up the flags and the tool check below, which decide what the
@@ -378,7 +378,7 @@ refused, in `strict`, and the error names it.
 | `AI6_CODEX_TOOL_CHECK` in the Agent's environment | When the check fails |
 | --- | --- |
 | `strict` (the default, also when unset) | The thread does not start, and the error names what was found |
-| `warn` | The thread starts; what was found is logged on the Station as a weakening and is the Session's first event (kind `weakened`) |
+| `warn` | The thread starts; what was found is logged on the Station as a weakening and is the Run's first event (kind `weakened`) |
 
 Any other value refuses to start. The features and the user's MCP servers are switched off in
 both modes.
@@ -397,7 +397,7 @@ Global and named-channel broadcasts. Its MCP tools provide peer discovery, sendi
 inbox reads, acknowledgements, replies and explicitly authorized held-Cable release. An
 authorized 00 Agent, and an Operation's watch, also has the `propose_mission` tool for submitting
 work to M; this does not make the proposal a Cable or scheduler input. The Station checks the Agent's clearance
-again on every proposal, so a lowered clearance or a retirement stops a running Session's
+again on every proposal, so a lowered clearance or a retirement stops a running Run's
 proposals at once. Every Agent has `request_approval`, which
 asks a person for [green ink](missions.md#green-ink) before an irreversible step.
 The relay supplies sender identity outside the tool schema and rechecks recipient
@@ -411,7 +411,7 @@ of the Agent's own Mission; anything else answers "not linked to this Mission".
 | Tool | What it does |
 | --- | --- |
 | `issues` | Lists the Mission's links: relation, whether the Agent may write, the title (untrusted), the last status and whether a question is open |
-| `issue_read` | One issue's title and body as last read, and the recent comments from people allowed to answer for it, each fenced as untrusted data; reading exposes the Session |
+| `issue_read` | One issue's title and body as last read, and the recent comments from people allowed to answer for it, each fenced as untrusted data; reading exposes the Run |
 | `issue_comment` | Comments. `queued` (the Station sends it), `pending` (green ink first) or `refused` with the rule |
 | `issue_request_info` | Asks a question and blocks the Mission (`blocked`, reason `issue`, the Watchdog paused) until a permitted reply or the timeout; the Agent ends its turn |
 | `issue_update` | Labels within the instance's `agent_labels`, a transition the instance lists in `agent_transitions`, assignees, close or reopen. The last three, and any other transition, need green ink (`issue-assign`, `issue-close`) |
@@ -430,23 +430,23 @@ but the tracker's and the Operation's git remote are refused, naming the rule an
 value; `@` mentions are put in backticks so nobody is pinged. The Station, never the Agent,
 appends the footer the Operation's cover policy allows.
 
-Each managed Session receives a separate loopback MCP endpoint when AI6 is built with
-`cables-mcp`; its tools answer only once AI6 binds the provider-issued Session ID. Every
+Each managed Run receives a separate loopback MCP endpoint when AI6 is built with
+`cables-mcp`; its tools answer only once AI6 binds the provider ID. Every
 handler connects it: Claude Code and Codex take the bearer from their launch environment,
 never from process arguments or persisted configuration; an ACP agent finds it in its
-Session's `mcpServers`; the Antigravity CLI in the launch's private MCP config
+Run's `mcpServers`; the Antigravity CLI in the launch's private MCP config
 ([above](#what-an-antigravity-cli-mission-may-call)). It works wherever the harness runs:
 
 | Where the harness runs | How it reaches its endpoint |
 | --- | --- |
 | On the Station's own host, or in remote-hands mode | The endpoint itself, on the Station's loopback |
-| Under a [runner](theaters.md#the-field-runner), on this host or another | The runner's relay on the Theater's loopback, with a token of its own. The runner carries each request over the connection the Station reaches it by, and the Station answers from the Session's endpoint with that endpoint's bearer, which never leaves the Station. No forward is needed |
+| Under a [runner](theaters.md#the-field-runner), on this host or another | The runner's relay on the Theater's loopback, with a token of its own. The runner carries each request over the connection the Station reaches it by, and the Station answers from the Run's endpoint with that endpoint's bearer, which never leaves the Station. No forward is needed |
 | Under the [detached wrapper](theaters.md#the-detached-wrapper) | A reverse forward from a loopback port on the Theater (the transport's `forward`) |
 
 A Theater where the wrapped harness would have no way to its endpoint (no runner, and a
 transport without `forward`) is ruled out for field mode at placement, with that reason;
 `agents = "auto"` then runs the harness on the Station in remote-hands mode. A Theater with
-`cables = "optional"` starts such a Session without Cables instead, and so without the other
+`cables = "optional"` starts such a Run without Cables instead, and so without the other
 tools on that endpoint (`request_approval`, the issue and memory tools); its check-in lists
 that as `weakened`, and the Station logs it for each such Mission.
 
@@ -468,20 +468,20 @@ permission contract.
 
 A Cable reaches an Agent whether or not it is polling:
 
-- **A Session between turns is woken.** A live Session waiting at a prompt (its Mission
+- **A Run between turns is woken.** A live Run waiting at a prompt (its Mission
   `blocked` with no reason of its own) takes a turn with the Cable as its input, marked
   untrusted as in `read_cables`, and its Mission is `working` again. The Cable shows `delivered`
   when the turn starts. The Agent's `wake_on_cable = false` opts out: its Cables wait for its own
   `read_cables`. `wakes_per_hour` (default 60, no floor; `0` wakes none) bounds the wakes of
   an Agent, counted across Stations and against its Cable quota; a wake the count refuses leaves
-  the Cable queued for the Session's own read.
-- **An Agent with no Session has it in the brief of its next.** A Cable to an Agent that is not
+  the Cable queued for the Run's own read.
+- **An Agent with no Run has it in the brief of its next.** A Cable to an Agent that is not
   running, or to an `operation` none of whose Agents run (it waits for that Operation's 00
-  Agents), stays queued in the Registry until its `expires`. The next Session of that Agent
+  Agents), stays queued in the Registry until its `expires`. The next Run of that Agent
   (a Mission's, or a standing Sleeper's window, which takes the Cables sent since the last one)
   starts with them in its brief, in the order they were sent, and the sender's Cable shows
-  `delivered` then. A Cable bound to the Session of a thread (a Liaison peer's) waits for that
-  Session's own read.
+  `delivered` then. A Cable bound to the Run of a thread (a Liaison peer's) waits for that
+  Run's own read.
 
 ```toml
 [agent.007]
@@ -489,33 +489,33 @@ wake_on_cable = true   # the default; false leaves its Cables for its own read_c
 wakes_per_hour = 60    # the default; 0 wakes none
 ```
 
-An Agent that keeps a [watch](watches.md) takes its Cables in the watch's Session instead: each
+An Agent that keeps a [watch](watches.md) takes its Cables in the watch's Run instead: each
 is a `cable` event of a wake, counted against the watch's own `max_turns_per_hour`, not
 `wakes_per_hour`. A watch is not a Mission, and its Agent is best kept for the watch alone: a
-Cable to the Agent goes to whichever of its Sessions reads it first.
+Cable to the Agent goes to whichever of its Runs reads it first.
 
 Neither path adds authority: the relay asks for the sender's and the receiver's grants and for
-any compartment again when it wakes a Session or fills a brief, so a grant revoked since the
+any compartment again when it wakes a Run or fills a brief, so a grant revoked since the
 Cable was sent refuses it. A Cable never creates a Mission, a brief or a placement; it waits for
-whatever the addressee's next Session was started for.
+whatever the addressee's next Run was started for.
 
 Agents outside AI6 reach these Cables over A2A through [Liaison](liaison.md). A peer's message
 arrives as a Cable from `a2a:<peer>` (shown as `a2a:<peer> for <principal>`), and its reply goes
 back with `reply_to_cable` as to any Cable; a Cable to `a2a:<peer>`, or `a2a:<peer>/<addressee>`
 for one of that peer's own addressees, is sent to it as an A2A message, and the peer's answer
 comes back as a reply. Both need grants naming `a2a:<peer>`, as any Cable needs grants naming
-its Agents. A thread stays with the Session that took its first message: a follow-up in the same
-A2A context reaches that Session, or, once it has ended, the Agent's next Session, never another
-of its Sessions that was already open.
+its Agents. A thread stays with the Run that took its first message: a follow-up in the same
+A2A context reaches that Run, or, once it has ended, the Agent's next Run, never another
+of its Runs that was already open.
 
 Across Operations, a Cable needs a [compartment](compartments.md#cables) as well as these grants,
-and a Session holding one also has `compartments`, `missions_in`, `mission_brief` and
-`mission_products`. Every Session also has `memory_search`, `memory_read`, `memory_write`
+and a Run holding one also has `compartments`, `missions_in`, `mission_brief` and
+`mission_products`. Every Run also has `memory_search`, `memory_read`, `memory_write`
 and `memory_forget`, for its Operation's memory and the global one ([Memories](memories.md#agents)).
 
 ## Reports
 
-Every Session has `file_report` on its AI6 MCP server: what it observed that someone should know or
+Every Run has `file_report` on its AI6 MCP server: what it observed that someone should know or
 decide about, a problem found along the way, a risk, an idea for later work. It is a
 [Report](reports.md) of its Operation, linked to its Mission, and it starts no work: the Operation's
 watch or a person assesses it, and `propose_mission` is still how an Agent asks for work.
@@ -530,13 +530,13 @@ watch or a person assesses it, and `propose_mission` is still how an Agent asks 
 | `classification`, `handling`, `compartments`, `tearline` | The markings ([Reports](reports.md#markings)) |
 | `links` | Other Missions, Reports, decisions or evidence; its Mission is linked anyway |
 
-`reports` lists what the Session may read, most urgent first, and `read_report` reads one, inside
-`<ai6-data>`: what a Report says is data from its filer. The Session reads its own Operation's
+`reports` lists what the Run may read, most urgent first, and `read_report` reads one, inside
+`<ai6-data>`: what a Report says is data from its filer. The Run reads its own Operation's
 Reports, another's only through a compartment granting `mission.read` there (audited, and marking
-the Session exposed as that Operation's product), and a Report's content only when the Agent is read
+the Run exposed as that Operation's product), and a Report's content only when the Agent is read
 in to each of its compartments and cleared for its classification; otherwise it sees the tearline, or
 the ID and markings alone. A Head of Station round's `file_report` is its round's report
-([Stations](stations.md)), also kept as a Report of its Station. Filing is rate limited per Session
+([Stations](stations.md)), also kept as a Report of its Station. Filing is rate limited per Run
 and per Operation (`[registry.limits.reports]`).
 
 ## Clearance
@@ -551,16 +551,16 @@ An Agent names its clearance in the roster, and `field` is what it gets when it 
 works at `desk` when configured so, when an Operation's ceiling or a person's hold says so, on desk
 duty before retirement, and when its grant cannot be read.
 
-Each handler holds a Mission's Session to its clearance. A clearance a handler does not know counts
+Each handler holds a Mission's Run to its clearance. A clearance a handler does not know counts
 as `desk`.
 
 | Handler | `desk` | `field` and `00` |
 | --- | --- | --- |
 | `claude` | Reading and searching, editing inside the working directory and AI6's MCP servers; no `Bash` or `PowerShell` ([the list](#what-a-claude-code-mission-may-call)). On a remote Theater, `theater_read` and `theater_list`, and no `theater_run` or `theater_write` | The whole list, with green ink on each command |
-| `codex` | File changes inside the working directory and AI6's MCP servers, and no command. Codex reads through commands, so such a Session can read no file: it has its prompt and its project's `AGENTS.md`. It starts only after the [tool check](#codex-tool-check) finds no command tool. On a remote Theater, as `claude` | Codex's own tools, with green ink on each command and file changes inside the working directory |
+| `codex` | File changes inside the working directory and AI6's MCP servers, and no command. Codex reads through commands, so such a Run can read no file: it has its prompt and its project's `AGENTS.md`. It starts only after the [tool check](#codex-tool-check) finds no command tool. On a remote Theater, as `claude` | Codex's own tools, with green ink on each command and file changes inside the working directory |
 | `acp` | Refused, at start and resume, because AI6 does not choose an external agent's tools; `unconfined_desk = true` in its `handler_settings` starts it with whatever tools the agent has, [reported as a weakening](acp.md#permissions-and-restricted-modes) | The agent's own tools, with green ink on each command |
 
-Answer-only Sessions and Moneypenny have limits of their own at any clearance. None of this
+Answer-only Runs and Moneypenny have limits of their own at any clearance. None of this
 isolates a command an Agent may run: [a command reaches what the Theater's OS user
 can](#what-a-claude-code-mission-may-call).
 
@@ -573,7 +573,7 @@ naming both clearances. Resuming it goes on at the clearance the Agent has then.
 fails shows nothing lower and stops nothing; a start or a resume at that moment counts the Agent as
 `desk`.
 
-A harness a field runner kept running holds what it was launched with, as its Session record says, so
+A harness a field runner kept running holds what it was launched with, as its Run record says, so
 a Station that attaches to it again stops it at once if the clearance has fallen since. Until a
 Station attaches, nothing reads the clearance for it and it keeps its tools. AI6's own tools are not so
 late: a proposal, an issue tool and a request for green ink each look at the clearance when called.
@@ -584,10 +584,10 @@ credentials are issued.
 
 ### Track record and promotion
 
-The Station that runs a Session counts its outcome in the Agent's **record**: Missions done,
+The Station that runs a Run counts its outcome in the Agent's **record**: Missions done,
 failed, blown, abandoned and stalled, and the incidents charged to it (quarantines, budget
-stops, green ink refused), per Operation and by clearance, under the model the Session was
-launched with. A Session lost with its Station or runner counts as `lost`, never as the
+stops, green ink refused), per Operation and by clearance, under the model the Run was
+launched with. A Run lost with its Station or runner counts as `lost`, never as the
 Agent's failure; Chief of Staff reviews are not counted. Outer Office's Agents view and `ai6ctl
 agents --operation ID` show an Operation's records (`agent.read`), nothing of other
 Operations'. Promotion counts only the Missions of the model that occupies the codename now.
@@ -640,9 +640,9 @@ command no `item/started` announced earlier under the same item id: its command 
 what Codex asked; each is logged and recorded as a `declined` event. In remote-hands mode the Station checks every
 `theater_run` command itself. The hook is the `ai6` program hosting the handler unless the
 Agent's roster environment names another in `AI6_GREEN_INK_GATE` (reported as a weakening; a
-start or resume request cannot set it), and it is given the Session's Cable URL in its own
+start or resume request cannot set it), and it is given the Run's Cable URL in its own
 arguments. The Station sets `AI6_GREEN_INK_TIMEOUT` and `AI6_GREEN_INK_NESTING` in the
-Session's environment from its `station` record (`[green_ink] gate_timeout`, `[approvals]
+Run's environment from its `station` record (`[green_ink] gate_timeout`, `[approvals]
 classify_nesting`): how long the gate waits for the Station and how deep it reads nested
 shells and git aliases; one nested deeper is held. It needs Claude Code 2.1.295 or later, which blocks the call when the hook cannot
 run.
@@ -655,12 +655,12 @@ knows where it goes. Give a governed step literal names.
 
 The record above counts outcomes; the **scorecard** reads them again for a person deciding whether an
 Agent, a route or a model is doing a good job. It is computed each time it is asked for, from the
-Registry's Session records and usage ledger, and nothing is stored besides them: a Session record
+Registry's Run records and usage ledger, and nothing is stored besides them: a Run record
 names its Agent (`launch.agent`), when it opened and closed, and how its Mission stood at the last
 write (`result`: the state, the reason when AI6 knows one, and the tools its harness refused), and
 what a person found when they checked it (`verdict`).
 
-Each attempt (one Session) gets one judgment, by whose doing the outcome was:
+Each attempt (one Run) gets one judgment, by whose doing the outcome was:
 
 | Judgment | Meaning | Judged? |
 | --- | --- | --- |
@@ -674,7 +674,7 @@ Each attempt (one Session) gets one judgment, by whose doing the outcome was:
 | `withdrawn` | A person cancelled, interrupted, quarantined or lowered it. | No |
 | `running`, `unrecorded` | Still working; or closed with no outcome written. | No |
 
-A start that never got a Session (a failed checkout, a brief with no Agent) leaves no record and so
+A start that never got a Run (a failed checkout, a brief with no Agent) leaves no record and so
 no attempt. A row's failure rate is failed, blown, stalled and disputed over judged attempts; below
 `small_sample` judged attempts a row says so and nothing should be ranked on it. Each row also has
 tokens and cost from the ledger, wall time of the closed attempts (parked time included), and how many
@@ -707,7 +707,7 @@ never_prefer = ["claude-fable-5-1"] # models M never proposes putting an Agent o
 ```
 
 - **A proposal** is a [green ink](missions.md#green-ink) request of kind `hold` or `prefer`, filed by
-  M (Session `m`, Mission `hold-AGENT` or `prefer-AGENT`), with the numbers in its reason: the failed
+  M (Run `m`, Mission `hold-AGENT` or `prefer-AGENT`), with the numbers in its reason: the failed
   share, the window, the cost and the Missions behind it. Signing one needs `approval.decide` and, for
   a hold, `agent.configure`. It is asked again only once the sample has grown by `small_sample` more.
   A **hold** you sign becomes a hold in your name. A **prefer** is advice (`008` ahead of `007` for
@@ -716,7 +716,7 @@ never_prefer = ["claude-fable-5-1"] # models M never proposes putting an Agent o
 - **A hold** keeps an Agent, or one route of it, out of use in that Operation until a person lifts it
   (`ai6ctl agents lift`, or the Agents page): selection passes the Agent over, a queued Mission is
   given to the next qualified Agent or waits, and the route is not chosen, saying why in the
-  Mission's `waiting` reason. It stops new work only: a Session already running finishes. Revoking
+  Mission's `waiting` reason. It stops new work only: a Run already running finishes. Revoking
   the green ink that signed a hold lifts it.
 - **`auto_hold`** lets M hold by itself, on the same threshold, audited (`agent.hold.applied`, actor
   `m`) with the reason on the hold and the Agents page. A hold that would leave a role with no Agent
@@ -729,7 +729,7 @@ never_prefer = ["claude-fable-5-1"] # models M never proposes putting an Agent o
 
 ## Credentials
 
-Q issues each Session the credentials its Agent's loadout names, as leases, and nothing
+Q issues each Run the credentials its Agent's loadout names, as leases, and nothing
 else of its own: harness keys or tokens, git and forge tokens. A Station reads loadouts from
 `loadouts.toml` in its configuration directory:
 
@@ -758,12 +758,12 @@ provider = "file"
 dir = "/etc/ai6/secrets"
 ```
 
-- When a Session starts or resumes, the Station leases the Agent's secrets from their
+- When a Run starts or resumes, the Station leases the Agent's secrets from their
   providers and puts each value in the harness's environment under `env`, replacing what the
-  Mission's earlier Session held. A value is never written to disk: not in the safe house,
+  Mission's earlier Run held. A value is never written to disk: not in the safe house,
   the launch record, the Registry, nor on the Theater. The [detached
   wrapper](theaters.md#the-detached-wrapper) hands the environment over through a FIFO; a
-  runner keeps it in memory. A Session refuses to start when a provider refuses an
+  runner keeps it in memory. A Run refuses to start when a provider refuses an
   ordinary secret.
 - The built-in providers read each value when it is leased: `file` from a file on the Station
   (`secrets/<name>` in its configuration directory by default; a relative `key` is relative to
@@ -772,7 +772,7 @@ dir = "/etc/ai6/secrets"
   inherits it, a harness among them, green ink or not. A provider that leases, such as a vault
   client whose leases expire on their own, revokes what it issued. Leases last an hour (the `station` record's
   `[secrets] lease_ttl`, at most `max_lease_ttl`) and are revoked when the Mission ends or
-  its Session stops on that Station; a value already in a harness's environment stays there
+  its Run stops on that Station; a value already in a harness's environment stays there
   until the harness ends.
 - A harness on the Station's own host runs as the Station's user, so it can read what that
   user can, the secret files among them. Keep green ink credentials out of reach of local
@@ -784,12 +784,12 @@ dir = "/etc/ai6/secrets"
   restart does not lease it again), for no longer than the approval lasts. A green ink secret
   without `targets`, and one served by a built-in provider (whose value a revocation cannot take
   back), is logged as a weakening at start. The Agent asks with `request_approval`, and the
-  credential is in its environment from the next Session start or resume after the
+  credential is in its environment from the next Run start or resume after the
   operator signs. When the approval expires or is revoked, the Station revokes the lease at
   its provider within a scheduler pass (`credential` / `revoked` on the timeline); a provider
   that issues credentials of its own stops honouring it, while a value already in the
   harness's environment stays there.
-- A Session the Operation's [exposure](medical.md) policy restricts with `secrets` gets no
+- A Run the Operation's [exposure](medical.md) policy restricts with `secrets` gets no
   new leases but its harness's model credential: a secret whose `env` is a provider credential
   variable (below). A Mission from a Source is exposed from its start, so this is how it runs.
 - Each lease is on the Mission's timeline (`credential` / `leased`), naming the secrets and
@@ -828,7 +828,7 @@ when the lease ends; a provider that does not lease is read.
 flat, written once and named by many secrets. It is global, or one Station's own when that
 Station's path or address differs. An instance may not take the name of a built-in or a loaded
 provider, and its `provider` is a loaded provider, never another instance. A setting its provider
-marks sensitive (a session, a password) is itself a secret reference, `{ provider = "file", key =
+marks sensitive (a run, a password) is itself a secret reference, `{ provider = "file", key =
 "…" }` or `{ secret = "name" }`, read when the instance is built; one that leads back to the instance
 is refused. The Station builds each instance once and keeps it until its record changes.
 
@@ -838,7 +838,7 @@ name with its reason withheld.
 
 ### Values that are no secret
 
-`env` on a loadout gives each Session of the Agent values that are no secret, most often the
+`env` on a loadout gives each Run of the Agent values that are no secret, most often the
 `PATH` its harness and tools are found on:
 
 ```toml
@@ -850,7 +850,7 @@ env = { PATH = "/opt/tools/bin:/usr/bin:/bin", TZ = "UTC" }
 - A harness's environment is what AI6 gives it and nothing of the Station's own, so the `PATH` a
   harness needs is one you set: here or in the Agent's own `[agent.<codename>.env]`; a loadout's value wins over
   the Agent's for the same name, and a start or resume request's wins over both.
-- **Exposure does not take it away.** A Session an Operation's [exposure](medical.md) policy
+- **Exposure does not take it away.** A Run an Operation's [exposure](medical.md) policy
   restricts with `secrets` loses its secrets, which is how a Mission from a Source runs under
   `strict`, and keeps this table. A `PATH` given as a secret would be lost with them.
 - **A value here is config, and anyone who can read the record reads it** (`ai6ctl get
@@ -867,20 +867,20 @@ env = { PATH = "/opt/tools/bin:/usr/bin:/bin", TZ = "UTC" }
 
 ### Account pools
 
-Several provider accounts can be shared by every Station, each Session drawing one, so
+Several provider accounts can be shared by every Station, each Run drawing one, so
 work spreads over the quota that is left and a limit on one account does not stop the
 others. Pools are declared beside the loadouts, in `loadouts.toml`:
 
 ```toml
 [pool.claude-team]
-handler = "claude"              # the AgentHandler whose Sessions draw from it
+handler = "claude"              # the AgentHandler whose Runs draw from it
 operations = ["ai6-*"]          # globs on Operation IDs or an ancestor's; default: every Operation
 strategy = "headroom"           # or "round_robin" or "priority"
 
 [pool.claude-team.account.alice]
 kind = "claude-oauth-token"     # from `claude setup-token`
 secret = "alice-token"          # a [secret.<name>]; default: the account's name
-max_concurrent = 2              # Sessions at once, across every Station; default: no limit
+max_concurrent = 2              # Runs at once, across every Station; default: no limit
 priority = 1                    # ties, and the priority strategy; default 0
 
 [pool.claude-team.account.bob]
@@ -902,13 +902,13 @@ kind = "openai-api-key"
 | `anthropic-auth-token` | `ANTHROPIC_AUTH_TOKEN` |
 | `openai-api-key`, `codex-access-token` | a `CODEX_HOME` the Station makes for the Mission and logs in with `codex login --with-api-key` or `--with-access-token`, the value on standard input |
 | `config-dir` | `dir` as `CLAUDE_CONFIG_DIR` (handler `claude`) or `CODEX_HOME` (`codex`) |
-| `harness-login` | nothing is handed over: the harness uses the login it has where it runs, and the account only counts its use and its limits, so several routes can share one budget. With `files`, the login is [kept in the Registry](#logins-kept-in-the-registry) and written under a home of the Session's own |
+| `harness-login` | nothing is handed over: the harness uses the login it has where it runs, and the account only counts its use and its limits, so several routes can share one budget. With `files`, the login is [kept in the Registry](#logins-kept-in-the-registry) and written under a home of the Run's own |
 
 `env = "VAR"` puts the value (or directory) in another variable; a handler other than
 `claude` or `codex` needs it for `config-dir`. Each account's secret is an ordinary loadout
 secret: it is leased from the same provider, never written to the Registry, the safe house or
 the timeline. A `green_ink` secret cannot back an account: the load fails, since a pool hands
-its accounts to every Session that draws them while a green ink credential is only for a step
+its accounts to every Run that draws them while a green ink credential is only for a step
 a person approved.
 
 - **Who may draw from a pool**: its `handler` must be the Agent's, its `operations` must admit
@@ -918,29 +918,29 @@ a person approved.
   keeps its loadout alone. `named_only = true` on a pool keeps it from every Agent and route
   that does not name it, so a pool of one source is not drawn by every other Agent of its
   handler.
-- **One account per Session**: the Station removes every provider credential variable from the
-  Session's environment (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`,
+- **One account per Run**: the Station removes every provider credential variable from the
+  Run's environment (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`,
   `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CONFIG_DIR`, `OPENAI_API_KEY`, `CODEX_ACCESS_TOKEN`,
   `CODEX_HOME` and every account's `env`), then claims an account in the Registry and hands its
   credential over, after the Agent's loadout secrets so none can stand in for it. A loadout
-  secret whose `env` is one of those variables is not issued to a pooled Agent's Session, and
+  secret whose `env` is one of those variables is not issued to a pooled Agent's Run, and
   that is logged as a weakening. The claim is one Registry write, so two Stations never both
   take the last place of an account, and it drops any claim the Mission held on another
-  account. A resumed Session keeps its account while it has room, and moves only to an
+  account. A resumed Run keeps its account while it has room, and moves only to an
   account whose kind carries its history: from one environment kind to another, never to or
   from a `config-dir` or Codex account (those are tried again as a new attempt instead).
 - **Balancing**: `headroom` skips accounts that are limited or at `max_concurrent`, then
   takes the one whose most used quota window is lowest (an account whose provider has
   reported nothing counts as half used, the `station` record's `[accounts]
   unknown_use_permille`; a window past its reset counts as unused), then the
-  one with fewest Sessions, then the least recently used, then the highest priority.
+  one with fewest Runs, then the least recently used, then the highest priority.
   `round_robin` takes the least recently used and `priority` the highest priority with room.
-- **Claims and usage**: a claim is released when the Session ends, fails or is fenced out,
-  and lapses with the Station's Session leases when the Station goes dark; the Station renews
-  the claims of its Sessions, those still being handed over included, at each check-in. A
-  Session a Station re-attaches to after a restart or an adoption keeps the account its
-  Session record names, claimed again even past its `max_concurrent` or a limit (`account` /
-  `reclaimed` on the timeline). The tokens each Session uses count toward its account's day,
+- **Claims and usage**: a claim is released when the Run ends, fails or is fenced out,
+  and lapses with the Station's Run leases when the Station goes dark; the Station renews
+  the claims of its Runs, those still being handed over included, at each check-in. A
+  Run a Station re-attaches to after a restart or an adoption keeps the account its
+  Run record names, claimed again even past its `max_concurrent` or a limit (`account` /
+  `reclaimed` on the timeline). The tokens each Run uses count toward its account's day,
   and the quota windows Claude Code and Codex report are kept per account.
 - **Limits**: a limited account is skipped until its reset, but never longer than eight days
   (the `station` record's `[accounts] limit_horizon`), whatever the provider reports. An operator
@@ -956,13 +956,13 @@ a person approved.
   own host.
 - **The board**: each Station records its own view of its accounts when it starts, with the
   Operations of its roster that may draw from each pool; the board shows an account to an
-  Operation any Station names. Another Operation's Sessions on an account are shown only as a
+  Operation any Station names. Another Operation's Runs on an account are shown only as a
   count.
 
 Claude Code and Codex each also read a login of the host's user when no credential is
-given; pooled Sessions always get one. Other variables that point a harness elsewhere
+given; pooled Runs always get one. Other variables that point a harness elsewhere
 (`ANTHROPIC_BASE_URL`, `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`) are left as the
-Agent's environment sets them: an Agent that sets them sends its pooled Sessions there with
+Agent's environment sets them: an Agent that sets them sends its pooled Runs there with
 the account's credential.
 
 ### Logins kept in the Registry
@@ -991,11 +991,11 @@ renew_env = { GROK_AUTH_EARLY_INVALIDATION_SECS = "3600" }
   Its public half is published in the Registry, signed by the Station's identity, so a person who
   holds the fingerprint `ai6 identity` prints can tell it from one written there by someone else.
   The identity's own key is not used: it signs TLS, may come from a CA, and may be replaced.
-- **A Session.** The account is claimed as any other, and only on a Station the login names. The
+- **A Run.** The account is claimed as any other, and only on a Station the login names. The
   login is written under a home the Station makes for the Mission (`HOME`, and `USERPROFILE` on
   Windows), which is why the harness must run on the Station's own host, and a home is removed once
-  its Mission is over. A Session's commands can read those files, as they can a login on a shared
-  host: a Session that runs commands where that matters still needs a container Theater.
+  its Mission is over. A Run's commands can read those files, as they can a login on a shared
+  host: a Run that runs commands where that matters still needs a container Theater.
 - **What a harness renews comes back.** At every configuration poll and check-in the Station looks
   at each home. A changed login is sealed and written with a revision check, and an older value
   never replaces a newer one: a copy made from a revision since replaced is kept only if it plainly
@@ -1004,7 +1004,7 @@ renew_env = { GROK_AUTH_EARLY_INVALIDATION_SECS = "3600" }
   a link, or past `[registry.limits.accounts] sealed_bytes`, counts as gone. A Station that went
   down with a renewed copy writes it when it returns, under the same check.
 - **Other Stations learn at their next poll.** A revision that moved is opened and written over the
-  Session's files in place, each file replaced whole.
+  Run's files in place, each file replaced whole.
 - **The renewal round.** At `[accounts] renew_every` the Headquarters Station looks at each login
   whose end is within `renew_within`, or, where its files do not say when it ends, that has not
   been renewed for `renew_after`. It grants one Station the renewal lease (itself when the login
@@ -1014,18 +1014,18 @@ renew_env = { GROK_AUTH_EARLY_INVALIDATION_SECS = "3600" }
   success. A failure waits `renew_backoff`, doubled each time up to `renew_backoff_max`, and
   `renew_attempts` of them mark the account as needing a person: audited
   (`pool.login.needs_person`), on the timeline of each Operation that may draw it (`account`,
-  `needs_person`), and on the board. Its Sessions then go to the next account or route. All of this
+  `needs_person`), and on the board. Its Runs then go to the next account or route. All of this
   is in the Registry, so the next Headquarters Station carries on where this one stopped. With no
   `renew_command`, a login is left to its next real use and a person is told it may lapse.
 - **The board.** `pool.read` shows the Stations named, when the login ends, when it was last
   renewed, who holds its lease and why a person is needed: never the login.
-- **A Session whose token was refused** fails with a line naming the renewal under it, and a resume
+- **A Run whose token was refused** fails with a line naming the renewal under it, and a resume
   takes the current login.
 
 The value of a login reaches no record, log, error or response, and what a renewal command prints is
 never read.
 
-**May it be shared?** `max_concurrent` keeps its meaning: several Sessions may share a login, across
+**May it be shared?** `max_concurrent` keeps its meaning: several Runs may share a login, across
 Stations. Whether that is safe depends on the CLI and on its provider. What each measured CLI does is
 below; nothing here was run against a real login, and whether a provider rotates a refresh token and
 whether an old access token stays good after a renewal are unmeasured for all of them. Until they are,
@@ -1078,35 +1078,35 @@ route. Routes of one Agent are meant to be one model. AI6 does not check that, a
 a model at all; an Agent that needs another model's behaviour is another Agent.
 
 - **Which routes count**: a route counts when its handler is available on this Station, it can hold
-  the Session's clearance (the `acp` handler cannot hold `desk` without `unconfined_desk`), what it
+  the Run's clearance (the `acp` handler cannot hold `desk` without `unconfined_desk`), what it
   names is configured, and its account source has room. Pools follow the rules above, on the
   route's handler and `pool`. The Station and placement take an Agent while any of its routes can
   run.
 - **Balancing**: `headroom` compares routes by their best account, by the numbers pools keep; a
-  route with no reported use counts as `[accounts] unknown_use_permille`. Then fewest Sessions, the
+  route with no reported use counts as `[accounts] unknown_use_permille`. Then fewest Runs, the
   least recently used, the highest `priority`, and the order listed. `round_robin` takes the least
   recently used, and `priority` the highest priority with room, then the order listed. The default
   is `headroom`.
 - **A route with no pool** has one account of its own that hands over nothing, kept in the Registry
   under a `route-…` ID and labelled with the Agent, handler and model. So every Station sees its
-  limit, its Sessions count and the board shows it as `harness-login`.
+  limit, its Runs count and the board shows it as `harness-login`.
 - **Its `env`** is values anyone who reads the roster can read: a credential's variable or AI6's own
   is refused at load. Exposure does not take them away, and a review keeps them.
-- **Its `secrets`** are `[secret.<name>]` definitions in `loadouts.toml`, leased per Session and
-  handed to the harness as any loadout secret, and issued whatever the Session has read, since the
+- **Its `secrets`** are `[secret.<name>]` definitions in `loadouts.toml`, leased per Run and
+  handed to the harness as any loadout secret, and issued whatever the Run has read, since the
   harness reaches its model with them. A file of `[secret.<name>]` tables and no loadout or pool is
   acceptable. A secret that is not configured, or a green ink one, rules the route out. A variable
   a pool account also supplies is left to the account.
 - **All limited**: the Mission waits, and its `waiting` reason names each route and why. A brief
   waits only when no route has room on any handler the deciding Station can judge: which Station
   runs it, and so which handlers it has, is decided later.
-- **A Session keeps its route.** A resume stays on it, since history belongs to the harness and the
+- **A Run keeps its route.** A resume stays on it, since history belongs to the harness and the
   source. Without room there, a resume moves only to a route of the same handler whose accounts
   carry the history, from an account that does; otherwise it is a new attempt on another route, and
   the Agent is told, as a limit moves work. A running harness is never moved.
-- **`on_limit`**: `rotate` (the default) moves a limited Session by the rule above; `wait` parks it
+- **`on_limit`**: `rotate` (the default) moves a limited Run by the rule above; `wait` parks it
   and `backup` hands it to the next Agent, whatever other routes it has.
-- **What is shown**: the Session record's `launch` names the handler, model and pool, and its
+- **What is shown**: the Run record's `launch` names the handler, model and pool, and its
   `account` the account. So do the board's attempts, `ai6ctl mission` and the Mission page. The
   timeline has `route` / `chosen` and `route` / `moved`, and the Agents page and `ai6ctl agents` list
   each route.
@@ -1127,7 +1127,7 @@ models it covers, how much is used and when it refills, as `coqui-acp`'s usage m
 | --- | --- | --- |
 | `claude` | the running spend of a process and each window of a `rate_limit_event` | only from a turn's events (`needs_turn`) |
 | `codex` | each request's tokens and the account's rate-limit windows | `account/rateLimits/read` through an app server started for the read; no thread, no turn |
-| `antigravity` | each model call's tokens, and the quota agy serves on a loopback port | from the agy of a running Session of the same home, else through a private `agy acp` with an empty session, ended after the read (`usage_wait_ms`) |
+| `antigravity` | each model call's tokens, and the quota agy serves on a loopback port | from the agy of a running Run of the same home, else through a private `agy acp` with an empty run, ended after the read (`usage_wait_ms`) |
 | `acp` | a refusal read as a limit (`limit_phrases`, default the shared words) | only from a turn (`needs_turn`) |
 
 A Station reads each pool account it declared that the Registry holds limited, on the `usage` table of the
@@ -1146,7 +1146,7 @@ with the models it covers and when it was read (`ai6ctl pools`, column `READ_UNI
 A route names a model by what its source calls it, so a person needs to know what a source offers.
 Each Station asks its handlers, through the optional call `AgentHandler::models`, which models the
 account behind an environment may use, with **no model turn**: for each pool account (its credential
-leased as a Session's is, no account claimed, the lease revoked as soon as the answer is in) and for
+leased as a Run's is, no account claimed, the lease revoked as soon as the answer is in) and for
 each route no pool serves (its `env` and `secrets`). It looks again every `[accounts] models_every`
 seconds (3600; 0 never on its own) and reports the answers at check-in. A look runs on its own
 thread, never on the check-in beat, so slow handlers cannot make the Station look dark; it asks
@@ -1174,8 +1174,8 @@ since which standards apply belongs to the project. The format is the
 `0.1.0-draft`: a tree with an optional manifest, `overlay.cfg` or `OVERLAY.md`. Reading, validating,
 composing and the tree digest are the shared `coqui-aos` crate's.
 
-A Station fetches each overlay to a store keyed by its digest, verifies it at every Session start,
-and gives the Session a read-only copy outside its working directory, so no commit can hold it.
+A Station fetches each overlay to a store keyed by its digest, verifies it at every Run start,
+and gives the Run a read-only copy outside its working directory, so no commit can hold it.
 
 ```toml
 # loadouts.toml
@@ -1203,12 +1203,12 @@ overlays = ["rust"]
   `overlay`, `system`, `user`, `project`, `project-root` and Windows device names are refused.
 - **`overlays`** on a loadout and on an Operation name records by identity, each once. A
   loadout's must name records its document defines.
-- **Order.** A Session gets the loadout's list, then the Operation's. Each overlay's `requires`
+- **Order.** A Run gets the loadout's list, then the Operation's. Each overlay's `requires`
   is resolved first and each overlay is issued once; they then contribute in AOS composition
   order, ascending `(priority, name, identity)`, so the overlay with the higher `priority` wins
   a conflict. An Operation's list only adds: no name takes away what the loadout issues.
 - **Refusals.** A name that is no overlay name or that no record defines, a `requires` no record
-  offers, and a cycle (`a -> b -> a`) each refuse the Session, naming the overlay: a Session is
+  offers, and a cycle (`a -> b -> a`) each refuse the Run, naming the overlay: a Run is
   never given part of what it was meant to have.
 - **The pin** is the AOS tree digest: one line per file, `path NUL sha256:<hex> LF`, sorted by
   path bytes, hashed with SHA-256, over the bytes as published. `.git`, `node_modules`,
@@ -1261,7 +1261,7 @@ tools or injected command.
   `{ provider = "env", key = "VAR" }` in `env` or an `aos` env file, never in dotenv), and only
   when granted to that overlay; a placeholder never reads a secret.
 
-### What a Session gets
+### What a Run gets
 
 - **The root.** `<NAME>_OVERLAY_ROOT` for each overlay, its identity in upper case with `-` as `_`,
   and `<NAME>_OVERLAY_STATE`. A root is read-only: `0555` and `0444`, with `0555` on a file under
@@ -1273,9 +1273,9 @@ tools or injected command.
 - **`bin/`** first on `PATH`, `lib/python/` on `PYTHONPATH` and `lib/node/` on `NODE_PATH`, with the
   rest of the overlay's `env` and `env_files`, in the order of application. An Agent with no `PATH`
   keeps where a process given none looks; on a Theater, the login `PATH`. An overlay may not set a
-  variable starting `AI6_`: that refuses the Session.
+  variable starting `AI6_`: that refuses the Run.
 - **The text.** Rules, routing and context in the initial context, each file marked, in composition
-  order, the whole no more than `[overlays] context_bytes`: past it the Session is refused, naming the
+  order, the whole no more than `[overlays] context_bytes`: past it the Run is refused, naming the
   setting, rather than its text cut.
 - **Skills**, loaded natively where the harness loads them, and otherwise named by a routing line
   (`Skill <name> (overlay <overlay>): ... Read <root>/skills/<name>/SKILL.md`). Two overlays offering a
@@ -1285,17 +1285,17 @@ tools or injected command.
   applies. While an `OVERLAY.md` body is the context, a root `CONTEXT.md` is left out wherever it is
   named (a harness's `context` included) and the delivery reports `context-ignored` naming it; the
   overlay stays usable.
-- **A `desk` Session** gets the root and the text, and no `bin/`, `lib/` or anything run for it. The
-  same goes for a Session held to reading until its plan passes.
+- **A `desk` Run** gets the root and the text, and no `bin/`, `lib/` or anything run for it. The
+  same goes for a Run held to reading until its plan passes.
 
 | Handler | Harness id | Skills | Checked with |
 | --- | --- | --- | --- |
 | `claude` | `claude-code` | Native: `--plugin-dir` of a plugin the Station lays out, `Skill` offered | Claude Code 2.1.318 |
 | `codex` | `codex` | Routing line: Codex takes no root of skills but its home and the project. At `desk` it has no tool that reads a file, so there it cannot open what the line names | Codex 0.164.0 |
 | `acp` | `acp` | Routing line, in the first prompt | Grok 1.0.70 |
-| `antigravity` | `antigravity` | Native: a workspace of the Session's own holding the skills; each root may be read | agy 1.4.12 on Linux |
+| `antigravity` | `antigravity` | Native: a workspace of the Run's own holding the skills; each root may be read | agy 1.4.12 on Linux |
 
-**A resumed Session** is given its overlays again, checked again. If its digests differ from those it
+**A resumed Run** is given its overlays again, checked again. If its digests differ from those it
 started with (a changed pin), it gets the new ones, and the timeline says so (`overlay`, `changed`).
 One taken up as it runs, on its runner, keeps what it has.
 
@@ -1308,16 +1308,16 @@ one `git`.
 
 ### Code in an overlay
 
-Code needs what runs it where the Session runs. Text does not: an overlay with only text goes anywhere.
+Code needs what runs it where the Run runs. Text does not: an overlay with only text goes anywhere.
 
-- **What is looked for.** On a Session that may run commands, a Station looks on the Agent's `PATH`
+- **What is looked for.** On a Run that may run commands, a Station looks on the Agent's `PATH`
   (the login `PATH` when it names none) at most once per `[scheduler] check_in`, for each interpreter
   and command the overlay's manifest and files call for: Python (`python3`, or `python`, answering
   `Python 3`) for `lib/python/`, `cmds/` or a requirements file, what a setup or env script names, and
   `npm` for a `package.json`. A Theater lacking one is passed over: the Mission waits, and says what
   is missing and which overlay needs it, until it is there.
 - **Dependencies** go into an environment of each overlay's own, keyed by its digest, whatever
-  `environment` the overlay chooses, so a pin covers exactly the packages its Sessions get. AOS
+  `environment` the overlay chooses, so a pin covers exactly the packages its Runs get. AOS
   allows a consumer this policy, and it is not a weakening, since it shares less. It is built before
   the harness starts, outside its sandbox, and is read-only after. A file with an option in it, a
   direct URL, or only some requirements hashed is refused. `deps-network` is reported for each
@@ -1331,12 +1331,12 @@ Code needs what runs it where the Session runs. Text does not: an overlay with o
   variables and its own overlay's, never a credential. A Station cannot deny it the network, so
   `network-not-enforced` is reported for a setup that declares none.
 - **The state directory** is per overlay identity and Theater, kept across digests, emptied before
-  `install`, and read-only to the Session.
-- **Env scripts** run at each start, outside the Session, and what they print joins the environment;
+  `install`, and read-only to the Run.
+- **Env scripts** run at each start, outside the Run, and what they print joins the environment;
   `env-script` is reported each time.
 - **`AGENTS_PYTHON`** names the interpreter found, for an overlay with Python code.
 - **`cmds/`** runs under `dotagents`: `[overlays] dotagents_pyz` names the `dotagents.pyz` on the
-  Station and `dotagents_pin` its SHA-256. A Session then has `dotagents` on `PATH`, `AGENTS_CMDS_PATH`
+  Station and `dotagents_pin` its SHA-256. A Run then has `dotagents` on `PATH`, `AGENTS_CMDS_PATH`
   naming each overlay's `cmds/`, and an empty `AGENTS_HOME` of its own, removed with its Mission. An
   overlay with `cmds/` and no such setting is refused, naming it.
 

@@ -26,7 +26,7 @@ Map<String, Object?> _proposal(String operation) => {
   'operation_id': operation,
   'parent_mission_id': 'mission-1',
   'proposer_agent_id': '007',
-  'proposer_session_id': 'provider-session-1',
+  'proposer_run_id': 'provider-id-1',
   'brief': {'title': 'Proposal in $operation', 'body': 'Do it.'},
   'created_at': 1_798_000_000.0,
 };

@@ -1,5 +1,5 @@
-//! The Guatiao contract for launching one agent Session. The Session a handler returns, and the
-//! events it reports, are `coqui_acp_provider`'s agent session kind, shared with every host of
+//! The Guatiao contract for launching one agent Run. The Run a handler returns, and the
+//! events it reports, are `coqui_acp_provider`'s agent run kind, shared with every host of
 //! agent providers.
 
 use coqui_acp_api::{UsageReport, UsageSupport};
@@ -9,14 +9,14 @@ use guatiao::{FromValue, Schema, ToValue};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use crate::directorates::m::identity::{MissionId, SessionId};
+use crate::directorates::m::identity::{MissionId, RunId};
 use crate::directorates::q::terminal::{AgentTerminal, HarnessStdio};
 
 /// The first instruction for one agent operation in a Mission.
 #[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::guatiao)]
 pub struct AgentStart {
-    /// AI6's identifier for the unit of work; a Mission may have several Sessions.
+    /// AI6's identifier for the unit of work; a Mission may have several Runs.
     pub mission_id: MissionId,
     /// The configured Agent codename.
     pub agent_id: String,
@@ -47,13 +47,13 @@ pub struct AgentStart {
     /// names; `false` keeps only the servers AI6 passes.
     #[serde(default)]
     pub project_mcp: bool,
-    /// Whether the Session only reads its prompt and answers: the handler starts the harness
+    /// Whether the Run only reads its prompt and answers: the handler starts the harness
     /// with every tool it can switch off switched off, no MCP server, no settings of the
     /// working directory, and a sandbox that cannot write or reach the network where the
     /// harness has one. AI6 asks for it for a Chief of Staff review, which reads untrusted text.
     #[serde(default)]
     pub answer_only: bool,
-    /// Set when the Session is Moneypenny, the operator's assistant: as [`answer_only`], no
+    /// Set when the Run is Moneypenny, the operator's assistant: as [`answer_only`], no
     /// built-in tool, no settings of the working directory and no web, except for what the
     /// mode allows, which is only the MCP servers it names. Takes precedence over
     /// `answer_only`.
@@ -61,14 +61,14 @@ pub struct AgentStart {
     /// [`answer_only`]: AgentStart::answer_only
     #[serde(default)]
     pub assistant: Option<AssistantMode>,
-    /// What the Session's overlays hand the harness beside their text and environment, which are
+    /// What the Run's overlays hand the harness beside their text and environment, which are
     /// in `initial_context` and `environment` already.
     #[map(default)]
     #[serde(default)]
-    pub overlays: SessionOverlays,
+    pub overlays: RunOverlays,
 }
 
-/// A skill of an overlay issued to a Session.
+/// A skill of an overlay issued to a Run.
 #[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::guatiao)]
 pub struct OverlaySkill {
@@ -87,12 +87,12 @@ pub struct OverlaySkill {
     pub native: bool,
 }
 
-/// What a Session's overlays hand its harness. Empty for a Session with none.
+/// What a Run's overlays hand its harness. Empty for a Run with none.
 #[derive(
     ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default,
 )]
 #[map(crate = ::guatiao)]
-pub struct SessionOverlays {
+pub struct RunOverlays {
     /// Each overlay's root on the harness's host, absolute and read-only. A handler whose harness
     /// refuses to read outside its workspaces allows these.
     #[map(default)]
@@ -108,7 +108,7 @@ pub struct SessionOverlays {
     pub plugin_dir: Option<String>,
 }
 
-impl SessionOverlays {
+impl RunOverlays {
     /// The routing lines for the skills a handler does not load itself: those whose `native` is
     /// unset when `loads_skills`, else every one. A skill is a file an Agent can read, so a harness
     /// with no skills of its own is told where each one is. `None` when there is none to name.
@@ -140,7 +140,7 @@ impl SessionOverlays {
     }
 }
 
-/// What an assistant Session may use besides answering: its parts, so a handler builds the
+/// What an assistant Run may use besides answering: its parts, so a handler builds the
 /// harness's settings from them rather than from one fixed set.
 #[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::guatiao)]
@@ -237,7 +237,7 @@ impl AssistantNetwork {
     }
 }
 
-/// An MCP server an assistant Session connects to, found in its environment: the URL in
+/// An MCP server an assistant Run connects to, found in its environment: the URL in
 /// `<env_prefix>_URL` and the bearer token in `<env_prefix>_TOKEN`, so the token never
 /// appears in a command line.
 #[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -250,59 +250,59 @@ pub struct McpServerRef {
     pub env_prefix: String,
 }
 
-/// Whether a Session at `clearance` may have a command tool: `field` and `00`. Anything else,
+/// Whether a Run at `clearance` may have a command tool: `field` and `00`. Anything else,
 /// `desk` and a clearance this build does not know alike, may not, because a command reaches
-/// whatever the harness's OS user can. A handler that cannot keep commands from a Session refuses
+/// whatever the harness's OS user can. A handler that cannot keep commands from a Run refuses
 /// to start it.
 pub fn clearance_runs_commands(clearance: &str) -> bool {
     crate::directorates::m::approvals::clearance_at_least(clearance, "field")
 }
 
-/// The clearance of a Mission's Session held to reading and searching until its plan passes a
+/// The clearance of a Mission's Run held to reading and searching until its plan passes a
 /// review: no tool that changes anything but AI6's own `submit_plan`. Only AI6 sets it; an Agent
 /// cannot be configured at it.
 pub const READ_CLEARANCE: &str = "read";
 
-/// Whether a Session at `clearance` is held to reading ([`READ_CLEARANCE`]).
+/// Whether a Run at `clearance` is held to reading ([`READ_CLEARANCE`]).
 pub fn clearance_reads_only(clearance: &str) -> bool {
     clearance == READ_CLEARANCE
 }
 
-/// The provider-issued Session ID a Session reported, as AI6 records it. One that is no valid
-/// identity fails the Session, with this sentence.
+/// The provider ID a Run reported, as AI6 records it. One that is no valid
+/// identity fails the Run, with this sentence.
 #[cfg_attr(not(feature = "daemon"), allow(dead_code))]
-pub(crate) fn checked_session_id(reported: Option<String>) -> Result<Option<SessionId>, String> {
+pub(crate) fn checked_run_id(reported: Option<String>) -> Result<Option<RunId>, String> {
     reported
         .map(|id| {
-            SessionId::try_from(id).map_err(|error| {
-                format!("the provider reported a Session ID AI6 cannot record: {error}")
+            RunId::try_from(id).map_err(|error| {
+                format!("the provider reported a Run ID AI6 cannot record: {error}")
             })
         })
         .transpose()
 }
 
-/// [`checked_session_id`] of what `session_id` answered; the provider's own error passes as it is.
+/// [`checked_run_id`] of what `run_id` answered; the provider's own error passes as it is.
 #[cfg_attr(not(feature = "daemon"), allow(dead_code))]
-pub(crate) fn provider_session_id(
+pub(crate) fn provider_id(
     reported: Result<Option<String>, ProviderError>,
-) -> Result<Option<SessionId>, ProviderError> {
-    checked_session_id(reported?)
+) -> Result<Option<RunId>, ProviderError> {
+    checked_run_id(reported?)
         .map_err(|why| ProviderError::new(guatiao::Status::GUATIAO_ERR_BAD_VALUE, &why))
 }
 
-/// How AI6 resumes a provider-issued Session.
+/// How AI6 resumes a provider-issued Run.
 #[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::guatiao)]
 pub struct AgentResume {
-    /// The Mission this Session is working on.
+    /// The Mission this Run is working on.
     pub mission_id: MissionId,
     /// The provider-issued identity of the operation to resume.
-    pub session_id: SessionId,
+    pub run_id: RunId,
     /// A new message to submit after resuming, if any.
     pub message: Option<String>,
-    /// The Mission checkout or safe house containing the saved Session.
+    /// The Mission checkout or safe house containing the saved Run.
     pub working_directory: String,
-    /// The clearance the Agent works at now, decided again on every resume, so that a Session
+    /// The clearance the Agent works at now, decided again on every resume, so that a Run
     /// resumed after a change gets what the new clearance allows. Absent counts as `desk`
     /// ([`clearance_runs_commands`]).
     #[serde(default)]
@@ -324,7 +324,7 @@ pub struct AgentResume {
     /// names, decided again on every resume.
     #[serde(default)]
     pub project_mcp: bool,
-    /// Whether the Session only reads and answers, as [`AgentStart::answer_only`] started it.
+    /// Whether the Run only reads and answers, as [`AgentStart::answer_only`] started it.
     #[serde(default)]
     pub answer_only: bool,
     /// The assistant mode, as [`AgentStart::assistant`]; decided again on every resume.
@@ -332,16 +332,16 @@ pub struct AgentResume {
     pub assistant: Option<AssistantMode>,
     /// The standing part of [`AgentStart::initial_context`] (the Agent's context, its role's
     /// purpose and policy, an assistant's instructions; never a recap of the conversation the
-    /// Session already holds), for a harness that may not keep its start-up context in the
-    /// Session it resumes. Claude Code gets it again as `--append-system-prompt`, which it
-    /// uses once the recorded prompt is gone (a compacted Session); Codex keeps a thread's
+    /// Run already holds), for a harness that may not keep its start-up context in the
+    /// Run it resumes. Claude Code gets it again as `--append-system-prompt`, which it
+    /// uses once the recorded prompt is gone (a compacted Run); Codex keeps a thread's
     /// instructions and ignores it.
     #[serde(default)]
     pub initial_context: Vec<String>,
-    /// What the Session's overlays hand the harness, delivered again for this launch.
+    /// What the Run's overlays hand the harness, delivered again for this launch.
     #[map(default)]
     #[serde(default)]
-    pub overlays: SessionOverlays,
+    pub overlays: RunOverlays,
 }
 
 /// One model a harness says an account may use.
@@ -390,23 +390,23 @@ impl ModelListing {
     }
 }
 
-/// The Session whose harness record [`AgentHandler::session_record`] is asked for: its
+/// The Run whose harness record [`AgentHandler::run_record`] is asked for: its
 /// provider-issued ID, and the working directory and environment its harness was started with.
 #[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::guatiao)]
-pub struct SessionRecordQuery {
-    /// The provider-issued Session ID.
-    pub session_id: String,
+pub struct RunRecordQuery {
+    /// The provider ID.
+    pub run_id: String,
     /// The directory the harness ran in.
     pub working_directory: String,
     /// The environment the harness was started with.
     pub environment: BTreeMap<String, String>,
 }
 
-/// Where a harness keeps its own record of one Session, on the host it ran on, and its format.
+/// Where a harness keeps its own record of one Run, on the host it ran on, and its format.
 #[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::guatiao)]
-pub struct SessionRecordFile {
+pub struct RunRecordFile {
     /// The file's absolute path.
     pub path: String,
     /// What the file holds, as a short name the app knows (`claude-code-jsonl`,
@@ -417,7 +417,7 @@ pub struct SessionRecordFile {
 /// Starts or resumes the configured Agent implementation.
 #[guatiao::kind(name = "ai6_agent_handler")]
 pub trait AgentHandler: Send + Sync {
-    /// Starts an Agent Session with context established before its task prompt.
+    /// Starts an Agent Run with context established before its task prompt.
     ///
     /// `terminal` is an AI6-owned object bridge over its selected terminal provider; the
     /// handler selects its command and protocol while the provider owns process lifetime.
@@ -427,7 +427,7 @@ pub trait AgentHandler: Send + Sync {
         terminal: Object<dyn AgentTerminal>,
     ) -> Result<Object<dyn AgentSession>, ProviderError>;
 
-    /// Reattaches to the same provider-issued Session ID after an interruption.
+    /// Reattaches to the same provider ID after an interruption.
     fn resume(
         &self,
         request: AgentResume,
@@ -469,26 +469,26 @@ pub trait AgentHandler: Send + Sync {
         Ok(Vec::new())
     }
 
-    /// Why this handler, with its settings, would refuse a Mission's Session at `clearance`, in a
-    /// sentence; `None` when it holds such a Session to what the clearance promises. A route of
+    /// Why this handler, with its settings, would refuse a Mission's Run at `clearance`, in a
+    /// sentence; `None` when it holds such a Run to what the clearance promises. A route of
     /// an Agent that would be refused is passed over. The default: it can hold any.
     fn clearance_refusal(&self, clearance: String) -> Result<Option<String>, ProviderError> {
         let _ = clearance;
         Ok(None)
     }
 
-    /// Why this handler cannot hold a Mission's Session to reading at [`READ_CLEARANCE`] and then
-    /// give it the Mission's tools on a resume of the same Session, in a sentence; `None` when it
+    /// Why this handler cannot hold a Mission's Run to reading at [`READ_CLEARANCE`] and then
+    /// give it the Mission's tools on a resume of the same Run, in a sentence; `None` when it
     /// can. The default: it cannot say it can, so a Mission whose plan is reviewed does not start
     /// on it.
     fn read_only_refusal(&self) -> Result<Option<String>, ProviderError> {
         Ok(Some(
-            "its handler cannot hold a Session to reading and then give it the Mission's tools"
+            "its handler cannot hold a Run to reading and then give it the Mission's tools"
                 .to_owned(),
         ))
     }
 
-    /// The models the account behind `environment` (the variables a Session would start with)
+    /// The models the account behind `environment` (the variables a Run would start with)
     /// may use, if the harness can say without a model turn. The default: it cannot, and says
     /// so. A handler never puts a credential from `environment` in its answer.
     fn models(&self, environment: BTreeMap<String, String>) -> Result<ModelListing, ProviderError> {
@@ -498,18 +498,18 @@ pub trait AgentHandler: Send + Sync {
         ))
     }
 
-    /// Where the harness keeps its own record of the Session `query` names, when it keeps one
-    /// and the file is there; the Station reads it as that Session's context. The default:
+    /// Where the harness keeps its own record of the Run `query` names, when it keeps one
+    /// and the file is there; the Station reads it as that Run's context. The default:
     /// none, and the Station keeps its event stream instead.
-    fn session_record(
+    fn run_record(
         &self,
-        query: SessionRecordQuery,
-    ) -> Result<Option<SessionRecordFile>, ProviderError> {
+        query: RunRecordQuery,
+    ) -> Result<Option<RunRecordFile>, ProviderError> {
         let _ = query;
         Ok(None)
     }
 
-    /// The program the harness is started as, a name looked up on the Session's `PATH` or a
+    /// The program the harness is started as, a name looked up on the Run's `PATH` or a
     /// path, so a Station can say a harness cannot be found before it asks a terminal to start
     /// it. The default: `None`, and the Station does not look.
     fn program(&self) -> Result<Option<String>, ProviderError> {
@@ -525,13 +525,13 @@ pub trait AgentHandler: Send + Sync {
 
     /// What the harness can report of its account's usage, known before anything starts. A
     /// handler whose `needs_turn` is set learns its usage only from a turn's events, and the
-    /// Station never asks it to [`read`](Self::usage) one; `needs_session` is for one that
-    /// learns it once a session is open. The default: it reports nothing.
+    /// Station never asks it to [`read`](Self::usage) one; `needs_run` is for one that
+    /// learns it once a run is open. The default: it reports nothing.
     fn usage_support(&self) -> Result<UsageSupport, ProviderError> {
         Ok(UsageSupport::none())
     }
 
-    /// The usage of the account behind `environment` (the variables a Session would start with),
+    /// The usage of the account behind `environment` (the variables a Run would start with),
     /// read with no model turn. The report holds the account's buckets, each with the models it
     /// covers, how much is used and when it refills; a handler never puts a credential from
     /// `environment` in it. The default: this handler reports no usage.
@@ -545,7 +545,7 @@ pub trait AgentHandler: Send + Sync {
 mod tests {
     use super::*;
 
-    // A changed required signature affects every built provider; the Session's table is the
+    // A changed required signature affects every built provider; the Run's table is the
     // shared kind's, whose header names the same value.
     #[test]
     fn floor_hashes_are_pinned() {
@@ -557,17 +557,17 @@ mod tests {
     }
 
     #[test]
-    fn a_provider_session_id_ai6_cannot_record_fails_the_session() {
-        assert_eq!(checked_session_id(None), Ok(None));
+    fn a_provider_id_ai6_cannot_record_fails_the_run() {
+        assert_eq!(checked_run_id(None), Ok(None));
         assert_eq!(
-            checked_session_id(Some("provider-1".to_owned())),
-            Ok(Some(SessionId::try_new("provider-1").unwrap()))
+            checked_run_id(Some("provider-1".to_owned())),
+            Ok(Some(RunId::try_new("provider-1").unwrap()))
         );
         for bad in [String::new(), "a\nb".to_owned(), "x".repeat(10_000)] {
-            let refused = checked_session_id(Some(bad)).unwrap_err();
+            let refused = checked_run_id(Some(bad)).unwrap_err();
             assert!(refused.contains("cannot record"), "{refused}");
         }
-        let refused = provider_session_id(Ok(Some(String::new()))).unwrap_err();
+        let refused = provider_id(Ok(Some(String::new()))).unwrap_err();
         assert!(refused.to_string().contains("cannot record"), "{refused}");
     }
 }

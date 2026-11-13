@@ -23,7 +23,7 @@ mission_cost_usd = 10.0
 operation_cost_usd_per_day = 50.0
 warn_at = 0.8
 
-# Exposure is always recorded; strict (the default) also restricts an exposed Session.
+# Exposure is always recorded; strict (the default) also restricts an exposed Run.
 [operation.G.exposure]
 preset = "strict"
 

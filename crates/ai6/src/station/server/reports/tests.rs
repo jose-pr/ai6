@@ -154,7 +154,7 @@ fn an_agents_report_is_stored_linked_to_its_mission_and_read_under_its_operation
         stored.filer,
         ReportFiler::Agent {
             agent: "007".to_owned(),
-            session: "mission-1".to_owned(),
+            run: "mission-1".to_owned(),
             mission: "mission-1".to_owned(),
         }
     );
@@ -162,7 +162,7 @@ fn an_agents_report_is_stored_linked_to_its_mission_and_read_under_its_operation
     assert_eq!(state.intake.filed_briefs("G", 100).unwrap().len(), briefs);
     assert_eq!(state.missions.lock().unwrap().list().len(), missions);
 
-    // Another Session of the Operation reads it, and finds it by its Mission.
+    // Another Run of the Operation reads it, and finds it by its Mission.
     let colleague = reader("licensed", "G", "mission-2");
     let shown = read(&state, &colleague, &id);
     assert_eq!(shown["text"], "parser_test fails one run in ten");
@@ -171,7 +171,7 @@ fn an_agents_report_is_stored_linked_to_its_mission_and_read_under_its_operation
     let by_mission = listed(&state, &colleague, None, Some("mission-1"));
     assert_eq!(by_mission["reports"][0]["id"], id.as_str());
 
-    // Another Operation's Session does not, unless a compartment gives it the Operation.
+    // Another Operation's Run does not, unless a compartment gives it the Operation.
     let outsider = reader("007", "B", "B-1");
     assert_eq!(read(&state, &outsider, &id)["reason"], "no such report");
     assert_eq!(
@@ -219,7 +219,7 @@ fn a_marked_report_is_refused_to_an_agent_not_read_in_and_its_mission_shows_only
             "compartments": ["KESTREL"],
         }),
     );
-    // The filer is read in; another Session of the Operation is not.
+    // The filer is read in; another Run of the Operation is not.
     assert_eq!(read(&state, &filer, &id)["sight"], "content");
     let colleague = reader("licensed", "G", "mission-2");
     let refused = read(&state, &colleague, &id);
@@ -295,7 +295,7 @@ fn the_rate_limit_refuses_an_agents_storm() {
     let state = station(
         root.path(),
         ReportLimits {
-            per_session: Limit::at(2),
+            per_run: Limit::at(2),
             ..ReportLimits::default()
         },
     );
@@ -311,7 +311,7 @@ fn the_rate_limit_refuses_an_agents_storm() {
         .file(&filer, None, filing(json!({"title": "storm", "text": "x"})))
         .unwrap_err();
     assert!(refused.contains("wait"), "{refused}");
-    // Another Session is counted apart.
+    // Another Run is counted apart.
     ReportDesk::new(state.clone())
         .file(
             &reader("007", "G", "mission-2"),

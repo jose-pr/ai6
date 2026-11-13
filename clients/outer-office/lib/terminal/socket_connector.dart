@@ -5,12 +5,12 @@ import 'socket_connector_stub.dart'
     if (dart.library.js_interop) 'socket_connector_web.dart'
     as platform;
 
-WebSocketChannel connectSessionSocket(
+WebSocketChannel connectRunSocket(
   Uri uri, {
   required List<String> protocols,
   required String origin,
   required String? cookie,
-}) => platform.connectSessionSocket(
+}) => platform.connectRunSocket(
   uri,
   protocols: protocols,
   origin: origin,

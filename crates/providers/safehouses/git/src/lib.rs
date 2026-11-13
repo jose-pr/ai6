@@ -16,7 +16,7 @@ mod clone;
 mod worktree;
 
 use ai6::directorates::q::safehouse::{
-    ChangeLog, CheckpointSpec, SafeHouseInfo, SafeHouseProvider, SafeHouseSession, SafeHouseSpec,
+    ChangeLog, CheckpointSpec, SafeHouseInfo, SafeHouseProvider, SafeHouseRun, SafeHouseSpec,
 };
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Schema, Status, ToValue, Value};
@@ -101,7 +101,7 @@ impl TryFrom<GitConfig> for Git {
 }
 
 impl SafeHouseProvider for Git {
-    fn open(&self, spec: &Value) -> Result<Object<dyn SafeHouseSession>, ProviderError> {
+    fn open(&self, spec: &Value) -> Result<Object<dyn SafeHouseRun>, ProviderError> {
         let spec = SafeHouseSpec::from_value(spec)
             .map_err(|error| refuse(Status::GUATIAO_ERR_BAD_VALUE, error))?;
         let worktree = Worktree::open(
@@ -118,7 +118,7 @@ impl SafeHouseProvider for Git {
 
 struct GitSafeHouse(Worktree);
 
-impl SafeHouseSession for GitSafeHouse {
+impl SafeHouseRun for GitSafeHouse {
     fn info(&self) -> Result<Value, ProviderError> {
         value(&SafeHouseInfo {
             path: self.0.path.to_string_lossy().into_owned(),

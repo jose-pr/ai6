@@ -29,7 +29,7 @@ The crate forbids unsafe code with `#![forbid(unsafe_code)]`.
 ```rust
 pub struct OperationId(String);
 pub struct MissionId(String);
-pub struct SessionId(String);
+pub struct RunId(String);
 pub struct ControlId(String);
 ```
 
@@ -38,31 +38,31 @@ empty values, control characters and identifiers longer than `MAX_ID_BYTES`
 (256 UTF-8 bytes). `as_str(&self) -> &str` borrows the validated spelling.
 `Display` returns that spelling. Fields are private so callers cannot bypass
 validation. An Operation identifies a project; a Mission ID groups one unit of
-work; a provider Session ID identifies one resumable agent operation; a control ID
+work; a provider ID identifies one resumable agent operation; a control ID
 identifies one operator control request.
 
 ## Board events
 
 ```rust
-pub enum SessionState {
+pub enum RunState {
     Queued, Working, Blocked, Stalled, Parked, Quarantined, Held, Done, Failed, Abandoned,
 }
-impl SessionState {
+impl RunState {
     pub const fn as_str(self) -> &'static str;   // "queued", "working", ...
     pub fn parse(state: &str) -> Option<Self>;   // None for an unknown spelling
 }
-pub struct SessionSnapshot {
+pub struct RunSnapshot {
     pub operation_id: OperationId,
     pub mission_id: MissionId,
-    pub session_id: SessionId,
-    pub state: SessionState,
+    pub run_id: RunId,
+    pub state: RunState,
     pub sequence: u64,
 }
 pub struct LifecycleEvent {
     pub operation_id: OperationId,
     pub mission_id: MissionId,
-    pub session_id: SessionId,
-    pub state: SessionState,
+    pub run_id: RunId,
+    pub state: RunState,
     pub reason: Option<String>,   // why AI6 holds this state: "green-ink", "budget", "permission-denied"
     pub sequence: u64,
 }
@@ -70,15 +70,15 @@ pub const MAX_REASON_BYTES: usize = 64;
 pub fn valid_reason(reason: &str) -> bool;   // 1..=64 bytes of a-z 0-9 - _ .
 ```
 
-All fields above are public. `SessionState` is non-exhaustive and carries the state
-of the Mission the Session serves: `Queued` means the Mission waits for another
-attempt (this Session will not run again), `Abandoned` that an operator or AI6
+All fields above are public. `RunState` is non-exhaustive and carries the state
+of the Mission the Run serves: `Queued` means the Mission waits for another
+attempt (this Run will not run again), `Abandoned` that an operator or AI6
 withdrew it, and `Held` that it ended done with something its role requires missing, for
 a person's verdict (reason `no-approval`). `reason` is an optional field of the lifecycle frame: `green-ink` on a
-`Blocked` Session whose Agent waits for a person's approval of an irreversible step,
+`Blocked` Run whose Agent waits for a person's approval of an irreversible step,
 `permission-denied` on a `Done` or `Failed` one whose harness refused calls in its last turn.
-The receiver refuses a reason that `valid_reason` rejects. `sequence` is a monotonic cursor for events in one provider Session. A
-Mission may have multiple Sessions; these types do not derive one identity from
+The receiver refuses a reason that `valid_reason` rejects. `sequence` is a monotonic cursor for events in one provider Run. A
+Mission may have multiple Runs; these types do not derive one identity from
 another.
 
 ## Operator controls
@@ -95,13 +95,13 @@ pub struct MissionControl { /* fields are private */ }
 impl MissionControl {
     pub fn new(control_id: ControlId, operation_id: OperationId, mission_id: MissionId,
                action: ControlAction) -> Self;
-    pub fn with_session(self, session_id: SessionId) -> Self;
+    pub fn with_run(self, run_id: RunId) -> Self;
     pub fn with_agent(self, agent: impl Into<String>) -> Result<Self, InvalidControl>;
     pub fn with_message(self, message: impl Into<String>) -> Result<Self, InvalidControl>;
     pub fn control_id(&self) -> &ControlId;
     pub fn operation_id(&self) -> &OperationId;
     pub fn mission_id(&self) -> &MissionId;
-    pub fn session_id(&self) -> Option<&SessionId>;
+    pub fn run_id(&self) -> Option<&RunId>;
     pub const fn action(&self) -> ControlAction;
     pub fn agent(&self) -> Option<&str>;
     pub fn message(&self) -> Option<&str>;
@@ -109,10 +109,10 @@ impl MissionControl {
 ```
 
 A control is what Universal Exports hands the Station holding a Mission. `Cancel` stops
-the live Session and abandons the Mission, `Retry` queues a stalled or finished Mission
+the live Run and abandons the Mission, `Retry` queues a stalled or finished Mission
 as a new attempt (optionally for `agent`), `Resume` resumes a parked, blocked or stalled
-Mission (optionally with `message`) and `Interrupt` stops the current turn. `session_id`
-names the provider Session the requester expects to be current. `with_agent` refuses a
+Mission (optionally with `message`) and `Interrupt` stops the current turn. `run_id`
+names the provider Run the requester expects to be current. `with_agent` refuses a
 blank codename, one over `MAX_ID_BYTES` or one with control characters; `with_message`
 refuses a blank message or one over `MAX_CONTROL_MESSAGE_BYTES` (16 KiB). `Debug`
 redacts the message to its length. `ControlAction` is non-exhaustive.
@@ -124,12 +124,12 @@ pub enum TerminalDirection { Output, Input }
 pub struct TerminalData { /* fields are private */ }
 impl TerminalData {
     pub fn new(
-        session_id: SessionId,
+        run_id: RunId,
         sequence: u64,
         direction: TerminalDirection,
         bytes: Vec<u8>,
     ) -> Result<Self, FrameTooLarge>;
-    pub fn session_id(&self) -> &SessionId;
+    pub fn run_id(&self) -> &RunId;
     pub const fn sequence(&self) -> u64;
     pub const fn direction(&self) -> TerminalDirection;
     pub fn bytes(&self) -> &[u8];
@@ -143,9 +143,9 @@ length.
 ```rust
 pub struct TerminalResize { /* fields are private */ }
 impl TerminalResize {
-    pub fn new(session_id: SessionId, sequence: u64, columns: u16, rows: u16)
+    pub fn new(run_id: RunId, sequence: u64, columns: u16, rows: u16)
         -> Result<Self, InvalidSize>;
-    pub fn session_id(&self) -> &SessionId;
+    pub fn run_id(&self) -> &RunId;
     pub const fn sequence(&self) -> u64;
     pub const fn columns(&self) -> u16;
     pub const fn rows(&self) -> u16;
@@ -200,17 +200,17 @@ return `Ok(None)`; unknown channels, malformed values and invalid identities fai
 ```rust
 pub struct TerminalGap { /* private */ }
 impl TerminalGap {
-    pub fn new(session_id: SessionId, after: u64, before: u64) -> Result<Self, InvalidGap>;
-    pub fn session_id(&self) -> &SessionId;
+    pub fn new(run_id: RunId, after: u64, before: u64) -> Result<Self, InvalidGap>;
+    pub fn run_id(&self) -> &RunId;
     pub const fn after(&self) -> u64;
     pub const fn before(&self) -> u64;
 }
 pub fn gap_frames(gap: &TerminalGap) -> Result<(Vec<u8>, Vec<u8>), guatiao::value::ValueError>;
 ```
 
-A gap says a Session's events after `after` and before `before` cannot be had. The gateway sends one
+A gap says a Run's events after `after` and before `before` cannot be had. The gateway sends one
 on attach when what it holds starts later than the viewer's position or skips a sequence, and live
-when a Session's next event skips one; `new` refuses ends with no sequence between them. A viewer
+when a Run's next event skips one; `new` refuses ends with no sequence between them. A viewer
 already at `before - 1` or past it has missed nothing, and ignores the frame. A gap has no sequence
 of its own and moves no cursor but a viewer's own. A gap's schema may be announced again.
 
@@ -233,7 +233,7 @@ rejected payload bytes. Frame construction may also return guatiao's `ValueError
 
 ## Gotchas
 
-- A2A Task IDs are external data and are not Mission IDs or provider Session IDs.
+- A2A Task IDs are external data and are not Mission IDs or provider IDs.
 - `TerminalData::Debug` redacts its contents. Do not add terminal bytes to logs.
 - `MissionControl::Debug` redacts a resume's message; it is operator text for the Agent.
 - Schema and value frames are separate. Announce a channel schema before sending

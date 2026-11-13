@@ -23,7 +23,7 @@ Map<String, Object?> _pending(
   'operation_id': operation,
   'mission_id': id,
   'handle': 'ai6-$id',
-  'sessions': const <Object>[],
+  'runs': const <Object>[],
   'attempts': const <Object>[],
   'pending': pending,
 };
@@ -60,7 +60,7 @@ final _missions = [
     'operation_id': 'G',
     'mission_id': '4',
     'handle': 'ai6-4',
-    'sessions': const <Object>[],
+    'runs': const <Object>[],
     'attempts': const <Object>[],
   },
 ];
@@ -81,7 +81,7 @@ Future<MissionBoard> _board() async {
           {
             'operation_id': 'G',
             'mission_id': '4',
-            'session_id': 's4',
+            'run_id': 's4',
             'state': 'working',
             'sequence': 1,
             'updated_at': 1_799_999_999.0,
@@ -131,7 +131,7 @@ void main() {
   tearDown(() => ooClock = clock);
 
   test(
-    'Missions with no Session are listed beside those that have one',
+    'Missions with no Run are listed beside those that have one',
     () async {
       final board = await _board();
       final groups = board.missionGroups();
@@ -140,7 +140,7 @@ void main() {
       expect(byId['4']!.pending, isNull);
       expect(byId['4']!.state, 'working');
       expect(byId['8']!.state, 'queued');
-      expect(byId['8']!.sessions, isEmpty);
+      expect(byId['8']!.runs, isEmpty);
       expect(byId['8']!.updatedAt, 1_799_999_990.0);
       expect(byId['1']!.state, 'failed');
       expect(byId['1']!.finished, isTrue);
@@ -207,7 +207,7 @@ void main() {
   });
 
   test(
-    'the board sorts Missions with and without Sessions by either time',
+    'the board sorts Missions with and without Runs by either time',
     () async {
       final board = await _board();
       for (final sort in ['updated', 'created']) {
@@ -221,8 +221,8 @@ void main() {
             board.missionGroups().length,
             reason: '$sort $order',
           );
-          expect(sorted.any((group) => group.sessions.isEmpty), isTrue);
-          expect(sorted.any((group) => group.sessions.isNotEmpty), isTrue);
+          expect(sorted.any((group) => group.runs.isEmpty), isTrue);
+          expect(sorted.any((group) => group.runs.isNotEmpty), isTrue);
         }
       }
     },
@@ -242,7 +242,7 @@ void main() {
         mission: failed,
         pages: const [OoPage.missions],
         onRoute: (_) {},
-        onOpenSession: (_) {},
+        onOpenRun: (_) {},
         onClose: () {},
       ),
     );

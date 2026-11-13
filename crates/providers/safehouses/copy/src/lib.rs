@@ -13,7 +13,7 @@ ai6::guatiao::providers!(Copier);
 mod tree;
 
 use ai6::directorates::q::safehouse::{
-    ChangeLog, SafeHouseInfo, SafeHouseProvider, SafeHouseReport, SafeHouseSession, SafeHouseSpec,
+    ChangeLog, SafeHouseInfo, SafeHouseProvider, SafeHouseReport, SafeHouseRun, SafeHouseSpec,
 };
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Schema, Status, ToValue, Value};
@@ -72,7 +72,7 @@ impl TryFrom<CopyConfig> for Copier {
 }
 
 impl SafeHouseProvider for Copier {
-    fn open(&self, spec: &Value) -> Result<Object<dyn SafeHouseSession>, ProviderError> {
+    fn open(&self, spec: &Value) -> Result<Object<dyn SafeHouseRun>, ProviderError> {
         let spec = SafeHouseSpec::from_value(spec)
             .map_err(|error| refuse(Status::GUATIAO_ERR_BAD_VALUE, error))?;
         if spec.clone.is_some() {
@@ -92,7 +92,7 @@ impl SafeHouseProvider for Copier {
 
 struct CopySafeHouse(Tree);
 
-impl SafeHouseSession for CopySafeHouse {
+impl SafeHouseRun for CopySafeHouse {
     fn info(&self) -> Result<Value, ProviderError> {
         value(&SafeHouseInfo {
             path: self.0.path.to_string_lossy().into_owned(),

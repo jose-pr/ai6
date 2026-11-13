@@ -8,7 +8,7 @@ reading its source. MSRV: Rust 1.89. No Cargo features. Depends on `libc` on Uni
 The crate root exports `ProcessTree`, a different type on each platform:
 
 ```rust
-// Unix: the program leads a session and process group of its own.
+// Unix: the program leads a run and process group of its own.
 impl ProcessTree {
     pub fn of(pid: Option<u32>, scans: usize) -> io::Result<Self>; // Err for no ID, 0, 1 or out of range
     pub fn kill(&self, leader_alive: bool) -> io::Result<()>;

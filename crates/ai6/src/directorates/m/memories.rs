@@ -10,11 +10,11 @@
 //! reads nobody in. Only someone read into a compartment adds it to an entry or removes it, and
 //! nobody hides an entry from themselves.
 //!
-//! An entry written by an exposed Session stays marked, and whoever reads it is told: a Session is
+//! An entry written by an exposed Run stays marked, and whoever reads it is told: a Run is
 //! exposed by it, as by a Cable. A person's own edit clears the mark, audited. What an Agent may not
 //! write at once becomes a [`MemoryProposal`] a person decides; it keeps who asked and their mark.
 //!
-//! Universal Exports asks as a person, and as Moneypenny for one; a Station asks as a Session. Each
+//! Universal Exports asks as a person, and as Moneypenny for one; a Station asks as a Run. Each
 //! says what it holds by implementing [`MemoryCaller`], read afresh for the call.
 
 use std::collections::BTreeSet;
@@ -70,8 +70,8 @@ pub trait MemoryCaller {
     /// Who a write is recorded as: [`MemorySource::by`].
     fn by(&self) -> String;
 
-    /// The Session or conversation a write comes from.
-    fn session(&self) -> Option<String>;
+    /// The Run or conversation a write comes from.
+    fn run(&self) -> Option<String>;
 
     /// Whether the caller has the scope's read.
     fn reads_scope(&self, scope: &MemoryScope) -> bool;
@@ -87,16 +87,16 @@ pub trait MemoryCaller {
     fn sees_all_compartments(&self) -> bool;
 
     /// Whether a person is acting for themselves, so an edit clears a mark and a proposal can be
-    /// decided: never a Session, nor Moneypenny for a person.
+    /// decided: never a Run, nor Moneypenny for a person.
     fn acts_in_person(&self) -> bool;
 
     /// How what is asking has been exposed, which a write it makes carries.
     fn exposures(&self) -> Vec<String>;
 
-    /// Tells the caller it was shown what an exposed Session wrote; `source` says which.
+    /// Tells the caller it was shown what an exposed Run wrote; `source` says which.
     fn saw_marked(&self, source: &str);
 
-    /// Bytes of one exposure source (`[registry.limits.sessions] exposure_source_bytes`).
+    /// Bytes of one exposure source (`[registry.limits.runs] exposure_source_bytes`).
     fn mark_bytes(&self) -> Limit;
 
     /// The time now, as Unix seconds.
@@ -124,7 +124,7 @@ fn visible(caller: &dyn MemoryCaller, header: &MemoryHeader) -> bool {
     caller.reads_scope(&header.scope) && admits(caller, &header.compartments)
 }
 
-/// Tells `caller` of each of `headers` an exposed Session wrote.
+/// Tells `caller` of each of `headers` an exposed Run wrote.
 fn note_marks<'a>(caller: &dyn MemoryCaller, headers: impl Iterator<Item = &'a MemoryHeader>) {
     for header in headers.filter(|header| header.source.exposed()) {
         caller.saw_marked(&memory_source(&header.id, caller.mark_bytes()));
@@ -472,7 +472,7 @@ pub fn write_entry(
     exposures.dedup();
     let source = match change.source {
         Some(source) => source,
-        None => MemorySource::new(caller.by(), caller.session()).exposed_by(exposures),
+        None => MemorySource::new(caller.by(), caller.run()).exposed_by(exposures),
     };
 
     if right == MemoryWriteRight::Propose {
@@ -597,7 +597,7 @@ pub fn forget_entry(
                 summary: current.header.summary.clone(),
                 content: String::new(),
                 compartments: None,
-                source: MemorySource::new(caller.by(), caller.session())
+                source: MemorySource::new(caller.by(), caller.run())
                     .exposed_by(caller.exposures()),
                 at: caller.now(),
             };
@@ -721,10 +721,10 @@ pub fn decide_proposal(
     Ok(written)
 }
 
-/// What an audit record names: the entry, and the Session or conversation it came from.
+/// What an audit record names: the entry, and the Run or conversation it came from.
 fn audit_target(id: &str, caller: &dyn MemoryCaller) -> String {
-    match caller.session() {
-        Some(session) => format!("{id} from {session}"),
+    match caller.run() {
+        Some(run) => format!("{id} from {run}"),
         None => id.to_owned(),
     }
 }
@@ -772,7 +772,7 @@ pub fn proposal_json(proposal: &MemoryProposal) -> Value {
         "compartments": proposal.compartments,
         "source": {
             "by": proposal.source.by,
-            "session": proposal.source.session,
+            "run": proposal.source.run,
             "exposed": proposal.source.exposed(),
             "exposures": proposal.source.exposures,
         },
@@ -792,7 +792,7 @@ pub fn header_json(header: &MemoryHeader) -> Value {
         "updated_by": header.updated_by,
         "source": {
             "by": header.source.by,
-            "session": header.source.session,
+            "run": header.source.run,
             "exposed": header.source.exposed(),
             "exposures": header.source.exposures,
         },
@@ -882,7 +882,7 @@ mod tests {
             "person:ana".to_owned()
         }
 
-        fn session(&self) -> Option<String> {
+        fn run(&self) -> Option<String> {
             None
         }
 

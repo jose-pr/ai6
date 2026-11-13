@@ -1,8 +1,8 @@
 //! What the Antigravity CLI reports of its account's quota, and how it is read with no turn.
 //!
 //! agy serves the quota on a loopback port of its own language server (see
-//! [`coqui_acp_harness::antigravity::AgyQuota`]). A Session's agy may serve it already; when none
-//! does, a private `agy acp` with an empty session is started under the account's own home, read
+//! [`coqui_acp_harness::antigravity::AgyQuota`]). A Run's agy may serve it already; when none
+//! does, a private `agy acp` with an empty run is started under the account's own home, read
 //! and ended.
 
 use std::collections::{BTreeMap, VecDeque};
@@ -17,7 +17,7 @@ use ai6::{Bucket, UsageReport, UsageSource};
 use coqui_acp_harness::antigravity::{AcpModel, AgyQuota, ReadError, ReadLimits};
 use serde_json::{Value, json};
 
-/// The agy processes of live Sessions, by the home directory their account lives in.
+/// The agy processes of live Runs, by the home directory their account lives in.
 static LIVE: Mutex<Vec<(String, u32)>> = Mutex::new(Vec::new());
 
 fn live() -> MutexGuard<'static, Vec<(String, u32)>> {
@@ -34,7 +34,7 @@ pub(crate) fn home_of(environment: &BTreeMap<String, String>) -> String {
         .unwrap_or_default()
 }
 
-/// A Session's agy process, listed while it runs.
+/// A Run's agy process, listed while it runs.
 pub(crate) struct Live {
     home: String,
     pid: u32,
@@ -62,7 +62,7 @@ impl Drop for Live {
     }
 }
 
-/// The processes of live Sessions under `home`.
+/// The processes of live Runs under `home`.
 pub(crate) fn live_under(home: &str) -> Vec<u32> {
     live()
         .iter()
@@ -108,7 +108,7 @@ pub(crate) fn parse_table(text: &str) -> Vec<(u32, u32)> {
         .collect()
 }
 
-/// The report of `buckets`: reported figures, nothing of a session's spend.
+/// The report of `buckets`: reported figures, nothing of a run's spend.
 pub(crate) fn report_of(buckets: Vec<Bucket>) -> UsageReport {
     let mut report = UsageReport::new();
     report.sources = vec![UsageSource::Reported];
@@ -127,9 +127,9 @@ fn limits_within(wait: Duration) -> ReadLimits {
     ReadLimits::default().connect(wait).total(wait)
 }
 
-/// The quota read from the agy of a live Session of the account at `home`, when one serves it
+/// The quota read from the agy of a live Run of the account at `home`, when one serves it
 /// within `wait`.
-pub(crate) fn through_session(home: &str, wait: Duration) -> Option<Vec<Bucket>> {
+pub(crate) fn through_run(home: &str, wait: Duration) -> Option<Vec<Bucket>> {
     let roots = live_under(home);
     if roots.is_empty() {
         return None;
@@ -189,9 +189,9 @@ pub(crate) fn models_of(answer: &Value) -> Vec<AcpModel> {
         .collect()
 }
 
-/// Reads the quota through a private `agy acp` with an empty session, started with `environment`
+/// Reads the quota through a private `agy acp` with an empty run, started with `environment`
 /// and ended afterwards. `wait` bounds the whole read: agy's ports appear a few seconds after the
-/// session starts.
+/// run starts.
 pub(crate) fn through_private_agent(
     executable: &str,
     environment: &BTreeMap<String, String>,
@@ -275,7 +275,7 @@ mod tests {
     }
 
     #[test]
-    fn a_live_session_is_listed_under_its_home_until_it_is_dropped() {
+    fn a_live_run_is_listed_under_its_home_until_it_is_dropped() {
         let environment = BTreeMap::from([("HOME".to_owned(), "/tmp/ai6-usage-home".to_owned())]);
         let other = BTreeMap::from([("HOME".to_owned(), "/tmp/ai6-usage-other".to_owned())]);
         let held = Live::new(&environment, 4242).unwrap();

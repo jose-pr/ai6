@@ -92,7 +92,7 @@
           {
             "type": "function",
             "name": "js_reset",
-            "description": "Reset the persistent cua_repl JavaScript session. All JavaScript bindings are discarded. The next cua_repl.js call initi"
+            "description": "Reset the persistent cua_repl JavaScript run. All JavaScript bindings are discarded. The next cua_repl.js call initi"
           }
         ]
       }

@@ -106,4 +106,4 @@ never reach the provider, nor do the Station's own keys (`status_labels`, `statu
 - **Rate limits**: a 429, or a 403 with `x-ratelimit-remaining: 0`, is an error naming
   the reset time; the cursor does not move and the Station polls again at its next interval.
 - Every request has a `request_timeout_secs` (30 s) timeout and follows no redirects.
-- Review comments on a pull request are not forwarded to the Mission's Session.
+- Review comments on a pull request are not forwarded to the Mission's Run.

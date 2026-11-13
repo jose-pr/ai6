@@ -454,23 +454,23 @@ pub(crate) async fn scorecard(
         if let Some(days) = query.window_days {
             policy.window_days = days;
         }
-        let sessions = registry.sessions().map_err(|_| ApiError::internal())?;
+        let runs = registry.runs().map_err(|_| ApiError::internal())?;
         let mut usage = BTreeMap::new();
-        let missions = sessions
+        let missions = runs
             .iter()
-            .filter(|session| session.operation.as_deref() == Some(operation.as_str()))
-            .map(|session| session.mission_id.as_str())
+            .filter(|run| run.operation.as_deref() == Some(operation.as_str()))
+            .map(|run| run.mission_id.as_str())
             .collect::<std::collections::BTreeSet<_>>();
         for mission in missions {
             if let Some(ledger) = registry
                 .mission_usage(Some(&operation), mission)
                 .map_err(|_| ApiError::internal())?
             {
-                usage.extend(ledger.sessions);
+                usage.extend(ledger.runs);
             }
         }
         Ok::<_, ApiError>(Scorecard::build(
-            &operation, &sessions, &usage, &policy, now,
+            &operation, &runs, &usage, &policy, now,
         ))
     })
     .await
@@ -478,12 +478,12 @@ pub(crate) async fn scorecard(
     Ok(Json(card))
 }
 
-/// Whether a waiting request is M's promotion request: kind `clearance`, filed under Session
+/// Whether a waiting request is M's promotion request: kind `clearance`, filed under Run
 /// `m` and Mission `promotion-AGENT` for that Agent. A `clearance` request an Agent filed itself
 /// is not one, and is never shown as one.
 fn is_promotion(request: &ApprovalRequest) -> bool {
     request.scope.kind == CLEARANCE_KIND
-        && request.session.as_str() == "m"
+        && request.run.as_str() == "m"
         && request.mission.as_str() == format!("promotion-{}", request.agent)
         && request
             .scope
@@ -1018,7 +1018,7 @@ mod tests {
         let request = ai6::ApprovalRequest::try_new(
             "G",
             ai6::MissionId::try_new("promotion-007").unwrap(),
-            ai6::SessionId::try_new("m").unwrap(),
+            ai6::RunId::try_new("m").unwrap(),
             "007",
             ai6::ActionScope::try_new("clearance", "007:field@G").unwrap(),
             "10 Missions done",
@@ -1032,7 +1032,7 @@ mod tests {
         let own = ai6::ApprovalRequest::try_new(
             "G",
             ai6::MissionId::try_new("mission-g").unwrap(),
-            ai6::SessionId::try_new("session-g").unwrap(),
+            ai6::RunId::try_new("run-g").unwrap(),
             "007",
             ai6::ActionScope::try_new("clearance", "007:00@G").unwrap(),
             "let me",
@@ -1203,7 +1203,7 @@ mod tests {
         }
     }
 
-    /// Opens Session `mission`.1 of `agent` on `model`, in `state` with `reason`; closed unless
+    /// Opens Run `mission`.1 of `agent` on `model`, in `state` with `reason`; closed unless
     /// its Mission is blocked.
     fn attempt(
         served: &crate::controls::tests::Served,
@@ -1213,14 +1213,14 @@ mod tests {
         state: &str,
         reason: Option<&str>,
     ) {
-        use ai6::{NewSession, SessionLaunch, SessionResult, SessionStatus, SessionUpdate};
+        use ai6::{NewRun, RunLaunch, RunResult, RunStatus, RunUpdate};
         let record = served
             .registry
-            .open_session(
-                NewSession::new(format!("{mission}.1"), mission, "hq")
+            .open_run(
+                NewRun::new(format!("{mission}.1"), mission, "hq")
                     .with_operation("G")
                     .with_launch(
-                        SessionLaunch::new("claude", "pipe", "/w")
+                        RunLaunch::new("claude", "pipe", "/w")
                             .with_model(Some(model.to_owned()), None)
                             .with_agent(Some(agent.to_owned())),
                     ),
@@ -1229,16 +1229,16 @@ mod tests {
             .unwrap();
         served
             .registry
-            .update_session(
-                &record.session_id,
+            .update_run(
+                &record.run_id,
                 "hq",
                 record.fence,
-                SessionUpdate::default()
-                    .result(SessionResult::new(state).with_reason(reason.map(str::to_owned)))
+                RunUpdate::default()
+                    .result(RunResult::new(state).with_reason(reason.map(str::to_owned)))
                     .status(if state == "blocked" {
-                        SessionStatus::Active
+                        RunStatus::Active
                     } else {
-                        SessionStatus::Ended
+                        RunStatus::Ended
                     }),
             )
             .unwrap();
@@ -1329,7 +1329,7 @@ mod tests {
         assert_eq!(
             models,
             [None, Some("haiku"), Some("opus")],
-            "the Session the fixture's gateway already holds names no model"
+            "the Run the fixture's gateway already holds names no model"
         );
         assert_eq!(
             card["unattributed"], 1,
@@ -1363,7 +1363,7 @@ mod tests {
         let request = ai6::ApprovalRequest::try_new(
             "G",
             ai6::MissionId::try_new("hold-007").unwrap(),
-            ai6::SessionId::try_new("m").unwrap(),
+            ai6::RunId::try_new("m").unwrap(),
             "007",
             ai6::ActionScope::try_new(ai6::HOLD_KIND, "007@G").unwrap(),
             "5 of 6 judged attempts failed",

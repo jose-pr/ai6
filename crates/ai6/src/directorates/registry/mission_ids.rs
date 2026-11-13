@@ -486,7 +486,7 @@ mod tests {
     use super::*;
     use crate::directorates::registry::backend::*;
     use crate::directorates::registry::limits::RegistryLimits;
-    use crate::directorates::registry::sessions::NewSession;
+    use crate::directorates::registry::runs::NewRun;
     use crate::directorates::registry::sources::{Ingest, SourceItem};
     use crate::directorates::registry::store::{
         Brief, DEFAULT_LEASE, FileRegistry, LeaseRecovery, MissionProposal, Reentry,
@@ -695,7 +695,7 @@ mod tests {
             operation,
             crate::MissionId::try_new("parent".to_owned()).unwrap(),
             "007",
-            crate::SessionId::try_new("session".to_owned()).unwrap(),
+            crate::RunId::try_new("run".to_owned()).unwrap(),
             key,
             proposed,
             &Default::default(),
@@ -1405,20 +1405,20 @@ mod tests {
             .unwrap();
         let uid = entered.key();
         let open = |attempt: u32, handle: &str| {
-            registry.open_session(
-                NewSession::new(new_uid(), &uid, "hq")
+            registry.open_run(
+                NewRun::new(new_uid(), &uid, "hq")
                     .with_handle(handle)
                     .with_attempt(attempt, None),
                 DEFAULT_LEASE,
             )
         };
         let first = open(1, "G-1").unwrap();
-        assert!(is_uid(&first.session_id));
+        assert!(is_uid(&first.run_id));
         assert_eq!(first.handle.as_deref(), Some("G-1.1"));
         assert!(
             matches!(
                 open(1, "G-1"),
-                Err(crate::directorates::registry::sessions::SessionError::Exists)
+                Err(crate::directorates::registry::runs::RunError::Exists)
             ),
             "one record per attempt, whatever its UID"
         );
@@ -1427,7 +1427,7 @@ mod tests {
         assert_eq!(second.handle.as_deref(), Some("G-fix.2"));
         assert_eq!(
             registry
-                .session(&first.session_id)
+                .run(&first.run_id)
                 .unwrap()
                 .unwrap()
                 .handle
@@ -1435,17 +1435,17 @@ mod tests {
             Some("G-1.1"),
             "a run keeps the handle it opened with"
         );
-        let next = NewSession::new(new_uid(), &uid, "hq")
+        let next = NewRun::new(new_uid(), &uid, "hq")
             .with_handle("G-fix")
             .with_attempt(2, None)
             .next_attempt()
             .unwrap();
-        let third = registry.open_session(next, DEFAULT_LEASE).unwrap();
+        let third = registry.open_run(next, DEFAULT_LEASE).unwrap();
         assert_eq!(
             (third.attempt, third.handle.as_deref()),
             (3, Some("G-fix.3"))
         );
-        assert_ne!(third.session_id, second.session_id);
+        assert_ne!(third.run_id, second.run_id);
     }
 
     #[test]

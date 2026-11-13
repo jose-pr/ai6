@@ -856,7 +856,7 @@ class _GraphNodeCard extends StatelessWidget {
       'station' => OoIconName.stations,
       'theater' => OoIconName.theaters,
       'mission' => OoIconName.missions,
-      'session' => OoIconName.sessions,
+      'run' => OoIconName.runs,
       'agent' => OoIconName.agents,
       _ => null,
     };

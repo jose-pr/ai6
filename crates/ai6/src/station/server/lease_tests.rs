@@ -9,7 +9,7 @@ use super::placement_tests::{empty_book, pinned_brief};
 use super::tests::{wait_for_state, wait_for_verifying};
 use super::*;
 use crate::bounds::Seconds;
-use crate::directorates::registry::sessions::{MissionVerdict, OutcomeVerdict};
+use crate::directorates::registry::runs::{MissionVerdict, OutcomeVerdict};
 use crate::directorates::registry::store::LeaseRecovery;
 use crate::station::limits::StationLimits;
 
@@ -63,8 +63,8 @@ fn confirm(state: &DaemonState, mission_id: &str) {
 async fn a_renewal_later_than_a_minute_after_the_last_still_finds_the_lease_held() {
     let root = tempfile::tempdir().unwrap();
     let (state, mission_id) = verifying(root.path(), "renewal").await;
-    renew_session_leases(&state);
-    let record = state.intake.latest_session(&mission_id).unwrap().unwrap();
+    renew_run_leases(&state);
+    let record = state.intake.latest_run(&mission_id).unwrap().unwrap();
     // The 60 seconds every lease once lasted had passed by the time a Station on a distant
     // Registry came round again.
     let a_slow_round = unix_now() + 90.0;
@@ -83,8 +83,8 @@ async fn the_lease_lasts_as_long_as_the_station_sets() {
     limits.scheduler.lease = Seconds::new(7);
     state.station = state.station.clone().with_limits(limits);
     assert_eq!(state.mission_lease(), Duration::from_secs(7));
-    renew_session_leases(&state);
-    let record = state.intake.latest_session(&mission_id).unwrap().unwrap();
+    renew_run_leases(&state);
+    let record = state.intake.latest_run(&mission_id).unwrap().unwrap();
     let left = record.lease_expires - unix_now();
     assert!((5.0..=7.5).contains(&left), "{left}");
     state
@@ -96,11 +96,11 @@ async fn the_lease_lasts_as_long_as_the_station_sets() {
 async fn a_verifying_mission_whose_leases_ran_out_waits_for_its_verdict() {
     let root = tempfile::tempdir().unwrap();
     let (state, mission_id) = verifying(root.path(), "waits").await;
-    // Its Session lease lapses as well.
-    let hold = session_hold(&state, &mission_id).unwrap();
+    // Its Run lease lapses as well.
+    let hold = run_hold(&state, &mission_id).unwrap();
     state
         .intake
-        .renew_session(
+        .renew_run(
             &hold.id,
             &state.station_id,
             hold.fence,
@@ -112,8 +112,8 @@ async fn a_verifying_mission_whose_leases_ran_out_waits_for_its_verdict() {
     let extraction = recovery::extract(&state, &lapsed);
     assert!(matches!(extraction, recovery::Extraction::Wait));
     assert_eq!(extraction.max_attempts(3), None);
-    let record = state.intake.latest_session(&mission_id).unwrap().unwrap();
-    assert!(!record.status.is_closed(), "its Session is not given up");
+    let record = state.intake.latest_run(&mission_id).unwrap().unwrap();
+    assert!(!record.status.is_closed(), "its Run is not given up");
     assert_eq!(
         state
             .intake

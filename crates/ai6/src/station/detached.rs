@@ -1,6 +1,6 @@
 //! The detached wrapper: how a Station runs a harness on a POSIX Theater that has no runner.
 //!
-//! The harness is started over the Theater's transport in a session of its own (`setsid`, or
+//! The harness is started over the Theater's transport in a run of its own (`setsid`, or
 //! `nohup` where there is none), so the link that started it can drop without ending it. Its
 //! output is appended to a file and its input read from a FIFO it holds open itself. While the
 //! link is down a read finds nothing new; once the transport reconnects, reads resume from the
@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use guatiao::library::{Object, ProviderError};
 use guatiao::{Bytes, FromValue, Status, ToValue, Value};
 
-use crate::directorates::q::terminal::{ExitInfo, READ_TIMED_OUT, Spec, Terminal, TerminalSession};
+use crate::directorates::q::terminal::{ExitInfo, READ_TIMED_OUT, Spec, Terminal, TerminalRun};
 use crate::directorates::q::transport::kit::{is_variable_name, quote};
 use crate::directorates::q::transport::{ReadSpec, RunSpec, TransportClient, describe};
 use crate::station::limits::DetachedLimits;
@@ -66,7 +66,7 @@ pwd -P
 "#;
 
 /// Starts the wrapper detached from this link, hands it the environment (standard input)
-/// through its FIFO, and prints the harness session's process ID.
+/// through its FIFO, and prints the harness run's process ID.
 const LAUNCH: &str = r#"cd "$1" || exit 44
 shift
 if command -v setsid >/dev/null 2>&1; then
@@ -84,7 +84,7 @@ cat pid
 const ALIVE: &str = r#"[ -f "$1/exit" ] || kill -0 "$2" 2>/dev/null
 "#;
 
-/// Ends the harness's session (its process group under `setsid`, else the wrapper).
+/// Ends the harness's run (its process group under `setsid`, else the wrapper).
 const KILL: &str = r#"pid=$(cat "$1/pid") || exit 0
 kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
 "#;
@@ -206,7 +206,7 @@ fn environment_file(spec: &Spec) -> Result<Vec<u8>, ProviderError> {
 }
 
 impl Terminal for DetachedTerminal {
-    fn spawn(&self, spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError> {
+    fn spawn(&self, spec: &Value) -> Result<Object<dyn TerminalRun>, ProviderError> {
         let spec = Spec::from_value(spec).map_err(|error| {
             ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, &error.to_string())
         })?;
@@ -232,7 +232,7 @@ impl Terminal for DetachedTerminal {
             .script(LAUNCH, arguments, Some(environment))?
             .parse::<i64>()
             .map_err(|_| refuse("the detached wrapper did not report the harness's process"))?;
-        Ok(DetachedSession {
+        Ok(DetachedRun {
             client: self.client.clone(),
             limits: self.limits.clone(),
             dir,
@@ -253,7 +253,7 @@ impl Terminal for DetachedTerminal {
 }
 
 /// One harness under the wrapper, read and written through the transport.
-struct DetachedSession {
+struct DetachedRun {
     client: Arc<TransportClient>,
     limits: DetachedLimits,
     dir: String,
@@ -265,7 +265,7 @@ struct DetachedSession {
     reach: ReachWatch,
 }
 
-impl DetachedSession {
+impl DetachedRun {
     fn path(&self, name: &str) -> String {
         format!("{}/{name}", self.dir)
     }
@@ -357,7 +357,7 @@ impl DetachedSession {
     }
 }
 
-impl TerminalSession for DetachedSession {
+impl TerminalRun for DetachedRun {
     fn pid(&self) -> i64 {
         self.pid
     }

@@ -71,7 +71,7 @@ class PoolAccountSummary {
     required this.handler,
     required this.kind,
     required this.active,
-    this.otherSessions = 0,
+    this.otherRuns = 0,
     this.maxConcurrent,
     this.windows = const [],
     this.limitedUntil,
@@ -83,11 +83,11 @@ class PoolAccountSummary {
   final String handler;
   final String kind;
 
-  /// This Operation's Missions whose Sessions use it now.
+  /// This Operation's Missions whose Runs use it now.
   final List<String> active;
 
-  /// How many Sessions of other Operations use it now.
-  final int otherSessions;
+  /// How many Runs of other Operations use it now.
+  final int otherRuns;
   final int? maxConcurrent;
   final List<QuotaWindowSummary> windows;
 
@@ -105,7 +105,7 @@ class PoolAccountSummary {
           for (final claim in json['active'] as List<dynamic>)
             (claim as Map<String, dynamic>)['mission_id'] as String,
         ],
-        otherSessions: json['other_sessions'] as int? ?? 0,
+        otherRuns: json['other_runs'] as int? ?? 0,
         maxConcurrent: json['max_concurrent'] as int?,
         windows: [
           for (final window in json['windows'] as List<dynamic>)
@@ -115,10 +115,10 @@ class PoolAccountSummary {
         tokensToday: json['tokens_today'] as int,
       );
 
-  /// `1/2 Sessions`, or `1 Session` without a limit.
-  String get sessions {
-    final count = active.length + otherSessions;
-    final noun = (maxConcurrent ?? count) == 1 ? 'Session' : 'Sessions';
+  /// `1/2 Runs`, or `1 Run` without a limit.
+  String get runs {
+    final count = active.length + otherRuns;
+    final noun = (maxConcurrent ?? count) == 1 ? 'Run' : 'Runs';
     return maxConcurrent == null
         ? '$count $noun'
         : '$count/$maxConcurrent $noun';
@@ -320,7 +320,7 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
                       'No account pool named $pool in Operation $operation.',
                   },
                   body:
-                      'A pool shares logins among Sessions. Without one, a Session uses '
+                      'A pool shares logins among Runs. Without one, a Run uses '
                       'the login its Agent is given.',
                 )
               : Column(
@@ -416,7 +416,7 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
               LinearProgressIndicator(value: use),
             Text(
               [
-                account.sessions,
+                account.runs,
                 if (account.windows.isNotEmpty)
                   account.windows.map((window) => window.label).join(', '),
                 '${account.tokensToday} tokens today',

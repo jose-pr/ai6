@@ -43,7 +43,7 @@ MissionBoard boardOf(
   );
   board.accessToken = 'operator-token';
   board.loading = false;
-  board.userSession = UserSessionSummary(
+  board.userRun = UserRunSummary(
     personId: 'operator-007',
     name: 'operator-007',
     displayName: null,
@@ -215,12 +215,12 @@ void main() {
       access('P', 'ROOT'),
       access('ROOT'),
     ]);
-    board.sessions = [
+    board.runs = [
       for (final operation in ['G', 'P', 'ROOT', 'OTHER'])
-        SessionSummary(
+        RunSummary(
           operationId: operation,
           missionId: 'm-$operation',
-          sessionId: 's-$operation',
+          runId: 's-$operation',
           state: 'working',
           sequence: 1,
           stationId: 'station-a',

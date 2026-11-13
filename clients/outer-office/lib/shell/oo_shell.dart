@@ -19,11 +19,11 @@ enum OoPage {
     OoIconName.missions,
     'Each Mission is one brief of work under an Operation.',
   ),
-  sessions(
-    'sessions',
-    'Sessions',
-    OoIconName.sessions,
-    'Each Session is one run of an Agent on a Mission.',
+  runs(
+    'runs',
+    'Runs',
+    OoIconName.runs,
+    'Each Run is one run of an Agent on a Mission.',
   ),
   agents(
     'agents',
@@ -59,7 +59,7 @@ enum OoPage {
     'pools',
     'Account Pools',
     OoIconName.pools,
-    'The accounts Sessions draw from, and how much of each is used.',
+    'The accounts Runs draw from, and how much of each is used.',
   ),
   timeline(
     'timeline',
@@ -109,7 +109,7 @@ enum OoRailGroup {
   work('Work', [
     OoPage.overview,
     OoPage.missions,
-    OoPage.sessions,
+    OoPage.runs,
     OoPage.greenInk,
     OoPage.briefings,
   ]),

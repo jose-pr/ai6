@@ -64,7 +64,7 @@ import 'shell/oo_empty.dart';
 import 'shell/oo_freshness.dart';
 import 'shell/oo_link.dart';
 import 'shell/overview_page.dart';
-import 'shell/sessions_page.dart';
+import 'shell/runs_page.dart';
 import 'shell/sign_in_page.dart';
 import 'shell/station_watch.dart';
 import 'shell/top_bar.dart';
@@ -126,11 +126,11 @@ Future<void> _startWeb() async {
     themeId: config.defaultTheme(warn: debugPrint),
     onThemeChanged: appearance.saveTheme,
     onBackdropChanged: appearance.saveBackdrop,
-    pollInterval: config.limits.refresh.sessions,
+    pollInterval: config.limits.refresh.runs,
     limits: config.limits,
   );
   board.followRuntime(runtime);
-  // Only here: the session cookie is a browser's, and the desktop app's sign-in stays in memory.
+  // Only here: the run cookie is a browser's, and the desktop app's sign-in stays in memory.
   unawaited(board.resumeSignIn());
   try {
     await appearance.restore(board);
@@ -177,7 +177,7 @@ void _startDesktop() {
     themeId: config.defaultTheme(warn: debugPrint),
     onThemeChanged: appearance.saveTheme,
     onBackdropChanged: appearance.saveBackdrop,
-    pollInterval: config.limits.refresh.sessions,
+    pollInterval: config.limits.refresh.runs,
     limits: config.limits,
   );
   runWidget(_DesktopWindowHost(board: board, chatSettings: config.chat));
@@ -227,26 +227,26 @@ class MissionBoard extends ChangeNotifier
     this.onBackdropChanged,
     this.assistantChannel,
     http.Client? client,
-    this.pollInterval = RefreshSettings.defaultSessions,
+    this.pollInterval = RefreshSettings.defaultRuns,
     this.limits = const OoLimits(),
   }) : themeId = ooThemePreference(themeId),
        _client = client ?? http.Client() {
     if (demo) {
-      sessions = [
-        SessionSummary(
+      runs = [
+        RunSummary(
           operationId: 'G',
           missionId: 'mission-007',
-          sessionId: 'preview-session-007',
+          runId: 'preview-run-007',
           state: 'working',
           sequence: 18,
           updatedAt: _demoNow() - 90,
           stationId: 'station-control-01',
           agent: 'technical-officer',
         ),
-        SessionSummary(
+        RunSummary(
           operationId: 'G',
           missionId: 'mission-007',
-          sessionId: 'preview-session-008',
+          runId: 'preview-run-008',
           state: 'blocked',
           sequence: 7,
           updatedAt: _demoNow() - 150,
@@ -254,10 +254,10 @@ class MissionBoard extends ChangeNotifier
           stationId: 'station-control-01',
           agent: 'technical-officer',
         ),
-        SessionSummary(
+        RunSummary(
           operationId: 'L',
           missionId: 'mission-021',
-          sessionId: 'preview-session-021',
+          runId: 'preview-run-021',
           state: 'done',
           sequence: 32,
           updatedAt: _demoNow() - 7200,
@@ -317,7 +317,7 @@ class MissionBoard extends ChangeNotifier
           at: _demoNow() - 600,
         ),
       ];
-      userSession = const UserSessionSummary(
+      userRun = const UserRunSummary(
         personId: 'preview-operator',
         name: 'preview-operator',
         displayName: 'Preview Operator',
@@ -329,7 +329,7 @@ class MissionBoard extends ChangeNotifier
             actions: [
               'mission.read',
               'mission.control',
-              'session.read',
+              'run.read',
               'audit.read',
               'agent.read',
             ],
@@ -444,7 +444,7 @@ class MissionBoard extends ChangeNotifier
   /// Whether the tab or window can be seen; hidden, the board and the pages' own timers back
   /// off (`[refresh] hidden`).
   bool visible = true;
-  List<SessionSummary> sessions = const [];
+  List<RunSummary> runs = const [];
   List<MissionBriefSummary> missionBriefs = const [];
 
   /// Every attempt at each Mission, by (Operation, Mission), first first.
@@ -453,13 +453,13 @@ class MissionBoard extends ChangeNotifier
   /// What each Mission is called now, by (Operation, Mission UID).
   Map<(String, String), String> missionHandles = const {};
 
-  /// Where each Mission with no Session stands, by (Operation, Mission UID): queued, waiting,
+  /// Where each Mission with no Run stands, by (Operation, Mission UID): queued, waiting,
   /// retrying a start, or failed before one.
   Map<(String, String), PendingMission> missionPending = const {};
 
-  /// The Missions the board lists: those with a Session, then those with none yet.
+  /// The Missions the board lists: those with a Run, then those with none yet.
   List<MissionGroup> missionGroups() {
-    final started = groupMissions(sessions);
+    final started = groupMissions(runs);
     final seen = {
       for (final group in started) (group.operationId, group.missionId),
     };
@@ -469,7 +469,7 @@ class MissionBoard extends ChangeNotifier
           MissionGroup(
             operationId: entry.key.$1,
             missionId: entry.key.$2,
-            sessions: const [],
+            runs: const [],
             pending: entry.value,
           ),
     ];
@@ -561,7 +561,7 @@ class MissionBoard extends ChangeNotifier
     notifyListeners();
   }
 
-  UserSessionSummary? userSession;
+  UserRunSummary? userRun;
   StationBoardSummary stationBoard = const StationBoardSummary(
     headquartersStation: null,
     stations: [],
@@ -718,7 +718,7 @@ class MissionBoard extends ChangeNotifier
     notifyListeners();
   }
 
-  Future<UserSessionSummary> loadUserSession() async {
+  Future<UserRunSummary> loadUserRun() async {
     final token = accessToken;
     if (token == null) {
       throw StateError('Sign in before viewing account details.');
@@ -730,16 +730,16 @@ class MissionBoard extends ChangeNotifier
     if (response.statusCode != 200) {
       throw StateError('The gateway refused account details.');
     }
-    final profile = UserSessionSummary.fromJson(
+    final profile = UserRunSummary.fromJson(
       jsonDecode(response.body) as Map<String, dynamic>,
     );
-    userSession = profile;
+    userRun = profile;
     notifyListeners();
     return profile;
   }
 
   bool canReadMissions(String operationId) =>
-      userSession?.operations.any(
+      userRun?.operations.any(
         (operation) =>
             operation.operationId == operationId &&
             operation.actions.contains('mission.read'),
@@ -797,7 +797,7 @@ class MissionBoard extends ChangeNotifier
 
   /// Whether this account holds [action] on the Operation.
   bool hasOperationAction(String operationId, String action) =>
-      userSession?.operations.any(
+      userRun?.operations.any(
         (operation) =>
             operation.operationId == operationId &&
             operation.actions.contains(action),
@@ -814,7 +814,7 @@ class MissionBoard extends ChangeNotifier
   }
 
   bool canCreateMission(String operationId) =>
-      userSession?.operations.any(
+      userRun?.operations.any(
         (operation) =>
             operation.operationId == operationId &&
             operation.actions.contains('mission.create'),
@@ -822,7 +822,7 @@ class MissionBoard extends ChangeNotifier
       false;
 
   bool canControlMission(String operationId) =>
-      userSession?.operations.any(
+      userRun?.operations.any(
         (operation) =>
             operation.operationId == operationId &&
             operation.actions.contains('mission.control'),
@@ -874,7 +874,7 @@ class MissionBoard extends ChangeNotifier
     required String action,
     String? agent,
     String? message,
-    String? sessionId,
+    String? runId,
     Duration? wait,
     Duration? pollEvery,
   }) async {
@@ -925,7 +925,7 @@ class MissionBoard extends ChangeNotifier
               'oo-${DateTime.now().microsecondsSinceEpoch}-${_controlSerial++}',
           'agent': ?agent,
           'message': ?message,
-          'session_id': ?sessionId,
+          'run_id': ?runId,
         }),
       );
     } on Object {
@@ -939,7 +939,7 @@ class MissionBoard extends ChangeNotifier
         404 =>
           'Universal Exports does not know this Mission in this Operation.',
         409 =>
-          'The Mission moved on to another Session; refresh and try again.',
+          'The Mission moved on to another Run; refresh and try again.',
         503 => 'No Station can take the control now; try again shortly.',
         _ => 'The gateway refused the control.',
       });
@@ -1000,7 +1000,7 @@ class MissionBoard extends ChangeNotifier
 
   List<String> get proposalOperations => demo
       ? const ['G']
-      : userSession?.operations
+      : userRun?.operations
                 .where((operation) => canCreateMission(operation.operationId))
                 .map((operation) => operation.operationId)
                 .toList(growable: false) ??
@@ -1111,7 +1111,7 @@ class MissionBoard extends ChangeNotifier
       operationId: 'G',
       parentMissionId: 'mission-007',
       proposerAgentId: 'coordinator-007',
-      proposerSessionId: 'preview-session-007',
+      proposerRunId: 'preview-run-007',
       title: 'Review the role catalog',
       body: 'Report which roles have no qualified Agent.',
       role: 'analyst',
@@ -1441,13 +1441,13 @@ class MissionBoard extends ChangeNotifier
   }
 
   @override
-  Future<Map<String, Object?>> sessionContext(
+  Future<Map<String, Object?>> runContext(
     String operation,
-    String session,
+    String run,
   ) => _readObject(
-    '/v1/user/operations/${Uri.encodeComponent(operation)}/sessions/'
-        '${Uri.encodeComponent(session)}/context',
-    "the Session's context",
+    '/v1/user/operations/${Uri.encodeComponent(operation)}/runs/'
+        '${Uri.encodeComponent(run)}/context',
+    "the Run's context",
   );
 
   @override
@@ -1732,7 +1732,7 @@ class MissionBoard extends ChangeNotifier
 
   /// Operations whose activity timeline this account may read (`audit.read`).
   List<String> get timelineOperations =>
-      (userSession?.operations
+      (userRun?.operations
                 .where((operation) => operation.actions.contains('audit.read'))
                 .map((operation) => operation.operationId)
                 .toList() ??
@@ -1769,7 +1769,7 @@ class MissionBoard extends ChangeNotifier
                     operationId: operationId,
                     stationId: 'station-control-01',
                     missionId: 'mission-007',
-                    sessionId: 'preview-session-008',
+                    runId: 'preview-run-008',
                   ),
                 ]
                 .where(
@@ -1814,25 +1814,25 @@ class MissionBoard extends ChangeNotifier
   List<String> get poolOperations => _operationsWith('pool.read');
 
   /// Whether Moneypenny is on this deployment, once the profile has said so.
-  bool get moneypennyServed => demo || (userSession?.moneypenny ?? false);
+  bool get moneypennyServed => demo || (userRun?.moneypenny ?? false);
 
   /// Whether the person may read the roster every Station reads.
   bool get canReadRoster =>
-      demo || (userSession?.roster.contains('roster.read') ?? false);
+      demo || (userRun?.roster.contains('roster.read') ?? false);
 
   /// Whether the person may edit it.
   bool get canManageRoster =>
-      !demo && (userSession?.roster.contains('roster.manage') ?? false);
+      !demo && (userRun?.roster.contains('roster.manage') ?? false);
 
   /// Whether the person may list the records of the roster route kind [kind]: a configuration
   /// family (`watches`) by `config.read` on it, any other kind by `roster.read`.
   bool canReadRecords(String kind) => rosterConfigKinds.contains(kind)
-      ? demo || (userSession?.config[kind]?.contains('config.read') ?? false)
+      ? demo || (userRun?.config[kind]?.contains('config.read') ?? false)
       : canReadRoster;
 
   /// Whether the person may edit the records of [kind].
   bool canManageRecords(String kind) => rosterConfigKinds.contains(kind)
-      ? !demo && (userSession?.config[kind]?.contains('config.manage') ?? false)
+      ? !demo && (userRun?.config[kind]?.contains('config.manage') ?? false)
       : canManageRoster;
 
   /// Whether the person may approve a provider library a Station found: the `plugin.manage`
@@ -1910,7 +1910,7 @@ class MissionBoard extends ChangeNotifier
 
   /// The person's actions on the global access policy and the accounts (`access.read`,
   /// `access.manage`, `account.manage`).
-  List<String> get globalActions => userSession?.globalActions ?? const [];
+  List<String> get globalActions => userRun?.globalActions ?? const [];
 
   /// Operations whose own access policy this account may read (`access.read`).
   List<String> get accessOperations => _operationsWith('access.read');
@@ -1920,7 +1920,7 @@ class MissionBoard extends ChangeNotifier
   bool get canOpenAccess =>
       globalActions.contains('access.read') ||
       globalActions.contains('account.manage') ||
-      (userSession?.operations.any(
+      (userRun?.operations.any(
             (operation) => operation.actions.contains('access.read'),
           ) ??
           false);
@@ -1929,7 +1929,7 @@ class MissionBoard extends ChangeNotifier
   /// may consent to a cover, or are read into one.
   bool get canOpenCompartments =>
       globalActions.contains('compartment.manage') ||
-      (userSession?.operations.any(
+      (userRun?.operations.any(
             (operation) =>
                 operation.actions.contains('compartment.cover') ||
                 operation.compartments.isNotEmpty,
@@ -2227,7 +2227,7 @@ class MissionBoard extends ChangeNotifier
   /// gives them something on.
   List<String> get memoryOperations => [
     for (final operation
-        in userSession?.operations ?? const <UserOperationAccess>[])
+        in userRun?.operations ?? const <UserOperationAccess>[])
       if (operation.actions.contains('mission.read') ||
           operation.compartments.isNotEmpty)
         operation.operationId,
@@ -2406,7 +2406,7 @@ class MissionBoard extends ChangeNotifier
               'small_sample': false,
               'attempts': {
                 'done': [
-                  {'mission_id': 'mission-007', 'session_id': 'mission-007.1'},
+                  {'mission_id': 'mission-007', 'run_id': 'mission-007.1'},
                 ],
               },
               'usage': {'input': 1200, 'output': 300, 'cost_micro_usd': 40000},
@@ -2481,7 +2481,7 @@ class MissionBoard extends ChangeNotifier
 
   List<String> _operationsWith(String action) {
     if (demo) return const ['G'];
-    return (userSession?.operations
+    return (userRun?.operations
               .where((operation) => operation.actions.contains(action))
               .map((operation) => operation.operationId)
               .toList() ??
@@ -2520,7 +2520,7 @@ class MissionBoard extends ChangeNotifier
       id: 'green-ink-preview',
       operationId: operationId,
       missionId: 'mission-007',
-      sessionId: 'preview-session-007',
+      runId: 'preview-run-007',
       agent: '007',
       kind: 'push',
       target: 'origin:refs/heads/main',
@@ -2723,24 +2723,24 @@ class MissionBoard extends ChangeNotifier
   }
 
   bool get canReadAudit =>
-      (userSession?.operations.any(
+      (userRun?.operations.any(
             (operation) => operation.actions.contains('audit.read'),
           ) ??
           false) ||
-      (userSession?.stations.any(
+      (userRun?.stations.any(
             (station) => station.actions.contains('audit.read'),
           ) ??
           false);
 
   List<String> get readableStations =>
-      userSession?.stations
+      userRun?.stations
           .where((station) => station.actions.contains('station.read'))
           .map((station) => station.stationId)
           .toList(growable: false) ??
       const [];
 
   bool canConfigureStation(String stationId) =>
-      userSession?.stations.any(
+      userRun?.stations.any(
         (station) =>
             station.stationId == stationId &&
             station.actions.contains('station.configure'),
@@ -2805,7 +2805,7 @@ class MissionBoard extends ChangeNotifier
   }
 
   bool canReadAgentRoles(String operationId) =>
-      userSession?.operations.any(
+      userRun?.operations.any(
         (operation) =>
             operation.operationId == operationId &&
             operation.actions.contains('agent.read'),
@@ -2813,7 +2813,7 @@ class MissionBoard extends ChangeNotifier
       false;
 
   bool canConfigureAgentRoles(String operationId) =>
-      userSession?.operations.any(
+      userRun?.operations.any(
         (operation) =>
             operation.operationId == operationId &&
             operation.actions.contains('agent.configure'),
@@ -3084,9 +3084,9 @@ class MissionBoard extends ChangeNotifier
 
       if (reads.contains(BoardRead.board)) {
         settle(BoardSource.board, responses[0], (body) {
-          sessions = (jsonDecode(body) as List<dynamic>)
+          runs = (jsonDecode(body) as List<dynamic>)
               .map(
-                (item) => SessionSummary.fromJson(item as Map<String, dynamic>),
+                (item) => RunSummary.fromJson(item as Map<String, dynamic>),
               )
               .toList(growable: false);
         });
@@ -3137,7 +3137,7 @@ class MissionBoard extends ChangeNotifier
         final profile = responses[3];
         if (profile?.statusCode == 200) {
           try {
-            userSession = UserSessionSummary.fromJson(
+            userRun = UserRunSummary.fromJson(
               jsonDecode(profile!.body) as Map<String, dynamic>,
             );
           } on Object {
@@ -3233,7 +3233,7 @@ class MissionBoard extends ChangeNotifier
     _idleDeadline = null;
     _active = false;
     _cadence?.forget();
-    sessions = const [];
+    runs = const [];
     missionBriefs = const [];
     missionAttempts = const {};
     missionHandles = const {};
@@ -3246,7 +3246,7 @@ class MissionBoard extends ChangeNotifier
     _sourcePages.clear();
     controls = const {};
     requests = const {};
-    userSession = null;
+    userRun = null;
     stationBoard = const StationBoardSummary(
       headquartersStation: null,
       stations: [],
@@ -3466,7 +3466,7 @@ class MissionBoard extends ChangeNotifier
     );
   }
 
-  /// The latest attempt at a Mission, whose Session sets its state; `null` before one is
+  /// The latest attempt at a Mission, whose Run sets its state; `null` before one is
   /// recorded.
   MissionAttemptSummary? currentAttempt(String operationId, String missionId) =>
       attempts(operationId, missionId).fold<MissionAttemptSummary?>(
@@ -3558,7 +3558,7 @@ class MissionBoard extends ChangeNotifier
     }
   }
 
-  /// Comes back from a page reload: asks the gateway for a token on the strength of the session
+  /// Comes back from a page reload: asks the gateway for a token on the strength of the run
   /// cookie, which the browser sends and this code cannot read. Anything but a token means
   /// nobody is signed in, which is no error to tell anyone about.
   Future<void> resumeSignIn() async {
@@ -3626,7 +3626,7 @@ class MissionBoard extends ChangeNotifier
     _tokenTimer = Timer(
       left > Duration.zero
           ? (wait > Duration.zero ? wait : left ~/ 2)
-          : limits.refresh.sessions ?? limits.refresh.renewRetry,
+          : limits.refresh.runs ?? limits.refresh.renewRetry,
       left > Duration.zero ? _renewDue : _renewToken,
     );
   }
@@ -3661,7 +3661,7 @@ class MissionBoard extends ChangeNotifier
       }
     }
     _tokenTimer = Timer(
-      limits.refresh.sessions ?? limits.refresh.renewRetry,
+      limits.refresh.runs ?? limits.refresh.renewRetry,
       _renewToken,
     );
   }
@@ -3711,14 +3711,14 @@ class MissionBoard extends ChangeNotifier
     }
   }
 
-  Future<String?> prepareSessionSocket(
-    SessionSummary session, {
+  Future<String?> prepareRunSocket(
+    RunSummary run, {
     required bool write,
   }) async {
     final token = accessToken;
-    if (token == null) throw StateError('Sign in before opening a Session.');
+    if (token == null) throw StateError('Sign in before opening a Run.');
     if (kIsWeb && apiOrigin.origin != Uri.base.origin) {
-      throw StateError('Web Session views require the same gateway origin.');
+      throw StateError('Web Run views require the same gateway origin.');
     }
     final grant = await _client.post(
       apiOrigin.resolve('/v1/user/attach-grants'),
@@ -3727,14 +3727,14 @@ class MissionBoard extends ChangeNotifier
         'content-type': 'application/json',
       },
       body: jsonEncode({
-        'operation_id': session.operationId,
-        'mission_id': session.missionId,
-        'session_id': session.sessionId,
+        'operation_id': run.operationId,
+        'mission_id': run.missionId,
+        'run_id': run.runId,
         'mode': write ? 'write' : 'read',
       }),
     );
     if (grant.statusCode != 201) {
-      throw StateError('The gateway refused the Session attachment.');
+      throw StateError('The gateway refused the Run attachment.');
     }
     final grantToken =
         (jsonDecode(grant.body) as Map<String, dynamic>)['token'] as String;
@@ -3749,7 +3749,7 @@ class MissionBoard extends ChangeNotifier
       body: jsonEncode({'token': grantToken}),
     );
     if (exchange.statusCode != 204) {
-      throw StateError('The gateway refused the Session attachment.');
+      throw StateError('The gateway refused the Run attachment.');
     }
     if (kIsWeb) return null;
     final setCookie = exchange.headers['set-cookie'];
@@ -3757,26 +3757,26 @@ class MissionBoard extends ChangeNotifier
         ? null
         : RegExp(r'(?:^|;\s*)ai6_attach=([^;]+)').firstMatch(setCookie);
     if (cookie == null) {
-      throw StateError('The gateway did not issue a Session cookie.');
+      throw StateError('The gateway did not issue a Run cookie.');
     }
     return 'ai6_attach=${cookie.group(1)}';
   }
 
   void applyLifecycle(
-    String sessionId,
+    String runId,
     String state,
     int sequence, {
     String? reason,
   }) {
-    final index = sessions.indexWhere((item) => item.sessionId == sessionId);
-    if (index < 0 || sequence <= sessions[index].sequence) return;
-    final updated = sessions.toList();
-    updated[index] = sessions[index].copyWith(
+    final index = runs.indexWhere((item) => item.runId == runId);
+    if (index < 0 || sequence <= runs[index].sequence) return;
+    final updated = runs.toList();
+    updated[index] = runs[index].copyWith(
       state: state,
       sequence: sequence,
       reason: reason,
     );
-    sessions = List.unmodifiable(updated);
+    runs = List.unmodifiable(updated);
     notifyListeners();
   }
 
@@ -4157,7 +4157,7 @@ class TheaterSummary {
     this.report,
     this.madeFor,
     this.resources,
-    this.sessions = 0,
+    this.runs = 0,
   });
 
   final String id;
@@ -4181,7 +4181,7 @@ class TheaterSummary {
   /// AI6's leases.
   final List<String> weakened;
 
-  /// What the Theater must have before Sessions run there.
+  /// What the Theater must have before Runs run there.
   final TheaterRequirements? requires;
 
   /// What the Station's last probe found there.
@@ -4193,8 +4193,8 @@ class TheaterSummary {
   /// Its CPUs, load and memory as last sampled; `null` until a sample succeeds.
   final HostResources? resources;
 
-  /// Sessions the Station is running there.
-  final int sessions;
+  /// Runs the Station is running there.
+  final int runs;
 
   /// The Theater declares requirements that are unchecked or unmet.
   bool get unfit => requires != null && (report == null || !report!.fit);
@@ -4230,7 +4230,7 @@ class TheaterSummary {
     resources: json['resources'] == null
         ? null
         : HostResources.fromJson(json['resources'] as Map<String, dynamic>),
-    sessions: json['sessions'] as int? ?? 0,
+    runs: json['runs'] as int? ?? 0,
   );
 
   String get description {
@@ -4243,7 +4243,7 @@ class TheaterSummary {
       if (madeFor != null) 'made for Mission $madeFor',
       if (unavailable != null) 'unreachable: $unavailable',
       resources?.description ?? 'resources unknown',
-      if (sessions > 0) '$sessions running',
+      if (runs > 0) '$runs running',
       if (capabilities != null) capabilities!.description,
       ...?capabilities?.notes,
       'agents $agents · egress $egress',
@@ -4256,7 +4256,7 @@ class TheaterSummary {
   }
 }
 
-/// What a Theater must have before Sessions run there.
+/// What a Theater must have before Runs run there.
 class TheaterRequirements {
   const TheaterRequirements({
     this.os,
@@ -4421,8 +4421,8 @@ class PlacementPreview {
       );
 }
 
-class UserSessionSummary {
-  const UserSessionSummary({
+class UserRunSummary {
+  const UserRunSummary({
     required this.personId,
     required this.name,
     required this.displayName,
@@ -4457,8 +4457,8 @@ class UserSessionSummary {
   /// Whether this gateway serves Moneypenny; the app offers her only when it does.
   final bool moneypenny;
 
-  factory UserSessionSummary.fromJson(Map<String, dynamic> json) =>
-      UserSessionSummary(
+  factory UserRunSummary.fromJson(Map<String, dynamic> json) =>
+      UserRunSummary(
         personId: json['person_id'] as String,
         name: json['name'] as String,
         displayName: json['display_name'] as String?,
@@ -4574,7 +4574,7 @@ class MissionProposalSummary {
     required this.operationId,
     required this.parentMissionId,
     required this.proposerAgentId,
-    required this.proposerSessionId,
+    required this.proposerRunId,
     required this.title,
     required this.body,
     required this.role,
@@ -4588,7 +4588,7 @@ class MissionProposalSummary {
   final String operationId;
   final String parentMissionId;
   final String proposerAgentId;
-  final String proposerSessionId;
+  final String proposerRunId;
   final String title;
   final String body;
   final String? role;
@@ -4606,7 +4606,7 @@ class MissionProposalSummary {
       operationId: json['operation_id'] as String,
       parentMissionId: json['parent_mission_id'] as String,
       proposerAgentId: json['proposer_agent_id'] as String,
-      proposerSessionId: json['proposer_session_id'] as String,
+      proposerRunId: json['proposer_run_id'] as String,
       title: brief['title'] as String,
       body: brief['body'] as String? ?? '',
       role: brief['role'] as String?,
@@ -4701,11 +4701,11 @@ class _MainWindowDelegate with WindowControllerDelegate {
 }
 
 @immutable
-class SessionSummary {
-  const SessionSummary({
+class RunSummary {
+  const RunSummary({
     required this.operationId,
     required this.missionId,
-    required this.sessionId,
+    required this.runId,
     required this.state,
     required this.sequence,
     this.reason,
@@ -4717,22 +4717,22 @@ class SessionSummary {
 
   final String operationId;
   final String missionId;
-  final String sessionId;
+  final String runId;
   final String? state;
 
-  /// Why AI6 holds the Session in its state: `green-ink` while a step waits for a person's
+  /// Why AI6 holds the Run in its state: `green-ink` while a step waits for a person's
   /// approval, `budget` after a spending limit.
   final String? reason;
   final int sequence;
 
-  /// When the gateway last received this Session's state, as Unix seconds; the most
-  /// recently updated Session of a Mission carries the Mission's current state.
+  /// When the gateway last received this Run's state, as Unix seconds; the most
+  /// recently updated Run of a Mission carries the Mission's current state.
   final double? updatedAt;
 
-  /// The untrusted input the Session has read (`brief:source`, `tool:WebFetch`, ...).
+  /// The untrusted input the Run has read (`brief:source`, `tool:WebFetch`, ...).
   final List<String> exposure;
 
-  /// The Station that holds, or last held, the Session; `null` when the gateway has no
+  /// The Station that holds, or last held, the Run; `null` when the gateway has no
   /// record of it.
   final String? stationId;
 
@@ -4740,11 +4740,11 @@ class SessionSummary {
   final String? agent;
 
   /// A new state replaces the reason with [reason]; without one the reason stays.
-  SessionSummary copyWith({String? state, int? sequence, String? reason}) =>
-      SessionSummary(
+  RunSummary copyWith({String? state, int? sequence, String? reason}) =>
+      RunSummary(
         operationId: operationId,
         missionId: missionId,
-        sessionId: sessionId,
+        runId: runId,
         state: state ?? this.state,
         reason: state == null ? this.reason : reason,
         sequence: sequence ?? this.sequence,
@@ -4756,10 +4756,10 @@ class SessionSummary {
         agent: agent,
       );
 
-  factory SessionSummary.fromJson(Map<String, dynamic> json) => SessionSummary(
+  factory RunSummary.fromJson(Map<String, dynamic> json) => RunSummary(
     operationId: json['operation_id'] as String,
     missionId: json['mission_id'] as String,
-    sessionId: json['session_id'] as String,
+    runId: json['run_id'] as String,
     state: json['state'] as String?,
     reason: json['reason'] as String?,
     sequence: json['sequence'] as int,
@@ -4879,7 +4879,7 @@ class BriefOrigin {
   /// The person, Source provider, Sleeper or proposing Agent; `null` for a registry drop.
   final String? principal;
 
-  /// The Source item, Sleeper fingerprint or proposing Session.
+  /// The Source item, Sleeper fingerprint or proposing Run.
   final String? reference;
   final String? itemUrl;
 
@@ -4972,7 +4972,7 @@ class ProbeEvidenceSummary {
       );
 }
 
-/// Where a Mission with no Session stands, as the gateway read it from the Registry.
+/// Where a Mission with no Run stands, as the gateway read it from the Registry.
 class PendingMission {
   const PendingMission({
     required this.state,
@@ -5067,7 +5067,7 @@ class MissionAttemptSummary {
 
   final int attempt;
 
-  /// AI6's ID for this run, its UID, apart from the provider's Session ID.
+  /// AI6's ID for this run, its UID, apart from the provider's Run ID.
   final String? runId;
 
   /// The run's handle, `<mission handle>.<attempt>`, as the Mission was called when it opened.
@@ -5102,7 +5102,7 @@ class MissionAttemptSummary {
   /// When a probe was asked for, as Unix seconds, until the Station has run it.
   final double? probeRequested;
 
-  /// `handler model (pool name)`, from what a Session record says of its route.
+  /// `handler model (pool name)`, from what a Run record says of its route.
   static String? _routeOf(Map<String, dynamic>? route) {
     if (route == null) return null;
     return [
@@ -5115,7 +5115,7 @@ class MissionAttemptSummary {
   factory MissionAttemptSummary.fromJson(Map<String, dynamic> json) =>
       MissionAttemptSummary(
         attempt: json['attempt'] as int,
-        runId: json['session_id'] as String?,
+        runId: json['run_id'] as String?,
         handle: json['handle'] as String?,
         station: json['station'] as String,
         status: json['status'] as String,
@@ -5352,7 +5352,7 @@ MoneypennyChat moneypennyChatFor(
       ? ChatPreferences(SharedPreferences.getInstance())
       : null;
   // The preview's sample conversation is nobody's to go back to.
-  final person = board.demo ? null : board.userSession?.personId;
+  final person = board.demo ? null : board.userRun?.personId;
   return MoneypennyChat(
     controller: AssistantController(
       token: board.demo ? 'demo' : board.accessToken!,
@@ -5507,7 +5507,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
 
   bool get _canReadRoles =>
       widget.board.demo ||
-      (widget.board.userSession?.operations.any(
+      (widget.board.userRun?.operations.any(
             (operation) => operation.actions.contains('agent.read'),
           ) ??
           false);
@@ -5517,7 +5517,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
     OoPage.overview,
     OoPage.operations,
     OoPage.missions,
-    OoPage.sessions,
+    OoPage.runs,
     if (_canReadRoles) OoPage.agents,
     OoPage.stations,
     if (board.greenInkOperations.isNotEmpty ||
@@ -5532,11 +5532,11 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
     if (board.canOpenCompartments) OoPage.compartments,
   ];
 
-  void _openSession(BuildContext context, SessionSummary session) {
+  void _openRun(BuildContext context, RunSummary run) {
     if (widget.desktopWindows) {
-      openSessionWindow(context, session, widget.board);
+      openRunWindow(context, run, widget.board);
     } else {
-      openSessionPage(context, session, widget.board);
+      openRunPage(context, run, widget.board);
     }
   }
 
@@ -5558,7 +5558,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
       ...attentionSources,
     ],
     OoPage.missions => const [BoardSource.board, BoardSource.missions],
-    OoPage.operations || OoPage.sessions => const [BoardSource.board],
+    OoPage.operations || OoPage.runs => const [BoardSource.board],
     OoPage.stations => const [BoardSource.stations],
     _ => const [],
   };
@@ -5609,11 +5609,11 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
               onCreateMission: (operationId) =>
                   _showCreateMission(context, operationId, board),
             ),
-            OoPage.sessions => SessionsPage(
+            OoPage.runs => RunsPage(
               board: board,
               route: route,
               onRoute: onRoute,
-              onOpen: (session) => _openSession(context, session),
+              onOpen: (run) => _openRun(context, run),
             ),
             OoPage.agents => OoTabs(
               empty: 'No Agents are available to this account.',
@@ -5827,11 +5827,11 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
     final notice = widget.notice;
     return ChatShell(
       chat: chat,
-      personId: widget.board.userSession?.personId,
+      personId: widget.board.userRun?.personId,
       route: route,
       operations: [
         for (final operation
-            in widget.board.userSession?.operations ??
+            in widget.board.userRun?.operations ??
                 const <UserOperationAccess>[])
           operation.operationId,
       ],
@@ -5877,7 +5877,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
           AnimatedBuilder(
             animation: widget.board,
             builder: (context, _) => UserChip(
-              session: widget.board.userSession,
+              run: widget.board.userRun,
               compact: width < OoBreakpoints.wide,
               onPressed: () => _showOperatorMenu(context, widget.board),
             ),
@@ -5961,7 +5961,7 @@ class _TheatersTab extends StatelessWidget {
           _ => 'No Station reports a Theater.',
         },
         body:
-            'A Theater is where a Session runs, reached through a Station. Each Station lists '
+            'A Theater is where a Run runs, reached through a Station. Each Station lists '
             'its own in theaters.toml.',
       );
     }
@@ -6289,10 +6289,10 @@ class _MissionProposalsPageState extends State<MissionProposalsPage> {
                                       ),
                                     ),
                                     (
-                                      'Session ${proposal.proposerSessionId}',
-                                      OoLinkTo.session(
+                                      'Run ${proposal.proposerRunId}',
+                                      OoLinkTo.run(
                                         proposal.operationId,
-                                        proposal.proposerSessionId,
+                                        proposal.proposerRunId,
                                       ),
                                     ),
                                   ], style: DefaultTextStyle.of(context).style),
@@ -6722,7 +6722,7 @@ class _AgentRolesPageState extends State<AgentRolesPage> {
   Future<List<AgentRoleSummary>>? _roles;
 
   List<String> get _operations =>
-      widget.board.userSession?.operations
+      widget.board.userRun?.operations
           .where(
             (operation) =>
                 widget.board.canReadAgentRoles(operation.operationId),
@@ -7088,7 +7088,7 @@ class _AgentRoleEditorDialogState extends State<AgentRoleEditorDialog> {
 }
 
 Future<void> _showOperatorMenu(BuildContext context, MissionBoard board) async {
-  final identity = board.demo ? null : board.loadUserSession();
+  final identity = board.demo ? null : board.loadUserRun();
   await showDialog<void>(
     context: context,
     builder: (dialogContext) => AlertDialog(
@@ -7107,7 +7107,7 @@ Future<void> _showOperatorMenu(BuildContext context, MissionBoard board) async {
                   if (board.demo)
                     const Text('Demo data · no signed-in operator')
                   else
-                    FutureBuilder<UserSessionSummary>(
+                    FutureBuilder<UserRunSummary>(
                       future: identity,
                       builder: (context, snapshot) {
                         if (snapshot.hasError) {
@@ -7229,7 +7229,7 @@ class _ThemeChooser extends StatelessWidget {
         onTheme: board.setThemeId,
         onBackdrop: board.setBackdrop,
       ),
-      if (board.userSession != null && !board.moneypennyServed) ...[
+      if (board.userRun != null && !board.moneypennyServed) ...[
         const SizedBox(height: 18),
         Text(
           moneypennyOffNote,

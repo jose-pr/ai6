@@ -21,13 +21,13 @@ MissionBoard gateway(
     'operation_id': 'G',
     'mission_id': uid,
     'handle': handle,
-    'sessions': const [],
+    'runs': const [],
     'brief': null,
     'usage': null,
     'attempts': [
       {
         'attempt': 1,
-        'session_id': '019a1b2c-3d4e-7f00-8123-000000000001',
+        'run_id': '019a1b2c-3d4e-7f00-8123-000000000001',
         'handle': 'G-1.1',
         'station': 'hq',
         'status': 'active',
@@ -86,7 +86,7 @@ MissionBoard gateway(
             {
               'operation_id': 'G',
               'mission_id': uid,
-              'session_id': 'provider-session-1',
+              'run_id': 'provider-id-1',
               'state': 'working',
               'sequence': 1,
               'updated_at': 100.0,

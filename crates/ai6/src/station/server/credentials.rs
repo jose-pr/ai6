@@ -1,8 +1,8 @@
-//! Q's credentials for a Session: the Agent's loadout secrets, leased per Session from the
+//! Q's credentials for a Run: the Agent's loadout secrets, leased per Run from the
 //! secret provider each names and handed to the harness in its environment only.
 //!
 //! Nothing is written anywhere: a value lives in the Station's memory and the harness's
-//! environment. Leases are revoked when the Session's Mission ends or its Session stops on
+//! environment. Leases are revoked when the Run's Mission ends or its Run stops on
 //! this Station, and when their time is up. A `green_ink` secret is leased only while the
 //! Mission holds a live green ink approval of a kind it names, once per approval, and its lease
 //! is revoked as soon as that approval expires or is revoked.
@@ -50,7 +50,7 @@ pub(crate) struct CredentialDesk {
     /// One built provider per instance, or per provider used with its defaults.
     built: Arc<Mutex<BTreeMap<String, Built>>>,
     issued: Arc<Mutex<BTreeMap<String, Vec<Issued>>>>,
-    /// Pool account logins and the accounts Sessions hold.
+    /// Pool account logins and the accounts Runs hold.
     pub(super) accounts: super::accounts::AccountDesk,
 }
 
@@ -225,7 +225,7 @@ impl CredentialDesk {
         refused
     }
 
-    /// The names of the secrets leased to `mission_id`'s Session now.
+    /// The names of the secrets leased to `mission_id`'s Run now.
     #[cfg(test)]
     pub(crate) fn issued_for(&self, mission_id: &str) -> Vec<String> {
         self.issued
@@ -443,7 +443,7 @@ fn built_error(provider: &str, error: &PluginBuildError) -> String {
 }
 
 /// The value of the `[secret.<name>]` a private overlay source is fetched with, read for this
-/// fetch alone: no Session sees it.
+/// fetch alone: no Run sees it.
 pub(super) fn read_for_overlay(
     state: &DaemonState,
     name: &str,
@@ -461,10 +461,10 @@ pub(super) fn read_for_overlay(
         .map_err(|why| format!("secret {name:?}: {why}"))
 }
 
-/// What a Session of `agent` starts from: its roster `env`, with its loadout's `env` over it.
+/// What a Run of `agent` starts from: its roster `env`, with its loadout's `env` over it.
 /// The issue of secrets after this takes only secrets' and pool accounts' variables away, which
-/// a loadout's `env` cannot name, so what is here reaches an exposed Session too.
-pub(super) fn session_environment(
+/// a loadout's `env` cannot name, so what is here reaches an exposed Run too.
+pub(super) fn run_environment(
     state: &DaemonState,
     agent: &str,
     roster: &BTreeMap<String, String>,
@@ -488,19 +488,19 @@ pub(super) fn session_environment(
     environment
 }
 
-/// Claims a pool account for a Session of `mission` when its Agent draws from a pool, and
+/// Claims a pool account for a Run of `mission` when its Agent draws from a pool, and
 /// leases the Agent's loadout secrets; puts each value in `environment` under its variable,
 /// replacing what the Mission held before. An Agent without a loadout or pool gets nothing;
-/// an exposed Session whose Operation restricts `secrets` gets only what its harness reaches its
+/// an exposed Run whose Operation restricts `secrets` gets only what its harness reaches its
 /// model with (a pool account, or a loadout secret in a provider credential variable): without
-/// it the harness could not run, and a Session that read untrusted text is the common case.
+/// it the harness could not run, and a Run that read untrusted text is the common case.
 ///
 /// Fails when the backend refuses an ordinary secret or no pool account can be had, so a
-/// Session never starts without the credentials its loadout and pools promise. Blocks on the
+/// Run never starts without the credentials its loadout and pools promise. Blocks on the
 /// backend and the Registry.
 ///
-/// `agent` is as its Session works, on `on` when it has routes: the route's own secrets are what
-/// its harness reaches its model with, so they are issued whatever the Session has read.
+/// `agent` is as its Run works, on `on` when it has routes: the route's own secrets are what
+/// its harness reaches its model with, so they are issued whatever the Run has read.
 pub(super) fn issue(
     state: &DaemonState,
     mission: &Mission,
@@ -521,7 +521,7 @@ pub(super) fn issue(
     )
 }
 
-/// What an assistant Session of `agent` reaches its model with, under the name `holder` gives it:
+/// What an assistant Run of `agent` reaches its model with, under the name `holder` gives it:
 /// its route's account and secrets. She is given no loadout secret: nothing she reads is trusted,
 /// and a tool's credential would reach whatever she reads. Blocks on the backend and the Registry.
 #[cfg(feature = "publisher")]
@@ -536,7 +536,7 @@ pub(super) fn issue_for_assistant(
     issue_for(state, holder, agent, on, None, site, environment)
 }
 
-/// What a watch's Session of `agent` reaches its model with, under the name `holder` gives it: its
+/// What a watch's Run of `agent` reaches its model with, under the name `holder` gives it: its
 /// route's account and secrets, and no loadout secret, since a watch reads untrusted text. Blocks
 /// on the backend and the Registry.
 pub(super) fn issue_for_watch(
@@ -729,7 +729,7 @@ fn issue_loadout(
     let Some(loadout) = loadout else {
         return Ok(());
     };
-    // What an earlier Session of the Mission held goes, so only this issue's leases remain.
+    // What an earlier Run of the Mission held goes, so only this issue's leases remain.
     for name in loadout.secret_names() {
         environment.remove(catalog.secret(name).env());
     }
@@ -737,7 +737,7 @@ fn issue_loadout(
     if restricted {
         eprintln!(
             "ai6: Mission {mission_id:?} read untrusted input and its Operation restricts \
-             secrets, so its Session gets only its harness's model credential"
+             secrets, so its Run gets only its harness's model credential"
         );
     }
     let (ordinary, protected): (Vec<_>, Vec<_>) = loadout
@@ -853,7 +853,7 @@ fn issue_loadout(
     Ok(())
 }
 
-/// Keeps `leases` for `mission_id` until its Session stops here.
+/// Keeps `leases` for `mission_id` until its Run stops here.
 fn keep(state: &DaemonState, mission_id: &str, mut leases: Leases) -> Result<(), String> {
     if leases.0.is_empty() {
         return Ok(());
@@ -913,7 +913,7 @@ impl Drop for Leases {
     }
 }
 
-/// Revokes every lease issued for `mission_id` and frees its pool account, once its Session
+/// Revokes every lease issued for `mission_id` and frees its pool account, once its Run
 /// stops on this Station or the Mission ends.
 pub(super) fn release(state: &DaemonState, mission_id: &str) {
     super::accounts::release(state, mission_id);
@@ -1047,7 +1047,7 @@ fn live_approvals(state: &DaemonState, mission: &Mission) -> Vec<Approval> {
     }
 }
 
-/// Records which credentials a Mission's Session was issued: names, never values.
+/// Records which credentials a Mission's Run was issued: names, never values.
 fn record(
     state: &DaemonState,
     mission: &Mission,

@@ -143,20 +143,20 @@ const _labels = {
   'cancel': 'Cancel Mission',
   'retry': 'Retry Mission',
   'resume': 'Resume Mission',
-  'interrupt': 'Interrupt Session',
+  'interrupt': 'Interrupt Run',
 };
 
-/// The latest of [sessions], the one carrying a Mission's current state: the highest `updatedAt`,
+/// The latest of [runs], the one carrying a Mission's current state: the highest `updatedAt`,
 /// none counting as oldest and the first of equals winning. Never `sequence`: that is a cursor
-/// within one provider Session, so a long first attempt would outrank the newer retry after it.
+/// within one provider Run, so a long first attempt would outrank the newer retry after it.
 /// Universal Exports' `Route::shows_mission` decides the same.
-SessionSummary? currentSession(Iterable<SessionSummary> sessions) {
-  SessionSummary? current;
-  for (final session in sessions) {
+RunSummary? currentRun(Iterable<RunSummary> runs) {
+  RunSummary? current;
+  for (final run in runs) {
     if (current == null ||
-        (session.updatedAt ?? double.negativeInfinity) >
+        (run.updatedAt ?? double.negativeInfinity) >
             (current.updatedAt ?? double.negativeInfinity)) {
-      current = session;
+      current = run;
     }
   }
   return current;
@@ -213,20 +213,20 @@ List<MissionControlOption> missionControls({
       icon: Icons.pause_circle_outline,
       unavailable: when(
         current == 'working',
-        'Only a working Session can be interrupted.',
+        'Only a working Run can be interrupted.',
       ),
     ),
   ];
 }
 
-/// The Mission card's control menu. Closing a Session view never sends a control; only a
+/// The Mission card's control menu. Closing a Run view never sends a control; only a
 /// choice made here does.
 class MissionActionsMenu extends StatelessWidget {
   const MissionActionsMenu({
     required this.board,
     required this.operationId,
     required this.missionId,
-    required this.sessions,
+    required this.runs,
     this.state,
     super.key,
   });
@@ -234,9 +234,9 @@ class MissionActionsMenu extends StatelessWidget {
   final MissionBoard board;
   final String operationId;
   final String missionId;
-  final List<SessionSummary> sessions;
+  final List<RunSummary> runs;
 
-  /// The Mission's state when it has no Session to say (queued, failed before it started).
+  /// The Mission's state when it has no Run to say (queued, failed before it started).
   final String? state;
 
   /// Whether the Mission waits for a decision and this person may give it.
@@ -247,7 +247,7 @@ class MissionActionsMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final current = currentSession(sessions);
+    final current = currentRun(runs);
     final shown = current?.state ?? state;
     final busy = board.requestInProgress(operationId, missionId);
     final options = [
@@ -308,7 +308,7 @@ class MissionActionsMenu extends StatelessWidget {
   Future<void> _run(
     BuildContext context,
     String action,
-    SessionSummary? current,
+    RunSummary? current,
   ) async {
     if (action.startsWith('verify-')) {
       final messenger = ScaffoldMessenger.maybeOf(context);
@@ -339,7 +339,7 @@ class MissionActionsMenu extends StatelessWidget {
         action: action,
         agent: request.agent,
         message: request.message,
-        sessionId: action == 'interrupt' ? current?.sessionId : null,
+        runId: action == 'interrupt' ? current?.runId : null,
       );
       messenger?.showSnackBar(SnackBar(content: Text(status.describe())));
     } on StateError catch (error) {
@@ -385,7 +385,7 @@ class _ControlDialogState extends State<_ControlDialog> {
     final (title, body, confirm) = switch (widget.action) {
       'cancel' => (
         'Cancel Mission ${widget.missionId}?',
-        'Its live Session stops and the Mission is abandoned. Its safe house keeps the work.',
+        'Its live Run stops and the Mission is abandoned. Its safe house keeps the work.',
         'Cancel Mission',
       ),
       'retry' => (
@@ -395,11 +395,11 @@ class _ControlDialogState extends State<_ControlDialog> {
       ),
       'resume' => (
         'Resume Mission ${widget.missionId}?',
-        'The Mission resumes now on its provider Session.',
+        'The Mission resumes now on its provider Run.',
         'Resume',
       ),
       _ => (
-        'Interrupt the Session?',
+        'Interrupt the Run?',
         'The current turn stops. The Mission waits, blocked, until it is resumed.',
         'Interrupt',
       ),

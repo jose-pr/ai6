@@ -483,7 +483,7 @@ impl CableStore for SqlRegistry {
     fn cable_inbox(
         &self,
         agent: &str,
-        session_id: Option<&str>,
+        run_id: Option<&str>,
         limit: usize,
         now: Option<f64>,
     ) -> io::Result<Vec<Cable>> {
@@ -501,8 +501,8 @@ impl CableStore for SqlRegistry {
                 cable.recipients().iter().any(|recipient| {
                     recipient.agent() == agent
                         && recipient
-                            .session_id()
-                            .is_none_or(|target| Some(target) == session_id)
+                            .run_id()
+                            .is_none_or(|target| Some(target) == run_id)
                         && matches!(
                             recipient.state(),
                             CableState::Queued | CableState::Delivered
@@ -567,7 +567,7 @@ impl CableStore for SqlRegistry {
         &self,
         cable_id: &str,
         agent: &str,
-        session_id: Option<&str>,
+        run_id: Option<&str>,
         state: CableState,
         taken_by: Option<&str>,
         now: Option<f64>,
@@ -584,7 +584,7 @@ impl CableStore for SqlRegistry {
                 state
             };
             let Some(updated) = cable
-                .with_recipient_taken(agent, session_id, next_state, taken_by)
+                .with_recipient_taken(agent, run_id, next_state, taken_by)
                 .map_err(cable_error)?
             else {
                 return Ok(None);
@@ -1014,7 +1014,7 @@ impl UsageStore for SqlRegistry {
         &self,
         operation: Option<&str>,
         mission: &str,
-        session: &str,
+        run: &str,
         delta: &UsageTotals,
         now: i64,
     ) -> io::Result<MissionUsage> {
@@ -1027,7 +1027,7 @@ impl UsageStore for SqlRegistry {
                 Some(row) => parse_ledger(row.text(0)?.as_bytes(), &self.limits.usage)?,
                 None => MissionUsage::default(),
             };
-            add_usage(&mut usage, session, delta, now, &self.limits.usage);
+            add_usage(&mut usage, run, delta, now, &self.limits.usage);
             tx.execute(
                 "INSERT INTO ai6_usage (operation, mission, ledger, revision) VALUES ($1, $2, $3, $4) \
                  ON CONFLICT (operation, mission) DO UPDATE SET ledger = excluded.ledger, \

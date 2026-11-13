@@ -4,7 +4,7 @@
 //! read, so a read out holds from the next call. A Mission the caller may not see answers as a
 //! Mission that does not exist. What a call returns from another Operation is written to the
 //! audit log before it is returned, and a failed write refuses the call; a brief or a product
-//! marks the Session exposed, since another Operation's text is outside text.
+//! marks the Run exposed, since another Operation's text is outside text.
 
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -27,7 +27,7 @@ const READ_ACTION: &str = "compartment.read";
 /// The audit action of a proposal through a compartment.
 pub(super) const PROPOSE_ACTION: &str = "mission.propose";
 
-/// Who is calling: the Session as the Station started it. No part of it comes from the request.
+/// Who is calling: the Run as the Station started it. No part of it comes from the request.
 #[derive(Clone)]
 pub(super) struct Reader {
     pub(super) agent: String,
@@ -60,7 +60,7 @@ impl CableCompartments for CableAnswers {
     }
 }
 
-/// A Session's way to read other Operations' work.
+/// A Run's way to read other Operations' work.
 #[derive(Clone)]
 pub(super) struct CompartmentDesk {
     state: DaemonState,
@@ -94,7 +94,7 @@ impl CompartmentDesk {
         Ok((state, compiled, principal))
     }
 
-    /// Whether the Session holds any compartment now, which is what lists the tools.
+    /// Whether the Run holds any compartment now, which is what lists the tools.
     pub(super) fn holds_any(&self, reader: &Reader) -> bool {
         self.now(reader)
             .is_ok_and(|(_, compiled, principal)| !compiled.held(&principal).is_empty())
@@ -133,7 +133,7 @@ impl CompartmentDesk {
         Some(compartment.to_owned())
     }
 
-    /// The compartments the Session holds now: IDs only, and a description, which is
+    /// The compartments the Run holds now: IDs only, and a description, which is
     /// configuration rather than outside text.
     pub(super) fn compartments(&self, reader: &Reader) -> Result<Value, String> {
         let (_, compiled, principal) = self.now(reader)?;
@@ -284,9 +284,9 @@ impl CompartmentDesk {
         }
     }
 
-    /// Marks the Session exposed by `operation`'s text, before the caller is given it.
+    /// Marks the Run exposed by `operation`'s text, before the caller is given it.
     fn mark_exposed(state: &DaemonState, reader: &Reader, operation: &str) {
-        let limits = &state.intake.limits().sessions;
+        let limits = &state.intake.limits().runs;
         reader.exposure.mark(
             &product_source(operation, limits.exposure_source_bytes),
             state.clock.now() as f64,

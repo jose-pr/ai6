@@ -31,7 +31,7 @@ Map<String, Object?> account(
     for (final mission in missions)
       {'station_id': 'station-alpha', 'mission_id': mission, 'since': 1.0},
   ],
-  'other_sessions': others,
+  'other_runs': others,
   'windows': [
     if (used != null)
       {
@@ -176,14 +176,14 @@ void main() {
     expect(find.text('Operation L'), findsNothing);
     expect(find.text('team/alpha'), findsOneWidget);
     expect(
-      find.text('2/2 Sessions · five hour 42.5% · 1200 tokens today'),
+      find.text('2/2 Runs · five hour 42.5% · 1200 tokens today'),
       findsOneWidget,
     );
     expect(find.text('Used by'), findsOneWidget);
     expect(find.text('Mission mission-1'), findsOneWidget);
     expect(
       find.textContaining(
-        '0 Sessions · five hour (opus) 100.0% · 0 tokens today · Limited, back in ',
+        '0 Runs · five hour (opus) 100.0% · 0 tokens today · Limited, back in ',
       ),
       findsOneWidget,
       reason: 'a window names the models it covers',

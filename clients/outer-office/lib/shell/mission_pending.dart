@@ -4,7 +4,7 @@ import '../main.dart';
 import '../theme/oo_tokens.dart';
 import 'oo_freshness.dart';
 
-/// Where a Mission with no Session stands, in words: what it is waiting for or retrying, and
+/// Where a Mission with no Run stands, in words: what it is waiting for or retrying, and
 /// why, as the Registry and its Station said. [compact] is one line of each, for a table cell.
 class MissionPendingNote extends StatelessWidget {
   const MissionPendingNote({

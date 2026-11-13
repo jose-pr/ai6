@@ -12,7 +12,7 @@ use guatiao::{FromValue, ToValue};
 
 use crate::directorates::q::safehouse::{
     Change, ChangeLog, CheckpointSpec, SafeHouseCheckpoint, SafeHouseDiff, SafeHouseExports,
-    SafeHouseInfo, SafeHouseProvider, SafeHouseReport, SafeHouseSession, SafeHouseSpec,
+    SafeHouseInfo, SafeHouseProvider, SafeHouseReport, SafeHouseRun, SafeHouseSpec,
 };
 
 /// A rejected safe-house operation.
@@ -28,10 +28,10 @@ impl std::fmt::Display for SafeHouseError {
 
 impl std::error::Error for SafeHouseError {}
 
-/// A Mission's open safe house: a provider session and what it reported when opened.
+/// A Mission's open safe house: a provider run and what it reported when opened.
 #[derive(Clone)]
 pub struct SafeHouse {
-    session: Arc<Object<dyn SafeHouseSession>>,
+    run: Arc<Object<dyn SafeHouseRun>>,
     info: SafeHouseInfo,
 }
 
@@ -51,10 +51,10 @@ impl SafeHouse {
         spec: &SafeHouseSpec,
     ) -> Result<Self, SafeHouseError> {
         let spec = spec.to_value().map_err(fail)?;
-        let session = provider.open(&spec).map_err(fail)?;
-        let info = SafeHouseInfo::from_value(&session.info().map_err(fail)?).map_err(fail)?;
+        let run = provider.open(&spec).map_err(fail)?;
+        let info = SafeHouseInfo::from_value(&run.info().map_err(fail)?).map_err(fail)?;
         Ok(Self {
-            session: Arc::new(session),
+            run: Arc::new(run),
             info,
         })
     }
@@ -87,19 +87,19 @@ impl SafeHouse {
 
     /// The changes made since the base, newest first; empty without history.
     pub fn changes(&self) -> Result<Vec<Change>, SafeHouseError> {
-        let log = self.session.changes().map_err(fail)?;
+        let log = self.run.changes().map_err(fail)?;
         Ok(ChangeLog::from_value(&log).map_err(fail)?.changes)
     }
 
     /// The change since the base, cut to `bytes`.
     pub fn diff(&self, bytes: crate::bounds::Limit) -> Result<SafeHouseDiff, SafeHouseError> {
-        let diff = self.session.diff(bytes.or_max() as u64).map_err(fail)?;
+        let diff = self.run.diff(bytes.or_max() as u64).map_err(fail)?;
         SafeHouseDiff::from_value(&diff).map_err(fail)
     }
 
     /// Removes an untouched isolated safe house and keeps one that holds work.
     pub fn finish(&self) -> Result<SafeHouseReport, SafeHouseError> {
-        let report = self.session.finish().map_err(fail)?;
+        let report = self.run.finish().map_err(fail)?;
         SafeHouseReport::from_value(&report).map_err(fail)
     }
 
@@ -107,14 +107,14 @@ impl SafeHouse {
     /// directory as it is.
     pub fn checkpoint(&self, spec: &CheckpointSpec) -> Result<SafeHouseCheckpoint, SafeHouseError> {
         let spec = spec.to_value().map_err(fail)?;
-        let saved = self.session.checkpoint(&spec).map_err(fail)?;
+        let saved = self.run.checkpoint(&spec).map_err(fail)?;
         SafeHouseCheckpoint::from_value(&saved).map_err(fail)
     }
 
     /// What of the work exists only here; `None` when the provider cannot tell, which a
     /// caller reads as all of it.
     pub fn exports(&self) -> Result<Option<SafeHouseExports>, SafeHouseError> {
-        match self.session.exports() {
+        match self.run.exports() {
             Ok(exports) => SafeHouseExports::from_value(&exports)
                 .map(Some)
                 .map_err(fail),
@@ -125,7 +125,7 @@ impl SafeHouse {
 
     /// Removes an isolated safe house whatever it holds, through its provider.
     pub fn discard(&self) -> Result<(), SafeHouseError> {
-        self.session.discard().map_err(fail)
+        self.run.discard().map_err(fail)
     }
 
     /// Describes the safe house while it is still in use.
@@ -228,9 +228,9 @@ mod tests {
     }
 
     impl SafeHouseProvider for Stub {
-        fn open(&self, spec: &Value) -> Result<Object<dyn SafeHouseSession>, ProviderError> {
+        fn open(&self, spec: &Value) -> Result<Object<dyn SafeHouseRun>, ProviderError> {
             let spec = SafeHouseSpec::from_value(spec).unwrap();
-            Ok(StubSession {
+            Ok(StubRun {
                 info: SafeHouseInfo {
                     path: spec.source,
                     branch: None,
@@ -243,11 +243,11 @@ mod tests {
         }
     }
 
-    struct StubSession {
+    struct StubRun {
         info: SafeHouseInfo,
     }
 
-    impl SafeHouseSession for StubSession {
+    impl SafeHouseRun for StubRun {
         fn info(&self) -> Result<Value, ProviderError> {
             Ok(self.info.to_value().unwrap())
         }
@@ -295,7 +295,7 @@ mod tests {
     }
 
     #[test]
-    fn the_host_reads_a_provider_session_through_the_kind() {
+    fn the_host_reads_a_provider_id_through_the_kind() {
         let house = SafeHouse::open(&Stub { history: true }, &spec(true)).unwrap();
         assert_eq!(house.path(), Path::new("/work"));
         assert_eq!(house.base(), Some("base"));

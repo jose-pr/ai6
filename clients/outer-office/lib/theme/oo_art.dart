@@ -50,13 +50,13 @@ class OoArt {
   /// What each picture was last chosen as, so a window made smaller fetches nothing new.
   static final _chosen = <OoArt, OoArtFile>{};
 
-  /// Forgets the choices, for a test that starts a new session.
+  /// Forgets the choices, for a test that starts a new run.
   @visibleForTesting
   static void forget() => _chosen.clear();
 
   /// The file for a box of [box] physical pixels: the smallest that covers it, by width or by
   /// height at the file's aspect (a phone's box is decided by height), else the largest within
-  /// [maxWidth]. Once a larger file was chosen it stays for this session.
+  /// [maxWidth]. Once a larger file was chosen it stays for this run.
   OoArtFile pick(Size box, {int? maxWidth}) {
     final cap = maxWidth ?? OoArtLimits.current.maxWidth;
     final allowed = files.where((file) => file.width <= cap).toList();

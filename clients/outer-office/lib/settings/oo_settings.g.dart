@@ -17,7 +17,7 @@ abstract final class OoDefaults {
   static const chatRetryMaxDelay = Duration(seconds: 16);
   static const routesTextBytes = 128;
   static const artMaxWidth = 3840;
-  static const refreshSessions = Duration(seconds: 3);
+  static const refreshRuns = Duration(seconds: 3);
   static const refreshOverview = Duration(seconds: 10);
   static const refreshTimeline = Duration(seconds: 10);
   static const refreshPools = Duration(seconds: 15);
@@ -227,12 +227,12 @@ const ooSettingsJson = r'''
       "refresh": {
         "type": "object",
         "properties": {
-          "sessions": {
+          "runs": {
             "type": "number",
             "minimum": 0,
             "format": "seconds",
             "title": "The page shown",
-            "description": "What the page shown displays from the board of Sessions, Stations and Missions.",
+            "description": "What the page shown displays from the board of Runs, Stations and Missions.",
             "default": 3.0
           },
           "overview": {
@@ -264,7 +264,7 @@ const ooSettingsJson = r'''
             "minimum": 0,
             "format": "seconds",
             "title": "The bell and the search",
-            "description": "What the bell and the search need and the page shown does not display: Sessions, Stations, held briefs, green ink requests and Mission proposals; `0` reads them with every refresh.",
+            "description": "What the bell and the search need and the page shown does not display: Runs, Stations, held briefs, green ink requests and Mission proposals; `0` reads them with every refresh.",
             "default": 15.0
           },
           "profile": {
@@ -287,7 +287,7 @@ const ooSettingsJson = r'''
             "type": "integer",
             "minimum": 1,
             "title": "Intervals before a Station is silent",
-            "description": "A Station that has not checked in for this many `sessions` intervals shows as silent.",
+            "description": "A Station that has not checked in for this many `runs` intervals shows as silent.",
             "default": 3
           },
           "renew_before": {
@@ -303,7 +303,7 @@ const ooSettingsJson = r'''
             "minimum": 1e-6,
             "format": "seconds",
             "title": "Retry a failed renewal after",
-            "description": "How soon a failed renewal is tried again when `sessions` is off; else it is tried again at `sessions`.",
+            "description": "How soon a failed renewal is tried again when `runs` is off; else it is tried again at `runs`.",
             "default": 30
           }
         },
@@ -311,7 +311,7 @@ const ooSettingsJson = r'''
         "title": "How often pages ask again",
         "description": "`[oo.refresh]`: how often each page asks again; `0` turns that refresh off.",
         "default": {
-          "sessions": 3.0,
+          "runs": 3.0,
           "overview": 10.0,
           "timeline": 10.0,
           "pools": 15.0,
@@ -439,7 +439,7 @@ const ooSettingsJson = r'''
         },
         "additionalProperties": false,
         "title": "The live terminal",
-        "description": "`[oo.terminal]`: the live Session terminal.",
+        "description": "`[oo.terminal]`: the live Run terminal.",
         "default": {
           "scrollback_lines": 10000,
           "connect_timeout": 10,

@@ -1,16 +1,16 @@
 //! A person's verdict on a Mission's outcome: the latest attempt that ended done or held is marked
 //! confirmed, disputed or failed verification, under `mission.verify`.
 //!
-//! The scorecard reads it from the Session record; a Station settles a held Mission by it. A
+//! The scorecard reads it from the Run record; a Station settles a held Mission by it. A
 //! verdict is audited with its word and never its note, and goes on the Operation's timeline.
 //!
-//! A Mission whose Session ended done is `verifying`, and nothing but a decision settles it: the
+//! A Mission whose Run ended done is `verifying`, and nothing but a decision settles it: the
 //! same action asks the Station to probe what it was to deliver (`probe`) and decides it (`verify`:
 //! done, redispatch as the next attempt, or failed), each with its reason.
 
 use ai6::directorates::registry::decisions::{self, VerifyingDecision};
 use ai6::{
-    AuditRecord, MissionVerdict, OutcomeVerdict, SessionError, SessionRecord, TimelineEvent,
+    AuditRecord, MissionVerdict, OutcomeVerdict, RunError, RunRecord, TimelineEvent,
 };
 use ai6_diptel::OperationId;
 use axum::Json;
@@ -44,18 +44,18 @@ pub struct GivenVerdict {
     pub mission_id: String,
     /// The attempt it is on.
     pub attempt: u32,
-    /// AI6's Session ID of that attempt.
-    pub session_id: String,
+    /// AI6's Run ID of that attempt.
+    pub run_id: String,
     /// What was found, by whom and when.
     #[serde(flatten)]
     pub verdict: MissionVerdict,
 }
 
-fn refused_by(error: SessionError) -> Refused {
+fn refused_by(error: RunError) -> Refused {
     match error {
-        SessionError::NotFound => ApiError::not_found().into(),
-        SessionError::Unsettled(_) => memories::refused(StatusCode::CONFLICT, error.to_string()),
-        SessionError::Io(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
+        RunError::NotFound => ApiError::not_found().into(),
+        RunError::Unsettled(_) => memories::refused(StatusCode::CONFLICT, error.to_string()),
+        RunError::Io(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
             memories::refused(StatusCode::BAD_REQUEST, error.to_string())
         }
         _ => ApiError::internal().into(),
@@ -100,7 +100,7 @@ pub(crate) async fn give(
     let store = registry.clone();
     let record = tokio::task::spawn_blocking(move || {
         // Audited first: a verdict that cannot be audited is not given.
-        check_settled(&store.latest_session(&uid)?, &key)?;
+        check_settled(&store.latest_run(&uid)?, &key)?;
         store.record_audit(&audit)?;
         store.record_verdict(&key, &uid, &recorded)
     })
@@ -109,7 +109,7 @@ pub(crate) async fn give(
     .map_err(refused_by)?;
     let event = TimelineEvent::new("verdict", word.as_str(), operation.to_string(), at)
         .mission(record.mission_id.clone())
-        .session(record.session_id.clone())
+        .run(record.run_id.clone())
         .actor(person.id);
     // A timeline entry that fails is left out; the audit record and the verdict stand.
     let _ = tokio::task::spawn_blocking(move || registry.record_event(&event)).await;
@@ -117,7 +117,7 @@ pub(crate) async fn give(
         operation_id: operation.to_string(),
         mission_id: record.mission_id,
         attempt: record.attempt,
-        session_id: record.session_id,
+        run_id: record.run_id,
         verdict,
     }))
 }
@@ -143,8 +143,8 @@ pub struct GivenDecision {
     pub mission_id: String,
     /// The attempt it is on.
     pub attempt: u32,
-    /// AI6's Session ID of that attempt.
-    pub session_id: String,
+    /// AI6's Run ID of that attempt.
+    pub run_id: String,
     /// `done`, `redispatch` or `failed`.
     pub decision: String,
     /// Why, by whom and when.
@@ -201,7 +201,7 @@ pub(crate) async fn verify(
         operation_id: operation.to_string(),
         mission_id: record.mission_id,
         attempt: record.attempt,
-        session_id: record.session_id,
+        run_id: record.run_id,
         decision: request.decision,
         verdict,
     }))
@@ -217,8 +217,8 @@ pub struct ProbeRequested {
     pub mission_id: String,
     /// The attempt whose deliverables will be probed.
     pub attempt: u32,
-    /// AI6's Session ID of that attempt.
-    pub session_id: String,
+    /// AI6's Run ID of that attempt.
+    pub run_id: String,
     /// When it was asked for, as Unix seconds.
     pub requested_at: f64,
 }
@@ -250,7 +250,7 @@ pub(crate) async fn probe(
     };
     let key = operation.to_string();
     let record = tokio::task::spawn_blocking(move || {
-        decisions::check_verifying(&registry.latest_session(&uid)?, &key)?;
+        decisions::check_verifying(&registry.latest_run(&uid)?, &key)?;
         registry.record_audit(&audit)?;
         registry.request_probe(&key, &uid, at)
     })
@@ -261,16 +261,16 @@ pub(crate) async fn probe(
         operation_id: operation.to_string(),
         mission_id: record.mission_id,
         attempt: record.attempt,
-        session_id: record.session_id,
+        run_id: record.run_id,
         requested_at: at,
     }))
 }
 
 /// Why `latest`, the latest attempt at a Mission, cannot take a verdict in `operation`.
-fn check_settled(latest: &Option<SessionRecord>, operation: &str) -> Result<(), SessionError> {
+fn check_settled(latest: &Option<RunRecord>, operation: &str) -> Result<(), RunError> {
     match latest {
         Some(record) if record.operation.as_deref() == Some(operation) => record.takes_verdict(),
-        _ => Err(SessionError::NotFound),
+        _ => Err(RunError::NotFound),
     }
 }
 
@@ -280,7 +280,7 @@ mod tests {
 
     use ai6::directorates::m::scorecard::{self, Judgment, ScorecardPolicy};
     use ai6::directorates::registry::backend::*;
-    use ai6::{NewSession, SessionLaunch, SessionResult, SessionUpdate};
+    use ai6::{NewRun, RunLaunch, RunResult, RunUpdate};
 
     use crate::controls::tests::{Served, served_with};
 
@@ -305,11 +305,11 @@ mod tests {
     fn ended(served: &Served, mission: &str, state: &str) {
         let opened = served
             .registry
-            .open_session(
-                NewSession::new(format!("{mission}-1"), mission, "worker")
+            .open_run(
+                NewRun::new(format!("{mission}-1"), mission, "worker")
                     .with_operation("G")
                     .with_launch(
-                        SessionLaunch::new("claude", "pipe", "/w")
+                        RunLaunch::new("claude", "pipe", "/w")
                             .with_agent(Some("007".to_owned())),
                     ),
                 Duration::from_secs(60),
@@ -317,11 +317,11 @@ mod tests {
             .unwrap();
         served
             .registry
-            .update_session(
-                &opened.session_id,
+            .update_run(
+                &opened.run_id,
                 "worker",
                 opened.fence,
-                SessionUpdate::default().result(SessionResult::new(state)),
+                RunUpdate::default().result(RunResult::new(state)),
             )
             .unwrap();
     }
@@ -427,7 +427,7 @@ mod tests {
         assert_eq!(
             served
                 .registry
-                .session("m-done-1")
+                .run("m-done-1")
                 .unwrap()
                 .unwrap()
                 .verdict,
@@ -545,7 +545,7 @@ mod tests {
         assert_eq!(
             served
                 .registry
-                .session("m-verifying-1")
+                .run("m-verifying-1")
                 .unwrap()
                 .unwrap()
                 .verdict,
@@ -575,7 +575,7 @@ mod tests {
 
         let verdict = served
             .registry
-            .session("m-verifying-1")
+            .run("m-verifying-1")
             .unwrap()
             .unwrap()
             .verdict
@@ -649,8 +649,8 @@ mod tests {
         for operation in ["R", "N"] {
             let opened = served
                 .registry
-                .open_session(
-                    NewSession::new(
+                .open_run(
+                    NewRun::new(
                         format!("{operation}-1"),
                         format!("{operation}-mission"),
                         "w",
@@ -661,11 +661,11 @@ mod tests {
                 .unwrap();
             served
                 .registry
-                .update_session(
-                    &opened.session_id,
+                .update_run(
+                    &opened.run_id,
                     "w",
                     opened.fence,
-                    SessionUpdate::default().result(SessionResult::new("verifying")),
+                    RunUpdate::default().result(RunResult::new("verifying")),
                 )
                 .unwrap();
         }
@@ -702,7 +702,7 @@ mod tests {
         assert_eq!(
             served
                 .registry
-                .session("m-verifying-1")
+                .run("m-verifying-1")
                 .unwrap()
                 .unwrap()
                 .probe_requested,
@@ -711,14 +711,14 @@ mod tests {
 
         let asked = act(&served, &served.operator, "m-verifying", "probe", None).await;
         assert_eq!(asked.status(), 200);
-        let on_board = served.registry.session("record-g").unwrap().unwrap();
+        let on_board = served.registry.run("record-g").unwrap().unwrap();
         served
             .registry
-            .update_session(
+            .update_run(
                 "record-g",
                 "worker",
                 on_board.fence,
-                SessionUpdate::default().result(SessionResult::new("verifying")),
+                RunUpdate::default().result(RunResult::new("verifying")),
             )
             .unwrap();
         let board = act(&served, &served.operator, "mission-g", "probe", None).await;
@@ -727,7 +727,7 @@ mod tests {
         assert_eq!(asked["attempt"], 1);
         let requested = served
             .registry
-            .session("m-verifying-1")
+            .run("m-verifying-1")
             .unwrap()
             .unwrap()
             .probe_requested;
@@ -742,14 +742,14 @@ mod tests {
         );
 
         // The Station's findings appear in the detail of a Mission on the board.
-        let opened = served.registry.session("record-g").unwrap().unwrap();
+        let opened = served.registry.run("record-g").unwrap().unwrap();
         served
             .registry
-            .update_session(
+            .update_run(
                 "record-g",
                 "worker",
                 opened.fence,
-                SessionUpdate::default()
+                RunUpdate::default()
                     .deliverables(vec![
                         ai6::directorates::m::deliverables::Deliverable::parse(
                             "branch:never-pushed",
@@ -798,14 +798,14 @@ mod tests {
     #[tokio::test]
     async fn the_board_shows_a_verdict_and_the_detail_the_final_report() {
         let served = served_with(ROLES).await;
-        let opened = served.registry.session("record-g").unwrap().unwrap();
+        let opened = served.registry.run("record-g").unwrap().unwrap();
         served
             .registry
-            .update_session(
+            .update_run(
                 "record-g",
                 "worker",
                 opened.fence,
-                SessionUpdate::default().result(SessionResult::new("done")),
+                RunUpdate::default().result(RunResult::new("done")),
             )
             .unwrap();
         served

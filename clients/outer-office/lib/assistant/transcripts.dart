@@ -7,14 +7,14 @@ import 'export.dart' as exporting;
 
 const _mono = TextStyle(fontFamily: 'monospace');
 
-/// What the app reads of what was said and done in a Session: a Mission's Session context,
+/// What the app reads of what was said and done in a Run: a Mission's Run context,
 /// Moneypenny's conversation log and her harnesses' contexts. Universal Exports refuses what
 /// the person may not read; another person's conversation needs `audit.read` and
-/// `session.context`, and each such read is audited there.
+/// `run.context`, and each such read is audited there.
 abstract interface class TranscriptReads {
-  /// A Mission's Session's context: `{session, format, source, filed_at, cut_from?, bytes,
+  /// A Mission's Run's context: `{run, format, source, filed_at, cut_from?, bytes,
   /// content}`.
-  Future<Map<String, Object?>> sessionContext(String operation, String session);
+  Future<Map<String, Object?>> runContext(String operation, String run);
 
   /// A conversation's log: `{conversation, person, entries}`.
   Future<Map<String, Object?>> conversationLog(String conversation);
@@ -163,10 +163,10 @@ class ContextView extends StatelessWidget {
 
   Future<void> _download(BuildContext context) async {
     final messenger = ScaffoldMessenger.maybeOf(context);
-    final session = data['session'] as String? ?? 'session';
+    final run = data['run'] as String? ?? 'run';
     try {
       final where = await saveText(
-        'context-$session.jsonl',
+        'context-$run.jsonl',
         data['content'] as String? ?? '',
       );
       messenger?.showSnackBar(
@@ -200,7 +200,7 @@ class ContextView extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Session ${data['session'] ?? ''}',
+                    'Run ${data['run'] ?? ''}',
                     style: theme.textTheme.titleSmall,
                   ),
                   Text(source, style: theme.textTheme.bodySmall),
@@ -311,23 +311,23 @@ class _LoadedState<T> extends State<_Loaded<T>> {
   );
 }
 
-/// A Mission's Session's context, loaded from [reads].
-class SessionContextPanel extends StatelessWidget {
-  const SessionContextPanel({
+/// A Mission's Run's context, loaded from [reads].
+class RunContextPanel extends StatelessWidget {
+  const RunContextPanel({
     required this.reads,
     required this.operation,
-    required this.session,
+    required this.run,
     super.key,
   });
 
   final TranscriptReads reads;
   final String operation;
-  final String session;
+  final String run;
 
   @override
   Widget build(BuildContext context) => _Loaded<Map<String, Object?>>(
-    key: ValueKey('$operation/$session'),
-    load: () => reads.sessionContext(operation, session),
+    key: ValueKey('$operation/$run'),
+    load: () => reads.runContext(operation, run),
     builder: (context, loaded) => ListView(
       padding: const EdgeInsets.all(12),
       children: [ContextView(data: loaded)],
@@ -336,7 +336,7 @@ class SessionContextPanel extends StatelessWidget {
 }
 
 /// One conversation with Moneypenny as the log keeps it, every entry with the turn that ran
-/// it, and beside it the contexts of her harnesses' Sessions.
+/// it, and beside it the contexts of her harnesses' Runs.
 class ConversationLogPage extends StatelessWidget {
   const ConversationLogPage({
     required this.reads,
@@ -386,7 +386,7 @@ class ConversationLogPage extends StatelessWidget {
                       .toList();
               if (contexts.isEmpty) {
                 return const Center(
-                  child: Text('No Session context was filed for it.'),
+                  child: Text('No Run context was filed for it.'),
                 );
               }
               return ListView(
@@ -425,7 +425,7 @@ class _LogEntry extends StatelessWidget {
     final account = turn?['account'] as Map<String, dynamic>?;
     final ran = [
       if (turn?['station'] case final String station) 'Station $station',
-      if (turn?['session'] case final String session) 'Session $session',
+      if (turn?['run'] case final String run) 'Run $run',
       if (route != null)
         'route ${route['handler']}'
             '${route['model'] == null ? '' : ' ${route['model']}'}'
@@ -472,7 +472,7 @@ class _LogEntry extends StatelessWidget {
 }
 
 /// Conversations with Moneypenny in the log: the person's own, or, for one who holds
-/// `audit.read` and `session.context`, another person's or everyone's.
+/// `audit.read` and `run.context`, another person's or everyone's.
 class ConversationsPage extends StatefulWidget {
   const ConversationsPage({required this.reads, super.key});
 

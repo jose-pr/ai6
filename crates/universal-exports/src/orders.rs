@@ -220,12 +220,12 @@ fn settle_claim(
     let Some(brief) = registry.read_claimed(key)? else {
         return Ok(Err(refused("the Mission has no claim")));
     };
-    let session = registry
-        .latest_session(key)?
-        .and_then(|record| record.provider_session_id);
+    let run = registry
+        .latest_run(key)?
+        .and_then(|record| record.provider_id);
     let outcome = serde_json::json!({
         "state": "failed",
-        "session_id": session,
+        "run_id": run,
         "mission_id": key,
         "reason": reason,
         "station": lease.station(),

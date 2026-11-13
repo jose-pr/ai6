@@ -33,7 +33,7 @@ origin leaves the public roots alone.
 - `ai6ctl agents --operation <OPERATION_ID>` prints `GET /v1/user/operations/{id}/agents`
   as tab-separated `AGENT POSTED DONE FAILED BLOWN ABANDONED STALLED LOST QUARANTINED BUDGET_STOPS
   GREEN_INK_REJECTED LAST_MISSION_UNIX MODEL RETIREMENT CLEARANCE PROMOTION HOLDS` (one header line):
-  counts in that Operation (`LOST`: Sessions lost with their Station or runner, never
+  counts in that Operation (`LOST`: Runs lost with their Station or runner, never
   failures), `QUARANTINED` adding quarantines of every Operation, `LAST_MISSION_UNIX` `-`
   before any, `MODEL` the current occupant (`default` for the handler's own, `-` before any
   record), `RETIREMENT` `status:YYYY-MM-DD` (`retiring`, `desk_duty`, `retired`) or `-`,
@@ -55,7 +55,7 @@ origin leaves the public roots alone.
   WAITING_ON_PERSON BUDGET_STOP PARKED LOST HANDED_OFF WITHDRAWN RUNNING UNRECORDED`) and
   `REFUSED_TOOLS TOKENS COST_USD WALL_SECS`: per Agent (`ROUTE` `all`), per route (`HANDLER MODEL
   POOL`) and per model (`AGENT` `(model)`). `SAMPLE` is `SMALL` under the Operation's line. `--show`
-  adds one line per attempt behind that judgment (`MISSION`, `SESSION`). Needs `agent.read` and
+  adds one line per attempt behind that judgment (`MISSION`, `RUN`). Needs `agent.read` and
   `roster.read`.
 - `ai6ctl agents lower <AGENT> <CLEARANCE> --reason <TEXT> [--expires-in-secs N] --operation
   <ID>` puts `.../agents/{agent}/clearance` and prints `AGENT: held at CLEARANCE in ID`;
@@ -78,16 +78,16 @@ origin leaves the public roots alone.
   `.../public` and prints `ID: public at URL` or `ID: no public link`; `pages rm <ID>` deletes. The ID is encoded as one path segment; 404 reads "no such page of yours" (another
   person's page too); a refusal with a reason prints the gateway's reason.
 - `ai6ctl pools --operation <OPERATION_ID>` prints `GET /v1/user/operations/{id}/pools`
-  as tab-separated `POOL ACCOUNT KIND SESSIONS WINDOWS READ_UNIX LIMITED_UNTIL_UNIX TOKENS_TODAY` (`READ_UNIX`: when the newest window was last read):
-  `SESSIONS` is `active/max_concurrent` (or the count without a limit), `WINDOWS`
+  as tab-separated `POOL ACCOUNT KIND RUNS WINDOWS READ_UNIX LIMITED_UNTIL_UNIX TOKENS_TODAY` (`READ_UNIX`: when the newest window was last read):
+  `RUNS` is `active/max_concurrent` (or the count without a limit), `WINDOWS`
   `name=42.5%` per window (`name=?` without a figure) or `-`, `LIMITED_UNTIL_UNIX` `-`
-  unless in the future; `SESSIONS` counts other Operations' Sessions too. A refusal names
+  unless in the future; `RUNS` counts other Operations' Runs too. A refusal names
   `pool.read`.
 - `ai6ctl pools clear-limit <POOL> <ACCOUNT> --operation <OPERATION_ID>` posts
   `.../pools/{pool}/{account}/clear-limit` and prints `pool/account: limit cleared`; 403 names
   `pool.manage`, 404 an account not declared for the Operation.
 - `ai6ctl missions [--operation <ID> [--subtree]]` lists visible Missions as `STATION MISSION
-  SESSIONS NAME UID`: `MISSION` the handle (the ID when the gateway gives none), `NAME` the name
+  RUNS NAME UID`: `MISSION` the handle (the ID when the gateway gives none), `NAME` the name
   beside it (`-` before a Station published one; an issue's title, as data) and `UID` the
   Mission's ID; `--operation` asks the gateway for that Operation's (`GET
   /v1/missions?operation=`), and `--subtree` also for every Operation under it
@@ -144,19 +144,19 @@ origin leaves the public roots alone.
   NAME g,h` and `reset-password NAME` use `/v1/user/accounts`; a generated password is printed
   once as `password\t…`, to stdout only. Accounts are never deleted through the API.
 - `ai6ctl mission <MISSION_ID> [--operation <ID>]` shows a Mission (the `missions` row), its
-  runs (`RUN STATUS ROUTE`, `RUN` the run's handle, else its UID) and its provider Sessions
-  (`SESSION STATE REASON SEQUENCE EXPOSURE`; `REASON` is the lifecycle reason the Station
+  runs (`RUN STATUS ROUTE`, `RUN` the run's handle, else its UID) and its provider Runs
+  (`RUN STATE REASON SEQUENCE EXPOSURE`; `REASON` is the lifecycle reason the Station
   published, such as `permission-denied`, or `-`); `--operation` disambiguates a Mission ID
   used by several Operations.
-- `ai6ctl sessions [--operation <ID>] [--mission <ID>] [--state <STATE>]` filters the
+- `ai6ctl runs [--operation <ID>] [--mission <ID>] [--state <STATE>]` filters the
   authorized `GET /v1/board` response.
-- `ai6ctl session <SESSION_ID>` prints one provider Session.
+- `ai6ctl run <RUN_ID>` prints one provider Run.
 
-Session listings end with an `EXPOSURE` column: the untrusted input the Session read,
-comma separated, or `-`. A Session state is free text from the board and includes
+Run listings end with an `EXPOSURE` column: the untrusted input the Run read,
+comma separated, or `-`. A Run state is free text from the board and includes
 `queued`, `parked`, `quarantined` and `abandoned`.
 
-Mission lists include only Missions with a provider Session registered at the gateway.
+Mission lists include only Missions with a provider Run registered at the gateway.
 
 - `ai6ctl missions --compartment <ID>` keeps what that compartment covers;
   `ai6ctl missions products <MISSION_ID>` prints a Mission's outcome, CX report and refs.
@@ -214,7 +214,7 @@ A refusal prints the gateway's reason and exits 1.
 
 - `ai6ctl memories search [QUERY] [--scope person:ID|operation:ID|global]`: `ID SCOPE REVISION
   SOURCE SUMMARY`, best first, then `(N of TOTAL)` when cut; with no query, the newest of the scope.
-  SOURCE is who wrote it, with `(exposed: …)` when an exposed Session did.
+  SOURCE is who wrote it, with `(exposed: …)` when an exposed Run did.
 - `ai6ctl memories show <ID>`: the fields, then the content.
 - `ai6ctl memories add <SCOPE> --summary TEXT --content TEXT [--name N] [--compartments a,b]`,
   `edit <ID> --revision N --summary TEXT --content TEXT [--name N] [--compartments a,b]`: prints
@@ -230,7 +230,7 @@ Each control needs `mission.control` on the Mission's Operation. It posts
 `POST /v1/user/operations/{operation}/missions/{mission}/actions`, then polls the
 control's status route every `--poll-interval` (0.5 s) until the Station reports or `--wait` runs out.
 
-- `ai6ctl mission cancel <MISSION_ID>` stops the live Session, if any, and abandons the
+- `ai6ctl mission cancel <MISSION_ID>` stops the live Run, if any, and abandons the
   Mission; one no Station has taken yet is withdrawn, and one that already ended stays as it is, and
   the control comes back `applied`.
 - `ai6ctl mission retry <MISSION_ID> [--agent <CODENAME>]` queues a stalled or finished
@@ -253,12 +253,12 @@ control's status route every `--poll-interval` (0.5 s) until the Station reports
   prints `SLEEPER STATE`. Needs `mission.control`.
 - `ai6ctl mission resume <MISSION_ID> [--message <TEXT>]` resumes a parked, blocked or
   stalled Mission now, sending `--message` to the Agent.
-- `ai6ctl session interrupt <SESSION_ID>` stops the Session's current turn; it finds the
-  Session's Operation and Mission on the board and names the Session, so the request is
+- `ai6ctl run interrupt <RUN_ID>` stops the Run's current turn; it finds the
+  Run's Operation and Mission on the board and names the Run, so the request is
   refused (HTTP 409) if the Mission has moved on to another one.
 
 Shared options: `--operation <ID>` (Mission commands only; found from the board when
-omitted, and required for a Mission with no registered Session), `--idempotency-key
+omitted, and required for a Mission with no registered Run), `--idempotency-key
 <KEY>` (default: unique per invocation; repeating a key returns the first request's
 control) `--wait <SECONDS>` (default `10`; `0` returns once queued) and `--poll-interval <SECONDS>` (default `0.5`).
 
@@ -334,9 +334,9 @@ needs), a missing item or a rejected or expired control, `2` for invalid argumen
 
 - The only writes are the controls, green ink decisions and access and account changes above; no flag accepts the
   Station channel bearer or a terminal-attachment token.
-- `mission <ID>` and `session <ID>` still show; a Mission or Session literally named
+- `mission <ID>` and `run <ID>` still show; a Mission or Run literally named
   `cancel`, `retry`, `resume` or `interrupt` is shown with `ai6ctl missions` or
-  `ai6ctl sessions` instead.
+  `ai6ctl runs` instead.
 - A control that times out under `--wait` exits `0` with its open status; the Station may
   still apply it.
 - The access token is read only from the environment, never from an argument, so it

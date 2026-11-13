@@ -50,7 +50,7 @@ class MissionsPage extends StatefulWidget {
 }
 
 class _MissionsPageState extends State<MissionsPage> {
-  SessionSummary? _selectedWebSession;
+  RunSummary? _selectedWebRun;
 
   /// The route's Mission IDs the gateway was asked about because no Mission on the board goes
   /// by them, each with what it answered: a handle a Mission had before a rename still opens it.
@@ -137,11 +137,11 @@ class _MissionsPageState extends State<MissionsPage> {
         .withField('mission_id', mission.missionId),
   );
 
-  void _openSession(BuildContext context, SessionSummary session) {
+  void _openRun(BuildContext context, RunSummary run) {
     if (widget.desktopWindows) {
-      openSessionWindow(context, session, board);
+      openRunWindow(context, run, board);
     } else {
-      openSessionPage(context, session, board);
+      openRunPage(context, run, board);
     }
   }
 
@@ -155,12 +155,12 @@ class _MissionsPageState extends State<MissionsPage> {
     final missionId = route['mission_id'];
     // The page's width beside the labelled rail at the wide breakpoint.
     final beside = width >= OoBreakpoints.wide - OoRail.width - 1;
-    final showSessionPane = !widget.desktopWindows && beside;
+    final showRunPane = !widget.desktopWindows && beside;
     final listRoute = route.without('mission_id');
     final selected = missionId == null
         ? null
         : routeMissions(board, route).firstOrNull;
-    final queue = _queue(context, listRoute, showSessionPane, selected);
+    final queue = _queue(context, listRoute, showRunPane, selected);
     if (missionId != null &&
         selected == null &&
         !_asked.containsKey(missionId)) {
@@ -183,17 +183,17 @@ class _MissionsPageState extends State<MissionsPage> {
             mission: selected,
             pages: widget.pages,
             onRoute: widget.onRoute,
-            onOpenSession: (session) => _openSession(context, session),
+            onOpenRun: (run) => _openRun(context, run),
             onClose: () => widget.onRoute(route.without('mission_id')),
           );
     if (!beside) return detail ?? queue;
-    final session = _selectedWebSession;
-    final pane = session != null && showSessionPane
-        ? SessionDetailPane(
-            key: ValueKey(session.sessionId),
-            session: session,
+    final run = _selectedWebRun;
+    final pane = run != null && showRunPane
+        ? RunDetailPane(
+            key: ValueKey(run.runId),
+            run: run,
             board: board,
-            onClose: () => setState(() => _selectedWebSession = null),
+            onClose: () => setState(() => _selectedWebRun = null),
           )
         : detail;
     if (pane == null) return queue;
@@ -209,7 +209,7 @@ class _MissionsPageState extends State<MissionsPage> {
   Widget _queue(
     BuildContext context,
     OoRoute listRoute,
-    bool showSessionPane,
+    bool showRunPane,
     MissionGroup? open,
   ) {
     final inCompartment = listRoute['compartment'] == null
@@ -278,7 +278,7 @@ class _MissionsPageState extends State<MissionsPage> {
               onRetry: board.refresh,
             ),
           ),
-        if (board.loading && board.sessions.isEmpty)
+        if (board.loading && board.runs.isEmpty)
           const SliverFillRemaining(
             hasScrollBody: false,
             child: Center(child: CircularProgressIndicator()),
@@ -298,7 +298,7 @@ class _MissionsPageState extends State<MissionsPage> {
                   ? const []
                   : [
                       for (final operation
-                          in board.userSession?.operations ??
+                          in board.userRun?.operations ??
                               const <UserOperationAccess>[])
                         if (board.canCreateMission(operation.operationId))
                           operation.operationId,
@@ -347,9 +347,9 @@ class _MissionsPageState extends State<MissionsPage> {
                     mission.missionId,
                   ),
                   onDetails: () => _details(mission),
-                  onSelectSession: showSessionPane
-                      ? (session) =>
-                            setState(() => _selectedWebSession = session)
+                  onSelectRun: showRunPane
+                      ? (run) =>
+                            setState(() => _selectedWebRun = run)
                       : null,
                 );
               },
@@ -357,7 +357,7 @@ class _MissionsPageState extends State<MissionsPage> {
           ),
       ],
     );
-    // A wide queue may be a table; the cards show each Mission's Sessions, so they stay the
+    // A wide queue may be a table; the cards show each Mission's Runs, so they stay the
     // default, and a narrow queue always has them.
     return LayoutBuilder(
       builder: (context, box) => ValueListenableBuilder<bool>(

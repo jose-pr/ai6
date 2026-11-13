@@ -315,7 +315,7 @@ pub(crate) async fn rearm(
     .map_err(registry_error)?;
     let event = TimelineEvent::new("green_ink", "rearmed", operation.to_string(), now)
         .mission(reopened.mission.to_string())
-        .session(reopened.session.to_string())
+        .run(reopened.run.to_string())
         .actor(person.id)
         .detail("request", reopened.id.clone())
         .detail("step", reopened.scope.kind.clone())
@@ -669,7 +669,7 @@ pub(crate) async fn revoke_class(
 #[cfg(test)]
 mod tests {
     use ai6::directorates::registry::backend::*;
-    use ai6::{ActionScope, ApprovalStatus, MissionId, SessionId};
+    use ai6::{ActionScope, ApprovalStatus, MissionId, RunId};
 
     use crate::controls::tests::{Served, served_with};
 
@@ -701,7 +701,7 @@ mod tests {
         let request = ai6::ApprovalRequest::try_new(
             "G",
             MissionId::try_new("mission-g").unwrap(),
-            SessionId::try_new("session-g").unwrap(),
+            RunId::try_new("run-g").unwrap(),
             "007",
             ActionScope::try_new("push", "origin:refs/heads/main").unwrap(),
             "the release is green",
@@ -740,7 +740,7 @@ mod tests {
         let lapsed = ai6::ApprovalRequest::try_new(
             "G",
             MissionId::try_new("mission-g").unwrap(),
-            SessionId::try_new("session-g").unwrap(),
+            RunId::try_new("run-g").unwrap(),
             "007",
             ActionScope::try_new("push", "origin:refs/heads/main").unwrap(),
             "the release is green",

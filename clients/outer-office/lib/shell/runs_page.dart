@@ -12,33 +12,33 @@ import 'oo_freshness.dart';
 import 'oo_link.dart';
 import 'oo_shell.dart';
 
-/// The Sessions a Sessions [route] selects from the board, in its order: by Operation,
-/// Mission and Session unless it sorts, ties kept in that order.
-List<SessionSummary> routeSessions(MissionBoard board, OoRoute route) {
+/// The Runs a Runs [route] selects from the board, in its order: by Operation,
+/// Mission and Run unless it sorts, ties kept in that order.
+List<RunSummary> routeRuns(MissionBoard board, OoRoute route) {
   final text = route['text']?.toLowerCase();
-  bool matches(SessionSummary session) =>
+  bool matches(RunSummary run) =>
       (route['operation_id'] == null ||
-          session.operationId == route['operation_id']) &&
+          run.operationId == route['operation_id']) &&
       (route['state'] == null ||
-          (session.state ?? 'working') == route['state']) &&
+          (run.state ?? 'working') == route['state']) &&
       (route['station_id'] == null ||
-          session.stationId == route['station_id']) &&
-      (route['agent'] == null || session.agent == route['agent']) &&
+          run.stationId == route['station_id']) &&
+      (route['agent'] == null || run.agent == route['agent']) &&
       (text == null ||
           [
-            session.operationId,
-            session.missionId,
-            board.handleOf(session.operationId, session.missionId),
-            session.sessionId,
-            ?session.stationId,
-            ?session.agent,
+            run.operationId,
+            run.missionId,
+            board.handleOf(run.operationId, run.missionId),
+            run.runId,
+            ?run.stationId,
+            ?run.agent,
           ].any((item) => item.toLowerCase().contains(text)));
 
-  int byBoard(SessionSummary left, SessionSummary right) {
+  int byBoard(RunSummary left, RunSummary right) {
     for (final (a, b) in [
       (left.operationId, right.operationId),
       (left.missionId, right.missionId),
-      (left.sessionId, right.sessionId),
+      (left.runId, right.runId),
     ]) {
       final order = a.compareTo(b);
       if (order != 0) return order;
@@ -46,29 +46,29 @@ List<SessionSummary> routeSessions(MissionBoard board, OoRoute route) {
     return 0;
   }
 
-  // The board holds no creation time: a Session's one update time stands in for it.
-  final Comparable<Object>? Function(SessionSummary)? key =
+  // The board holds no creation time: a Run's one update time stands in for it.
+  final Comparable<Object>? Function(RunSummary)? key =
       switch (route['sort']) {
-        'updated' || 'created' => (session) => session.updatedAt ?? 0,
-        'state' => (session) => boardStates.indexOf(session.state ?? 'working'),
-        'operation' => (session) => session.operationId,
-        'mission' => (session) => session.missionId,
-        'session' => (session) => session.sessionId,
+        'updated' || 'created' => (run) => run.updatedAt ?? 0,
+        'state' => (run) => boardStates.indexOf(run.state ?? 'working'),
+        'operation' => (run) => run.operationId,
+        'mission' => (run) => run.missionId,
+        'run' => (run) => run.runId,
         _ => null,
       };
-  final sessions = board.sessions.where(matches).toList()
+  final runs = board.runs.where(matches).toList()
     ..sort((left, right) {
       final order = key == null ? 0 : key(left)!.compareTo(key(right)!);
       return order != 0 ? order : byBoard(left, right);
     });
-  return route['order'] == 'desc' ? sessions.reversed.toList() : sessions;
+  return route['order'] == 'desc' ? runs.reversed.toList() : runs;
 }
 
-/// Every Session on the board, filtered and sorted by the route, in a table; a row opens the
-/// Session. The route's `session_id` shows that Session's facts above the table, read-only.
+/// Every Run on the board, filtered and sorted by the route, in a table; a row opens the
+/// Run. The route's `run_id` shows that Run's facts above the table, read-only.
 /// On a phone the table is a list of rows, in the same order.
-class SessionsPage extends StatelessWidget {
-  const SessionsPage({
+class RunsPage extends StatelessWidget {
+  const RunsPage({
     required this.board,
     required this.route,
     required this.onRoute,
@@ -79,7 +79,7 @@ class SessionsPage extends StatelessWidget {
   final MissionBoard board;
   final OoRoute route;
   final ValueChanged<OoRoute> onRoute;
-  final ValueChanged<SessionSummary> onOpen;
+  final ValueChanged<RunSummary> onOpen;
 
   // The width the page has, not the window's: a docked chat takes part of it.
   @override
@@ -88,7 +88,7 @@ class SessionsPage extends StatelessWidget {
   );
 
   Widget _page(double width) {
-    if (board.sessions.isEmpty) {
+    if (board.runs.isEmpty) {
       if (boardProblem(board, BoardSource.board) case final problem?) {
         return problem;
       }
@@ -96,18 +96,18 @@ class SessionsPage extends StatelessWidget {
         return const Center(child: CircularProgressIndicator());
       }
       return const OoEmptyState(
-        icon: OoIconName.sessions,
+        icon: OoIconName.runs,
         backdrop: true,
-        title: 'No Sessions yet',
-        body: 'A Session is one run of an Agent on a Mission. They show here once a Mission starts.',
+        title: 'No Runs yet',
+        body: 'A Run is one run of an Agent on a Mission. They show here once a Mission starts.',
         link: ('Go to Missions', OoRoute(OoPage.missions)),
       );
     }
-    final sessions = routeSessions(board, route);
-    final selectedId = route['session_id'];
+    final runs = routeRuns(board, route);
+    final selectedId = route['run_id'];
     final selected = selectedId == null
         ? null
-        : board.sessions.where((session) => session.sessionId == selectedId);
+        : board.runs.where((run) => run.runId == selectedId);
     final controls = Padding(
       padding: const EdgeInsets.fromLTRB(24, 12, 12, 0),
       child: Row(
@@ -128,68 +128,68 @@ class SessionsPage extends StatelessWidget {
       null => null,
       final found when found.isEmpty => Padding(
         padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
-        child: Text('Session $selectedId is not on this board.'),
+        child: Text('Run $selectedId is not on this board.'),
       ),
-      final found => _SessionFacts(
-        session: found.first,
+      final found => _RunFacts(
+        run: found.first,
         handle: board.handleOf(found.first.operationId, found.first.missionId),
         onOpen: onOpen,
       ),
     };
     final Widget table;
-    if (sessions.isEmpty) {
+    if (runs.isEmpty) {
       table = const Padding(
         padding: EdgeInsets.all(24),
-        child: Center(child: Text('No Sessions match these filters.')),
+        child: Center(child: Text('No Runs match these filters.')),
       );
     } else if (width < OoBreakpoints.phone) {
-      table = _SessionList(
-        sessions: sessions,
-        handleOf: (session) =>
-            board.handleOf(session.operationId, session.missionId),
+      table = _RunList(
+        runs: runs,
+        handleOf: (run) =>
+            board.handleOf(run.operationId, run.missionId),
         onOpen: onOpen,
       );
     } else {
-      table = OoDataTable<SessionSummary>(
-        rows: sessions,
-        rowId: (session) => session.sessionId,
+      table = OoDataTable<RunSummary>(
+        rows: runs,
+        rowId: (run) => run.runId,
         narrowed: true,
-        noun: 'Sessions',
+        noun: 'Runs',
         route: route,
         onRoute: onRoute,
         onOpen: onOpen,
-        searchText: (session) => session.sessionId,
+        searchText: (run) => run.runId,
         defaultSort: ('operation', true),
         cardsBelow: OoBreakpoints.phone,
         columns: [
           OoColumn(
             id: 'operation',
             label: 'Operation',
-            sortKey: (session) => session.operationId,
-            cell: (context, session) => OoLink(
-              session.operationId,
-              route: OoLinkTo.operation(session.operationId),
-              semanticLabel: 'Open Operation ${session.operationId}',
+            sortKey: (run) => run.operationId,
+            cell: (context, run) => OoLink(
+              run.operationId,
+              route: OoLinkTo.operation(run.operationId),
+              semanticLabel: 'Open Operation ${run.operationId}',
             ),
           ),
           OoColumn(
             id: 'mission',
             label: 'Mission',
-            sortKey: (session) => session.missionId,
-            cell: (context, session) => OoLink(
-              board.handleOf(session.operationId, session.missionId),
-              route: OoLinkTo.mission(session.operationId, session.missionId),
+            sortKey: (run) => run.missionId,
+            cell: (context, run) => OoLink(
+              board.handleOf(run.operationId, run.missionId),
+              route: OoLinkTo.mission(run.operationId, run.missionId),
               semanticLabel:
                   'Open Mission '
-                  '${board.handleOf(session.operationId, session.missionId)}',
+                  '${board.handleOf(run.operationId, run.missionId)}',
             ),
           ),
           OoColumn(
-            id: 'session',
-            label: 'Session',
-            sortKey: (session) => session.sessionId,
-            cell: (context, session) => Text(
-              session.sessionId,
+            id: 'run',
+            label: 'Run',
+            sortKey: (run) => run.runId,
+            cell: (context, run) => Text(
+              run.runId,
               style: const TextStyle(fontFamily: 'monospace'),
             ),
           ),
@@ -197,17 +197,17 @@ class SessionsPage extends StatelessWidget {
             id: 'state',
             label: 'State',
             flex: 2,
-            sortKey: (session) =>
-                boardStates.indexOf(session.state ?? 'working'),
-            cell: (context, session) => Row(
+            sortKey: (run) =>
+                boardStates.indexOf(run.state ?? 'working'),
+            cell: (context, run) => Row(
               children: [
-                OoStateMark(session.state ?? 'working', reason: session.reason),
+                OoStateMark(run.state ?? 'working', reason: run.reason),
                 const SizedBox(width: 8),
                 Flexible(
                   child: Text(
                     [
-                      session.state ?? 'working',
-                      if (session.reason case final reason?)
+                      run.state ?? 'working',
+                      if (run.reason case final reason?)
                         reasonWords(reason),
                     ].join(' · '),
                     overflow: TextOverflow.ellipsis,
@@ -219,32 +219,32 @@ class SessionsPage extends StatelessWidget {
           OoColumn(
             id: 'updated',
             label: 'Updated',
-            sortKey: (session) => session.updatedAt ?? 0,
-            cell: (context, session) => OoTime(session.updatedAt, style: null),
+            sortKey: (run) => run.updatedAt ?? 0,
+            cell: (context, run) => OoTime(run.updatedAt, style: null),
           ),
           OoColumn(
             id: 'station',
             label: 'Station',
-            cell: (context, session) => session.stationId == null
+            cell: (context, run) => run.stationId == null
                 ? const Text('—')
                 : OoLink(
-                    session.stationId!,
-                    route: OoLinkTo.station(session.stationId!),
-                    semanticLabel: 'Open Station ${session.stationId}',
+                    run.stationId!,
+                    route: OoLinkTo.station(run.stationId!),
+                    semanticLabel: 'Open Station ${run.stationId}',
                   ),
           ),
           OoColumn(
             id: 'agent',
             label: 'Agent',
-            cell: (context, session) => session.agent == null
+            cell: (context, run) => run.agent == null
                 ? const Text('—')
                 : OoLink(
-                    session.agent!,
+                    run.agent!,
                     route: OoLinkTo.agent(
-                      session.agent!,
-                      operation: session.operationId,
+                      run.agent!,
+                      operation: run.operationId,
                     ),
-                    semanticLabel: 'Open Agent ${session.agent}',
+                    semanticLabel: 'Open Agent ${run.agent}',
                   ),
           ),
         ],
@@ -254,7 +254,7 @@ class SessionsPage extends StatelessWidget {
       slivers: [
         SliverToBoxAdapter(child: controls),
         if (details != null) SliverToBoxAdapter(child: details),
-        if (table is _SessionList || table is OoDataTable<SessionSummary>)
+        if (table is _RunList || table is OoDataTable<RunSummary>)
           SliverFillRemaining(child: table)
         else
           SliverToBoxAdapter(child: table),
@@ -263,55 +263,55 @@ class SessionsPage extends StatelessWidget {
   }
 }
 
-/// The facts of the Session a route selects; opening it is the person's own click.
-class _SessionFacts extends StatelessWidget {
-  const _SessionFacts({
-    required this.session,
+/// The facts of the Run a route selects; opening it is the person's own click.
+class _RunFacts extends StatelessWidget {
+  const _RunFacts({
+    required this.run,
     required this.handle,
     required this.onOpen,
   });
 
-  final SessionSummary session;
+  final RunSummary run;
 
   /// What its Mission is called.
   final String handle;
-  final ValueChanged<SessionSummary> onOpen;
+  final ValueChanged<RunSummary> onOpen;
 
   @override
   Widget build(BuildContext context) {
-    final state = session.state ?? 'working';
+    final state = run.state ?? 'working';
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
       child: Card(
         child: ListTile(
-          leading: const OoTile(OoIconName.sessions, size: 44),
-          title: Text('Session ${session.sessionId}'),
+          leading: const OoTile(OoIconName.runs, size: 44),
+          title: Text('Run ${run.runId}'),
           subtitle: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               OoLinkLine([
                 (
-                  'Operation ${session.operationId}',
-                  OoLinkTo.operation(session.operationId),
+                  'Operation ${run.operationId}',
+                  OoLinkTo.operation(run.operationId),
                 ),
                 (
                   'Mission $handle',
-                  OoLinkTo.mission(session.operationId, session.missionId),
+                  OoLinkTo.mission(run.operationId, run.missionId),
                 ),
               ]),
               Text(
                 [
                   state,
-                  if (session.reason case final reason?) reasonWords(reason),
+                  if (run.reason case final reason?) reasonWords(reason),
                 ].join(' · '),
               ),
-              if (session.exposure.isNotEmpty)
-                Text('Has read: ${session.exposure.join(', ')}'),
+              if (run.exposure.isNotEmpty)
+                Text('Has read: ${run.exposure.join(', ')}'),
             ],
           ),
           isThreeLine: true,
           trailing: TextButton(
-            onPressed: () => onOpen(session),
+            onPressed: () => onOpen(run),
             child: const Text('Open'),
           ),
         ),
@@ -320,20 +320,20 @@ class _SessionFacts extends StatelessWidget {
   }
 }
 
-/// The Sessions as rows, like the design reference's phone lists: an icon tile, the
-/// Session, its Operation and Mission, and its state beside a dot of its colour.
-class _SessionList extends StatelessWidget {
-  const _SessionList({
-    required this.sessions,
+/// The Runs as rows, like the design reference's phone lists: an icon tile, the
+/// Run, its Operation and Mission, and its state beside a dot of its colour.
+class _RunList extends StatelessWidget {
+  const _RunList({
+    required this.runs,
     required this.handleOf,
     required this.onOpen,
   });
 
-  final List<SessionSummary> sessions;
+  final List<RunSummary> runs;
 
-  /// What a Session's Mission is called.
-  final String Function(SessionSummary session) handleOf;
-  final ValueChanged<SessionSummary> onOpen;
+  /// What a Run's Mission is called.
+  final String Function(RunSummary run) handleOf;
+  final ValueChanged<RunSummary> onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -341,41 +341,41 @@ class _SessionList extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     return ListView.separated(
       padding: const EdgeInsets.all(12),
-      itemCount: sessions.length,
+      itemCount: runs.length,
       separatorBuilder: (_, _) => const SizedBox(height: 8),
       itemBuilder: (context, index) {
-        final session = sessions[index];
-        final state = session.state ?? 'working';
+        final run = runs[index];
+        final state = run.state ?? 'working';
         return Card(
           clipBehavior: Clip.antiAlias,
           child: InkWell(
-            onTap: () => onOpen(session),
+            onTap: () => onOpen(run),
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Row(
                 children: [
-                  const OoTile(OoIconName.sessions, size: 44),
+                  const OoTile(OoIconName.runs, size: 44),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          session.sessionId,
+                          run.runId,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: text.titleSmall,
                         ),
                         OoLinkLine([
                           (
-                            'Operation ${session.operationId}',
-                            OoLinkTo.operation(session.operationId),
+                            'Operation ${run.operationId}',
+                            OoLinkTo.operation(run.operationId),
                           ),
                           (
-                            'Mission ${handleOf(session)}',
+                            'Mission ${handleOf(run)}',
                             OoLinkTo.mission(
-                              session.operationId,
-                              session.missionId,
+                              run.operationId,
+                              run.missionId,
                             ),
                           ),
                         ]),
@@ -388,7 +388,7 @@ class _SessionList extends StatelessWidget {
                   Text(
                     [
                       state,
-                      if (session.reason case final reason?)
+                      if (run.reason case final reason?)
                         reasonWords(reason),
                     ].join(' · '),
                     style: text.labelMedium,

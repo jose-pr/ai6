@@ -5,7 +5,7 @@
 //! TTL, deduplication and audit as any Cable. The addressee's reply is a Cable reply, read back as
 //! the A2A answer. Nothing else is kept: an A2A Task is the peer's Cable (its ID is the Cable's),
 //! its context the Cable conversation, and its state the Cable's delivery. Nothing is placed or
-//! scheduled. A thread stays with the Session that first took it ([`CableSendRequest::with_affinity`]).
+//! scheduled. A thread stays with the Run that first took it ([`CableSendRequest::with_affinity`]).
 //!
 //! A peer arrives on a proven coqui-agentic-peer link ([`LinkListener`]) or on the gateway's
 //! HTTP JSON-RPC binding (`/v1/a2a`), signed in as its principal. Cables to `a2a:<peer>` leave as
@@ -513,7 +513,7 @@ impl Liaison {
     }
 
     /// The principal a peer's Cables go as: its sender, acting for its principal, stamped with
-    /// `proof`, with `route` as its Session when replies are to come back to one.
+    /// `proof`, with `route` as its Run when replies are to come back to one.
     fn principal_for(
         peer: &LiaisonPeer,
         proof: &str,
@@ -570,7 +570,7 @@ impl Liaison {
         Ok(cables)
     }
 
-    /// Takes a peer's message: who it is for, that the principal may send there, and the Session
+    /// Takes a peer's message: who it is for, that the principal may send there, and the Run
     /// its context is bound to; then submits it to the relay as a Cable.
     pub(crate) fn submit(
         &self,
@@ -605,7 +605,7 @@ impl Liaison {
                 "Liaison carries text parts only",
             ));
         }
-        // The context's first Cable decides its addressee, and the Session it is bound to.
+        // The context's first Cable decides its addressee, and the Run it is bound to.
         let earlier = match &message.context_id {
             Some(context) => Some(
                 self.cables_of(peer)?
@@ -682,7 +682,7 @@ impl Liaison {
             .unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
         let affinity = earlier
             .as_ref()
-            .and_then(|earlier| self.bound_session(earlier));
+            .and_then(|earlier| self.bound_run(earlier));
         let endpoint = CableEndpoint::try_new(
             agent.clone(),
             operation.clone(),
@@ -698,8 +698,8 @@ impl Liaison {
         let target =
             CableTarget::try_new(CableScope::Agent, Some(agent.clone())).map_err(|_| denied())?;
         let mut cable = CableSendRequest::new(target, text, key).with_conversation(context);
-        if let Some(session) = affinity {
-            cable = cable.with_affinity(session);
+        if let Some(run) = affinity {
+            cable = cable.with_affinity(run);
         }
         let cable = relay.send(&principal, cable).map_err(|error| {
             self.audit(
@@ -726,11 +726,11 @@ impl Liaison {
         Ok(cable)
     }
 
-    /// The provider Session a context is bound to: the one that took its first Cable, else the
+    /// The provider Run a context is bound to: the one that took its first Cable, else the
     /// one that first replied in it.
-    fn bound_session(&self, first: &Cable) -> Option<String> {
-        if let Some(session) = first.affinity() {
-            return Some(session.to_owned());
+    fn bound_run(&self, first: &Cable) -> Option<String> {
+        if let Some(run) = first.affinity() {
+            return Some(run.to_owned());
         }
         let current = self.registry().ok()?.get_cable(first.id()).ok()??;
         current
@@ -1261,7 +1261,7 @@ impl Agent for Liaison {
     }
 }
 
-/// The Session a context's replies come back to: Liaison's own name for the thread, never the
+/// The Run a context's replies come back to: Liaison's own name for the thread, never the
 /// A2A Task ID.
 fn route(context: &str) -> String {
     format!("liaison-{context}")

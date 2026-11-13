@@ -27,9 +27,9 @@ const operationActions = [
   'mission.verify',
   'pool.manage',
   'pool.read',
-  'session.context',
-  'session.input',
-  'session.read',
+  'run.context',
+  'run.input',
+  'run.read',
 ];
 
 /// A change the gateway refused, in its words.

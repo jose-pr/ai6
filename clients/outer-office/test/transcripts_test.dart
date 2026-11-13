@@ -5,7 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:outer_office/assistant/transcripts.dart';
 import 'package:outer_office/theme/oo_theme.dart';
 
-/// Claude Code's transcript of a short Session: a question, a tool call, its result, an
+/// Claude Code's transcript of a short Run: a question, a tool call, its result, an
 /// answer.
 final _claude = [
   {
@@ -52,11 +52,11 @@ final _claude = [
 
 class _Reads implements TranscriptReads {
   @override
-  Future<Map<String, Object?>> sessionContext(
+  Future<Map<String, Object?>> runContext(
     String operation,
-    String session,
+    String run,
   ) async => {
-    'session': session,
+    'run': run,
     'format': 'claude-code-jsonl',
     'source': 'harness',
     'content': _claude,
@@ -77,7 +77,7 @@ class _Reads implements TranscriptReads {
         },
         'turn': {
           'station': 'hq',
-          'session': 'provider-1',
+          'run': 'provider-1',
           'route': {'handler': 'claude', 'pool': 'team'},
           'account': {'pool': 'team', 'account': 'alice'},
         },
@@ -101,7 +101,7 @@ class _Reads implements TranscriptReads {
         'conversation': conversation,
         'contexts': [
           {
-            'session': 'provider-1',
+            'run': 'provider-1',
             'format': 'ai6-events-jsonl',
             'source': 'events',
             'cut_from': 9000,
@@ -152,7 +152,7 @@ void main() {
     expect(unknown.every((turn) => turn.folded), isTrue);
   });
 
-  testWidgets("a Session's context shows its turns, a tool result folded", (
+  testWidgets("a Run's context shows its turns, a tool result folded", (
     tester,
   ) async {
     final saved = <String, String>{};
@@ -162,7 +162,7 @@ void main() {
           body: SingleChildScrollView(
             child: ContextView(
               data: {
-                'session': 'session-g',
+                'run': 'run-g',
                 'format': 'claude-code-jsonl',
                 'source': 'harness',
                 'content': _claude,
@@ -186,7 +186,7 @@ void main() {
     expect(find.text('worker runs 4 of 4'), findsOneWidget);
     await tester.tap(find.text('Download'));
     await tester.pumpAndSettle();
-    expect(saved['context-session-g.jsonl'], _claude);
+    expect(saved['context-run-g.jsonl'], _claude);
   });
 
   testWidgets(

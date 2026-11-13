@@ -73,7 +73,7 @@ pub const CONFIG_ACCOUNTS: &str = "config:accounts";
 /// given it.
 /// `compartment.cover` on `operation:<id>` is the Operation's consent to be covered. `memory.write`
 /// changes the memory of `operation:<id>`, or of everyone at `config:memory`.
-/// `session.context` reads what an agent was given and did in a Session: on `operation:<id>` a
+/// `run.context` reads what an agent was given and did in a Run: on `operation:<id>` a
 /// Mission's, and with `audit.read` on `config:assistant` another person's conversations with
 /// Moneypenny. `mission.verify` gives a verdict on a Mission's outcome.
 pub const ACTIONS: &[&str] = &[
@@ -110,9 +110,9 @@ pub const ACTIONS: &[&str] = &[
     "product.read",
     "roster.manage",
     "roster.read",
-    "session.context",
-    "session.input",
-    "session.read",
+    "run.context",
+    "run.input",
+    "run.read",
     "station.configure",
     "station.read",
 ];
@@ -147,9 +147,9 @@ pub const OPERATION_ACTIONS: &[&str] = &[
     "pool.manage",
     "pool.read",
     "product.read",
-    "session.context",
-    "session.input",
-    "session.read",
+    "run.context",
+    "run.input",
+    "run.read",
 ];
 
 /// A role authorizer builder that accepts AI6's scope kinds and no others.
@@ -232,7 +232,7 @@ mod tests {
                 actions = ["mission.read", "transcript.read"]
 
                 [role.operator]
-                actions = ["mission.read", "session.input", "session.kill"]
+                actions = ["mission.read", "run.input", "run.kill"]
 
                 [[rule]]
                 subject = "group:field"
@@ -259,10 +259,10 @@ mod tests {
                 .allowed
         };
         assert!(allowed(&viewer, "mission.read", "operation:G"));
-        assert!(!allowed(&viewer, "session.input", "operation:G"));
+        assert!(!allowed(&viewer, "run.input", "operation:G"));
         assert!(!allowed(&viewer, "mission.read", "operation:L"));
-        assert!(allowed(&operator, "session.input", "operation:G"));
-        assert!(!allowed(&operator, "session.input", "operation:L"));
+        assert!(allowed(&operator, "run.input", "operation:G"));
+        assert!(!allowed(&operator, "run.input", "operation:L"));
         assert!(!allowed(
             &person("unlisted", "unlisted", &[]),
             "mission.read",
@@ -474,7 +474,7 @@ mod tests {
         );
         assert!(
             !authorizer
-                .authorize(request(person, "session.input", "operation:G"))
+                .authorize(request(person, "run.input", "operation:G"))
                 .unwrap()
                 .allowed
         );

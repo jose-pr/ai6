@@ -37,7 +37,7 @@ Infrastructure  Station ──────────────────�
 - **Mission**: one brief under an Operation; its Mission ID may group several Runs.
 - **Run**: one AI6 agent run of a Mission or a charge, named by one UUID AI6 makes. A Mission or a Run is
   *executed*: executing a Mission starts its next Run, and executing a Run starts it, or resumes it if it ran.
-  Never call it a Task or a Session.
+  Never call it a Task or a Run.
 - **Station**: a node running `ai6 serve`, with the `control` role, the `execution` role
   or both. The elected **Headquarters Station (HQS)** holds M's authority by lease.
 - **Theater**: the host or environment a Run works on, reached through a transport
@@ -126,7 +126,7 @@ see it, and the credential it needs is leased only against an approval.
 | **Provider ID** | the id a harness or provider knows a Run by, kept apart from the Run's UUID (`provider_id`); a provider maps the UUID to one it accepts and answers with the UUID |
 | **Conversation** | one chat with Moneypenny; the agent run behind it is a Run |
 | **Charge** | what an Agent answers for: an Operation is its `00` Agent's charge, a Station its Head of Station's, the service M's; it holds one standing Run, resumed after restarts and takeovers (`[charge.<scope>]`, [Charges](charges.md)) |
-| **Session** | only another protocol's own word, kept at that wire: ACP's `sessionId` and `session/*` methods, the Claude Code and Codex CLIs' own session ids and flags, a person's sign-in session and its cookie, and MCP's `Mcp-Session-Id`. It is never an AI6 Run |
+| **Run** | only another protocol's own word, kept at that wire: ACP's `sessionId` and `run/*` methods, the Claude Code and Codex CLIs' own run ids and flags, a person's sign-in session and its cookie, and MCP's `Mcp-Session-Id`. It is never an AI6 Run |
 | **Station** | a node running the daemon (`ai6 serve --station`, `station_id`) |
 | **Headquarters Station (HQS)** | the control Station holding the current Headquarters lease |
 | **Fallback Station** | a control Station ready to take over when the HQS lease lapses |

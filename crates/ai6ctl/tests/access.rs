@@ -147,7 +147,7 @@ async fn a_role_is_set_with_the_revision_read_and_a_refusal_prints_the_reason() 
             "set",
             "reviewer",
             "--actions",
-            "mission.read,session.read",
+            "mission.read,run.read",
         ],
     )
     .await;
@@ -161,7 +161,7 @@ async fn a_role_is_set_with_the_revision_read_and_a_refusal_prints_the_reason() 
         .cloned()
         .unwrap();
     assert_eq!(put.2.as_deref(), Some("r1"));
-    assert_eq!(put.3["actions"], json!(["mission.read", "session.read"]));
+    assert_eq!(put.3["actions"], json!(["mission.read", "run.read"]));
     let (ok, _, err) = ai6ctl(
         &server,
         &["access", "role", "set", "bad", "--actions", "x.y"],

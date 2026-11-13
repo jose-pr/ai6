@@ -1,4 +1,4 @@
-//! Theaters: where a Session's harness runs, and how a Station reaches each one.
+//! Theaters: where a Run's harness runs, and how a Station reaches each one.
 //!
 //! Each Station reads its own `theaters.toml`:
 //!
@@ -28,7 +28,7 @@
 //! and `runner` how to reach the `ai6 runner` that supervises harnesses there (see
 //! [`RunnerSettings`]).
 //!
-//! `requires` says what the Theater must have before Sessions run there and `provision` how
+//! `requires` says what the Theater must have before Runs run there and `provision` how
 //! to install it (see [`Requirements`] and [`ProvisionSpec`]); the Station probes the
 //! Theater and publishes what it found, and `ai6 theater provision` fits it out.
 
@@ -315,7 +315,7 @@ impl AgentMode {
     }
 }
 
-/// Whether a Session on a Theater must reach its Cable endpoint.
+/// Whether a Run on a Theater must reach its Cable endpoint.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -324,7 +324,7 @@ pub enum CableReach {
     /// is ruled out, with the reason.
     #[default]
     Required,
-    /// A Session that has no way to its endpoint starts without one, a reported weakening.
+    /// A Run that has no way to its endpoint starts without one, a reported weakening.
     Optional,
 }
 
@@ -401,7 +401,7 @@ impl EgressKind {
 }
 
 /// A runner on a Theater: the `ai6` binary in its runner mode supervises the harness there and
-/// spools its events, so a Session outlives the Station that started it and a Station that
+/// spools its events, so a Run outlives the Station that started it and a Station that
 /// comes back (or another one) re-attaches and replays what it missed.
 ///
 /// `runner = {}` uses every default.
@@ -465,7 +465,7 @@ impl RunnerSettings {
     }
 }
 
-/// A host or sandbox where a Session's harness can run.
+/// A host or sandbox where a Run's harness can run.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Theater {
@@ -493,13 +493,13 @@ pub struct Theater {
     /// supervises them itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runner: Option<RunnerSettings>,
-    /// What the Theater must have before Sessions run there; nothing is checked when absent.
+    /// What the Theater must have before Runs run there; nothing is checked when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub requires: Option<Requirements>,
     /// How `ai6 theater provision` installs what the Theater lacks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provision: Option<ProvisionSpec>,
-    /// Whether a Session here must reach its Cable endpoint.
+    /// Whether a Run here must reach its Cable endpoint.
     #[serde(default, skip_serializing_if = "CableReach::is_required")]
     pub cables: CableReach,
 }
@@ -522,7 +522,7 @@ impl Theater {
         }
     }
 
-    /// Declares what the Theater must have before Sessions run there.
+    /// Declares what the Theater must have before Runs run there.
     #[must_use]
     pub fn with_requirements(mut self, requires: Requirements) -> Self {
         self.requires = Some(requires);
@@ -578,7 +578,7 @@ impl Theater {
         self
     }
 
-    /// Sets whether a Session here must reach its Cable endpoint.
+    /// Sets whether a Run here must reach its Cable endpoint.
     #[must_use]
     pub fn with_cables(mut self, cables: CableReach) -> Self {
         self.cables = cables;
@@ -609,7 +609,7 @@ impl Theater {
         }
         if self.cables == CableReach::Optional {
             weakened.push(
-                "cables = \"optional\": a Session with no way to its Cable endpoint here starts \
+                "cables = \"optional\": a Run with no way to its Cable endpoint here starts \
                  without one, so it cannot send or read Cables"
                     .to_owned(),
             );
@@ -652,7 +652,7 @@ impl Theater {
             report: None,
             made_for: None,
             resources: None,
-            sessions: 0,
+            runs: 0,
             cables: self.cables,
         }
     }
@@ -856,7 +856,7 @@ pub struct TheaterSummary {
     /// The directory a remote-hands Mission works in when its Operation names no path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workdir: Option<String>,
-    /// A runner supervises harnesses on the Theater, so its Sessions outlive the Station.
+    /// A runner supervises harnesses on the Theater, so its Runs outlive the Station.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub runner: bool,
     /// Why the Station cannot reach the Theater now: no transport provider, or the last
@@ -867,7 +867,7 @@ pub struct TheaterSummary {
     /// AI6's leases.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub weakened: Vec<String>,
-    /// What the Theater must have before Sessions run there.
+    /// What the Theater must have before Runs run there.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub requires: Option<Requirements>,
     /// What the Station's last probe of the Theater found; absent until one finishes.
@@ -880,10 +880,10 @@ pub struct TheaterSummary {
     /// else the Station's probe of it. Absent until a sample succeeds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resources: Option<crate::directorates::m::placement::Resources>,
-    /// Sessions the Station is running on the Theater.
+    /// Runs the Station is running on the Theater.
     #[serde(default, skip_serializing_if = "is_zero")]
-    pub sessions: usize,
-    /// Whether a Session here must reach its Cable endpoint.
+    pub runs: usize,
+    /// Whether a Run here must reach its Cable endpoint.
     #[serde(default, skip_serializing_if = "CableReach::is_required")]
     pub cables: CableReach,
 }
@@ -1248,7 +1248,7 @@ agents = "remote-hands"
     }
 
     #[test]
-    fn ssh_session_bounds_reach_the_ssh_transports_settings() {
+    fn ssh_run_bounds_reach_the_ssh_transports_settings() {
         let access: SshAccess = toml::from_str(
             "host = \"h\"
 exit_grace_ms = 50

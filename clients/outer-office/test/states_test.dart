@@ -37,7 +37,7 @@ class ReadyChannel implements AssistantChannel {
   Future<void> close() => _incoming.close();
 }
 
-/// A gateway with one Operation, one working Session, one held brief and one green ink
+/// A gateway with one Operation, one working Run, one held brief and one green ink
 /// request waiting, which each test turns into the failure it needs. Every request is kept in
 /// [requests].
 class Gateway {
@@ -52,11 +52,11 @@ class Gateway {
 
   List<Map<String, Object?>> held = [_held];
   List<Map<String, Object?>> greenInk = [_greenInk];
-  List<Map<String, Object?>> sessions = [
+  List<Map<String, Object?>> runs = [
     {
       'operation_id': 'operation-alpha',
       'mission_id': 'mission-007',
-      'session_id': 'session-1',
+      'run_id': 'run-1',
       'state': 'working',
       'sequence': 1,
       'updated_at': 100.0,
@@ -85,7 +85,7 @@ class Gateway {
       );
     }
     if (path == '/v1/board') {
-      return boardStatus == 200 ? ok(sessions) : http.Response('', boardStatus);
+      return boardStatus == 200 ? ok(runs) : http.Response('', boardStatus);
     }
     if (path == '/v1/missions') return ok(<Object>[]);
     if (path == '/v1/stations') {
@@ -198,7 +198,7 @@ const _greenInk = {
   'id': 'green-ink-1',
   'operation': 'operation-alpha',
   'mission': 'mission-007',
-  'session': 'session-9',
+  'run': 'run-9',
   'agent': '007',
   'scope': {'kind': 'push', 'target': 'origin:refs/heads/main'},
   'reason': 'Ship it.',
@@ -265,21 +265,21 @@ Future<void> refresh(WidgetTester tester, MissionBoard board) async {
 }
 
 void main() {
-  testWidgets('a refresh failing after a good one keeps the Sessions and says '
+  testWidgets('a refresh failing after a good one keeps the Runs and says '
       'when they were read', (tester) async {
     final gateway = Gateway();
     final board = await signedIn(gateway);
     await openAt(tester, board, '/missions');
-    expect(find.text('session-1'), findsOneWidget);
+    expect(find.text('run-1'), findsOneWidget);
     expect(find.byType(GatewayStrip), findsOneWidget);
     expect(find.textContaining('unreachable'), findsNothing);
     final at = ooClockTime(board.lastUpdated(BoardSource.board)!);
 
     gateway.down = true;
     await refresh(tester, board);
-    expect(find.text('session-1'), findsOneWidget, reason: 'the data stays');
+    expect(find.text('run-1'), findsOneWidget, reason: 'the data stays');
     expect(board.freshness(BoardSource.board), OoFreshness.stale);
-    expect(find.textContaining('Sessions: Last updated $at'), findsOneWidget);
+    expect(find.textContaining('Runs: Last updated $at'), findsOneWidget);
     expect(
       find.text(
         'Universal Exports unreachable, showing data from $at. Retrying.',
@@ -356,17 +356,17 @@ void main() {
       board,
       '/missions?operation_id=operation-alpha&mission_id=mission-007',
     );
-    expect(find.text('session-1'), findsWidgets);
+    expect(find.text('run-1'), findsWidgets);
 
     gateway.boardStatus = 401;
     await refresh(tester, board);
     expect(board.accessToken, isNull);
-    expect(board.sessions, isEmpty);
+    expect(board.runs, isEmpty);
     expect(board.heldBriefs, isEmpty);
     expect(board.greenInkRequests, isEmpty);
-    expect(board.userSession, isNull);
+    expect(board.userRun, isNull);
     expect(find.text('Continue'), findsOneWidget, reason: 'the sign-in page');
-    expect(find.textContaining('session-1'), findsNothing);
+    expect(find.textContaining('run-1'), findsNothing);
     expect(find.textContaining('mission-007'), findsNothing);
     expect(find.textContaining('Fix the login page'), findsNothing);
     expect(find.text('Your sign-in ended. Sign in again.'), findsOneWidget);
@@ -412,7 +412,7 @@ void main() {
 
     await tester.tap(find.byTooltip('Mission actions').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Interrupt Session'));
+    await tester.tap(find.text('Interrupt Run'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Interrupt'));
     await tester.pump();
@@ -437,7 +437,7 @@ void main() {
     expect(find.text('YOUR REQUESTS'), findsOneWidget);
     expect(
       find.text(
-        'Interrupt Session · Operation operation-alpha › mission-007 · '
+        'Interrupt Run · Operation operation-alpha › mission-007 · '
         'Outcome unknown',
       ),
       findsOneWidget,
@@ -470,10 +470,10 @@ void main() {
     await tester.enterText(find.byType(TextField).last, 'zzz');
     await tester.pumpAndSettle();
     expect(find.text('No matches in the loaded board'), findsOneWidget);
-    await tester.enterText(find.byType(TextField).last, 'session-1');
+    await tester.enterText(find.byType(TextField).last, 'run-1');
     await tester.pumpAndSettle();
     expect(find.text('Results in the loaded board'), findsOneWidget);
-    expect(find.text('Session session-1'), findsOneWidget);
+    expect(find.text('Run run-1'), findsOneWidget);
   });
 
   testWidgets('Ctrl+K opens search from the page and from a field', (
@@ -558,7 +558,7 @@ void main() {
   ) async {
     final gateway = Gateway();
     final board = await signedIn(gateway);
-    board.userSession = null;
+    board.userRun = null;
     await openAt(tester, board, '/');
     expect(
       find.text(

@@ -164,7 +164,7 @@ class CompartmentsApi {
 /// The Operations this person may consent for: the only ones a cover may name from here.
 List<String> consentingOperations(MissionBoard board) => [
   for (final operation
-      in board.userSession?.operations ?? const <UserOperationAccess>[])
+      in board.userRun?.operations ?? const <UserOperationAccess>[])
     if (operation.actions.contains('compartment.cover')) operation.operationId,
 ];
 

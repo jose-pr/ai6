@@ -298,7 +298,7 @@ impl Outbound {
             delivery.from_operation.clone(),
             delivery.from_theater.clone(),
             delivery.from_station.clone(),
-            delivery.session_id.clone(),
+            delivery.run_id.clone(),
             delivery.mission_id.clone(),
         ) else {
             return false;

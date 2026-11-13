@@ -220,17 +220,17 @@ CREATE TABLE IF NOT EXISTS ai6_roster_holds (
     PRIMARY KEY (operation, agent, route)
 );
 
-CREATE TABLE IF NOT EXISTS ai6_sessions (
-    session_id TEXT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS ai6_runs (
+    run_id TEXT PRIMARY KEY,
     mission_id TEXT NOT NULL,
     record TEXT NOT NULL,
     revision INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS ai6_sessions_mission ON ai6_sessions (mission_id);
+CREATE INDEX IF NOT EXISTS ai6_runs_mission ON ai6_runs (mission_id);
 
--- An Agent's last message on a Session, apart from its record so a board read stays small.
+-- An Agent's last message on a Run, apart from its record so a board read stays small.
 CREATE TABLE IF NOT EXISTS ai6_final_reports (
-    session_id TEXT PRIMARY KEY,
+    run_id TEXT PRIMARY KEY,
     mission_id TEXT NOT NULL,
     record TEXT NOT NULL,
     revision INTEGER NOT NULL
@@ -251,7 +251,7 @@ CREATE TABLE IF NOT EXISTS ai6_logbooks (
     revision INTEGER NOT NULL
 );
 
--- Each watch: its standing Session, lease and logbook as JSON, keyed by its scope.
+-- Each watch: its standing Run, lease and logbook as JSON, keyed by its scope.
 CREATE TABLE IF NOT EXISTS ai6_watches (
     scope TEXT PRIMARY KEY,
     record TEXT NOT NULL,
@@ -513,15 +513,15 @@ CREATE TABLE IF NOT EXISTS ai6_mission_reviews (
     PRIMARY KEY (mission_id, gate)
 );
 
--- Reports: one JSON record each, with what a list filters and orders by beside it. session_id is
--- the Agent Session that filed it and source_key the source whose reliability orders it; priority
+-- Reports: one JSON record each, with what a list filters and orders by beside it. run_id is
+-- the Agent Run that filed it and source_key the source whose reliability orders it; priority
 -- is empty, and deadline and credibility null, while unset.
 CREATE TABLE IF NOT EXISTS ai6_reports (
     id TEXT PRIMARY KEY,
     scope TEXT NOT NULL,
     state TEXT NOT NULL,
     kind TEXT NOT NULL,
-    session_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
     source_key TEXT NOT NULL,
     priority TEXT NOT NULL,
     deadline REAL,
@@ -659,10 +659,10 @@ CREATE INDEX IF NOT EXISTS ai6_assistant_log_conversation ON ai6_assistant_log (
 CREATE INDEX IF NOT EXISTS ai6_assistant_log_person ON ai6_assistant_log (person);
 CREATE INDEX IF NOT EXISTS ai6_assistant_log_order ON ai6_assistant_log (at_micros, id);
 
--- Each provider Session's harness context: the record as JSON, its content as text. conversation is
--- '' for a Mission's Session, operation '' for one of Moneypenny's.
-CREATE TABLE IF NOT EXISTS ai6_session_contexts (
-    session TEXT PRIMARY KEY,
+-- Each provider Run's harness context: the record as JSON, its content as text. conversation is
+-- '' for a Mission's Run, operation '' for one of Moneypenny's.
+CREATE TABLE IF NOT EXISTS ai6_run_contexts (
+    run TEXT PRIMARY KEY,
     conversation TEXT NOT NULL,
     operation TEXT NOT NULL,
     filed_micros INTEGER NOT NULL,
@@ -670,8 +670,8 @@ CREATE TABLE IF NOT EXISTS ai6_session_contexts (
     content TEXT NOT NULL,
     revision INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS ai6_session_contexts_conversation ON ai6_session_contexts (conversation);
-CREATE INDEX IF NOT EXISTS ai6_session_contexts_order ON ai6_session_contexts (filed_micros, session);
+CREATE INDEX IF NOT EXISTS ai6_run_contexts_conversation ON ai6_run_contexts (conversation);
+CREATE INDEX IF NOT EXISTS ai6_run_contexts_order ON ai6_run_contexts (filed_micros, run);
 
 CREATE TABLE IF NOT EXISTS ai6_principals (
     id TEXT PRIMARY KEY,

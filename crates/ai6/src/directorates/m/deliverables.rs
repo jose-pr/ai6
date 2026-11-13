@@ -1,4 +1,4 @@
-//! What a Mission is to deliver, declared before the work so what a Session says it did can be
+//! What a Mission is to deliver, declared before the work so what a Run says it did can be
 //! checked against something other than its own account.
 //!
 //! A deliverable is a kind and, for most kinds, a target, written `kind` or `kind:target`

@@ -1,28 +1,28 @@
-//! A terminal provider's session as the blocking input and output of an ACP agent.
+//! A terminal provider's run as the blocking input and output of an ACP agent.
 
 use guatiao::library::Object;
 use std::io::{self, Read, Write};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::directorates::q::terminal::{READ_TIMED_OUT, TerminalSession};
+use crate::directorates::q::terminal::{READ_TIMED_OUT, TerminalRun};
 
-/// A terminal provider's session as blocking [`Read`] and [`Write`]: the standard output and
+/// A terminal provider's run as blocking [`Read`] and [`Write`]: the standard output and
 /// input of an agent the `pipe` terminal started. Reading returns end of file once the
 /// program's output can never arrive or [`TerminalIo::stop`] was called.
 #[derive(Clone)]
 pub struct TerminalIo {
-    session: Arc<Object<dyn TerminalSession>>,
+    run: Arc<Object<dyn TerminalRun>>,
     stopped: Arc<AtomicBool>,
     poll_ms: i64,
 }
 
 impl TerminalIo {
-    /// Reads and writes `session`, checking for a stop request every `poll_ms` milliseconds
+    /// Reads and writes `run`, checking for a stop request every `poll_ms` milliseconds
     /// of silence.
-    pub fn new(session: Arc<Object<dyn TerminalSession>>, poll_ms: i64) -> Self {
+    pub fn new(run: Arc<Object<dyn TerminalRun>>, poll_ms: i64) -> Self {
         Self {
-            session,
+            run,
             stopped: Arc::new(AtomicBool::new(false)),
             poll_ms,
         }
@@ -40,7 +40,7 @@ impl Read for TerminalIo {
             if self.stopped.load(Ordering::SeqCst) {
                 return Ok(0);
             }
-            match self.session.read(buf, self.poll_ms) {
+            match self.run.read(buf, self.poll_ms) {
                 Ok(READ_TIMED_OUT) => continue,
                 Ok(count) => return Ok(usize::try_from(count).unwrap_or(0)),
                 Err(error) => return Err(io::Error::other(error.to_string())),
@@ -51,7 +51,7 @@ impl Read for TerminalIo {
 
 impl Write for TerminalIo {
     fn write(&mut self, data: &[u8]) -> io::Result<usize> {
-        self.session
+        self.run
             .write(data)
             .map_err(|error| io::Error::other(error.to_string()))?;
         Ok(data.len())

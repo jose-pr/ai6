@@ -9,7 +9,7 @@ use ai6::directorates::registry::mission_issues::{IssueLink, LinkRelation, LinkS
 use ai6::directorates::registry::reviews::{MissionReview, ReviewMaterial};
 use ai6::{
     Brief, Cable, CableDraft, CableRecipient, CableScope, CableState, CableTarget, MissionEntry,
-    NewSession, new_uid,
+    NewRun, new_uid,
 };
 use serde_json::{Value, json};
 
@@ -46,7 +46,7 @@ async fn rename(served: &Served, token: &str, id: &str, handle: &str) -> reqwest
     .await
 }
 
-/// A Mission with a Session on the board and in the Registry, a Cable, a review and a linked
+/// A Mission with a Run on the board and in the Registry, a Cable, a review and a linked
 /// issue, every one kept by its UID.
 async fn working_mission(served: &Served) -> String {
     let entered = served
@@ -59,18 +59,18 @@ async fn working_mission(served: &Served) -> String {
         served,
         STATION_TOKEN,
         reqwest::Method::POST,
-        "/v1/station/sessions",
-        Some(json!({"operation_id": "G", "mission_id": uid, "session_id": "session-r"})),
+        "/v1/station/runs",
+        Some(json!({"operation_id": "G", "mission_id": uid, "run_id": "run-r"})),
     )
     .await;
     assert!(registered.status().is_success(), "{}", registered.status());
     served
         .registry
-        .open_session(
-            NewSession::new(new_uid(), &uid, "worker")
+        .open_run(
+            NewRun::new(new_uid(), &uid, "worker")
                 .with_operation("G")
                 .with_handle("G-1")
-                .with_provider_session("session-r"),
+                .with_provider_id("run-r"),
             Duration::from_secs(60),
         )
         .unwrap();
@@ -149,7 +149,7 @@ async fn a_renamed_mission_reads_under_its_new_handle_its_old_one_and_its_uid() 
         let detail: Value = detail.json().await.unwrap();
         assert_eq!(detail["mission_id"], uid.as_str(), "{id}");
         assert_eq!(detail["handle"], "G-build-fix", "{id}");
-        assert_eq!(detail["sessions"][0]["session_id"], "session-r", "{id}");
+        assert_eq!(detail["runs"][0]["run_id"], "run-r", "{id}");
         assert_eq!(
             detail["attempts"][0]["handle"], "G-1.1",
             "a run keeps the handle it opened with"

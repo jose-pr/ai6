@@ -114,7 +114,7 @@ struct RegistryFacts {
     passed: Vec<(f64, String)>,
     /// Missions whose brief passed at any time the timeline still remembers.
     passed_missions: BTreeSet<String>,
-    /// Proposal reviews queued in the window: when, and the proposing Session.
+    /// Proposal reviews queued in the window: when, and the proposing Run.
     proposal_reviews: Vec<(f64, String)>,
     day_spend: Option<u64>,
 }
@@ -483,8 +483,8 @@ impl<'a> Round<'a> {
                     }
                 }
                 "reviewing" if event.at >= window => {
-                    if let Some(session) = event.detail.get("proposer_session") {
-                        read.proposal_reviews.push((event.at, session.clone()));
+                    if let Some(run) = event.detail.get("proposer_run") {
+                        read.proposal_reviews.push((event.at, run.clone()));
                     }
                 }
                 _ => {}
@@ -625,11 +625,11 @@ impl<'a> Round<'a> {
             ..VettingContext::default()
         };
         let reviews_here = read.proposal_reviews.len() as u32;
-        let session = proposal.proposer_session_id.to_string();
-        let reviews_by_session = read
+        let run = proposal.proposer_run_id.to_string();
+        let reviews_by_run = read
             .proposal_reviews
             .iter()
-            .filter(|(_, by)| *by == session)
+            .filter(|(_, by)| *by == run)
             .count() as u32;
         let mut vetting = vet(&proposal.brief, &operation.vetting, &context);
         let work = std::mem::take(&mut context.work);
@@ -663,13 +663,13 @@ impl<'a> Round<'a> {
                 )])
                 .within(&state.station.limits().vetting)
             } else if over(
-                operation.vetting.max_proposal_reviews_per_session_per_hour,
-                reviews_by_session,
+                operation.vetting.max_proposal_reviews_per_run_per_hour,
+                reviews_by_run,
             ) {
                 Vetting::from_findings(vec![Finding::new(
                     FindingKind::Rate,
                     format!(
-                        "{reviews_by_session} reviews of this Session's proposals were queued in \
+                        "{reviews_by_run} reviews of this Run's proposals were queued in \
                          the last hour"
                     ),
                 )])
@@ -686,7 +686,7 @@ impl<'a> Round<'a> {
                     Some(ReviewState::Queued) => {
                         record_proposal_review(state, operation, proposal);
                         if let Some(read) = self.facts(operation).read.as_mut() {
-                            read.proposal_reviews.push((now, session));
+                            read.proposal_reviews.push((now, run));
                         }
                         return None;
                     }
@@ -765,10 +765,10 @@ fn reviewed(state: &DaemonState, brief: &Brief) -> Option<bool> {
 /// Promotes a clean proposal when a live class authorisation of kind `proposal` covers it:
 /// its proposing Agent, or its parent Mission's recorded role (a role the proposal asks for
 /// must be that role or one the class authorisation lists), at the Agent's clearance, and
-/// its title against the target pattern. Never for a proposal whose proposing Session read
-/// untrusted input, by the proposal's own mark or by the parent Mission's Session records
+/// its title against the target pattern. Never for a proposal whose proposing Run read
+/// untrusted input, by the proposal's own mark or by the parent Mission's Run records
 /// under an Operation that restricts proposals, nor before it is
-/// `[vetting] proposal_settle` old, so the Session's last events have reached the Registry.
+/// `[vetting] proposal_settle` old, so the Run's last events have reached the Registry.
 /// The approval counts one use and is audited as `mission.proposal.approved` with actor
 /// `class:ID`.
 fn promote_by_class(
@@ -777,7 +777,7 @@ fn promote_by_class(
     proposal: &MissionProposal,
     now: f64,
 ) {
-    if !medical::brief_exposure(&proposal.brief, &state.intake.limits().sessions).is_empty()
+    if !medical::brief_exposure(&proposal.brief, &state.intake.limits().runs).is_empty()
         || proposal.created_at
             + state
                 .station
@@ -818,7 +818,7 @@ fn promote_by_class(
     let Ok(request) = ApprovalRequest::try_new(
         operation.id.clone(),
         proposal.parent_mission_id.clone(),
-        proposal.proposer_session_id.clone(),
+        proposal.proposer_run_id.clone(),
         proposal.proposer_agent_id.clone(),
         scope,
         format!("Mission proposal {}", proposal.id),
@@ -1238,7 +1238,7 @@ fn record_target(
     }
 }
 
-/// Records a proposal review queued, with the proposing Session, so the proposal review
+/// Records a proposal review queued, with the proposing Run, so the proposal review
 /// rate can count it.
 fn record_proposal_review(state: &DaemonState, operation: &Operation, proposal: &MissionProposal) {
     let event = TimelineEvent::new(
@@ -1251,8 +1251,8 @@ fn record_proposal_review(state: &DaemonState, operation: &Operation, proposal: 
     .mission(detail_text(state, &proposal.id))
     .actor(detail_text(state, &proposal.proposer_agent_id))
     .detail(
-        "proposer_session",
-        detail_text(state, proposal.proposer_session_id.as_str()),
+        "proposer_run",
+        detail_text(state, proposal.proposer_run_id.as_str()),
     );
     if let Err(error) = state.intake.record_event(&event) {
         eprintln!("ai6: vetting timeline event was not recorded: {error}");
@@ -1413,21 +1413,21 @@ pub(super) fn log_weakenings(roster: &Roster) {
     }
 }
 
-/// A handler for review tests: its Session completes at once with the final message its
+/// A handler for review tests: its Run completes at once with the final message its
 /// Agent's model names ([`verdict`]), and each start is recorded.
 #[cfg(test)]
 pub(super) mod testing {
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use crate::directorates::m::identity::SessionId;
+    use crate::directorates::m::identity::RunId;
     use crate::directorates::q::terminal::AgentTerminal;
     use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
     use crate::guatiao::library::{Object, ProviderError};
     use crate::guatiao::{Provider, Status};
     use coqui_acp_provider::{AgentEvent, AgentSession};
 
-    use super::super::tests::MockSession;
+    use super::super::tests::MockRun;
 
     /// Each start, as the handler was asked for it.
     pub(super) static STARTED: Mutex<Vec<AgentStart>> = Mutex::new(Vec::new());
@@ -1462,7 +1462,7 @@ pub(super) mod testing {
         ) -> Result<Object<dyn AgentSession>, ProviderError> {
             STARTED.lock().unwrap().push(request.clone());
             let started = STARTS.fetch_add(1, Ordering::Relaxed);
-            let session = SessionId::try_new(format!("provider-session-verdict-{started}"))
+            let run = RunId::try_new(format!("provider-id-verdict-{started}"))
                 .map_err(|error| {
                     ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &error.to_string())
                 })?;
@@ -1474,7 +1474,7 @@ pub(super) mod testing {
                 tools: Vec::new(),
                 report: None,
             };
-            Ok(MockSession::with_event(session, event).into_object())
+            Ok(MockRun::with_event(run, event).into_object())
         }
 
         fn resume(
@@ -2192,16 +2192,16 @@ mod tests {
         );
     }
 
-    /// Agent 007's proposal of `title` and `body` from Mission `parent`'s Session `session`,
-    /// retried under `key`; `exposed` marks it as from a Session that read untrusted input.
+    /// Agent 007's proposal of `title` and `body` from Mission `parent`'s Run `run`,
+    /// retried under `key`; `exposed` marks it as from a Run that read untrusted input.
     fn propose_from(
         state: &DaemonState,
-        (key, session): (&str, &str),
+        (key, run): (&str, &str),
         (title, body): (&str, &str),
         exposed: bool,
         (parent_role, role): (Option<&str>, Option<&str>),
     ) -> String {
-        use crate::directorates::m::identity::{MissionId, SessionId};
+        use crate::directorates::m::identity::{MissionId, RunId};
         let mut brief: Brief = serde_json::from_value(serde_json::json!({
             "title": title, "body": body, "id": "child", "source": "ai6-agent-proposal",
             "role": role,
@@ -2217,7 +2217,7 @@ mod tests {
             "G",
             MissionId::try_new("parent").unwrap(),
             "007",
-            SessionId::try_new(session).unwrap(),
+            RunId::try_new(run).unwrap(),
             key,
             brief,
             &Default::default(),
@@ -2231,7 +2231,7 @@ mod tests {
     fn propose(state: &DaemonState, key: &str, title: &str, body: &str, exposed: bool) -> String {
         propose_from(
             state,
-            (key, "provider-session-parent"),
+            (key, "provider-id-parent"),
             (title, body),
             exposed,
             (None, None),
@@ -2279,7 +2279,7 @@ mod tests {
         assert_eq!(
             pending(&state).len(),
             3,
-            "a new proposal waits until its Session's last events are in"
+            "a new proposal waits until its Run's last events are in"
         );
 
         later(&mut state, 60);
@@ -2366,8 +2366,8 @@ mod tests {
         later(&mut state, 60);
         let class = class(&state, "*").for_roles(vec!["implement".to_owned()]);
         state.intake.put_class_authorization(&class).unwrap();
-        let session = |n: &str| format!("provider-session-{n}");
-        let (one, two, three) = (session("1"), session("2"), session("3"));
+        let run = |n: &str| format!("provider-id-{n}");
+        let (one, two, three) = (run("1"), run("2"), run("3"));
         // The proposer names the role it is covered for; its own Mission had none.
         let claimed = propose_from(
             &state,
@@ -2435,18 +2435,18 @@ mod tests {
     }
 
     #[test]
-    fn proposal_reviews_past_a_sessions_rate_are_held_for_an_operator() {
+    fn proposal_reviews_past_a_runs_rate_are_held_for_an_operator() {
         let dir = tempfile::tempdir().unwrap();
         let state = review_station(
             dir.path(),
             "clear",
-            "vetting = { max_proposal_reviews_per_session_per_hour = 1 }\n",
+            "vetting = { max_proposal_reviews_per_run_per_hour = 1 }\n",
         );
         let first = propose(&state, "one", "Update the changelog", "for 1.2", false);
         let second = propose(&state, "two", "Rewrite the parser", "faster", false);
         let other = propose_from(
             &state,
-            ("three", "provider-session-other"),
+            ("three", "provider-id-other"),
             ("Update the notes", "c"),
             false,
             (None, None),
@@ -2461,7 +2461,7 @@ mod tests {
                 .vetting
         };
         assert_eq!(vetting(&first), None, "its review is queued");
-        assert_eq!(vetting(&other), None, "another Session's review is queued");
+        assert_eq!(vetting(&other), None, "another Run's review is queued");
         let held = vetting(&second).expect("held");
         assert_eq!(held.verdict, VettingVerdict::Hold);
         assert_eq!(held.kinds(), BTreeSet::from([FindingKind::Rate]));

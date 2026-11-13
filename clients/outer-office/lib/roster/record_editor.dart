@@ -1220,7 +1220,7 @@ Future<RosterChange?> confirmRemoveRecord(
             spacing: 8,
             children: [
               const Text(
-                'Every Station stops using it at its next poll. Running Sessions keep '
+                'Every Station stops using it at its next poll. Running Runs keep '
                 'the roster they started with.',
               ),
               if (dependents.isEmpty)

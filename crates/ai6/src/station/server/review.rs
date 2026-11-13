@@ -1,12 +1,12 @@
 //! Reviews on the Mission path: where a Mission would be `done`, it waits for its panel.
 //!
-//! The Station closes the author's Session and blocks the Mission for `review-output`, keeping its
+//! The Station closes the author's Run and blocks the Mission for `review-output`, keeping its
 //! safe house. Each scheduler round [`advance`] reads the record the Registry holds, fills the
 //! panel, asks whoever has not been asked, and acts on what the votes decide. Nothing is remembered
 //! between rounds, so a restart carries on from the record; a seat has one vote a round, so a
 //! reviewer started again is not counted twice.
 //!
-//! A reviewer's turn is an answer-only Session of its own: a brief AI6 queues under a `review`
+//! A reviewer's turn is an answer-only Run of its own: a brief AI6 queues under a `review`
 //! provenance, placed like any other, started as a Chief of Staff review is. Its final message is
 //! read for a vote and nothing else.
 
@@ -18,8 +18,8 @@ use axum::extract::{Path, State};
 use super::{
     AgentEvent, AgentSession, ApiErrorResponse, DaemonState, FinishOutcome, MissionState,
     ResumeMission, TransitionMission, audit_cover, publish_finished_event, publish_lifecycle,
-    queue_event, reopen_left_safe_house, resume_mission, stop_session_keeping_mission,
-    sync_session_record, transition_mission, vetting,
+    queue_event, reopen_left_safe_house, resume_mission, stop_run_keeping_mission,
+    sync_run_record, transition_mission, vetting,
 };
 use crate::directorates::m::mission::Mission;
 use crate::directorates::m::review::{
@@ -105,12 +105,12 @@ pub(super) fn is_panel_mission(mission: &Mission) -> bool {
     })
 }
 
-/// Stops the author at the output gate when a review applies: the Session is closed, the safe house
+/// Stops the author at the output gate when a review applies: the Run is closed, the safe house
 /// kept and the Mission blocked, and `true` is returned. `false` lets the Mission finish.
 pub(super) fn holds_output(
     state: &DaemonState,
     mission_id: &str,
-    session: &std::sync::Arc<std::sync::Mutex<crate::guatiao::library::Object<dyn AgentSession>>>,
+    run: &std::sync::Arc<std::sync::Mutex<crate::guatiao::library::Object<dyn AgentSession>>>,
     final_message: Option<&str>,
 ) -> bool {
     let Some(mission) = state
@@ -129,7 +129,7 @@ pub(super) fn holds_output(
         Ok(applied) => applied,
         // Not knowing which review applies is no reason to skip one.
         Err(refusal) => {
-            stop_author(state, mission_id, session, gate, &refusal.to_string());
+            stop_author(state, mission_id, run, gate, &refusal.to_string());
             note_refusal(state, &mission, gate, &refusal.to_string());
             return true;
         }
@@ -142,34 +142,34 @@ pub(super) fn holds_output(
     stop_author(
         state,
         mission_id,
-        session,
+        run,
         gate,
         &format!("waiting for review policy {name:?}"),
     );
     true
 }
 
-/// Closes the author's Session and blocks the Mission for `gate`, telling whoever watches why.
+/// Closes the author's Run and blocks the Mission for `gate`, telling whoever watches why.
 fn stop_author(
     state: &DaemonState,
     mission_id: &str,
-    session: &std::sync::Arc<std::sync::Mutex<crate::guatiao::library::Object<dyn AgentSession>>>,
+    run: &std::sync::Arc<std::sync::Mutex<crate::guatiao::library::Object<dyn AgentSession>>>,
     gate: ReviewGate,
     text: &str,
 ) {
     #[cfg(feature = "publisher")]
     let telemetry = state
-        .sessions
+        .runs
         .lock()
         .ok()
-        .and_then(|sessions| sessions.get(mission_id)?.telemetry.clone());
-    stop_session_keeping_mission(state, mission_id, session);
+        .and_then(|runs| runs.get(mission_id)?.telemetry.clone());
+    stop_run_keeping_mission(state, mission_id, run);
     let blocked = state
         .missions
         .lock()
         .is_ok_and(|mut missions| missions.block_for(mission_id, gate.reason()).is_ok());
     if blocked {
-        sync_session_record(state, mission_id);
+        sync_run_record(state, mission_id);
         publish_lifecycle(state, mission_id, MissionState::Blocked);
         #[cfg(feature = "publisher")]
         if let Some(telemetry) = &telemetry {
@@ -206,8 +206,8 @@ fn material(state: &DaemonState, mission: &Mission, submitted: Option<&str>) -> 
         material.branch.clone_from(&report.branch);
         material.base.clone_from(&report.base);
     }
-    let house = state.sessions.lock().ok().and_then(|sessions| {
-        sessions
+    let house = state.runs.lock().ok().and_then(|runs| {
+        runs
             .get(mission.mission_id.as_str())?
             .safe_house
             .clone()
@@ -721,13 +721,13 @@ fn reblock(state: &DaemonState, mission_id: &str, reason: &str) {
         .lock()
         .is_ok_and(|mut missions| missions.block_for(mission_id, reason).is_ok());
     if blocked {
-        sync_session_record(state, mission_id);
+        sync_run_record(state, mission_id);
         publish_lifecycle(state, mission_id, MissionState::Blocked);
     }
 }
 
 /// A blocked Mission with no record: its record could not be written when it stopped. Its final
-/// message is gone with its Session, so the panel is told; it reads the goals and the change.
+/// message is gone with its Run, so the panel is told; it reads the goals and the change.
 fn reopen(state: &DaemonState, mission: &Mission, gate: ReviewGate) {
     let Ok(applied) = applied_policy(state, mission, gate) else {
         return;
@@ -1080,7 +1080,7 @@ pub(super) fn reviewer_ended(state: &DaemonState, lease: &Lease, mission: &Missi
 
 /// The reviewers' turns on this Station nothing is waiting for any more, or that cannot answer: a
 /// turn stalled, or whose seat voted or review moved on. Each is returned to be abandoned. A turn
-/// lost in a restart before its harness named a Session is queued again.
+/// lost in a restart before its harness named a Run is queued again.
 fn sweep_reviewers(state: &DaemonState) -> Vec<String> {
     let turns = state
         .missions
@@ -1125,7 +1125,7 @@ fn sweep_reviewers(state: &DaemonState) -> Vec<String> {
                 );
                 stale.push(mission_id.to_owned());
             }
-            MissionState::Blocked if mission.session_ids.is_empty() => {
+            MissionState::Blocked if mission.run_ids.is_empty() => {
                 restart_turn(state, &mission);
             }
             _ => {}
@@ -1134,7 +1134,7 @@ fn sweep_reviewers(state: &DaemonState) -> Vec<String> {
     stale
 }
 
-/// Queues again a reviewer's turn whose harness never named a Session, so there is nothing to
+/// Queues again a reviewer's turn whose harness never named a Run, so there is nothing to
 /// resume: the seat has no vote yet, so this counts nothing twice.
 fn restart_turn(state: &DaemonState, mission: &Mission) {
     let mission_id = mission.mission_id.as_str();
@@ -1188,7 +1188,7 @@ fn sent_back_message(state: &DaemonState, review: &MissionReview) -> String {
     )
 }
 
-/// Resumes the author's Session with the reasons. Tried again next round when it cannot start; the
+/// Resumes the author's Run with the reasons. Tried again next round when it cannot start; the
 /// record says so until it does.
 async fn send_back(state: &DaemonState, mission_id: &str, gate: ReviewGate, message: String) {
     let waiting = state
@@ -1327,12 +1327,12 @@ async fn finish_passed(state: &DaemonState, mission_id: &str) {
     publish_finished_event(state, mission_id, event, Some(finished));
 }
 
-/// The telemetry of a Mission with no live Session, so its end reaches Universal Exports.
+/// The telemetry of a Mission with no live Run, so its end reaches Universal Exports.
 #[cfg(feature = "publisher")]
 pub(super) fn published(
     state: &DaemonState,
     mission_id: &str,
-) -> Option<std::sync::Arc<crate::station::publisher::SessionTelemetry>> {
+) -> Option<std::sync::Arc<crate::station::publisher::RunTelemetry>> {
     let (mission, manifest) = state.missions.lock().ok().and_then(|missions| {
         Some((
             missions.get(mission_id)?.clone(),
@@ -1343,7 +1343,7 @@ pub(super) fn published(
     let telemetry = state
         .publisher
         .as_ref()?
-        .session(operation, mission.mission_id.clone());
+        .run(operation, mission.mission_id.clone());
     telemetry.set_mission_publication(crate::station::publisher::MissionPublication {
         name: mission.name.clone(),
         prompt: mission.prompt.clone(),
@@ -1360,8 +1360,8 @@ pub(super) fn published(
         mode: manifest.mode,
         provenance: mission.provenance.clone(),
     });
-    if let Some(session) = mission.session_ids.last() {
-        telemetry.bind(session.clone());
+    if let Some(run) = mission.run_ids.last() {
+        telemetry.bind(run.clone());
     }
     Some(telemetry)
 }
@@ -1432,7 +1432,7 @@ pub(super) fn in_plan_stage(state: &DaemonState, mission: &Mission) -> bool {
 pub(super) fn holds_plan(
     state: &DaemonState,
     mission_id: &str,
-    session: &std::sync::Arc<std::sync::Mutex<crate::guatiao::library::Object<dyn AgentSession>>>,
+    run: &std::sync::Arc<std::sync::Mutex<crate::guatiao::library::Object<dyn AgentSession>>>,
     final_message: Option<&str>,
 ) -> bool {
     let Some(mission) = state
@@ -1450,7 +1450,7 @@ pub(super) fn holds_plan(
     let name = match applied_policy(state, &mission, gate) {
         Ok(applied) => applied.name,
         Err(refusal) => {
-            stop_author(state, mission_id, session, gate, &refusal.to_string());
+            stop_author(state, mission_id, run, gate, &refusal.to_string());
             note_refusal(state, &mission, gate, &refusal.to_string());
             return true;
         }
@@ -1476,7 +1476,7 @@ pub(super) fn holds_plan(
     stop_author(
         state,
         mission_id,
-        session,
+        run,
         gate,
         &format!("its plan waits for review policy {name:?}"),
     );

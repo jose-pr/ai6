@@ -8,11 +8,11 @@ import 'package:guatiao/wire.dart' as wire;
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:outer_office/main.dart';
-import 'package:outer_office/terminal/session_connection.dart';
+import 'package:outer_office/terminal/run_connection.dart';
 
 void main() {
   test(
-    'Session connection replays bytes, renews leases, and sends input',
+    'Run connection replays bytes, renews leases, and sends input',
     () async {
       final frames = await _readProtocolFrames();
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -104,15 +104,15 @@ void main() {
         }),
       );
       board.accessToken = 'user-token';
-      const session = SessionSummary(
+      const run = RunSummary(
         operationId: 'operation-a',
         missionId: 'mission-17',
-        sessionId: 'provider-run-3',
+        runId: 'provider-run-3',
         state: 'working',
         sequence: 3,
       );
-      board.sessions = [session];
-      final connection = SessionConnection(board: board, session: session);
+      board.runs = [run];
+      final connection = RunConnection(board: board, run: run);
       final output = Completer<List<int>>();
       final outputSubscription = connection.output.listen((bytes) {
         if (!output.isCompleted) output.complete(List<int>.from(bytes));
@@ -143,8 +143,8 @@ void main() {
         0,
         128,
       ]);
-      expect(board.sessions.single.state, 'working');
-      expect(board.sessions.single.sequence, 4);
+      expect(board.runs.single.state, 'working');
+      expect(board.runs.single.sequence, 4);
       connection.sendInput([9]);
       connection.sendResize(80, 24);
 
@@ -175,13 +175,13 @@ void main() {
         const Duration(seconds: 5),
       );
       expect(input, {
-        'session_id': 'provider-run-3',
+        'run_id': 'provider-run-3',
         'sequence': 1,
         'direction': 'input',
         'bytes': Uint8List.fromList([0, 255, 10]),
       });
       expect(resize, {
-        'session_id': 'provider-run-3',
+        'run_id': 'provider-run-3',
         'sequence': 2,
         'columns': 120,
         'rows': 40,
@@ -227,15 +227,15 @@ void main() {
       }
     });
     final board = _board(server);
-    const session = SessionSummary(
+    const run = RunSummary(
       operationId: 'operation-a',
       missionId: 'mission-17',
-      sessionId: 'provider-run-3',
+      runId: 'provider-run-3',
       state: 'working',
       sequence: 40,
     );
-    board.sessions = [session];
-    final connection = SessionConnection(board: board, session: session);
+    board.runs = [run];
+    final connection = RunConnection(board: board, run: run);
     final received = connection.output.first;
     addTearDown(() async {
       connection.dispose();
@@ -275,15 +275,15 @@ void main() {
       socket.add(frames['gap_value']!);
     });
     final board = _board(server);
-    const session = SessionSummary(
+    const run = RunSummary(
       operationId: 'operation-a',
       missionId: 'mission-17',
-      sessionId: 'provider-run-3',
+      runId: 'provider-run-3',
       state: 'working',
       sequence: 0,
     );
-    board.sessions = [session];
-    final connection = SessionConnection(board: board, session: session);
+    board.runs = [run];
+    final connection = RunConnection(board: board, run: run);
     final shown = <List<int>>[];
     final subscription = connection.output.listen(shown.add);
     addTearDown(() async {
@@ -325,7 +325,7 @@ MissionBoard _board(HttpServer server) {
   return board;
 }
 
-Future<void> _waitUntilConnected(SessionConnection connection) async {
+Future<void> _waitUntilConnected(RunConnection connection) async {
   if (connection.isConnected) return;
   final connected = Completer<void>();
   void listen() {

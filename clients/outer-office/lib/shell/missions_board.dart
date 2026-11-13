@@ -1,15 +1,15 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../assistant/pages.dart' show launchPage;
-import '../assistant/transcripts.dart' show SessionContextPanel;
+import '../assistant/transcripts.dart' show RunContextPanel;
 import '../controls/mission_actions.dart';
 import '../main.dart';
 import '../operations/operation_tree.dart';
 import '../routes/oo_route.dart';
 import 'oo_shell.dart' show OoPage;
-import '../terminal/session_connection.dart';
+import '../terminal/run_connection.dart';
 import 'mission_pending.dart';
-import '../terminal/session_terminal.dart';
+import '../terminal/run_terminal.dart';
 import '../theme/oo_icon.dart';
 import '../theme/oo_tokens.dart';
 import 'app_window.dart';
@@ -18,15 +18,15 @@ import 'oo_freshness.dart';
 import 'oo_link.dart';
 
 /// The Missions a Missions [route] selects from the board, in its order. A state filter looks at
-/// each Mission's state, that of its latest Session, as Overview and an Operation's counts do; a
-/// Station or Agent filter keeps the Missions with a Session on that Station or for that Agent.
+/// each Mission's state, that of its latest Run, as Overview and an Operation's counts do; a
+/// Station or Agent filter keeps the Missions with a Run on that Station or for that Agent.
 List<MissionGroup> routeMissions(MissionBoard board, OoRoute route) {
   final states = route.states;
   final text = route['text']?.toLowerCase();
   // With `subtree`, the Operation and those under it as the person's tree shows them.
   final subtree = switch (route['operation_id']) {
     final operation? when route['subtree'] == 'true' => subtreeIds({
-      for (final access in board.userSession?.operations ?? const [])
+      for (final access in board.userRun?.operations ?? const [])
         access.operationId: access.parent,
     }, operation),
     _ => null,
@@ -54,11 +54,11 @@ List<MissionGroup> routeMissions(MissionBoard board, OoRoute route) {
       return false;
     }
     if (route['station_id'] case final station?
-        when !mission.sessions.any((session) => session.stationId == station)) {
+        when !mission.runs.any((run) => run.stationId == station)) {
       return false;
     }
     if (route['agent'] case final agent?
-        when !mission.sessions.any((session) => session.agent == agent)) {
+        when !mission.runs.any((run) => run.agent == agent)) {
       return false;
     }
     if (text != null) {
@@ -67,7 +67,7 @@ List<MissionGroup> routeMissions(MissionBoard board, OoRoute route) {
         mission.operationId,
         mission.missionId,
         board.handleOf(mission.operationId, mission.missionId),
-        for (final session in mission.sessions) session.sessionId,
+        for (final run in mission.runs) run.runId,
         for (final attempt in board.attempts(
           mission.operationId,
           mission.missionId,
@@ -84,11 +84,11 @@ List<MissionGroup> routeMissions(MissionBoard board, OoRoute route) {
 
   double updated(MissionGroup mission) => mission.updatedAt ?? 0;
   // The board holds no creation time: the earliest update it holds stands in for one, and a
-  // Mission with no Session has only the time the Registry last said where it stands.
-  double created(MissionGroup mission) => mission.sessions.isEmpty
+  // Mission with no Run has only the time the Registry last said where it stands.
+  double created(MissionGroup mission) => mission.runs.isEmpty
       ? mission.pending?.at ?? 0
-      : mission.sessions
-            .map((session) => session.updatedAt ?? 0)
+      : mission.runs
+            .map((run) => run.updatedAt ?? 0)
             .reduce((a, b) => a < b ? a : b);
   final sort = route['sort'] ?? 'updated';
   final Comparable<Object> Function(MissionGroup) key = switch (sort) {
@@ -227,46 +227,46 @@ class EmptyFilter extends StatelessWidget {
   Widget build(BuildContext context) => Center(child: Text(text));
 }
 
-/// One Mission on the board and its Sessions.
+/// One Mission on the board and its Runs.
 class MissionGroup {
   const MissionGroup({
     required this.operationId,
     required this.missionId,
-    required this.sessions,
+    required this.runs,
     this.pending,
   });
 
   final String operationId;
   final String missionId;
-  final List<SessionSummary> sessions;
+  final List<RunSummary> runs;
 
-  /// Where a Mission with no Session stands; `null` for one that has Sessions.
+  /// Where a Mission with no Run stands; `null` for one that has Runs.
   final PendingMission? pending;
 
-  /// The Session that sets the Mission's state, by [currentSession]'s rule; `null` for a
+  /// The Run that sets the Mission's state, by [currentRun]'s rule; `null` for a
   /// Mission that has none yet.
-  SessionSummary? get latest => currentSession(sessions);
+  RunSummary? get latest => currentRun(runs);
 
-  /// The state of its latest Session, a Session not yet reporting one being working; without a
-  /// Session, `queued` or `failed` as the Registry says.
+  /// The state of its latest Run, a Run not yet reporting one being working; without a
+  /// Run, `queued` or `failed` as the Registry says.
   String get state => latest == null
       ? (pending?.state ?? 'queued')
       : (latest!.state ?? 'working');
 
-  /// Why the latest Session holds that state, when it says.
+  /// Why the latest Run holds that state, when it says.
   String? get reason => latest?.reason;
 
-  /// When the board last heard of any of its Sessions, as Unix seconds; `null` before it
+  /// When the board last heard of any of its Runs, as Unix seconds; `null` before it
   /// has heard of one. A Mission with none has the time the Registry last said where it stands.
   double? get updatedAt =>
-      sessions
-          .map((session) => session.updatedAt)
+      runs
+          .map((run) => run.updatedAt)
           .whereType<double>()
           .fold<double?>(
             null,
             (latest, at) => latest == null || at > latest ? at : latest,
           ) ??
-      (sessions.isEmpty ? pending?.at : null);
+      (runs.isEmpty ? pending?.at : null);
 
   /// Whether it has stopped for good: done, failed or abandoned.
   bool get finished => const {'done', 'failed', 'abandoned'}.contains(state);
@@ -277,20 +277,20 @@ class MissionGroup {
 String missionOrder(String id) =>
     id.replaceAllMapped(RegExp(r'\d+'), (run) => run[0]!.padLeft(20, '0'));
 
-/// The board's Sessions grouped by Mission, by Operation then Mission ID.
-List<MissionGroup> groupMissions(List<SessionSummary> sessions) {
-  final groups = <(String, String), List<SessionSummary>>{};
-  for (final session in sessions) {
+/// The board's Runs grouped by Mission, by Operation then Mission ID.
+List<MissionGroup> groupMissions(List<RunSummary> runs) {
+  final groups = <(String, String), List<RunSummary>>{};
+  for (final run in runs) {
     groups
-        .putIfAbsent((session.operationId, session.missionId), () => [])
-        .add(session);
+        .putIfAbsent((run.operationId, run.missionId), () => [])
+        .add(run);
   }
   final result = groups.entries
       .map(
         (entry) => MissionGroup(
           operationId: entry.key.$1,
           missionId: entry.key.$2,
-          sessions: List.unmodifiable(entry.value),
+          runs: List.unmodifiable(entry.value),
         ),
       )
       .toList();
@@ -314,7 +314,7 @@ class MissionCard extends StatelessWidget {
     required this.mission,
     required this.board,
     required this.desktopWindows,
-    required this.onSelectSession,
+    required this.onSelectRun,
     this.onDetails,
     this.detailsFocus,
     this.selected = false,
@@ -324,7 +324,7 @@ class MissionCard extends StatelessWidget {
   final MissionGroup mission;
   final MissionBoard board;
   final bool desktopWindows;
-  final ValueChanged<SessionSummary>? onSelectSession;
+  final ValueChanged<RunSummary>? onSelectRun;
 
   /// Opens the Mission's detail; the card has no such button without it.
   final VoidCallback? onDetails;
@@ -373,7 +373,7 @@ class MissionCard extends StatelessWidget {
                 ),
               ),
               Text(
-                '${mission.sessions.length} session${mission.sessions.length == 1 ? '' : 's'}',
+                '${mission.runs.length} run${mission.runs.length == 1 ? '' : 's'}',
                 style: Theme.of(context).textTheme.labelMedium,
               ),
               if (board.missionBrief(mission.operationId, mission.missionId)
@@ -391,7 +391,7 @@ class MissionCard extends StatelessWidget {
                 board: board,
                 operationId: mission.operationId,
                 missionId: mission.missionId,
-                sessions: mission.sessions,
+                runs: mission.runs,
                 state: mission.state,
               ),
             ],
@@ -438,12 +438,12 @@ class MissionCard extends StatelessWidget {
                 style: Theme.of(context).textTheme.labelMedium,
               ),
             ),
-          for (final session in mission.sessions)
-            _SessionRow(
-              session: session,
+          for (final run in mission.runs)
+            _RunRow(
+              run: run,
               board: board,
               desktopWindows: desktopWindows,
-              onSelectSession: onSelectSession,
+              onSelectRun: onSelectRun,
             ),
         ],
       ),
@@ -657,40 +657,40 @@ class MissionBriefPage extends StatelessWidget {
   );
 }
 
-class _SessionRow extends StatelessWidget {
-  const _SessionRow({
-    required this.session,
+class _RunRow extends StatelessWidget {
+  const _RunRow({
+    required this.run,
     required this.board,
     required this.desktopWindows,
-    required this.onSelectSession,
+    required this.onSelectRun,
   });
 
-  final SessionSummary session;
+  final RunSummary run;
   final MissionBoard board;
   final bool desktopWindows;
-  final ValueChanged<SessionSummary>? onSelectSession;
+  final ValueChanged<RunSummary>? onSelectRun;
 
   void _open(BuildContext context) {
-    if (onSelectSession case final select?) {
-      select(session);
+    if (onSelectRun case final select?) {
+      select(run);
     } else if (desktopWindows) {
-      openSessionWindow(context, session, board);
+      openRunWindow(context, run, board);
     } else {
-      openSessionPage(context, session, board);
+      openRunPage(context, run, board);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final state = session.state ?? 'working';
+    final state = run.state ?? 'working';
     final tokens = OoTokens.of(context);
     final marks = Wrap(
       spacing: 6,
       runSpacing: 4,
       children: [
-        if (session.exposure.isNotEmpty)
+        if (run.exposure.isNotEmpty)
           Tooltip(
-            message: 'Read untrusted input: ${session.exposure.join(', ')}',
+            message: 'Read untrusted input: ${run.exposure.join(', ')}',
             child: const Chip(
               label: Text('EXPOSED'),
               visualDensity: VisualDensity.compact,
@@ -700,7 +700,7 @@ class _SessionRow extends StatelessWidget {
           label: Text(
             [
               state,
-              if (session.reason case final reason?) reasonWords(reason),
+              if (run.reason case final reason?) reasonWords(reason),
             ].join(' · ').toUpperCase(),
           ),
           visualDensity: VisualDensity.compact,
@@ -720,7 +720,7 @@ class _SessionRow extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         child: Row(
           children: [
-            OoStateMark(state, reason: session.reason),
+            OoStateMark(state, reason: run.reason),
             const SizedBox(width: 10),
             Expanded(
               // The state chips stay beside the ID when there is room and go under it when not.
@@ -735,11 +735,11 @@ class _SessionRow extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        session.sessionId,
+                        run.runId,
                         style: const TextStyle(fontFamily: 'monospace'),
                       ),
                       Text(
-                        'Updated at event ${session.sequence}',
+                        'Updated at event ${run.sequence}',
                         style: Theme.of(context).textTheme.labelSmall
                             ?.copyWith(color: tokens.muted),
                       ),
@@ -752,14 +752,14 @@ class _SessionRow extends StatelessWidget {
             if (desktopWindows) ...[
               const SizedBox(width: 8),
               IconButton(
-                tooltip: 'Open Session window',
+                tooltip: 'Open Run window',
                 onPressed: () => _open(context),
                 icon: const Icon(Icons.open_in_new),
               ),
             ] else ...[
               const SizedBox(width: 8),
               IconButton(
-                tooltip: 'View Session details',
+                tooltip: 'View Run details',
                 onPressed: () => _open(context),
                 icon: const Icon(Icons.chevron_right),
               ),
@@ -771,55 +771,55 @@ class _SessionRow extends StatelessWidget {
   }
 }
 
-void openSessionPage(
+void openRunPage(
   BuildContext context,
-  SessionSummary session,
+  RunSummary run,
   MissionBoard board,
 ) {
   Navigator.of(context).push(
     MaterialPageRoute<void>(
-      builder: (_) => SessionWindow(session: session, board: board),
+      builder: (_) => RunWindow(run: run, board: board),
     ),
   );
 }
 
-void openSessionWindow(
+void openRunWindow(
   BuildContext context,
-  SessionSummary session,
+  RunSummary run,
   MissionBoard board,
 ) => openAppWindow(
   context,
   size: const Size(900, 680),
-  title: 'Session ${session.sessionId} | Outer Office',
+  title: 'Run ${run.runId} | Outer Office',
   builder: (_) => boardThemedApp(
     board,
-    title: 'Session ${session.sessionId}',
-    home: SessionWindow(session: session, board: board),
+    title: 'Run ${run.runId}',
+    home: RunWindow(run: run, board: board),
   ),
 );
 
-class SessionWindow extends StatelessWidget {
-  const SessionWindow({required this.session, required this.board, super.key});
+class RunWindow extends StatelessWidget {
+  const RunWindow({required this.run, required this.board, super.key});
 
-  final SessionSummary session;
+  final RunSummary run;
   final MissionBoard board;
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text('Session ${session.sessionId}')),
-    body: _SessionDetailContent(session: session, board: board),
+    appBar: AppBar(title: Text('Run ${run.runId}')),
+    body: _RunDetailContent(run: run, board: board),
   );
 }
 
-class SessionDetailPane extends StatelessWidget {
-  const SessionDetailPane({
-    required this.session,
+class RunDetailPane extends StatelessWidget {
+  const RunDetailPane({
+    required this.run,
     required this.board,
     required this.onClose,
     super.key,
   });
 
-  final SessionSummary session;
+  final RunSummary run;
   final MissionBoard board;
   final VoidCallback onClose;
 
@@ -828,28 +828,28 @@ class SessionDetailPane extends StatelessWidget {
     children: [
       ListTile(
         title: Text(
-          'Session ${session.sessionId}',
+          'Run ${run.runId}',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
         trailing: IconButton(
-          tooltip: 'Close Session details',
+          tooltip: 'Close Run details',
           onPressed: onClose,
           icon: const Icon(Icons.close),
         ),
       ),
       const Divider(height: 1),
       Expanded(
-        child: _SessionDetailContent(session: session, board: board),
+        child: _RunDetailContent(run: run, board: board),
       ),
     ],
   );
 }
 
-class _SessionDetailContent extends StatelessWidget {
-  const _SessionDetailContent({required this.session, required this.board});
+class _RunDetailContent extends StatelessWidget {
+  const _RunDetailContent({required this.run, required this.board});
 
-  final SessionSummary session;
+  final RunSummary run;
   final MissionBoard board;
 
   @override
@@ -857,10 +857,10 @@ class _SessionDetailContent extends StatelessWidget {
     animation: board,
     builder: (context, _) {
       final current =
-          board.sessions
-              .where((item) => item.sessionId == session.sessionId)
+          board.runs
+              .where((item) => item.runId == run.runId)
               .firstOrNull ??
-          session;
+          run;
       return Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -893,27 +893,27 @@ class _SessionDetailContent extends StatelessWidget {
                       child: TabBarView(
                         children: [
                           board.demo
-                              ? const _SessionPreviewPanel(
-                                  message: 'Demo Sessions are sample data. No terminal connection is available.',
+                              ? const _RunPreviewPanel(
+                                  message: 'Demo Runs are sample data. No terminal connection is available.',
                                 )
                               : board.accessToken == null
-                              ? const _SessionPreviewPanel(
-                                  message: 'Sign in to Universal Exports to attach to this Session.',
+                              ? const _RunPreviewPanel(
+                                  message: 'Sign in to Universal Exports to attach to this Run.',
                                 )
-                              : _LiveSessionTerminal(
-                                  session: current,
+                              : _LiveRunTerminal(
+                                  run: current,
                                   board: board,
                                 ),
                           board.demo || board.accessToken == null
-                              ? const _SessionPreviewPanel(
+                              ? const _RunPreviewPanel(
                                   message:
-                                      "A Session's context is read from Universal Exports "
+                                      "A Run's context is read from Universal Exports "
                                       'once you are signed in.',
                                 )
-                              : SessionContextPanel(
+                              : RunContextPanel(
                                   reads: board,
                                   operation: current.operationId,
-                                  session: current.sessionId,
+                                  run: current.runId,
                                 ),
                         ],
                       ),
@@ -929,8 +929,8 @@ class _SessionDetailContent extends StatelessWidget {
   );
 }
 
-class _SessionPreviewPanel extends StatelessWidget {
-  const _SessionPreviewPanel({required this.message});
+class _RunPreviewPanel extends StatelessWidget {
+  const _RunPreviewPanel({required this.message});
 
   final String message;
 
@@ -944,7 +944,7 @@ class _SessionPreviewPanel extends StatelessWidget {
           children: [
             Icon(Icons.terminal, size: 36, color: OoTokens.of(context).accent),
             const SizedBox(height: 12),
-            const Text('Session preview'),
+            const Text('Run preview'),
             const SizedBox(height: 8),
             Text(message, textAlign: TextAlign.center),
           ],
@@ -954,25 +954,25 @@ class _SessionPreviewPanel extends StatelessWidget {
   );
 }
 
-class _LiveSessionTerminal extends StatefulWidget {
-  const _LiveSessionTerminal({required this.session, required this.board});
+class _LiveRunTerminal extends StatefulWidget {
+  const _LiveRunTerminal({required this.run, required this.board});
 
-  final SessionSummary session;
+  final RunSummary run;
   final MissionBoard board;
 
   @override
-  State<_LiveSessionTerminal> createState() => _LiveSessionTerminalState();
+  State<_LiveRunTerminal> createState() => _LiveRunTerminalState();
 }
 
-class _LiveSessionTerminalState extends State<_LiveSessionTerminal> {
-  late final SessionConnection _connection;
+class _LiveRunTerminalState extends State<_LiveRunTerminal> {
+  late final RunConnection _connection;
 
   @override
   void initState() {
     super.initState();
-    _connection = SessionConnection(
+    _connection = RunConnection(
       board: widget.board,
-      session: widget.session,
+      run: widget.run,
     )..addListener(_changed);
     _connection.start();
   }
@@ -1021,7 +1021,7 @@ class _LiveSessionTerminalState extends State<_LiveSessionTerminal> {
         const Divider(height: 1),
         Expanded(
           child: _connection.runtimeError == null
-              ? SessionTerminal(
+              ? RunTerminal(
                   output: _connection.output,
                   onInput: _connection.sendInput,
                   onResize: _connection.sendResize,
@@ -1055,10 +1055,10 @@ class EmptyBoard extends StatelessWidget {
     backdrop: true,
     title: 'No Missions yet',
     body: operations.isEmpty
-        ? 'A Mission is one brief of work under an Operation, and its Sessions show here. Your '
+        ? 'A Mission is one brief of work under an Operation, and its Runs show here. Your '
               'account cannot start one; a controller grants mission.create on an Operation.'
         : 'A Mission is one brief of work under an Operation. Start the first, and its '
-              'Sessions show here.',
+              'Runs show here.',
     actions: [
       if (onCreate case final onCreate?)
         for (final operation in operations)

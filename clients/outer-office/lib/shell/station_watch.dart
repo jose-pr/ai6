@@ -10,7 +10,7 @@ import 'oo_link.dart';
 import 'oo_shell.dart';
 
 /// The Stations as cards. With [detailed], the route named one Station: its card is the
-/// Station Watch, wider, with the Sessions running there.
+/// Station Watch, wider, with the Runs running there.
 class StationOverview extends StatelessWidget {
   const StationOverview({
     required this.board,
@@ -83,12 +83,12 @@ class StationOverview extends StatelessWidget {
 }
 
 /// The Missions with an active attempt on [stationId]: each with an active attempt there, and the
-/// with the Session of it the board holds there, by Operation then Mission.
-List<(MissionGroup, SessionSummary?)> sessionsHere(
+/// with the Run of it the board holds there, by Operation then Mission.
+List<(MissionGroup, RunSummary?)> runsHere(
   MissionBoard board,
   String stationId,
 ) {
-  final here = <(MissionGroup, SessionSummary?)>[];
+  final here = <(MissionGroup, RunSummary?)>[];
   for (final mission in board.missionGroups()) {
     final attempts = board.attempts(mission.operationId, mission.missionId);
     if (!attempts.any(
@@ -96,17 +96,17 @@ List<(MissionGroup, SessionSummary?)> sessionsHere(
     )) {
       continue;
     }
-    final onStation = mission.sessions.where(
-      (session) => session.stationId == stationId,
+    final onStation = mission.runs.where(
+      (run) => run.stationId == stationId,
     );
-    here.add((mission, currentSession(onStation)));
+    here.add((mission, currentRun(onStation)));
   }
   return here;
 }
 
 /// One Station: whether it is online, when it last checked in, its roles, its load, its
 /// resources as last sampled and its Theaters, with its Head of Station's report and a button
-/// to start a Mission in each Operation it serves. [detailed] adds the Sessions running there,
+/// to start a Mission in each Operation it serves. [detailed] adds the Runs running there,
 /// each a link to its Mission.
 class StationCard extends StatelessWidget {
   const StationCard({
@@ -209,7 +209,7 @@ class StationCard extends StatelessWidget {
             ),
             const SizedBox(height: 2),
             Text(
-              'Running ${station.running} of ${station.capacity} Sessions',
+              'Running ${station.running} of ${station.capacity} Runs',
               style: text.bodySmall,
             ),
             const SizedBox(height: 2),
@@ -218,7 +218,7 @@ class StationCard extends StatelessWidget {
               style: text.bodySmall,
             ),
             if (detailed)
-              _SessionsHere(station: station, board: board, onRoute: onRoute),
+              _RunsHere(station: station, board: board, onRoute: onRoute),
             if (station.theaters.isNotEmpty) ...[
               const SizedBox(height: 10),
               Wrap(
@@ -427,8 +427,8 @@ class _StationStatus extends StatelessWidget {
 }
 
 /// The Missions with an active attempt on a Station, each opening its detail.
-class _SessionsHere extends StatelessWidget {
-  const _SessionsHere({
+class _RunsHere extends StatelessWidget {
+  const _RunsHere({
     required this.station,
     required this.board,
     required this.onRoute,
@@ -440,12 +440,12 @@ class _SessionsHere extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final here = sessionsHere(board, station.stationId);
+    final here = runsHere(board, station.stationId);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 14),
-        Text('SESSIONS HERE', style: ooSectionLabel(context)),
+        Text('RUNS HERE', style: ooSectionLabel(context)),
         if (here.isEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 4),
@@ -454,7 +454,7 @@ class _SessionsHere extends StatelessWidget {
               style: TextStyle(color: OoTokens.of(context).muted),
             ),
           ),
-        for (final (mission, session) in here)
+        for (final (mission, run) in here)
           Align(
             alignment: Alignment.centerLeft,
             child: TextButton(
@@ -466,7 +466,7 @@ class _SessionsHere extends StatelessWidget {
               child: Text(
                 '${mission.operationId} › '
                 '${board.handleOf(mission.operationId, mission.missionId)}'
-                '${session == null ? '' : ' · ${session.sessionId}'}',
+                '${run == null ? '' : ' · ${run.runId}'}',
               ),
             ),
           ),

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Unix: the child is a session leader, its tree is found from its process group, and the
+//! Unix: the child is a run leader, its tree is found from its process group, and the
 //! terminal has no line editing or echo.
 
 use std::borrow::Cow;
@@ -16,7 +16,7 @@ use portable_pty::MasterPty;
 pub(crate) use ai6_process_tree::ProcessTree;
 
 /// The child's process tree: `portable-pty` starts the child with `setsid`, so its process
-/// group and session ids are its pid.
+/// group and run ids are its pid.
 pub(crate) fn adopt(pid: Option<u32>, scans: usize) -> io::Result<ProcessTree> {
     ProcessTree::of(pid, scans)
 }

@@ -20,7 +20,7 @@ milliseconds.
 | `executable` | `claude` | Executable visible to the terminal environment |
 | `json_line_bytes` | 67108864 | Bytes of one line of Claude Code's output held before what there is is handed over |
 | `csi_bytes` | 64 | Bytes of one terminal control sequence before it is dropped |
-| `tail_lines` | 8 | Non-JSON lines a failed Session quotes |
+| `tail_lines` | 8 | Non-JSON lines a failed Run quotes |
 | `tail_line_bytes` | 512 | Bytes of each of those lines |
 | `close_wait_ms` | 2000 | How long `close` waits for Claude Code to have exited |
 | `exit_wait_ms` | 1000 | How long the end of the output waits for the exit status |
@@ -42,12 +42,12 @@ the terminal instance supplied by AI6. Initial context becomes appended system
 instructions (`--append-system-prompt`) before the task prompt is written to the stream.
 It, the model and the effort are each passed as one `--flag=VALUE` argument, so a value that
 starts with `-` is never read as another option.
-Claude's provider Session ID is returned from `session_id()` after the provider emits it
+Claude's provider ID is returned from `run_id()` after the provider emits it
 and is supplied unchanged to `resume`. Claude Code 2.1.310 records the system prompt with
-the Session (`--system-prompt-snapshot`, on by default) and reuses it on resume until the
-Session is compacted; after that it builds the prompt from the resuming launch, so resume
+the Run (`--system-prompt-snapshot`, on by default) and reuses it on resume until the
+Run is compacted; after that it builds the prompt from the resuming launch, so resume
 passes `AgentResume::initial_context` as `--append-system-prompt` too when it is not empty.
-A restricted Session (`answer_only`, or `assistant`) whose `assistant` message calls a tool
+A restricted Run (`answer_only`, or `assistant`) whose `assistant` message calls a tool
 not named `mcp__<server>__<tool>` for one of its servers (nor, for an assistant, one of the
 built-in tools its mode offers: the file tools, `Bash`, `WebFetch`, `WebSearch`) is killed,
 ends with a `failed`
@@ -56,21 +56,21 @@ allow-list of content block types: `text`, `thinking`, `redacted_thinking` and a
 of an allowed name pass; any other block trips it, named `TYPE` or `TYPE:NAME`
 (`server_tool_use:advisor`, `mcp_tool_use:echo`, `web_search_tool_result`, `untyped`, or a
 type Claude Code adds later): those the Messages API runs itself, outside every MCP server,
-and their results, which a restricted Session never may have. Whether Claude Code's stream
-carries such blocks is not documented; the block types are the Messages API's. A restricted Session also runs with
+and their results, which a restricted Run never may have. Whether Claude Code's stream
+carries such blocks is not documented; the block types are the Messages API's. A restricted Run also runs with
 `CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1` in its environment, overriding the Agent's: Claude Code
 2.1.310 otherwise attaches its server-side `advisor` tool to model requests (seen with
 `claude-opus-5-5`), and neither `--restricted`, `--tools=` nor a deny rule removes it. That
 variable is the only documented switch (code.claude.com/docs/en/advisor and
 `/docs/en/env-vars`); no setting, flag or permission rule turns server-side tools off as a
-class. `--resume <id>` finds a Session only from the directory that recorded
-it (Claude Code 2.1.310: from another one it answers "No conversation found with session
+class. `--resume <id>` finds a Run only from the directory that recorded
+it (Claude Code 2.1.310: from another one it answers "No conversation found with run
 ID"), so resume must be given that working directory. With `--input-format stream-json`
 Claude Code writes nothing, not even its stream's initialization, until it has read a
 message, so resume sends its optional follow-up message right after starting the process and
-returns without waiting for output. `session_id()` is `None` until Claude reports the
-Session; a reported ID other than the one resumed makes `next_event` fail ("Claude resumed a
-different Session than requested"), and a Session Claude cannot find ends with a `failed`
+returns without waiting for output. `run_id()` is `None` until Claude reports the
+Run; a reported ID other than the one resumed makes `next_event` fail ("Claude resumed a
+different Run than requested"), and a Run Claude cannot find ends with a `failed`
 event quoting its message. The end of Claude's output is the terminal's
 end-of-file, or Claude's exit while the terminal keeps the output open (a read that times
 out asks the terminal's `exit_status`). After every line written before it, that emits one
@@ -80,7 +80,7 @@ wrote that were not JSON (512 bytes each); a read timeout otherwise returns `Non
 kills the terminal and waits up to 2 s for its exit status, so the working directory is free
 when it returns.
 
-`program()` answers `executable`, which the Station looks up on the Session's own `PATH` before it
+`program()` answers `executable`, which the Station looks up on the Run's own `PATH` before it
 starts it. `stdio()` answers `HarnessStdio::Json`, so the Station starts Claude Code in a terminal
 provider without a terminal (`pipe`) and refuses one that gives it a terminal: with `-p`,
 Claude Code 2.1.310 exits at once when its standard input is a terminal ("Input must be
@@ -88,7 +88,7 @@ provided either through stdin or as a prompt argument when using --print").
 
 `interrupt` writes one stream-json control request,
 `{"type":"control_request","request_id":"ai6-interrupt-N","request":{"subtype":"interrupt"}}`
-(`N` counts from 1 per Session), the shape the Agent SDK sends; no `^C` byte is written,
+(`N` counts from 1 per Run), the shape the Agent SDK sends; no `^C` byte is written,
 since without a terminal it would reach Claude as data. Claude answers with a
 `control_response` line, which `next_event` reads and drops, never an event; one whose
 `response.subtype` is `error` is logged to standard error with its `error`. Claude Code
@@ -140,7 +140,7 @@ environment placeholders; the bearer token never appears in argv, and its tools 
 server (`mcp__ai6-cables` in `--allowedTools`). If either variable is absent, no AI6 MCP
 configuration is added.
 
-When AI6 supplies `AI6_THEATER_MCP_URL` and `AI6_THEATER_MCP_TOKEN` the Session is in
+When AI6 supplies `AI6_THEATER_MCP_URL` and `AI6_THEATER_MCP_TOKEN` the Run is in
 remote-hands mode: its work is on a remote Theater, reached only through the Theater tools.
 The handler then registers that server as `ai6-theater` (same placeholder scheme), allows its
 tools (`mcp__ai6-theater`) and keeps Claude's own shell and file tools off (below) so nothing it
@@ -149,7 +149,7 @@ The handler also sets `MCP_TOOL_TIMEOUT` (milliseconds; Claude Code's default is
 Station's `AI6_THEATER_MCP_TIMEOUT_MS`, so a long `theater_run` is not cut off; a `MCP_TOOL_TIMEOUT` the
 Agent's own environment sets stands.
 
-A field Session, one neither answer-only nor an assistant, on start and resume gets, by
+A field Run, one neither answer-only nor an assistant, on start and resume gets, by
 `AgentStart::clearance` or `AgentResume::clearance`, each variadic list closed by the next flag. At
 `field` and `00`:
 
@@ -177,8 +177,8 @@ rules and join the deny list, and `allowed_tools` cannot bring them back; at `de
 also takes `mcp__ai6-theater__theater_run` and `mcp__ai6-theater__theater_write`, which a rule naming
 one lifts. `AgentHandler::weakenings` answers one line per `allowed_tools` rule not denied by
 `denied_tools` that is for `Bash`, `PowerShell` or one of those two tools (`allowed_tools adds RULE
-to what its desk Sessions may call`, whatever the Agent's configured clearance, since it can come to
-work at `desk`), or that is not on the default allow list (`… its field Sessions …`).
+to what its desk Runs may call`, whatever the Agent's configured clearance, since it can come to
+work at `desk`), or that is not on the default allow list (`… its field Runs …`).
 
 Measured at `desk` with 2.1.316 against the same stand-in, on Windows: `Bash` and `PowerShell`
 answered `No such tool available`, with `CLAUDE_CODE_USE_POWERSHELL_TOOL=1` set and with a
@@ -186,7 +186,7 @@ answered `No such tool available`, with `CLAUDE_CODE_USE_POWERSHELL_TOOL=1` set 
 `Read`, `Glob`, `Grep`, `TaskCreate` and a tool of `mcp__ai6-cables` ran; `Write` outside it, through
 `..`, to `.git/x` and to `.claude/settings.json` was denied. With `allowed_tools = ["Bash"]` it ran,
 through the hook, and `PowerShell` stayed out. A tool of an allowed server denied by name
-(`mcp__ai6-cables__echo`) answered `No such tool available`. A Session started at `field` and resumed
+(`mcp__ai6-cables__echo`) answered `No such tool available`. A Run started at `field` and resumed
 with the `desk` flags was offered no `Bash` or `PowerShell`, and one started at `desk` and resumed
 with the `field` flags was offered both: the flags of the launch decide.
 
@@ -222,10 +222,10 @@ may hold anything and they did not run; then its `completed` or `failed`.
 With the Cable endpoint present, start and resume also pass `--settings` with the green ink
 gate: `{"disableAllHooks": false, "hooks": {"PreToolUse": [{"matcher": "Bash|PowerShell",
 "hooks": [{"type": "command", "command": PROGRAM, "args": ["green-ink", "gate",
-"--cable-url", URL], "timeout": 60, "onFailure": "block"}]}]}}`. `URL` is the Session's
+"--cable-url", URL], "timeout": 60, "onFailure": "block"}]}]}}`. `URL` is the Run's
 `AI6_CABLE_MCP_URL`, pinned in the hook so a project's settings (`env`) cannot point the gate
 elsewhere; the token stays in the environment, out of every command line (a redirected token
-only makes the gate hold). `PROGRAM` is `AI6_GREEN_INK_GATE` from the Session environment
+only makes the gate hold). `PROGRAM` is `AI6_GREEN_INK_GATE` from the Run environment
 (which only the Agent's roster can set) when not blank, else the executable hosting the
 handler (`ai6` on a Station or field runner). The hook asks the Station whether a live green ink approval covers
 each governed step of a shell command and denies the call otherwise
@@ -253,7 +253,7 @@ a Chief of Staff review, start and resume add, in place of the project settings,
 flags: `--restricted`, `--tools=`, `--disallowedTools
 Bash,PowerShell,Edit,Write,NotebookEdit,Read,Glob,Grep,WebFetch,WebSearch,Task,Agent,TodoWrite,mcp__*`,
 `--setting-sources user`, `--strict-mcp-config` and `--mcp-config {"mcpServers":{}}`. An
-assistant Session's list is the same with `Skill` in place of `mcp__*`. An assistant whose
+assistant Run's list is the same with `Skill` in place of `mcp__*`. An assistant whose
 mode names `files` instead gets `--tools Read,Write,Edit,Glob,Grep`, `--permission-mode
 dontAsk`, `--disallowedTools Bash,PowerShell,NotebookEdit,WebFetch,WebSearch,Task,Agent,
 TodoWrite,Skill,Edit(**/.*),Edit(**/.*/**)` (no path with a name starting with `.`) and `--allowedTools mcp__<server>,…,Read,Glob,Grep,Edit(/<dir>/**),…` (Edit
@@ -267,7 +267,7 @@ refused Read outside the working directory. With the dot-path rules, Write and E
 short names (`GIT~1\config`, `GITATT~1`) even after reading them. Under `--restricted` the working directory's
 `CLAUDE.md` does not load, with or without `--setting-sources user,project`, so a mode's
 `context_file` goes in with `--append-system-prompt-file`, which reached the request's
-system prompt. Every assistant Session also has `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`.
+system prompt. Every assistant Run also has `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`.
 
 An assistant's scripts and network (code.claude.com/docs/en/sandboxing, /permissions and
 /settings-reference): `--tools` names exactly the built-in tools its parts call for, in the
@@ -286,7 +286,7 @@ platform's paths an interpreter needs (Linux: `/usr`, `/bin`, `/sbin`, `/lib`, `
 `ca-certificates`, `localtime`, `hosts`, `resolv.conf`, `nsswitch.conf`, `host.conf`,
 `gai.conf`, `services`, `protocols`, `passwd`, `group`, `alternatives`, the devices `null`,
 `zero`, `random`, `urandom`, `tty`, and the sandbox's own network relay sockets by name,
-`/tmp/claude-http-*.sock`, `/tmp/srt-mux-*.sock`, or the same two under the Session's
+`/tmp/claude-http-*.sock`, `/tmp/srt-mux-*.sock`, or the same two under the Run's
 `CLAUDE_CODE_TMPDIR` when it has one; macOS: `/usr`, `/bin`, `/sbin`, `/System`,
 `/Library/Developer/CommandLineTools`, `/private/var/db/xcode_select_link`,
 `/private/var/select`, the `/private/etc` files `ssl`, `hosts`, `resolv.conf`, `localtime`,
@@ -305,7 +305,7 @@ AI6's files and IPC sockets, `/proc` and other conversations stay unreadable), `
 and single addresses of `network.denied`, categories expanded, an IPv6 one in brackets, and
 nothing when it is empty, under `open` too; `strictAllowlist: true`), `credentials.envVars`
 denying (`mode: "deny"`) every
-variable of the Session's environment but `PATH`, `HOME`, `USERPROFILE`, `APPDATA`,
+variable of the Run's environment but `PATH`, `HOME`, `USERPROFILE`, `APPDATA`,
 `LOCALAPPDATA`, `SYSTEMROOT`, `TEMP`, `TMP`, `TMPDIR`, `LANG`, `LC_ALL`, `LC_CTYPE`, `TERM` and
 `TZ` (the proxy variables among the denied, since a proxy URL may carry basic-auth), and always
 `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN`;
@@ -405,7 +405,7 @@ A Mission whose `AgentStart::overlays` or `AgentResume::overlays` has a skill wi
 `plugin_dir` gets, at every clearance, `Skill` last in `--tools`, `Skill(ai6:<name>)` per such skill in
 `--allowedTools`, `--plugin-dir <plugin_dir>`, and `"disableSkillShellExecution": true` in the one
 `--settings` value beside the green ink gate. A skill without `native` (its overlay's harness hint) is
-a routing line after the standing context (`SessionOverlays::with_routing`). Measured with 2.1.318 on
+a routing line after the standing context (`RunOverlays::with_routing`). Measured with 2.1.318 on
 Windows against a loopback stand-in for the API, with this argv at `field` and `desk`: the request's
 system prompt listed `ai6:<name>`, the skill launched as `ai6:<name>` and as the bare name, a name it
 does not hold answered `Unknown skill`, `Read` of the plugin's files ran and `Write` to them was
@@ -445,10 +445,10 @@ A `harness-login` pool account with `files = [".claude/.credentials.json"]`. Mea
 fake login and a loopback stand-in, never a real one:
 
 - The file is `$CLAUDE_CONFIG_DIR/.credentials.json`, else `$HOME/.claude/`. macOS's Keychain holds it
-  unless that refuses. An account's Session gets `HOME`; `CLAUDE_CONFIG_DIR` is stripped.
+  unless that refuses. An account's Run gets `HOME`; `CLAUDE_CONFIG_DIR` is stripped.
 - `claude auth status` renews with no model turn, only within 5 minutes of `expiresAt` (fixed in the
   program, no setting), and writes the rotated refresh token. Further from its end it does nothing, so
-  `renew_every` must be under 5 minutes for a round to catch it, and that is the same window a Session's
+  `renew_every` must be under 5 minutes for a round to catch it, and that is the same window a Run's
   harness refreshes in: a round cannot get ahead of one.
 - A refused refresh (`invalid_grant`) blanks `accessToken` and `refreshToken` and sets `expiresAt` to 0.
 - A running harness reloads when the file's mtime moves and recovers from disk on a 401 (program text).

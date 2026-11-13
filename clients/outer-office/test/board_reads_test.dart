@@ -23,7 +23,7 @@ void main() {
       final board = MissionBoard(
         apiOrigin: Uri.parse('https://oo.example'),
         client: gateway(counts),
-        pollInterval: refresh.sessions,
+        pollInterval: refresh.runs,
         limits: OoLimits(refresh: refresh),
       );
       await board.login('ana', 'secret');

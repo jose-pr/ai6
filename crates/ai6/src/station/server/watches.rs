@@ -1,9 +1,9 @@
-//! The watches this Station runs: one standing Session per scope, woken by its area's events.
+//! The watches this Station runs: one standing Run per scope, woken by its area's events.
 //!
 //! Each check-in, the Station claims or renews every watch on the roster it may run: M's when it
 //! holds the Headquarters lease, an Operation's when the Operation allows it, its own always,
 //! and only when the watch's Agent has a handler here. A watch whose lease another Station took
-//! is closed here, as a Session is fenced out. Then it looks at the watch's area for what the
+//! is closed here, as a Run is fenced out. Then it looks at the watch's area for what the
 //! watch has not been told: a Mission of its Operation entering `verifying`, a quarantine, a
 //! Station gone dark (M's), a control a person asked for. Every round it takes the Cables
 //! waiting for the watch, and wakes it when `wake_every` has passed with nothing else.
@@ -11,8 +11,8 @@
 //! Each wake is one turn, given the waiting events as its input, those carrying outside text
 //! marked untrusted. Turns are counted per hour on the watch's record, so a storm of events waits
 //! (and past `max_waiting_events`, is cut) rather than spending turns. The harness is kept
-//! between turns and its provider Session resumed after a restart or a takeover; when the
-//! handler cannot resume it, a fresh Session starts with the watch's logbook.
+//! between turns and its provider Run resumed after a restart or a takeover; when the
+//! handler cannot resume it, a fresh Run starts with the watch's logbook.
 //!
 //! A watch is not a Mission: none of this makes a Mission, a brief, a placement or an attempt.
 //!
@@ -34,7 +34,7 @@ use super::{DaemonState, StationRole, unix_now};
 use crate::directorates::m::watches::{Watch, WatchScope};
 use crate::directorates::medical::exposure::ExposureGate;
 use crate::directorates::registry::cables::CablePrincipal;
-use crate::directorates::registry::sessions::SessionRecord;
+use crate::directorates::registry::runs::RunRecord;
 use crate::directorates::registry::watches::{
     TURN_WINDOW_SECS, WatchError, WatchLogEntry, WatchRecord, WatchUpdate,
 };
@@ -121,7 +121,7 @@ impl WatchEvent {
 /// A watch this Station holds.
 pub(super) struct Live {
     scope: WatchScope,
-    /// The name its Session is started and its credentials issued under.
+    /// The name its Run is started and its credentials issued under.
     key: String,
     /// Its settings as the roster has them now.
     watch: Mutex<Watch>,
@@ -147,7 +147,7 @@ pub(super) struct Live {
     /// The logbook has said the hour's turns are spent.
     quota_noted: AtomicBool,
     harness: Mutex<Option<turn::Harnessed>>,
-    /// Who it is to the Cable relay, bound to its provider Session once it has one; `None` for a
+    /// Who it is to the Cable relay, bound to its provider Run once it has one; `None` for a
     /// watch whose Cables are in no Operation.
     principal: Mutex<Option<CablePrincipal>>,
     #[cfg_attr(not(feature = "cables-mcp"), allow(dead_code))]
@@ -207,9 +207,9 @@ impl Live {
     }
 }
 
-/// The name a watch's Session and credentials go under: `watch--` and its scope, made safe for a
+/// The name a watch's Run and credentials go under: `watch--` and its scope, made safe for a
 /// file name.
-pub(super) fn session_key(scope: &WatchScope) -> String {
+pub(super) fn run_key(scope: &WatchScope) -> String {
     let safe: String = scope
         .to_string()
         .chars()
@@ -287,7 +287,7 @@ pub(super) async fn tend(state: &DaemonState, headquarters: bool, check_in: bool
 }
 
 /// Closes every watch this Station runs, leaving their leases to lapse and their provider
-/// Sessions to be resumed.
+/// Runs to be resumed.
 pub(super) async fn close_all(state: &DaemonState) {
     for live in state.watches.all() {
         stop(state, &live, "the Station is stopping").await;
@@ -385,7 +385,7 @@ async fn open(state: &DaemonState, watch: &Watch, record: &WatchRecord) -> Arc<L
     let exposure = ExposureGate::default();
     let live = Arc::new(Live {
         scope: watch.scope.clone(),
-        key: session_key(&watch.scope),
+        key: run_key(&watch.scope),
         watch: Mutex::new(watch.clone()),
         fence: AtomicU64::new(record.fence),
         claimed_at: unix_now(),
@@ -447,7 +447,7 @@ async fn open(state: &DaemonState, watch: &Watch, record: &WatchRecord) -> Arc<L
                             state.clone(),
                             operation.to_owned(),
                             watch.settings.agent.clone(),
-                            session_key(&watch.scope),
+                            run_key(&watch.scope),
                         ));
                     }
                     if let Ok(mut slot) = live.endpoint.lock() {
@@ -471,7 +471,7 @@ async fn open(state: &DaemonState, watch: &Watch, record: &WatchRecord) -> Arc<L
 }
 
 /// Stops running `live` here: its harness is closed and its credentials released; its record and
-/// provider Session stay for whoever runs it next.
+/// provider Run stay for whoever runs it next.
 async fn stop(state: &DaemonState, live: &Arc<Live>, why: &str) {
     if live.closing.swap(true, Ordering::AcqRel) {
         return;
@@ -502,10 +502,10 @@ async fn stop(state: &DaemonState, live: &Arc<Live>, why: &str) {
 
 /// An attempt as a watch reads it to verify: its brief and final report (untrusted text), what it
 /// was to deliver, what the probes found, and what has been decided or recommended.
-fn attempt_detail(state: &DaemonState, record: &SessionRecord) -> serde_json::Value {
+fn attempt_detail(state: &DaemonState, record: &RunRecord) -> serde_json::Value {
     let report = state
         .intake
-        .final_report(&record.session_id)
+        .final_report(&record.run_id)
         .ok()
         .flatten()
         .map(|report| report.text);
@@ -546,25 +546,25 @@ fn scan(state: &DaemonState, live: &Live, record: &WatchRecord) -> Vec<WatchEven
         found.push(event);
     }
     if let WatchScope::Operation(operation) = &live.scope {
-        match state.intake.sessions() {
-            Ok(sessions) => {
-                for session in sessions.into_iter().filter(|session| {
-                    session.operation.as_deref() == Some(operation.as_str())
-                        && !session.status.is_closed()
-                        && session
+        match state.intake.runs() {
+            Ok(runs) => {
+                for run in runs.into_iter().filter(|run| {
+                    run.operation.as_deref() == Some(operation.as_str())
+                        && !run.status.is_closed()
+                        && run
                             .result
                             .as_ref()
                             .is_some_and(|result| result.state == "verifying")
                 }) {
                     // The final report and the brief are text written outside AI6.
                     found.push(
-                        WatchEvent::new("verifying", true, attempt_detail(state, &session))
-                            .keyed(format!("verifying:{}", session.session_id)),
+                        WatchEvent::new("verifying", true, attempt_detail(state, &run))
+                            .keyed(format!("verifying:{}", run.run_id)),
                     );
                 }
             }
             Err(error) => eprintln!(
-                "ai6: watch {}: Session records unreadable: {error}",
+                "ai6: watch {}: Run records unreadable: {error}",
                 live.scope
             ),
         }
@@ -900,8 +900,8 @@ async fn run_turn(state: &DaemonState, live: &Arc<Live>, events: Vec<WatchEvent>
         ),
         now,
     ));
-    if let Some((handler, session)) = outcome.session {
-        update = update.session(handler, session);
+    if let Some((handler, run)) = outcome.run {
+        update = update.run(handler, run);
     }
     let mut seen = record.seen.clone();
     seen.extend(events.iter().filter_map(|event| event.key.clone()));

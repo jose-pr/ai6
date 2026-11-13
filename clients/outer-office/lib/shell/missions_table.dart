@@ -183,7 +183,7 @@ class MissionsTable extends StatelessWidget {
             board: board,
             operationId: mission.operationId,
             missionId: mission.missionId,
-            sessions: mission.sessions,
+            runs: mission.runs,
             state: mission.state,
           ),
         ),

@@ -8,13 +8,13 @@
 
 The `pty` terminal provider for [AI6](https://github.com/jose-pr/ai6), on
 [`portable-pty`](https://crates.io/crates/portable-pty): **one provider for `openpty` on
-Unix and ConPTY on Windows**. The session code is shared; the platform parts (owning the
+Unix and ConPTY on Windows**. The run code is shared; the platform parts (owning the
 child's process tree, translating input) live in `unix.rs` and `windows.rs`. See the
 [API header](https://github.com/jose-pr/ai6/blob/main/crates/providers/terminals/pty/AGENTS.md).
 
 ## Features
 
-- Interactive pseudo-terminal Sessions for agent harnesses, with resize and bounded reads.
+- Interactive pseudo-terminal Runs for agent harnesses, with resize and bounded reads.
 - On Unix, no line editing or echo: an input line of any length reaches the harness whole.
 - Kills the whole process tree: the process group and the processes found by parent from it on
   Unix, a Job Object on Windows.

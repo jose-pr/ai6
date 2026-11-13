@@ -1,12 +1,12 @@
 # The Watchdog
 
 The Rust AI6 daemon monitors provider events, terminal output and accepted operator
-messages for each Agent Session. Provider events and terminal bytes count as activity;
+messages for each Agent Run. Provider events and terminal bytes count as activity;
 an accepted follow-up message resets both inactivity and repeated-output timing.
 
 After ten quiet seconds at a recognized terminal prompt, AI6 moves the Mission to
-`blocked` so an operator can respond. If the Session then remains inactive for five
-minutes, AI6 marks it `stalled`, interrupts and closes the provider Session, and ends
+`blocked` so an operator can respond. If the Run then remains inactive for five
+minutes, AI6 marks it `stalled`, interrupts and closes the provider Run, and ends
 the active operation. New terminal output moves a blocked Mission back to `working`.
 
 The Rust monitor also detects repeated terminal lines. It strips ANSI control sequences,
@@ -24,11 +24,11 @@ minutes stalls the Mission and closes its operation. The monitor bounds partial 
 | Repeated lines before loop tracking applies | 50 |
 | Novel-output period before loop `stalled` | 300 s |
 | Maximum remembered line digests | 4,096 |
-| Maximum Session runtime | Disabled |
+| Maximum Run runtime | Disabled |
 | Digit normalization for loop matching | Disabled |
 
 `WatchdogConfig` exposes these settings to Rust callers, and `ServeConfig::with_watchdog`
-applies one configuration to Sessions started by that daemon. `ai6 serve` exposes the same
+applies one configuration to Runs started by that daemon. `ai6 serve` exposes the same
 limits through `--stall-timeout`, `--loop-timeout`, `--loop-min-lines`, `--blocked-after`,
 `--max-runtime`, `--history` and `--normalize-digits`; timeout values accept fractional,
 non-negative seconds. Each Agent can override selected settings in its `[agent.<id>.limits]`
@@ -53,9 +53,9 @@ asked for (see [Green ink](missions.md#green-ink)). The watchdog is paused meanw
 nothing stalls, loops or runs out its maximum runtime while it waits, and the time spent
 waiting does not count toward that runtime. The decision resumes it with fresh deadlines.
 
-An Agent whose Sessions keep stalling or looping is stopped across Missions: three stalls or
+An Agent whose Runs keep stalling or looping is stopped across Missions: three stalls or
 loops within 24 hours [quarantine](medical.md#quarantine) it (the count, the window and the
-trigger are Operation settings). A Session stopped by a [budget](medical.md#budgets) is
+trigger are Operation settings). A Run stopped by a [budget](medical.md#budgets) is
 `blocked` with reason `budget`, and a Mission whose Agent is quarantined is `quarantined`:
 
 ```text

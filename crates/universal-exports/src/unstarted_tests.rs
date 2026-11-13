@@ -1,4 +1,4 @@
-//! Missions with no Session yet are listed with where they stand, for a person who may read
+//! Missions with no Run yet are listed with where they stand, for a person who may read
 //! their Operation and nobody else.
 
 use std::collections::BTreeMap;
@@ -82,7 +82,7 @@ async fn queued_waiting_retrying_and_failed_missions_are_listed_with_their_reaso
     let missions: Value = listed.json().await.unwrap();
 
     let retry = entry(&missions, "m-retry");
-    assert_eq!(retry["sessions"], json!([]));
+    assert_eq!(retry["runs"], json!([]));
     assert_eq!(retry["pending"]["state"], "queued");
     assert_eq!(retry["pending"]["kind"], "retrying");
     assert_eq!(retry["pending"]["failures"], 2);
@@ -115,7 +115,7 @@ async fn queued_waiting_retrying_and_failed_missions_are_listed_with_their_reaso
         "unplaced"
     );
 
-    // A Mission with a Session is listed by it, with nothing pending.
+    // A Mission with a Run is listed by it, with nothing pending.
     assert!(entry(&missions, "mission-g").get("pending").is_none());
     // Another Operation's Missions are not theirs to read.
     let ids: Vec<&str> = missions

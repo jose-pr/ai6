@@ -155,7 +155,7 @@ location = "postgres://user:{PLANTED}@db/registry"
 password = {{ provider = "file", key = "{PLANTED}" }}
 headquarters_lease = 60
 
-[registry.limits.sessions]
+[registry.limits.runs]
 records = 100000
 
 [unex]
@@ -212,7 +212,7 @@ nested = {{ value = "{PLANTED}" }}
 listed = ["{PLANTED}"]
 
 [oo.refresh]
-sessions = 3
+runs = 3
 
 [oo.limits]
 reason_chars = 512
@@ -253,7 +253,7 @@ reason_chars = 512
             "oo.appearance.theme",
             "oo.assets.cdn",
             "oo.chat.width",
-            "oo.refresh.sessions",
+            "oo.refresh.runs",
             "oo.limits.reason_chars",
         ]
         .map(str::to_owned)

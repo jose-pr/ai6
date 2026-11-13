@@ -1,5 +1,5 @@
 //! The Station against a harness that behaves like Claude Code on stream-json: it writes nothing
-//! until it has read a message, its Session ID first appears in its stream, and an interrupted
+//! until it has read a message, its Run ID first appears in its stream, and an interrupted
 //! turn still ends with a result. A mock that reports its ID at once hides every bug of that
 //! timing.
 
@@ -18,7 +18,7 @@ use super::*;
 use crate::directorates::q::terminal::AgentTerminal;
 use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
 
-/// What a key's sessions were told, so a test reads only its own.
+/// What a key's runs were told, so a test reads only its own.
 #[derive(Debug, Default, Clone)]
 pub(super) struct StreamLog {
     pub(super) resumed: Vec<Option<String>>,
@@ -33,29 +33,29 @@ pub(super) fn log_of(key: &str) -> StreamLog {
     LOGS.lock().unwrap().get(key).cloned().unwrap_or_default()
 }
 
-/// What a test does at a moment of a key's mock, to see a race go one way. It is told the Session
+/// What a test does at a moment of a key's mock, to see a race go one way. It is told the Run
 /// ID the mock reports.
 type Hook = Arc<dyn Fn(&str) + Send + Sync>;
 
 static ON_RESUME: Mutex<BTreeMap<String, Hook>> = Mutex::new(BTreeMap::new());
 static ON_CLOSE: Mutex<BTreeMap<String, Hook>> = Mutex::new(BTreeMap::new());
 
-fn run_hook(hooks: &Mutex<BTreeMap<String, Hook>>, key: &str, session: &str) {
+fn run_hook(hooks: &Mutex<BTreeMap<String, Hook>>, key: &str, run: &str) {
     let hook = hooks.lock().unwrap().get(key).cloned();
     if let Some(hook) = hook {
-        hook(session);
+        hook(run);
     }
 }
 
-/// A handler whose Sessions behave as [`StreamSession`] does.
+/// A handler whose Runs behave as [`StreamRun`] does.
 ///
 /// Its Agent's environment says how: `MOCK_STREAM_KEY` names the log, `MOCK_STREAM_TURN` is what
 /// a first turn does after its initialization (`hold` works on, `complete` ends it),
 /// `MOCK_STREAM_INTERRUPT` is how an interrupted turn ends (`failed`, `completed`, `silent`, or
-/// `late`: silent the first time, then failed), and `MOCK_STREAM_RESUMES_AS` a Session ID a resume
+/// `late`: silent the first time, then failed), and `MOCK_STREAM_RESUMES_AS` a Run ID a resume
 /// reports other than the one asked for.
-/// `MOCK_STREAM_RESUME_FAILS` refuses a resume with that text, and `MOCK_STREAM_SESSIONLESS` keeps
-/// the harness from ever reporting a Session.
+/// `MOCK_STREAM_RESUME_FAILS` refuses a resume with that text, and `MOCK_STREAM_RUNLESS` keeps
+/// the harness from ever reporting a Run.
 #[derive(Default, Provider)]
 #[provider(AgentHandler, id = "mock-stream", name = "Mock Stream", crate = crate::guatiao)]
 pub(super) struct MockStreamHandler;
@@ -67,13 +67,13 @@ impl AgentHandler for MockStreamHandler {
         _terminal: Object<dyn AgentTerminal>,
     ) -> Result<Object<dyn AgentSession>, ProviderError> {
         let key = setting(&request.environment, "MOCK_STREAM_KEY", "default");
-        let session = StreamSession::new(
+        let run = StreamRun::new(
             &request.environment,
             format!("stream-{key}"),
             setting(&request.environment, "MOCK_STREAM_TURN", "hold"),
         );
-        session.read_message();
-        Ok(session.into_object())
+        run.read_message();
+        Ok(run.into_object())
     }
 
     fn resume(
@@ -87,19 +87,19 @@ impl AgentHandler for MockStreamHandler {
         run_hook(
             &ON_RESUME,
             &setting(&request.environment, "MOCK_STREAM_KEY", "default"),
-            request.session_id.as_str(),
+            request.run_id.as_str(),
         );
         let reports = request
             .environment
             .get("MOCK_STREAM_RESUMES_AS")
             .cloned()
-            .unwrap_or_else(|| request.session_id.to_string());
-        let session = StreamSession::new(&request.environment, reports, "complete".to_owned());
-        session.log(|log| log.resumed.push(request.message.clone()));
+            .unwrap_or_else(|| request.run_id.to_string());
+        let run = StreamRun::new(&request.environment, reports, "complete".to_owned());
+        run.log(|log| log.resumed.push(request.message.clone()));
         if request.message.is_some() {
-            session.read_message();
+            run.read_message();
         }
-        Ok(session.into_object())
+        Ok(run.into_object())
     }
 }
 
@@ -129,27 +129,27 @@ const FIRST_LINE_AFTER: Duration = Duration::from_millis(200);
 struct Stream {
     read_at: Option<Instant>,
     initialized: bool,
-    session_id: Option<SessionId>,
+    run_id: Option<RunId>,
     queue: VecDeque<AgentEvent>,
 }
 
-struct StreamSession {
+struct StreamRun {
     key: String,
     reports: String,
     turn: String,
     on_interrupt: String,
-    sessionless: bool,
+    runless: bool,
     stream: Mutex<Stream>,
 }
 
-impl StreamSession {
+impl StreamRun {
     fn new(environment: &BTreeMap<String, String>, reports: String, turn: String) -> Self {
         Self {
             key: setting(environment, "MOCK_STREAM_KEY", "default"),
             reports,
             turn,
             on_interrupt: setting(environment, "MOCK_STREAM_INTERRUPT", "failed"),
-            sessionless: environment.contains_key("MOCK_STREAM_SESSIONLESS"),
+            runless: environment.contains_key("MOCK_STREAM_RUNLESS"),
             stream: Mutex::new(Stream::default()),
         }
     }
@@ -167,13 +167,13 @@ impl StreamSession {
     }
 }
 
-impl AgentSession for StreamSession {
+impl AgentSession for StreamRun {
     fn session_id(&self) -> Result<Option<String>, ProviderError> {
         Ok(self
             .stream
             .lock()
             .unwrap()
-            .session_id
+            .run_id
             .clone()
             .map(String::from))
     }
@@ -194,14 +194,14 @@ impl AgentSession for StreamSession {
         let waited = Duration::from_millis(u64::try_from(timeout_ms).unwrap_or(0).min(10));
         {
             let mut stream = self.stream.lock().unwrap();
-            let first_line_due = !self.sessionless
+            let first_line_due = !self.runless
                 && stream
                     .read_at
                     .is_some_and(|read| read.elapsed() >= FIRST_LINE_AFTER);
             if first_line_due && !stream.initialized {
                 stream.initialized = true;
-                stream.session_id =
-                    Some(SessionId::try_new(self.reports.clone()).map_err(|error| {
+                stream.run_id =
+                    Some(RunId::try_new(self.reports.clone()).map_err(|error| {
                         ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &error.to_string())
                     })?);
                 if self.turn == "complete" {
@@ -265,22 +265,22 @@ async fn wait_until(what: &str, mut holds: impl FnMut() -> bool) {
     }
 }
 
-async fn wait_for_session(state: &DaemonState, mission_id: &str, wanted: &str) {
+async fn wait_for_run(state: &DaemonState, mission_id: &str, wanted: &str) {
     wait_until(
-        "the Mission records the Session its stream reported",
+        "the Mission records the Run its stream reported",
         || {
             mission_state(state, mission_id)
-                .session_ids
+                .run_ids
                 .last()
-                .map(SessionId::as_str)
+                .map(RunId::as_str)
                 == Some(wanted)
         },
     )
     .await;
 }
 
-fn has_live_session(state: &DaemonState, mission_id: &str) -> bool {
-    state.sessions.lock().unwrap().contains_key(mission_id)
+fn has_live_run(state: &DaemonState, mission_id: &str) -> bool {
+    state.runs.lock().unwrap().contains_key(mission_id)
 }
 
 async fn resume(
@@ -308,23 +308,23 @@ impl Drop for StopOnDrop {
     }
 }
 
-/// The Cable identity tools answer to exists only once the endpoint knows the provider Session.
+/// The Cable identity tools answer to exists only once the endpoint knows the provider Run.
 #[cfg(feature = "cables-mcp")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_fresh_session_is_bound_to_its_cable_endpoint_when_its_stream_reports_it() {
+async fn a_fresh_run_is_bound_to_its_cable_endpoint_when_its_stream_reports_it() {
     let root = tempfile::tempdir().unwrap();
     let state = test_state(root.path(), "", &agent("bind", "", ""));
     let _stop = StopOnDrop(state.clone());
     start_mission_by_id(&state, "mission-1").await;
-    wait_for_session(&state, "mission-1", "stream-bind").await;
-    wait_until("the Cable endpoint is bound to the Session", || {
+    wait_for_run(&state, "mission-1", "stream-bind").await;
+    wait_until("the Cable endpoint is bound to the Run", || {
         state
-            .sessions
+            .runs
             .lock()
             .unwrap()
             .get("mission-1")
             .and_then(|operation| operation.cables_mcp.as_ref())
-            .and_then(cables_mcp::Endpoint::bound_session)
+            .and_then(cables_mcp::Endpoint::bound_run)
             .as_deref()
             == Some("stream-bind")
     })
@@ -332,12 +332,12 @@ async fn a_fresh_session_is_bound_to_its_cable_endpoint_when_its_stream_reports_
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_resume_is_accepted_before_the_stream_reports_its_session() {
+async fn a_resume_is_accepted_before_the_stream_reports_its_run() {
     let root = tempfile::tempdir().unwrap();
     let state = test_state(root.path(), "", &agent("resume", "", ""));
     let _stop = StopOnDrop(state.clone());
     start_mission_by_id(&state, "mission-1").await;
-    wait_for_session(&state, "mission-1", "stream-resume").await;
+    wait_for_run(&state, "mission-1", "stream-resume").await;
     state
         .missions
         .lock()
@@ -350,7 +350,7 @@ async fn a_resume_is_accepted_before_the_stream_reports_its_session() {
         .unwrap_or_else(|error| panic!("the resume was refused: {:?}", error.1.0.error));
     assert_eq!(status, StatusCode::ACCEPTED);
     assert_eq!(
-        started.provider_session_id.as_ref().map(SessionId::as_str),
+        started.provider_id.as_ref().map(RunId::as_str),
         Some("stream-resume")
     );
     wait_for_done(&state, "mission-1").await;
@@ -365,7 +365,7 @@ async fn a_resume_with_no_message_tells_the_silent_harness_to_go_on() {
     let state = test_state(root.path(), "", &agent("silent", "", ""));
     let _stop = StopOnDrop(state.clone());
     start_mission_by_id(&state, "mission-1").await;
-    wait_for_session(&state, "mission-1", "stream-silent").await;
+    wait_for_run(&state, "mission-1", "stream-silent").await;
     state
         .missions
         .lock()
@@ -380,10 +380,10 @@ async fn a_resume_with_no_message_tells_the_silent_harness_to_go_on() {
     assert!(resumed[0].is_some(), "{resumed:?}");
 }
 
-/// A harness that resumes another Session than the one asked for is refused when it says so: no
+/// A harness that resumes another Run than the one asked for is refused when it says so: no
 /// final state, nothing recorded, and the harness stopped.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_resume_that_reports_another_session_is_refused_when_it_appears() {
+async fn a_resume_that_reports_another_run_is_refused_when_it_appears() {
     let root = tempfile::tempdir().unwrap();
     let state = test_state(
         root.path(),
@@ -392,7 +392,7 @@ async fn a_resume_that_reports_another_session_is_refused_when_it_appears() {
     );
     let _stop = StopOnDrop(state.clone());
     start_mission_by_id(&state, "mission-1").await;
-    wait_for_session(&state, "mission-1", "stream-other").await;
+    wait_for_run(&state, "mission-1", "stream-other").await;
     state
         .missions
         .lock()
@@ -404,26 +404,26 @@ async fn a_resume_that_reports_another_session_is_refused_when_it_appears() {
         .unwrap_or_else(|error| panic!("the resume was refused early: {:?}", error.1.0.error));
     wait_for_state(&state, "mission-1", MissionState::Blocked).await;
     wait_until("the refused harness is stopped", || {
-        !has_live_session(&state, "mission-1")
+        !has_live_run(&state, "mission-1")
     })
     .await;
     let mission = mission_state(&state, "mission-1");
     assert_eq!(mission.state, MissionState::Blocked);
     assert_eq!(
         mission
-            .session_ids
+            .run_ids
             .iter()
-            .map(SessionId::as_str)
+            .map(RunId::as_str)
             .collect::<Vec<_>>(),
         ["stream-other"],
-        "the other Session is not the Mission's"
+        "the other Run is not the Mission's"
     );
     // The Mission can be resumed again.
     assert!(log_of("other").closes >= 1);
 }
 
 /// A harness answers being stopped with the end of a turn: it must no longer be the Mission's
-/// Session by then, or that end reads as the end of the Mission.
+/// Run by then, or that end reads as the end of the Mission.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_replaced_harness_is_stopped_only_once_it_is_replaced() {
     let root = tempfile::tempdir().unwrap();
@@ -441,20 +441,20 @@ async fn a_replaced_harness_is_stopped_only_once_it_is_replaced() {
     let (watched, seen) = (state.clone(), still_the_missions.clone());
     ON_CLOSE.lock().unwrap().insert(
         "replaced".to_owned(),
-        Arc::new(move |session: &str| {
-            if session == "stream-replaced" {
-                let first_session_live = watched
-                    .sessions
+        Arc::new(move |run: &str| {
+            if run == "stream-replaced" {
+                let first_run_live = watched
+                    .runs
                     .lock()
                     .unwrap()
                     .get("mission-1")
                     .is_some_and(|operation| !operation.resumed);
-                seen.lock().unwrap().push(first_session_live);
+                seen.lock().unwrap().push(first_run_live);
             }
         }),
     );
     start_mission_by_id(&state, "mission-1").await;
-    wait_for_session(&state, "mission-1", "stream-replaced").await;
+    wait_for_run(&state, "mission-1", "stream-replaced").await;
     state
         .missions
         .lock()
@@ -479,7 +479,7 @@ async fn a_resume_before_an_interrupted_turn_ended_goes_on() {
     );
     let _stop = StopOnDrop(state.clone());
     start_mission_by_id(&state, "mission-1").await;
-    wait_for_session(&state, "mission-1", "stream-slow-end").await;
+    wait_for_run(&state, "mission-1", "stream-slow-end").await;
     assert_eq!(
         interrupt(&state, "mission-1").await.state,
         MissionState::Blocked
@@ -490,14 +490,14 @@ async fn a_resume_before_an_interrupted_turn_ended_goes_on() {
     wait_for_done(&state, "mission-1").await;
 }
 
-/// A pump whose Session is no longer the Mission's has no say in it, however late it gets there.
+/// A pump whose Run is no longer the Mission's has no say in it, however late it gets there.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn the_end_of_a_session_no_longer_the_missions_is_not_the_missions() {
+async fn the_end_of_a_run_no_longer_the_missions_is_not_the_missions() {
     let root = tempfile::tempdir().unwrap();
     let state = test_state(root.path(), "", &agent("stale", "", ""));
     let _stop = StopOnDrop(state.clone());
     start_mission_by_id(&state, "mission-1").await;
-    wait_for_session(&state, "mission-1", "stream-stale").await;
+    wait_for_run(&state, "mission-1", "stream-stale").await;
     publish_finished_event(
         &state,
         "mission-1",
@@ -516,7 +516,7 @@ async fn the_end_of_a_session_no_longer_the_missions_is_not_the_missions() {
 /// A harness whose turn ends while its resume is under way settles the Mission: the resume is
 /// refused and the harness it started stopped, or it would run on with no pump to read it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_session_that_ends_during_its_resume_takes_the_resume_with_it() {
+async fn a_run_that_ends_during_its_resume_takes_the_resume_with_it() {
     let root = tempfile::tempdir().unwrap();
     let state = test_state(root.path(), "", &agent("ending", "", ""));
     let _stop = StopOnDrop(state.clone());
@@ -524,23 +524,23 @@ async fn a_session_that_ends_during_its_resume_takes_the_resume_with_it() {
     ON_RESUME.lock().unwrap().insert(
         "ending".to_owned(),
         Arc::new(move |_: &str| {
-            let session = during
-                .sessions
+            let run = during
+                .runs
                 .lock()
                 .unwrap()
                 .get("mission-1")
-                .map(|operation| operation.session.clone())
+                .map(|operation| operation.run.clone())
                 .unwrap();
-            session.lock().unwrap().interrupt().unwrap();
+            run.lock().unwrap().interrupt().unwrap();
             let deadline = Instant::now() + Duration::from_secs(60);
-            while has_live_session(&during, "mission-1") {
+            while has_live_run(&during, "mission-1") {
                 assert!(Instant::now() < deadline, "the turn never ended");
                 std::thread::sleep(Duration::from_millis(5));
             }
         }),
     );
     start_mission_by_id(&state, "mission-1").await;
-    wait_for_session(&state, "mission-1", "stream-ending").await;
+    wait_for_run(&state, "mission-1", "stream-ending").await;
     state
         .missions
         .lock()
@@ -548,7 +548,7 @@ async fn a_session_that_ends_during_its_resume_takes_the_resume_with_it() {
         .transition("mission-1", MissionState::Blocked)
         .unwrap();
     assert!(resume(&state, "mission-1", Some("go on")).await.is_err());
-    assert!(!has_live_session(&state, "mission-1"));
+    assert!(!has_live_run(&state, "mission-1"));
     wait_for_state(&state, "mission-1", MissionState::Failed).await;
     wait_until("both harnesses are closed", || log_of("ending").closes >= 2).await;
 }
@@ -572,14 +572,14 @@ async fn a_mission_that_ends_during_its_resume_leaves_no_harness() {
         }),
     );
     start_mission_by_id(&state, "mission-1").await;
-    wait_for_session(&state, "mission-1", "stream-abandoned").await;
+    wait_for_run(&state, "mission-1", "stream-abandoned").await;
     interrupt(&state, "mission-1").await;
     wait_until("the interrupted turn's end closes the harness", || {
-        !has_live_session(&state, "mission-1")
+        !has_live_run(&state, "mission-1")
     })
     .await;
     assert!(resume(&state, "mission-1", Some("go on")).await.is_err());
-    assert!(!has_live_session(&state, "mission-1"));
+    assert!(!has_live_run(&state, "mission-1"));
     wait_until("the resumed harness is closed", || {
         log_of("abandoned").closes >= 2
     })
@@ -610,19 +610,19 @@ async fn an_interrupted_turn_leaves_the_mission_blocked_however_it_ends() {
         );
         let _stop = StopOnDrop(state.clone());
         start_mission_by_id(&state, "mission-1").await;
-        wait_for_session(&state, "mission-1", &format!("stream-{key}")).await;
+        wait_for_run(&state, "mission-1", &format!("stream-{key}")).await;
         assert_eq!(
             interrupt(&state, "mission-1").await.state,
             MissionState::Blocked
         );
         wait_until("the interrupted turn's end closes the harness", || {
-            !has_live_session(&state, "mission-1")
+            !has_live_run(&state, "mission-1")
                 || mission_state(&state, "mission-1").state != MissionState::Blocked
         })
         .await;
         let mission = mission_state(&state, "mission-1");
         assert_eq!(mission.state, MissionState::Blocked, "ended by {ending}");
-        assert!(!has_live_session(&state, "mission-1"), "ended by {ending}");
+        assert!(!has_live_run(&state, "mission-1"), "ended by {ending}");
 
         let (status, _) = resume(&state, "mission-1", Some("go on"))
             .await
@@ -632,19 +632,19 @@ async fn an_interrupted_turn_leaves_the_mission_blocked_however_it_ends() {
     }
 }
 
-/// With no Session ID there is nothing to resume: an interrupted turn that ends before the
+/// With no Run ID there is nothing to resume: an interrupted turn that ends before the
 /// harness reported one must not leave the Mission waiting for a resume that can never run.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_interrupted_turn_with_no_session_to_resume_is_not_left_waiting() {
+async fn an_interrupted_turn_with_no_run_to_resume_is_not_left_waiting() {
     let root = tempfile::tempdir().unwrap();
     let state = test_state(
         root.path(),
         "",
-        &agent("nosession", "MOCK_STREAM_SESSIONLESS = \"1\"\n", ""),
+        &agent("norun", "MOCK_STREAM_RUNLESS = \"1\"\n", ""),
     );
     let _stop = StopOnDrop(state.clone());
     start_mission_by_id(&state, "mission-1").await;
-    assert!(mission_state(&state, "mission-1").session_ids.is_empty());
+    assert!(mission_state(&state, "mission-1").run_ids.is_empty());
     interrupt(&state, "mission-1").await;
     wait_for_state(&state, "mission-1", MissionState::Failed).await;
 }
@@ -665,7 +665,7 @@ async fn an_interrupt_answered_by_silence_leaves_the_mission_waiting() {
     );
     let _stop = StopOnDrop(state.clone());
     start_mission_by_id(&state, "mission-1").await;
-    wait_for_session(&state, "mission-1", "stream-quiet").await;
+    wait_for_run(&state, "mission-1", "stream-quiet").await;
     interrupt(&state, "mission-1").await;
     tokio::time::sleep(Duration::from_millis(1_500)).await;
     assert_eq!(
@@ -706,7 +706,7 @@ async fn a_stalled_mission_keeps_its_safe_house_until_it_ends() {
     start_mission_by_id(&state, "mission-1").await;
     wait_for_state(&state, "mission-1", MissionState::Stalled).await;
     wait_until("the stalled harness is closed", || {
-        !has_live_session(&state, "mission-1")
+        !has_live_run(&state, "mission-1")
     })
     .await;
     let report = mission_state(&state, "mission-1").safe_house.unwrap();
@@ -738,7 +738,7 @@ mod controls_on_a_stream {
         )
     }
 
-    /// Cancelling a Mission with no live Session still ends what it left behind.
+    /// Cancelling a Mission with no live Run still ends what it left behind.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cancelling_a_stalled_mission_finishes_its_safe_house() {
         let root = tempfile::tempdir().unwrap();
@@ -747,7 +747,7 @@ mod controls_on_a_stream {
         start_mission_by_id(&state, "mission-1").await;
         wait_for_state(&state, "mission-1", MissionState::Stalled).await;
         wait_until("the stalled harness is closed", || {
-            !has_live_session(&state, "mission-1")
+            !has_live_run(&state, "mission-1")
         })
         .await;
         let report = mission_state(&state, "mission-1").safe_house.unwrap();
@@ -788,7 +788,7 @@ mod controls_on_a_stream {
             );
             let _stop = StopOnDrop(state.clone());
             start_mission_by_id(&state, "mission-1").await;
-            wait_for_session(&state, "mission-1", &format!("stream-{key}")).await;
+            wait_for_run(&state, "mission-1", &format!("stream-{key}")).await;
             state
                 .missions
                 .lock()

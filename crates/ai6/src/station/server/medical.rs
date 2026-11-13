@@ -1,9 +1,9 @@
-//! The Station's side of Medical: recording what Sessions consume and enforcing budgets.
+//! The Station's side of Medical: recording what Runs consume and enforcing budgets.
 
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
-use super::{DaemonState, queue_event, session_hold, sync_session_record};
+use super::{DaemonState, queue_event, run_hold, sync_run_record};
 use crate::directorates::m::mission::{Mission, MissionState};
 use crate::directorates::medical::exposure::{
     BRIEF_EXPOSURE_KEY, BRIEF_SOURCE, Exposure, ExposureGate, tool_source,
@@ -13,9 +13,9 @@ use crate::directorates::medical::usage::{
     Budget, BudgetBreach, BudgetLevel, BudgetScope, MissionUsage, UsageTotals, UsageTracker,
 };
 use crate::directorates::registry::agent_records::AgentOutcome;
-use crate::directorates::registry::limits::SessionLimits;
+use crate::directorates::registry::limits::RunLimits;
 use crate::directorates::registry::quarantine::Quarantine;
-use crate::directorates::registry::sessions::SessionUpdate;
+use crate::directorates::registry::runs::RunUpdate;
 use crate::directorates::registry::sources::SOURCE_BRIEF_PREFIX;
 use crate::directorates::registry::store::{AuditRecord, Brief};
 use coqui_acp_api::Spend;
@@ -30,20 +30,20 @@ pub(super) const BUDGET_EVENT: &str = "budget";
 /// The event kind that reports a Mission stopped because its Agent is quarantined.
 pub(super) const QUARANTINED_EVENT: &str = "quarantined";
 
-/// The event kind that reports a new way a Session was exposed; its text is the source.
+/// The event kind that reports a new way a Run was exposed; its text is the source.
 pub(super) const EXPOSED_EVENT: &str = "exposed";
 
 /// What one recorded usage report left behind.
 pub(super) struct Recorded {
     /// The Mission's ledger after the addition.
     pub(super) mission: MissionUsage,
-    /// The reporting Session's totals after the addition.
-    pub(super) session: UsageTotals,
+    /// The reporting Run's totals after the addition.
+    pub(super) run: UsageTotals,
 }
 
 /// Adds what the provider reported to the Mission's ledger in the shared Registry.
 ///
-/// `tracker` belongs to one attached provider process, so a resumed Session is never
+/// `tracker` belongs to one attached provider process, so a resumed Run is never
 /// counted twice. A ledger that cannot be written is logged and the work continues:
 /// measuring never stops an Agent.
 pub(super) fn record_usage(
@@ -55,17 +55,17 @@ pub(super) fn record_usage(
     let delta = tracker.observe(reported);
     super::accounts::record_usage(state, mission_id, delta.tokens());
     let operation_id = operation_of(state, mission_id);
-    let session =
-        session_hold(state, mission_id).map_or_else(|| mission_id.to_owned(), |hold| hold.id);
+    let run =
+        run_hold(state, mission_id).map_or_else(|| mission_id.to_owned(), |hold| hold.id);
     match state.intake.record_usage(
         operation_id.as_deref(),
         mission_id,
-        &session,
+        &run,
         &delta,
         state.clock.now(),
     ) {
         Ok(mission) => Some(Recorded {
-            session: mission.sessions.get(&session).copied().unwrap_or_default(),
+            run: mission.runs.get(&run).copied().unwrap_or_default(),
             mission,
         }),
         Err(error) => {
@@ -129,7 +129,7 @@ pub(super) fn remaining_mission_cost(state: &DaemonState, mission_id: &str) -> O
 ///
 /// A warning is reported once per attached provider process (`warned` remembers which),
 /// as a `budget` event and an audit record. Returns the description of the first limit
-/// that was reached, which the caller answers by stopping the Session.
+/// that was reached, which the caller answers by stopping the Run.
 pub(super) fn enforce_budget(
     state: &DaemonState,
     mission_id: &str,
@@ -149,7 +149,7 @@ pub(super) fn enforce_budget(
             .ok()
     });
     let mut stop = None;
-    for breach in budget.check(&recorded.session, &recorded.mission.total, day_cost) {
+    for breach in budget.check(&recorded.run, &recorded.mission.total, day_cost) {
         let at_limit = breach.level == BudgetLevel::Limit;
         if warned.insert((breach.scope, at_limit)) {
             let action = if at_limit {
@@ -203,8 +203,8 @@ fn announce(
     }
 }
 
-/// The exposure gate for a Mission's next Session: the Operation's policy, starting from
-/// what the Mission came from and what any earlier Session of it read.
+/// The exposure gate for a Mission's next Run: the Operation's policy, starting from
+/// what the Mission came from and what any earlier Run of it read.
 pub(super) fn open_gate(state: &DaemonState, mission: &Mission) -> ExposureGate {
     let policy = mission
         .operation_id
@@ -231,12 +231,12 @@ pub(super) fn open_gate(state: &DaemonState, mission: &Mission) -> ExposureGate 
             });
         }
     }
-    ExposureGate::new(policy, inherited, &state.intake.limits().sessions)
+    ExposureGate::new(policy, inherited, &state.intake.limits().runs)
 }
 
 /// What a Mission made from `brief` has already read: the Source item's text, or the
-/// exposure the proposing Session carried into the proposal.
-pub(super) fn brief_exposure(brief: &Brief, limits: &SessionLimits) -> Vec<String> {
+/// exposure the proposing Run carried into the proposal.
+pub(super) fn brief_exposure(brief: &Brief, limits: &RunLimits) -> Vec<String> {
     let mut sources = Vec::new();
     if brief.source.starts_with(SOURCE_BRIEF_PREFIX) {
         sources.push(BRIEF_SOURCE.to_owned());
@@ -260,19 +260,19 @@ pub(super) fn brief_exposure(brief: &Brief, limits: &SessionLimits) -> Vec<Strin
     sources
 }
 
-/// Marks the Session exposed by any tool in `event` the Operation lists.
+/// Marks the Run exposed by any tool in `event` the Operation lists.
 pub(super) fn expose_by_tools(state: &DaemonState, gate: &ExposureGate, event: &AgentEvent) {
     for tool in &event.tools {
         if gate.policy().exposed_by_tool(tool) {
             gate.mark(
-                &tool_source(tool, state.intake.limits().sessions.exposure_source_bytes),
+                &tool_source(tool, state.intake.limits().runs.exposure_source_bytes),
                 state.clock.now() as f64,
             );
         }
     }
 }
 
-/// Writes exposure that changed to the Session's Registry record and announces each new
+/// Writes exposure that changed to the Run's Registry record and announces each new
 /// source as an `exposed` event. `announced` counts the sources already announced.
 pub(super) fn sync_exposure(
     state: &DaemonState,
@@ -301,42 +301,42 @@ pub(super) fn sync_exposure(
     persist_exposure(state, mission_id, &exposures);
 }
 
-/// Adds `exposures` to the Mission's Session record, when this Station holds one.
+/// Adds `exposures` to the Mission's Run record, when this Station holds one.
 pub(super) fn persist_exposure(state: &DaemonState, mission_id: &str, exposures: &[Exposure]) {
     if exposures.is_empty() {
         return;
     }
-    let Some(hold) = session_hold(state, mission_id) else {
+    let Some(hold) = run_hold(state, mission_id) else {
         return;
     };
-    if let Err(error) = state.intake.update_session(
+    if let Err(error) = state.intake.update_run(
         &hold.id,
         &state.station_id,
         hold.fence,
-        SessionUpdate::default().exposed(exposures.to_vec()),
+        RunUpdate::default().exposed(exposures.to_vec()),
     ) {
         eprintln!(
-            "ai6: exposure of Session {:?} not recorded: {error}",
+            "ai6: exposure of Run {:?} not recorded: {error}",
             hold.id
         );
     }
 }
 
-/// Stops a Session whose budget is spent and blocks its Mission with reason `budget`.
+/// Stops a Run whose budget is spent and blocks its Mission with reason `budget`.
 ///
-/// The safe house and provider Session stay as they are, so an operator who raises the
+/// The safe house and provider Run stay as they are, so an operator who raises the
 /// limit can resume the same work.
 pub(super) fn stop_for_budget(
     state: &DaemonState,
     mission_id: &str,
-    session: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
+    run: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
 ) {
-    let operation = state.sessions.lock().ok().and_then(|mut sessions| {
-        if sessions
+    let operation = state.runs.lock().ok().and_then(|mut runs| {
+        if runs
             .get(mission_id)
-            .is_some_and(|operation| Arc::ptr_eq(&operation.session, session))
+            .is_some_and(|operation| Arc::ptr_eq(&operation.run, run))
         {
-            sessions
+            runs
                 .remove(mission_id)
                 .inspect(|operation| operation.gate.close())
         } else {
@@ -346,9 +346,9 @@ pub(super) fn stop_for_budget(
     let Some(operation) = operation else {
         return;
     };
-    if let Ok(session) = operation.session.lock() {
-        let _ = session.interrupt();
-        let _ = session.close();
+    if let Ok(run) = operation.run.lock() {
+        let _ = run.interrupt();
+        let _ = run.close();
     }
     let blocked = state
         .missions
@@ -362,7 +362,7 @@ pub(super) fn stop_for_budget(
     if let Some(telemetry) = &operation.telemetry {
         telemetry.publish_lifecycle_for("blocked", Some(BUDGET_REASON));
     }
-    sync_session_record(state, mission_id);
+    sync_run_record(state, mission_id);
     report_incident(state, mission_id, IncidentKind::Budget);
 }
 
@@ -416,7 +416,7 @@ pub(super) fn report_incident(state: &DaemonState, mission_id: &str, kind: Incid
         .unwrap_or_default();
     // Stalls, loops and blown covers are counted from the Mission's state.
     if kind == IncidentKind::Budget {
-        let attempt = session_hold(state, mission_id).map_or(0, |hold| hold.attempt);
+        let attempt = run_hold(state, mission_id).map_or(0, |hold| hold.attempt);
         super::agents::count(
             state,
             &agent,
@@ -531,16 +531,16 @@ pub(super) fn enforce_quarantines(state: &DaemonState) {
 fn stop_for_quarantine(state: &DaemonState, mission: &Mission, records: &[Quarantine]) {
     let mission_id = mission.mission_id.as_str();
     let operation = state
-        .sessions
+        .runs
         .lock()
         .ok()
-        .and_then(|mut sessions| sessions.remove(mission_id))
+        .and_then(|mut runs| runs.remove(mission_id))
         .inspect(|operation| operation.gate.close());
     if let Some(operation) = &operation
-        && let Ok(session) = operation.session.lock()
+        && let Ok(run) = operation.run.lock()
     {
-        let _ = session.interrupt();
-        let _ = session.close();
+        let _ = run.interrupt();
+        let _ = run.close();
     }
     let quarantined = state
         .missions
@@ -557,7 +557,7 @@ fn stop_for_quarantine(state: &DaemonState, mission: &Mission, records: &[Quaran
     {
         telemetry.publish_lifecycle("quarantined");
     }
-    sync_session_record(state, mission_id);
+    sync_run_record(state, mission_id);
     let reason = records
         .iter()
         .find(|record| {
@@ -601,6 +601,6 @@ fn release_mission(state: &DaemonState, mission: &Mission) {
             .is_ok()
     });
     if requeued {
-        sync_session_record(state, mission.mission_id.as_str());
+        sync_run_record(state, mission.mission_id.as_str());
     }
 }

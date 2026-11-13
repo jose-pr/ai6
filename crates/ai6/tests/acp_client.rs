@@ -5,7 +5,7 @@ use agent_client_protocol::{
     Agent, Channel, Client, ConnectionTo, Responder, UntypedMessage, on_receive_notification,
     on_receive_request,
 };
-use ai6::directorates::section_00::acp::{AcpOptions, AcpSession, duplex};
+use ai6::directorates::section_00::acp::{AcpOptions, AcpRun, duplex};
 use coqui_acp_provider::{AgentEvent, AgentSession, CANCELLED_EVENT, LIMIT_EVENT, TURN_CANCELLED};
 use serde_json::{Value, json};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -48,7 +48,7 @@ fn extension_event(seq: u64, kind: &str, text: Option<&str>) -> Value {
     };
     json!({
         "sessionId": "ext-1",
-        "providerSessionId": "provider-1",
+        "providerId": "provider-1",
         "seq": seq,
         "event": serde_json::to_value(event).unwrap(),
     })
@@ -115,7 +115,7 @@ fn serve(behaviour: Behaviour, seen: Arc<Seen>, transport: Channel) {
                                                 &cx,
                                                 json!({
                                                     "sessionId": "ext-1",
-                                                    "providerSessionId": "provider-1",
+                                                    "providerId": "provider-1",
                                                 }),
                                             );
                                             tell(&cx, extension_event(1, "text", Some("hi")));
@@ -135,7 +135,7 @@ fn serve(behaviour: Behaviour, seen: Arc<Seen>, transport: Channel) {
                                                 &cx,
                                                 json!({
                                                     "sessionId": "ext-1",
-                                                    "providerSessionId": "provider-1",
+                                                    "providerId": "provider-1",
                                                 }),
                                             );
                                             tell(&cx, extension_event(1, "text", Some("hi")));
@@ -224,21 +224,21 @@ fn connect(
     behaviour: Behaviour,
     options: AcpOptions,
 ) -> (
-    Result<AcpSession, ai6::guatiao::library::ProviderError>,
+    Result<AcpRun, ai6::guatiao::library::ProviderError>,
     Arc<Seen>,
 ) {
     let seen = Arc::new(Seen::default());
     let (agent_end, client_end) = duplex();
     serve(behaviour, seen.clone(), agent_end);
-    (AcpSession::connect(client_end, options, None), seen)
+    (AcpRun::connect(client_end, options, None), seen)
 }
 
 /// Events until `done` says so, or the agent has left and nothing more comes, within a deadline.
-fn events_until(session: &AcpSession, done: impl Fn(&[AgentEvent]) -> bool) -> Vec<AgentEvent> {
+fn events_until(run: &AcpRun, done: impl Fn(&[AgentEvent]) -> bool) -> Vec<AgentEvent> {
     let deadline = Instant::now() + Duration::from_secs(120);
     let mut seen = Vec::new();
     while Instant::now() < deadline {
-        if let Some(event) = session.next_event(100).unwrap() {
+        if let Some(event) = run.next_event(100).unwrap() {
             seen.push(event);
         }
         if done(&seen) {
@@ -248,9 +248,9 @@ fn events_until(session: &AcpSession, done: impl Fn(&[AgentEvent]) -> bool) -> V
     panic!("the events never satisfied the test; saw {seen:?}");
 }
 
-fn left(session: &AcpSession) {
+fn left(run: &AcpRun) {
     let deadline = Instant::now() + Duration::from_secs(120);
-    while !session.connection_lost() {
+    while !run.connection_lost() {
         assert!(Instant::now() < deadline, "the agent never left");
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -262,31 +262,31 @@ fn exit_detail() -> Option<ai6::directorates::section_00::acp::DisconnectDetail>
 
 #[test]
 fn a_turn_the_agent_ended_is_not_failed_by_the_agent_leaving_and_what_was_taken_is_acknowledged() {
-    let (session, seen) = connect(
+    let (run, seen) = connect(
         Behaviour::EndsThenLeaves,
         AcpOptions {
             disconnect_detail: exit_detail(),
             ..options()
         },
     );
-    let session = session.unwrap();
+    let run = run.unwrap();
     assert_eq!(
-        session.session_id().unwrap().unwrap().as_str(),
+        run.session_id().unwrap().unwrap().as_str(),
         "provider-1",
-        "the operation said who it is before the Session was handed out"
+        "the operation said who it is before the Run was handed out"
     );
-    let events = events_until(&session, |events| {
+    let events = events_until(&run, |events| {
         events.iter().any(|event| event.kind == "completed")
     });
-    left(&session);
+    left(&run);
     // Asking again says the caller dealt with the last one; the connection is gone by now.
-    let after = session.next_event(500).unwrap();
+    let after = run.next_event(500).unwrap();
     assert_eq!(after, None, "no failure after a finished turn");
     assert!(
         events.iter().all(|event| event.kind != "failed"),
         "{events:?}"
     );
-    assert_eq!(session.last_seq(), 2);
+    assert_eq!(run.last_seq(), 2);
     assert!(
         seen.acks.lock().unwrap().contains(&1),
         "the first event taken was acknowledged: {:?}",
@@ -296,14 +296,14 @@ fn a_turn_the_agent_ended_is_not_failed_by_the_agent_leaving_and_what_was_taken_
 
 #[test]
 fn a_turn_left_unfinished_by_the_agent_leaving_fails_with_what_became_of_it() {
-    let (session, _) = connect(
+    let (run, _) = connect(
         Behaviour::LeavesMidTurn,
         AcpOptions {
             disconnect_detail: exit_detail(),
             ..options()
         },
     );
-    let events = events_until(&session.unwrap(), |events| {
+    let events = events_until(&run.unwrap(), |events| {
         events.iter().any(|event| event.kind == "failed")
     });
     let failed = events.last().unwrap().text.as_deref().unwrap();
@@ -321,7 +321,7 @@ fn a_turn_left_unfinished_by_the_agent_leaving_fails_with_what_became_of_it() {
 
 #[test]
 fn a_connection_that_may_drop_without_failing_the_turn_says_only_that_it_dropped() {
-    let (session, _) = connect(
+    let (run, _) = connect(
         Behaviour::LeavesMidTurn,
         AcpOptions {
             fail_on_disconnect: false,
@@ -329,27 +329,27 @@ fn a_connection_that_may_drop_without_failing_the_turn_says_only_that_it_dropped
             ..options()
         },
     );
-    let session = session.unwrap();
-    left(&session);
+    let run = run.unwrap();
+    left(&run);
     let mut seen = Vec::new();
-    while let Some(event) = session.next_event(500).unwrap() {
+    while let Some(event) = run.next_event(500).unwrap() {
         seen.push(event);
     }
     assert!(seen.iter().all(|event| event.kind != "failed"), "{seen:?}");
-    assert!(session.connection_lost());
+    assert!(run.connection_lost());
 }
 
 #[test]
 fn an_operation_that_never_starts_is_a_start_failure_with_its_own_limit() {
     let started = Instant::now();
-    let (session, _) = connect(
+    let (run, _) = connect(
         Behaviour::NeverStarts,
         AcpOptions {
             start_timeout_ms: 300,
             ..options()
         },
     );
-    let error = session.err().expect("the start times out");
+    let error = run.err().expect("the start times out");
     assert!(
         error.to_string().contains("did not start within 300 ms"),
         "{error}"
@@ -359,14 +359,14 @@ fn an_operation_that_never_starts_is_a_start_failure_with_its_own_limit() {
 
 #[test]
 fn an_interrupted_turn_completes_and_one_the_agent_cancels_by_itself_is_cancelled() {
-    let (session, _) = connect(Behaviour::CancelsByItself, options());
-    let session = session.unwrap();
-    session.interrupt().unwrap();
-    let events = events_until(&session, |events| !events.is_empty());
+    let (run, _) = connect(Behaviour::CancelsByItself, options());
+    let run = run.unwrap();
+    run.interrupt().unwrap();
+    let events = events_until(&run, |events| !events.is_empty());
     assert_eq!(events.last().unwrap().kind, "completed");
 
-    let (session, _) = connect(Behaviour::CancelsByItself, options());
-    let events = events_until(&session.unwrap(), |events| !events.is_empty());
+    let (run, _) = connect(Behaviour::CancelsByItself, options());
+    let events = events_until(&run.unwrap(), |events| !events.is_empty());
     let last = events.last().unwrap();
     assert_eq!(last.kind, CANCELLED_EVENT);
     assert_eq!(last.text.as_deref(), Some(TURN_CANCELLED));
@@ -374,14 +374,14 @@ fn an_interrupted_turn_completes_and_one_the_agent_cancels_by_itself_is_cancelle
 
 #[test]
 fn a_prompt_error_with_its_reason_in_an_object_is_a_limit_when_its_words_say_so() {
-    let (session, _) = connect(
+    let (run, _) = connect(
         Behaviour::OutOfCredits,
         AcpOptions {
             limit_phrases: vec!["spending-limit".to_owned()],
             ..options()
         },
     );
-    let events = events_until(&session.unwrap(), |events| !events.is_empty());
+    let events = events_until(&run.unwrap(), |events| !events.is_empty());
     let last = events.last().unwrap();
     assert_eq!(last.kind, LIMIT_EVENT, "{events:?}");
     let text = last.text.as_deref().unwrap();
@@ -394,7 +394,7 @@ fn a_prompt_error_with_its_reason_in_an_object_is_a_limit_when_its_words_say_so(
 
 #[test]
 fn a_lost_connection_is_never_read_as_a_limit_whatever_the_agent_last_wrote() {
-    let (session, _) = connect(
+    let (run, _) = connect(
         Behaviour::PlainLeavesMidTurn,
         AcpOptions {
             limit_phrases: vec!["rate limited".to_owned()],
@@ -402,7 +402,7 @@ fn a_lost_connection_is_never_read_as_a_limit_whatever_the_agent_last_wrote() {
             ..options()
         },
     );
-    let events = events_until(&session.unwrap(), |events| !events.is_empty());
+    let events = events_until(&run.unwrap(), |events| !events.is_empty());
     let last = events.last().unwrap();
     assert_eq!(last.kind, "failed", "{events:?}");
     let text = last.text.as_deref().unwrap();
@@ -413,8 +413,8 @@ fn a_lost_connection_is_never_read_as_a_limit_whatever_the_agent_last_wrote() {
 
 #[test]
 fn output_a_bridge_lost_fails_the_turn_with_what_was_lost() {
-    let (session, _) = connect(Behaviour::LosesOutput, options());
-    let events = events_until(&session.unwrap(), |events| {
+    let (run, _) = connect(Behaviour::LosesOutput, options());
+    let events = events_until(&run.unwrap(), |events| {
         events.iter().any(|event| event.kind == "completed")
     });
     let failed = events

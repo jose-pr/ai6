@@ -1,15 +1,15 @@
-//! The Station's side of a Session's Report tools.
+//! The Station's side of a Run's Report tools.
 //!
-//! Every Agent's Session files Reports against its Mission's Operation, linked to that Mission,
+//! Every Agent's Run files Reports against its Mission's Operation, linked to that Mission,
 //! and reads them under the same rule as a person: the Operation's read (its own Operation, or
 //! another through a compartment granting `mission.read`, audited first), being read in to each
 //! of a Report's compartments, and a clearance at or above its classification. A Head of
 //! Station round also reads its own Station's Reports. Filing creates no Mission, brief or
 //! placement.
 //!
-//! Every call asks the configuration what is granted now, and works from the Session as the
+//! Every call asks the configuration what is granted now, and works from the Run as the
 //! Station started it. What it reads is fenced as data; a Report from another Operation marks the
-//! Session exposed as that Operation's product.
+//! Run exposed as that Operation's product.
 
 use std::collections::BTreeMap;
 use std::io;
@@ -41,8 +41,8 @@ const AUDIT_BYTES: Limit = Limit::at(512);
 /// What a call answers when who is asking cannot be settled.
 const UNAVAILABLE: &str = "reports are unavailable";
 
-/// A Session asking about Reports, as granted at this call.
-struct SessionReader<'a> {
+/// A Run asking about Reports, as granted at this call.
+struct RunReader<'a> {
     state: &'a DaemonState,
     reader: &'a Reader,
     principal: FieldPrincipal,
@@ -58,7 +58,7 @@ struct SessionReader<'a> {
     clearances: Vec<ReportClearance>,
 }
 
-impl SessionReader<'_> {
+impl RunReader<'_> {
     fn crosses_into(&self, operation: &str) -> bool {
         let mut crossed = self
             .crossed
@@ -90,7 +90,7 @@ impl SessionReader<'_> {
     }
 }
 
-impl ReportReader for SessionReader<'_> {
+impl ReportReader for RunReader<'_> {
     fn reads_scope(&self, scope: &ReportScope) -> bool {
         match scope {
             ReportScope::Operation(operation) if *operation == self.reader.operation => true,
@@ -111,12 +111,12 @@ impl ReportReader for SessionReader<'_> {
     }
 }
 
-/// How a refusal reads to the Session.
+/// How a refusal reads to the Run.
 fn refused(reason: impl Into<String>) -> Value {
     json!({ "status": "refused", "reason": reason.into() })
 }
 
-/// What a store error says to the Session.
+/// What a store error says to the Run.
 fn store_refusal(error: &io::Error) -> String {
     match error.kind() {
         io::ErrorKind::QuotaExceeded | io::ErrorKind::InvalidInput => error.to_string(),
@@ -125,7 +125,7 @@ fn store_refusal(error: &io::Error) -> String {
     }
 }
 
-/// A Session's way to its Reports.
+/// A Run's way to its Reports.
 #[derive(Clone)]
 pub(super) struct ReportDesk {
     state: DaemonState,
@@ -147,7 +147,7 @@ impl ReportDesk {
         &self,
         reader: &Reader,
         station: Option<&str>,
-        work: impl FnOnce(&DaemonState, &SessionReader<'_>) -> Value,
+        work: impl FnOnce(&DaemonState, &RunReader<'_>) -> Value,
     ) -> Result<Value, String> {
         let state = self.state.current();
         let clearance = agents::effective(&state, Some(&reader.operation), &reader.agent)
@@ -161,7 +161,7 @@ impl ReportDesk {
             .intake
             .report_clearances()
             .map_err(|_| UNAVAILABLE.to_owned())?;
-        let caller = SessionReader {
+        let caller = RunReader {
             state: &state,
             reader,
             principal: FieldPrincipal::new(
@@ -179,22 +179,22 @@ impl ReportDesk {
         Ok(work(&state, &caller))
     }
 
-    /// Files `filing` against the Session's Operation, linked to its Mission. `session` is the
-    /// provider Session once the harness has reported it.
+    /// Files `filing` against the Run's Operation, linked to its Mission. `run` is the
+    /// provider Run once the harness has reported it.
     pub(super) fn file(
         &self,
         reader: &Reader,
-        session: Option<String>,
+        run: Option<String>,
         filing: ReportFiling,
     ) -> Result<Value, String> {
         let mission = reader
             .mission
             .clone()
-            .ok_or_else(|| "file_report needs the Session's Mission".to_owned())?;
+            .ok_or_else(|| "file_report needs the Run's Mission".to_owned())?;
         let state = &self.state;
         let filer = ReportFiler::Agent {
             agent: reader.agent.clone(),
-            session: session.unwrap_or_else(|| mission.clone()),
+            run: run.unwrap_or_else(|| mission.clone()),
             mission: mission.clone(),
         };
         let report = filing.into_report(
@@ -228,8 +228,8 @@ impl ReportDesk {
         Ok(json!({ "filed": true, "id": report.id, "scope": report.scope.to_string() }))
     }
 
-    /// The Reports of `scope` (the Session's Operation when left out) or tied to `mission`, in
-    /// a watch's order, each as far as the Session may see it, fenced.
+    /// The Reports of `scope` (the Run's Operation when left out) or tied to `mission`, in
+    /// a watch's order, each as far as the Run may see it, fenced.
     pub(super) fn list(
         &self,
         reader: &Reader,
@@ -255,7 +255,7 @@ impl ReportDesk {
                 filter = filter.clone().in_scope(scope.clone());
             }
             if let Some(mission) = mission {
-                // A Mission the Session may not read answers as one with no Reports.
+                // A Mission the Run may not read answers as one with no Reports.
                 let own = caller.reader.mission.as_deref() == Some(mission.as_str());
                 let here = state.missions.lock().ok().and_then(|missions| {
                     missions
@@ -299,8 +299,8 @@ impl ReportDesk {
         })
     }
 
-    /// One Report as far as the Session may see it, fenced; refused, with its markings, to a
-    /// Session that may see only those.
+    /// One Report as far as the Run may see it, fenced; refused, with its markings, to a
+    /// Run that may see only those.
     pub(super) fn read(
         &self,
         reader: &Reader,
@@ -312,7 +312,7 @@ impl ReportDesk {
                 Ok(Some(report)) => report,
                 Ok(None) | Err(_) => return refused("no such report"),
             };
-            // A Report of a scope the Session may not read answers as one that does not exist.
+            // A Report of a scope the Run may not read answers as one that does not exist.
             if !caller.reads_scope(&report.scope) {
                 return refused("no such report");
             }
@@ -332,8 +332,8 @@ impl ReportDesk {
         })
     }
 
-    /// `report` as `caller` may see it; content from another Operation marks the Session.
-    fn shown(&self, state: &DaemonState, caller: &SessionReader<'_>, report: &Report) -> Value {
+    /// `report` as `caller` may see it; content from another Operation marks the Run.
+    fn shown(&self, state: &DaemonState, caller: &RunReader<'_>, report: &Report) -> Value {
         let rules = ReportRules::new(&caller.settings, &caller.clearances);
         let seen = sight(caller, report, &rules);
         if seen != ReportSight::Markings
@@ -342,7 +342,7 @@ impl ReportDesk {
         {
             let mark = product_source(
                 operation,
-                state.intake.limits().sessions.exposure_source_bytes,
+                state.intake.limits().runs.exposure_source_bytes,
             );
             caller.reader.exposure.mark(&mark, state.clock.now() as f64);
         }

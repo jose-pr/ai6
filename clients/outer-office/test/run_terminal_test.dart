@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:outer_office/terminal/session_terminal.dart';
+import 'package:outer_office/terminal/run_terminal.dart';
 import 'package:xterm2/xterm.dart';
 
 void main() {
@@ -31,7 +31,7 @@ void main() {
           home: SizedBox(
             width: 640,
             height: 400,
-            child: SessionTerminal(output: output.stream),
+            child: RunTerminal(output: output.stream),
           ),
         ),
       );
@@ -45,7 +45,7 @@ void main() {
           home: SizedBox(
             width: 640,
             height: 400,
-            child: SessionTerminal(
+            child: RunTerminal(
               output: output.stream,
               onInput: (_) {},
               writeLeaseHeld: true,
@@ -67,7 +67,7 @@ void main() {
         home: SizedBox(
           width: 640,
           height: 400,
-          child: SessionTerminal(output: output.stream),
+          child: RunTerminal(output: output.stream),
         ),
       ),
     );
@@ -87,7 +87,7 @@ void main() {
         home: SizedBox(
           width: 640,
           height: 400,
-          child: SessionTerminal(output: output.stream),
+          child: RunTerminal(output: output.stream),
         ),
       ),
     );

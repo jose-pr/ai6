@@ -44,7 +44,7 @@ fn an_agents_settings_reach_the_built_library_and_its_weakenings_come_back() {
         .expect("the handler reads its settings");
     assert_eq!(
         built.weakenings().unwrap(),
-        ["allowed_tools adds search_web to what its field Sessions may call"]
+        ["allowed_tools adds search_web to what its field Runs may call"]
     );
     assert!(
         plugins

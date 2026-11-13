@@ -6,7 +6,7 @@
 ai6::guatiao::providers!(AntigravityHandler);
 
 mod files;
-mod session;
+mod run;
 mod usage;
 
 use std::collections::BTreeMap;
@@ -14,10 +14,10 @@ use std::path::Path;
 
 use ai6::AgentSession;
 use ai6::HarnessStdio;
-use ai6::directorates::q::terminal::{AgentTerminal, STREAM_COLS, Spec, TerminalSession};
+use ai6::directorates::q::terminal::{AgentTerminal, STREAM_COLS, Spec, TerminalRun};
 use ai6::directorates::section_00::agent::{
-    AgentHandler, AgentResume, AgentStart, AssistantMode, SessionOverlays, SessionRecordFile,
-    SessionRecordQuery, clearance_runs_commands,
+    AgentHandler, AgentResume, AgentStart, AssistantMode, RunOverlays, RunRecordFile,
+    RunRecordQuery, clearance_runs_commands,
 };
 use ai6::directorates::section_00::gate::{CABLE_TOKEN_ENV, CABLE_URL_ENV, GATE_PROGRAM_ENV};
 use ai6::directorates::section_00::records;
@@ -26,8 +26,8 @@ use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use ai6::{UsageReport, UsageSource, UsageSupport};
 use serde_json::{Value, json};
 
-use files::SessionFiles;
-use session::{AntigravitySession, Respawn, Restriction};
+use files::RunFiles;
+use run::{AntigravityRun, Respawn, Restriction};
 
 /// Antigravity CLI AgentHandler configuration.
 #[derive(Debug, Clone, ToValue, FromValue, Schema)]
@@ -36,26 +36,26 @@ pub struct AntigravityConfig {
     /// Executable visible to the AI6-owned terminal environment.
     #[map(default = String::from("agy"))]
     pub executable: String,
-    /// Bytes of one line of agy's output the Session holds before handing over what it has.
+    /// Bytes of one line of agy's output the Run holds before handing over what it has.
     /// Default 67108864 (64 MiB).
     #[map(default = 64 * 1024 * 1024)]
     pub json_line_bytes: u64,
     /// Bytes of one terminal control sequence before it is dropped. Default 64.
     #[map(default = 64)]
     pub csi_bytes: u64,
-    /// How many of the last non-JSON lines a failed Session quotes. Default 8.
+    /// How many of the last non-JSON lines a failed Run quotes. Default 8.
     #[map(default = 8)]
     pub tail_lines: u64,
-    /// Bytes of each of those lines a failed Session quotes. Default 512.
+    /// Bytes of each of those lines a failed Run quotes. Default 512.
     #[map(default = 512)]
     pub tail_line_bytes: u64,
-    /// Milliseconds a closing Session waits for agy to have exited. Default 2000.
+    /// Milliseconds a closing Run waits for agy to have exited. Default 2000.
     #[map(default = 2_000)]
     pub close_wait_ms: u64,
     /// Milliseconds the end of the output waits for agy's exit status. Default 1000.
     #[map(default = 1_000)]
     pub exit_wait_ms: u64,
-    /// Bytes of an assistant's context file read into the Session's system prompt; a larger file
+    /// Bytes of an assistant's context file read into the Run's system prompt; a larger file
     /// is refused. Default 1048576.
     #[map(default = 1024 * 1024)]
     pub context_file_bytes: u64,
@@ -67,28 +67,28 @@ pub struct AntigravityConfig {
     /// them off, and 0 leaves its own, 300 s to connect and 180 s for a call. Default 0.
     #[map(default = 0)]
     pub mcp_timeout_secs: i64,
-    /// Milliseconds a read of the account's quota with no Session running may take, counting the
-    /// private `agy acp` it starts: agy serves the quota a few seconds after a session opens.
+    /// Milliseconds a read of the account's quota with no Run running may take, counting the
+    /// private `agy acp` it starts: agy serves the quota a few seconds after a run opens.
     /// Default 20000.
     #[map(default = 20_000)]
     pub usage_wait_ms: u64,
     /// agy permission rules (`command(git)`, `read_url(*)`) added to the allow list, or the names
-    /// of tools added to what a Mission's Session is offered (`search_web`). Answer-only and
-    /// assistant Sessions ignore them.
+    /// of tools added to what a Mission's Run is offered (`search_web`). Answer-only and
+    /// assistant Runs ignore them.
     #[schema(section = "agent")]
     #[map(default)]
     pub allowed_tools: Vec<String>,
     /// agy permission rules added to the deny list, or the names of tools taken out of what a
-    /// Mission's Session is offered; a deny rule beats an allow rule.
+    /// Mission's Run is offered; a deny rule beats an allow rule.
     #[schema(section = "agent")]
     #[map(default)]
     pub denied_tools: Vec<String>,
-    /// Further `settings.json` keys for this Session's `--settings` (`modelProvider`), never those
-    /// that decide what a Session may do.
+    /// Further `settings.json` keys for this Run's `--settings` (`modelProvider`), never those
+    /// that decide what a Run may do.
     #[schema(section = "agent")]
     #[map(with = ::ai6::guatiao_serde::adapt::object, default)]
     pub settings: serde_json::Map<String, Value>,
-    /// Lets agy update itself while a Session starts; off by default, so that a Session runs the
+    /// Lets agy update itself while a Run starts; off by default, so that a Run runs the
     /// CLI its fixtures were recorded from until an operator updates it.
     #[schema(section = "agent")]
     #[map(default)]
@@ -126,23 +126,23 @@ impl Default for AntigravityConfig {
 #[derive(Debug, Clone)]
 struct AntigravitySettings {
     /// agy permission rules (`command(git)`, `read_url(*)`) added to the allow list, or the names
-    /// of tools added to what a Mission's Session is offered (`search_web`). Answer-only and
-    /// assistant Sessions ignore them.
+    /// of tools added to what a Mission's Run is offered (`search_web`). Answer-only and
+    /// assistant Runs ignore them.
     allowed_tools: Vec<String>,
     /// agy permission rules added to the deny list, or the names of tools taken out of what a
-    /// Mission's Session is offered; a deny rule beats an allow rule.
+    /// Mission's Run is offered; a deny rule beats an allow rule.
     denied_tools: Vec<String>,
-    /// Further `settings.json` keys for this Session's `--settings` (`modelProvider`), never those
-    /// that decide what a Session may do ([`RESERVED_SETTINGS`]).
+    /// Further `settings.json` keys for this Run's `--settings` (`modelProvider`), never those
+    /// that decide what a Run may do ([`RESERVED_SETTINGS`]).
     settings: serde_json::Map<String, Value>,
-    /// Lets agy update itself while a Session starts; off by default, so that a Session runs the
+    /// Lets agy update itself while a Run starts; off by default, so that a Run runs the
     /// CLI its fixtures were recorded from until an operator updates it.
     auto_update: bool,
     /// What marks a failed turn as a quota limit, found in its error without regard to case.
     limit_phrases: Vec<String>,
 }
 
-/// `settings.json` keys `handler_settings` may not set: they decide what a Session may do, which
+/// `settings.json` keys `handler_settings` may not set: they decide what a Run may do, which
 /// `allowed_tools` and `denied_tools` say and report as weakenings.
 const RESERVED_SETTINGS: [&str; 5] = [
     "permissions",
@@ -184,7 +184,7 @@ impl AntigravitySettings {
             .find(|key| settings.settings.contains_key(**key))
         {
             return Err(format!(
-                "settings may not set {key}: allowed_tools and denied_tools say what a Session may do"
+                "settings may not set {key}: allowed_tools and denied_tools say what a Run may do"
             ));
         }
         Ok(settings)
@@ -205,7 +205,7 @@ fn valid_rule(rule: &str) -> bool {
         && target.is_none_or(|target| target.ends_with(')'))
 }
 
-/// The tool a Session runs commands with, and the permission action that governs it.
+/// The tool a Run runs commands with, and the permission action that governs it.
 const COMMAND_TOOL: &str = "run_command";
 const COMMAND_ACTION: &str = "command";
 
@@ -221,7 +221,7 @@ const EDIT_TOOLS: [&str; 2] = ["write_file", "edit_file"];
 /// runs under whatever next runs git there.
 const PROTECTED_DIRECTORIES: [&str; 3] = [".git", ".agents", ".agent"];
 
-/// Files a working directory carries that run commands or connect servers in any Session started
+/// Files a working directory carries that run commands or connect servers in any Run started
 /// there, trusted or not (agy 1.4.12: both hook files ran with the directory outside
 /// `trustedWorkspaces`, and `.agents/mcp_config.json` connected). The plugin directories are from
 /// agy's documentation.
@@ -245,13 +245,13 @@ struct Plan {
     deny: Vec<String>,
     /// Each MCP server's name and the prefix of its two variables.
     servers: Vec<(String, String)>,
-    /// The Session's environment, where those variables are.
+    /// The Run's environment, where those variables are.
     endpoints: BTreeMap<String, String>,
     restriction: Option<Restriction>,
     gate: bool,
 }
 
-/// What a request says about its Session, on a start or a resume.
+/// What a request says about its Run, on a start or a resume.
 struct Launch<'a> {
     working_directory: &'a str,
     clearance: &'a str,
@@ -262,10 +262,10 @@ struct Launch<'a> {
     project_mcp: bool,
     answer_only: bool,
     assistant: Option<&'a AssistantMode>,
-    overlays: &'a SessionOverlays,
+    overlays: &'a RunOverlays,
 }
 
-/// Starts and resumes Antigravity CLI streams for AI6 Agent Sessions.
+/// Starts and resumes Antigravity CLI streams for AI6 Agent Runs.
 #[derive(Provider)]
 #[provider(
     AgentHandler,
@@ -305,17 +305,17 @@ pub const RECORD_FORMAT: &str = "antigravity-jsonl";
 /// The Antigravity CLI's transcript of the conversation `query` names, when it is on this
 /// host: `~/.gemini/antigravity-cli/brain/<conversation>/transcript.jsonl`, the path its hooks
 /// are given as `transcriptPath` (1.4.12).
-fn antigravity_record(query: &SessionRecordQuery) -> Option<SessionRecordFile> {
-    if !records::file_safe(&query.session_id) {
+fn antigravity_record(query: &RunRecordQuery) -> Option<RunRecordFile> {
+    if !records::file_safe(&query.run_id) {
         return None;
     }
     let path = records::home(&query.environment)?
         .join(".gemini")
         .join("antigravity-cli")
         .join("brain")
-        .join(&query.session_id)
+        .join(&query.run_id)
         .join("transcript.jsonl");
-    path.is_file().then(|| SessionRecordFile {
+    path.is_file().then(|| RunRecordFile {
         path: path.to_string_lossy().into_owned(),
         format: RECORD_FORMAT.to_owned(),
     })
@@ -332,20 +332,20 @@ impl AgentHandler for AntigravityHandler {
     }
 
     /// agy reports the account's quota as figures it serves itself, with no turn. A turn's own
-    /// events carry the session's tokens.
+    /// events carry the run's tokens.
     fn usage_support(&self) -> Result<UsageSupport, ProviderError> {
         Ok(UsageSupport::new(vec![UsageSource::Reported], true))
     }
 
-    /// The quota of the account behind `environment`: from the agy of a running Session under the
-    /// same home when it serves it, else from a private `agy acp` with an empty session, started
+    /// The quota of the account behind `environment`: from the agy of a running Run under the
+    /// same home when it serves it, else from a private `agy acp` with an empty run, started
     /// under that home and ended after the read. No model turn is spent. A signed-out agy, or one
     /// that serves no quota within `usage_wait_ms`, is an error.
     fn usage(&self, environment: BTreeMap<String, String>) -> Result<UsageReport, ProviderError> {
         let home = usage::home_of(&environment);
         let wait = std::time::Duration::from_millis(self.config.usage_wait_ms);
         let started = std::time::Instant::now();
-        if let Some(buckets) = usage::through_session(&home, wait) {
+        if let Some(buckets) = usage::through_run(&home, wait) {
             return Ok(usage::report_of(buckets));
         }
         usage::through_private_agent(
@@ -358,10 +358,10 @@ impl AgentHandler for AntigravityHandler {
     }
 
     /// agy keeps each conversation's transcript under its home directory.
-    fn session_record(
+    fn run_record(
         &self,
-        query: SessionRecordQuery,
-    ) -> Result<Option<SessionRecordFile>, ProviderError> {
+        query: RunRecordQuery,
+    ) -> Result<Option<RunRecordFile>, ProviderError> {
         Ok(antigravity_record(&query))
     }
 
@@ -378,14 +378,14 @@ impl AgentHandler for AntigravityHandler {
             .filter_map(|rule| {
                 if rule_runs_commands(rule) {
                     Some(format!(
-                        "allowed_tools adds {rule} to what its desk Sessions may call"
+                        "allowed_tools adds {rule} to what its desk Runs may call"
                     ))
                 } else if READ_TOOLS.contains(&rule.as_str()) || EDIT_TOOLS.contains(&rule.as_str())
                 {
                     None
                 } else {
                     Some(format!(
-                        "allowed_tools adds {rule} to what its field Sessions may call"
+                        "allowed_tools adds {rule} to what its field Runs may call"
                     ))
                 }
             })
@@ -416,7 +416,7 @@ impl AgentHandler for AntigravityHandler {
                 .with_routing(&request.initial_context, true),
             request.assistant.as_ref(),
         )?;
-        let files = SessionFiles::create(
+        let files = RunFiles::create(
             &request.working_directory,
             &plan,
             self.config.mcp_timeout_secs,
@@ -426,14 +426,14 @@ impl AgentHandler for AntigravityHandler {
         )?;
         let argv = self.argv(&launch, &plan, &files, Some(files.agent_name()), None);
         let environment = self.environment(&request.environment);
-        let session = spawn(
+        let run = spawn(
             &terminal,
             argv.clone(),
             &request.working_directory,
             &environment,
         )?;
-        let operation = AntigravitySession::new(
-            session,
+        let operation = AntigravityRun::new(
+            run,
             None,
             plan.restriction,
             &self.config,
@@ -470,7 +470,7 @@ impl AgentHandler for AntigravityHandler {
         let plan = self.plan(&launch)?;
         // The agent and its system prompt stay as the conversation's first launch had them, so
         // this launch needs no agent file; its MCP servers, hooks and skills are this launch's.
-        let files = SessionFiles::create(
+        let files = RunFiles::create(
             &request.working_directory,
             &plan,
             self.config.mcp_timeout_secs,
@@ -483,18 +483,18 @@ impl AgentHandler for AntigravityHandler {
             &plan,
             &files,
             None,
-            Some(request.session_id.as_str()),
+            Some(request.run_id.as_str()),
         );
         let environment = self.environment(&request.environment);
-        let session = spawn(
+        let run = spawn(
             &terminal,
             argv.clone(),
             &request.working_directory,
             &environment,
         )?;
-        let operation = AntigravitySession::new(
-            session,
-            Some(request.session_id.clone()),
+        let operation = AntigravityRun::new(
+            run,
+            Some(request.run_id.clone()),
             plan.restriction,
             &self.config,
             self.settings.limit_phrases.clone(),
@@ -534,7 +534,7 @@ impl AntigravityHandler {
         Ok(plan)
     }
 
-    /// A Mission's Session at its clearance. At `field` and `00`: reading, editing inside the
+    /// A Mission's Run at its clearance. At `field` and `00`: reading, editing inside the
     /// working directory, commands and AI6's MCP servers. At `desk` and any other clearance: the
     /// same with no command tool, and commands denied by rule, since a resumed conversation keeps
     /// the tools of its first launch. In remote-hands mode only the Theater's tools.
@@ -635,7 +635,7 @@ impl AntigravityHandler {
         Ok(plan)
     }
 
-    /// Moneypenny's Session: reading and the mode's MCP servers, or a refusal naming what is asked
+    /// Moneypenny's Run: reading and the mode's MCP servers, or a refusal naming what is asked
     /// for beyond them. agy has no `Bash(<interpreter> *)` rule, and its only sandbox is
     /// `--sandbox`, which AI6 has not measured, so it runs no interpreter; it cannot keep a
     /// `write_file` rule from a name starting with `.`, so it takes no `files`; `search_web` takes
@@ -700,7 +700,7 @@ impl AntigravityHandler {
         })
     }
 
-    /// The hook that holds a command green ink does not cover, for a Session with a Station to
+    /// The hook that holds a command green ink does not cover, for a Run with a Station to
     /// ask. It runs under `sh -c`, so each part is quoted; the token stays in the environment.
     fn gate_hook(&self, launch: &Launch<'_>, plan: &Plan) -> Option<Value> {
         if !plan.gate || !plan.tools.iter().any(|tool| tool == COMMAND_TOOL) {
@@ -729,7 +729,7 @@ impl AntigravityHandler {
         }))
     }
 
-    /// The Session's system prompt: the standing context and an assistant's context file.
+    /// The Run's system prompt: the standing context and an assistant's context file.
     fn context(
         &self,
         context: &[String],
@@ -769,7 +769,7 @@ impl AntigravityHandler {
         &self,
         launch: &Launch<'_>,
         plan: &Plan,
-        files: &SessionFiles,
+        files: &RunFiles,
         agent: Option<&str>,
         conversation: Option<&str>,
     ) -> Vec<String> {
@@ -795,15 +795,15 @@ impl AntigravityHandler {
         add_model(&mut argv, launch.model, launch.effort);
         argv.extend([
             "--settings".to_owned(),
-            self.session_settings(plan, files).to_string(),
+            self.run_settings(plan, files).to_string(),
         ]);
         argv
     }
 
     /// The `--settings` value: never saved by agy, so nothing here reaches the user's own file. It
-    /// names no secret; the Session's own directory is denied to the file tools, since it holds
+    /// names no secret; the Run's own directory is denied to the file tools, since it holds
     /// the MCP servers' tokens.
-    fn session_settings(&self, plan: &Plan, files: &SessionFiles) -> Value {
+    fn run_settings(&self, plan: &Plan, files: &RunFiles) -> Value {
         let mut deny = plan.deny.clone();
         deny.push(format!("read_file({})", files.path_text()));
         deny.push(format!("write_file({})", files.path_text()));
@@ -815,7 +815,7 @@ impl AntigravityHandler {
         Value::Object(settings)
     }
 
-    /// The harness's environment: the Session's, with agy's updater off unless the Agent lets it
+    /// The harness's environment: the Run's, with agy's updater off unless the Agent lets it
     /// run. Only the value `true` turns it off (agy 1.4.12 went on updating with `1`).
     fn environment(&self, environment: &BTreeMap<String, String>) -> BTreeMap<String, String> {
         let mut environment = environment.clone();
@@ -829,7 +829,7 @@ impl AntigravityHandler {
 /// The variable that keeps agy from starting its updater.
 const AUTO_UPDATE_OFF_ENV: &str = "AGY_CLI_DISABLE_AUTO_UPDATE";
 
-/// The tools a restricted Session is not to reach by rule, should its offer ever widen.
+/// The tools a restricted Run is not to reach by rule, should its offer ever widen.
 const RESTRICTED_DENIED: [&str; 4] = [
     "write_file(*)",
     "command(*)",
@@ -837,7 +837,7 @@ const RESTRICTED_DENIED: [&str; 4] = [
     "execute_url(*)",
 ];
 
-/// The tools an assistant Session may call: reading, the MCP tools (checked by server), and
+/// The tools an assistant Run may call: reading, the MCP tools (checked by server), and
 /// `manage_task`, which agy offers every agent and which has no background task to act on here.
 const ASSISTANT_TOOLS: [&str; 5] = [
     "read_file",
@@ -847,7 +847,7 @@ const ASSISTANT_TOOLS: [&str; 5] = [
     "manage_task",
 ];
 
-/// A Session that only reads its prompt and answers. agy offers `list_resources`, `read_resource`
+/// A Run that only reads its prompt and answers. agy offers `list_resources`, `read_resource`
 /// and `manage_task` to any agent; the rules and the tripwire keep the first two away.
 fn answer_only_plan() -> Plan {
     let mut deny: Vec<String> = RESTRICTED_DENIED.map(str::to_owned).to_vec();
@@ -867,7 +867,7 @@ fn answer_only_plan() -> Plan {
     }
 }
 
-/// Whether a rule lets a Session run commands.
+/// Whether a rule lets a Run run commands.
 fn rule_runs_commands(rule: &str) -> bool {
     rule == COMMAND_TOOL || rule.starts_with("command(")
 }
@@ -893,7 +893,7 @@ fn check_project_files(root: &Path, settings: bool, mcp: bool) -> Result<(), Pro
             Status::GUATIAO_ERR_UNSUPPORTED,
             format!(
                 "the working directory carries {name}, which the Antigravity CLI loads in every \
-                 Session started there and no flag keeps out, and the Operation does not allow \
+                 Run started there and no flag keeps out, and the Operation does not allow \
                  its project settings: remove it, or allow them with harness.project_settings"
             ),
         )),
@@ -918,7 +918,7 @@ fn add_model(argv: &mut Vec<String>, model: Option<&str>, effort: Option<&str>) 
     }
 }
 
-/// The program a hook runs as AI6's gate: `AI6_GREEN_INK_GATE` from the Session environment when
+/// The program a hook runs as AI6's gate: `AI6_GREEN_INK_GATE` from the Run environment when
 /// not blank, else the executable hosting this handler.
 fn hook_program(environment: &BTreeMap<String, String>) -> Option<String> {
     environment
@@ -952,7 +952,7 @@ fn spawn(
     argv: Vec<String>,
     cwd: &str,
     environment: &BTreeMap<String, String>,
-) -> Result<Object<dyn TerminalSession>, ProviderError> {
+) -> Result<Object<dyn TerminalRun>, ProviderError> {
     let spec = Spec {
         argv,
         cwd: Some(cwd.to_owned()),
@@ -987,8 +987,8 @@ mod record_tests {
             .join("c-1");
         std::fs::create_dir_all(&brain).unwrap();
         std::fs::write(brain.join("transcript.jsonl"), "{}\n").unwrap();
-        let query = |conversation: &str| SessionRecordQuery {
-            session_id: conversation.to_owned(),
+        let query = |conversation: &str| RunRecordQuery {
+            run_id: conversation.to_owned(),
             working_directory: "/work".to_owned(),
             environment: BTreeMap::from([(
                 "HOME".to_owned(),

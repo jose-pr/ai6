@@ -1,7 +1,7 @@
 //! Overlays: directories of skills, rules, context, programs and environment that a loadout
-//! and an Operation issue to an Agent's Sessions, in the Agent Overlay Spec's format. Reading,
+//! and an Operation issue to an Agent's Runs, in the Agent Overlay Spec's format. Reading,
 //! validating, composing and the tree digest are the `coqui-aos` crate's; this module is what is
-//! the host's: the `[overlay.<name>]` records, which overlays a Session is issued, the refusal
+//! the host's: the `[overlay.<name>]` records, which overlays a Run is issued, the refusal
 //! of hooks until AI6 runs them, and the checks on the skills it delivers.
 //!
 //! Nothing here runs a script, installs a package, starts a server or reads the network.
@@ -23,7 +23,7 @@
 //! ```
 //!
 //! and an Operation adds its own (`overlays = ["rust"]`). [`issue_overlays`] turns the two
-//! lists and each overlay's manifest into the overlays a Session gets, in AOS composition
+//! lists and each overlay's manifest into the overlays a Run gets, in AOS composition
 //! order, or a refusal. An Operation's list only adds: it cannot take away what the loadout
 //! issues.
 
@@ -252,7 +252,7 @@ impl fmt::Display for OverlayList {
     }
 }
 
-/// Why a Session's overlays cannot be issued. Each names the overlay; none is a warning.
+/// Why a Run's overlays cannot be issued. Each names the overlay; none is a warning.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OverlayRefusal {
@@ -318,7 +318,7 @@ impl fmt::Display for OverlayRefusal {
 
 impl std::error::Error for OverlayRefusal {}
 
-/// One overlay a Session is issued.
+/// One overlay a Run is issued.
 #[derive(Debug, Clone, PartialEq)]
 pub struct IssuedOverlay {
     /// Its identity.
@@ -338,7 +338,7 @@ pub struct IssuedDigest {
     pub digest: String,
 }
 
-/// The overlays a Session is issued.
+/// The overlays a Run is issued.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct IssuedOverlays {
     /// Each identity once, after what it requires: the order to fetch and prepare them in.
@@ -376,13 +376,13 @@ fn identities(
         .collect()
 }
 
-/// The overlays a Session gets: the loadout's list, then the Operation's, each overlay's
+/// The overlays a Run gets: the loadout's list, then the Operation's, each overlay's
 /// `requires` resolved first and each issued once, in composition order. `records` holds the
 /// `[overlay.<name>]` tables by identity and `manifests` each one's manifest as read; a
 /// required overlay must be in both. With `allow_unpinned` an overlay with no pin is issued
 /// and reported; without, it is refused.
 ///
-/// A Session must be complete, so a missing requirement refuses it rather than leaving the
+/// A Run must be complete, so a missing requirement refuses it rather than leaving the
 /// overlay out.
 ///
 /// # Errors

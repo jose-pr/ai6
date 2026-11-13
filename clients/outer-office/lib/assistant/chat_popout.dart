@@ -247,8 +247,8 @@ typedef PopoutState = ({
 /// The pop-out's side: asks its opener for the conversation and the draft, keeps the draft
 /// level with the opener's, and tells it when the person brings the chat back or closes the
 /// window.
-class PopoutSession {
-  PopoutSession(this.platform, {String? person})
+class PopoutRun {
+  PopoutRun(this.platform, {String? person})
     : link = platform.link(_channelName(person)) {
     _subscriptions
       ..add(link.messages.listen(_heard))

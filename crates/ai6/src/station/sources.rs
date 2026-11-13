@@ -1072,14 +1072,14 @@ pub(crate) fn compose_report(disclosure: Disclosure, finished: &FinishedSourceBr
         if let Some(agent) = outcome_text("agent") {
             lines.push(format!("Agent: {agent}"));
         }
-        let session_ids: Vec<&str> = finished
+        let run_ids: Vec<&str> = finished
             .outcome
-            .get("session_ids")
+            .get("run_ids")
             .and_then(serde_json::Value::as_array)
             .map(|ids| ids.iter().filter_map(serde_json::Value::as_str).collect())
             .unwrap_or_default();
-        if !session_ids.is_empty() {
-            lines.push(format!("Provider Sessions: {}", session_ids.join(", ")));
+        if !run_ids.is_empty() {
+            lines.push(format!("Provider Runs: {}", run_ids.join(", ")));
         }
     }
     CxReport {
@@ -2229,7 +2229,7 @@ bogus = true
             serde_json::json!({
                 "state": "done",
                 "mission_id": "G-fake-report-me",
-                "session_ids": ["sess-1"],
+                "run_ids": ["sess-1"],
                 "agent": "007",
                 "branch": "agent/fix",
             }),
@@ -2993,7 +2993,7 @@ title = \"Update dependencies\"
             outcome: serde_json::json!({
                 "state": if ok { "done" } else { "failed" },
                 "mission_id": "m-9",
-                "session_ids": ["sess-9"],
+                "run_ids": ["sess-9"],
                 "agent": "007",
                 "branch": "agent/x",
             }),
@@ -3053,7 +3053,7 @@ title = \"Update dependencies\"
     }
 
     #[test]
-    fn covert_and_partial_reports_name_neither_agent_nor_session() {
+    fn covert_and_partial_reports_name_neither_agent_nor_run() {
         for disclosure in [Disclosure::Hidden, Disclosure::Assisted] {
             let report = compose_report(disclosure, &finished(true));
             assert!(!report.body.contains("007"), "{}", report.body);

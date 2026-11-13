@@ -28,7 +28,7 @@ pub(crate) enum CompartmentsCommand {
         /// cable.send, cable.read, mission.propose.
         #[arg(long, value_delimiter = ',')]
         actions: Option<Vec<String>>,
-        /// The clearance a Session needs for it to apply: desk, field or 00.
+        /// The clearance a Run needs for it to apply: desk, field or 00.
         #[arg(long)]
         min_clearance: Option<String>,
         /// The most recipients of one Cable, or `none`.

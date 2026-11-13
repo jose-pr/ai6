@@ -16,14 +16,14 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use ai6::directorates::m::identity::SessionId;
+use ai6::directorates::m::identity::RunId;
 use ai6::directorates::q::terminal::{
     AgentTerminal, ExitInfo, JsonLines, READ_TIMED_OUT, STREAM_COLS, Spec, StreamLine,
-    TerminalSession, exit_code_text,
+    TerminalRun, exit_code_text,
 };
 use ai6::directorates::section_00::agent::{
     AgentHandler, AgentResume, AgentStart, AssistantMode, ModelInfo, ModelListing,
-    SessionRecordFile, SessionRecordQuery, clearance_reads_only, clearance_runs_commands,
+    RunRecordFile, RunRecordQuery, clearance_reads_only, clearance_runs_commands,
 };
 use ai6::directorates::section_00::gate::{GateClient, GateVerdict, gate};
 use ai6::directorates::section_00::listing;
@@ -66,7 +66,7 @@ pub struct CodexConfig {
     /// Executable visible to the AI6-owned terminal environment.
     #[map(default = String::from("codex"))]
     pub executable: String,
-    /// Bytes of one line of the app server's output a Session holds before handing over what it
+    /// Bytes of one line of the app server's output a Run holds before handing over what it
     /// has. Default 67108864 (64 MiB).
     #[map(default = 64 * 1024 * 1024)]
     pub json_line_bytes: u64,
@@ -77,13 +77,13 @@ pub struct CodexConfig {
     /// Bytes an assistant's context file may hold. Default 1048576 (1 MiB).
     #[map(default = 1024 * 1024)]
     pub context_file_bytes: u64,
-    /// How many of the last non-JSON lines a failed Session quotes. Default 8.
+    /// How many of the last non-JSON lines a failed Run quotes. Default 8.
     #[map(default = 8)]
     pub tail_lines: u64,
-    /// Bytes of each of those lines a failed Session quotes. Default 512.
+    /// Bytes of each of those lines a failed Run quotes. Default 512.
     #[map(default = 512)]
     pub tail_line_bytes: u64,
-    /// Milliseconds a closing Session waits for the app server to have exited. Default 2000.
+    /// Milliseconds a closing Run waits for the app server to have exited. Default 2000.
     #[map(default = 2_000)]
     pub close_wait_ms: u64,
     /// Milliseconds the end of the output waits for the app server's exit status. Default 1000.
@@ -179,18 +179,18 @@ impl TryFrom<CodexConfig> for CodexHandler {
 /// The format of Codex's rollout file.
 pub const RECORD_FORMAT: &str = "codex-rollout-jsonl";
 
-/// Codex's rollout of the thread `query` names, when it is on this host: `sessions/YYYY/MM/DD/
+/// Codex's rollout of the thread `query` names, when it is on this host: `runs/YYYY/MM/DD/
 /// rollout-<time>-<thread>.jsonl` under `CODEX_HOME` (else `~/.codex`).
-fn codex_record(query: &SessionRecordQuery) -> Option<SessionRecordFile> {
-    if !records::file_safe(&query.session_id) {
+fn codex_record(query: &RunRecordQuery) -> Option<RunRecordFile> {
+    if !records::file_safe(&query.run_id) {
         return None;
     }
     let root = records::configured_dir(&query.environment, "CODEX_HOME", ".codex")?;
-    let suffix = format!("-{}.jsonl", query.session_id);
-    let path = records::find_file(&root.join("sessions"), 3, &|file| {
+    let suffix = format!("-{}.jsonl", query.run_id);
+    let path = records::find_file(&root.join("runs"), 3, &|file| {
         file.starts_with("rollout-") && file.ends_with(&suffix)
     })?;
-    Some(SessionRecordFile {
+    Some(RunRecordFile {
         path: path.to_string_lossy().into_owned(),
         format: RECORD_FORMAT.to_owned(),
     })
@@ -211,10 +211,10 @@ impl AgentHandler for CodexHandler {
     }
 
     /// Codex keeps each thread as a rollout file, one JSON object per line.
-    fn session_record(
+    fn run_record(
         &self,
-        query: SessionRecordQuery,
-    ) -> Result<Option<SessionRecordFile>, ProviderError> {
+        query: RunRecordQuery,
+    ) -> Result<Option<RunRecordFile>, ProviderError> {
         Ok(codex_record(&query))
     }
 
@@ -341,7 +341,7 @@ impl AgentHandler for CodexHandler {
         let gate = station_gate(&request.environment)
             .filter(|_| !(request.answer_only || request.assistant.is_some()));
         let scripts = Scripts::of(request.assistant.as_ref());
-        let mut session = CodexSession::new(process, request.effort)
+        let mut run = CodexRun::new(process, request.effort)
             .working_in(&request.working_directory)
             .limited_by(&self.config)
             .with_gate(gate)
@@ -353,7 +353,7 @@ impl AgentHandler for CodexHandler {
                 clearance_reads_only(&request.clearance),
             ))
             .reporting_commands(scripts != Scripts::None);
-        session.request(
+        run.request(
             "initialize",
             json!({
                 "clientInfo": { "name": "ai6", "version": env!("CARGO_PKG_VERSION") },
@@ -361,19 +361,19 @@ impl AgentHandler for CodexHandler {
             }),
             self.config.millis(self.config.start_timeout_ms),
         )?;
-        session.notify("initialized", json!({}))?;
+        run.notify("initialized", json!({}))?;
         if let Some(profile) = &profile {
             close_unless(
-                &session,
+                &run,
                 check_sandbox_config(
-                    &session,
+                    &run,
                     profile,
                     &request.working_directory,
                     self.config.millis(self.config.request_timeout_ms),
                 ),
             )?;
         }
-        let mut params = json!({ "threadId": request.session_id.as_str(), "excludeTurns": true });
+        let mut params = json!({ "threadId": request.run_id.as_str(), "excludeTurns": true });
         if let Some(model) = request.model {
             params["model"] = json!(model);
         }
@@ -385,26 +385,26 @@ impl AgentHandler for CodexHandler {
             scripts,
             desk,
         );
-        let response = match session.request(
+        let response = match run.request(
             "thread/resume",
             params,
             self.config.millis(self.config.request_timeout_ms),
         ) {
             Ok(response) => response,
             Err(error) => {
-                let _ = session.close();
+                let _ = run.close();
                 return Err(error);
             }
         };
         let Some(resumed_thread_id) = response.pointer("/thread/id").and_then(Value::as_str) else {
-            let _ = session.close();
+            let _ = run.close();
             return Err(refuse(
                 Status::GUATIAO_ERR_BAD_VALUE,
                 "Codex omitted resumed thread ID",
             ));
         };
-        if resumed_thread_id != request.session_id.as_str() {
-            let _ = session.close();
+        if resumed_thread_id != request.run_id.as_str() {
+            let _ = run.close();
             return Err(refuse(
                 Status::GUATIAO_ERR_BAD_VALUE,
                 "Codex resumed a different thread than requested",
@@ -412,20 +412,20 @@ impl AgentHandler for CodexHandler {
         }
         if let Some(profile) = &profile {
             close_unless(
-                &session,
+                &run,
                 profile
                     .check_thread(&response)
                     .map_err(|found| refuse(Status::GUATIAO_ERR_UNSUPPORTED, found)),
             )?;
         }
-        session.thread_id = Some(request.session_id);
+        run.thread_id = Some(request.run_id);
         if let Some(message) = request.message
-            && let Err(error) = session.send_message(AgentMessage { text: message })
+            && let Err(error) = run.send_message(AgentMessage { text: message })
         {
-            let _ = session.close();
+            let _ = run.close();
             return Err(error);
         }
-        Ok(session.into_object())
+        Ok(run.into_object())
     }
 }
 
@@ -477,7 +477,7 @@ impl CodexHandler {
             },
         )?;
         let gate = gate.filter(|_| !(request.answer_only || request.assistant.is_some()));
-        let mut session = CodexSession::new(process, request.effort)
+        let mut run = CodexRun::new(process, request.effort)
             .working_in(&request.working_directory)
             .limited_by(&self.config)
             .with_gate(gate)
@@ -489,7 +489,7 @@ impl CodexHandler {
                 clearance_reads_only(&request.clearance),
             ))
             .reporting_commands(scripts != Scripts::None);
-        session.request(
+        run.request(
             "initialize",
             json!({
                 "clientInfo": { "name": "ai6", "version": env!("CARGO_PKG_VERSION") },
@@ -497,12 +497,12 @@ impl CodexHandler {
             }),
             self.config.millis(self.config.start_timeout_ms),
         )?;
-        session.notify("initialized", json!({}))?;
+        run.notify("initialized", json!({}))?;
         if let Some(profile) = &profile {
             close_unless(
-                &session,
+                &run,
                 check_sandbox_config(
-                    &session,
+                    &run,
                     profile,
                     &request.working_directory,
                     self.config.millis(self.config.request_timeout_ms),
@@ -523,14 +523,14 @@ impl CodexHandler {
         if !instructions.is_empty() {
             params["developerInstructions"] = json!(instructions.join("\n\n"));
         }
-        let response = session.request(
+        let response = run.request(
             "thread/start",
             params,
             self.config.millis(self.config.request_timeout_ms),
         )?;
         if let Some(profile) = &profile {
             close_unless(
-                &session,
+                &run,
                 profile
                     .check_thread(&response)
                     .map_err(|found| refuse(Status::GUATIAO_ERR_UNSUPPORTED, found)),
@@ -541,14 +541,14 @@ impl CodexHandler {
             .and_then(Value::as_str)
             .ok_or_else(|| refuse(Status::GUATIAO_ERR_BAD_VALUE, "Codex omitted thread ID"))?
             .to_string();
-        session.thread_id = Some(
-            SessionId::try_from(thread_id)
+        run.thread_id = Some(
+            RunId::try_from(thread_id)
                 .map_err(|error| refuse(Status::GUATIAO_ERR_BAD_VALUE, error))?,
         );
-        session.send_message(AgentMessage {
+        run.send_message(AgentMessage {
             text: request.prompt,
         })?;
-        Ok(session.into_object())
+        Ok(run.into_object())
     }
 }
 
@@ -573,7 +573,7 @@ fn held_to_desk(clearance: &str, answer_only: bool, assistant: Option<&Assistant
     !answer_only && assistant.is_none() && !clearance_runs_commands(clearance)
 }
 
-/// AI6's own MCP servers a Session's environment names, as [`app_server_argv`] configures them.
+/// AI6's own MCP servers a Run's environment names, as [`app_server_argv`] configures them.
 fn station_servers(environment: &std::collections::BTreeMap<String, String>) -> Vec<String> {
     [
         ("ai6-cables", "AI6_CABLE_MCP"),
@@ -706,7 +706,7 @@ fn assistant_instructions(
 /// Decides whether a command Codex asks to run may go ahead, given its working directory.
 type Gate = Arc<dyn Fn(&str, Option<&Path>) -> GateVerdict + Send + Sync>;
 
-/// The green ink gate asking the Session's Station through its Cable endpoint. A Session with
+/// The green ink gate asking the Run's Station through its Cable endpoint. A Run with
 /// no endpoint cannot ask for green ink at all, so it has no gate, as with Claude Code.
 fn station_gate(environment: &std::collections::BTreeMap<String, String>) -> Option<Gate> {
     let client = GateClient::from_environment(environment)?;
@@ -751,12 +751,12 @@ fn set_approval_policy(
     }
 }
 
-struct CodexSession {
-    terminal: Object<dyn TerminalSession>,
+struct CodexRun {
+    terminal: Object<dyn TerminalRun>,
     gate: Option<Gate>,
     output: Mutex<JsonLines>,
     events: Mutex<VecDeque<AgentEvent>>,
-    thread_id: Option<SessionId>,
+    thread_id: Option<RunId>,
     request_id: AtomicU64,
     effort: Option<String>,
     /// The latest quota window the account reported as used up.
@@ -796,8 +796,8 @@ struct CodexSession {
     exit_wait_ms: i64,
 }
 
-impl CodexSession {
-    fn new(terminal: Object<dyn TerminalSession>, effort: Option<String>) -> Self {
+impl CodexRun {
+    fn new(terminal: Object<dyn TerminalRun>, effort: Option<String>) -> Self {
         Self {
             terminal,
             gate: None,
@@ -868,7 +868,7 @@ impl CodexSession {
             Some(_) => "exited".to_owned(),
             None => "closed its terminal".to_owned(),
         };
-        let mut reason = format!("Codex app-server {how} before completing the Session");
+        let mut reason = format!("Codex app-server {how} before completing the Run");
         if let Ok(tail) = self.tail.lock()
             && !tail.is_empty()
         {
@@ -909,7 +909,7 @@ impl CodexSession {
             return Ok(());
         }
         let reason = format!(
-            "the restricted Codex thread used {what}, which it may not use; the Session was ended"
+            "the restricted Codex thread used {what}, which it may not use; the Run was ended"
         );
         eprintln!("ai6: {reason}");
         let _ = self.terminal.kill();
@@ -934,7 +934,7 @@ impl CodexSession {
         self
     }
 
-    /// Reports what a `warn` tool check found, on the Station's log and as the Session's
+    /// Reports what a `warn` tool check found, on the Station's log and as the Run's
     /// first event (kind `weakened`).
     fn with_weakening(self, weakening: Option<String>) -> Self {
         if let Some(text) = weakening {
@@ -1207,7 +1207,7 @@ fn forbidden_use(message: &Value, restriction: &Restriction) -> Option<String> {
     }
 }
 
-impl CodexSession {
+impl CodexRun {
     /// Answers a command approval with the green ink gate: `accept` unless the gate holds the
     /// command, then `decline`, and the reason is steered into the running turn so the Agent
     /// knows to ask for green ink. With a gate, these are declined without asking it: input to
@@ -1449,7 +1449,7 @@ fn decode_quota(message: &Value) -> Vec<Bucket> {
 
 /// The quota window an `account/rateLimits/updated` notification reports as used up.
 ///
-/// The usage-limit error that follows does not always repeat the reset time, so the session
+/// The usage-limit error that follows does not always repeat the reset time, so the run
 /// keeps the latest exhausted window as a hint.
 fn exhausted_window(message: &Value) -> Option<LimitHit> {
     if message.get("method")?.as_str()? != "account/rateLimits/updated" {
@@ -1560,7 +1560,7 @@ fn decode_tools(message: &Value) -> Vec<String> {
 }
 
 /// What a notification tells of the account's usage: one request's spend (an addition, which
-/// the session turns into a running total) and the rate-limit windows.
+/// the run turns into a running total) and the rate-limit windows.
 fn decode_report(message: &Value) -> Option<UsageReport> {
     let spend = decode_usage(message);
     let buckets = decode_quota(message);
@@ -1606,7 +1606,7 @@ fn decode_event(message: &Value, hint: Option<&LimitHit>) -> Option<AgentEvent> 
     })
 }
 
-impl AgentSession for CodexSession {
+impl AgentSession for CodexRun {
     fn session_id(&self) -> Result<Option<String>, ProviderError> {
         Ok(self.thread_id.clone().map(String::from))
     }
@@ -1635,7 +1635,7 @@ impl AgentSession for CodexSession {
             return Ok(Some(event));
         }
         let read = self.read_line(Duration::from_millis(timeout_ms.max(0) as u64));
-        // The app server's exit ends the Session once, with the reason.
+        // The app server's exit ends the Run once, with the reason.
         let read = match read {
             Err(_) if self.ended.load(Ordering::Acquire) => {
                 if self.ended_reported.swap(true, Ordering::AcqRel) {
@@ -1728,24 +1728,24 @@ fn scripts_profile(
 /// Refuses a scripts thread whose app server's effective configuration is not the sandbox
 /// passed to it ([`sandbox::Profile::check_config`]): Codex merges the user's own settings in.
 fn check_sandbox_config(
-    session: &CodexSession,
+    run: &CodexRun,
     profile: &sandbox::Profile,
     cwd: &str,
     timeout: Duration,
 ) -> Result<(), ProviderError> {
-    let result = session.request("config/read", json!({ "cwd": cwd }), timeout)?;
+    let result = run.request("config/read", json!({ "cwd": cwd }), timeout)?;
     profile
         .check_config(&result)
         .map_err(|found| refuse(Status::GUATIAO_ERR_UNSUPPORTED, found))
 }
 
-/// Closes `session` and returns `error` when `checked` failed.
+/// Closes `run` and returns `error` when `checked` failed.
 fn close_unless<T>(
-    session: &CodexSession,
+    run: &CodexRun,
     checked: Result<T, ProviderError>,
 ) -> Result<T, ProviderError> {
     checked.inspect_err(|_| {
-        let _ = session.close();
+        let _ = run.close();
     })
 }
 
@@ -1757,7 +1757,7 @@ fn spawn(
     cwd: &str,
     environment: &std::collections::BTreeMap<String, String>,
     mode: Mode<'_>,
-) -> Result<(Object<dyn TerminalSession>, Option<String>), ProviderError> {
+) -> Result<(Object<dyn TerminalRun>, Option<String>), ProviderError> {
     let mut argv = if let Some(assistant) = mode.assistant {
         assistant_argv(executable, environment, assistant, mode.profile)?
     } else if mode.answer_only {
@@ -2056,7 +2056,7 @@ fn restrict_to_answer_only(params: &mut Value) {
 fn lock<T>(mutex: &Mutex<T>) -> Result<std::sync::MutexGuard<'_, T>, ProviderError> {
     mutex
         .lock()
-        .map_err(|_| refuse(Status::GUATIAO_ERR_INTERNAL, "session lock was poisoned"))
+        .map_err(|_| refuse(Status::GUATIAO_ERR_INTERNAL, "run lock was poisoned"))
 }
 
 fn internal(error: impl std::fmt::Display) -> ProviderError {
@@ -2077,15 +2077,15 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let day = home
             .path()
-            .join("sessions")
+            .join("runs")
             .join("2026")
             .join("11")
             .join("04");
         std::fs::create_dir_all(&day).unwrap();
         let file = day.join("rollout-2026-11-04T10-00-00-0195-thread.jsonl");
         std::fs::write(&file, "{}\n").unwrap();
-        let query = |thread: &str| SessionRecordQuery {
-            session_id: thread.to_owned(),
+        let query = |thread: &str| RunRecordQuery {
+            run_id: thread.to_owned(),
             working_directory: "/work".to_owned(),
             environment: BTreeMap::from([(
                 "CODEX_HOME".to_owned(),
@@ -2200,7 +2200,7 @@ mod tests {
         fn spawn_private(
             &self,
             value: &ai6::guatiao::Value,
-        ) -> Result<Object<dyn TerminalSession>, ProviderError> {
+        ) -> Result<Object<dyn TerminalRun>, ProviderError> {
             let spec = Spec::from_value(value).map_err(internal)?;
             self.private.lock().unwrap().push(spec.argv[1].clone());
             self.spawn(value)
@@ -2209,7 +2209,7 @@ mod tests {
         fn spawn(
             &self,
             value: &ai6::guatiao::Value,
-        ) -> Result<Object<dyn TerminalSession>, ProviderError> {
+        ) -> Result<Object<dyn TerminalRun>, ProviderError> {
             let spec = Spec::from_value(value).map_err(internal)?;
             self.specs.lock().unwrap().push(spec.clone());
 
@@ -2243,7 +2243,7 @@ mod tests {
                 .is_some_and(|command| command == "app-server");
             thread::spawn(move || forward_json_lines(stdout, sender, json_only));
 
-            Ok(ProcessTerminalSession {
+            Ok(ProcessTerminalRun {
                 child: Mutex::new(child),
                 stdin: Mutex::new(stdin),
                 receiver: Mutex::new(receiver),
@@ -2287,14 +2287,14 @@ mod tests {
         }
     }
 
-    struct ProcessTerminalSession {
+    struct ProcessTerminalRun {
         child: Mutex<Child>,
         stdin: Mutex<ChildStdin>,
         receiver: Mutex<Receiver<Vec<u8>>>,
         pending: Mutex<std::collections::VecDeque<u8>>,
     }
 
-    impl TerminalSession for ProcessTerminalSession {
+    impl TerminalRun for ProcessTerminalRun {
         fn pid(&self) -> i64 {
             i64::from(self.child.lock().unwrap().id())
         }
@@ -2612,12 +2612,12 @@ mod tests {
         config
     }
 
-    fn read_to_completion(session: &Object<dyn AgentSession>) -> Vec<AgentEvent> {
+    fn read_to_completion(run: &Object<dyn AgentSession>) -> Vec<AgentEvent> {
         let deadline = Instant::now() + Duration::from_secs(60);
         let mut events = Vec::new();
         while Instant::now() < deadline {
             let remaining = deadline.saturating_duration_since(Instant::now());
-            if let Some(event) = session
+            if let Some(event) = run
                 .next_event(remaining.as_millis().min(i64::MAX as u128) as i64)
                 .unwrap()
             {
@@ -2628,15 +2628,15 @@ mod tests {
                 }
             }
         }
-        panic!("fake Codex did not complete the provider Session")
+        panic!("fake Codex did not complete the provider Run")
     }
 
     #[test]
-    fn process_session_restarts_and_resumes_with_the_same_provider_thread() {
+    fn process_run_restarts_and_resumes_with_the_same_provider_thread() {
         let terminal = ProcessTerminal::new();
-        let session_id = SessionId::try_new("codex-process-thread-42").unwrap();
+        let run_id = RunId::try_new("codex-process-thread-42").unwrap();
         let environment =
-            BTreeMap::from([("CODEX_FIXTURE_THREAD_ID".to_owned(), session_id.to_string())]);
+            BTreeMap::from([("CODEX_FIXTURE_THREAD_ID".to_owned(), run_id.to_string())]);
         let handler = CodexHandler::try_from(CodexConfig {
             executable: "codex-process-fixture".to_owned(),
             ..CodexConfig::default()
@@ -2669,7 +2669,7 @@ mod tests {
             )
             .unwrap();
         let first_events = read_to_completion(&started);
-        assert_eq!(started.session_id().unwrap(), Some(session_id.to_string()));
+        assert_eq!(started.session_id().unwrap(), Some(run_id.to_string()));
         assert!(first_events.iter().any(|event| {
             event.kind == "text" && event.text.as_deref() == Some("first process turn")
         }));
@@ -2681,7 +2681,7 @@ mod tests {
                 AgentResume {
                     clearance: "field".to_owned(),
                     mission_id: "mission-process-42".parse().unwrap(),
-                    session_id: session_id.clone(),
+                    run_id: run_id.clone(),
                     message: Some("resumed process turn".to_owned()),
                     working_directory: std::env::current_dir()
                         .unwrap()
@@ -2701,7 +2701,7 @@ mod tests {
                 terminal.clone().into_object(),
             )
             .unwrap();
-        assert_eq!(resumed.session_id().unwrap(), Some(session_id.to_string()));
+        assert_eq!(resumed.session_id().unwrap(), Some(run_id.to_string()));
         let resumed_events = read_to_completion(&resumed);
         assert!(resumed_events.iter().any(|event| {
             event.kind == "text" && event.text.as_deref() == Some("resumed process turn")
@@ -2768,11 +2768,11 @@ mod tests {
         }))
     }
 
-    fn texts_until_completed(session: &Object<dyn AgentSession>) -> Vec<String> {
+    fn texts_until_completed(run: &Object<dyn AgentSession>) -> Vec<String> {
         let deadline = Instant::now() + Duration::from_secs(30);
         let mut texts = Vec::new();
         while Instant::now() < deadline {
-            if let Some(event) = session.next_event(1_000).unwrap() {
+            if let Some(event) = run.next_event(1_000).unwrap() {
                 if event.kind == "completed" {
                     return texts;
                 }
@@ -2790,7 +2790,7 @@ mod tests {
             ..CodexConfig::default()
         })
         .unwrap();
-        let session = handler
+        let run = handler
             .start_gated(
                 AgentStart {
                     mission_id: "mission-gate".parse().unwrap(),
@@ -2820,7 +2820,7 @@ mod tests {
             )
             .unwrap();
 
-        let declined = texts_until_completed(&session);
+        let declined = texts_until_completed(&run);
         assert_eq!(declined[0], "decision: decline", "{declined:?}");
         assert!(
             declined[1].starts_with("steered: ")
@@ -2833,42 +2833,42 @@ mod tests {
             .lock()
             .unwrap()
             .push(ai6::ActionScope::try_new("push", "origin:main").unwrap());
-        session
+        run
             .send_message(AgentMessage {
                 text: "run: git push origin main".to_owned(),
             })
             .unwrap();
-        assert_eq!(texts_until_completed(&session), ["decision: accept"]);
+        assert_eq!(texts_until_completed(&run), ["decision: accept"]);
 
-        session
+        run
             .send_message(AgentMessage {
                 text: "run: cargo test --workspace".to_owned(),
             })
             .unwrap();
-        assert_eq!(texts_until_completed(&session), ["decision: accept"]);
+        assert_eq!(texts_until_completed(&run), ["decision: accept"]);
 
         // The gate cannot see what these run, so they are declined and the Agent told why.
         for (text, why) in [
             ("stdin: git push origin main", "input to a running command"),
             ("nameless", "names no command"),
         ] {
-            session
+            run
                 .send_message(AgentMessage {
                     text: text.to_owned(),
                 })
                 .unwrap();
-            let declined = texts_until_completed(&session);
+            let declined = texts_until_completed(&run);
             assert_eq!(declined[0], "decision: decline", "{text}: {declined:?}");
             assert!(declined[1].contains(why), "{text}: {declined:?}");
         }
-        session.close().unwrap();
+        run.close().unwrap();
     }
 
-    /// What a gated session answers to `stream`: the decision written back, and the events.
+    /// What a gated run answers to `stream`: the decision written back, and the events.
     fn answered(stream: &[u8]) -> (Value, Vec<AgentEvent>) {
         let writes = Arc::new(Mutex::new(Vec::new()));
-        let session = CodexSession::new(
-            ResumeTerminalSession {
+        let run = CodexRun::new(
+            ResumeTerminalRun {
                 input: Mutex::new(stream.to_vec()),
                 writes: writes.clone(),
                 killed: Arc::new(AtomicBool::new(false)),
@@ -2878,10 +2878,10 @@ mod tests {
         )
         .with_gate(approvals_gate(Arc::new(Mutex::new(Vec::new()))));
         let mut events = Vec::new();
-        while let Some(event) = session.next_event(20).unwrap() {
+        while let Some(event) = run.next_event(20).unwrap() {
             events.push(event);
         }
-        while let Ok(Some(event)) = session.next_event(20) {
+        while let Ok(Some(event)) = run.next_event(20) {
             events.push(event);
         }
         let written = String::from_utf8(writes.lock().unwrap().clone()).unwrap();
@@ -2983,11 +2983,11 @@ mod tests {
         )
     }
 
-    /// What a gated session working in `directory` answers to `stream`, and what it told the turn.
+    /// What a gated run working in `directory` answers to `stream`, and what it told the turn.
     fn answered_in(directory: &Path, stream: &str) -> (Value, String) {
         let writes = Arc::new(Mutex::new(Vec::new()));
-        let session = CodexSession::new(
-            ResumeTerminalSession {
+        let run = CodexRun::new(
+            ResumeTerminalRun {
                 input: Mutex::new(stream.as_bytes().to_vec()),
                 writes: writes.clone(),
                 killed: Arc::new(AtomicBool::new(false)),
@@ -2997,7 +2997,7 @@ mod tests {
         )
         .working_in(&directory.to_string_lossy())
         .with_gate(approvals_gate(Arc::new(Mutex::new(Vec::new()))));
-        while let Ok(Some(_)) = session.next_event(20) {}
+        while let Ok(Some(_)) = run.next_event(20) {}
         let written = String::from_utf8(writes.lock().unwrap().clone()).unwrap();
         let decision = written
             .lines()
@@ -3055,11 +3055,11 @@ mod tests {
         assert_eq!(decision, "decline", "no item started");
     }
 
-    /// What a `desk` session working in `directory`, without a gate, answers to `stream`.
+    /// What a `desk` run working in `directory`, without a gate, answers to `stream`.
     fn answered_at_desk(directory: &Path, stream: &str) -> Value {
         let writes = Arc::new(Mutex::new(Vec::new()));
-        let session = CodexSession::new(
-            ResumeTerminalSession {
+        let run = CodexRun::new(
+            ResumeTerminalRun {
                 input: Mutex::new(stream.as_bytes().to_vec()),
                 writes: writes.clone(),
                 killed: Arc::new(AtomicBool::new(false)),
@@ -3069,7 +3069,7 @@ mod tests {
         )
         .working_in(&directory.to_string_lossy())
         .restricted_to(restriction(false, None, Some(&BTreeMap::new()), false));
-        while let Ok(Some(_)) = session.next_event(20) {}
+        while let Ok(Some(_)) = run.next_event(20) {}
         let written = String::from_utf8(writes.lock().unwrap().clone()).unwrap();
         written
             .lines()
@@ -3086,8 +3086,8 @@ mod tests {
         let inside = file_change(&work.join("p.md").to_string_lossy(), Value::Null);
         let answered = |reads_only: bool| {
             let writes = Arc::new(Mutex::new(Vec::new()));
-            let session = CodexSession::new(
-                ResumeTerminalSession {
+            let run = CodexRun::new(
+                ResumeTerminalRun {
                     input: Mutex::new(inside.as_bytes().to_vec()),
                     writes: writes.clone(),
                     killed: Arc::new(AtomicBool::new(false)),
@@ -3103,7 +3103,7 @@ mod tests {
                 reads_only,
             ));
             let mut events = Vec::new();
-            while let Ok(Some(event)) = session.next_event(20) {
+            while let Ok(Some(event)) = run.next_event(20) {
                 events.push(event);
             }
             let written = String::from_utf8(writes.lock().unwrap().clone()).unwrap();
@@ -3215,7 +3215,7 @@ mod tests {
             .resume(
                 AgentResume {
                     mission_id: "mission-clearance".parse().unwrap(),
-                    session_id: SessionId::try_new("codex-clearance-thread").unwrap(),
+                    run_id: RunId::try_new("codex-clearance-thread").unwrap(),
                     message: Some("more".to_owned()),
                     working_directory: cwd,
                     clearance: clearance.to_owned(),
@@ -3457,20 +3457,20 @@ mod tests {
     }
 
     /// `codex mcp list --json` prints each server's environment values: only the app server, the
-    /// Session itself, may run where its viewers read it.
+    /// Run itself, may run where its viewers read it.
     #[test]
     fn the_tool_check_runs_out_of_the_viewers_sight_and_the_app_server_in_it() {
         let terminal = ProcessTerminal::new();
         let desk = DESK_PROMPT.replace('\n', "");
-        let session = desk_start_on(
+        let run = desk_start_on(
             terminal.clone(),
             "codex-private-probe-fixture",
             "work",
             &[("CODEX_FIXTURE_PROMPT_INPUT", &desk)],
         )
         .unwrap();
-        read_to_completion(&session);
-        session.close().unwrap();
+        read_to_completion(&run);
+        run.close().unwrap();
         let private = terminal.private.lock().unwrap();
         for command in ["--version", "features", "mcp", "debug"] {
             assert!(private.iter().any(|word| word == command), "{private:?}");
@@ -3492,18 +3492,18 @@ mod tests {
     #[test]
     fn a_desk_thread_starts_only_if_codex_gives_it_no_command_tool() {
         let desk = DESK_PROMPT.replace('\n', "");
-        let session = desk_start(
+        let run = desk_start(
             "codex-desk-offered-fixture",
             "work",
             &[("CODEX_FIXTURE_PROMPT_INPUT", &desk)],
         )
         .unwrap();
-        let events = read_to_completion(&session);
+        let events = read_to_completion(&run);
         assert!(
             !events.iter().any(|event| event.kind == "weakened"),
             "{events:?}"
         );
-        session.close().unwrap();
+        run.close().unwrap();
 
         let nests_commands = SCRIPTS_PROMPT.replace('\n', "");
         let refused = match desk_start(
@@ -3518,7 +3518,7 @@ mod tests {
             refused.contains("exec_command") && refused.contains(TOOL_CHECK_ENV),
             "{refused}"
         );
-        let session = desk_start(
+        let run = desk_start(
             "codex-desk-commands-warned-fixture",
             "work",
             &[
@@ -3527,13 +3527,13 @@ mod tests {
             ],
         )
         .unwrap();
-        let events = read_to_completion(&session);
+        let events = read_to_completion(&run);
         assert!(
             events.iter().any(|event| event.kind == "weakened"
                 && event.text.as_deref().unwrap().contains("exec_command")),
             "{events:?}"
         );
-        session.close().unwrap();
+        run.close().unwrap();
     }
 
     #[test]
@@ -3542,23 +3542,23 @@ mod tests {
             ("codex-desk-item-fixture", "item: commandExecution"),
             ("codex-desk-ask-fixture", "run: rm -rf /"),
         ] {
-            let session = desk_start(executable, prompt, &[]).unwrap();
+            let run = desk_start(executable, prompt, &[]).unwrap();
             let deadline = Instant::now() + Duration::from_secs(30);
             let reason = loop {
                 assert!(Instant::now() < deadline, "{prompt}: never ended");
-                if let Some(event) = session.next_event(100).unwrap()
+                if let Some(event) = run.next_event(100).unwrap()
                     && event.kind == "failed"
                 {
                     break event.text.unwrap();
                 }
             };
             assert!(reason.contains("restricted Codex thread used"), "{reason}");
-            session.close().unwrap();
+            run.close().unwrap();
         }
     }
 
     #[test]
-    fn a_gated_session_asks_before_every_untrusted_command() {
+    fn a_gated_run_asks_before_every_untrusted_command() {
         let cable = std::collections::BTreeMap::from([
             (
                 "AI6_CABLE_MCP_URL".to_owned(),
@@ -3606,9 +3606,9 @@ mod tests {
         );
     }
 
-    struct EofTerminalSession;
+    struct EofTerminalRun;
 
-    impl TerminalSession for EofTerminalSession {
+    impl TerminalRun for EofTerminalRun {
         fn pid(&self) -> i64 {
             1
         }
@@ -3645,16 +3645,16 @@ mod tests {
         fn spawn_private(
             &self,
             value: &ai6::guatiao::Value,
-        ) -> Result<Object<dyn TerminalSession>, ProviderError> {
+        ) -> Result<Object<dyn TerminalRun>, ProviderError> {
             self.spawn(value)
         }
 
         fn spawn(
             &self,
             value: &ai6::guatiao::Value,
-        ) -> Result<Object<dyn TerminalSession>, ProviderError> {
+        ) -> Result<Object<dyn TerminalRun>, ProviderError> {
             *self.spec.lock().unwrap() = Some(Spec::from_value(value).map_err(internal)?);
-            Ok(ResumeTerminalSession {
+            Ok(ResumeTerminalRun {
                 input: Mutex::new(self.input.clone()),
                 writes: self.writes.clone(),
                 killed: self.killed.clone(),
@@ -3663,13 +3663,13 @@ mod tests {
         }
     }
 
-    struct ResumeTerminalSession {
+    struct ResumeTerminalRun {
         input: Mutex<Vec<u8>>,
         writes: Arc<Mutex<Vec<u8>>>,
         killed: Arc<AtomicBool>,
     }
 
-    impl TerminalSession for ResumeTerminalSession {
+    impl TerminalRun for ResumeTerminalRun {
         fn pid(&self) -> i64 {
             8
         }
@@ -3709,7 +3709,7 @@ mod tests {
 
     #[test]
     fn resume_reattaches_and_submits_a_turn_to_the_same_provider_thread() {
-        let session_id = SessionId::try_new("codex-thread-42").unwrap();
+        let run_id = RunId::try_new("codex-thread-42").unwrap();
         let spec = Arc::new(Mutex::new(None));
         let writes = Arc::new(Mutex::new(Vec::new()));
         let killed = Arc::new(AtomicBool::new(false));
@@ -3724,13 +3724,13 @@ mod tests {
             ..CodexConfig::default()
         })
         .unwrap();
-        let session = handler
+        let run = handler
             .resume(
                 AgentResume {
                     clearance: "field".to_owned(),
                     mission_id: "mission-42".parse().unwrap(),
-                    session_id: session_id.clone(),
-                    message: Some("continue the same Session".to_owned()),
+                    run_id: run_id.clone(),
+                    message: Some("continue the same Run".to_owned()),
                     working_directory: "C:\\station\\mission-42".to_owned(),
                     environment: BTreeMap::from([("TOKEN".to_owned(), "fresh".to_owned())]),
                     model: Some("gpt-5".to_owned()),
@@ -3747,7 +3747,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(session.session_id().unwrap(), Some(session_id.to_string()));
+        assert_eq!(run.session_id().unwrap(), Some(run_id.to_string()));
 
         let spec = spec.lock().unwrap().clone().unwrap();
         assert_eq!(
@@ -3781,7 +3781,7 @@ mod tests {
         assert_eq!(messages[3]["params"]["effort"], "high");
         assert_eq!(
             messages[3]["params"]["input"][0]["text"],
-            "continue the same Session"
+            "continue the same Run"
         );
         assert!(!killed.load(Ordering::Acquire));
     }
@@ -3818,12 +3818,12 @@ mod tests {
             ..CodexConfig::default()
         })
         .unwrap();
-        let session = handler
+        let run = handler
             .resume(
                 AgentResume {
                     clearance: "field".to_owned(),
                     mission_id: "mission-42".parse().unwrap(),
-                    session_id: SessionId::try_new("codex-thread-42").unwrap(),
+                    run_id: RunId::try_new("codex-thread-42").unwrap(),
                     message: None,
                     working_directory: "C:\\station\\mission-42".to_owned(),
                     environment: BTreeMap::new(),
@@ -3840,7 +3840,7 @@ mod tests {
                 terminal.into_object(),
             )
             .unwrap();
-        let event = session.next_event(50).unwrap().unwrap();
+        let event = run.next_event(50).unwrap().unwrap();
         assert_eq!(
             (event.kind.as_str(), event.text.as_deref()),
             ("text", Some(&*delta))
@@ -3869,7 +3869,7 @@ mod tests {
             AgentResume {
                 clearance: "field".to_owned(),
                 mission_id: "mission-42".parse().unwrap(),
-                session_id: SessionId::try_new("codex-thread-42").unwrap(),
+                run_id: RunId::try_new("codex-thread-42").unwrap(),
                 message: None,
                 working_directory: "C:\\station\\mission-42".to_owned(),
                 environment: BTreeMap::new(),
@@ -4042,8 +4042,8 @@ mod tests {
 
     #[test]
     fn terminal_eof_is_a_provider_failure_not_an_idle_timeout() {
-        let session = CodexSession::new(EofTerminalSession.into_object(), None);
-        let error = session
+        let run = CodexRun::new(EofTerminalRun.into_object(), None);
+        let error = run
             .read_line(Duration::from_millis(10))
             .unwrap_err()
             .to_string();
@@ -4052,11 +4052,11 @@ mod tests {
     }
 
     /// An app server that exited, behind a terminal that keeps its output open (ConPTY).
-    struct ExitedTerminalSession {
+    struct ExitedTerminalRun {
         output: Mutex<Vec<u8>>,
     }
 
-    impl TerminalSession for ExitedTerminalSession {
+    impl TerminalRun for ExitedTerminalRun {
         fn pid(&self) -> i64 {
             1
         }
@@ -4096,23 +4096,23 @@ mod tests {
     }
 
     #[test]
-    fn an_app_server_that_exits_fails_the_session_with_its_status_and_last_output() {
-        let session = CodexSession::new(
-            ExitedTerminalSession {
+    fn an_app_server_that_exits_fails_the_run_with_its_status_and_last_output() {
+        let run = CodexRun::new(
+            ExitedTerminalRun {
                 output: Mutex::new(b"error: unknown model \"nope\"\r\n".to_vec()),
             }
             .into_object(),
             None,
         );
-        let output = session.next_event(100).unwrap().unwrap();
+        let output = run.next_event(100).unwrap().unwrap();
         assert_eq!(output.kind, "output");
-        let failed = session.next_event(100).unwrap().unwrap();
+        let failed = run.next_event(100).unwrap().unwrap();
         assert_eq!(failed.kind, "failed");
         let reason = failed.text.unwrap();
         assert!(reason.contains("exited with code 2"), "{reason}");
         assert!(reason.contains("unknown model"), "{reason}");
-        assert_eq!(session.next_event(100).unwrap(), None, "reported once");
-        let error = session
+        assert_eq!(run.next_event(100).unwrap(), None, "reported once");
+        let error = run
             .request("thread/start", json!({}), Duration::from_millis(100))
             .unwrap_err()
             .to_string();
@@ -4120,18 +4120,18 @@ mod tests {
     }
 
     #[test]
-    fn the_configured_tail_bounds_what_a_failed_session_quotes() {
+    fn the_configured_tail_bounds_what_a_failed_run_quotes() {
         let config = CodexConfig {
             tail_lines: 2,
             tail_line_bytes: 4,
             ..CodexConfig::default()
         };
-        let session = CodexSession::new(EofTerminalSession.into_object(), None).limited_by(&config);
+        let run = CodexRun::new(EofTerminalRun.into_object(), None).limited_by(&config);
         for line in ["one one", "two two", "three three"] {
-            session.remember_output(line);
+            run.remember_output(line);
         }
 
-        let reason = session.exit_reason();
+        let reason = run.exit_reason();
         assert!(reason.ends_with("its last output:\ntwo \nthre"), "{reason}");
     }
 
@@ -4188,7 +4188,7 @@ mod tests {
             !app_server_argv("codex", &std::collections::BTreeMap::new())
                 .iter()
                 .any(|argument| argument == "features.shell_tool=false"),
-            "a field Session on the Station keeps its commands"
+            "a field Run on the Station keeps its commands"
         );
 
         let mut params = json!({ "cwd": "/scratch" });
@@ -4219,9 +4219,9 @@ mod tests {
     #[test]
     fn an_assistant_thread_has_only_its_mcp_servers_read_only_on_start_and_resume() {
         let terminal = ProcessTerminal::new();
-        let session_id = SessionId::try_new("codex-assistant-thread").unwrap();
+        let run_id = RunId::try_new("codex-assistant-thread").unwrap();
         let environment = BTreeMap::from([
-            ("CODEX_FIXTURE_THREAD_ID".to_owned(), session_id.to_string()),
+            ("CODEX_FIXTURE_THREAD_ID".to_owned(), run_id.to_string()),
             ("CODEX_FIXTURE_SHOW_POLICY".to_owned(), "1".to_owned()),
             (
                 "AI6_MONEYPENNY_MCP_URL".to_owned(),
@@ -4279,7 +4279,7 @@ mod tests {
                 AgentResume {
                     clearance: "desk".to_owned(),
                     mission_id: "assistant-conversation".parse().unwrap(),
-                    session_id,
+                    run_id,
                     message: Some("And now?".to_owned()),
                     working_directory: cwd.clone(),
                     environment,
@@ -4405,7 +4405,7 @@ mod tests {
     const SCRIPTS_PROMPT: &str =
         include_str!("../tests/fixtures/codex-0.164.0/prompt-input-scripts.json");
 
-    /// An assistant Session's environment and start request, with `mode`.
+    /// An assistant Run's environment and start request, with `mode`.
     fn assistant_start(mode: AssistantMode, prompt: &str) -> AgentStart {
         let environment = BTreeMap::from([
             (
@@ -4473,11 +4473,11 @@ mod tests {
         .unwrap();
         let terminal = ProcessTerminal::new();
         let start = assistant_start(mode.clone(), "Chart it.");
-        let session = handler
+        let run = handler
             .start(start.clone(), terminal.clone().into_object())
             .unwrap();
-        let events = read_to_completion(&session);
-        session.close().unwrap();
+        let events = read_to_completion(&run);
+        run.close().unwrap();
         let _ = std::fs::remove_file(&context);
         assert_eq!(events[0].kind, "weakened", "{events:?}");
         let weakening = events[0].text.clone().unwrap();
@@ -4545,7 +4545,7 @@ mod tests {
                 AgentResume {
                     clearance: "desk".to_owned(),
                     mission_id: start.mission_id.clone(),
-                    session_id: SessionId::try_new("codex-scripts-thread").unwrap(),
+                    run_id: RunId::try_new("codex-scripts-thread").unwrap(),
                     message: Some("Again.".to_owned()),
                     working_directory: start.working_directory.clone(),
                     environment: start.environment.clone(),
@@ -4601,7 +4601,7 @@ mod tests {
                     AgentResume {
                         clearance: "desk".to_owned(),
                         mission_id: start.mission_id.clone(),
-                        session_id: SessionId::try_new("codex-scripts-thread").unwrap(),
+                        run_id: RunId::try_new("codex-scripts-thread").unwrap(),
                         message: None,
                         working_directory: start.working_directory.clone(),
                         environment: start.environment.clone(),
@@ -4639,14 +4639,14 @@ mod tests {
             mode.files = vec!["personal".to_owned()];
             mode.unsandboxed = unsandboxed;
             let terminal = ProcessTerminal::new();
-            let session = handler
+            let run = handler
                 .start(
                     assistant_start(mode, "item: commandExecution"),
                     terminal.clone().into_object(),
                 )
                 .unwrap();
-            let events = until_end(&session);
-            session.close().unwrap();
+            let events = until_end(&run);
+            run.close().unwrap();
             assert_eq!(events.last().unwrap().kind, "completed", "{events:?}");
             let reported = events
                 .iter()
@@ -4779,13 +4779,13 @@ mod tests {
             "CODEX_FIXTURE_MCP_LIST".to_owned(),
             MCP_LIST.replace('\n', ""),
         )]);
-        let session = handler
+        let run = handler
             .start(
                 answer_only_start(environment),
                 terminal.clone().into_object(),
             )
             .unwrap();
-        session.close().unwrap();
+        run.close().unwrap();
         let specs = terminal.specs.lock().unwrap();
         let server = specs
             .iter()
@@ -4842,17 +4842,17 @@ mod tests {
                 "refused before anything else ran"
             );
             environment.insert(TOOL_CHECK_ENV.to_owned(), "warn".to_owned());
-            let session = handler
+            let run = handler
                 .start(
                     answer_only_start(environment),
                     ProcessTerminal::new().into_object(),
                 )
                 .unwrap();
-            let first = session.next_event(1_000).unwrap().unwrap();
+            let first = run.next_event(1_000).unwrap().unwrap();
             assert_eq!(first.kind, "weakened");
             let text = first.text.unwrap();
             assert!(text.contains(found), "{text}");
-            session.close().unwrap();
+            run.close().unwrap();
         }
     }
 
@@ -4908,20 +4908,20 @@ mod tests {
             ),
             (TOOL_CHECK_ENV.to_owned(), "warn".to_owned()),
         ]);
-        let session = handler
+        let run = handler
             .start(
                 answer_only_start(environment),
                 ProcessTerminal::new().into_object(),
             )
             .unwrap();
-        let first = session.next_event(1_000).unwrap().unwrap();
+        let first = run.next_event(1_000).unwrap().unwrap();
         assert_eq!(first.kind, "weakened");
         let text = first.text.unwrap();
         assert!(
             text.contains("functions.exec") && text.contains("mcp__cua_repl.js"),
             "{text}"
         );
-        session.close().unwrap();
+        run.close().unwrap();
     }
 
     #[test]
@@ -4932,13 +4932,13 @@ mod tests {
             ..CodexConfig::default()
         })
         .unwrap();
-        let session = handler
+        let run = handler
             .start(
                 answer_only_start(BTreeMap::new()),
                 terminal.clone().into_object(),
             )
             .unwrap();
-        session.close().unwrap();
+        run.close().unwrap();
         let specs = terminal.specs.lock().unwrap();
         let server = specs
             .iter()
@@ -4968,13 +4968,13 @@ mod tests {
         .unwrap();
         for home in ["C:\\agents\\one", "C:\\agents\\one", "C:\\agents\\two"] {
             let environment = BTreeMap::from([("CODEX_HOME".to_owned(), home.to_owned())]);
-            let session = handler
+            let run = handler
                 .start(
                     answer_only_start(environment),
                     terminal.clone().into_object(),
                 )
                 .unwrap();
-            session.close().unwrap();
+            run.close().unwrap();
         }
         let specs = terminal.specs.lock().unwrap();
         let count = |command: &str| {
@@ -5021,24 +5021,24 @@ mod tests {
         };
         assert!(refused.contains("plugin cache is stale"), "{refused}");
         environment.insert(TOOL_CHECK_ENV.to_owned(), "warn".to_owned());
-        let session = handler
+        let run = handler
             .start(
                 answer_only_start(environment),
                 ProcessTerminal::new().into_object(),
             )
             .unwrap();
-        let first = session.next_event(1_000).unwrap().unwrap();
+        let first = run.next_event(1_000).unwrap().unwrap();
         assert_eq!(first.kind, "weakened");
         assert!(first.text.unwrap().contains("not a feature"));
-        session.close().unwrap();
+        run.close().unwrap();
     }
 
-    /// Events until the Session ends (`completed` or `failed`), at most a minute.
-    fn until_end(session: &Object<dyn AgentSession>) -> Vec<AgentEvent> {
+    /// Events until the Run ends (`completed` or `failed`), at most a minute.
+    fn until_end(run: &Object<dyn AgentSession>) -> Vec<AgentEvent> {
         let deadline = Instant::now() + Duration::from_secs(60);
         let mut events = Vec::new();
         while Instant::now() < deadline {
-            match session.next_event(200) {
+            match run.next_event(200) {
                 Ok(Some(event)) => {
                     let end = matches!(event.kind.as_str(), "completed" | "failed");
                     events.push(event);
@@ -5068,11 +5068,11 @@ mod tests {
         ] {
             let mut start = answer_only_start(BTreeMap::new());
             start.prompt = format!("item: {item}");
-            let session = handler
+            let run = handler
                 .start(start, ProcessTerminal::new().into_object())
                 .unwrap();
-            let events = until_end(&session);
-            let last = events.last().expect("the Session ended");
+            let events = until_end(&run);
+            let last = events.last().expect("the Run ended");
             assert_eq!(last.kind, "failed", "{item}: {events:?}");
             let reason = last.text.as_deref().unwrap_or_default();
             assert!(reason.contains("restricted Codex thread used"), "{reason}");
@@ -5333,7 +5333,7 @@ mod tests {
             ),
             (
                 "AI6_CABLE_MCP_TOKEN".to_owned(),
-                "session-secret-token".to_owned(),
+                "run-secret-token".to_owned(),
             ),
         ]);
 
@@ -5349,7 +5349,7 @@ mod tests {
         }));
         assert!(
             argv.iter()
-                .all(|argument| !argument.contains("session-secret-token"))
+                .all(|argument| !argument.contains("run-secret-token"))
         );
     }
 
@@ -5439,8 +5439,8 @@ mod tests {
             path: "/store/tools/skills/review".to_owned(),
             native: true,
         });
-        let session = handler.start(start, terminal.into_object()).unwrap();
-        let events = read_to_completion(&session);
+        let run = handler.start(start, terminal.into_object()).unwrap();
+        let events = read_to_completion(&run);
         let instructions = reported_policy(&events)["developerInstructions"]
             .as_str()
             .unwrap()
@@ -5457,6 +5457,6 @@ mod tests {
             instructions.contains("/store/tools/skills/review/SKILL.md"),
             "{instructions}"
         );
-        session.close().unwrap();
+        run.close().unwrap();
     }
 }

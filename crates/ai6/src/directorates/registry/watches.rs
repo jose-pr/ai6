@@ -1,13 +1,13 @@
-//! Watch records: each watch's standing Session, the Station that runs it, and what it has done.
+//! Watch records: each watch's standing Run, the Station that runs it, and what it has done.
 //!
-//! A watch is not a Mission, so its Session is recorded here and never among the Session records:
+//! A watch is not a Mission, so its Run is recorded here and never among the Run records:
 //! this record names the watch's scope (`m`, `operation:<codename>`, `station:<id>`) where a
-//! Mission's Session record names the Mission. It keeps the provider Session the watch resumes,
-//! its logbook (what a fresh Session is handed when the old one cannot be resumed), when it last
+//! Mission's Run record names the Mission. It keeps the provider Run the watch resumes,
+//! its logbook (what a fresh Run is handed when the old one cannot be resumed), when it last
 //! woke and when each turn of the last hour began, what it has been told of, and the controls
 //! people asked for.
 //!
-//! The Station running a watch holds its lease as a Station holds a Session's: it claims the
+//! The Station running a watch holds its lease as a Station holds a Run's: it claims the
 //! record, renews it, and presents its fencing token with every write. A lease that lapses lets
 //! another Station take the watch over with a higher token, so the one that went dark cannot
 //! write after it. Leases lapse on the Registry's clock (the database's for SQL).
@@ -44,7 +44,7 @@ pub struct WatchLimits {
     #[schema(title = "Largest watch record", format = "bytes")]
     #[map(default = WatchLimits::default().record_bytes)]
     pub record_bytes: Limit,
-    /// Logbook entries kept per watch, and handed to a fresh Session; past it the oldest go.
+    /// Logbook entries kept per watch, and handed to a fresh Run; past it the oldest go.
     #[schema(title = "Logbook entries per watch")]
     #[map(default = WatchLimits::default().logbook)]
     pub logbook: Limit,
@@ -125,7 +125,7 @@ pub struct WatchRecord {
     pub scope: String,
     /// The Agent that keeps it, as its table named it when its Station last claimed it.
     pub agent: String,
-    /// The Station that holds its lease and runs its Session.
+    /// The Station that holds its lease and runs its Run.
     pub station: String,
     /// The fencing token of the current lease; it only grows.
     pub fence: u64,
@@ -133,9 +133,9 @@ pub struct WatchRecord {
     pub lease_expires: f64,
     /// When the record was made, as Unix seconds.
     pub opened_at: f64,
-    /// The provider-issued Session the watch resumes, once a harness has issued one.
+    /// The provider-issued Run the watch resumes, once a harness has issued one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider_session_id: Option<String>,
+    pub provider_id: Option<String>,
     /// The handler that issued it: another handler cannot resume it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handler: Option<String>,
@@ -167,8 +167,8 @@ impl WatchRecord {
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WatchUpdate {
-    /// The provider Session and the handler that issued it; `Some(None)` forgets both.
-    pub session: Option<Option<(String, String)>>,
+    /// The provider Run and the handler that issued it; `Some(None)` forgets both.
+    pub run: Option<Option<(String, String)>>,
     /// When it woke.
     pub last_wake: Option<f64>,
     /// When a turn began: counted towards its hour.
@@ -182,17 +182,17 @@ pub struct WatchUpdate {
 }
 
 impl WatchUpdate {
-    /// Records the provider Session `session`, issued by `handler`.
+    /// Records the provider Run `run`, issued by `handler`.
     #[must_use]
-    pub fn session(mut self, handler: impl Into<String>, session: impl Into<String>) -> Self {
-        self.session = Some(Some((handler.into(), session.into())));
+    pub fn run(mut self, handler: impl Into<String>, run: impl Into<String>) -> Self {
+        self.run = Some(Some((handler.into(), run.into())));
         self
     }
 
-    /// Forgets the provider Session.
+    /// Forgets the provider Run.
     #[must_use]
-    pub fn forget_session(mut self) -> Self {
-        self.session = Some(None);
+    pub fn forget_run(mut self) -> Self {
+        self.run = Some(None);
         self
     }
 
@@ -273,7 +273,7 @@ pub trait WatchStore {
     /// Takes the lease on the watch of `scope` for `station` until `ttl` from now, making its
     /// record when there is none, or renews it when `station` holds it already. A lapsed lease of
     /// another Station is taken over with a higher fencing token, which the logbook records. A
-    /// record whose Agent is not `agent` takes `agent` and forgets its provider Session, which
+    /// record whose Agent is not `agent` takes `agent` and forgets its provider Run, which
     /// was another Agent's.
     ///
     /// # Errors
@@ -401,7 +401,7 @@ pub(super) fn claim(
             fence: 1,
             lease_expires,
             opened_at: now,
-            provider_session_id: None,
+            provider_id: None,
             handler: None,
             last_wake: None,
             turns: Vec::new(),
@@ -430,13 +430,13 @@ pub(super) fn claim(
         log.push(WatchLogEntry::new(
             "agent",
             format!(
-                "Agent {agent} keeps the watch in place of {}; its Session starts fresh",
+                "Agent {agent} keeps the watch in place of {}; its Run starts fresh",
                 record.agent
             ),
             now,
         ));
         record.agent = agent.to_owned();
-        record.provider_session_id = None;
+        record.provider_id = None;
         record.handler = None;
     }
     record.lease_expires = lease_expires;
@@ -456,18 +456,18 @@ pub(super) fn apply(
     if record.station != station || record.fence != fence {
         return Err(WatchError::Stale);
     }
-    if let Some(session) = update.session {
-        match session {
-            Some((handler, session)) => {
-                if session.is_empty() || session.len() > 512 || session.contains(char::is_control) {
-                    return Err(invalid_input("a watch's provider Session ID is invalid").into());
+    if let Some(run) = update.run {
+        match run {
+            Some((handler, run)) => {
+                if run.is_empty() || run.len() > 512 || run.contains(char::is_control) {
+                    return Err(invalid_input("a watch's provider ID is invalid").into());
                 }
                 record.handler = Some(handler);
-                record.provider_session_id = Some(session);
+                record.provider_id = Some(run);
             }
             None => {
                 record.handler = None;
-                record.provider_session_id = None;
+                record.provider_id = None;
             }
         }
     }
@@ -689,12 +689,12 @@ mod tests {
                 "station-a",
                 1,
                 Some(Duration::ZERO),
-                WatchUpdate::default().session("mock", "provider-1"),
+                WatchUpdate::default().run("mock", "provider-1"),
             )
             .unwrap();
         let taken = wait_for_takeover(registry.as_ref(), "operation:G", "station-b");
         assert_eq!(taken.fence, 2);
-        assert_eq!(taken.provider_session_id.as_deref(), Some("provider-1"));
+        assert_eq!(taken.provider_id.as_deref(), Some("provider-1"));
         assert_eq!(taken.logbook.last().unwrap().kind, "station");
         assert!(matches!(
             registry.update_watch("operation:G", "station-a", 1, None, WatchUpdate::default()),
@@ -704,8 +704,8 @@ mod tests {
             .claim_watch("operation:G", "M", "station-b", LONG)
             .unwrap();
         assert_eq!(
-            other_agent.provider_session_id, None,
-            "another Agent's Session"
+            other_agent.provider_id, None,
+            "another Agent's Run"
         );
         assert!(registry.claim_watch("theater:x", "00", "a", LONG).is_err());
         assert_eq!(

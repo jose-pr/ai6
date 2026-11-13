@@ -78,7 +78,7 @@ Future<MissionBoard> queuedBoard((int, String) preview) async {
             {
               'operation_id': 'operation-alpha',
               'mission_id': 'mission-007',
-              'session_id': 'session-1',
+              'run_id': 'run-1',
               'state': 'queued',
               'sequence': 1,
               'updated_at': 100.0,
@@ -195,20 +195,20 @@ void main() {
     'equal update times keep the rows in Operation and Mission order',
     (tester) async {
       final board = demoBoard();
-      SessionSummary session(String operation, String mission, double? at) =>
-          SessionSummary(
+      RunSummary run(String operation, String mission, double? at) =>
+          RunSummary(
             operationId: operation,
             missionId: mission,
-            sessionId: 's-$operation-$mission',
+            runId: 's-$operation-$mission',
             state: 'working',
             sequence: 1,
             updatedAt: at,
           );
-      final sessions = [
-        session('G', 'm-b', 50),
-        session('G', 'm-a', 50),
-        session('L', 'm-c', 50),
-        session('G', 'm-new', 90),
+      final runs = [
+        run('G', 'm-b', 50),
+        run('G', 'm-a', 50),
+        run('L', 'm-c', 50),
+        run('G', 'm-new', 90),
       ];
       List<String> order() => [
         for (final mission in routeMissions(
@@ -217,16 +217,16 @@ void main() {
         ))
           mission.missionId,
       ];
-      board.sessions = sessions;
+      board.runs = runs;
       final first = order();
       expect(first, ['m-new', 'm-a', 'm-b', 'm-c'], reason: 'newest first');
-      board.sessions = sessions.reversed.toList();
+      board.runs = runs.reversed.toList();
       expect(
         order(),
         first,
         reason: 'the board delivered them in another order',
       );
-      board.sessions = sessions;
+      board.runs = runs;
       expect(
         [
           for (final mission in routeMissions(
@@ -244,7 +244,7 @@ void main() {
           tester.getTopLeft(find.text('Mission $mission')).dy;
       expect(top('m-new'), lessThan(top('m-a')));
       expect(top('m-a'), lessThan(top('m-b')));
-      board.sessions = sessions.reversed.toList();
+      board.runs = runs.reversed.toList();
       // A refresh with the same data in another order leaves the rows where they are.
       board.refresh();
       await tester.pumpAndSettle();
@@ -255,30 +255,30 @@ void main() {
   );
 
   testWidgets(
-    "the Missions tile's link shows the Missions it counted, by their latest Session",
+    "the Missions tile's link shows the Missions it counted, by their latest Run",
     (tester) async {
       final board = demoBoard();
-      SessionSummary session(
+      RunSummary run(
         String mission,
         String id,
         String state,
         int sequence,
         double updatedAt,
-      ) => SessionSummary(
+      ) => RunSummary(
         operationId: 'G',
         missionId: mission,
-        sessionId: id,
+        runId: id,
         state: state,
         sequence: sequence,
         updatedAt: updatedAt,
       );
-      board.sessions = [
-        session('m-finished', 's-older', 'blocked', 4, 100),
-        session('m-finished', 's-latest', 'done', 7, 200),
-        session('m-open', 's-open', 'working', 2, 300),
+      board.runs = [
+        run('m-finished', 's-older', 'blocked', 4, 100),
+        run('m-finished', 's-latest', 'done', 7, 200),
+        run('m-open', 's-open', 'working', 2, 300),
         // A long failed first attempt: its event count says nothing about the retry after it.
-        session('m-retry', 's-first', 'failed', 40, 400),
-        session('m-retry', 's-retry', 'working', 2, 500),
+        run('m-retry', 's-first', 'failed', 40, 400),
+        run('m-retry', 's-retry', 'working', 2, 500),
       ];
       await openAt(tester, board, '/overview', size: const Size(1400, 1600));
       final overview = find.byType(OverviewPage);
@@ -295,47 +295,47 @@ void main() {
       expect(
         find.text('All  3'),
         findsOneWidget,
-        reason: 'the chips count Missions, not Sessions',
+        reason: 'the chips count Missions, not Runs',
       );
       expect(find.text('blocked  0'), findsOneWidget);
       expect(find.text('done  1'), findsOneWidget);
       await tester.tap(find.text('done  1'));
       await tester.pumpAndSettle();
       expect(find.text('Mission m-finished'), findsOneWidget);
-      expect(find.text('s-older'), findsOneWidget, reason: 'all its Sessions');
+      expect(find.text('s-older'), findsOneWidget, reason: 'all its Runs');
       expect(find.text('s-latest'), findsOneWidget);
     },
   );
 
-  test('a Station watch names the Session updated last, not the longest', () {
+  test('a Station watch names the Run updated last, not the longest', () {
     final board = demoBoard();
-    SessionSummary session(String id, int sequence, double updatedAt) =>
-        SessionSummary(
+    RunSummary run(String id, int sequence, double updatedAt) =>
+        RunSummary(
           operationId: 'G',
           missionId: 'm',
-          sessionId: id,
+          runId: id,
           state: 'working',
           sequence: sequence,
           updatedAt: updatedAt,
           stationId: 'hq',
         );
-    board.sessions = [session('s-first', 40, 100), session('s-retry', 2, 200)];
+    board.runs = [run('s-first', 40, 100), run('s-retry', 2, 200)];
     board.missionAttempts = {
       ('G', 'm'): const [
         MissionAttemptSummary(attempt: 2, station: 'hq', status: 'active'),
       ],
     };
-    expect(sessionsHere(board, 'hq').single.$2?.sessionId, 's-retry');
+    expect(runsHere(board, 'hq').single.$2?.runId, 's-retry');
   });
 
-  group('a Session row', () {
+  group('a Run row', () {
     const short = 's-1234';
     final long = 'a' * 40;
 
-    SessionSummary row(String id) => SessionSummary(
+    RunSummary row(String id) => RunSummary(
       operationId: 'G',
       missionId: 'm-$id',
-      sessionId: id,
+      runId: id,
       state: 'blocked',
       reason: 'green-ink',
       sequence: 3,
@@ -367,7 +367,7 @@ void main() {
       tester,
     ) async {
       final board = demoBoard();
-      board.sessions = [row(short), row(long)];
+      board.runs = [row(short), row(long)];
       await openAt(tester, board, '/missions', size: const Size(390, 2400));
       expect(lines(tester, short), 1);
       expect(
@@ -386,7 +386,7 @@ void main() {
 
     testWidgets('with room the chips stay beside its ID', (tester) async {
       final board = demoBoard();
-      board.sessions = [row(short)];
+      board.runs = [row(short)];
       await openAt(tester, board, '/missions', size: const Size(1400, 1600));
       expect(lines(tester, short), 1);
       final id = tester.getRect(find.text(short));
@@ -416,15 +416,15 @@ void main() {
         findsNWidgets(2),
       );
       expect(
-        find.text('State from · attempt 2 · Session preview-session-007'),
+        find.text('State from · attempt 2 · Run preview-run-007'),
         findsOneWidget,
       );
       expect(find.text('Mission brief'), findsOneWidget);
       expect(button('Timeline'), findsOneWidget);
-      expect(find.text('Open Session preview-session-007'), findsOneWidget);
-      expect(find.text('Open Session preview-session-008'), findsOneWidget);
+      expect(find.text('Open Run preview-run-007'), findsOneWidget);
+      expect(find.text('Open Run preview-run-008'), findsOneWidget);
       expect(
-        find.text('No Session of this Mission is recorded on this Station.'),
+        find.text('No Run of this Mission is recorded on this Station.'),
         findsOneWidget,
         reason: 'the lost attempt ran elsewhere',
       );
@@ -444,14 +444,14 @@ void main() {
         '/stations?station_id=station-control-01',
       );
       // The Station Watch lists the Mission whose attempt runs there.
-      expect(find.text('SESSIONS HERE'), findsOneWidget);
+      expect(find.text('RUNS HERE'), findsOneWidget);
       expect(
-        find.text('G › mission-007 · preview-session-007'),
+        find.text('G › mission-007 · preview-run-007'),
         findsOneWidget,
       );
       expect(find.text('Online'), findsOneWidget);
 
-      await tester.tap(find.text('G › mission-007 · preview-session-007'));
+      await tester.tap(find.text('G › mission-007 · preview-run-007'));
       await tester.pumpAndSettle();
       expect(
         locations(reported).last.$1,
@@ -489,8 +489,8 @@ void main() {
       button('Back to the queue'),
       button('Station station-remote-02'),
       button('Station station-control-01'),
-      button('Open Session preview-session-007'),
-      button('Open Session preview-session-008'),
+      button('Open Run preview-run-007'),
+      button('Open Run preview-run-008'),
       button('Mission brief'),
       button('Timeline'),
     ];
@@ -563,7 +563,7 @@ void main() {
     expect(find.textContaining('8 CPUs'), findsOneWidget);
     expect(find.textContaining('sampled'), findsOneWidget);
     expect(find.text('HQS'), findsOneWidget);
-    expect(find.text('Running 2 of 4 Sessions'), findsOneWidget);
+    expect(find.text('Running 2 of 4 Runs'), findsOneWidget);
     expect(find.text('Roles: control, execution'), findsOneWidget);
   });
 

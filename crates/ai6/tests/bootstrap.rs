@@ -173,12 +173,12 @@ fn registry_limits_in_the_file_bound_the_registry_it_opens() {
             "ai6.cfg",
             &format!(
                 "[registry]\nlocation = {location:?}\nsqlite_busy_timeout = 5\n\
-                 [registry.limits.sessions]\nrecords = 2\n"
+                 [registry.limits.runs]\nrecords = 2\n"
             ),
         );
         let located = Bootstrap::find(Some(&path)).unwrap();
         let registry = located.value.registry.clone();
-        assert_eq!(registry.limits.sessions.records, ai6::Limit::at(2));
+        assert_eq!(registry.limits.runs.records, ai6::Limit::at(2));
         assert_eq!(registry.sqlite_busy_timeout().as_secs(), 5);
         let options = ai6::SqlOptions::for_lease(registry.headquarters_lease())
             .with_busy_timeout(registry.sqlite_busy_timeout())
@@ -191,14 +191,14 @@ fn registry_limits_in_the_file_bound_the_registry_it_opens() {
         let ttl = std::time::Duration::from_secs(60);
         for (id, mission) in [("s-1", "mission-1"), ("s-2", "mission-2")] {
             opened
-                .open_session(ai6::NewSession::new(id, mission, "station-a"), ttl)
+                .open_run(ai6::NewRun::new(id, mission, "station-a"), ttl)
                 .unwrap();
         }
         let refused = opened
-            .open_session(ai6::NewSession::new("s-3", "mission-3", "station-a"), ttl)
+            .open_run(ai6::NewRun::new("s-3", "mission-3", "station-a"), ttl)
             .unwrap_err();
         assert!(
-            refused.to_string().contains("too many Session records"),
+            refused.to_string().contains("too many Run records"),
             "{location}: {refused}"
         );
         assert!(located.weakenings().is_empty(), "tighter than the defaults");
@@ -212,17 +212,17 @@ fn an_unbounded_or_larger_limit_is_reported_as_a_weakening() {
         dir.path(),
         "ai6.cfg",
         "[provider]\nloadout_bytes = 2097152\n[registry]\nsqlite_busy_timeout = 60\n\
-         [registry.limits.sessions]\nrecords = \"none\"\n",
+         [registry.limits.runs]\nrecords = \"none\"\n",
     );
     let located = Bootstrap::find(Some(&path)).unwrap();
     assert_eq!(
-        located.value.registry.limits.sessions.records,
+        located.value.registry.limits.runs.records,
         ai6::Limit::UNBOUNDED
     );
     assert_eq!(
         located.weakenings(),
         [
-            "registry.limits.sessions.records none is looser than the default 100000",
+            "registry.limits.runs.records none is looser than the default 100000",
             "registry.sqlite_busy_timeout 60 is looser than the default 30",
             "provider.loadout_bytes 2097152 is looser than the default 1048576",
         ]
@@ -237,8 +237,8 @@ fn an_unbounded_or_larger_limit_is_reported_as_a_weakening() {
         json.registry.limits.cables.max_ttl,
         ai6::TimeLimit::UNBOUNDED
     );
-    assert!(read("[registry.limits.sessions]\nrecords = -1\n").is_err());
-    assert!(read("[registry.limits.sessions]\nrecordz = 1\n").is_err());
+    assert!(read("[registry.limits.runs]\nrecords = -1\n").is_err());
+    assert!(read("[registry.limits.runs]\nrecordz = 1\n").is_err());
 }
 
 #[test]

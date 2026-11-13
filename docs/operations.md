@@ -48,12 +48,12 @@ recorded in the Mission report.
 | `settings.branch` | `{id}-{slug}` | Branch name template; `{id}`, `{slug}` and `{operation}` are filled in |
 | `settings.isolate` | `true` | `false` works in `source` itself instead of a separate copy |
 | `settings.checkpoint_remote` | none | A Git remote (name or URL) each running Mission's safe house is checkpointed to, on its own branch, so a later attempt on another Station starts from its work. Unset pushes nothing |
-| `settings.checkpoint_secs` | `300` | Seconds between checkpoints while a Session runs. Must be above zero |
+| `settings.checkpoint_secs` | `300` | Seconds between checkpoints while a Run runs. Must be above zero |
 
 Two providers ship: `git` (a worktree on its own branch; commits are audited) and `copy`
 (a plain copy of the directory, always kept, no history).
 
-Providers are loaded by the Station that runs the Session (`ai6 serve --plugin-path`). A
+Providers are loaded by the Station that runs the Run (`ai6 serve --plugin-path`). A
 provider that keeps no history makes the Mission's cover report say it was **not
 checkable** instead of passing.
 
@@ -85,16 +85,16 @@ pools = ["claude-team"]    # the account pools its Missions may draw from; defau
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `on_limit` | `rotate` | `rotate` moves the Session to another account of its [pools](agents.md#account-pools) that has headroom: a Claude Session on an environment credential resumes the same provider Session there; a Codex or `config-dir` Session, whose history stays with its account, is tried again as a new attempt with a hand-off. Without a pooled account to move to it waits. `wait` parks the Mission and resumes the same provider Session when the quota resets. `backup` posts the next qualified Agent whose handler is different, as a new attempt in the same safe house, and parks only when there is none |
+| `on_limit` | `rotate` | `rotate` moves the Run to another account of its [pools](agents.md#account-pools) that has headroom: a Claude Run on an environment credential resumes the same provider Run there; a Codex or `config-dir` Run, whose history stays with its account, is tried again as a new attempt with a hand-off. Without a pooled account to move to it waits. `wait` parks the Mission and resumes the same provider Run when the quota resets. `backup` posts the next qualified Agent whose handler is different, as a new attempt in the same safe house, and parks only when there is none |
 | `pools` | every pool | The account pools whose own `operations` admit this Operation that its Missions may use; an empty list uses none |
 | `limit_fallback_secs` | `1800` | Seconds to park when the provider reports no reset time (or one already past). Must be above zero |
 
 Both are overridable per Operation and an unknown `on_limit` value fails the load. See
 [Recovery](missions.md#recovery).
 
-## Lost Sessions
+## Lost Runs
 
-A Session is lost when its Station goes dark and no other Station can re-attach to it (its
+A Run is lost when its Station goes dark and no other Station can re-attach to it (its
 harness ran on that Station's own host), or when its Station lives but the Theater's runner,
 or a wrapped harness, stays out of reach:
 
@@ -107,7 +107,7 @@ lost_after_secs = 45
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `on_lost` | `retry` | `retry` queues the brief again as a new attempt on an eligible Station, starting from the last checkpoint (see `workspace.checkpoint_remote`) with a hand-off about the lost attempt, up to three attempts in all. `fail` files the brief as lost |
-| `lost_after_secs` | `45` | Seconds a Session's runner or wrapped harness may stay out of reach (three Station check-ins) before its Station probes it once more through the Theater's transport and, if it is still gone, marks the Session lost. Must be above zero |
+| `lost_after_secs` | `45` | Seconds a Run's runner or wrapped harness may stay out of reach (three Station check-ins) before its Station probes it once more through the Theater's transport and, if it is still gone, marks the Run lost. Must be above zero |
 
 An unknown value fails the load. See [Station loss](missions.md#station-loss-adoption) and
 [Runner loss](missions.md#runner-loss-the-station-lives).
@@ -248,7 +248,7 @@ posts_per_hour = 6
 | `on_timeout` | `resume` | **When nobody answers.** `resume` tells the Agent nobody answered; `fail` fails the Mission; `wait` keeps waiting. |
 | `on_secret` | `refuse` | **When a post holds a secret.** `refuse` refuses a post holding a secret; `redact` replaces it and posts the rest. |
 | `links` | `tracker` | **Links in Agent text.** `tracker`: links and images in Agent text only to the tracker's host and the Operation's git remote host; `any`: every host. |
-| `create` | `propose` | **Creating issues.** `propose`: a person approves each creation, or a class authorisation `issue-create` one from an unexposed Session with no findings; `direct`: the Agent creates at once; `off`: Agents cannot ask. |
+| `create` | `propose` | **Creating issues.** `propose`: a person approves each creation, or a class authorisation `issue-create` one from an unexposed Run with no findings; `direct`: the Agent creates at once; `off`: Agents cannot ask. |
 | `max_created` | 10 | **Issues per Mission.** Issues one Mission may create, those waiting for a person included. |
 | `max_created_per_day` | 50 | **Issues a day, per Operation.** Issues an Operation's Agents may create per day. |
 | `max_split_depth` | 2 | **Depth of a split.** How deep a split may go (a child of a child is depth 2). |
@@ -332,7 +332,7 @@ Station cannot read the files there.
 
 What `pinned` does not cover: a command that names no path inside the working directory
 (a program found on `PATH`, a script fetched at run time), anything a pinned script itself
-reads, and changes made after the check, including by the Agent during the Session (Claude
+reads, and changes made after the check, including by the Agent during the Run (Claude
 Code reloads a changed settings file). A SHA-1 `pin` is accepted and reported as a
 weakening. AI6's own settings, the green ink hook (`--settings`) and the Station's MCP
 servers (`--mcp-config`), apply in every mode.
@@ -356,7 +356,7 @@ html_comments = true
 rate_hold_hours = 24          # 0 keeps rate holds until an operator decides
 review = "untrusted"          # or "all", "off"
 max_proposal_reviews_per_hour = 20             # 0 is no limit
-max_proposal_reviews_per_session_per_hour = 5  # 0 is no limit
+max_proposal_reviews_per_run_per_hour = 5  # 0 is no limit
 ```
 
 | Key | Default | Meaning |
@@ -372,7 +372,7 @@ max_proposal_reviews_per_session_per_hour = 5  # 0 is no limit
 | `rate_hold_hours` | `24` | How long a brief held only for a rate limit stays held before it returns to the queue to be vetted again |
 | `review` | `untrusted` | Which briefs a qualified `chief-of-staff` Agent reviews before they are placed |
 | `max_proposal_reviews_per_hour` | `20` | Mission proposal reviews queued per rolling hour; the next proposal is held |
-| `max_proposal_reviews_per_session_per_hour` | `5` | The same, for the proposals of one Agent Session |
+| `max_proposal_reviews_per_run_per_hour` | `5` | The same, for the proposals of one Agent Run |
 
 Untrusted briefs are a Source's items, Agents' Mission proposals, and any brief without a
 valid provenance (one dropped into the Registry queue by hand, or changed after it was
@@ -391,7 +391,7 @@ schedule = "0 3 * * *"
 title = "Update dependencies"
 prompt = "Update the lockfile and run the tests."
 standing = true   # optional: one Mission, each window an attempt of it
-resume = true     # optional, needs standing: resume the last attempt's Session
+resume = true     # optional, needs standing: resume the last attempt's Run
 ```
 
 A failed attempt leaves a standing order standing; a stalled one is superseded by the next window;
@@ -489,7 +489,7 @@ bootstrap file's own directory when the provider is a database).
 
 A Station asks its configuration provider for its revision every 5 seconds (`ai6.cfg`'s
 `[provider] poll`, `0` to stop) and applies a new one without a restart: new requests, the scheduler and new
-Sessions use it, while a Session already running keeps the roster it started with. Every
+Runs use it, while a Run already running keeps the roster it started with. Every
 Station sharing a SQL roster therefore takes up an edit within one poll. A new revision is
 checked as the files are checked, every Agent resolved; one that fails is refused once:
 the Station logs why, records a `config.refused` audit event under its own `station:<id>`,
@@ -520,6 +520,6 @@ The source checks the whole roster before it keeps an edit; an accepted edit is 
 `roster.refused`. A configuration directory is listed read-only: its files are edited by
 hand, and every Station using it takes up the change at its next poll.
 
-Missions and provider Sessions are visible in Outer Office and through `ai6ctl`. The Mission ID identifies
-the work; the provider-issued Session ID identifies one resumable agent run. See
+Missions and provider Runs are visible in Outer Office and through `ai6ctl`. The Mission ID identifies
+the work; the provider ID identifies one resumable agent run. See
 [Missions and intake](missions.md) and [Agents and clearance](agents.md).

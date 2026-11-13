@@ -1,7 +1,7 @@
-//! Exposure: which Sessions have read input an attacker could have written.
+//! Exposure: which Runs have read input an attacker could have written.
 //!
-//! A Session is marked the moment it reads such input and stays marked; a later attempt at
-//! the same Mission inherits the mark. Marking is always on. What a marked Session may then
+//! A Run is marked the moment it reads such input and stays marked; a later attempt at
+//! the same Mission inherits the mark. Marking is always on. What a marked Run may then
 //! do is the Operation's [`ExposurePolicy`]: the `strict` preset (the default) restricts it,
 //! `observe` only records it, and every restriction can be chosen individually.
 
@@ -12,14 +12,14 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 
 use crate::bounds::Limit;
-use crate::directorates::registry::limits::SessionLimits;
+use crate::directorates::registry::limits::RunLimits;
 
-/// The source of a Session whose Mission came from a Source item.
+/// The source of a Run whose Mission came from a Source item.
 pub const BRIEF_SOURCE: &str = "brief:source";
-/// The source of a Session whose Mission came from a brief dropped into the Registry's queue
+/// The source of a Run whose Mission came from a brief dropped into the Registry's queue
 /// with no provenance.
 pub const BRIEF_REGISTRY_DROP: &str = "brief:registry_drop";
-/// The source of a Session that read review text written by someone else.
+/// The source of a Run that read review text written by someone else.
 pub const REVIEW: &str = "review";
 /// The source of a Head of Station round that read its Station's report, which quotes what
 /// other Missions' Agents wrote (commit subjects, branch names).
@@ -29,7 +29,7 @@ pub const STATION_REPORT: &str = "station:report";
 pub const STATION_LOGBOOK: &str = "station:logbook";
 /// The source of a Mission proposed into this Operation from another through a compartment.
 pub const BRIEF_COMPARTMENT: &str = "brief:compartment";
-/// What starts the source of a Session that read another Operation's brief or product.
+/// What starts the source of a Run that read another Operation's brief or product.
 pub const PRODUCT_PREFIX: &str = "product:";
 /// The Brief `data` key under which a proposal carries its parent's exposure sources.
 pub const BRIEF_EXPOSURE_KEY: &str = "exposure";
@@ -37,30 +37,30 @@ pub const BRIEF_EXPOSURE_KEY: &str = "exposure";
 /// Tools whose results are untrusted unless the Operation lists others.
 pub const DEFAULT_EXPOSING_TOOLS: [&str; 2] = ["WebFetch", "WebSearch"];
 
-/// The source for a Session that read a Cable from `sender`, cut to `limit` bytes
-/// (`[registry.limits.sessions] exposure_source_bytes`).
+/// The source for a Run that read a Cable from `sender`, cut to `limit` bytes
+/// (`[registry.limits.runs] exposure_source_bytes`).
 pub fn cable_source(sender: &str, limit: Limit) -> String {
     bounded(format!("cable:{sender}"), limit)
 }
 
-/// The source for a Session that read a reply on an issue of `tracker` (an instance name),
+/// The source for a Run that read a reply on an issue of `tracker` (an instance name),
 /// cut to `limit` bytes.
 pub fn issue_source(tracker: &str, limit: Limit) -> String {
     bounded(format!("issue:{tracker}"), limit)
 }
 
-/// The source for a Session that read a memory entry an exposed Session wrote, cut to `limit`
+/// The source for a Run that read a memory entry an exposed Run wrote, cut to `limit`
 /// bytes.
 pub fn memory_source(id: &str, limit: Limit) -> String {
     bounded(format!("memory:{id}"), limit)
 }
 
-/// The source for a Session that read a brief or a product of `operation`, cut to `limit` bytes.
+/// The source for a Run that read a brief or a product of `operation`, cut to `limit` bytes.
 pub fn product_source(operation: &str, limit: Limit) -> String {
     bounded(format!("{PRODUCT_PREFIX}{operation}"), limit)
 }
 
-/// The source for a Session whose tool call named `tool`, cut to `limit` bytes.
+/// The source for a Run whose tool call named `tool`, cut to `limit` bytes.
 pub fn tool_source(tool: &str, limit: Limit) -> String {
     bounded(format!("tool:{tool}"), limit)
 }
@@ -76,7 +76,7 @@ fn bounded(mut source: String, limit: Limit) -> String {
     source
 }
 
-/// One way a Session was exposed, and when.
+/// One way a Run was exposed, and when.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Exposure {
     /// `brief:source`, `brief:compartment`, `cable:SENDER`, `issue:TRACKER`, `memory:ID`,
@@ -86,7 +86,7 @@ pub struct Exposure {
     pub at: f64,
 }
 
-/// What an exposed Session may not do.
+/// What an exposed Run may not do.
 #[non_exhaustive]
 #[derive(
     Debug,
@@ -184,7 +184,7 @@ impl ExposurePolicy {
         }
     }
 
-    /// Whether an exposed Session is held to `restriction`.
+    /// Whether an exposed Run is held to `restriction`.
     pub fn restricts(&self, restriction: Restriction) -> bool {
         self.restrictions.contains(&restriction)
     }
@@ -194,12 +194,12 @@ impl ExposurePolicy {
         self.restrictions.iter().copied()
     }
 
-    /// The tools whose use exposes a Session.
+    /// The tools whose use exposes a Run.
     pub fn tools(&self) -> &[String] {
         &self.tools
     }
 
-    /// Whether a Session that called `tool` is exposed by it.
+    /// Whether a Run that called `tool` is exposed by it.
     pub fn exposed_by_tool(&self, tool: &str) -> bool {
         self.tools.iter().any(|listed| listed == tool)
     }
@@ -220,7 +220,7 @@ pub struct ExposureDefinition {
     /// A starting point the values below replace.
     #[schema(title = "Starting point")]
     preset: Option<ExposurePreset>,
-    /// What applies to a Session once it has read outside text.
+    /// What applies to a Run once it has read outside text.
     #[schema(title = "Restrictions")]
     restrict: Option<Vec<Restriction>>,
     /// The tools whose results count as outside text.
@@ -249,9 +249,9 @@ impl ExposureDefinition {
     }
 }
 
-/// The live exposure of one Session, shared between the Station and the Session's tools.
+/// The live exposure of one Run, shared between the Station and the Run's tools.
 ///
-/// The Station syncs changes to the Session's Registry record; the Cable tools consult the
+/// The Station syncs changes to the Run's Registry record; the Cable tools consult the
 /// gate before acting.
 #[derive(Debug, Clone, Default)]
 pub struct ExposureGate(Arc<GateInner>);
@@ -259,15 +259,15 @@ pub struct ExposureGate(Arc<GateInner>);
 #[derive(Debug, Default)]
 struct GateInner {
     policy: ExposurePolicy,
-    limits: SessionLimits,
+    limits: RunLimits,
     exposures: Mutex<Vec<Exposure>>,
     changed: AtomicBool,
 }
 
 impl ExposureGate {
-    /// A gate under `policy`, starting from the exposures a Session inherits, keeping as many
-    /// sources, each as long, as the Registry's Session `limits` allow.
-    pub fn new(policy: ExposurePolicy, inherited: Vec<Exposure>, limits: &SessionLimits) -> Self {
+    /// A gate under `policy`, starting from the exposures a Run inherits, keeping as many
+    /// sources, each as long, as the Registry's Run `limits` allow.
+    pub fn new(policy: ExposurePolicy, inherited: Vec<Exposure>, limits: &RunLimits) -> Self {
         let gate = Self(Arc::new(GateInner {
             policy,
             limits: limits.clone(),
@@ -285,7 +285,7 @@ impl ExposureGate {
         &self.0.policy
     }
 
-    /// Marks the Session exposed by `source` at `at`; `false` when it already was.
+    /// Marks the Run exposed by `source` at `at`; `false` when it already was.
     pub fn mark(&self, source: &str, at: f64) -> bool {
         let Ok(mut exposures) = self.0.exposures.lock() else {
             return false;
@@ -302,7 +302,7 @@ impl ExposureGate {
         true
     }
 
-    /// Every way the Session was exposed, in the order it happened.
+    /// Every way the Run was exposed, in the order it happened.
     pub fn exposures(&self) -> Vec<Exposure> {
         self.0
             .exposures
@@ -311,7 +311,7 @@ impl ExposureGate {
             .unwrap_or_default()
     }
 
-    /// Whether the Session has read untrusted input.
+    /// Whether the Run has read untrusted input.
     pub fn is_exposed(&self) -> bool {
         self.0
             .exposures
@@ -319,7 +319,7 @@ impl ExposureGate {
             .is_ok_and(|exposures| !exposures.is_empty())
     }
 
-    /// Whether the Session is exposed and the policy holds it to `restriction`.
+    /// Whether the Run is exposed and the policy holds it to `restriction`.
     pub fn restricts(&self, restriction: Restriction) -> bool {
         self.0.policy.restricts(restriction) && self.is_exposed()
     }
@@ -360,7 +360,7 @@ mod tests {
         let gate = ExposureGate::new(
             ExposurePolicy::default(),
             inherited,
-            &SessionLimits::default(),
+            &RunLimits::default(),
         );
         assert!(gate.is_exposed());
         assert_eq!(gate.take_changes(), None);
@@ -368,14 +368,14 @@ mod tests {
         let observe = ExposureGate::new(
             ExposurePolicy::preset(ExposurePreset::Observe),
             gate.exposures(),
-            &SessionLimits::default(),
+            &RunLimits::default(),
         );
         assert!(observe.is_exposed());
         assert!(!observe.restricts(Restriction::Cables));
     }
 
     #[test]
-    fn nothing_is_restricted_until_the_session_is_exposed() {
+    fn nothing_is_restricted_until_the_run_is_exposed() {
         let gate = ExposureGate::default();
         assert!(!gate.restricts(Restriction::Cables));
         gate.mark(REVIEW, 1.0);

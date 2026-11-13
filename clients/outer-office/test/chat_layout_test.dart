@@ -183,7 +183,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       final reason = '$width px, docked: $docked';
-      final labels = ['Operations', 'Stations', 'Missions', 'Sessions waiting'];
+      final labels = ['Operations', 'Stations', 'Missions', 'Runs waiting'];
       final rects = [
         for (final label in labels) tester.getRect(tile(label).first),
       ];
@@ -217,18 +217,18 @@ void main() {
     await atSize(tester, const Size(1400, 900));
     final channel = FakeChannel();
     final board = signedIn(channel)
-      ..sessions = const [
-        SessionSummary(
+      ..runs = const [
+        RunSummary(
           operationId: 'G',
           missionId: 'mission-1',
-          sessionId: 'session-blocked',
+          runId: 'run-blocked',
           state: 'blocked',
           sequence: 1,
         ),
-        SessionSummary(
+        RunSummary(
           operationId: 'G',
           missionId: 'mission-2',
-          sessionId: 'session-working',
+          runId: 'run-working',
           state: 'working',
           sequence: 1,
         ),
@@ -464,7 +464,7 @@ void main() {
     // Ben changes his width; Ana's stays.
     final benChannel = FakeChannel();
     final ben = signedIn(benChannel)
-      ..userSession = const UserSessionSummary(
+      ..userRun = const UserRunSummary(
         personId: 'ben',
         moneypenny: true,
         name: 'ben',

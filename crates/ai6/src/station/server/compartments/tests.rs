@@ -83,7 +83,7 @@ fn filed(state: &DaemonState, id: &str, operation: &str, finished: bool) -> Brie
                 &json!({
                     "state": "done",
                     "mission_id": id,
-                    "session_ids": ["provider-secret-session"],
+                    "run_ids": ["provider-secret-run"],
                     "agent": "008",
                     "branch": "ai6/work",
                     "summary": "the product text",
@@ -155,7 +155,7 @@ fn a_status_read_lists_exactly_the_status_fields_and_does_not_expose() {
     assert_eq!(missions[0]["agent"], "008");
     let text = answer.to_string();
     assert!(!text.contains("the brief of"), "{text}");
-    assert!(!text.contains("provider-secret-session"), "{text}");
+    assert!(!text.contains("provider-secret-run"), "{text}");
     assert!(!text.contains("station-secret"), "{text}");
     assert!(!reader.exposure.is_exposed());
     let by_name = desk(&state)
@@ -182,7 +182,7 @@ fn a_status_read_lists_exactly_the_status_fields_and_does_not_expose() {
 }
 
 #[test]
-fn a_product_read_returns_the_product_and_marks_the_session() {
+fn a_product_read_returns_the_product_and_marks_the_run() {
     let root = tempfile::tempdir().unwrap();
     let state = station(root.path());
     filed(&state, "B-1", "B", true);
@@ -220,7 +220,7 @@ fn a_product_read_returns_the_product_and_marks_the_session() {
     assert_eq!(answer["refs"]["branch"], "ai6/work");
     assert_eq!(answer.get("brief_untrusted"), None);
     let text = answer.to_string();
-    assert!(!text.contains("provider-secret-session"), "{text}");
+    assert!(!text.contains("provider-secret-run"), "{text}");
     assert!(!text.contains("station-secret"), "{text}");
     let sources: Vec<String> = reader
         .exposure
@@ -236,7 +236,7 @@ fn a_product_read_returns_the_product_and_marks_the_session() {
 }
 
 #[test]
-fn a_brief_read_gives_the_text_and_marks_the_session() {
+fn a_brief_read_gives_the_text_and_marks_the_run() {
     let root = tempfile::tempdir().unwrap();
     let state = station(root.path());
     filed(&state, "B-1", "B", false);
@@ -541,7 +541,7 @@ mod over_mcp {
     use super::super::super::cables_mcp::Endpoint;
     use super::super::super::green_ink;
     use super::*;
-    use crate::directorates::m::identity::SessionId;
+    use crate::directorates::m::identity::RunId;
     use crate::directorates::registry::cables::{
         CableEndpoint, CablePolicy, CablePrincipal, CableRelay,
     };
@@ -606,16 +606,16 @@ mod over_mcp {
         endpoint.open_compartment_tools(CompartmentDesk::new(state.clone()));
         if bind {
             endpoint
-                .bind_session(Some(&SessionId::try_new("provider-session").unwrap()))
+                .bind_run(Some(&RunId::try_new("provider-id").unwrap()))
                 .unwrap();
         }
         endpoint
     }
 
-    /// A native harness connects and lists its tools before it reports a Session ID, so nothing
+    /// A native harness connects and lists its tools before it reports a Run ID, so nothing
     /// here may wait for one.
     #[tokio::test(flavor = "multi_thread")]
-    async fn the_tools_are_listed_and_work_before_the_session_id_arrives() {
+    async fn the_tools_are_listed_and_work_before_the_run_id_arrives() {
         let root = tempfile::tempdir().unwrap();
         let state = station(root.path());
         filed(&state, "B-1", "B", true);
@@ -641,7 +641,7 @@ mod over_mcp {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn the_tools_are_listed_only_while_the_session_holds_a_compartment() {
+    async fn the_tools_are_listed_only_while_the_run_holds_a_compartment() {
         let root = tempfile::tempdir().unwrap();
         let state = station(root.path());
         filed(&state, "B-1", "B", true);
@@ -817,7 +817,7 @@ mod over_mcp {
                     "B".to_owned(),
                     None,
                     station_id,
-                    Some("session-008".to_owned()),
+                    Some("run-008".to_owned()),
                     Some("B-1".to_owned()),
                 )
                 .unwrap(),
@@ -838,7 +838,7 @@ mod over_mcp {
         );
         let peers = call(&client, "discover_agents", json!({})).await;
         assert!(peers.contains("\"compartment\":\"KESTREL\""), "{peers}");
-        assert!(!peers.contains("session-008"), "{peers}");
+        assert!(!peers.contains("run-008"), "{peers}");
         let sent = call(&client, "send_cable", cable("granted")).await;
         assert!(sent.contains("\"recipient_count\":1"), "{sent}");
         let records = state.intake.audit_records().unwrap();
@@ -861,9 +861,9 @@ mod over_mcp {
         client.cancel().await.unwrap();
     }
 
-    /// Both ways a Station opens a Session's endpoint must give it the tools.
+    /// Both ways a Station opens a Run's endpoint must give it the tools.
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_started_and_a_resumed_session_both_get_the_tools() {
+    async fn a_started_and_a_resumed_run_both_get_the_tools() {
         let root = tempfile::tempdir().unwrap();
         let state = station(root.path());
         filed(&state, "B-1", "B", true);
@@ -889,7 +889,7 @@ mod over_mcp {
             .unwrap();
         start_mission_by_id(&state, &mission_id).await;
         wait_for_state(&state, &mission_id, MissionState::Blocked).await;
-        let environment = state.sessions.lock().unwrap()[&mission_id]
+        let environment = state.runs.lock().unwrap()[&mission_id]
             .environment
             .clone();
         let client = connect(
@@ -937,7 +937,7 @@ mod over_mcp {
         );
         let answer = call(&client, "mission_products", json!({"mission": "B-1"})).await;
         assert!(answer.contains("the product text"), "{answer}");
-        // A resumed Session is held to a read out like any other.
+        // A resumed Run is held to a read out like any other.
         read_out(root.path());
         let refused = call(&client, "mission_products", json!({"mission": "B-1"})).await;
         assert!(refused.contains(UNKNOWN_MISSION), "{refused}");

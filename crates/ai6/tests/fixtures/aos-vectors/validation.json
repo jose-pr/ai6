@@ -3935,7 +3935,7 @@
     },
     {
       "id": "hooks-match-reason-unknown",
-      "description": "A harness's own reason (startup) is not one of the session reasons.",
+      "description": "A harness's own reason (startup) is not one of the run reasons.",
       "document": {
         "hooks": {
           "session-start": {

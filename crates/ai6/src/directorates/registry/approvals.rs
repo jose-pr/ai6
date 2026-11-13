@@ -23,7 +23,7 @@ use super::limits::ApprovalLimits;
 use super::store::{FileRegistry, hex_digest, invalid_data, validate_registry_key};
 use crate::bounds::Limit;
 use crate::directorates::m::approvals::{ActionScope, clearance_at_least, valid_kind};
-use crate::directorates::m::identity::{MissionId, SessionId};
+use crate::directorates::m::identity::{MissionId, RunId};
 
 /// The signer of a request that expired without a decision.
 pub const EXPIRY_SIGNER: &str = "expiry";
@@ -33,14 +33,14 @@ pub const EXPIRY_SIGNER: &str = "expiry";
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ApprovalRequest {
-    /// `green-ink-` and the SHA-256 of the Operation, Session, scope and retry key.
+    /// `green-ink-` and the SHA-256 of the Operation, Run, scope and retry key.
     pub id: String,
     /// The Operation the Mission belongs to.
     pub operation: String,
     /// The Mission whose Agent asked.
     pub mission: MissionId,
-    /// The provider Session that asked, bound to its authenticated tool endpoint.
-    pub session: SessionId,
+    /// The provider Run that asked, bound to its authenticated tool endpoint.
+    pub run: RunId,
     /// The Agent codename, supplied by AI6 rather than the request text.
     pub agent: String,
     /// The step.
@@ -161,7 +161,7 @@ impl ApprovalRequest {
         self
     }
 
-    /// A request with an identity derived from the Session, the scope and a retry key, so
+    /// A request with an identity derived from the Run, the scope and a retry key, so
     /// asking again with the same key finds the same request. Its times are set by
     /// [`ApprovalRequest::expiring`].
     ///
@@ -173,7 +173,7 @@ impl ApprovalRequest {
     pub fn try_new(
         operation: impl Into<String>,
         mission: MissionId,
-        session: SessionId,
+        run: RunId,
         agent: impl Into<String>,
         scope: ActionScope,
         reason: impl Into<String>,
@@ -190,7 +190,7 @@ impl ApprovalRequest {
         let mut digest = Sha256::new();
         for component in [
             operation.as_bytes(),
-            session.as_str().as_bytes(),
+            run.as_str().as_bytes(),
             scope.kind.as_bytes(),
             scope.target.as_bytes(),
             idempotency_key.as_bytes(),
@@ -202,7 +202,7 @@ impl ApprovalRequest {
             id: format!("green-ink-{}", hex_digest(&digest.finalize())),
             operation,
             mission,
-            session,
+            run,
             agent: agent.into(),
             scope,
             reason: reason.into(),
@@ -1740,7 +1740,7 @@ mod tests {
         let full = ApprovalRequest::try_new(
             "G",
             MissionId::try_new("mission-1").unwrap(),
-            SessionId::try_new("provider-session-1").unwrap(),
+            RunId::try_new("provider-id-1").unwrap(),
             "007",
             ActionScope::try_new("merge", "PR 43").unwrap(),
             "r".repeat(limits.reason_bytes.or_max()),
@@ -1839,7 +1839,7 @@ mod tests {
         ApprovalRequest::try_new(
             "G",
             MissionId::try_new("mission-1").unwrap(),
-            SessionId::try_new("provider-session-1").unwrap(),
+            RunId::try_new("provider-id-1").unwrap(),
             "007",
             ActionScope::try_new(kind, target).unwrap(),
             "the release is ready",
@@ -2216,13 +2216,13 @@ mod tests {
 
     fn requests_are_bounded(store: &dyn Store) {
         let mission = MissionId::try_new("mission-1").unwrap();
-        let session = SessionId::try_new("provider-session-1").unwrap();
+        let run = RunId::try_new("provider-id-1").unwrap();
         let scope = ActionScope::try_new("push", "main").unwrap();
         let attempt = |agent: &str, reason: &str, key: &str| {
             ApprovalRequest::try_new(
                 "G",
                 mission.clone(),
-                session.clone(),
+                run.clone(),
                 agent,
                 scope.clone(),
                 reason,

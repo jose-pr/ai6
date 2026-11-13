@@ -18,7 +18,7 @@ const DAY: u64 = 24 * 60 * 60;
 #[non_exhaustive]
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct UnexLimits {
-    /// `[gateway]`: live Sessions, connections and frames.
+    /// `[gateway]`: live Runs, connections and frames.
     pub gateway: UnexGatewayLimits,
     /// `[controls]`: the operator controls waiting for a Station.
     pub controls: ControlLimits,
@@ -35,20 +35,20 @@ pub struct UnexLimits {
 #[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
 #[map(deny_unknown_fields)]
 pub struct UnexGatewayLimits {
-    /// Live provider Sessions.
-    #[schema(title = "Live Sessions")]
-    #[map(default = UnexGatewayLimits::default().sessions)]
-    pub sessions: Limit,
-    /// Sessions the Mission board lists from the Registry's records, the most recently updated
-    /// ones; a Session still live is always listed.
-    #[schema(title = "Sessions on the Mission board")]
-    #[map(default = UnexGatewayLimits::default().board_sessions)]
-    pub board_sessions: Limit,
-    /// Simultaneous browser connections to one provider Session.
-    #[schema(title = "Browser connections per Session")]
-    #[map(default = UnexGatewayLimits::default().clients_per_session)]
-    pub clients_per_session: Limit,
-    /// Value frames kept per provider Session for a client that joins late.
+    /// Live provider Runs.
+    #[schema(title = "Live Runs")]
+    #[map(default = UnexGatewayLimits::default().runs)]
+    pub runs: Limit,
+    /// Runs the Mission board lists from the Registry's records, the most recently updated
+    /// ones; a Run still live is always listed.
+    #[schema(title = "Runs on the Mission board")]
+    #[map(default = UnexGatewayLimits::default().board_runs)]
+    pub board_runs: Limit,
+    /// Simultaneous browser connections to one provider Run.
+    #[schema(title = "Browser connections per Run")]
+    #[map(default = UnexGatewayLimits::default().clients_per_run)]
+    pub clients_per_run: Limit,
+    /// Value frames kept per provider Run for a client that joins late.
     #[schema(title = "Frames kept for a late client")]
     #[map(default = UnexGatewayLimits::default().scrollback_events)]
     pub scrollback_events: Limit,
@@ -65,17 +65,17 @@ pub struct UnexGatewayLimits {
     #[schema(title = "Queue to the Stations")]
     #[map(default = UnexGatewayLimits::default().input_queue)]
     pub input_queue: u64,
-    /// Capacity of each per-Session viewer queue, at least 1.
-    #[schema(title = "Queue per Session viewer")]
+    /// Capacity of each per-Run viewer queue, at least 1.
+    #[schema(title = "Queue per Run viewer")]
     #[map(default = UnexGatewayLimits::default().fanout)]
     pub fanout: u64,
-    /// Bytes the gateway may hold in buffers across every Session and connection; the configuration
+    /// Bytes the gateway may hold in buffers across every Run and connection; the configuration
     /// is refused when its limits could exceed it.
     #[schema(title = "All the gateway's buffers", format = "bytes")]
     #[map(default = UnexGatewayLimits::default().buffer_budget_bytes)]
     pub buffer_budget_bytes: Limit,
     /// Browser connections the gateway keeps slots for; the configuration is refused when its
-    /// Sessions times connections per Session could exceed it.
+    /// Runs times connections per Run could exceed it.
     #[schema(title = "Browser connection slots")]
     #[map(default = UnexGatewayLimits::default().client_slots)]
     pub client_slots: Limit,
@@ -137,9 +137,9 @@ pub struct UnexGatewayLimits {
 impl Default for UnexGatewayLimits {
     fn default() -> Self {
         Self {
-            sessions: Limit::at(16),
-            board_sessions: Limit::at(2_000),
-            clients_per_session: Limit::at(12),
+            runs: Limit::at(16),
+            board_runs: Limit::at(2_000),
+            clients_per_run: Limit::at(12),
             scrollback_events: Limit::at(64),
             frame_bytes: Limit::at(256 * KIB),
             input_frames_per_second: Limit::at(40),
@@ -411,8 +411,8 @@ impl UnexLimits {
         at_least_one(
             "gateway",
             &[
-                ("sessions", gateway.sessions),
-                ("clients_per_session", gateway.clients_per_session),
+                ("runs", gateway.runs),
+                ("clients_per_run", gateway.clients_per_run),
                 ("scrollback_events", gateway.scrollback_events),
                 ("frame_bytes", gateway.frame_bytes),
                 ("input_frames_per_second", gateway.input_frames_per_second),
@@ -527,10 +527,10 @@ mod tests {
         assert!(limits.validate().is_ok());
         assert!(read("[gateway]\nno_such = 1\n").is_err());
         let mut zero = UnexLimits::default();
-        zero.gateway.sessions = Limit::at(0);
+        zero.gateway.runs = Limit::at(0);
         assert_eq!(
             zero.validate(),
-            Err("gateway.sessions: at least 1".to_owned())
+            Err("gateway.runs: at least 1".to_owned())
         );
         let mut token = UnexLimits::default();
         token.gateway.access_token_ttl = Seconds::new(0);

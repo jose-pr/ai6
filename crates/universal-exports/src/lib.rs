@@ -70,7 +70,7 @@ use ai6::{
 /// How a brief's provenance names the gateway as the place it was accepted.
 const GATEWAY_RECEIVER: &str = "universal-exports";
 use ai6_diptel::{
-    FrameReceiver, IncomingFrame, LifecycleEvent, MissionId, OperationId, SessionId, SessionState,
+    FrameReceiver, IncomingFrame, LifecycleEvent, MissionId, OperationId, RunId, RunState,
     TerminalData, TerminalDirection, TerminalResize, lifecycle_frames, resize_frames,
     terminal_frames,
 };
@@ -129,11 +129,11 @@ pub struct GatewayConfig {
 /// Finite state, payload, fanout and input limits for one gateway.
 #[derive(Debug, Clone, Copy)]
 pub struct GatewayLimits {
-    /// Maximum number of live provider Sessions.
-    pub max_sessions: usize,
-    /// Maximum simultaneous browser connections to one provider Session.
-    pub max_clients_per_session: usize,
-    /// Number of value frames retained per provider Session.
+    /// Maximum number of live provider Runs.
+    pub max_runs: usize,
+    /// Maximum simultaneous browser connections to one provider Run.
+    pub max_clients_per_run: usize,
+    /// Number of value frames retained per provider Run.
     pub scrollback_events: usize,
     /// Maximum bytes in one guatiao WebSocket or ingress frame.
     pub max_frame_bytes: usize,
@@ -141,13 +141,13 @@ pub struct GatewayLimits {
     pub max_input_frames_per_second: u32,
     /// Capacity of the bounded queue between the gateway and its Stations.
     pub input_queue_capacity: usize,
-    /// Capacity of each per-Session viewer fanout queue.
+    /// Capacity of each per-Run viewer fanout queue.
     pub fanout_capacity: usize,
-    /// Bytes the gateway may hold in buffers across every Session and connection; the
+    /// Bytes the gateway may hold in buffers across every Run and connection; the
     /// configuration is refused when its limits could exceed it.
     pub buffer_budget_bytes: ai6::Limit,
     /// Connections the gateway keeps slots for; the configuration is refused when its
-    /// Sessions times connections per Session could exceed it.
+    /// Runs times connections per Run could exceed it.
     pub client_slots: ai6::Limit,
     /// The fewest bytes the Station token may hold.
     pub station_token_min_bytes: usize,
@@ -327,8 +327,8 @@ impl From<&ai6::UnexGatewayLimits> for GatewayLimits {
     /// The record's `[gateway]` table, an absent bound being as large as the type holds.
     fn from(table: &ai6::UnexGatewayLimits) -> Self {
         Self {
-            max_sessions: table.sessions.or_max(),
-            max_clients_per_session: table.clients_per_session.or_max(),
+            max_runs: table.runs.or_max(),
+            max_clients_per_run: table.clients_per_run.or_max(),
             scrollback_events: table.scrollback_events.or_max(),
             max_frame_bytes: table.frame_bytes.or_max(),
             max_input_frames_per_second: table
@@ -349,7 +349,7 @@ impl From<&ai6::UnexGatewayLimits> for GatewayLimits {
 
 impl GatewayConfig {
     /// Creates a gateway config and rejects limits that cannot work together: a zero where
-    /// nothing could pass, and Sessions, connections and frames that could hold more than
+    /// nothing could pass, and Runs, connections and frames that could hold more than
     /// `buffer_budget_bytes` or `client_slots` allow.
     pub fn new(
         public_origin: impl Into<String>,
@@ -367,10 +367,10 @@ impl GatewayConfig {
             .input_queue_capacity
             .checked_mul(limits.max_frame_bytes);
         let history_budget = limits
-            .max_sessions
+            .max_runs
             .checked_mul(retained_bytes.unwrap_or(usize::MAX));
         let fanout_budget = limits
-            .max_sessions
+            .max_runs
             .checked_mul(fanout_bytes.unwrap_or(usize::MAX));
         let socket_buffer = limits
             .max_frame_bytes
@@ -391,14 +391,14 @@ impl GatewayConfig {
             .and_then(|buffers| buffers.checked_add(input_bytes.unwrap_or(usize::MAX)))
             .and_then(|buffers| socket_budget.and_then(|sockets| buffers.checked_add(sockets)));
         let client_slots = limits
-            .max_sessions
-            .checked_mul(limits.max_clients_per_session);
+            .max_runs
+            .checked_mul(limits.max_clients_per_run);
         if authority.is_empty()
             || authority.contains(['/', '?', '#', '@'])
             || !limits.origin_bytes.allows(public_origin.len())
             || station_token.len() < limits.station_token_min_bytes
-            || limits.max_sessions == 0
-            || limits.max_clients_per_session == 0
+            || limits.max_runs == 0
+            || limits.max_clients_per_run == 0
             || limits.scrollback_events == 0
             || limits.max_frame_bytes == 0
             || limits.max_input_frames_per_second == 0
@@ -472,15 +472,15 @@ pub enum AttachMode {
     Write,
 }
 
-/// An authorization grant scoped to one Station, Mission, Session and mode.
+/// An authorization grant scoped to one Station, Mission, Run and mode.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttachGrant {
     /// The project that owns this work.
     pub operation_id: OperationId,
-    /// The unit of work that groups Sessions.
+    /// The unit of work that groups Runs.
     pub mission_id: MissionId,
     /// The provider-issued resumable operation.
-    pub session_id: SessionId,
+    pub run_id: RunId,
     /// Read or write rights granted by M.
     pub mode: AttachMode,
 }
@@ -490,10 +490,10 @@ pub struct AttachGrant {
 pub struct AgentInput {
     /// The Operation containing the Mission.
     pub operation_id: OperationId,
-    /// The unit of work that groups Sessions.
+    /// The unit of work that groups Runs.
     pub mission_id: MissionId,
-    /// The provider-issued Agent Session receiving input.
-    pub session_id: SessionId,
+    /// The provider-issued Agent Run receiving input.
+    pub run_id: RunId,
     /// Validated guatiao channel frame, kept as bytes.
     pub frame: Vec<u8>,
 }
@@ -503,7 +503,7 @@ impl fmt::Debug for AgentInput {
         f.debug_struct("AgentInput")
             .field("operation_id", &self.operation_id)
             .field("mission_id", &self.mission_id)
-            .field("session_id", &self.session_id)
+            .field("run_id", &self.run_id)
             .field(
                 "frame",
                 &format_args!("[REDACTED; {} bytes]", self.frame.len()),
@@ -520,7 +520,7 @@ pub struct Attachment {
     pub replay: Vec<Vec<u8>>,
     /// Live event stream. A lagged receiver must be disconnected.
     pub events: broadcast::Receiver<Vec<u8>>,
-    session_id: SessionId,
+    run_id: RunId,
     connection_id: String,
     expires: Instant,
 }
@@ -530,7 +530,7 @@ impl fmt::Debug for Attachment {
         f.debug_struct("Attachment")
             .field("mode", &self.mode)
             .field("replay_frames", &self.replay.len())
-            .field("session_id", &self.session_id)
+            .field("run_id", &self.run_id)
             .field("connection_id", &"[REDACTED]")
             .field("expires", &self.expires)
             .finish()
@@ -545,9 +545,9 @@ pub enum GatewayError {
     InvalidConfiguration,
     /// The caller did not authenticate as a Station.
     Unauthorized,
-    /// A grant does not match the registered Station, Mission or Session.
+    /// A grant does not match the registered Station, Mission or Run.
     Forbidden,
-    /// A requested Mission or Session has not been registered.
+    /// A requested Mission or Run has not been registered.
     NotFound,
     /// A viewer, writer or prior event already occupies this bounded slot.
     Conflict,
@@ -566,8 +566,8 @@ impl fmt::Display for GatewayError {
         let message = match self {
             Self::InvalidConfiguration => "gateway configuration is invalid",
             Self::Unauthorized => "Station authentication is required",
-            Self::Forbidden => "the grant does not authorize this Station and Session",
-            Self::NotFound => "the Station or Session was not found",
+            Self::Forbidden => "the grant does not authorize this Station and Run",
+            Self::NotFound => "the Station or Run was not found",
             Self::Conflict => "a bounded gateway resource is already occupied",
             Self::TooLarge => "the frame exceeds the configured bound",
             Self::InvalidFrame => "the guatiao frame is invalid",
@@ -651,7 +651,7 @@ impl fmt::Debug for Gateway {
 
 #[derive(Default)]
 struct Inner {
-    sessions: HashMap<SessionId, SessionRecord>,
+    runs: HashMap<RunId, RunRecord>,
     missions: HashMap<(OperationId, MissionId), LaunchManifest>,
     attach_tokens: HashMap<String, TimedGrant>,
     connection_tickets: HashMap<String, TimedGrant>,
@@ -664,7 +664,7 @@ struct TimedGrant {
 }
 
 struct ActiveConnection {
-    session_id: SessionId,
+    run_id: RunId,
     mode: AttachMode,
     expires: Instant,
     input_window_started: Instant,
@@ -672,7 +672,7 @@ struct ActiveConnection {
     last_input_sequence: u64,
 }
 
-struct SessionRecord {
+struct RunRecord {
     operation_id: OperationId,
     mission_id: MissionId,
     lifecycle_state: Option<String>,
@@ -937,29 +937,29 @@ impl Gateway {
         }
     }
 
-    /// Registers one active provider Session after authenticating the Station.
-    pub async fn register_session(
+    /// Registers one active provider Run after authenticating the Station.
+    pub async fn register_run(
         &self,
         station_token: &str,
         operation_id: OperationId,
         mission_id: MissionId,
-        session_id: SessionId,
+        run_id: RunId,
     ) -> Result<(), GatewayError> {
         self.authenticate_station(station_token)?;
         let mut inner = self.inner.lock().await;
-        if let Some(record) = inner.sessions.get(&session_id) {
+        if let Some(record) = inner.runs.get(&run_id) {
             if record.operation_id == operation_id && record.mission_id == mission_id {
                 return Ok(());
             }
             return Err(GatewayError::Conflict);
         }
-        if inner.sessions.len() >= self.config.limits.max_sessions {
+        if inner.runs.len() >= self.config.limits.max_runs {
             return Err(GatewayError::Conflict);
         }
         let (events, _) = broadcast::channel(self.config.limits.fanout_capacity);
-        inner.sessions.insert(
-            session_id.clone(),
-            SessionRecord {
+        inner.runs.insert(
+            run_id.clone(),
+            RunRecord {
                 operation_id,
                 mission_id,
                 lifecycle_state: None,
@@ -977,32 +977,32 @@ impl Gateway {
         Ok(())
     }
 
-    /// Returns the next event cursor for an authenticated registered Session.
+    /// Returns the next event cursor for an authenticated registered Run.
     pub async fn next_sequence(
         &self,
         station_token: &str,
-        session_id: &SessionId,
+        run_id: &RunId,
     ) -> Result<u64, GatewayError> {
         self.authenticate_station(station_token)?;
         let inner = self.inner.lock().await;
-        let session = inner
-            .sessions
-            .get(session_id)
+        let run = inner
+            .runs
+            .get(run_id)
             .ok_or(GatewayError::NotFound)?;
-        session
+        run
             .last_sequence
             .checked_add(1)
             .ok_or(GatewayError::Conflict)
     }
 
-    /// Returns the provider Sessions, their latest lifecycle states and the Agent of each one's
+    /// Returns the provider Runs, their latest lifecycle states and the Agent of each one's
     /// Mission.
     ///
-    /// The Registry's Session records say what ended or is waiting to be checked, which no
+    /// The Registry's Run records say what ended or is waiting to be checked, which no
     /// Station sends again after the gateway restarts; the lifecycle frames received since say
     /// what is happening now and win while their sequence is above zero, unless the record has
-    /// closed. Records past `[gateway] board_sessions`, the least recently updated, are left out.
-    pub async fn board_sessions(&self) -> Vec<BoardSession> {
+    /// closed. Records past `[gateway] board_runs`, the least recently updated, are left out.
+    pub async fn board_runs(&self) -> Vec<BoardRun> {
         let (mut live, briefs) = {
             let inner = self.inner.lock().await;
             let briefs: HashMap<(String, String), String> = inner
@@ -1015,25 +1015,25 @@ impl Gateway {
                     ))
                 })
                 .collect();
-            let live: BTreeMap<String, BoardSession> = inner
-                .sessions
+            let live: BTreeMap<String, BoardRun> = inner
+                .runs
                 .iter()
-                .map(|(session_id, session)| {
-                    let operation_id = session.operation_id.to_string();
-                    let mission_id = session.mission_id.to_string();
+                .map(|(run_id, run)| {
+                    let operation_id = run.operation_id.to_string();
+                    let mission_id = run.mission_id.to_string();
                     let agent = briefs
                         .get(&(operation_id.clone(), mission_id.clone()))
                         .cloned();
                     (
-                        session_id.to_string(),
-                        BoardSession {
+                        run_id.to_string(),
+                        BoardRun {
                             operation_id,
                             mission_id,
-                            session_id: session_id.to_string(),
-                            state: session.lifecycle_state.clone(),
-                            reason: session.lifecycle_reason.clone(),
-                            sequence: session.lifecycle_sequence,
-                            updated_at: session.lifecycle_at,
+                            run_id: run_id.to_string(),
+                            state: run.lifecycle_state.clone(),
+                            reason: run.lifecycle_reason.clone(),
+                            sequence: run.lifecycle_sequence,
+                            updated_at: run.lifecycle_at,
                             exposure: Vec::new(),
                             station_id: None,
                             agent,
@@ -1043,20 +1043,20 @@ impl Gateway {
                 .collect();
             (live, briefs)
         };
-        let keep = self.config.unex().gateway.board_sessions.or_max();
+        let keep = self.config.unex().gateway.board_runs.or_max();
         let recorded = match self.registry.clone() {
-            Some(registry) => tokio::task::spawn_blocking(move || registry.sessions())
+            Some(registry) => tokio::task::spawn_blocking(move || registry.runs())
                 .await
                 .ok()
                 .and_then(Result::ok)
                 .unwrap_or_default(),
             None => Vec::new(),
         };
-        // A later attempt may resume the provider's Session: the board lists it once, as the
+        // A later attempt may resume the provider's Run: the board lists it once, as the
         // latest attempt stands.
-        let mut latest = HashMap::<String, ai6::SessionRecord>::new();
+        let mut latest = HashMap::<String, ai6::RunRecord>::new();
         for record in recorded {
-            let Some(provider) = record.provider_session_id.clone() else {
+            let Some(provider) = record.provider_id.clone() else {
                 continue;
             };
             if latest
@@ -1066,7 +1066,7 @@ impl Gateway {
                 latest.insert(provider, record);
             }
         }
-        let mut recorded: Vec<(ai6::SessionRecord, String)> = latest
+        let mut recorded: Vec<(ai6::RunRecord, String)> = latest
             .into_iter()
             .map(|(provider, record)| (record, provider))
             .collect();
@@ -1074,12 +1074,12 @@ impl Gateway {
             record_updated_at(right)
                 .partial_cmp(&record_updated_at(left))
                 .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| left.session_id.cmp(&right.session_id))
+                .then_with(|| left.run_id.cmp(&right.run_id))
         });
-        let mut sessions = Vec::new();
+        let mut runs = Vec::new();
         for (record, provider) in recorded {
             let overlaid = live.remove(&provider);
-            if sessions.len() >= keep && overlaid.is_none() {
+            if runs.len() >= keep && overlaid.is_none() {
                 continue;
             }
             let Some(operation_id) = record
@@ -1095,7 +1095,7 @@ impl Gateway {
             else {
                 continue;
             };
-            let from_record = BoardSession {
+            let from_record = BoardRun {
                 agent: briefs
                     .get(&(operation_id.clone(), record.mission_id.clone()))
                     .cloned()
@@ -1107,7 +1107,7 @@ impl Gateway {
                     }),
                 operation_id,
                 mission_id: record.mission_id.clone(),
-                session_id: provider,
+                run_id: provider,
                 state: record.result.as_ref().map(|result| result.state.clone()),
                 reason: record
                     .result
@@ -1118,8 +1118,8 @@ impl Gateway {
                 exposure: record.exposure.iter().map(|e| e.source.clone()).collect(),
                 station_id: Some(record.station.clone()),
             };
-            sessions.push(match overlaid {
-                Some(frames) if frames.sequence > 0 && !record.status.is_closed() => BoardSession {
+            runs.push(match overlaid {
+                Some(frames) if frames.sequence > 0 && !record.status.is_closed() => BoardRun {
                     exposure: from_record.exposure,
                     station_id: from_record.station_id,
                     ..frames
@@ -1127,21 +1127,21 @@ impl Gateway {
                 _ => from_record,
             });
         }
-        // Sessions the Registry has not recorded (yet), or has no Registry for.
-        sessions.extend(live.into_values());
-        sessions.sort_by(|left, right| {
-            (&left.operation_id, &left.mission_id, &left.session_id).cmp(&(
+        // Runs the Registry has not recorded (yet), or has no Registry for.
+        runs.extend(live.into_values());
+        runs.sort_by(|left, right| {
+            (&left.operation_id, &left.mission_id, &left.run_id).cmp(&(
                 &right.operation_id,
                 &right.mission_id,
-                &right.session_id,
+                &right.run_id,
             ))
         });
-        sessions
+        runs
     }
 
-    /// Returns registered Missions grouped by Station with their provider Sessions.
+    /// Returns registered Missions grouped by Station with their provider Runs.
     pub async fn board_missions(&self) -> Vec<BoardMission> {
-        self.enrich_missions(group_missions(self.board_sessions().await))
+        self.enrich_missions(group_missions(self.board_runs().await))
             .await
     }
 
@@ -1163,7 +1163,7 @@ impl Gateway {
         if let Some(registry) = self.registry.clone() {
             missions = tokio::task::spawn_blocking(move || {
                 let mut attempts = registry
-                    .sessions()
+                    .runs()
                     .map(attempts_by_mission)
                     .unwrap_or_default();
                 for mission in &mut missions {
@@ -1193,16 +1193,16 @@ impl Gateway {
         missions
     }
 
-    /// Encodes and publishes one lifecycle event for a registered provider Session.
+    /// Encodes and publishes one lifecycle event for a registered provider Run.
     pub async fn publish_lifecycle(
         &self,
         station_token: &str,
         event: LifecycleEvent,
     ) -> Result<(), GatewayError> {
         let (schema, value) = lifecycle_frames(&event).map_err(|_| GatewayError::InvalidFrame)?;
-        self.ingest(station_token, &event.session_id, 0, schema)
+        self.ingest(station_token, &event.run_id, 0, schema)
             .await?;
-        self.ingest(station_token, &event.session_id, event.sequence, value)
+        self.ingest(station_token, &event.run_id, event.sequence, value)
             .await
     }
 
@@ -1210,28 +1210,28 @@ impl Gateway {
     pub async fn publish_terminal_output(
         &self,
         station_token: &str,
-        session_id: SessionId,
+        run_id: RunId,
         sequence: u64,
         bytes: Vec<u8>,
     ) -> Result<(), GatewayError> {
         let terminal = TerminalData::new(
-            session_id.clone(),
+            run_id.clone(),
             sequence,
             TerminalDirection::Output,
             bytes,
         )
         .map_err(|_| GatewayError::TooLarge)?;
         let (schema, value) = terminal_frames(&terminal).map_err(|_| GatewayError::InvalidFrame)?;
-        self.ingest(station_token, &session_id, 0, schema).await?;
-        self.ingest(station_token, &session_id, sequence, value)
+        self.ingest(station_token, &run_id, 0, schema).await?;
+        self.ingest(station_token, &run_id, sequence, value)
             .await
     }
 
-    /// The most terminal output that fits one frame of `session_id` at any sequence, and that the
+    /// The most terminal output that fits one frame of `run_id` at any sequence, and that the
     /// wire contract allows: what a Station is told, so that it splits longer output itself.
-    pub fn terminal_bytes(&self, session_id: &SessionId) -> usize {
+    pub fn terminal_bytes(&self, run_id: &RunId) -> usize {
         let header = TerminalData::new(
-            session_id.clone(),
+            run_id.clone(),
             u64::MAX,
             TerminalDirection::Output,
             Vec::new(),
@@ -1248,7 +1248,7 @@ impl Gateway {
             .min(ai6_diptel::MAX_TERMINAL_BYTES)
     }
 
-    /// Mints an opaque, short-lived, single-use token for an existing Session.
+    /// Mints an opaque, short-lived, single-use token for an existing Run.
     pub async fn issue_attach_token(
         &self,
         station_token: &str,
@@ -1260,11 +1260,11 @@ impl Gateway {
 
     async fn store_attach_token(&self, grant: AttachGrant) -> Result<String, GatewayError> {
         let mut inner = self.inner.lock().await;
-        let session = inner
-            .sessions
-            .get(&grant.session_id)
+        let run = inner
+            .runs
+            .get(&grant.run_id)
             .ok_or(GatewayError::NotFound)?;
-        if session.operation_id != grant.operation_id || session.mission_id != grant.mission_id {
+        if run.operation_id != grant.operation_id || run.mission_id != grant.mission_id {
             return Err(GatewayError::Forbidden);
         }
         prune_expired(&mut inner);
@@ -1310,7 +1310,7 @@ impl Gateway {
     /// says so, ahead of the frame after it.
     pub async fn attach(
         &self,
-        session_id: &SessionId,
+        run_id: &RunId,
         ticket: &str,
         after_sequence: u64,
     ) -> Result<Attachment, GatewayError> {
@@ -1320,24 +1320,24 @@ impl Gateway {
             .connection_tickets
             .remove(ticket)
             .ok_or(GatewayError::InvalidCredential)?;
-        if &timed.grant.session_id != session_id {
+        if &timed.grant.run_id != run_id {
             return Err(GatewayError::Forbidden);
         }
-        let session = inner
-            .sessions
-            .get_mut(session_id)
+        let run = inner
+            .runs
+            .get_mut(run_id)
             .ok_or(GatewayError::NotFound)?;
-        if session.operation_id != timed.grant.operation_id
-            || session.mission_id != timed.grant.mission_id
+        if run.operation_id != timed.grant.operation_id
+            || run.mission_id != timed.grant.mission_id
         {
             return Err(GatewayError::Forbidden);
         }
-        if session.active_clients >= self.config.limits.max_clients_per_session {
+        if run.active_clients >= self.config.limits.max_clients_per_run {
             return Err(GatewayError::Conflict);
         }
         let now = Instant::now();
         if timed.grant.mode == AttachMode::Write
-            && session
+            && run
                 .lease
                 .as_ref()
                 .is_some_and(|lease| lease.expires > now)
@@ -1348,30 +1348,30 @@ impl Gateway {
         let connection_expires = timed.expires;
         let lease_expires = (now + self.config.write_lease_ttl).min(connection_expires);
         if timed.grant.mode == AttachMode::Write {
-            session.lease = Some(WriteLease {
+            run.lease = Some(WriteLease {
                 connection_id: connection_id.clone(),
                 expires: lease_expires,
             });
         }
-        let mut replay: Vec<_> = session.schemas.values().cloned().collect();
+        let mut replay: Vec<_> = run.schemas.values().cloned().collect();
         let mut position = after_sequence;
-        for (sequence, frame) in session
+        for (sequence, frame) in run
             .history
             .iter()
             .filter(|(sequence, _)| *sequence > after_sequence)
         {
-            if let Some([schema, gap]) = gap_between(session_id, position, *sequence)? {
+            if let Some([schema, gap]) = gap_between(run_id, position, *sequence)? {
                 replay.extend([schema, gap]);
             }
             replay.push(frame.clone());
             position = *sequence;
         }
-        let events = session.events.subscribe();
-        session.active_clients += 1;
+        let events = run.events.subscribe();
+        run.active_clients += 1;
         inner.connections.insert(
             connection_id.clone(),
             ActiveConnection {
-                session_id: session_id.clone(),
+                run_id: run_id.clone(),
                 mode: timed.grant.mode,
                 expires: connection_expires,
                 input_window_started: now,
@@ -1383,7 +1383,7 @@ impl Gateway {
             mode: timed.grant.mode,
             replay,
             events,
-            session_id: session_id.clone(),
+            run_id: run_id.clone(),
             connection_id,
             expires: connection_expires,
         })
@@ -1393,7 +1393,7 @@ impl Gateway {
     pub async fn ingest(
         &self,
         station_token: &str,
-        session_id: &SessionId,
+        run_id: &RunId,
         sequence: u64,
         frame: Vec<u8>,
     ) -> Result<(), GatewayError> {
@@ -1402,7 +1402,7 @@ impl Gateway {
             return Err(GatewayError::TooLarge);
         }
         let mut inner = self.inner.lock().await;
-        let transition = self.ingest_locked(&mut inner, session_id, sequence, frame)?;
+        let transition = self.ingest_locked(&mut inner, run_id, sequence, frame)?;
         drop(inner);
         if let Some(transition) = transition {
             timeline::record_transition(self, transition).await;
@@ -1414,16 +1414,16 @@ impl Gateway {
     fn ingest_locked(
         &self,
         inner: &mut Inner,
-        session_id: &SessionId,
+        run_id: &RunId,
         sequence: u64,
         frame: Vec<u8>,
     ) -> Result<Option<timeline::Transition>, GatewayError> {
-        let session = inner
-            .sessions
-            .get_mut(session_id)
+        let run = inner
+            .runs
+            .get_mut(run_id)
             .ok_or(GatewayError::NotFound)?;
         let mut receiver = guatiao::value::wire::channel::Receiver::new();
-        for schema in session.schemas.values() {
+        for schema in run.schemas.values() {
             receiver
                 .accept(schema)
                 .map_err(|_| GatewayError::InvalidFrame)?;
@@ -1443,7 +1443,7 @@ impl Gateway {
             &received,
             guatiao::value::wire::channel::Received::Value { .. }
         );
-        if (is_value && (sequence == 0 || sequence <= session.last_sequence))
+        if (is_value && (sequence == 0 || sequence <= run.last_sequence))
             || (!is_value && sequence != 0)
         {
             return Err(GatewayError::Conflict);
@@ -1451,7 +1451,7 @@ impl Gateway {
         if matches!(
             &received,
             guatiao::value::wire::channel::Received::Schema(_)
-        ) && session.schemas.get(&channel) == Some(&frame)
+        ) && run.schemas.get(&channel) == Some(&frame)
         {
             return Ok(None);
         }
@@ -1459,16 +1459,16 @@ impl Gateway {
             guatiao::value::wire::channel::Received::Value { channel: 1, value } => {
                 validate_lifecycle_value(
                     value,
-                    &session.operation_id,
-                    &session.mission_id,
-                    session_id,
+                    &run.operation_id,
+                    &run.mission_id,
+                    run_id,
                     sequence,
                 )?
             }
             guatiao::value::wire::channel::Received::Value { channel: 2, value } => {
                 validate_terminal_output(
                     value,
-                    session_id,
+                    run_id,
                     sequence,
                     self.config.limits.max_frame_bytes,
                 )?
@@ -1494,10 +1494,10 @@ impl Gateway {
         };
         match received {
             guatiao::value::wire::channel::Received::Schema(_) => {
-                session.schemas.insert(channel, frame.clone());
+                run.schemas.insert(channel, frame.clone());
             }
             guatiao::value::wire::channel::Received::Closed(_) => {
-                session.schemas.remove(&channel);
+                run.schemas.remove(&channel);
             }
             guatiao::value::wire::channel::Received::Value { .. } => {}
         }
@@ -1505,38 +1505,38 @@ impl Gateway {
         if is_value {
             // A viewer that is past the gap's start ignores it, so there is no need to know here
             // what each has seen.
-            if let Some(frames) = gap_between(session_id, session.last_sequence, sequence)? {
+            if let Some(frames) = gap_between(run_id, run.last_sequence, sequence)? {
                 for frame in frames {
-                    let _ = session.events.send(frame);
+                    let _ = run.events.send(frame);
                 }
             }
-            session.last_sequence = sequence;
+            run.last_sequence = sequence;
             if let Some((state, reason)) = lifecycle_state {
                 let at = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .map_or(0.0, |elapsed| elapsed.as_secs_f64());
                 // A repeated state is a re-publication, not a transition.
-                if session.lifecycle_state.as_deref() != Some(state.as_str()) {
+                if run.lifecycle_state.as_deref() != Some(state.as_str()) {
                     transition = Some(timeline::Transition {
-                        operation: session.operation_id.to_string(),
-                        mission: session.mission_id.to_string(),
-                        session: session_id.to_string(),
+                        operation: run.operation_id.to_string(),
+                        mission: run.mission_id.to_string(),
+                        run: run_id.to_string(),
                         state: state.clone(),
                         station: None,
                         at,
                     });
                 }
-                session.lifecycle_state = Some(state);
-                session.lifecycle_reason = reason;
-                session.lifecycle_sequence = sequence;
-                session.lifecycle_at = Some(at);
+                run.lifecycle_state = Some(state);
+                run.lifecycle_reason = reason;
+                run.lifecycle_sequence = sequence;
+                run.lifecycle_at = Some(at);
             }
-            session.history.push_back((sequence, frame.clone()));
-            while session.history.len() > self.config.limits.scrollback_events {
-                session.history.pop_front();
+            run.history.push_back((sequence, frame.clone()));
+            while run.history.len() > self.config.limits.scrollback_events {
+                run.history.pop_front();
             }
         }
-        let _ = session.events.send(frame);
+        let _ = run.events.send(frame);
         if let Some(transition) = &mut transition {
             transition.station = inner
                 .missions
@@ -1553,21 +1553,21 @@ impl Gateway {
     /// Queues one browser frame for the Station after confirming an active write lease.
     pub async fn submit_input(
         &self,
-        session_id: &SessionId,
+        run_id: &RunId,
         connection_id: &str,
         frame: Vec<u8>,
     ) -> Result<(), GatewayError> {
         if frame.len() > self.config.limits.max_frame_bytes {
             return Err(GatewayError::TooLarge);
         }
-        let input_sequence = validate_input_frame(session_id, &frame)?;
+        let input_sequence = validate_input_frame(run_id, &frame)?;
         let mut inner = self.inner.lock().await;
         let now = Instant::now();
         let connection = inner
             .connections
             .get(connection_id)
             .ok_or(GatewayError::InvalidCredential)?;
-        if &connection.session_id != session_id
+        if &connection.run_id != run_id
             || connection.mode != AttachMode::Write
             || connection.expires <= now
         {
@@ -1576,8 +1576,8 @@ impl Gateway {
         if input_sequence <= connection.last_input_sequence {
             return Err(GatewayError::Conflict);
         }
-        if let Some(session) = inner.sessions.get(session_id)
-            && !session
+        if let Some(run) = inner.runs.get(run_id)
+            && !run
                 .lease
                 .as_ref()
                 .is_some_and(|lease| lease.connection_id == connection_id && lease.expires > now)
@@ -1597,14 +1597,14 @@ impl Gateway {
         }
         connection.input_window_count += 1;
         connection.last_input_sequence = input_sequence;
-        let session = inner
-            .sessions
-            .get(session_id)
+        let run = inner
+            .runs
+            .get(run_id)
             .ok_or(GatewayError::NotFound)?;
         let input = AgentInput {
-            operation_id: session.operation_id.clone(),
-            mission_id: session.mission_id.clone(),
-            session_id: session_id.clone(),
+            operation_id: run.operation_id.clone(),
+            mission_id: run.mission_id.clone(),
+            run_id: run_id.clone(),
             frame,
         };
         self.input_tx
@@ -1614,24 +1614,24 @@ impl Gateway {
 
     /// Releases a viewer slot and its write lease when a socket closes.
     pub async fn disconnect(&self, attachment: Attachment) {
-        self.disconnect_connection(&attachment.session_id, &attachment.connection_id)
+        self.disconnect_connection(&attachment.run_id, &attachment.connection_id)
             .await;
     }
 
     /// Releases an active connection by its non-secret internal handle.
-    pub async fn disconnect_connection(&self, session_id: &SessionId, connection_id: &str) {
+    pub async fn disconnect_connection(&self, run_id: &RunId, connection_id: &str) {
         let mut inner = self.inner.lock().await;
         if inner.connections.remove(connection_id).is_none() {
             return;
         }
-        if let Some(session) = inner.sessions.get_mut(session_id) {
-            session.active_clients = session.active_clients.saturating_sub(1);
-            if session
+        if let Some(run) = inner.runs.get_mut(run_id) {
+            run.active_clients = run.active_clients.saturating_sub(1);
+            if run
                 .lease
                 .as_ref()
                 .is_some_and(|lease| lease.connection_id == connection_id)
             {
-                session.lease = None;
+                run.lease = None;
             }
         }
     }
@@ -2088,7 +2088,7 @@ impl Gateway {
                 get(principals::search).post(principals::lookup),
             )
             .route(
-                "/v1/user/operations/{operation_id}/sessions/{session_id}/context",
+                "/v1/user/operations/{operation_id}/runs/{run_id}/context",
                 get(transcripts::mission_context),
             )
             .route(
@@ -2108,17 +2108,17 @@ impl Gateway {
                 "/v1/station/source-reads/{id}/result",
                 post(source_reads::result),
             )
-            .route("/v1/station/sessions", post(register_session))
+            .route("/v1/station/runs", post(register_run))
             .route(
-                "/v1/station/sessions/{session_id}/lifecycle/{sequence}",
+                "/v1/station/runs/{run_id}/lifecycle/{sequence}",
                 post(publish_lifecycle),
             )
             .route(
-                "/v1/station/sessions/{session_id}/terminal/{sequence}",
+                "/v1/station/runs/{run_id}/terminal/{sequence}",
                 post(publish_terminal_output),
             )
             .route(
-                "/v1/station/sessions/{session_id}/events/{sequence}",
+                "/v1/station/runs/{run_id}/events/{sequence}",
                 post(ingest_event),
             )
             .route("/v1/station/attach-grants", post(issue_attach_token))
@@ -2137,7 +2137,7 @@ impl Gateway {
                 post(controls::report_station_control),
             )
             .route("/v1/attach", post(exchange_attach_token))
-            .route("/v1/socket/{session_id}", get(websocket_attach))
+            .route("/v1/socket/{run_id}", get(websocket_attach))
             .merge(liaison::routes())
             .layer(axum::extract::DefaultBodyLimit::max(max_frame_bytes))
             .merge(base)
@@ -2174,8 +2174,8 @@ impl Gateway {
 async fn board(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
-) -> Result<Json<Vec<BoardSession>>, ApiError> {
-    Ok(Json(authorized_board_sessions(&gateway, &headers).await?))
+) -> Result<Json<Vec<BoardRun>>, ApiError> {
+    Ok(Json(authorized_board_runs(&gateway, &headers).await?))
 }
 
 async fn stations(
@@ -2395,7 +2395,7 @@ fn station_theaters(info: &BTreeMap<String, serde_json::Value>) -> Vec<BoardThea
             report: theater.report,
             made_for: theater.made_for,
             resources: theater.resources,
-            sessions: theater.sessions,
+            runs: theater.runs,
         })
         .collect()
 }
@@ -2418,8 +2418,8 @@ async fn missions(
     headers: HeaderMap,
     Query(query): Query<MissionsQuery>,
 ) -> Result<Json<Vec<BoardMission>>, ApiError> {
-    let mut sessions = authorized_board_sessions(&gateway, &headers).await?;
-    // Missions no Session has been recorded for are listed beside the others, unless a
+    let mut runs = authorized_board_runs(&gateway, &headers).await?;
+    // Missions no Run has been recorded for are listed beside the others, unless a
     // compartment narrows the list: it covers Missions by what they are, which these are not yet.
     let mut unstarted = if query.compartment.is_some() {
         Vec::new()
@@ -2429,7 +2429,7 @@ async fn missions(
     };
     if let Some(mission) = &query.mission {
         let uid = mission_key(&gateway, mission).await?;
-        sessions.retain(|session| session.mission_id == uid);
+        runs.retain(|run| run.mission_id == uid);
         unstarted.retain(|pending| pending.mission_id == uid);
     }
     if let Some(operation) = &query.operation {
@@ -2438,13 +2438,13 @@ async fn missions(
         } else {
             OperationTree::default()
         };
-        sessions.retain(|session| tree.in_subtree(&session.operation_id, operation));
+        runs.retain(|run| tree.in_subtree(&run.operation_id, operation));
         unstarted.retain(|pending| tree.in_subtree(&pending.operation_id, operation));
     }
     if let Some(compartment) = query.compartment {
         let person = resolve_user(&gateway, bearer(&headers)?).await?;
         let access = gateway.probing_authorizer()?;
-        sessions = tokio::task::spawn_blocking(move || {
+        runs = tokio::task::spawn_blocking(move || {
             let compiled = access.compiled();
             let readable = access
                 .authorize(AuthorizationRequest {
@@ -2457,14 +2457,14 @@ async fn missions(
             let holds =
                 compiled.is_some_and(|compiled| compiled.person_holds(&compartment, &person));
             match compiled.filter(|_| readable || holds) {
-                Some(compiled) => sessions
+                Some(compiled) => runs
                     .into_iter()
-                    .filter(|session| {
+                    .filter(|run| {
                         compartments::in_compartment(
                             compiled,
                             &compartment,
-                            &session.operation_id,
-                            &session.mission_id,
+                            &run.operation_id,
+                            &run.mission_id,
                         )
                     })
                     .collect(),
@@ -2474,7 +2474,7 @@ async fn missions(
         .await
         .map_err(|_| ApiError::internal())?;
     }
-    let mut missions = group_missions(sessions);
+    let mut missions = group_missions(runs);
     let started: BTreeSet<_> = missions
         .iter()
         .map(|mission| (mission.operation_id.clone(), mission.mission_id.clone()))
@@ -2493,17 +2493,17 @@ async fn mission_detail(
     let operation_id = OperationId::new(operation_id).map_err(|_| ApiError::not_found())?;
     let named = named_mission(&gateway, &mission_id).await?;
     let mission_id = MissionId::new(named.mission_id).map_err(|_| ApiError::not_found())?;
-    let visible = authorized_board_sessions(&gateway, &headers).await?;
-    let sessions = visible
+    let visible = authorized_board_runs(&gateway, &headers).await?;
+    let runs = visible
         .into_iter()
-        .filter(|session| {
-            session.operation_id == operation_id.as_str()
-                && session.mission_id == mission_id.as_str()
+        .filter(|run| {
+            run.operation_id == operation_id.as_str()
+                && run.mission_id == mission_id.as_str()
         })
         .collect::<Vec<_>>();
-    let mut mission = match group_missions(sessions).into_iter().next() {
+    let mut mission = match group_missions(runs).into_iter().next() {
         Some(mission) => mission,
-        // A Mission nobody has started has no Session to find it by.
+        // A Mission nobody has started has no Run to find it by.
         None => {
             let person = resolve_user(&gateway, bearer(&headers)?).await?;
             unstarted::unstarted_missions(&gateway, person)
@@ -2527,10 +2527,10 @@ async fn mission_detail(
     if let Some(registry) = gateway.registry.clone() {
         let (operation, mission_id) = (mission.operation_id.clone(), mission.mission_id.clone());
         let (usage, mut attempts) = tokio::task::spawn_blocking(move || {
-            let mut attempts = attempts_by_mission(registry.sessions()?);
+            let mut attempts = attempts_by_mission(registry.runs()?);
             for attempt in attempts.get_mut(&mission_id).into_iter().flatten() {
                 attempt.final_report = registry
-                    .final_report(&attempt.session_id)?
+                    .final_report(&attempt.run_id)?
                     .map(|report| report.text);
             }
             Ok::<_, std::io::Error>((
@@ -3181,31 +3181,31 @@ async fn record_proposal_audit(
     Ok(())
 }
 
-async fn authorized_board_sessions(
+async fn authorized_board_runs(
     gateway: &Gateway,
     headers: &HeaderMap,
-) -> Result<Vec<BoardSession>, ApiError> {
+) -> Result<Vec<BoardRun>, ApiError> {
     let person = resolve_user(gateway, bearer(headers)?).await?;
     let authorizer = gateway.authorizer()?;
-    let sessions = gateway.board_sessions().await;
+    let runs = gateway.board_runs().await;
     let tree = operation_tree(gateway).await?;
     let visible = tokio::task::spawn_blocking(move || {
         let mut visible = Vec::new();
-        // One decision per Operation, not per Session.
+        // One decision per Operation, not per Run.
         let mut readable = HashMap::<String, bool>::new();
-        for session in sessions {
-            let allowed = match readable.get(&session.operation_id) {
+        for run in runs {
+            let allowed = match readable.get(&run.operation_id) {
                 Some(allowed) => *allowed,
                 None => {
                     let decision = authorizer
                         .authorize(operation_request(
                             person.clone(),
                             "mission.read",
-                            &session.operation_id,
+                            &run.operation_id,
                             &tree,
                         ))
                         .map_err(|_| ())?;
-                    readable.insert(session.operation_id.clone(), decision.allowed);
+                    readable.insert(run.operation_id.clone(), decision.allowed);
                     decision.allowed
                 }
             };
@@ -3214,11 +3214,11 @@ async fn authorized_board_sessions(
                 || authorizer.allows_mission(
                     &person,
                     ai6::CompartmentAction::MissionRead,
-                    &session.mission_id,
-                    &session.operation_id,
+                    &run.mission_id,
+                    &run.operation_id,
                 )
             {
-                visible.push(session);
+                visible.push(run);
             }
         }
         Ok::<_, ()>(visible)
@@ -3229,27 +3229,27 @@ async fn authorized_board_sessions(
     Ok(visible)
 }
 
-/// When a Session record last changed in a way the board shows, as Unix seconds: its close, or
+/// When a Run record last changed in a way the board shows, as Unix seconds: its close, or
 /// else its opening; zero when it recorded neither.
-fn record_updated_at(record: &ai6::SessionRecord) -> f64 {
+fn record_updated_at(record: &ai6::RunRecord) -> f64 {
     record.closed_at.or(record.opened_at).unwrap_or(0.0)
 }
 
-fn group_missions(sessions: Vec<BoardSession>) -> Vec<BoardMission> {
-    let mut missions = BTreeMap::<(String, String), Vec<BoardSession>>::new();
-    for session in sessions {
+fn group_missions(runs: Vec<BoardRun>) -> Vec<BoardMission> {
+    let mut missions = BTreeMap::<(String, String), Vec<BoardRun>>::new();
+    for run in runs {
         missions
-            .entry((session.operation_id.clone(), session.mission_id.clone()))
+            .entry((run.operation_id.clone(), run.mission_id.clone()))
             .or_default()
-            .push(session);
+            .push(run);
     }
     missions
         .into_iter()
-        .map(|((operation_id, mission_id), sessions)| BoardMission {
+        .map(|((operation_id, mission_id), runs)| BoardMission {
             operation_id,
             handle: mission_id.clone(),
             mission_id,
-            sessions,
+            runs,
             brief: None,
             usage: None,
             attempts: Vec::new(),
@@ -3368,7 +3368,7 @@ struct LoginRequest {
     secret: String,
     #[serde(default)]
     ttl_seconds: Option<u64>,
-    /// `false` asks a browser's sign-in not to get a session cookie.
+    /// `false` asks a browser's sign-in not to get a run cookie.
     #[serde(default)]
     session_cookie: Option<bool>,
 }
@@ -3625,7 +3625,7 @@ async fn login(
 }
 
 /// The page cookie of a browser's sign-in that `issued` was issued in: it names the sign-in
-/// (`sign_in`, the session cookie's record) when there is one, else the token itself, and lasts as
+/// (`sign_in`, the run cookie's record) when there is one, else the token itself, and lasts as
 /// long as what it names may.
 fn page_cookie_for(
     gateway: &Gateway,
@@ -3688,7 +3688,7 @@ async fn proxy_person(
         .map(Some)
 }
 
-/// `POST /v1/auth/resume`: a fresh access token for the sign-in a session cookie holds, so a
+/// `POST /v1/auth/resume`: a fresh access token for the sign-in a run cookie holds, so a
 /// reloaded page need not ask for the password. The sign-in's time keeps running from when it
 /// was made. It answers as `login` does; a cookie that does not stand is cleared.
 async fn resume(
@@ -3720,7 +3720,7 @@ async fn resume(
     Ok(response)
 }
 
-/// The token a session cookie's value gets, with the ID of its sign-in; `None` when it gets none: the setting is off, the
+/// The token a run cookie's value gets, with the ID of its sign-in; `None` when it gets none: the setting is off, the
 /// value is not a standing cookie, its time is up, its person has left the directory, or a
 /// front proxy now says this browser is someone else.
 async fn resumed_token(
@@ -3950,7 +3950,7 @@ fn new_secret() -> String {
     format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
 }
 
-/// Stores a new bearer token, of the sign-in holding the session cookie `sign_in` when one is
+/// Stores a new bearer token, of the sign-in holding the run cookie `sign_in` when one is
 /// named.
 async fn store_bearer(
     registry: Arc<dyn RegistryBackend>,
@@ -3999,19 +3999,19 @@ async fn store_bearer(
     })
 }
 
-/// A session cookie just stored: its record's ID and the header that hands it to the browser.
+/// A run cookie just stored: its record's ID and the header that hands it to the browser.
 struct NewSessionCookie {
     sign_in: String,
     header: HeaderValue,
 }
 
-/// Whether a browser's sign-in gets a session cookie: with renewal off the sign-in ends with its
+/// Whether a browser's sign-in gets a run cookie: with renewal off the sign-in ends with its
 /// first token, and there is nothing to come back to.
 fn session_cookies_on(table: &ai6::UnexGatewayLimits) -> bool {
     table.session_cookie && table.session_max.get() != Some(Duration::ZERO)
 }
 
-/// Moves a sign-in's session cookie on to `idle` seconds from `now`, and never past `ends`: the
+/// Moves a sign-in's run cookie on to `idle` seconds from `now`, and never past `ends`: the
 /// cookie stands while the sign-in is used, and a failure to write that down is not the
 /// request's.
 async fn keep_cookie(
@@ -4027,7 +4027,7 @@ async fn keep_cookie(
     let _ = tokio::task::spawn_blocking(move || registry.extend_access_token(&cookie, until)).await;
 }
 
-/// Stores a sign-in's session cookie, which ends `session_max` after `issued_at` and never
+/// Stores a sign-in's run cookie, which ends `session_max` after `issued_at` and never
 /// later, and `idle` seconds after `issued_at` unless the sign-in is renewed.
 async fn store_session_cookie(
     registry: Arc<dyn RegistryBackend>,
@@ -4172,24 +4172,24 @@ async fn issue_user_attach_token(
         operation_id: OperationId::new(request.operation_id)
             .map_err(|_| ApiError::bad_request())?,
         mission_id: MissionId::new(request.mission_id).map_err(|_| ApiError::bad_request())?,
-        session_id: SessionId::new(request.session_id).map_err(|_| ApiError::bad_request())?,
+        run_id: RunId::new(request.run_id).map_err(|_| ApiError::bad_request())?,
         mode,
     };
-    let session = gateway
+    let run = gateway
         .inner
         .lock()
         .await
-        .sessions
-        .get(&grant.session_id)
+        .runs
+        .get(&grant.run_id)
         .map(|record| (record.operation_id.clone(), record.mission_id.clone()))
         .ok_or_else(|| ApiError::from(GatewayError::NotFound))?;
-    if session != (grant.operation_id.clone(), grant.mission_id.clone()) {
+    if run != (grant.operation_id.clone(), grant.mission_id.clone()) {
         return Err(ApiError::forbidden());
     }
     let providers = gateway.access.clone().ok_or_else(ApiError::unavailable)?;
     let action = match grant.mode {
-        AttachMode::Read => "session.read",
-        AttachMode::Write => "session.input",
+        AttachMode::Read => "run.read",
+        AttachMode::Write => "run.input",
     };
     let request = operation_request(
         person,
@@ -5122,7 +5122,7 @@ async fn user_audit(
     ))
 }
 
-/// `POST /v1/auth/logout`: ends the sign-in of the presented token, of the session cookie when
+/// `POST /v1/auth/logout`: ends the sign-in of the presented token, of the run cookie when
 /// the app's own page sends one, or both. The cookie counts by itself because a token can be over
 /// by then, and signing out must still end what a reload would come back to.
 async fn logout(State(gateway): State<Gateway>, headers: HeaderMap) -> Result<Response, ApiError> {
@@ -5235,10 +5235,10 @@ fn utc_timestamp() -> Result<String, ApiError> {
 }
 
 #[derive(Deserialize)]
-struct RegisterSessionRequest {
+struct RegisterRunRequest {
     operation_id: String,
     mission_id: String,
-    session_id: String,
+    run_id: String,
     mission: Option<LaunchManifest>,
 }
 
@@ -5351,38 +5351,38 @@ struct LifecycleRequest {
     reason: Option<String>,
 }
 
-/// One provider Session entry returned by the public board API.
+/// One provider Run entry returned by the public board API.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct BoardSession {
+pub struct BoardRun {
     /// Project that owns the Mission.
     pub operation_id: String,
     /// AI6 Mission ID.
     pub mission_id: String,
-    /// Provider-issued resumable Session ID.
-    pub session_id: String,
+    /// Provider-issued resumable Run ID.
+    pub run_id: String,
     /// Latest Mission state, absent until the first lifecycle event.
     pub state: Option<String>,
-    /// Why AI6 holds the Session in that state, when it says: `green-ink` while a step
+    /// Why AI6 holds the Run in that state, when it says: `green-ink` while a step
     /// waits for a person's approval, `budget` after a spending limit.
     pub reason: Option<String>,
     /// Sequence of the latest lifecycle event, or zero before one arrives.
     pub sequence: u64,
     /// When the latest lifecycle event arrived, as Unix seconds; the most recently updated
-    /// Session of a Mission carries the Mission's current state.
+    /// Run of a Mission carries the Mission's current state.
     pub updated_at: Option<f64>,
-    /// The untrusted input the Session has read (`brief:source`, `cable:SENDER`,
+    /// The untrusted input the Run has read (`brief:source`, `cable:SENDER`,
     /// `tool:NAME`, `review`), from its Registry record; empty when it has read none.
     pub exposure: Vec<String>,
-    /// The Station that holds, or last held, the Session, from its Registry record; absent
-    /// without a Registry or before the Station records the Session.
+    /// The Station that holds, or last held, the Run, from its Registry record; absent
+    /// without a Registry or before the Station records the Run.
     pub station_id: Option<String>,
     /// The Agent the Mission's published brief names; absent before the brief arrives or
-    /// when it names none. Every Session of a Mission carries the same one.
+    /// when it names none. Every Run of a Mission carries the same one.
     pub agent: Option<String>,
 }
 
-/// One registered Mission with the provider Sessions known to Universal Exports.
+/// One registered Mission with the provider Runs known to Universal Exports.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BoardMission {
@@ -5392,18 +5392,18 @@ pub struct BoardMission {
     pub mission_id: String,
     /// What the Mission is called now; its ID when the Registry names it no other way.
     pub handle: String,
-    /// Provider Sessions registered for this Mission.
-    pub sessions: Vec<BoardSession>,
+    /// Provider Runs registered for this Mission.
+    pub runs: Vec<BoardRun>,
     /// Exact Mission brief and sanitized launch manifest published by AI6, when known.
     pub brief: Option<LaunchManifest>,
-    /// Tokens and cost the Mission's Sessions consumed, from the shared Registry ledger;
+    /// Tokens and cost the Mission's Runs consumed, from the shared Registry ledger;
     /// absent until a provider reports usage.
     pub usage: Option<MissionUsage>,
-    /// Every attempt at the Mission, first first, from the shared Session records; empty
-    /// when no Session was recorded.
+    /// Every attempt at the Mission, first first, from the shared Run records; empty
+    /// when no Run was recorded.
     pub attempts: Vec<MissionAttempt>,
-    /// Where a Mission with no Session stands: queued, waiting, retrying a start or failed
-    /// before one; absent once it has a Session.
+    /// Where a Mission with no Run stands: queued, waiting, retrying a start or failed
+    /// before one; absent once it has a Run.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pending: Option<unstarted::BoardPending>,
 }
@@ -5414,16 +5414,16 @@ pub struct BoardMission {
 pub struct MissionAttempt {
     /// Which try at the Mission this is, starting at 1.
     pub attempt: u32,
-    /// AI6's Session ID: the run's UID.
-    pub session_id: String,
+    /// AI6's Run ID: the run's UID.
+    pub run_id: String,
     /// The run's handle, `<mission handle>.<attempt>`, as the Mission was called when it
     /// opened.
     pub handle: Option<String>,
-    /// The provider's Session ID, once issued.
-    pub provider_session_id: Option<String>,
-    /// The AI6 Session ID of the attempt this one replaced.
+    /// The provider's Run ID, once issued.
+    pub provider_id: Option<String>,
+    /// The AI6 Run ID of the attempt this one replaced.
     pub predecessor: Option<String>,
-    /// The Station that holds, or last held, the Session.
+    /// The Station that holds, or last held, the Run.
     pub station: String,
     /// The Theater the harness ran in.
     pub theater: Option<String>,
@@ -5455,13 +5455,13 @@ pub struct MissionAttempt {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recommendation: Option<ai6::MissionVerdict>,
     /// The last message its Agent ended a turn with, as data. Only one Mission's detail has it:
-    /// each can be as long as `[registry.limits.sessions] final_report_bytes`.
+    /// each can be as long as `[registry.limits.runs] final_report_bytes`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub final_report: Option<String>,
 }
 
 impl MissionAttempt {
-    fn from_record(record: &ai6::SessionRecord) -> Self {
+    fn from_record(record: &ai6::RunRecord) -> Self {
         Self {
             route: record.launch.as_ref().map(|launch| {
                 ai6::RouteRef::new(
@@ -5482,9 +5482,9 @@ impl MissionAttempt {
             recommendation: record.recommendation.clone(),
             final_report: None,
             attempt: record.attempt,
-            session_id: record.session_id.clone(),
+            run_id: record.run_id.clone(),
             handle: record.handle.clone(),
-            provider_session_id: record.provider_session_id.clone(),
+            provider_id: record.provider_id.clone(),
             predecessor: record.predecessor.clone(),
             station: record.station.clone(),
             theater: record.theater.clone(),
@@ -5502,7 +5502,7 @@ impl MissionAttempt {
 }
 
 /// The attempts at each Mission among `records`, in attempt order.
-fn attempts_by_mission(records: Vec<ai6::SessionRecord>) -> BTreeMap<String, Vec<MissionAttempt>> {
+fn attempts_by_mission(records: Vec<ai6::RunRecord>) -> BTreeMap<String, Vec<MissionAttempt>> {
     let mut attempts = BTreeMap::<String, Vec<MissionAttempt>>::new();
     for record in &records {
         attempts
@@ -5557,7 +5557,7 @@ pub struct BoardStation {
     pub seen: f64,
     /// Station roles reported at check-in.
     pub roles: Vec<String>,
-    /// Active sessions reported at check-in.
+    /// Active runs reported at check-in.
     pub running: usize,
     /// Mission execution capacity reported at check-in.
     pub capacity: usize,
@@ -5646,7 +5646,7 @@ pub struct BoardTheater {
     /// AI6's leases.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub weakened: Vec<String>,
-    /// What the Theater must have before Sessions run there.
+    /// What the Theater must have before Runs run there.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub requires: Option<ai6::Requirements>,
     /// What the Station's last probe found there: versions, free space, unmet requirements.
@@ -5659,9 +5659,9 @@ pub struct BoardTheater {
     /// sample succeeds.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resources: Option<ai6::Resources>,
-    /// Sessions the Station is running there; omitted when none.
+    /// Runs the Station is running there; omitted when none.
     #[serde(skip_serializing_if = "is_zero")]
-    pub sessions: usize,
+    pub runs: usize,
 }
 
 fn is_zero(count: &usize) -> bool {
@@ -5693,7 +5693,7 @@ pub struct LaunchManifest {
     pub effort: Option<String>,
     /// Environment variable names only; values are never published.
     pub environment_keys: Vec<String>,
-    /// The Station that supervises the Session.
+    /// The Station that supervises the Run.
     pub station_id: String,
     /// The Theater the harness runs in, when the Station knows it.
     pub theater_id: Option<String>,
@@ -5711,7 +5711,7 @@ pub struct LaunchManifest {
 struct GrantRequest {
     operation_id: String,
     mission_id: String,
-    session_id: String,
+    run_id: String,
     mode: String,
 }
 
@@ -5730,22 +5730,22 @@ struct AfterQuery {
     after: Option<u64>,
 }
 
-async fn register_session(
+async fn register_run(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
-    Json(request): Json<RegisterSessionRequest>,
-) -> Result<(StatusCode, Json<RegisterSessionResponse>), ApiError> {
+    Json(request): Json<RegisterRunRequest>,
+) -> Result<(StatusCode, Json<RegisterRunResponse>), ApiError> {
     let token = bearer(&headers)?;
-    let session_id = SessionId::new(request.session_id).map_err(|_| ApiError::bad_request())?;
+    let run_id = RunId::new(request.run_id).map_err(|_| ApiError::bad_request())?;
     let operation_id =
         OperationId::new(request.operation_id).map_err(|_| ApiError::bad_request())?;
     let mission_id = MissionId::new(request.mission_id).map_err(|_| ApiError::bad_request())?;
     gateway
-        .register_session(
+        .register_run(
             token,
             operation_id.clone(),
             mission_id.clone(),
-            session_id.clone(),
+            run_id.clone(),
         )
         .await?;
     if let Some(brief) = request.mission {
@@ -5753,11 +5753,11 @@ async fn register_session(
             .publish_mission_brief(token, operation_id, mission_id, brief)
             .await?;
     }
-    let next_sequence = gateway.next_sequence(token, &session_id).await?;
-    let terminal_bytes = gateway.terminal_bytes(&session_id);
+    let next_sequence = gateway.next_sequence(token, &run_id).await?;
+    let terminal_bytes = gateway.terminal_bytes(&run_id);
     Ok((
         StatusCode::CREATED,
-        Json(RegisterSessionResponse {
+        Json(RegisterRunResponse {
             next_sequence,
             terminal_bytes,
         }),
@@ -5765,19 +5765,19 @@ async fn register_session(
 }
 
 #[derive(Serialize)]
-struct RegisterSessionResponse {
+struct RegisterRunResponse {
     next_sequence: u64,
-    /// The most terminal output one event of this Session may carry.
+    /// The most terminal output one event of this Run may carry.
     terminal_bytes: usize,
 }
 
 async fn publish_lifecycle(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
-    Path((session, sequence)): Path<(String, u64)>,
+    Path((run, sequence)): Path<(String, u64)>,
     Json(request): Json<LifecycleRequest>,
 ) -> Result<StatusCode, ApiError> {
-    let state = SessionState::parse(&request.state).ok_or_else(ApiError::bad_request)?;
+    let state = RunState::parse(&request.state).ok_or_else(ApiError::bad_request)?;
     if request
         .reason
         .as_deref()
@@ -5793,7 +5793,7 @@ async fn publish_lifecycle(
                     .map_err(|_| ApiError::bad_request())?,
                 mission_id: MissionId::new(request.mission_id)
                     .map_err(|_| ApiError::bad_request())?,
-                session_id: SessionId::new(session).map_err(|_| ApiError::bad_request())?,
+                run_id: RunId::new(run).map_err(|_| ApiError::bad_request())?,
                 state,
                 reason: request.reason,
                 sequence,
@@ -5806,13 +5806,13 @@ async fn publish_lifecycle(
 async fn publish_terminal_output(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
-    Path((session, sequence)): Path<(String, u64)>,
+    Path((run, sequence)): Path<(String, u64)>,
     body: Bytes,
 ) -> Result<StatusCode, ApiError> {
     gateway
         .publish_terminal_output(
             bearer(&headers)?,
-            SessionId::new(session).map_err(|_| ApiError::bad_request())?,
+            RunId::new(run).map_err(|_| ApiError::bad_request())?,
             sequence,
             body.to_vec(),
         )
@@ -5823,13 +5823,13 @@ async fn publish_terminal_output(
 async fn ingest_event(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
-    Path((session, sequence)): Path<(String, u64)>,
+    Path((run, sequence)): Path<(String, u64)>,
     body: Bytes,
 ) -> Result<StatusCode, ApiError> {
     gateway
         .ingest(
             bearer(&headers)?,
-            &SessionId::new(session).map_err(|_| ApiError::bad_request())?,
+            &RunId::new(run).map_err(|_| ApiError::bad_request())?,
             sequence,
             body.to_vec(),
         )
@@ -5855,7 +5855,7 @@ async fn issue_attach_token(
                     .map_err(|_| ApiError::bad_request())?,
                 mission_id: MissionId::new(request.mission_id)
                     .map_err(|_| ApiError::bad_request())?,
-                session_id: SessionId::new(request.session_id)
+                run_id: RunId::new(request.run_id)
                     .map_err(|_| ApiError::bad_request())?,
                 mode,
             },
@@ -5925,15 +5925,15 @@ async fn next_agent_input(
         HeaderValue::from_str(input.mission_id.as_str()).map_err(|_| ApiError::internal())?,
     );
     response.headers_mut().insert(
-        "x-ai6-session-id",
-        HeaderValue::from_str(input.session_id.as_str()).map_err(|_| ApiError::internal())?,
+        "x-ai6-run-id",
+        HeaderValue::from_str(input.run_id.as_str()).map_err(|_| ApiError::internal())?,
     );
     Ok(response)
 }
 
 async fn websocket_attach(
     State(gateway): State<Gateway>,
-    Path(session): Path<String>,
+    Path(run): Path<String>,
     Query(after): Query<AfterQuery>,
     headers: HeaderMap,
     upgrade: WebSocketUpgrade,
@@ -5944,9 +5944,9 @@ async fn websocket_attach(
         .and_then(|value| value.to_str().ok())
         .and_then(attach_cookie)
         .ok_or_else(ApiError::unauthorized)?;
-    let session_id = SessionId::new(session).map_err(|_| ApiError::bad_request())?;
+    let run_id = RunId::new(run).map_err(|_| ApiError::bad_request())?;
     let attachment = gateway
-        .attach(&session_id, cookie, after.after.unwrap_or(0))
+        .attach(&run_id, cookie, after.after.unwrap_or(0))
         .await?;
     let socket_origin = gateway.public_origin().to_owned();
     let max_write_buffer = gateway
@@ -5961,7 +5961,7 @@ async fn websocket_attach(
         .max_write_buffer_size(max_write_buffer)
         .protocols(["ai6.guatiao"])
         .on_upgrade(move |socket| {
-            serve_socket(socket, gateway, attachment, session_id, socket_origin)
+            serve_socket(socket, gateway, attachment, run_id, socket_origin)
         }))
 }
 
@@ -5969,7 +5969,7 @@ async fn serve_socket(
     socket: WebSocket,
     gateway: Gateway,
     attachment: Attachment,
-    session_id: SessionId,
+    run_id: RunId,
     _expected_origin: String,
 ) {
     let Attachment {
@@ -5984,7 +5984,7 @@ async fn serve_socket(
     for frame in replay {
         if sender.send(Message::Binary(frame.into())).await.is_err() {
             gateway
-                .disconnect_connection(&session_id, &connection_id)
+                .disconnect_connection(&run_id, &connection_id)
                 .await;
             return;
         }
@@ -6000,7 +6000,7 @@ async fn serve_socket(
             }
             message = receiver.next() => match message {
                 Some(Ok(Message::Binary(frame))) if mode == AttachMode::Write => {
-                    if gateway.submit_input(&session_id, &connection_id, frame.to_vec()).await.is_err() {
+                    if gateway.submit_input(&run_id, &connection_id, frame.to_vec()).await.is_err() {
                         let _ = sender.send(close_policy()).await;
                         break;
                     }
@@ -6031,7 +6031,7 @@ async fn serve_socket(
         }
     }
     gateway
-        .disconnect_connection(&session_id, &connection_id)
+        .disconnect_connection(&run_id, &connection_id)
         .await;
 }
 
@@ -6227,13 +6227,13 @@ fn prune_expired(inner: &mut Inner) {
     inner
         .connection_tickets
         .retain(|_, timed| timed.expires > now);
-    for session in inner.sessions.values_mut() {
-        if session
+    for run in inner.runs.values_mut() {
+        if run
             .lease
             .as_ref()
             .is_some_and(|lease| lease.expires <= now)
         {
-            session.lease = None;
+            run.lease = None;
         }
     }
 }
@@ -6241,15 +6241,15 @@ fn prune_expired(inner: &mut Inner) {
 fn pending_credential_capacity(config: &GatewayConfig) -> usize {
     config
         .limits
-        .max_sessions
-        .saturating_mul(config.limits.max_clients_per_session)
+        .max_runs
+        .saturating_mul(config.limits.max_clients_per_run)
         .clamp(16, 65_536)
 }
 
 fn client_slots_or_max(limits: GatewayLimits) -> usize {
     limits
-        .max_sessions
-        .saturating_mul(limits.max_clients_per_session)
+        .max_runs
+        .saturating_mul(limits.max_clients_per_run)
 }
 
 /// Whether `left` and `right` are equal, in time that does not depend on where they differ.
@@ -6259,10 +6259,10 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
     left.len() == right.len() && bool::from(left.ct_eq(right))
 }
 
-fn validate_input_frame(session_id: &SessionId, frame: &[u8]) -> Result<u64, GatewayError> {
-    let template = TerminalData::new(session_id.clone(), 1, TerminalDirection::Input, Vec::new())
+fn validate_input_frame(run_id: &RunId, frame: &[u8]) -> Result<u64, GatewayError> {
+    let template = TerminalData::new(run_id.clone(), 1, TerminalDirection::Input, Vec::new())
         .map_err(|_| GatewayError::InvalidFrame)?;
-    let resize_template = TerminalResize::new(session_id.clone(), 1, 80, 24)
+    let resize_template = TerminalResize::new(run_id.clone(), 1, 80, 24)
         .map_err(|_| GatewayError::InvalidFrame)?;
     let (terminal_schema, _) =
         terminal_frames(&template).map_err(|_| GatewayError::InvalidFrame)?;
@@ -6281,14 +6281,14 @@ fn validate_input_frame(session_id: &SessionId, frame: &[u8]) -> Result<u64, Gat
         .ok_or(GatewayError::InvalidFrame)?
     {
         IncomingFrame::Terminal(data)
-            if data.session_id() == session_id
+            if data.run_id() == run_id
                 && data.direction() == TerminalDirection::Input
                 && data.sequence() > 0 =>
         {
             Ok(data.sequence())
         }
         IncomingFrame::Resize(resize)
-            if resize.session_id() == session_id && resize.sequence() > 0 =>
+            if resize.run_id() == run_id && resize.sequence() > 0 =>
         {
             Ok(resize.sequence())
         }
@@ -6304,19 +6304,19 @@ fn validate_lifecycle_value(
     value: &guatiao::Value,
     operation_id: &OperationId,
     mission_id: &MissionId,
-    session_id: &SessionId,
+    run_id: &RunId,
     expected_sequence: u64,
 ) -> Result<(), GatewayError> {
     let map: &Map = value.try_as_ref().ok_or(GatewayError::InvalidFrame)?;
     let station = read_text(map, "operation_id")?;
     let mission = read_text(map, "mission_id")?;
-    let session = read_text(map, "session_id")?;
+    let run = read_text(map, "run_id")?;
     let state = read_text(map, "state")?;
     let sequence = read_sequence(map)?;
     if station != operation_id.as_str()
         || mission != mission_id.as_str()
-        || session != session_id.as_str()
-        || SessionState::parse(state).is_none()
+        || run != run_id.as_str()
+        || RunState::parse(state).is_none()
         || sequence != expected_sequence
     {
         return Err(GatewayError::Forbidden);
@@ -6326,11 +6326,11 @@ fn validate_lifecycle_value(
 
 /// The schema and value of a gap, when a sequence lies between `after` and `before`.
 fn gap_between(
-    session_id: &SessionId,
+    run_id: &RunId,
     after: u64,
     before: u64,
 ) -> Result<Option<[Vec<u8>; 2]>, GatewayError> {
-    let Ok(gap) = ai6_diptel::TerminalGap::new(session_id.clone(), after, before) else {
+    let Ok(gap) = ai6_diptel::TerminalGap::new(run_id.clone(), after, before) else {
         return Ok(None);
     };
     let (schema, value) = ai6_diptel::gap_frames(&gap).map_err(|_| GatewayError::InvalidFrame)?;
@@ -6339,12 +6339,12 @@ fn gap_between(
 
 fn validate_terminal_output(
     value: &guatiao::Value,
-    session_id: &SessionId,
+    run_id: &RunId,
     expected_sequence: u64,
     max_frame_bytes: usize,
 ) -> Result<(), GatewayError> {
     let map: &Map = value.try_as_ref().ok_or(GatewayError::InvalidFrame)?;
-    let session = read_text(map, "session_id")?;
+    let run = read_text(map, "run_id")?;
     let direction = read_text(map, "direction")?;
     let sequence = read_sequence(map)?;
     let bytes: &[u8] = map
@@ -6352,7 +6352,7 @@ fn validate_terminal_output(
         .map_err(|_| GatewayError::InvalidFrame)?
         .try_into()
         .map_err(|_| GatewayError::InvalidFrame)?;
-    if session != session_id.as_str() || direction != "output" || sequence != expected_sequence {
+    if run != run_id.as_str() || direction != "output" || sequence != expected_sequence {
         return Err(GatewayError::Forbidden);
     }
     if bytes.len() > max_frame_bytes {
@@ -6391,7 +6391,7 @@ mod tests {
     const PROXY_TEST_SECRET: &str = "proxy-secret-that-is-long-enough-for-tests";
     use ai6::{FileRegistry, RoleAuthorizer};
     use ai6_diptel::{
-        LifecycleEvent, SessionState, TerminalData, TerminalDirection, TerminalResize,
+        LifecycleEvent, RunState, TerminalData, TerminalDirection, TerminalResize,
         lifecycle_frames, resize_frames, terminal_frames,
     };
     use guatiao::library::ProviderError;
@@ -6399,8 +6399,8 @@ mod tests {
 
     fn test_limits() -> GatewayLimits {
         GatewayLimits {
-            max_sessions: 4,
-            max_clients_per_session: 3,
+            max_runs: 4,
+            max_clients_per_run: 3,
             scrollback_events: 2,
             max_frame_bytes: 1024,
             max_input_frames_per_second: 20,
@@ -6450,32 +6450,32 @@ mod tests {
         )
     }
 
-    async fn register(gateway: &Gateway) -> (OperationId, MissionId, SessionId) {
+    async fn register(gateway: &Gateway) -> (OperationId, MissionId, RunId) {
         let station = OperationId::new("station-a").unwrap();
         let mission = MissionId::new("mission-a").unwrap();
-        let session = SessionId::new("provider-session-a").unwrap();
+        let run = RunId::new("provider-id-a").unwrap();
         gateway
-            .register_session(
+            .register_run(
                 "m-token-that-is-long-enough-for-testing",
                 station.clone(),
                 mission.clone(),
-                session.clone(),
+                run.clone(),
             )
             .await
             .unwrap();
-        (station, mission, session)
+        (station, mission, run)
     }
 
     #[tokio::test]
-    async fn board_missions_group_provider_sessions_by_station_and_mission() {
+    async fn board_missions_group_provider_ids_by_station_and_mission() {
         let gateway = gateway();
         let (station, mission, _) = register(&gateway).await;
         gateway
-            .register_session(
+            .register_run(
                 "m-token-that-is-long-enough-for-testing",
                 station,
                 mission,
-                SessionId::new("provider-session-b").unwrap(),
+                RunId::new("provider-id-b").unwrap(),
             )
             .await
             .unwrap();
@@ -6485,18 +6485,18 @@ mod tests {
         assert_eq!(missions.len(), 1);
         assert_eq!(missions[0].operation_id, "station-a");
         assert_eq!(missions[0].mission_id, "mission-a");
-        assert_eq!(missions[0].sessions.len(), 2);
+        assert_eq!(missions[0].runs.len(), 2);
     }
 
     async fn grant(gateway: &Gateway, mode: AttachMode) -> String {
-        let (station, mission, session) = register(gateway).await;
+        let (station, mission, run) = register(gateway).await;
         gateway
             .issue_attach_token(
                 "m-token-that-is-long-enough-for-testing",
                 AttachGrant {
                     operation_id: station,
                     mission_id: mission,
-                    session_id: session,
+                    run_id: run,
                     mode,
                 },
             )
@@ -6504,9 +6504,9 @@ mod tests {
             .unwrap()
     }
 
-    fn output(session: &SessionId, sequence: u64) -> (Vec<u8>, Vec<u8>) {
+    fn output(run: &RunId, sequence: u64) -> (Vec<u8>, Vec<u8>) {
         let event = TerminalData::new(
-            session.clone(),
+            run.clone(),
             sequence,
             TerminalDirection::Output,
             vec![0xff, sequence as u8],
@@ -6522,14 +6522,14 @@ mod tests {
             gateway.authenticate_station("wrong").unwrap_err(),
             GatewayError::Unauthorized
         );
-        let (_, _, session) = register(&gateway).await;
+        let (_, _, run) = register(&gateway).await;
         let result = gateway
             .issue_attach_token(
                 "m-token-that-is-long-enough-for-testing",
                 AttachGrant {
                     operation_id: OperationId::new("other-station").unwrap(),
                     mission_id: MissionId::new("mission-a").unwrap(),
-                    session_id: session,
+                    run_id: run,
                     mode: AttachMode::Read,
                 },
             )
@@ -6538,35 +6538,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_board_shows_why_a_session_is_held_until_its_next_state() {
+    async fn the_board_shows_why_a_run_is_held_until_its_next_state() {
         let gateway = gateway();
-        let (operation, mission, session) = register(&gateway).await;
+        let (operation, mission, run) = register(&gateway).await;
         let event = |state, reason: Option<&str>, sequence| LifecycleEvent {
             operation_id: operation.clone(),
             mission_id: mission.clone(),
-            session_id: session.clone(),
+            run_id: run.clone(),
             state,
             reason: reason.map(str::to_owned),
             sequence,
         };
         let token = "m-token-that-is-long-enough-for-testing";
         gateway
-            .publish_lifecycle(token, event(SessionState::Blocked, Some("green-ink"), 1))
+            .publish_lifecycle(token, event(RunState::Blocked, Some("green-ink"), 1))
             .await
             .unwrap();
-        let board = gateway.board_sessions().await;
+        let board = gateway.board_runs().await;
         assert_eq!(
             (board[0].state.as_deref(), board[0].reason.as_deref()),
             (Some("blocked"), Some("green-ink"))
         );
         gateway
-            .publish_lifecycle(token, event(SessionState::Working, None, 2))
+            .publish_lifecycle(token, event(RunState::Working, None, 2))
             .await
             .unwrap();
-        assert_eq!(gateway.board_sessions().await[0].reason, None);
+        assert_eq!(gateway.board_runs().await[0].reason, None);
         assert!(
             gateway
-                .publish_lifecycle(token, event(SessionState::Blocked, Some("Green Ink"), 3))
+                .publish_lifecycle(token, event(RunState::Blocked, Some("Green Ink"), 3))
                 .await
                 .is_err(),
             "a reason is a name"
@@ -6576,29 +6576,29 @@ mod tests {
     #[tokio::test]
     async fn typed_m_publisher_encodes_failed_state_and_binary_terminal_output() {
         let gateway = gateway();
-        let (station, mission, session) = register(&gateway).await;
-        assert_eq!(gateway.board_sessions().await[0].updated_at, None);
+        let (station, mission, run) = register(&gateway).await;
+        assert_eq!(gateway.board_runs().await[0].updated_at, None);
         gateway
             .publish_lifecycle(
                 "m-token-that-is-long-enough-for-testing",
                 LifecycleEvent {
                     operation_id: station,
                     mission_id: mission,
-                    session_id: session.clone(),
-                    state: SessionState::Failed,
+                    run_id: run.clone(),
+                    state: RunState::Failed,
                     reason: None,
                     sequence: 1,
                 },
             )
             .await
             .unwrap();
-        let board = gateway.board_sessions().await;
+        let board = gateway.board_runs().await;
         assert_eq!(board[0].state.as_deref(), Some("failed"));
         assert!(board[0].updated_at.is_some_and(|at| at > 0.0));
         gateway
             .publish_terminal_output(
                 "m-token-that-is-long-enough-for-testing",
-                session.clone(),
+                run.clone(),
                 2,
                 vec![0xff, 0x00, 0x80],
             )
@@ -6607,7 +6607,7 @@ mod tests {
 
         let token = grant(&gateway, AttachMode::Read).await;
         let ticket = gateway.exchange_attach_token(&token).await.unwrap();
-        let attachment = gateway.attach(&session, &ticket, 0).await.unwrap();
+        let attachment = gateway.attach(&run, &ticket, 0).await.unwrap();
         assert_eq!(attachment.replay.len(), 4);
         let mut receiver = guatiao::value::wire::channel::Receiver::new();
         for frame in &attachment.replay {
@@ -6636,14 +6636,14 @@ mod tests {
             gateway.exchange_attach_token(&token).await.unwrap_err(),
             GatewayError::InvalidCredential
         );
-        let session = SessionId::new("provider-session-a").unwrap();
-        let attachment = gateway.attach(&session, &cookie, 0).await.unwrap();
+        let run = RunId::new("provider-id-a").unwrap();
+        let attachment = gateway.attach(&run, &cookie, 0).await.unwrap();
 
         let second_token = grant(&gateway, AttachMode::Write).await;
         let second_cookie = gateway.exchange_attach_token(&second_token).await.unwrap();
         assert_eq!(
             gateway
-                .attach(&session, &second_cookie, 0)
+                .attach(&run, &second_cookie, 0)
                 .await
                 .unwrap_err(),
             GatewayError::Conflict
@@ -6651,7 +6651,7 @@ mod tests {
         gateway.disconnect(attachment).await;
         let next = grant(&gateway, AttachMode::Write).await;
         let next = gateway.exchange_attach_token(&next).await.unwrap();
-        assert!(gateway.attach(&session, &next, 0).await.is_ok());
+        assert!(gateway.attach(&run, &next, 0).await.is_ok());
     }
 
     #[tokio::test]
@@ -6666,7 +6666,7 @@ mod tests {
             )
             .unwrap(),
         );
-        let (_, _, session) = register(&gateway).await;
+        let (_, _, run) = register(&gateway).await;
         let token = grant(&gateway, AttachMode::Read).await;
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert_eq!(
@@ -6676,18 +6676,18 @@ mod tests {
 
         let old_token = grant(&gateway, AttachMode::Write).await;
         let old_ticket = gateway.exchange_attach_token(&old_token).await.unwrap();
-        let old_writer = gateway.attach(&session, &old_ticket, 0).await.unwrap();
+        let old_writer = gateway.attach(&run, &old_ticket, 0).await.unwrap();
         tokio::time::sleep(Duration::from_millis(15)).await;
         let new_token = grant(&gateway, AttachMode::Write).await;
         let new_ticket = gateway.exchange_attach_token(&new_token).await.unwrap();
-        let new_writer = gateway.attach(&session, &new_ticket, 0).await.unwrap();
+        let new_writer = gateway.attach(&run, &new_ticket, 0).await.unwrap();
         assert_eq!(new_writer.mode, AttachMode::Write);
         let stale_input =
-            TerminalData::new(session.clone(), 1, TerminalDirection::Input, vec![b'x']).unwrap();
+            TerminalData::new(run.clone(), 1, TerminalDirection::Input, vec![b'x']).unwrap();
         let (_, stale_frame) = terminal_frames(&stale_input).unwrap();
         assert_eq!(
             gateway
-                .submit_input(&session, &old_writer.connection_id, stale_frame)
+                .submit_input(&run, &old_writer.connection_id, stale_frame)
                 .await
                 .unwrap_err(),
             GatewayError::Forbidden,
@@ -6698,13 +6698,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn attachment_ticket_is_session_scoped_and_read_is_default() {
+    async fn attachment_ticket_is_run_scoped_and_read_is_default() {
         let gateway = gateway();
         let token = grant(&gateway, AttachMode::Read).await;
         let cookie = gateway.exchange_attach_token(&token).await.unwrap();
         assert_eq!(
             gateway
-                .attach(&SessionId::new("other").unwrap(), &cookie, 0)
+                .attach(&RunId::new("other").unwrap(), &cookie, 0)
                 .await
                 .unwrap_err(),
             GatewayError::Forbidden
@@ -6713,7 +6713,7 @@ mod tests {
         let token = grant(&gateway, AttachMode::Read).await;
         let cookie = gateway.exchange_attach_token(&token).await.unwrap();
         let attachment = gateway
-            .attach(&SessionId::new("provider-session-a").unwrap(), &cookie, 0)
+            .attach(&RunId::new("provider-id-a").unwrap(), &cookie, 0)
             .await
             .unwrap();
         assert_eq!(attachment.mode, AttachMode::Read);
@@ -6723,12 +6723,12 @@ mod tests {
     #[tokio::test]
     async fn scrollback_is_bounded_and_replay_honors_the_sequence_cursor() {
         let gateway = gateway();
-        let (_, _, session) = register(&gateway).await;
-        let (schema, first) = output(&session, 1);
+        let (_, _, run) = register(&gateway).await;
+        let (schema, first) = output(&run, 1);
         gateway
             .ingest(
                 "m-token-that-is-long-enough-for-testing",
-                &session,
+                &run,
                 0,
                 schema,
             )
@@ -6737,27 +6737,27 @@ mod tests {
         gateway
             .ingest(
                 "m-token-that-is-long-enough-for-testing",
-                &session,
+                &run,
                 1,
                 first,
             )
             .await
             .unwrap();
-        let (_, second) = output(&session, 2);
+        let (_, second) = output(&run, 2);
         gateway
             .ingest(
                 "m-token-that-is-long-enough-for-testing",
-                &session,
+                &run,
                 2,
                 second,
             )
             .await
             .unwrap();
-        let (_, third) = output(&session, 3);
+        let (_, third) = output(&run, 3);
         gateway
             .ingest(
                 "m-token-that-is-long-enough-for-testing",
-                &session,
+                &run,
                 3,
                 third,
             )
@@ -6766,7 +6766,7 @@ mod tests {
 
         let token = grant(&gateway, AttachMode::Read).await;
         let ticket = gateway.exchange_attach_token(&token).await.unwrap();
-        let mut attachment = gateway.attach(&session, &ticket, 1).await.unwrap();
+        let mut attachment = gateway.attach(&run, &ticket, 1).await.unwrap();
         assert_eq!(
             attachment.replay.len(),
             3,
@@ -6782,10 +6782,10 @@ mod tests {
     #[tokio::test]
     async fn what_a_station_is_told_fits_one_frame_at_any_sequence() {
         let gateway = gateway();
-        let longest = SessionId::new("s".repeat(ai6_diptel::MAX_ID_BYTES)).unwrap();
+        let longest = RunId::new("s".repeat(ai6_diptel::MAX_ID_BYTES)).unwrap();
         let token = "m-token-that-is-long-enough-for-testing";
         gateway
-            .register_session(
+            .register_run(
                 token,
                 OperationId::new("station-a").unwrap(),
                 MissionId::new("mission-a").unwrap(),
@@ -6825,7 +6825,7 @@ mod tests {
             .unwrap(),
         );
         assert_eq!(
-            gateway.terminal_bytes(&SessionId::new("session").unwrap()),
+            gateway.terminal_bytes(&RunId::new("run").unwrap()),
             ai6_diptel::MAX_TERMINAL_BYTES
         );
     }
@@ -6851,28 +6851,28 @@ mod tests {
     /// Publishes output at each of `sequences`, then attaches after `after`.
     async fn attach_after(
         gateway: &Gateway,
-        session: &SessionId,
+        run: &RunId,
         sequences: &[u64],
         after: u64,
     ) -> Attachment {
         let token = "m-token-that-is-long-enough-for-testing";
         for sequence in sequences {
             gateway
-                .publish_terminal_output(token, session.clone(), *sequence, vec![1])
+                .publish_terminal_output(token, run.clone(), *sequence, vec![1])
                 .await
                 .unwrap();
         }
         let grant = grant(gateway, AttachMode::Read).await;
         let ticket = gateway.exchange_attach_token(&grant).await.unwrap();
-        gateway.attach(session, &ticket, after).await.unwrap()
+        gateway.attach(run, &ticket, after).await.unwrap()
     }
 
     #[tokio::test]
     async fn a_viewer_whose_position_was_trimmed_is_told_of_the_gap() {
         let gateway = gateway();
-        let (_, _, session) = register(&gateway).await;
+        let (_, _, run) = register(&gateway).await;
         // The test's scrollback holds two events.
-        let attachment = attach_after(&gateway, &session, &[1, 2, 3, 4, 5], 1).await;
+        let attachment = attach_after(&gateway, &run, &[1, 2, 3, 4, 5], 1).await;
         let (gaps, values) = gaps_and_values(&attachment.replay);
         assert_eq!(gaps, [(1, 4)], "2 and 3 are gone");
         assert_eq!(
@@ -6882,7 +6882,7 @@ mod tests {
         );
         gateway.disconnect(attachment).await;
 
-        let attachment = attach_after(&gateway, &session, &[], 0).await;
+        let attachment = attach_after(&gateway, &run, &[], 0).await;
         assert_eq!(
             gaps_and_values(&attachment.replay).0,
             [(0, 4)],
@@ -6890,7 +6890,7 @@ mod tests {
         );
         gateway.disconnect(attachment).await;
 
-        let attachment = attach_after(&gateway, &session, &[], 3).await;
+        let attachment = attach_after(&gateway, &run, &[], 3).await;
         assert_eq!(
             gaps_and_values(&attachment.replay).0,
             [],
@@ -6898,7 +6898,7 @@ mod tests {
         );
         gateway.disconnect(attachment).await;
 
-        let attachment = attach_after(&gateway, &session, &[], 5).await;
+        let attachment = attach_after(&gateway, &run, &[], 5).await;
         let (gaps, values) = gaps_and_values(&attachment.replay);
         assert_eq!(
             (gaps, values),
@@ -6924,15 +6924,15 @@ mod tests {
             )
             .unwrap(),
         );
-        let (_, _, session) = register(&gateway).await;
-        let mut attachment = attach_after(&gateway, &session, &[1, 4], 0).await;
+        let (_, _, run) = register(&gateway).await;
+        let mut attachment = attach_after(&gateway, &run, &[1, 4], 0).await;
         let (gaps, values) = gaps_and_values(&attachment.replay);
         assert_eq!(gaps, [(1, 4)], "the Station dropped 2 and 3");
         assert_eq!(values, [1, 4000, 4]);
 
         let token = "m-token-that-is-long-enough-for-testing";
         gateway
-            .publish_terminal_output(token, session.clone(), 7, vec![1])
+            .publish_terminal_output(token, run.clone(), 7, vec![1])
             .await
             .unwrap();
         let mut live = attachment.replay.clone();
@@ -6950,12 +6950,12 @@ mod tests {
     #[tokio::test]
     async fn a_gateway_that_restarted_tells_a_new_viewer_and_spares_one_that_has_it_all() {
         let gateway = gateway();
-        let (_, _, session) = register(&gateway).await;
+        let (_, _, run) = register(&gateway).await;
         // A Station's first event after this gateway restarted, its sequence going on from 40.
-        let attachment = attach_after(&gateway, &session, &[41], 0).await;
+        let attachment = attach_after(&gateway, &run, &[41], 0).await;
         assert_eq!(gaps_and_values(&attachment.replay).0, [(0, 41)]);
         gateway.disconnect(attachment).await;
-        let attachment = attach_after(&gateway, &session, &[], 40).await;
+        let attachment = attach_after(&gateway, &run, &[], 40).await;
         assert_eq!(gaps_and_values(&attachment.replay).0, []);
         gateway.disconnect(attachment).await;
     }
@@ -6963,12 +6963,12 @@ mod tests {
     #[tokio::test]
     async fn slow_viewers_are_bounded_and_report_lag() {
         let gateway = gateway();
-        let (_, _, session) = register(&gateway).await;
-        let (schema, value) = output(&session, 1);
+        let (_, _, run) = register(&gateway).await;
+        let (schema, value) = output(&run, 1);
         gateway
             .ingest(
                 "m-token-that-is-long-enough-for-testing",
-                &session,
+                &run,
                 0,
                 schema,
             )
@@ -6976,13 +6976,13 @@ mod tests {
             .unwrap();
         let token = grant(&gateway, AttachMode::Read).await;
         let ticket = gateway.exchange_attach_token(&token).await.unwrap();
-        let mut attachment = gateway.attach(&session, &ticket, 0).await.unwrap();
+        let mut attachment = gateway.attach(&run, &ticket, 0).await.unwrap();
         for sequence in 1..=3 {
-            let (_, frame) = output(&session, sequence);
+            let (_, frame) = output(&run, sequence);
             gateway
                 .ingest(
                     "m-token-that-is-long-enough-for-testing",
-                    &session,
+                    &run,
                     sequence,
                     frame,
                 )
@@ -7000,31 +7000,31 @@ mod tests {
     #[tokio::test]
     async fn only_the_write_lease_can_submit_valid_input_to_m() {
         let gateway = gateway();
-        let (_, _, session) = register(&gateway).await;
+        let (_, _, run) = register(&gateway).await;
         let reader_token = grant(&gateway, AttachMode::Read).await;
         let reader_ticket = gateway.exchange_attach_token(&reader_token).await.unwrap();
-        let reader = gateway.attach(&session, &reader_ticket, 0).await.unwrap();
+        let reader = gateway.attach(&run, &reader_ticket, 0).await.unwrap();
 
         let input = TerminalData::new(
-            session.clone(),
+            run.clone(),
             1,
             TerminalDirection::Input,
             vec![0xff, 0x00],
         )
         .unwrap();
         let (_, input_frame) = terminal_frames(&input).unwrap();
-        let resize = TerminalResize::new(session.clone(), 2, 120, 40).unwrap();
+        let resize = TerminalResize::new(run.clone(), 2, 120, 40).unwrap();
         let (_, resize_frame) = resize_frames(&resize).unwrap();
         assert_eq!(
             gateway
-                .submit_input(&session, &reader.connection_id, input_frame.clone())
+                .submit_input(&run, &reader.connection_id, input_frame.clone())
                 .await
                 .unwrap_err(),
             GatewayError::Forbidden
         );
         assert_eq!(
             gateway
-                .submit_input(&session, &reader.connection_id, resize_frame.clone())
+                .submit_input(&run, &reader.connection_id, resize_frame.clone())
                 .await
                 .unwrap_err(),
             GatewayError::Forbidden
@@ -7033,31 +7033,31 @@ mod tests {
 
         let writer_token = grant(&gateway, AttachMode::Write).await;
         let writer_ticket = gateway.exchange_attach_token(&writer_token).await.unwrap();
-        let writer = gateway.attach(&session, &writer_ticket, 0).await.unwrap();
+        let writer = gateway.attach(&run, &writer_ticket, 0).await.unwrap();
         gateway
-            .submit_input(&session, &writer.connection_id, input_frame)
+            .submit_input(&run, &writer.connection_id, input_frame)
             .await
             .unwrap();
         gateway
-            .submit_input(&session, &writer.connection_id, resize_frame)
+            .submit_input(&run, &writer.connection_id, resize_frame)
             .await
             .unwrap();
         let queued = gateway.receive_agent_input().await.unwrap();
-        assert_eq!(queued.session_id, session);
+        assert_eq!(queued.run_id, run);
         assert!(!queued.frame.is_empty());
         assert!(format!("{queued:?}").contains("[REDACTED;"));
         assert!(!format!("{queued:?}").contains("ff00"));
         let queued_resize = gateway.receive_agent_input().await.unwrap();
-        assert_eq!(queued_resize.session_id, session);
+        assert_eq!(queued_resize.run_id, run);
         assert!(!queued_resize.frame.is_empty());
 
         let stale_resize =
-            TerminalResize::new(queued_resize.session_id.clone(), 1, 80, 24).unwrap();
+            TerminalResize::new(queued_resize.run_id.clone(), 1, 80, 24).unwrap();
         let (_, stale_resize_frame) = resize_frames(&stale_resize).unwrap();
         assert_eq!(
             gateway
                 .submit_input(
-                    &queued_resize.session_id,
+                    &queued_resize.run_id,
                     &writer.connection_id,
                     stale_resize_frame
                 )
@@ -7067,7 +7067,7 @@ mod tests {
         );
 
         let duplicate = TerminalData::new(
-            SessionId::new("provider-session-a").unwrap(),
+            RunId::new("provider-id-a").unwrap(),
             1,
             TerminalDirection::Input,
             vec![0xff, 0x00],
@@ -7077,7 +7077,7 @@ mod tests {
         assert_eq!(
             gateway
                 .submit_input(
-                    &SessionId::new("provider-session-a").unwrap(),
+                    &RunId::new("provider-id-a").unwrap(),
                     &writer.connection_id,
                     duplicate_frame
                 )
@@ -7086,10 +7086,10 @@ mod tests {
             GatewayError::Conflict
         );
 
-        let (_, output_frame) = output(&queued.session_id, 3);
+        let (_, output_frame) = output(&queued.run_id, 3);
         assert_eq!(
             gateway
-                .submit_input(&session, &writer.connection_id, output_frame)
+                .submit_input(&run, &writer.connection_id, output_frame)
                 .await
                 .unwrap_err(),
             GatewayError::Forbidden
@@ -7109,12 +7109,12 @@ mod tests {
         let token = "m-token-that-is-long-enough-for-testing";
 
         let registered = client
-            .post(format!("{base}/v1/station/sessions"))
+            .post(format!("{base}/v1/station/runs"))
             .bearer_auth(token)
             .json(&serde_json::json!({
                 "operation_id": "station-a",
                 "mission_id": "mission-a",
-                "session_id": "provider-session-a",
+                "run_id": "provider-id-a",
                 "mission": {
                     "prompt": "Inspect this change",
                     "agent_id": "analyst",
@@ -7145,7 +7145,7 @@ mod tests {
 
         let lifecycle = client
             .post(format!(
-                "{base}/v1/station/sessions/provider-session-a/lifecycle/1"
+                "{base}/v1/station/runs/provider-id-a/lifecycle/1"
             ))
             .bearer_auth(token)
             .json(&serde_json::json!({
@@ -7163,7 +7163,7 @@ mod tests {
 
         let terminal = client
             .post(format!(
-                "{base}/v1/station/sessions/provider-session-a/terminal/2"
+                "{base}/v1/station/runs/provider-id-a/terminal/2"
             ))
             .bearer_auth(token)
             .body(vec![0xff, 0x00, 0x80])
@@ -7173,12 +7173,12 @@ mod tests {
         assert_eq!(terminal.status(), StatusCode::ACCEPTED);
 
         let resumed = client
-            .post(format!("{base}/v1/station/sessions"))
+            .post(format!("{base}/v1/station/runs"))
             .bearer_auth(token)
             .json(&serde_json::json!({
                 "operation_id": "station-a",
                 "mission_id": "mission-a",
-                "session_id": "provider-session-a"
+                "run_id": "provider-id-a"
             }))
             .send()
             .await
@@ -7189,10 +7189,10 @@ mod tests {
             3
         );
 
-        // A Session a provider limit paused is a board state of its own.
+        // A Run a provider limit paused is a board state of its own.
         let parked = client
             .post(format!(
-                "{base}/v1/station/sessions/provider-session-a/lifecycle/3"
+                "{base}/v1/station/runs/provider-id-a/lifecycle/3"
             ))
             .bearer_auth(token)
             .json(&serde_json::json!({
@@ -7204,11 +7204,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(parked.status(), StatusCode::ACCEPTED);
-        let session = observer.board_missions().await.remove(0).sessions.remove(0);
-        assert_eq!(session.state.as_deref(), Some("parked"));
+        let run = observer.board_missions().await.remove(0).runs.remove(0);
+        assert_eq!(run.state.as_deref(), Some("parked"));
         let unknown = client
             .post(format!(
-                "{base}/v1/station/sessions/provider-session-a/lifecycle/4"
+                "{base}/v1/station/runs/provider-id-a/lifecycle/4"
             ))
             .bearer_auth(token)
             .json(&serde_json::json!({
@@ -7223,7 +7223,7 @@ mod tests {
 
         let denied = client
             .post(format!(
-                "{base}/v1/station/sessions/provider-session-a/lifecycle/4"
+                "{base}/v1/station/runs/provider-id-a/lifecycle/4"
             ))
             .json(&serde_json::json!({
                 "operation_id": "station-a",
@@ -7480,8 +7480,8 @@ mod tests {
     #[test]
     fn the_gateway_s_own_limits_default_to_the_record_s() {
         let limits = GatewayLimits::default();
-        assert_eq!(limits.max_sessions, 16);
-        assert_eq!(limits.max_clients_per_session, 12);
+        assert_eq!(limits.max_runs, 16);
+        assert_eq!(limits.max_clients_per_run, 12);
         assert_eq!(limits.scrollback_events, 64);
         assert_eq!(limits.max_frame_bytes, 256 * 1024);
         assert_eq!(limits.max_input_frames_per_second, 40);
@@ -7642,7 +7642,7 @@ mod tests {
                 .unwrap()
         }
 
-        /// A session cookie of Alice's with these times, returning it as a browser sends it.
+        /// A run cookie of Alice's with these times, returning it as a browser sends it.
         fn cookie(&self, issued_at: f64, expires_at: f64) -> String {
             let value = new_secret();
             let record = AccessTokenRecord::try_new(
@@ -7674,7 +7674,7 @@ mod tests {
             .map(|value| value.to_str().unwrap().to_owned())
     }
 
-    /// Says the response tells the browser to drop the session cookie.
+    /// Says the response tells the browser to drop the run cookie.
     fn assert_clears_cookie(response: &reqwest::Response) {
         let set = set_cookie_of(response).expect("the cookie is cleared");
         assert!(set.starts_with("ai6_session=;"), "{set}");
@@ -7729,9 +7729,9 @@ mod tests {
             (time_in(&renewed, "ends_at") - (before - 10.0 + 7_200.0)).abs() < 1e-3,
             "{renewed}"
         );
-        let session = body_of(signing.session(&token).await).await;
-        assert_eq!(session["token_id"], id);
-        assert!((time_in(&session, "expires_at") - renewed_until).abs() < 1e-3);
+        let run = body_of(signing.session(&token).await).await;
+        assert_eq!(run["token_id"], id);
+        assert!((time_in(&run, "expires_at") - renewed_until).abs() < 1e-3);
 
         // Near the cap it stops there, and again it stays there.
         let issued_at = before - 5_000.0;
@@ -7770,7 +7770,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn session_max_turns_renewal_off_or_lets_it_run_on() {
+    async fn run_max_turns_renewal_off_or_lets_it_run_on() {
         let off = Signing::new(|gateway| gateway.session_max = TimeLimit::secs(0)).await;
         let signed_in: serde_json::Value = off.login(None).await.json().await.unwrap();
         let expires_at = time_in(&signed_in, "expires_at");
@@ -7991,9 +7991,9 @@ mod tests {
             (time_in(&resumed, "ends_at") - time_in(&signed_in, "ends_at")).abs() < 1e-3,
             "it ends when the sign-in does: {resumed}"
         );
-        let session = body_of(signing.session(second).await).await;
-        assert_eq!(session["person_id"], "alice-id");
-        assert_eq!(session["token_id"], resumed["token_id"]);
+        let run = body_of(signing.session(second).await).await;
+        assert_eq!(run["person_id"], "alice-id");
+        assert_eq!(run["token_id"], resumed["token_id"]);
         assert_eq!(
             signing.session(first).await.status(),
             StatusCode::OK,
@@ -8159,7 +8159,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_set_session_max_still_ends_a_sign_in_that_keeps_working() {
+    async fn a_set_run_max_still_ends_a_sign_in_that_keeps_working() {
         let signing = Signing::new(|gateway| {
             gateway.session_idle = TimeLimit::secs(1_800);
             gateway.session_max = TimeLimit::secs(7_200);
@@ -8673,10 +8673,10 @@ mod tests {
         let authorizer = ai6::access_from_toml(
             r#"
                 [role.viewer]
-                actions = ["mission.read", "session.read"]
+                actions = ["mission.read", "run.read"]
 
                 [role.operator]
-                actions = ["mission.read", "mission.create", "session.read", "session.input", "audit.read", "agent.read", "agent.configure"]
+                actions = ["mission.read", "mission.create", "run.read", "run.input", "audit.read", "agent.read", "agent.configure"]
 
                 [role.station-operator]
                 actions = ["station.read", "station.configure", "audit.read"]
@@ -8761,7 +8761,7 @@ mod tests {
                         "cpus": 1.5, "load_1m": 0.5, "memory_total_mb": 4096,
                         "memory_available_mb": 2048, "sampled_at": 1_700_000_010
                     },
-                    "sessions": 1
+                    "runs": 1
                 }
             ]),
         );
@@ -8795,7 +8795,7 @@ mod tests {
                 "G",
                 ai6::directorates::m::identity::MissionId::try_new("parent-mission").unwrap(),
                 "coordinator",
-                ai6::directorates::m::identity::SessionId::try_new("provider-session").unwrap(),
+                ai6::directorates::m::identity::RunId::try_new("provider-id").unwrap(),
                 retry_key,
                 Brief {
                     title: title.to_owned(),
@@ -8850,16 +8850,16 @@ mod tests {
             .with_proxy_secret(PROXY_TEST_SECRET, 32)
             .unwrap(),
         );
-        for (station, mission, session) in [
-            ("G", "mission-g", "session-g"),
-            ("L", "mission-l", "session-l"),
+        for (station, mission, run) in [
+            ("G", "mission-g", "run-g"),
+            ("L", "mission-l", "run-l"),
         ] {
             gateway
-                .register_session(
+                .register_run(
                     "m-token-that-is-long-enough-for-testing",
                     OperationId::new(station).unwrap(),
                     MissionId::new(mission).unwrap(),
-                    SessionId::new(session).unwrap(),
+                    RunId::new(run).unwrap(),
                 )
                 .await
                 .unwrap();
@@ -8989,7 +8989,7 @@ mod tests {
         assert_eq!(viewer_profile["operations"][0]["operation_id"], "G");
         assert_eq!(
             viewer_profile["operations"][0]["actions"],
-            serde_json::json!(["mission.read", "session.read"])
+            serde_json::json!(["mission.read", "run.read"])
         );
         assert!(viewer_profile["stations"].as_array().unwrap().is_empty());
         assert_eq!(viewer_profile["moneypenny"], false);
@@ -9037,8 +9037,8 @@ mod tests {
                 "audit.read",
                 "mission.create",
                 "mission.read",
-                "session.input",
-                "session.read",
+                "run.input",
+                "run.read",
             ])
         );
         let station_access = operator_profile["stations"].as_array().unwrap();
@@ -9664,10 +9664,10 @@ mod tests {
                         "cpus": 1.5, "load_1m": 0.5, "memory_total_mb": 4096,
                         "memory_available_mb": 2048, "sampled_at": 1_700_000_010
                     },
-                    "sessions": 1
+                    "runs": 1
                 }
             ]),
-            "a Theater without resources or Sessions carries neither key"
+            "a Theater without resources or Runs carries neither key"
         );
         assert_eq!(
             station_board["stations"][0]["resources"],
@@ -9714,7 +9714,7 @@ mod tests {
             .record_usage(
                 Some("G"),
                 "mission-g",
-                "session-g",
+                "run-g",
                 &ai6::UsageTotals {
                     input: 120,
                     output: 30,
@@ -9727,24 +9727,24 @@ mod tests {
         // The first attempt was lost with its Station; the second runs elsewhere.
         let registry = FileRegistry::open(directory.path());
         registry
-            .open_session(
-                ai6::NewSession::new("attempt-1", "mission-g", "hq").with_theater("local"),
+            .open_run(
+                ai6::NewRun::new("attempt-1", "mission-g", "hq").with_theater("local"),
                 Duration::from_nanos(1),
             )
             .unwrap();
         std::thread::sleep(Duration::from_millis(5));
         registry
-            .lose_session("attempt-1", "Station \"hq\" went dark")
+            .lose_run("attempt-1", "Station \"hq\" went dark")
             .unwrap();
         registry
-            .open_session(
-                ai6::NewSession::new("attempt-2", "mission-g", "worker")
+            .open_run(
+                ai6::NewRun::new("attempt-2", "mission-g", "worker")
                     .with_theater("local")
-                    .with_provider_session("session-g")
+                    .with_provider_id("run-g")
                     .with_attempt(2, Some("attempt-1".to_owned()))
                     .with_account(ai6::AccountRef::new("gateway", "key"))
                     .with_launch(
-                        ai6::SessionLaunch::new("claude", "pipe", "/work")
+                        ai6::RunLaunch::new("claude", "pipe", "/work")
                             .with_model(Some("gemini-free".to_owned()), None)
                             .with_pool(Some("gateway".to_owned())),
                     ),
@@ -9763,15 +9763,15 @@ mod tests {
             mission_detail["attempts"],
             serde_json::json!([
                 {
-                    "attempt": 1, "session_id": "attempt-1", "handle": null,
-                    "provider_session_id": null,
+                    "attempt": 1, "run_id": "attempt-1", "handle": null,
+                    "provider_id": null,
                     "predecessor": null, "station": "hq", "theater": "local",
                     "status": "lost", "lost": "Station \"hq\" went dark",
                     "checkpoint_branch": null, "route": null, "account": null
                 },
                 {
-                    "attempt": 2, "session_id": "attempt-2", "handle": null,
-                    "provider_session_id": "session-g",
+                    "attempt": 2, "run_id": "attempt-2", "handle": null,
+                    "provider_id": "run-g",
                     "predecessor": "attempt-1", "station": "worker", "theater": "local",
                     "status": "active", "lost": null, "checkpoint_branch": null,
                     "route": {"handler": "claude", "model": "gemini-free", "pool": "gateway"},
@@ -9782,7 +9782,7 @@ mod tests {
         assert_eq!(mission_detail["usage"]["total"]["input"], 120);
         assert_eq!(mission_detail["usage"]["total"]["cost_micro_usd"], 4_500);
         assert_eq!(
-            mission_detail["usage"]["sessions"]["session-g"]["output"],
+            mission_detail["usage"]["runs"]["run-g"]["output"],
             30
         );
         assert_eq!(
@@ -9817,9 +9817,9 @@ mod tests {
 
         let registry = FileRegistry::open(directory.path());
         registry
-            .open_session(
-                ai6::NewSession::new("record-g", "mission-g", "worker")
-                    .with_provider_session("session-g")
+            .open_run(
+                ai6::NewRun::new("record-g", "mission-g", "worker")
+                    .with_provider_id("run-g")
                     .with_attempt(3, None)
                     .with_exposure(vec![ai6::Exposure {
                         source: "tool:WebFetch".to_owned(),
@@ -9864,11 +9864,11 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .partition(|mission| !mission["sessions"].as_array().unwrap().is_empty());
+            .partition(|mission| !mission["runs"].as_array().unwrap().is_empty());
         assert_eq!(started.len(), 1);
         assert_eq!(started[0]["operation_id"], "G");
         assert_eq!(started[0]["mission_id"], "mission-g");
-        assert_eq!(started[0]["sessions"][0]["session_id"], "session-g");
+        assert_eq!(started[0]["runs"][0]["run_id"], "run-g");
         assert!(
             queued.iter().all(|mission| mission["operation_id"] == "G"
                 && mission["pending"]["kind"] == "unplaced")
@@ -9880,7 +9880,7 @@ mod tests {
             .json(&serde_json::json!({
                 "operation_id": "G",
                 "mission_id": "mission-g",
-                "session_id": "session-g",
+                "run_id": "run-g",
                 "mode": "read"
             }))
             .send()
@@ -9919,7 +9919,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(replayed.status(), StatusCode::UNAUTHORIZED);
-        let mut request = format!("ws://{address}/v1/socket/session-g?after=0")
+        let mut request = format!("ws://{address}/v1/socket/run-g?after=0")
             .into_client_request()
             .unwrap();
         request
@@ -9941,7 +9941,7 @@ mod tests {
             .json(&serde_json::json!({
                 "operation_id": "G",
                 "mission_id": "mission-g",
-                "session_id": "session-g",
+                "run_id": "run-g",
                 "mode": "write"
             }))
             .send()
@@ -9962,7 +9962,7 @@ mod tests {
             .json(&serde_json::json!({
                 "operation_id": "G",
                 "mission_id": "mission-g",
-                "session_id": "session-g",
+                "run_id": "run-g",
                 "mode": "write"
             }))
             .send()
@@ -9975,7 +9975,7 @@ mod tests {
             .json(&serde_json::json!({
                 "operation_id": "L",
                 "mission_id": "mission-l",
-                "session_id": "session-l",
+                "run_id": "run-l",
                 "mode": "write"
             }))
             .send()
@@ -10048,16 +10048,16 @@ mod tests {
         let token_id = issued["token_id"].as_str().unwrap().to_owned();
         let secret = issued["token"].as_str().unwrap().to_owned();
 
-        let session = client
+        let run = client
             .get(format!("{base_b}/v1/auth/session"))
             .bearer_auth(&secret)
             .send()
             .await
             .unwrap();
-        assert_eq!(session.status(), StatusCode::OK);
-        let session: serde_json::Value = session.json().await.unwrap();
-        assert_eq!(session["token_id"], token_id);
-        assert_eq!(session["person_id"], "person-007");
+        assert_eq!(run.status(), StatusCode::OK);
+        let run: serde_json::Value = run.json().await.unwrap();
+        assert_eq!(run["token_id"], token_id);
+        assert_eq!(run["person_id"], "person-007");
 
         let revoked = client
             .delete(format!("{base_a}/v1/station/access-tokens/{token_id}"))
@@ -10093,17 +10093,17 @@ mod tests {
         let client = reqwest::Client::new();
 
         let unauthorized = client
-            .post(format!("{base}/v1/station/sessions"))
-            .json(&serde_json::json!({"operation_id":"station-a","mission_id":"mission-a","session_id":"provider-session-a"}))
+            .post(format!("{base}/v1/station/runs"))
+            .json(&serde_json::json!({"operation_id":"station-a","mission_id":"mission-a","run_id":"provider-id-a"}))
             .send()
             .await
             .unwrap();
         assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
 
         let authorized = client
-            .post(format!("{base}/v1/station/sessions"))
+            .post(format!("{base}/v1/station/runs"))
             .bearer_auth("m-token-that-is-long-enough-for-testing")
-            .json(&serde_json::json!({"operation_id":"station-a","mission_id":"mission-a","session_id":"provider-session-a"}))
+            .json(&serde_json::json!({"operation_id":"station-a","mission_id":"mission-a","run_id":"provider-id-a"}))
             .send()
             .await
             .unwrap();
@@ -10112,7 +10112,7 @@ mod tests {
         let grant = client
             .post(format!("{base}/v1/station/attach-grants"))
             .bearer_auth("m-token-that-is-long-enough-for-testing")
-            .json(&serde_json::json!({"operation_id":"station-a","mission_id":"mission-a","session_id":"provider-session-a","mode":"read"}))
+            .json(&serde_json::json!({"operation_id":"station-a","mission_id":"mission-a","run_id":"provider-id-a","mode":"read"}))
             .send()
             .await
             .unwrap();
@@ -10150,18 +10150,18 @@ mod tests {
         assert!(cookie.contains("Path=/v1/socket"));
         let cookie = cookie.split(';').next().unwrap();
 
-        let session = SessionId::new("provider-session-a").unwrap();
+        let run = RunId::new("provider-id-a").unwrap();
         let event = LifecycleEvent {
             operation_id: OperationId::new("station-a").unwrap(),
             mission_id: MissionId::new("mission-a").unwrap(),
-            session_id: session.clone(),
-            state: SessionState::Working,
+            run_id: run.clone(),
+            state: RunState::Working,
             reason: None,
             sequence: 1,
         };
         let (schema, value) = lifecycle_frames(&event).unwrap();
         let terminal = TerminalData::new(
-            session.clone(),
+            run.clone(),
             2,
             TerminalDirection::Output,
             vec![0xff, 0x00, 0x80],
@@ -10176,7 +10176,7 @@ mod tests {
         ] {
             let ingested = client
                 .post(format!(
-                    "{base}/v1/station/sessions/{session}/events/{sequence}"
+                    "{base}/v1/station/runs/{run}/events/{sequence}"
                 ))
                 .bearer_auth("m-token-that-is-long-enough-for-testing")
                 .body(frame)
@@ -10186,7 +10186,7 @@ mod tests {
             assert_eq!(ingested.status(), StatusCode::ACCEPTED);
         }
 
-        let request = format!("ws://{address}/v1/socket/{session}?after=0")
+        let request = format!("ws://{address}/v1/socket/{run}?after=0")
             .into_client_request()
             .unwrap();
         let mut request = request;
@@ -10221,8 +10221,8 @@ mod tests {
                     .inner
                     .lock()
                     .await
-                    .sessions
-                    .get(&session)
+                    .runs
+                    .get(&run)
                     .is_some_and(|record| record.active_clients == 0)
                 {
                     break;
@@ -10335,14 +10335,14 @@ mod tests {
             )
             .unwrap(),
         );
-        let (_, _, session) = register(&gateway).await;
+        let (_, _, run) = register(&gateway).await;
         let token = grant(&gateway, AttachMode::Write).await;
         let ticket = gateway.exchange_attach_token(&token).await.unwrap();
-        let writer = gateway.attach(&session, &ticket, 0).await.unwrap();
+        let writer = gateway.attach(&run, &ticket, 0).await.unwrap();
 
         for sequence in [1, 2] {
             let input = TerminalData::new(
-                session.clone(),
+                run.clone(),
                 sequence,
                 TerminalDirection::Input,
                 vec![sequence as u8],
@@ -10350,7 +10350,7 @@ mod tests {
             .unwrap();
             let (_, frame) = terminal_frames(&input).unwrap();
             let result = gateway
-                .submit_input(&session, &writer.connection_id, frame)
+                .submit_input(&run, &writer.connection_id, frame)
                 .await;
             if sequence == 1 {
                 result.unwrap();

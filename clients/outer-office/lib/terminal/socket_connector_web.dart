@@ -1,6 +1,6 @@
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-WebSocketChannel connectSessionSocket(
+WebSocketChannel connectRunSocket(
   Uri uri, {
   required List<String> protocols,
   required String origin,

@@ -14,8 +14,8 @@ import 'package:outer_office/assistant/export.dart';
 import 'package:outer_office/routes/oo_route.dart';
 import 'package:outer_office/settings/oo_config.dart' show ChatSettings;
 import 'package:outer_office/shell/oo_shell.dart';
-import 'package:outer_office/terminal/session_connection.dart'
-    show sessionSocketUri;
+import 'package:outer_office/terminal/run_connection.dart'
+    show runSocketUri;
 
 /// One view of every kind and the views Universal Exports refuses, shared with its tests.
 final Map<String, Object?> fixture = (jsonDecode(
@@ -259,7 +259,7 @@ void main() {
         'Operation G',
         'mission-1',
         'mission-2',
-        'session-1',
+        'run-1',
       ]) {
         expect(find.text(node), findsOneWidget, reason: node);
       }
@@ -865,11 +865,11 @@ void main() {
       'wss://oo.example:8443/v1/user/moneypenny',
     );
     expect(
-      sessionSocketUri(page, 's 1', 7).toString(),
+      runSocketUri(page, 's 1', 7).toString(),
       'wss://oo.example:8443/v1/socket/s%201?after=7',
     );
     expect(
-      sessionSocketUri(Uri.parse('http://127.0.0.1:7082'), 's', 0).toString(),
+      runSocketUri(Uri.parse('http://127.0.0.1:7082'), 's', 0).toString(),
       'ws://127.0.0.1:7082/v1/socket/s?after=0',
     );
   });

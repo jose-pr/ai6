@@ -1,4 +1,4 @@
-//! Account pools: shared provider accounts a Session draws one credential from.
+//! Account pools: shared provider accounts a Run draws one credential from.
 //!
 //! A pool (`[pool.<id>]` in `loadouts.toml`, or [`AccountPool::new`] in code) serves one
 //! AgentHandler and lists accounts (`[pool.<id>.account.<name>]`). Each account says how the
@@ -33,7 +33,7 @@ pub enum AccountKind {
     /// The login the harness keeps for itself. With no [`Account::files`] it is the login it
     /// already has where it runs (`grok login`, `agy`): AI6 hands over nothing and only keeps
     /// count of its use and its limits, so several routes can share one budget. With them, the
-    /// login is sealed in the Registry to named Stations, written under a home of the Session's
+    /// login is sealed in the Registry to named Stations, written under a home of the Run's
     /// own, and what the harness renews there comes back.
     HarnessLogin,
 }
@@ -49,7 +49,7 @@ const KINDS: [AccountKind; 7] = [
     AccountKind::HarnessLogin,
 ];
 
-/// The variables that carry a provider credential to a harness. A pooled Session gets
+/// The variables that carry a provider credential to a harness. A pooled Run gets
 /// exactly one account's, so every other one is removed from its environment.
 pub const CREDENTIAL_VARIABLES: &[&str] = &[
     "CLAUDE_CODE_OAUTH_TOKEN",
@@ -108,10 +108,10 @@ impl AccountKind {
         !matches!(self, Self::ConfigDir | Self::HarnessLogin)
     }
 
-    /// Whether a provider Session can move to another account of this kind and keep its
+    /// Whether a provider Run can move to another account of this kind and keep its
     /// history: only the environment kinds, whose history stays where the harness keeps it
     /// whatever the token.
-    pub fn carries_session(self) -> bool {
+    pub fn carries_run(self) -> bool {
         self.env().is_some()
     }
 
@@ -138,7 +138,7 @@ impl fmt::Display for AccountKind {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum PoolStrategy {
     /// The account with the most quota left (lowest reported window use, unknown counting
-    /// as half), then fewest active Sessions, then least recently used, then priority.
+    /// as half), then fewest active Runs, then least recently used, then priority.
     #[default]
     Headroom,
     /// The least recently used account.
@@ -252,7 +252,7 @@ impl Account {
         self
     }
 
-    /// The most Sessions that may use the account at once, across every Station.
+    /// The most Runs that may use the account at once, across every Station.
     #[must_use]
     pub fn max_concurrent(mut self, limit: usize) -> Self {
         self.max_concurrent = Some(limit);
@@ -363,8 +363,8 @@ impl Account {
                  the Mission's life, since Codex reads its login only from there"
             )),
             AccountKind::HarnessLogin if self.keeps_login_files() => Some(format!(
-                "account {pool}/{name}'s login is written under a home of each Session's own, \
-                 which that Session's commands can read"
+                "account {pool}/{name}'s login is written under a home of each Run's own, \
+                 which that Run's commands can read"
             )),
             _ => None,
         }
@@ -605,7 +605,7 @@ impl AccountPool {
     }
 }
 
-/// The pools an Agent's Sessions may draw an account from, or why none may.
+/// The pools an Agent's Runs may draw an account from, or why none may.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PoolChoice<'a> {
     /// No pool serves the Agent's handler: its loadout alone supplies credentials.
@@ -706,16 +706,16 @@ pub struct RouteStanding {
     /// Thousandths of quota used on the route's best account; `None` when no provider reported
     /// any, which counts as the `unknown_use` given to [`choose_route`].
     pub used_permille: Option<u16>,
-    /// Sessions on the route's best account now.
+    /// Runs on the route's best account now.
     pub active: usize,
-    /// When its best account last took a Session, as Unix seconds.
+    /// When its best account last took a Run, as Unix seconds.
     pub last_used: Option<f64>,
     /// The route's `priority`; higher first.
     pub priority: i64,
 }
 
-/// Which of `open` an Agent's Session takes, as `strategy` says, an earlier entry winning every
-/// tie: [`PoolStrategy::Headroom`] compares use, then Sessions, then who waited longest, then
+/// Which of `open` an Agent's Run takes, as `strategy` says, an earlier entry winning every
+/// tie: [`PoolStrategy::Headroom`] compares use, then Runs, then who waited longest, then
 /// priority; [`PoolStrategy::RoundRobin`] who waited longest; [`PoolStrategy::Priority`] priority
 /// alone, so routes of equal priority go in the order they are listed. `None` when `open` is empty.
 pub fn choose_route(
@@ -878,7 +878,7 @@ mod tests {
     }
 
     #[test]
-    fn each_kind_names_its_variable_and_whether_a_session_can_move() {
+    fn each_kind_names_its_variable_and_whether_a_run_can_move() {
         for (kind, handler, variable, moves) in [
             (
                 AccountKind::ClaudeOauthToken,
@@ -909,7 +909,7 @@ mod tests {
                 Some(variable),
                 "{kind}"
             );
-            assert_eq!(kind.carries_session(), moves, "{kind}");
+            assert_eq!(kind.carries_run(), moves, "{kind}");
             assert_eq!(AccountKind::parse(kind.as_str()), Some(kind));
             assert!(CREDENTIAL_VARIABLES.contains(&variable));
         }
@@ -1129,7 +1129,7 @@ mod tests {
     }
 
     #[test]
-    fn equal_routes_spread_by_sessions_and_last_use_and_ties_keep_the_listed_order() {
+    fn equal_routes_spread_by_runs_and_last_use_and_ties_keep_the_listed_order() {
         let tied = [standing(None, 0, None, 0), standing(None, 0, None, 0)];
         for strategy in [
             PoolStrategy::Headroom,
@@ -1194,7 +1194,7 @@ mod tests {
         let login = Account::new("free", AccountKind::HarnessLogin);
         assert_eq!(login.variable("acp"), None);
         assert_eq!(login.secret_name(), None);
-        assert!(!login.kind().carries_session());
+        assert!(!login.kind().carries_run());
         assert_eq!(
             AccountKind::parse("harness-login"),
             Some(AccountKind::HarnessLogin)

@@ -1,8 +1,8 @@
-//! What M does when a provider usage limit stops a Session.
+//! What M does when a provider usage limit stops a Run.
 
 use serde::{Deserialize, Serialize};
 
-/// How long to park a Session when the provider reports a limit without a reset time.
+/// How long to park a Run when the provider reports a limit without a reset time.
 pub const DEFAULT_LIMIT_FALLBACK_SECS: u64 = 30 * 60;
 
 /// An Operation's response to a provider limit (`on_limit`).
@@ -23,13 +23,13 @@ pub const DEFAULT_LIMIT_FALLBACK_SECS: u64 = 30 * 60;
 #[serde(rename_all = "lowercase")]
 #[map(rename_all = "lowercase")]
 pub enum OnLimit {
-    /// Move the Session to another account of its pools that has headroom: the same provider
-    /// Session where its history goes with it (Claude's environment credentials), else a new
+    /// Move the Run to another account of its pools that has headroom: the same provider
+    /// Run where its history goes with it (Claude's environment credentials), else a new
     /// attempt with a hand-off. Without a pool account to move to, the same as `Wait`.
     #[default]
     #[schema(label = "Move to another account in its pools")]
     Rotate,
-    /// Park the Session and resume the same provider Session when the limit resets.
+    /// Park the Run and resume the same provider Run when the limit resets.
     #[schema(label = "Wait for the limit to reset")]
     Wait,
     /// Post the next qualified Agent as a new attempt; park only if there is none.
@@ -48,12 +48,12 @@ impl OnLimit {
     }
 }
 
-/// When a Session stopped at `now` (Unix seconds) may resume.
+/// When a Run stopped at `now` (Unix seconds) may resume.
 ///
-/// A reset time in the future is honoured plus `grace_secs`, so the resumed Session does not
+/// A reset time in the future is honoured plus `grace_secs`, so the resumed Run does not
 /// race the provider's own clock. Without one, the wait the provider stated (`retry_after_secs`,
 /// a 429's `retry-after`) is used as it is. A missing or already-past reset with no stated wait
-/// cannot be trusted (clock skew, or a limit that outlived its stated reset), so the Session
+/// cannot be trusted (clock skew, or a limit that outlived its stated reset), so the Run
 /// waits `fallback_secs` rather than retrying in a loop.
 pub fn parked_until(
     now: i64,

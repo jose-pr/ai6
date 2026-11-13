@@ -7,9 +7,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use ai6::directorates::m::identity::{MissionId, SessionId};
+use ai6::directorates::m::identity::{MissionId, RunId};
 use ai6::directorates::q::terminal::{
-    AgentTerminal, ExitInfo, READ_TIMED_OUT, Spec, TerminalSession,
+    AgentTerminal, ExitInfo, READ_TIMED_OUT, Spec, TerminalRun,
 };
 use ai6::directorates::section_00::agent::{
     AgentHandler, AgentResume, AgentStart, AssistantMode, AssistantNetwork, McpServerRef,
@@ -54,7 +54,7 @@ fn turn(lines: &str) -> Turn {
 #[derive(Debug, Clone)]
 struct Launch {
     spec: Spec,
-    session_dir: PathBuf,
+    run_dir: PathBuf,
     agent: Option<String>,
     mcp: Option<Value>,
     hooks: Option<Value>,
@@ -146,18 +146,18 @@ impl AgentTerminal for Fake {
     fn spawn_private(
         &self,
         value: &ai6::guatiao::Value,
-    ) -> Result<Object<dyn TerminalSession>, ProviderError> {
+    ) -> Result<Object<dyn TerminalRun>, ProviderError> {
         self.spawn(value)
     }
 
     fn spawn(
         &self,
         value: &ai6::guatiao::Value,
-    ) -> Result<Object<dyn TerminalSession>, ProviderError> {
+    ) -> Result<Object<dyn TerminalRun>, ProviderError> {
         let spec = Spec::from_value(value).unwrap();
         let at = spec.argv.iter().position(|a| a == "--add-dir").unwrap();
-        let session_dir = PathBuf::from(&spec.argv[at + 1]);
-        let dot = session_dir.join(".agents");
+        let run_dir = PathBuf::from(&spec.argv[at + 1]);
+        let dot = run_dir.join(".agents");
         let agent = spec
             .argv
             .iter()
@@ -168,7 +168,7 @@ impl AgentTerminal for Fake {
         #[cfg(unix)]
         let mode_private = {
             use std::os::unix::fs::PermissionsExt;
-            let dir = std::fs::metadata(&session_dir)
+            let dir = std::fs::metadata(&run_dir)
                 .unwrap()
                 .permissions()
                 .mode();
@@ -186,7 +186,7 @@ impl AgentTerminal for Fake {
         let mut shared = self.0.lock().unwrap();
         shared.launches.push(Launch {
             spec,
-            session_dir,
+            run_dir,
             agent,
             mcp: read_json(&dot.join("mcp_config.json")),
             hooks: read_json(&dot.join("hooks.json")),
@@ -200,7 +200,7 @@ impl AgentTerminal for Fake {
             }
             _ => output.extend(fixture!("init.jsonl").bytes()),
         }
-        Ok(FakeSession {
+        Ok(FakeRun {
             shared: self.0.clone(),
             state: Mutex::new(Process {
                 output: output.into(),
@@ -218,12 +218,12 @@ struct Process {
     killed: bool,
 }
 
-struct FakeSession {
+struct FakeRun {
     shared: Arc<Mutex<Shared>>,
     state: Mutex<Process>,
 }
 
-impl TerminalSession for FakeSession {
+impl TerminalRun for FakeRun {
     fn pid(&self) -> i64 {
         // The process whose loopback ports a quota read looks at: this test's own.
         i64::from(std::process::id())
@@ -311,7 +311,7 @@ fn handler(settings: &str) -> AntigravityHandler {
     AntigravityHandler::try_from(read_config(settings).unwrap()).unwrap()
 }
 
-/// A working directory beside which the Session's own directory can be made.
+/// A working directory beside which the Run's own directory can be made.
 fn checkout() -> (tempfile::TempDir, String) {
     let root = tempfile::tempdir().unwrap();
     let wd = root.path().join("checkout");
@@ -343,7 +343,7 @@ fn start_request(wd: &str, clearance: &str) -> AgentStart {
 fn resume_request(wd: &str, id: &str, clearance: &str) -> AgentResume {
     AgentResume {
         mission_id: MissionId::try_new("mission-agy").unwrap(),
-        session_id: SessionId::try_new(id).unwrap(),
+        run_id: RunId::try_new(id).unwrap(),
         message: Some("go on".to_owned()),
         working_directory: wd.to_owned(),
         clearance: clearance.to_owned(),
@@ -390,12 +390,12 @@ fn endpoint(prefix: &str) -> [(String, String); 2] {
 }
 
 /// Every event up to and including the first of `until`, however slow the machine.
-fn events_until(session: &Object<dyn AgentSession>, until: &[&str]) -> Vec<AgentEvent> {
+fn events_until(run: &Object<dyn AgentSession>, until: &[&str]) -> Vec<AgentEvent> {
     let deadline = Instant::now() + Duration::from_secs(120);
     let mut found = Vec::new();
     loop {
         assert!(Instant::now() < deadline, "no {until:?} in {found:?}");
-        if let Some(event) = session.next_event(50).unwrap() {
+        if let Some(event) = run.next_event(50).unwrap() {
             let done = until.contains(&event.kind.as_str());
             found.push(event);
             if done {
@@ -416,18 +416,18 @@ fn started(fake: &Fake, request: AgentStart, settings: &str) -> Object<dyn Agent
 }
 
 #[test]
-fn a_sessions_id_is_read_from_its_stream_and_not_before() {
+fn a_runs_id_is_read_from_its_stream_and_not_before() {
     let (_root, wd) = checkout();
     let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
-    let session = started(&fake, start_request(&wd, "field"), "");
-    assert_eq!(session.session_id().unwrap(), None, "nothing read yet");
-    events_until(&session, &["init"]);
+    let run = started(&fake, start_request(&wd, "field"), "");
+    assert_eq!(run.session_id().unwrap(), None, "nothing read yet");
+    events_until(&run, &["init"]);
     assert_eq!(
-        session.session_id().unwrap().unwrap().as_str(),
+        run.session_id().unwrap().unwrap().as_str(),
         CONV,
         "known from init, before any turn ends"
     );
-    let events = events_until(&session, &["completed"]);
+    let events = events_until(&run, &["completed"]);
     assert_eq!(events.last().unwrap().text.as_deref(), Some("OK.\n"));
     let said: Vec<_> = events.iter().filter(|event| event.kind == "text").collect();
     assert_eq!(said.len(), 1, "a response is one event, its deltas joined");
@@ -447,7 +447,7 @@ fn a_sessions_id_is_read_from_its_stream_and_not_before() {
 fn a_resume_holds_its_message_until_the_stream_names_the_conversation_asked_for() {
     let (_root, wd) = checkout();
     let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
-    let session = handler("")
+    let run = handler("")
         .resume(
             resume_request(&wd, CONV, "field"),
             fake.clone().into_object(),
@@ -457,7 +457,7 @@ fn a_resume_holds_its_message_until_the_stream_names_the_conversation_asked_for(
     let launch = fake.launch();
     assert!(launch.has(&format!("--conversation={CONV}")));
     assert!(launch.agent.is_none(), "a conversation keeps its agent");
-    events_until(&session, &["completed"]);
+    events_until(&run, &["completed"]);
     assert_eq!(fake.received(), ["go on"]);
 }
 
@@ -465,7 +465,7 @@ fn a_resume_holds_its_message_until_the_stream_names_the_conversation_asked_for(
 fn a_resume_that_got_another_conversation_sends_nothing_and_says_so() {
     let (_root, wd) = checkout();
     let fake = Fake::with(Vec::new());
-    let session = handler("")
+    let run = handler("")
         .resume(
             resume_request(&wd, "00000000-0000-4000-8000-000000000000", "field"),
             fake.clone().into_object(),
@@ -474,12 +474,12 @@ fn a_resume_that_got_another_conversation_sends_nothing_and_says_so() {
     let deadline = Instant::now() + Duration::from_secs(120);
     let error = loop {
         assert!(Instant::now() < deadline);
-        match session.next_event(50) {
+        match run.next_event(50) {
             Err(error) => break error.to_string(),
             Ok(_) => continue,
         }
     };
-    assert!(error.contains("different Session"), "{error}");
+    assert!(error.contains("different Run"), "{error}");
     assert!(
         fake.received().is_empty(),
         "no message reaches a new conversation"
@@ -495,15 +495,15 @@ fn a_quota_refusal_is_a_limit_and_the_exit_after_it_adds_nothing() {
         stderr: fixture!("turn_quota_429.stderr").to_owned(),
         exit: Some(3),
     }]);
-    let session = started(&fake, start_request(&wd, "field"), "");
-    let events = events_until(&session, &["limit", "failed", "completed"]);
+    let run = started(&fake, start_request(&wd, "field"), "");
+    let events = events_until(&run, &["limit", "failed", "completed"]);
     let last = events.last().unwrap();
     assert_eq!(last.kind, "limit");
     assert!(last.limit.is_some());
     assert!(last.text.as_deref().unwrap().contains("RESOURCE_EXHAUSTED"));
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
-        if let Some(event) = session.next_event(20).unwrap() {
+        if let Some(event) = run.next_event(20).unwrap() {
             assert_eq!(
                 event.kind, "output",
                 "only agy's stderr may follow: {event:?}"
@@ -519,9 +519,9 @@ fn a_429_with_no_details_is_a_limit_too() {
         exit: Some(3),
         ..turn(fixture!("turn_plain_429.jsonl"))
     }]);
-    let session = started(&fake, start_request(&wd, "field"), "");
+    let run = started(&fake, start_request(&wd, "field"), "");
     assert_eq!(
-        events_until(&session, &["limit", "failed"])
+        events_until(&run, &["limit", "failed"])
             .last()
             .unwrap()
             .kind,
@@ -536,13 +536,13 @@ fn the_words_for_a_limit_are_a_setting() {
         exit: Some(3),
         ..turn(fixture!("turn_plain_429.jsonl"))
     }]);
-    let session = started(
+    let run = started(
         &fake,
         start_request(&wd, "field"),
         "limit_phrases = [\"no such words\"]\n",
     );
     assert_eq!(
-        events_until(&session, &["limit", "failed"])
+        events_until(&run, &["limit", "failed"])
             .last()
             .unwrap()
             .kind,
@@ -559,9 +559,9 @@ fn the_quota_words_of_the_binary_are_a_limit_though_unseen_in_a_run() {
         exit: Some(3),
         ..turn(&format!("{line}\n"))
     }]);
-    let session = started(&fake, start_request(&wd, "field"), "");
+    let run = started(&fake, start_request(&wd, "field"), "");
     assert_eq!(
-        events_until(&session, &["limit", "failed"])
+        events_until(&run, &["limit", "failed"])
             .last()
             .unwrap()
             .kind,
@@ -576,8 +576,8 @@ fn a_turn_that_cannot_run_is_a_failure_with_agys_words() {
         exit: Some(3),
         ..turn(fixture!("turn_error.jsonl"))
     }]);
-    let session = started(&fake, start_request(&wd, "field"), "");
-    let events = events_until(&session, &["limit", "failed", "completed"]);
+    let run = started(&fake, start_request(&wd, "field"), "");
+    let events = events_until(&run, &["limit", "failed", "completed"]);
     let last = events.last().unwrap();
     assert_eq!(last.kind, "failed");
     assert!(
@@ -596,8 +596,8 @@ fn an_exit_without_a_result_is_a_failure_that_quotes_the_tail() {
         stderr: "error: authentication required\n".to_owned(),
         exit: Some(1),
     }]);
-    let session = started(&fake, start_request(&wd, "field"), "");
-    let events = events_until(&session, &["failed"]);
+    let run = started(&fake, start_request(&wd, "field"), "");
+    let events = events_until(&run, &["failed"]);
     let text = events.last().unwrap().text.clone().unwrap();
     assert!(text.contains("exited with code 1"), "{text}");
     assert!(text.contains("authentication required"), "{text}");
@@ -610,8 +610,8 @@ fn a_soft_denied_tool_is_reported_before_the_turn_that_still_says_success() {
         stderr: fixture!("turn_soft_denied.stderr").to_owned(),
         ..turn(fixture!("turn_soft_denied.jsonl"))
     }]);
-    let session = started(&fake, start_request(&wd, "field"), "");
-    let events = events_until(&session, &["completed"]);
+    let run = started(&fake, start_request(&wd, "field"), "");
+    let events = events_until(&run, &["completed"]);
     let denied = events.iter().find(|event| event.kind == "denied").unwrap();
     assert_eq!(denied.text.as_deref(), Some("run_command"));
     assert!(denied.tools.is_empty(), "it did not run");
@@ -631,8 +631,8 @@ fn a_refusal_by_a_deny_rule_or_a_hook_is_a_denial_though_agy_does_not_list_it() 
     ] {
         let (_root, wd) = checkout();
         let fake = Fake::with(vec![turn(lines)]);
-        let session = started(&fake, start_request(&wd, "field"), "");
-        let events = events_until(&session, &["completed"]);
+        let run = started(&fake, start_request(&wd, "field"), "");
+        let events = events_until(&run, &["completed"]);
         let denied = events.iter().find(|event| event.kind == "denied");
         assert_eq!(denied.and_then(|event| event.text.as_deref()), Some(tool));
     }
@@ -642,7 +642,7 @@ fn a_refusal_by_a_deny_rule_or_a_hook_is_a_denial_though_agy_does_not_list_it() 
 fn field_clearance_gets_commands_and_edits_inside_the_checkout_only() {
     let (_root, wd) = checkout();
     let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
-    let _session = started(&fake, start_request(&wd, "field"), "");
+    let _run = started(&fake, start_request(&wd, "field"), "");
     let launch = fake.launch();
     assert!(launch.tools().iter().any(|tool| tool == "run_command"));
     assert!(launch.tools().iter().any(|tool| tool == "write_file"));
@@ -668,7 +668,7 @@ fn desk_clearance_has_no_command_tool_and_a_rule_against_commands() {
     for clearance in ["desk", "", "someone-elses-word"] {
         let (_root, wd) = checkout();
         let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
-        let _session = started(&fake, start_request(&wd, clearance), "");
+        let _run = started(&fake, start_request(&wd, clearance), "");
         let launch = fake.launch();
         assert!(
             !launch.tools().iter().any(|tool| tool == "run_command"),
@@ -684,7 +684,7 @@ fn desk_clearance_has_no_command_tool_and_a_rule_against_commands() {
 fn a_resume_at_desk_of_a_field_conversation_denies_commands_by_rule() {
     let (_root, wd) = checkout();
     let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
-    let _session = handler("")
+    let _run = handler("")
         .resume(
             resume_request(&wd, CONV, "desk"),
             fake.clone().into_object(),
@@ -703,13 +703,13 @@ fn allowed_tools_can_lift_desk_as_a_reported_weakening() {
     assert_eq!(
         built.weakenings().unwrap(),
         [
-            "allowed_tools adds command(git status) to what its desk Sessions may call",
-            "allowed_tools adds search_web to what its field Sessions may call",
+            "allowed_tools adds command(git status) to what its desk Runs may call",
+            "allowed_tools adds search_web to what its field Runs may call",
         ]
     );
     let (_root, wd) = checkout();
     let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
-    let _session = built
+    let _run = built
         .start(start_request(&wd, "desk"), fake.clone().into_object())
         .unwrap();
     let launch = fake.launch();
@@ -747,7 +747,7 @@ fn settings_that_are_unknown_malformed_or_decide_permissions_are_refused() {
     }
     let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
     let (_root, wd) = checkout();
-    let _session = started(
+    let _run = started(
         &fake,
         start_request(&wd, "field"),
         "[settings]\nmodelProvider = \"gemini\"\n",
@@ -756,22 +756,22 @@ fn settings_that_are_unknown_malformed_or_decide_permissions_are_refused() {
 }
 
 #[test]
-fn moneypennys_session_reads_and_calls_her_own_mcp_tools_only() {
+fn moneypennys_run_reads_and_calls_her_own_mcp_tools_only() {
     let (_root, wd) = checkout();
     let mut request = start_request(&wd, "desk");
     request.assistant = Some(moneypenny());
     request.environment.extend(endpoint("AI6_MONEYPENNY_MCP"));
     let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
-    let session = started(&fake, request, "allowed_tools = [\"search_web\"]\n");
+    let run = started(&fake, request, "allowed_tools = [\"search_web\"]\n");
     let launch = fake.launch();
     assert_eq!(launch.tools(), ["read_file"], "settings do not widen her");
     assert_eq!(launch.rules("allow"), ["mcp(moneypenny/*)"]);
     let deny = launch.rules("deny");
     assert!(deny.contains(&"command(*)".to_owned()));
     assert!(deny.contains(&"write_file(*)".to_owned()));
-    assert!(deny.contains(&format!("read_file({})", launch.session_dir.display())));
+    assert!(deny.contains(&format!("read_file({})", launch.run_dir.display())));
     assert_eq!(launch.hooks, None, "no green ink hook: she has no command");
-    let events = events_until(&session, &["completed"]);
+    let events = events_until(&run, &["completed"]);
     assert!(!kinds(&events).contains(&"failed"));
 }
 
@@ -783,7 +783,7 @@ fn tool_step(tool: &str, parameters: Value) -> String {
 }
 
 #[test]
-fn a_restricted_session_that_calls_anything_else_is_ended() {
+fn a_restricted_run_that_calls_anything_else_is_ended() {
     for (tool, parameters) in [
         ("run_command", json!({"CommandLine": "true"})),
         ("search_web", json!({"query": "x"})),
@@ -798,8 +798,8 @@ fn a_restricted_session_that_calls_anything_else_is_ended() {
         request.assistant = Some(moneypenny());
         request.environment.extend(endpoint("AI6_MONEYPENNY_MCP"));
         let fake = Fake::with(vec![turn(&tool_step(tool, parameters))]);
-        let session = started(&fake, request, "");
-        let events = events_until(&session, &["failed", "completed"]);
+        let run = started(&fake, request, "");
+        let events = events_until(&run, &["failed", "completed"]);
         let last = events.last().unwrap();
         assert_eq!(last.kind, "failed", "{tool}");
         assert!(
@@ -808,7 +808,7 @@ fn a_restricted_session_that_calls_anything_else_is_ended() {
         );
         assert_eq!(fake.kills(), 1, "{tool}");
         assert_eq!(
-            session.next_event(10).unwrap(),
+            run.next_event(10).unwrap(),
             None,
             "nothing read after that"
         );
@@ -816,7 +816,7 @@ fn a_restricted_session_that_calls_anything_else_is_ended() {
 }
 
 #[test]
-fn a_restricted_session_keeps_going_on_its_own_tools() {
+fn a_restricted_run_keeps_going_on_its_own_tools() {
     for (tool, parameters) in [
         ("read_file", json!({"Path": "/x"})),
         (
@@ -833,8 +833,8 @@ fn a_restricted_session_keeps_going_on_its_own_tools() {
             tool_step(tool, parameters),
             fixture!("turn_answer.jsonl")
         ))]);
-        let session = started(&fake, request, "");
-        let events = events_until(&session, &["failed", "completed"]);
+        let run = started(&fake, request, "");
+        let events = events_until(&run, &["failed", "completed"]);
         assert_eq!(events.last().unwrap().kind, "completed", "{tool}");
         assert!(events.iter().any(|event| !event.tools.is_empty()));
     }
@@ -877,13 +877,13 @@ fn what_an_assistant_cannot_be_held_to_is_refused_plainly() {
 }
 
 #[test]
-fn an_answer_only_session_has_no_file_tool_and_no_mcp() {
+fn an_answer_only_run_has_no_file_tool_and_no_mcp() {
     let (_root, wd) = checkout();
     let mut request = start_request(&wd, "desk");
     request.answer_only = true;
     request.environment.extend(endpoint("AI6_CABLE_MCP"));
     let fake = Fake::with(vec![turn(&tool_step("list_resources", json!({})))]);
-    let session = started(&fake, request, "");
+    let run = started(&fake, request, "");
     let launch = fake.launch();
     assert!(launch.tools().is_empty());
     assert!(
@@ -899,7 +899,7 @@ fn an_answer_only_session_has_no_file_tool_and_no_mcp() {
     for rule in ["mcp(*)", "read_file(*)", "write_file(*)", "command(*)"] {
         assert!(deny.contains(&rule.to_owned()), "{rule}");
     }
-    let events = events_until(&session, &["failed"]);
+    let events = events_until(&run, &["failed"]);
     assert!(
         events
             .last()
@@ -919,7 +919,7 @@ fn the_model_name_carries_its_effort_or_the_flag_does() {
         request.model = Some(model.to_owned());
         request.effort = effort.map(str::to_owned);
         let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
-        let _session = started(&fake, request, "");
+        let _run = started(&fake, request, "");
         fake.launch().spec.argv
     };
     // agy refuses `--model gemini-3.8-flash-low --effort=high`, and an Agent's effort is often the
@@ -940,7 +940,7 @@ fn mcp_servers_reach_it_by_a_private_file_and_never_by_a_flag() {
     let mut request = start_request(&wd, "field");
     request.environment.extend(endpoint("AI6_CABLE_MCP"));
     let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
-    let session = started(&fake, request, "");
+    let run = started(&fake, request, "");
     let launch = fake.launch();
     let server = &launch.mcp.as_ref().unwrap()["mcpServers"]["ai6-cables"];
     assert_eq!(server["serverUrl"], "http://127.0.0.1:1/AI6_CABLE_MCP");
@@ -959,7 +959,7 @@ fn mcp_servers_reach_it_by_a_private_file_and_never_by_a_flag() {
             .rules("allow")
             .contains(&"mcp(ai6-cables/*)".to_owned())
     );
-    let dir = launch.session_dir.display().to_string();
+    let dir = launch.run_dir.display().to_string();
     assert!(
         launch.rules("deny").contains(&format!("read_file({dir})")),
         "not by the file tools"
@@ -971,24 +971,24 @@ fn mcp_servers_reach_it_by_a_private_file_and_never_by_a_flag() {
             .unwrap()
             .contains("inheritMcp: true")
     );
-    session.close().unwrap();
+    run.close().unwrap();
     assert!(
-        !launch.session_dir.exists(),
-        "the token goes with the Session"
+        !launch.run_dir.exists(),
+        "the token goes with the Run"
     );
 }
 
 #[test]
-fn the_sessions_directory_sorts_after_the_checkout_so_commands_run_in_the_checkout() {
+fn the_runs_directory_sorts_after_the_checkout_so_commands_run_in_the_checkout() {
     let (_root, wd) = checkout();
     let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
-    let _session = started(&fake, start_request(&wd, "field"), "");
+    let _run = started(&fake, start_request(&wd, "field"), "");
     let launch = fake.launch();
     assert_eq!(launch.spec.cwd.as_deref(), Some(wd.as_str()));
-    assert!(launch.session_dir.to_string_lossy().as_ref() > wd.as_str());
+    assert!(launch.run_dir.to_string_lossy().as_ref() > wd.as_str());
     assert!(
         launch
-            .session_dir
+            .run_dir
             .to_string_lossy()
             .starts_with(wd.as_str())
     );
@@ -1000,7 +1000,7 @@ fn the_standing_context_is_the_system_prompt_and_stays_whole() {
     let mut request = start_request(&wd, "field");
     request.initial_context = vec!["# A heading\n---\nfirst".to_owned(), "second".to_owned()];
     let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
-    let _session = started(&fake, request, "");
+    let _run = started(&fake, request, "");
     let agent = fake.launch().agent.unwrap();
     assert!(
         agent.contains("# System Prompt\n# A heading\n---\nfirst\n\nsecond"),
@@ -1020,7 +1020,7 @@ fn an_assistants_context_file_joins_the_system_prompt_within_its_bound() {
     request.assistant = Some(mode);
     request.environment.extend(endpoint("AI6_MONEYPENNY_MCP"));
     let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
-    let _session = started(&fake, request.clone(), "");
+    let _run = started(&fake, request.clone(), "");
     assert!(fake.launch().agent.unwrap().contains("from the file"));
     let small = AntigravityHandler::try_from(AntigravityConfig {
         context_file_bytes: 3,
@@ -1084,11 +1084,11 @@ fn a_checkouts_own_hooks_and_servers_are_refused_unless_the_operation_allows_the
 }
 
 #[test]
-fn the_updater_is_off_during_a_session_unless_the_agent_lets_it_run() {
+fn the_updater_is_off_during_a_run_unless_the_agent_lets_it_run() {
     let env_with = |settings: &str| {
         let (_root, wd) = checkout();
         let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
-        let _session = started(&fake, start_request(&wd, "field"), settings);
+        let _run = started(&fake, start_request(&wd, "field"), settings);
         fake.launch().spec.env.unwrap()
     };
     assert_eq!(
@@ -1105,7 +1105,7 @@ fn the_updater_is_off_during_a_session_unless_the_agent_lets_it_run() {
 }
 
 #[test]
-fn a_session_with_a_station_has_the_green_ink_hook_on_its_commands() {
+fn a_run_with_a_station_has_the_green_ink_hook_on_its_commands() {
     let (_root, wd) = checkout();
     let mut request = start_request(&wd, "field");
     request.environment.extend(endpoint("AI6_CABLE_MCP"));
@@ -1113,7 +1113,7 @@ fn a_session_with_a_station_has_the_green_ink_hook_on_its_commands() {
         .environment
         .insert("AI6_GREEN_INK_GATE".to_owned(), "/opt/it's/ai6".to_owned());
     let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
-    let _session = started(&fake, request, "");
+    let _run = started(&fake, request, "");
     let hooks = fake.launch().hooks.unwrap();
     let entry = &hooks["ai6-green-ink"]["PreToolUse"][0];
     assert_eq!(entry["matcher"], "^run_command$");
@@ -1125,14 +1125,14 @@ fn a_session_with_a_station_has_the_green_ink_hook_on_its_commands() {
 
     let (_root, wd) = checkout();
     let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
-    let _session = started(&fake, start_request(&wd, "field"), "");
+    let _run = started(&fake, start_request(&wd, "field"), "");
     assert_eq!(fake.launch().hooks, None, "no Station to ask");
 
     let (_root, wd) = checkout();
     let mut desk = start_request(&wd, "desk");
     desk.environment.extend(endpoint("AI6_CABLE_MCP"));
     let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
-    let _session = started(&fake, desk, "");
+    let _run = started(&fake, desk, "");
     assert_eq!(fake.launch().hooks, None, "no command to gate");
 }
 
@@ -1147,7 +1147,7 @@ fn the_theater_server_waits_as_long_as_the_station_says_a_call_may_take() {
         "3630001".to_owned(),
     );
     let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
-    let _session = started(&fake, request, "");
+    let _run = started(&fake, request, "");
     let mcp = fake.launch().mcp.expect("an MCP config");
     assert_eq!(mcp["mcpServers"]["ai6-theater"]["timeoutSeconds"], 3631);
     assert!(mcp["mcpServers"]["ai6-cables"]["timeoutSeconds"].is_null());
@@ -1156,7 +1156,7 @@ fn the_theater_server_waits_as_long_as_the_station_says_a_call_may_take() {
     let mut request = start_request(&wd, "field");
     request.environment.extend(endpoint("AI6_THEATER_MCP"));
     let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
-    let _session = started(&fake, request, "");
+    let _run = started(&fake, request, "");
     let mcp = fake.launch().mcp.expect("an MCP config");
     assert!(mcp["mcpServers"]["ai6-theater"]["timeoutSeconds"].is_null());
 }
@@ -1166,7 +1166,7 @@ fn remote_hands_turns_its_own_tools_off_and_at_desk_the_theaters_commands_too() 
     let mut request = start_request(&wd, "field");
     request.environment.extend(endpoint("AI6_THEATER_MCP"));
     let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
-    let _session = started(&fake, request.clone(), "");
+    let _run = started(&fake, request.clone(), "");
     let launch = fake.launch();
     assert!(launch.tools().is_empty());
     assert!(
@@ -1186,7 +1186,7 @@ fn remote_hands_turns_its_own_tools_off_and_at_desk_the_theaters_commands_too() 
     request.working_directory = wd;
     request.clearance = "desk".to_owned();
     let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
-    let _session = started(&fake, request, "");
+    let _run = started(&fake, request, "");
     let deny = fake.launch().rules("deny");
     assert!(
         deny.iter()
@@ -1207,18 +1207,18 @@ fn an_interrupt_ends_agy_reports_the_turn_and_the_next_message_goes_on_the_conve
         ),
         turn(fixture!("turn_answer.jsonl")),
     ]);
-    let session = started(&fake, start_request(&wd, "field"), "");
-    events_until(&session, &["init"]);
-    session.interrupt().unwrap();
+    let run = started(&fake, start_request(&wd, "field"), "");
+    events_until(&run, &["init"]);
+    run.interrupt().unwrap();
     assert_eq!(fake.kills(), 1);
-    let events = events_until(&session, &["completed", "failed"]);
+    let events = events_until(&run, &["completed", "failed"]);
     assert_eq!(
         events.last().unwrap().kind,
         "completed",
         "{:?}",
         kinds(&events)
     );
-    session
+    run
         .send_message(AgentMessage {
             text: "and then?".to_owned(),
         })
@@ -1226,7 +1226,7 @@ fn an_interrupt_ends_agy_reports_the_turn_and_the_next_message_goes_on_the_conve
     let launch = fake.launch();
     assert!(launch.has(&format!("--conversation={CONV}")));
     assert!(!launch.spec.argv.iter().any(|a| a.starts_with("--agent=")));
-    let events = events_until(&session, &["completed", "failed"]);
+    let events = events_until(&run, &["completed", "failed"]);
     assert_eq!(events.last().unwrap().kind, "completed");
     assert_eq!(fake.received(), ["the task", "and then?"]);
 }
@@ -1235,9 +1235,9 @@ fn an_interrupt_ends_agy_reports_the_turn_and_the_next_message_goes_on_the_conve
 fn an_interrupt_with_no_turn_running_leaves_agy_alone() {
     let (_root, wd) = checkout();
     let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
-    let session = started(&fake, start_request(&wd, "field"), "");
-    events_until(&session, &["completed"]);
-    session.interrupt().unwrap();
+    let run = started(&fake, start_request(&wd, "field"), "");
+    events_until(&run, &["completed"]);
+    run.interrupt().unwrap();
     assert_eq!(fake.kills(), 0);
 }
 
@@ -1248,14 +1248,14 @@ fn a_second_message_is_a_second_turn_in_the_same_process() {
         turn(fixture!("turn_answer.jsonl")),
         turn(fixture!("turn_answer.jsonl")),
     ]);
-    let session = started(&fake, start_request(&wd, "field"), "");
-    events_until(&session, &["completed"]);
-    session
+    let run = started(&fake, start_request(&wd, "field"), "");
+    events_until(&run, &["completed"]);
+    run
         .send_message(AgentMessage {
             text: "again".to_owned(),
         })
         .unwrap();
-    events_until(&session, &["completed"]);
+    events_until(&run, &["completed"]);
     assert_eq!(fake.0.lock().unwrap().launches.len(), 1);
     assert_eq!(fake.received(), ["the task", "again"]);
 }
@@ -1264,8 +1264,8 @@ fn a_second_message_is_a_second_turn_in_the_same_process() {
 fn a_model_calls_usage_is_counted_from_its_step_as_agy_reports_it() {
     let (_root, wd) = checkout();
     let fake = Fake::with(vec![turn(fixture!("turn_cached_usage.jsonl"))]);
-    let session = started(&fake, start_request(&wd, "field"), "");
-    let events = events_until(&session, &["completed"]);
+    let run = started(&fake, start_request(&wd, "field"), "");
+    let events = events_until(&run, &["completed"]);
     let usage = events
         .iter()
         .find_map(|event| event.report.as_ref()?.spend.clone())
@@ -1315,14 +1315,14 @@ fn stand_in_quota_server(remaining: f64) -> (std::net::SocketAddr, std::thread::
 }
 
 #[test]
-fn the_quota_of_a_running_agy_is_read_with_no_turn_and_a_session_of_another_home_is_not_asked() {
+fn the_quota_of_a_running_agy_is_read_with_no_turn_and_a_run_of_another_home_is_not_asked() {
     use ai6::UsageSource;
     let (_root, wd) = checkout();
     let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
     let home = "/ai6-usage-test-home".to_owned();
     let mut request = start_request(&wd, "field");
     request.environment.insert("HOME".to_owned(), home.clone());
-    let session = handler("")
+    let run = handler("")
         .start(request, fake.clone().into_object())
         .unwrap();
 
@@ -1363,15 +1363,15 @@ fn the_quota_of_a_running_agy_is_read_with_no_turn_and_a_session_of_another_home
         missing.to_string().contains("could not be started"),
         "{missing}"
     );
-    session.close().unwrap();
+    run.close().unwrap();
 }
 
 #[test]
 fn mcp_calls_are_named_by_server_and_tool_each_once() {
     let (_root, wd) = checkout();
     let fake = Fake::with(vec![turn(fixture!("turn_mcp_call.jsonl"))]);
-    let session = started(&fake, start_request(&wd, "field"), "");
-    let events = events_until(&session, &["completed"]);
+    let run = started(&fake, start_request(&wd, "field"), "");
+    let events = events_until(&run, &["completed"]);
     let tools: Vec<&str> = events
         .iter()
         .flat_map(|event| event.tools.iter().map(String::as_str))
@@ -1388,11 +1388,11 @@ fn it_speaks_on_pipes() {
     assert_eq!(handler("").stdio().unwrap(), ai6::HarnessStdio::Json);
 }
 
-/// A resumed conversation keeps the tools of its first launch, so a Session started holding only
+/// A resumed conversation keeps the tools of its first launch, so a Run started holding only
 /// what reads could never be given the Mission's: the handler says so, and the Station never
 /// starts it under a plan review.
 #[test]
-fn it_cannot_hold_a_session_to_its_plan() {
+fn it_cannot_hold_a_run_to_its_plan() {
     let refused = handler("").read_only_refusal().unwrap();
     assert!(refused.is_some());
 }
@@ -1428,7 +1428,7 @@ fn an_overlays_skill_is_in_a_second_workspace_and_its_root_may_be_read() {
         std::fs::write(source.join(name).join("refs/more.md"), "more").unwrap();
     }
     let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
-    let session = started(&fake, overlay_request(&wd, &source), "");
+    let run = started(&fake, overlay_request(&wd, &source), "");
     let launch = fake.launch();
     let dirs: Vec<&String> = launch
         .spec
@@ -1464,15 +1464,15 @@ fn an_overlays_skill_is_in_a_second_workspace_and_its_root_may_be_read() {
     let agent = launch.agent.unwrap();
     assert!(agent.contains("Skill `audit` (overlay `tools`)"), "{agent}");
     assert!(!agent.contains("Skill `review`"), "{agent}");
-    session.close().unwrap();
-    assert!(!skills.exists(), "removed with the Session");
+    run.close().unwrap();
+    assert!(!skills.exists(), "removed with the Run");
 }
 
 #[test]
-fn a_session_with_no_overlay_has_one_workspace_beside_its_own() {
+fn a_run_with_no_overlay_has_one_workspace_beside_its_own() {
     let (_root, wd) = checkout();
     let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
-    let _session = started(&fake, start_request(&wd, "field"), "");
+    let _run = started(&fake, start_request(&wd, "field"), "");
     let launch = fake.launch();
     assert_eq!(
         launch

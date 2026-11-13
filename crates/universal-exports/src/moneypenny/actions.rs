@@ -3,7 +3,7 @@
 //! A write tool never changes anything. It checks the input, checks that the person may do
 //! the thing at all (so a person without the permission gets no proposal), and records a
 //! proposal: the exact request, a summary and what it changes. The app shows it with
-//! Confirm and Cancel. Only a confirm from the signed-in session the proposal was made in
+//! Confirm and Cancel. Only a confirm from the signed-in run the proposal was made in
 //! runs it, through the same route and authorization as the app's own request, after an
 //! audit record (`moneypenny.confirmed`) names the person, the conversation and the
 //! proposal. Moneypenny reads untrusted text, so nothing she reads can act on its own.
@@ -61,8 +61,8 @@ pub(crate) struct Proposal {
     /// `pending`, `confirming`, `done`, `failed`, `cancelled` or `expired`.
     pub(crate) status: &'static str,
     pub(crate) created_at: f64,
-    /// SHA-256 of the access token of the session it was proposed in.
-    pub(crate) session: String,
+    /// SHA-256 of the access token of the run it was proposed in.
+    pub(crate) run: String,
     pub(crate) result: Option<String>,
     /// A commit a Station makes once the person confirms, in place of `draft.call`, which then
     /// only describes it.

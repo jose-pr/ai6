@@ -213,10 +213,10 @@ impl Default for OoArt {
 #[derive(Debug, Clone, PartialEq, ToValue, FromValue, Schema, Form)]
 #[map(deny_unknown_fields)]
 pub struct OoRefresh {
-    /// What the page shown displays from the board of Sessions, Stations and Missions.
+    /// What the page shown displays from the board of Runs, Stations and Missions.
     #[schema(title = "The page shown")]
-    #[map(default = OoRefresh::default().sessions)]
-    pub sessions: Seconds,
+    #[map(default = OoRefresh::default().runs)]
+    pub runs: Seconds,
     /// The overview's recent activity.
     #[schema(title = "The overview")]
     #[map(default = OoRefresh::default().overview)]
@@ -229,7 +229,7 @@ pub struct OoRefresh {
     #[schema(title = "The account pools")]
     #[map(default = OoRefresh::default().pools)]
     pub pools: Seconds,
-    /// What the bell and the search need and the page shown does not display: Sessions, Stations,
+    /// What the bell and the search need and the page shown does not display: Runs, Stations,
     /// held briefs, green ink requests and Mission proposals; `0` reads them with every refresh.
     #[schema(title = "The bell and the search")]
     #[map(default = OoRefresh::default().slow)]
@@ -243,7 +243,7 @@ pub struct OoRefresh {
     #[schema(title = "While nothing can be seen")]
     #[map(default = OoRefresh::default().hidden)]
     pub hidden: Seconds,
-    /// A Station that has not checked in for this many `sessions` intervals shows as silent.
+    /// A Station that has not checked in for this many `runs` intervals shows as silent.
     #[schema(title = "Intervals before a Station is silent")]
     #[map(with = one_or_more, default = OoRefresh::default().silent_intervals)]
     pub silent_intervals: u64,
@@ -253,8 +253,8 @@ pub struct OoRefresh {
     #[schema(title = "Renew a sign-in before it ends")]
     #[map(default = OoRefresh::default().renew_before)]
     pub renew_before: Seconds,
-    /// How soon a failed renewal is tried again when `sessions` is off; else it is tried again at
-    /// `sessions`.
+    /// How soon a failed renewal is tried again when `runs` is off; else it is tried again at
+    /// `runs`.
     #[schema(title = "Retry a failed renewal after", format = "seconds")]
     #[map(with = seconds_more_than_zero, default = OoRefresh::default().renew_retry)]
     pub renew_retry: f64,
@@ -263,7 +263,7 @@ pub struct OoRefresh {
 impl Default for OoRefresh {
     fn default() -> Self {
         Self {
-            sessions: Seconds::new(3),
+            runs: Seconds::new(3),
             overview: Seconds::new(10),
             timeline: Seconds::new(10),
             pools: Seconds::new(15),
@@ -341,7 +341,7 @@ impl Default for OoPages {
     }
 }
 
-/// `[oo.terminal]`: the live Session terminal.
+/// `[oo.terminal]`: the live Run terminal.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, ToValue, FromValue, Schema, Form)]
 #[map(deny_unknown_fields)]
@@ -474,7 +474,7 @@ pub struct OoSettings {
     #[map(default)]
     #[form(form = OoPages)]
     pub pages: OoPages,
-    /// `[oo.terminal]`: the live Session terminal.
+    /// `[oo.terminal]`: the live Run terminal.
     #[schema(title = "The live terminal")]
     #[map(default)]
     #[form(form = OoTerminal)]
@@ -571,7 +571,7 @@ mod tests {
             ("[chat]\nwidth = 0\n", "chat.width"),
             ("[chat]\nconnect_timeout = -1\n", "chat.connect_timeout"),
             ("[pages]\naudit = 0\n", "pages.audit"),
-            ("[refresh]\nsessions = -1\n", "refresh.sessions"),
+            ("[refresh]\nruns = -1\n", "refresh.runs"),
             ("[chat]\nno_such = 1\n", "no_such"),
         ] {
             let refusal = read(refused).unwrap_err();
@@ -597,7 +597,7 @@ mod tests {
                 assert!(default, "{table}.{key}: {field}");
             }
         }
-        let seconds = &tables["refresh"]["properties"]["sessions"];
+        let seconds = &tables["refresh"]["properties"]["runs"];
         assert_eq!(seconds["format"], "seconds", "{seconds}");
         assert_eq!(seconds["minimum"], 0.0, "{seconds}");
         let positive = &tables["controls"]["properties"]["poll"];

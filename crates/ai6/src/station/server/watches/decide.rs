@@ -18,7 +18,7 @@ use crate::directorates::registry::decisions::{self, VerifyingDecision};
 use crate::directorates::registry::reports::{
     Report, ReportFiler, ReportFilter, ReportScope, ReportState,
 };
-use crate::directorates::registry::sessions::{OutcomeVerdict, SessionRecord};
+use crate::directorates::registry::runs::{OutcomeVerdict, RunRecord};
 use crate::directorates::registry::source_items::{self, ITEM_KIND, ItemDecision, ItemVerdict};
 use crate::directorates::registry::store::AuditRecord;
 
@@ -31,7 +31,7 @@ pub(in crate::station::server) struct DecisionDesk {
     state: DaemonState,
     operation: String,
     agent: String,
-    /// The watch's Session name, which its proposals name as their parent.
+    /// The watch's Run name, which its proposals name as their parent.
     key: String,
 }
 
@@ -60,9 +60,9 @@ impl DecisionDesk {
 
     /// The latest attempt at the Mission `name` names (a UID or a handle), when the Operation is
     /// the watch's.
-    fn latest(&self, name: &str) -> Result<SessionRecord, String> {
+    fn latest(&self, name: &str) -> Result<RunRecord, String> {
         let intake = &self.state.intake;
-        let latest = match intake.latest_session(name).ok().flatten() {
+        let latest = match intake.latest_run(name).ok().flatten() {
             Some(record) => Some(record),
             None => {
                 let handle = intake
@@ -70,7 +70,7 @@ impl DecisionDesk {
                     .map_err(|error| error.to_string())?
                     .ok_or("no Mission goes by that name")?;
                 intake
-                    .latest_session(&handle.mission_id)
+                    .latest_run(&handle.mission_id)
                     .map_err(|error| error.to_string())?
             }
         };
@@ -81,11 +81,11 @@ impl DecisionDesk {
 
     /// Your Operation's Missions that are not settled: the latest attempt of each, with its state.
     pub(in crate::station::server) fn missions(&self) -> Result<String, String> {
-        let mut latest: BTreeMap<String, SessionRecord> = BTreeMap::new();
+        let mut latest: BTreeMap<String, RunRecord> = BTreeMap::new();
         for record in self
             .state
             .intake
-            .sessions()
+            .runs()
             .map_err(|error| error.to_string())?
             .into_iter()
             .filter(|record| record.operation.as_deref() == Some(self.operation.as_str()))

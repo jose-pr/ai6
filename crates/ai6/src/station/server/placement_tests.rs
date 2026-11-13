@@ -6,7 +6,7 @@ use std::path::Path;
 use guatiao::library::{Object, ProviderError};
 use guatiao::{Provider, Status};
 
-use super::tests::{MockSession, test_state};
+use super::tests::{MockRun, test_state};
 use super::*;
 use crate::bounds::{Limit, Seconds, TimeLimit};
 use crate::directorates::q::terminal::AgentTerminal;
@@ -82,11 +82,11 @@ impl AgentHandler for MockProgramHandler {
         _terminal: Object<dyn AgentTerminal>,
     ) -> Result<Object<dyn AgentSession>, ProviderError> {
         counts(&self.key, |counts| counts.starts += 1);
-        let session = SessionId::try_new(format!("provider-session-{}", request.mission_id))
+        let run = RunId::try_new(format!("provider-id-{}", request.mission_id))
             .map_err(|error| {
                 ProviderError::new(Status::GUATIAO_ERR_INTERNAL, &error.to_string())
             })?;
-        Ok(MockSession::new(session, "blocked").into_object())
+        Ok(MockRun::new(run, "blocked").into_object())
     }
 
     fn resume(
@@ -94,7 +94,7 @@ impl AgentHandler for MockProgramHandler {
         request: AgentResume,
         _terminal: Object<dyn AgentTerminal>,
     ) -> Result<Object<dyn AgentSession>, ProviderError> {
-        Ok(MockSession::new(request.session_id, "completed").into_object())
+        Ok(MockRun::new(request.run_id, "completed").into_object())
     }
 
     fn program(&self) -> Result<Option<String>, ProviderError> {
@@ -515,28 +515,28 @@ async fn a_cancel_ends_a_mission_looping_in_its_start() {
     );
 }
 
-/// A Mission AI6 failed itself stays failed, though its last Session on record was lost: its
+/// A Mission AI6 failed itself stays failed, though its last Run on record was lost: its
 /// reason would fail the next try alike, and each try would queue the one after.
 #[tokio::test]
 async fn a_mission_ai6_failed_is_not_taken_for_a_lost_attempt_to_try_again() {
-    use crate::directorates::registry::sessions::{NewSession, SessionError};
+    use crate::directorates::registry::runs::{NewRun, RunError};
 
     let root = tempfile::tempdir().unwrap();
     let (state, key) = placed_on_a_durable_book(root.path(), "pinned-lost");
     state
         .intake
-        .open_session(
-            NewSession::new("lost-run", key.as_str(), "elsewhere").with_operation("G"),
+        .open_run(
+            NewRun::new("lost-run", key.as_str(), "elsewhere").with_operation("G"),
             Duration::from_nanos(1),
         )
         .unwrap();
     loop {
         match state
             .intake
-            .lose_session("lost-run", "its Station went dark")
+            .lose_run("lost-run", "its Station went dark")
         {
             Ok(_) => break,
-            Err(SessionError::HeldBy(_)) => std::thread::sleep(Duration::from_millis(5)),
+            Err(RunError::HeldBy(_)) => std::thread::sleep(Duration::from_millis(5)),
             Err(error) => panic!("{error}"),
         }
     }
@@ -902,12 +902,12 @@ async fn a_mission_retried_after_its_settlement_runs_on() {
         state.intake.filed_brief(&key).unwrap().unwrap().state,
         "failed"
     );
-    // The Mission had a Session the settlement did not name: a later attempt.
+    // The Mission had a Run the settlement did not name: a later attempt.
     {
         let mut missions = state.missions.lock().unwrap();
         missions.transition(&key, MissionState::Working).unwrap();
         missions
-            .attach_session(&key, SessionId::try_new("provider-session-later").unwrap())
+            .attach_run(&key, RunId::try_new("provider-id-later").unwrap())
             .unwrap();
     }
     controls::stop_settled(&state).await;
@@ -1101,11 +1101,11 @@ async fn a_missing_safe_house_provider_fails_the_brief_once_with_its_reason() {
     assert!(
         !state
             .intake
-            .sessions()
+            .runs()
             .unwrap()
             .iter()
             .any(|record| record.mission_id == key),
-        "a start that failed leaves no Session record"
+        "a start that failed leaves no Run record"
     );
     assert!(schedule_intake_once(&state));
     assert_eq!(
@@ -1168,7 +1168,7 @@ async fn a_restart_does_not_resume_a_settled_brief() {
             None,
         )
         .unwrap();
-    state.sessions.lock().unwrap().clear();
+    state.runs.lock().unwrap().clear();
     // The mock harness may have moved the Mission on already; a restart finds it working.
     let _ = state
         .missions
@@ -1186,30 +1186,30 @@ async fn a_restart_does_not_resume_a_settled_brief() {
 
     schedule_recovered_once(&state).await;
     assert!(state.startup_recovery.lock().unwrap().is_empty());
-    assert!(state.sessions.lock().unwrap().is_empty(), "nothing resumed");
+    assert!(state.runs.lock().unwrap().is_empty(), "nothing resumed");
     assert_eq!(
         super::tests::mission_state(&state, &key).state,
         MissionState::Abandoned
     );
 }
 
-/// A Mission whose Session record has ended is not waited on: its attempt is lost at restart.
+/// A Mission whose Run record has ended is not waited on: its attempt is lost at restart.
 #[tokio::test]
-async fn a_restart_settles_a_mission_whose_session_is_gone() {
+async fn a_restart_settles_a_mission_whose_run_is_gone() {
     let root = tempfile::tempdir().unwrap();
     let (state, key) = placed_on_a_durable_book(root.path(), "pinned-gone");
     super::tests::start_mission_by_id(&state, &key).await;
-    let hold = session_hold(&state, &key).unwrap();
+    let hold = run_hold(&state, &key).unwrap();
     state
         .intake
-        .update_session(
+        .update_run(
             &hold.id,
             &state.station_id,
             hold.fence,
-            SessionUpdate::default().status(SessionStatus::Ended),
+            RunUpdate::default().status(RunStatus::Ended),
         )
         .unwrap();
-    state.sessions.lock().unwrap().clear();
+    state.runs.lock().unwrap().clear();
     // The mock harness may have moved the Mission on already; a restart finds it working.
     let _ = state
         .missions

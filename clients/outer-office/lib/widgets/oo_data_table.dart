@@ -24,7 +24,7 @@ abstract final class OoTablePreferences {
   static const _missionsKey = 'oo.missions_table';
 
   /// Whether a wide Missions queue is the table rather than the cards, which show each Mission's
-  /// Sessions.
+  /// Runs.
   static final missionsAsTable = ValueNotifier<bool>(false);
 
   static Future<void> chooseMissionsView({required bool table}) async {

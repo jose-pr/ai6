@@ -317,8 +317,8 @@ void main() {
   group('the pop-out side', () {
     test('asks its opener, and takes the conversation and draft', () async {
       final popups = FakePopups();
-      final session = PopoutSession(popups, person: 'ana');
-      addTearDown(session.dispose);
+      final run = PopoutRun(popups, person: 'ana');
+      addTearDown(run.dispose);
       final link = popups.links.single;
       expect(link.sent, [
         {'t': 'ask'},
@@ -330,7 +330,7 @@ void main() {
         'theme': 'night-ops',
         'backdrop': false,
       });
-      final state = await session.state;
+      final state = await run.state;
       expect(state.conversation, 'c-9');
       expect(state.draft, 'so far');
       expect(state.appearance, {'theme': 'night-ops', 'backdrop': false});
@@ -338,13 +338,13 @@ void main() {
 
     test('keeps the draft level with the opener\'s and sends its links', () {
       final popups = FakePopups();
-      final session = PopoutSession(popups, person: 'ana');
-      addTearDown(session.dispose);
+      final run = PopoutRun(popups, person: 'ana');
+      addTearDown(run.dispose);
       final chat = MoneypennyChat(
         controller: AssistantController(token: 't', connect: FakeChannel.new),
       );
       addTearDown(chat.dispose);
-      session.attach(chat, draft: 'so far');
+      run.attach(chat, draft: 'so far');
       final link = popups.links.single;
       expect(chat.message.text, 'so far');
 
@@ -360,16 +360,16 @@ void main() {
 
     test('Bring back and Hide tell the opener, and close the window', () {
       final back = FakePopups();
-      final backSession = PopoutSession(back, person: 'ana');
-      addTearDown(backSession.dispose);
-      backSession.bringBack();
+      final backRun = PopoutRun(back, person: 'ana');
+      addTearDown(backRun.dispose);
+      backRun.bringBack();
       expect(back.links.single.sent.last, {'t': 'bye', 'why': 'back'});
       expect(back.closedSelf, 1);
 
       final hide = FakePopups();
-      final hideSession = PopoutSession(hide, person: 'ana');
-      addTearDown(hideSession.dispose);
-      hideSession.hide();
+      final hideRun = PopoutRun(hide, person: 'ana');
+      addTearDown(hideRun.dispose);
+      hideRun.hide();
       expect(hide.links.single.sent.last, {'t': 'bye', 'why': 'hide'});
 
       // Closed afterwards by the browser, it says nothing more.
@@ -382,27 +382,27 @@ void main() {
 
     test('closing the window tells the opener', () {
       final popups = FakePopups();
-      final session = PopoutSession(popups, person: 'ana');
-      addTearDown(session.dispose);
+      final run = PopoutRun(popups, person: 'ana');
+      addTearDown(run.dispose);
       popups.pageHides.add(null);
       expect(popups.links.single.sent.last, {'t': 'bye', 'why': 'closed'});
     });
 
     test('an opener that is gone leaves nothing to show', () {
       final popups = FakePopups()..opener = false;
-      final session = PopoutSession(popups, person: 'ana');
-      addTearDown(session.dispose);
-      expect(session.openerClosed.value, isTrue);
+      final run = PopoutRun(popups, person: 'ana');
+      addTearDown(run.dispose);
+      expect(run.openerClosed.value, isTrue);
       expect(popups.closedSelf, 1);
       expect(popups.links.single.sent, isEmpty);
     });
 
     test('an opener that reloads or closes sends the window away', () {
       final popups = FakePopups();
-      final session = PopoutSession(popups, person: 'ana');
-      addTearDown(session.dispose);
+      final run = PopoutRun(popups, person: 'ana');
+      addTearDown(run.dispose);
       popups.links.single.hear({'t': 'gone'});
-      expect(session.openerClosed.value, isTrue);
+      expect(run.openerClosed.value, isTrue);
       expect(popups.closedSelf, 1);
       // The window going afterwards says nothing to an opener that is not there.
       popups.pageHides.add(null);

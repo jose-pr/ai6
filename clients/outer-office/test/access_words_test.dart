@@ -12,7 +12,7 @@ void main() {
   group('Your access', () {
     test('plain words by group, no action lost', () {
       final groups = accessGroups(const [
-        'session.read',
+        'run.read',
         'mission.read',
         'mission.control',
         'approval.decide',
@@ -24,7 +24,7 @@ void main() {
       ]);
       expect(groups.map((group) => group.name), [
         'Missions',
-        'Sessions',
+        'Runs',
         'Green ink',
         'Agents',
         'Pools',
@@ -47,7 +47,7 @@ void main() {
       );
       board.accessToken = 'token';
       board.loading = false;
-      board.userSession = UserSessionSummary.fromJson(profile());
+      board.userRun = UserRunSummary.fromJson(profile());
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(

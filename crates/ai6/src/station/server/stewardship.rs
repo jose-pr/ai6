@@ -2,13 +2,13 @@
 //!
 //! Each round, for every Operation that lets M propose, M reads the scorecard against the
 //! Agents posted there ([`crate::directorates::m::stewardship::propose`]) and files each
-//! proposal as a green ink request of kind `hold` or `prefer` under Session `m`, with the numbers
+//! proposal as a green ink request of kind `hold` or `prefer` under Run `m`, with the numbers
 //! it rests on in the reason. Filing again finds the same request, so there is one per step until
 //! the sample has grown by a small sample more. A `hold` a person signs becomes a hold, in the
 //! person's name; a `prefer` is advice the person carries out in the roster, and signing it only
 //! closes the request. With `auto_hold` M puts a hold on by itself, audited, unless it would leave
 //! a role with no Agent, which is proposed instead. Nothing here grants a role, a clearance or an
-//! account, and no Session already running is touched.
+//! account, and no Run already running is touched.
 
 use super::{DaemonState, agents, medical, observations};
 use crate::bounds::Limit;
@@ -25,10 +25,10 @@ use crate::directorates::registry::logbook::Severity;
 use crate::directorates::registry::reports::ReportFiler;
 use crate::directorates::registry::store::AuditRecord;
 use crate::directorates::registry::timeline::TimelineEvent;
-use crate::{MissionId, SessionId};
+use crate::{MissionId, RunId};
 
-/// The Session M files proposals under.
-const SESSION: &str = "m";
+/// The Run M files proposals under.
+const RUN: &str = "m";
 const TIMELINE_KIND: &str = "hold";
 
 /// The Agents of `operation` held whole, for selection to pass over.
@@ -172,7 +172,7 @@ fn file(state: &DaemonState, operation: &Operation, proposal: &Proposal, _facts:
         ApprovalRequest::try_new(
             operation.id.clone(),
             MissionId::try_new(mission_of(kind, agent)).map_err(invalid)?,
-            SessionId::try_new(SESSION).map_err(invalid)?,
+            RunId::try_new(RUN).map_err(invalid)?,
             agent.as_str(),
             ActionScope::try_new(kind, &proposal.target)?,
             within(&proposal.reason, limits.reason_bytes),
@@ -226,7 +226,7 @@ fn file(state: &DaemonState, operation: &Operation, proposal: &Proposal, _facts:
         Ok(ApprovalStatus::Decided(approval)) => {
             let now = state.clock.now() as f64;
             let by_a_person = approval.decision == Decision::Approved
-                && approval.request.session.as_str() == SESSION
+                && approval.request.run.as_str() == RUN
                 && approval.request.scope.kind == kind
                 && approval.request.scope.target == proposal.target
                 && approval.signer != EXPIRY_SIGNER
@@ -347,8 +347,8 @@ mod tests {
     use super::*;
     use crate::directorates::m::stewardship::{HOLD_KIND, PREFER_KIND};
     use crate::directorates::registry::approvals::Ruling;
-    use crate::directorates::registry::sessions::{
-        NewSession, SessionLaunch, SessionResult, SessionStatus, SessionUpdate,
+    use crate::directorates::registry::runs::{
+        NewRun, RunLaunch, RunResult, RunStatus, RunUpdate,
     };
     use std::time::Duration;
 
@@ -374,11 +374,11 @@ mod tests {
             let mission = format!("{agent}-{index}");
             let record = state
                 .intake
-                .open_session(
-                    NewSession::new(format!("{mission}.1"), &mission, "test")
+                .open_run(
+                    NewRun::new(format!("{mission}.1"), &mission, "test")
                         .with_operation("G")
                         .with_launch(
-                            SessionLaunch::new("mock-agent", "mock-terminal", "/w")
+                            RunLaunch::new("mock-agent", "mock-terminal", "/w")
                                 .with_agent(Some(agent.to_owned())),
                         ),
                     Duration::from_secs(600),
@@ -386,13 +386,13 @@ mod tests {
                 .unwrap();
             state
                 .intake
-                .update_session(
-                    &record.session_id,
+                .update_run(
+                    &record.run_id,
                     "test",
                     record.fence,
-                    SessionUpdate::default()
-                        .result(SessionResult::new(outcome))
-                        .status(SessionStatus::Ended),
+                    RunUpdate::default()
+                        .result(RunResult::new(outcome))
+                        .status(RunStatus::Ended),
                 )
                 .unwrap();
         }
@@ -431,7 +431,7 @@ mod tests {
         };
         assert_eq!(request.scope.kind, HOLD_KIND);
         assert_eq!(request.scope.target, "007@G");
-        assert_eq!(request.session.as_str(), "m");
+        assert_eq!(request.run.as_str(), "m");
         assert!(request.reason.contains("5 of 6"), "{}", request.reason);
         assert!(
             request.reason.contains("007-1"),

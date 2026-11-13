@@ -4,26 +4,26 @@
 
 //! Unix: a program's process tree, killed whole.
 //!
-//! The program leads a session and a process group of its own. Killing the group misses a
+//! The program leads a run and a process group of its own. Killing the group misses a
 //! process that left it (`setsid`, `setpgid`), so the tree is also found by parent: every
 //! process whose parent is in the tree, as many times as it takes for a scan to find nothing
 //! new. Each process found is stopped (`SIGSTOP`) before any is killed, so none can start a new
 //! one out of reach in between. A process whose parent chain no longer reaches the tree (its
 //! parent exited and it was reparented) is not found, unless it is still in the program's group
-//! or, on Linux and Android, its session.
+//! or, on Linux and Android, its run.
 
 #![allow(unsafe_code)]
 
 use std::collections::BTreeSet;
 use std::io;
 
-/// A program's process tree: its process ID, which is also its process group and session ID,
+/// A program's process tree: its process ID, which is also its process group and run ID,
 /// and how many times the process table is read again for processes started meanwhile (each
 /// scan stops what it finds, so a tree stops growing after a few).
 pub struct ProcessTree(libc::pid_t, usize);
 
 /// One process of the table: its ID, its parent's, its process group's and, where the platform
-/// says, its session's.
+/// says, its run's.
 struct Entry {
     pid: libc::pid_t,
     ppid: libc::pid_t,
@@ -104,7 +104,7 @@ impl ProcessTree {
     }
 }
 
-/// Every process `/proc` lists, with its parent, process group and session.
+/// Every process `/proc` lists, with its parent, process group and run.
 #[cfg(any(target_os = "linux", target_os = "android"))]
 fn processes() -> Vec<Entry> {
     let Ok(dir) = std::fs::read_dir("/proc") else {
@@ -113,7 +113,7 @@ fn processes() -> Vec<Entry> {
     dir.filter_map(|entry| {
         let pid: libc::pid_t = entry.ok()?.file_name().to_str()?.parse().ok()?;
         let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-        // `pid (comm) state ppid pgrp session …`; the command name may hold spaces and `)`.
+        // `pid (comm) state ppid pgrp run …`; the command name may hold spaces and `)`.
         let mut fields = stat.get(stat.rfind(')')? + 1..)?.split_whitespace().skip(1);
         let mut next = || fields.next()?.parse::<libc::pid_t>().ok();
         Some(Entry {
@@ -126,7 +126,7 @@ fn processes() -> Vec<Entry> {
     .collect()
 }
 
-/// Every process `ps` lists, with its parent and process group; `ps` here names no session.
+/// Every process `ps` lists, with its parent and process group; `ps` here names no run.
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
 fn processes() -> Vec<Entry> {
     let Ok(output) = std::process::Command::new("/bin/ps")

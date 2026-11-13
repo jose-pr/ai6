@@ -1,7 +1,7 @@
-//! Session records: the shared, fenced record of every Agent Session.
+//! Run records: the shared, fenced record of every Agent Run.
 //!
 //! A Station's own Mission book dies with the Station; this record lives in the Registry so
-//! another Station can see what was running and where. Whoever acts on a Session must hold
+//! another Station can see what was running and where. Whoever acts on a Run must hold
 //! its lease, and every write presents the fencing token the lease was granted with. A token
 //! is taken from the Headquarters election term and always grows past the previous holder's,
 //! so a Station that lost its lease while paused cannot write after a new holder took over.
@@ -20,40 +20,40 @@ use crate::directorates::q::safehouse::SafeHouseCheckpoint;
 
 use super::accounts::AccountRef;
 
-use super::limits::SessionLimits;
+use super::limits::RunLimits;
 use super::mission_ids::{new_uid, run_handle};
 use super::products::CUT_MARKER;
 use super::store::{FileRegistry, invalid_data, read_headquarters, unix_time};
 use crate::bounds::Limit;
 
-/// Where a Session stands, as far as the Registry knows.
+/// Where a Run stands, as far as the Registry knows.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SessionStatus {
-    /// The holder is running the provider Session.
+pub enum RunStatus {
+    /// The holder is running the provider Run.
     Active,
-    /// A provider limit paused the Session until `parked_until`.
+    /// A provider limit paused the Run until `parked_until`.
     Parked,
-    /// The Session finished; it can no longer be taken or written.
+    /// The Run finished; it can no longer be taken or written.
     Ended,
     /// Its Station went dark and nothing could re-attach to the harness; a later attempt
     /// replaces it. Closed like `Ended`.
     Lost,
 }
 
-impl SessionStatus {
-    /// Whether the Session can no longer be taken or written.
+impl RunStatus {
+    /// Whether the Run can no longer be taken or written.
     pub fn is_closed(self) -> bool {
         matches!(self, Self::Ended | Self::Lost)
     }
 }
 
-/// How a Session's harness was launched: what another Station needs to re-attach to it.
+/// How a Run's harness was launched: what another Station needs to re-attach to it.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SessionLaunch {
+pub struct RunLaunch {
     /// The AgentHandler provider.
     pub handler: String,
     /// The terminal provider the harness runs in.
@@ -73,14 +73,14 @@ pub struct SessionLaunch {
     /// Whether the harness runs on the Theater or acts on it from the Station.
     #[serde(default)]
     pub mode: ExecutionMode,
-    /// The key of the Session on the Theater's runner, when a runner supervises the harness;
-    /// only such a Session can be re-attached by another Station.
+    /// The key of the Run on the Theater's runner, when a runner supervises the harness;
+    /// only such a Run can be re-attached by another Station.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runner: Option<String>,
     /// The clearance the harness was launched at, which fixed its tools.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clearance: Option<String>,
-    /// The Agent codename the harness ran as. A scorecard groups Sessions by it.
+    /// The Agent codename the harness ran as. A scorecard groups Runs by it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
     /// The overlays it was launched with, each at its digest.
@@ -88,7 +88,7 @@ pub struct SessionLaunch {
     pub overlays: Vec<crate::directorates::q::overlays::IssuedDigest>,
 }
 
-impl SessionLaunch {
+impl RunLaunch {
     /// A launch of `handler` in `terminal`, working in `working_directory`.
     pub fn new(
         handler: impl Into<String>,
@@ -150,71 +150,71 @@ impl SessionLaunch {
         self
     }
 
-    /// Records the runner's key for the Session.
+    /// Records the runner's key for the Run.
     pub fn with_runner(mut self, key: impl Into<String>) -> Self {
         self.runner = Some(key.into());
         self
     }
 }
 
-/// One Agent Session as stored in the shared Registry.
+/// One Agent Run as stored in the shared Registry.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SessionRecord {
-    /// AI6's identifier for this Session, distinct from the provider's: the run's UID.
-    pub session_id: String,
-    /// The UID of the Mission the Session works for.
+pub struct RunRecord {
+    /// AI6's identifier for this Run, distinct from the provider's: the run's UID.
+    pub run_id: String,
+    /// The UID of the Mission the Run works for.
     pub mission_id: String,
     /// The run's handle, `<mission handle>.<attempt>`, from the handle the Mission had when the
     /// run opened; a rename of the Mission later leaves it as it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handle: Option<String>,
-    /// The Operation the Mission belongs to, when the Station that opened the Session knew it.
+    /// The Operation the Mission belongs to, when the Station that opened the Run knew it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation: Option<String>,
-    /// The provider-issued Session ID, once the provider has created it.
-    pub provider_session_id: Option<String>,
-    /// The Station that holds the lease and supervises the Session.
+    /// The provider ID, once the provider has created it.
+    pub provider_id: Option<String>,
+    /// The Station that holds the lease and supervises the Run.
     pub station: String,
     /// The Theater the harness runs in, when known.
     pub theater: Option<String>,
     /// Which try at the Mission this is, starting at 1.
     pub attempt: u32,
-    /// The AI6 ID of the Session this one replaced, when it is a later attempt.
+    /// The AI6 ID of the Run this one replaced, when it is a later attempt.
     pub predecessor: Option<String>,
     /// Current status.
-    pub status: SessionStatus,
-    /// When a parked Session may resume, as Unix seconds.
+    pub status: RunStatus,
+    /// When a parked Run may resume, as Unix seconds.
     pub parked_until: Option<f64>,
     /// When the holder's lease lapses, as Unix seconds.
     pub lease_expires: f64,
     /// The fencing token of the current lease; it only grows.
     pub fence: u64,
-    /// The untrusted input the Session has read; it only grows and a later attempt at the
+    /// The untrusted input the Run has read; it only grows and a later attempt at the
     /// Mission inherits it.
     pub exposure: Vec<Exposure>,
     /// How the harness was launched, which another Station needs to re-attach to it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub launch: Option<SessionLaunch>,
-    /// What the holder last saw the Session do, oldest first and bounded: the hand-off a
+    pub launch: Option<RunLaunch>,
+    /// What the holder last saw the Run do, oldest first and bounded: the hand-off a
     /// later attempt is briefed with when this one is lost.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recent: Vec<String>,
-    /// The last checkpoint of the Session's safe house.
+    /// The last checkpoint of the Run's safe house.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkpoint: Option<SafeHouseCheckpoint>,
     /// When the last checkpoint was saved, as Unix seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkpointed_at: Option<f64>,
-    /// Why the Session was lost; set only with [`SessionStatus::Lost`].
+    /// Why the Run was lost; set only with [`RunStatus::Lost`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lost: Option<String>,
-    /// The pool account whose credential the Session runs on, when its Agent draws from a
+    /// The pool account whose credential the Run runs on, when its Agent draws from a
     /// pool.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account: Option<AccountRef>,
-    /// When the Session was recorded, as Unix seconds.
+    /// When the Run was recorded, as Unix seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opened_at: Option<f64>,
     /// When it became `Ended` or `Lost`, as Unix seconds.
@@ -222,7 +222,7 @@ pub struct SessionRecord {
     pub closed_at: Option<f64>,
     /// How its Mission stood when the holder last wrote it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub result: Option<SessionResult>,
+    pub result: Option<RunResult>,
     /// The window (`20261025T0300Z`) a standing Sleeper's run answers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window: Option<String>,
@@ -399,32 +399,32 @@ impl MissionVerdict {
     }
 }
 
-/// The last message an Agent ended a turn with on a Session: its own account of the work, as data.
+/// The last message an Agent ended a turn with on a Run: its own account of the work, as data.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FinalReport {
-    /// AI6's identifier for the Session.
-    pub session_id: String,
+    /// AI6's identifier for the Run.
+    pub run_id: String,
     /// The UID of the Mission it worked for.
     pub mission_id: String,
-    /// The message, within `[registry.limits.sessions] final_report_bytes` and marked if cut.
+    /// The message, within `[registry.limits.runs] final_report_bytes` and marked if cut.
     pub text: String,
     /// When it was filed, as Unix seconds.
     pub at: f64,
 }
 
 impl FinalReport {
-    /// Session `session_id`'s report of `text`, cut to `limit` bytes with the cut marked.
+    /// Run `run_id`'s report of `text`, cut to `limit` bytes with the cut marked.
     pub fn new(
-        session_id: impl Into<String>,
+        run_id: impl Into<String>,
         mission_id: impl Into<String>,
         text: &str,
         at: f64,
         limit: Limit,
     ) -> Self {
         Self {
-            session_id: session_id.into(),
+            run_id: run_id.into(),
             mission_id: mission_id.into(),
             text: cut_report(text, limit),
             at,
@@ -448,11 +448,11 @@ fn cut_report(text: &str, limit: Limit) -> String {
     format!("{}{CUT_MARKER}", &text[..end])
 }
 
-/// How a Mission stood at its Session's last write: what a scorecard judges the attempt by.
+/// How a Mission stood at its Run's last write: what a scorecard judges the attempt by.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SessionResult {
+pub struct RunResult {
     /// The Mission's state, in its wire spelling (`working`, `blocked`, `stalled`, `done`,
     /// `failed`, `blown`, `abandoned`, `parked`, `quarantined`).
     pub state: String,
@@ -465,7 +465,7 @@ pub struct SessionResult {
     pub denied_tools: u32,
 }
 
-impl SessionResult {
+impl RunResult {
     /// The reason of an attempt another replaced after a limit: no outcome of its Agent's.
     pub const HANDED_OFF: &'static str = "handed-off";
 
@@ -493,16 +493,16 @@ impl SessionResult {
     }
 }
 
-impl SessionRecord {
+impl RunRecord {
     /// Whether a person may give a verdict on the attempt: it ended done or held, or is being
     /// verified.
     ///
     /// # Errors
     ///
     /// `Unsettled`, naming how it stands instead.
-    pub fn takes_verdict(&self) -> Result<(), SessionError> {
-        if self.status == SessionStatus::Lost {
-            return Err(SessionError::Unsettled("lost".to_owned()));
+    pub fn takes_verdict(&self) -> Result<(), RunError> {
+        if self.status == RunStatus::Lost {
+            return Err(RunError::Unsettled("lost".to_owned()));
         }
         let state = self
             .result
@@ -511,7 +511,7 @@ impl SessionRecord {
         if matches!(state, "done" | "held" | "verifying") {
             Ok(())
         } else {
-            Err(SessionError::Unsettled(state.to_owned()))
+            Err(RunError::Unsettled(state.to_owned()))
         }
     }
 
@@ -521,38 +521,38 @@ impl SessionRecord {
     }
 }
 
-/// A Session to record, built with defaults for the optional parts.
+/// A Run to record, built with defaults for the optional parts.
 #[derive(Debug, Clone, PartialEq)]
-pub struct NewSession {
-    pub(super) session_id: String,
+pub struct NewRun {
+    pub(super) run_id: String,
     pub(super) mission_id: String,
     mission_handle: Option<String>,
     operation: Option<String>,
     station: String,
-    provider_session_id: Option<String>,
+    provider_id: Option<String>,
     theater: Option<String>,
     attempt: u32,
     predecessor: Option<String>,
     exposure: Vec<Exposure>,
-    launch: Option<SessionLaunch>,
+    launch: Option<RunLaunch>,
     account: Option<AccountRef>,
     window: Option<String>,
 }
 
-impl NewSession {
+impl NewRun {
     /// Starts a first attempt held by `station`.
     pub fn new(
-        session_id: impl Into<String>,
+        run_id: impl Into<String>,
         mission_id: impl Into<String>,
         station: impl Into<String>,
     ) -> Self {
         Self {
-            session_id: session_id.into(),
+            run_id: run_id.into(),
             mission_id: mission_id.into(),
             mission_handle: None,
             operation: None,
             station: station.into(),
-            provider_session_id: None,
+            provider_id: None,
             theater: None,
             attempt: 1,
             predecessor: None,
@@ -576,7 +576,7 @@ impl NewSession {
         self
     }
 
-    /// The attempt this Session would be.
+    /// The attempt this Run would be.
     pub fn attempt(&self) -> u32 {
         self.attempt
     }
@@ -587,27 +587,27 @@ impl NewSession {
         self
     }
 
-    /// Records the pool account the Session runs on.
+    /// Records the pool account the Run runs on.
     pub fn with_account(mut self, account: AccountRef) -> Self {
         self.account = Some(account);
         self
     }
 
     /// Records how the harness was launched.
-    pub fn with_launch(mut self, launch: SessionLaunch) -> Self {
+    pub fn with_launch(mut self, launch: RunLaunch) -> Self {
         self.launch = Some(launch);
         self
     }
 
-    /// Records the exposure the Session starts with, inherited from its Mission.
+    /// Records the exposure the Run starts with, inherited from its Mission.
     pub fn with_exposure(mut self, exposure: Vec<Exposure>) -> Self {
         self.exposure = exposure;
         self
     }
 
-    /// Records the provider's Session ID when it is already known.
-    pub fn with_provider_session(mut self, id: impl Into<String>) -> Self {
-        self.provider_session_id = Some(id.into());
+    /// Records the provider's Run ID when it is already known.
+    pub fn with_provider_id(mut self, id: impl Into<String>) -> Self {
+        self.provider_id = Some(id.into());
         self
     }
 
@@ -617,47 +617,47 @@ impl NewSession {
         self
     }
 
-    /// Marks this as a later attempt that replaces the Session `predecessor`.
+    /// Marks this as a later attempt that replaces the Run `predecessor`.
     pub fn with_attempt(mut self, attempt: u32, predecessor: Option<String>) -> Self {
         self.attempt = attempt.max(1);
         self.predecessor = predecessor;
         self
     }
 
-    /// This Session as the attempt after it, with a new UID, replacing the record this one
+    /// This Run as the attempt after it, with a new UID, replacing the record this one
     /// would have been; `None` past the last attempt a record can count.
     pub fn next_attempt(mut self) -> Option<Self> {
         self.attempt = self.attempt.checked_add(1)?;
-        self.predecessor = Some(std::mem::replace(&mut self.session_id, new_uid()));
+        self.predecessor = Some(std::mem::replace(&mut self.run_id, new_uid()));
         Some(self)
     }
 }
 
-/// Changes a lease holder may make to a Session record.
+/// Changes a lease holder may make to a Run record.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct SessionUpdate {
-    provider_session_id: Option<String>,
-    status: Option<SessionStatus>,
+pub struct RunUpdate {
+    provider_id: Option<String>,
+    status: Option<RunStatus>,
     parked_until: Option<f64>,
     exposure: Vec<Exposure>,
-    launch: Option<SessionLaunch>,
+    launch: Option<RunLaunch>,
     recent: Option<Vec<String>>,
     checkpoint: Option<(SafeHouseCheckpoint, f64)>,
     account: Option<AccountRef>,
-    result: Option<SessionResult>,
+    result: Option<RunResult>,
     deliverables: Option<Vec<Deliverable>>,
     evidence: Vec<Evidence>,
     probed: bool,
 }
 
-impl SessionUpdate {
+impl RunUpdate {
     /// Records what the Mission was to deliver, replacing the earlier list.
     pub fn deliverables(mut self, deliverables: Vec<Deliverable>) -> Self {
         self.deliverables = Some(deliverables);
         self
     }
 
-    /// Adds what probes found; the oldest entries beyond `[registry.limits.sessions]
+    /// Adds what probes found; the oldest entries beyond `[registry.limits.runs]
     /// evidence_entries` go first.
     pub fn evidence(mut self, evidence: Vec<Evidence>) -> Self {
         self.evidence = evidence;
@@ -671,24 +671,24 @@ impl SessionUpdate {
     }
 
     /// Records how the Mission stands, replacing the earlier result.
-    pub fn result(mut self, result: SessionResult) -> Self {
+    pub fn result(mut self, result: RunResult) -> Self {
         self.result = Some(result);
         self
     }
 
-    /// Records the pool account the Session runs on now, replacing the one recorded.
+    /// Records the pool account the Run runs on now, replacing the one recorded.
     pub fn account(mut self, account: AccountRef) -> Self {
         self.account = Some(account);
         self
     }
 
     /// Records how the harness was launched, replacing what was recorded.
-    pub fn launch(mut self, launch: SessionLaunch) -> Self {
+    pub fn launch(mut self, launch: RunLaunch) -> Self {
         self.launch = Some(launch);
         self
     }
 
-    /// Replaces the recent events with the last `[registry.limits.sessions] recent_events` of
+    /// Replaces the recent events with the last `[registry.limits.runs] recent_events` of
     /// `recent`, each cut to `recent_event_chars` characters.
     pub fn recent(mut self, recent: Vec<String>) -> Self {
         self.recent = Some(recent);
@@ -707,39 +707,39 @@ impl SessionUpdate {
         self
     }
 
-    /// Records the provider's Session ID.
-    pub fn provider_session(mut self, id: impl Into<String>) -> Self {
-        self.provider_session_id = Some(id.into());
+    /// Records the provider's Run ID.
+    pub fn provider_id(mut self, id: impl Into<String>) -> Self {
+        self.provider_id = Some(id.into());
         self
     }
 
     /// Sets the status. `Active` clears `parked_until`.
-    pub fn status(mut self, status: SessionStatus) -> Self {
+    pub fn status(mut self, status: RunStatus) -> Self {
         self.status = Some(status);
         self
     }
 
-    /// Sets when a parked Session may resume, in Unix seconds.
+    /// Sets when a parked Run may resume, in Unix seconds.
     pub fn parked_until(mut self, until: f64) -> Self {
         self.parked_until = Some(until);
         self
     }
 }
 
-/// Why a Session record could not be read or written by a Station.
+/// Why a Run record could not be read or written by a Station.
 #[non_exhaustive]
 #[derive(Debug)]
-pub enum SessionError {
+pub enum RunError {
     /// No record with this ID exists.
     NotFound,
     /// A record with this ID already exists.
     Exists,
-    /// The Session finished and is closed to every Station.
+    /// The Run finished and is closed to every Station.
     Ended,
     /// The attempt has not ended done or held, so there is no outcome to give a verdict on; the
     /// state it stands in.
     Unsettled(String),
-    /// Another Station holds a live lease on the Session.
+    /// Another Station holds a live lease on the Run.
     HeldBy(String),
     /// The Station's lease or fencing token is no longer the current one.
     Stale,
@@ -747,26 +747,26 @@ pub enum SessionError {
     Io(io::Error),
 }
 
-impl fmt::Display for SessionError {
+impl fmt::Display for RunError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NotFound => f.write_str("no such Session record"),
-            Self::Exists => f.write_str("a Session record with this ID already exists"),
-            Self::Ended => f.write_str("the Session has ended"),
+            Self::NotFound => f.write_str("no such Run record"),
+            Self::Exists => f.write_str("a Run record with this ID already exists"),
+            Self::Ended => f.write_str("the Run has ended"),
             Self::Unsettled(state) => {
                 write!(
                     f,
                     "the latest attempt has no outcome to judge: it is {state}"
                 )
             }
-            Self::HeldBy(station) => write!(f, "Station {station:?} holds the Session lease"),
-            Self::Stale => f.write_str("the Session lease or fencing token is stale"),
-            Self::Io(error) => write!(f, "Session record: {error}"),
+            Self::HeldBy(station) => write!(f, "Station {station:?} holds the Run lease"),
+            Self::Stale => f.write_str("the Run lease or fencing token is stale"),
+            Self::Io(error) => write!(f, "Run record: {error}"),
         }
     }
 }
 
-impl std::error::Error for SessionError {
+impl std::error::Error for RunError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io(error) => Some(error),
@@ -775,13 +775,13 @@ impl std::error::Error for SessionError {
     }
 }
 
-impl From<io::Error> for SessionError {
+impl From<io::Error> for RunError {
     fn from(error: io::Error) -> Self {
         Self::Io(error)
     }
 }
 
-pub(super) fn validate_session_id(id: &str, limits: &SessionLimits) -> io::Result<()> {
+pub(super) fn validate_run_id(id: &str, limits: &RunLimits) -> io::Result<()> {
     let valid = !id.is_empty()
         && limits.id_bytes.allows(id.len())
         && !id.starts_with('.')
@@ -794,7 +794,7 @@ pub(super) fn validate_session_id(id: &str, limits: &SessionLimits) -> io::Resul
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!(
-                "Session ID must be 1-{} letters, digits, '-', '_' or '.' and not start with '.'",
+                "Run ID must be 1-{} letters, digits, '-', '_' or '.' and not start with '.'",
                 limits.id_bytes
             ),
         ))
@@ -802,8 +802,8 @@ pub(super) fn validate_session_id(id: &str, limits: &SessionLimits) -> io::Resul
 }
 
 impl FileRegistry {
-    fn session_path(&self, id: &str) -> std::path::PathBuf {
-        self.root.join("sessions").join(format!("{id}.json"))
+    fn run_path(&self, id: &str) -> std::path::PathBuf {
+        self.root.join("runs").join(format!("{id}.json"))
     }
 
     fn headquarters_term(&self) -> io::Result<u64> {
@@ -812,48 +812,48 @@ impl FileRegistry {
             .map_or(0, |lease| lease.term()))
     }
 
-    pub(crate) fn open_session_at(
+    pub(crate) fn open_run_at(
         &self,
-        new: NewSession,
+        new: NewRun,
         ttl: Duration,
         now: f64,
-    ) -> Result<SessionRecord, SessionError> {
-        validate_new_session(&new, &self.limits.sessions)?;
+    ) -> Result<RunRecord, RunError> {
+        validate_new_run(&new, &self.limits.runs)?;
         let _lock = self.lock()?;
-        let path = self.session_path(&new.session_id);
+        let path = self.run_path(&new.run_id);
         if path.exists()
             || self
-                .sessions_locked()?
+                .runs_locked()?
                 .iter()
                 .any(|record| same_run(record, &new))
         {
-            return Err(SessionError::Exists);
+            return Err(RunError::Exists);
         }
-        if fs::read_dir(self.root.join("sessions"))
-            .is_ok_and(|entries| !self.limits.sessions.records.allows(entries.count() + 1))
+        if fs::read_dir(self.root.join("runs"))
+            .is_ok_and(|entries| !self.limits.runs.records.allows(entries.count() + 1))
         {
-            return Err(io::Error::other("too many Session records").into());
+            return Err(io::Error::other("too many Run records").into());
         }
         let record = opened(new, ttl, now, self.headquarters_term()?);
-        self.write_session(&path, &record)?;
+        self.write_run(&path, &record)?;
         Ok(record)
     }
 
-    pub(crate) fn take_session_at(
+    pub(crate) fn take_run_at(
         &self,
         id: &str,
         station: &str,
         ttl: Duration,
         now: f64,
-    ) -> Result<SessionRecord, SessionError> {
-        validate_session_id(id, &self.limits.sessions)?;
+    ) -> Result<RunRecord, RunError> {
+        validate_run_id(id, &self.limits.runs)?;
         super::store::validate_station_id(station)?;
         let _lock = self.lock()?;
-        let path = self.session_path(id);
+        let path = self.run_path(id);
         let mut record =
-            read_session(&path, &self.limits.sessions)?.ok_or(SessionError::NotFound)?;
+            read_run(&path, &self.limits.runs)?.ok_or(RunError::NotFound)?;
         take(&mut record, station, ttl, now, || self.headquarters_term())?;
-        self.write_session(&path, &record)?;
+        self.write_run(&path, &record)?;
         Ok(record)
     }
 
@@ -864,13 +864,13 @@ impl FileRegistry {
         fence: u64,
         now: f64,
         renew: Option<Duration>,
-        update: SessionUpdate,
-    ) -> Result<SessionRecord, SessionError> {
-        validate_session_id(id, &self.limits.sessions)?;
+        update: RunUpdate,
+    ) -> Result<RunRecord, RunError> {
+        validate_run_id(id, &self.limits.runs)?;
         let _lock = self.lock()?;
-        let path = self.session_path(id);
+        let path = self.run_path(id);
         let mut record =
-            read_session(&path, &self.limits.sessions)?.ok_or(SessionError::NotFound)?;
+            read_run(&path, &self.limits.runs)?.ok_or(RunError::NotFound)?;
         apply_fenced(
             &mut record,
             station,
@@ -878,63 +878,63 @@ impl FileRegistry {
             now,
             renew,
             update,
-            &self.limits.sessions,
+            &self.limits.runs,
         )?;
-        self.write_session(&path, &record)?;
+        self.write_run(&path, &record)?;
         Ok(record)
     }
 
-    pub(crate) fn lose_session_at(
+    pub(crate) fn lose_run_at(
         &self,
         id: &str,
         reason: &str,
         now: f64,
-    ) -> Result<SessionRecord, SessionError> {
-        validate_session_id(id, &self.limits.sessions)?;
+    ) -> Result<RunRecord, RunError> {
+        validate_run_id(id, &self.limits.runs)?;
         let _lock = self.lock()?;
-        let path = self.session_path(id);
+        let path = self.run_path(id);
         let mut record =
-            read_session(&path, &self.limits.sessions)?.ok_or(SessionError::NotFound)?;
+            read_run(&path, &self.limits.runs)?.ok_or(RunError::NotFound)?;
         lose(
             &mut record,
             reason,
             now,
             || self.headquarters_term(),
-            &self.limits.sessions,
+            &self.limits.runs,
         )?;
-        self.write_session(&path, &record)?;
+        self.write_run(&path, &record)?;
         Ok(record)
     }
 }
 
 /// Whether `record` is the run `new` would be: the same attempt at the same Mission, which has
 /// one record whatever its UID.
-pub(super) fn same_run(record: &SessionRecord, new: &NewSession) -> bool {
+pub(super) fn same_run(record: &RunRecord, new: &NewRun) -> bool {
     record.mission_id == new.mission_id && record.attempt == new.attempt
 }
 
-/// Checks the identities of a Session to record.
-pub(super) fn validate_new_session(new: &NewSession, limits: &SessionLimits) -> io::Result<()> {
-    validate_session_id(&new.session_id, limits)?;
+/// Checks the identities of a Run to record.
+pub(super) fn validate_new_run(new: &NewRun, limits: &RunLimits) -> io::Result<()> {
+    validate_run_id(&new.run_id, limits)?;
     super::store::validate_station_id(&new.station)
 }
 
-/// A new Session's record: active, held by its Station from `now`, fenced at the
+/// A new Run's record: active, held by its Station from `now`, fenced at the
 /// Headquarters `term` (at least 1).
-pub(super) fn opened(new: NewSession, ttl: Duration, now: f64, term: u64) -> SessionRecord {
-    SessionRecord {
+pub(super) fn opened(new: NewRun, ttl: Duration, now: f64, term: u64) -> RunRecord {
+    RunRecord {
         handle: new
             .mission_handle
             .map(|handle| run_handle(&handle, new.attempt)),
-        session_id: new.session_id,
+        run_id: new.run_id,
         mission_id: new.mission_id,
         operation: new.operation,
-        provider_session_id: new.provider_session_id,
+        provider_id: new.provider_id,
         station: new.station,
         theater: new.theater,
         attempt: new.attempt,
         predecessor: new.predecessor,
-        status: SessionStatus::Active,
+        status: RunStatus::Active,
         parked_until: None,
         lease_expires: now + ttl.as_secs_f64(),
         fence: term.max(1),
@@ -960,18 +960,18 @@ pub(super) fn opened(new: NewSession, ttl: Duration, now: f64, term: u64) -> Ses
 /// Gives `station` the lease on `record` until `now + ttl`. A lapsed lease of another
 /// Station is taken over with a fence above both its own and the Headquarters `term`.
 pub(super) fn take(
-    record: &mut SessionRecord,
+    record: &mut RunRecord,
     station: &str,
     ttl: Duration,
     now: f64,
     term: impl FnOnce() -> io::Result<u64>,
-) -> Result<(), SessionError> {
+) -> Result<(), RunError> {
     if record.status.is_closed() {
-        return Err(SessionError::Ended);
+        return Err(RunError::Ended);
     }
     if record.station != station {
         if record.leased_at(now) {
-            return Err(SessionError::HeldBy(record.station.clone()));
+            return Err(RunError::HeldBy(record.station.clone()));
         }
         record.station = station.to_owned();
         record.fence = term()?.max(record.fence + 1);
@@ -982,25 +982,25 @@ pub(super) fn take(
 
 /// Applies `update` (and a renewal) to `record` if `station` holds it with `fence`.
 pub(super) fn apply_fenced(
-    record: &mut SessionRecord,
+    record: &mut RunRecord,
     station: &str,
     fence: u64,
     now: f64,
     renew: Option<Duration>,
-    update: SessionUpdate,
-    limits: &SessionLimits,
-) -> Result<(), SessionError> {
+    update: RunUpdate,
+    limits: &RunLimits,
+) -> Result<(), RunError> {
     if record.station != station || record.fence != fence {
-        return Err(SessionError::Stale);
+        return Err(RunError::Stale);
     }
     if record.status.is_closed() {
-        return Err(SessionError::Ended);
+        return Err(RunError::Ended);
     }
     if let Some(ttl) = renew {
         record.lease_expires = now + ttl.as_secs_f64();
     }
-    if let Some(provider) = update.provider_session_id {
-        record.provider_session_id = Some(provider);
+    if let Some(provider) = update.provider_id {
+        record.provider_id = Some(provider);
     }
     if let Some(launch) = update.launch {
         record.launch = Some(launch);
@@ -1063,7 +1063,7 @@ pub(super) fn apply_fenced(
                 .take(limits.recent_event_chars.or_max())
                 .collect()
         };
-        record.result = Some(SessionResult {
+        record.result = Some(RunResult {
             state: cut(result.state),
             reason: result.reason.map(cut),
             denied_tools: result.denied_tools,
@@ -1075,7 +1075,7 @@ pub(super) fn apply_fenced(
         }
         record.status = status;
         record.parked_until = match status {
-            SessionStatus::Parked => update.parked_until.or(record.parked_until),
+            RunStatus::Parked => update.parked_until.or(record.parked_until),
             _ => None,
         };
     }
@@ -1085,19 +1085,19 @@ pub(super) fn apply_fenced(
 /// Marks `record` lost for `reason` once its lease lapsed, moving its fence past the
 /// holder's and the Headquarters `term`.
 pub(super) fn lose(
-    record: &mut SessionRecord,
+    record: &mut RunRecord,
     reason: &str,
     now: f64,
     term: impl FnOnce() -> io::Result<u64>,
-    limits: &SessionLimits,
-) -> Result<(), SessionError> {
+    limits: &RunLimits,
+) -> Result<(), RunError> {
     if record.status.is_closed() {
-        return Err(SessionError::Ended);
+        return Err(RunError::Ended);
     }
     if record.leased_at(now) {
-        return Err(SessionError::HeldBy(record.station.clone()));
+        return Err(RunError::HeldBy(record.station.clone()));
     }
-    record.status = SessionStatus::Lost;
+    record.status = RunStatus::Lost;
     record.closed_at = Some(now);
     record.parked_until = None;
     record.lost = Some(
@@ -1111,7 +1111,7 @@ pub(super) fn lose(
 }
 
 /// Checks a verdict's bounds before it is stored.
-pub(super) fn validate_verdict(verdict: &MissionVerdict, limits: &SessionLimits) -> io::Result<()> {
+pub(super) fn validate_verdict(verdict: &MissionVerdict, limits: &RunLimits) -> io::Result<()> {
     let invalid = |message: String| io::Error::new(io::ErrorKind::InvalidInput, message);
     if verdict.by.trim().is_empty() || !verdict.at.is_finite() || verdict.at <= 0.0 {
         return Err(invalid(
@@ -1151,9 +1151,9 @@ pub(super) fn validate_verdict(verdict: &MissionVerdict, limits: &SessionLimits)
 
 /// Puts `verdict` on the attempt that ended done or held; a verdict already there is replaced.
 pub(super) fn apply_verdict(
-    record: &mut SessionRecord,
+    record: &mut RunRecord,
     verdict: MissionVerdict,
-) -> Result<(), SessionError> {
+) -> Result<(), RunError> {
     record.takes_verdict()?;
     record.verdict = Some(verdict);
     Ok(())
@@ -1161,28 +1161,28 @@ pub(super) fn apply_verdict(
 
 /// Puts `recommendation` on the attempt; only one being verified takes it.
 pub(super) fn apply_recommendation(
-    record: &mut SessionRecord,
+    record: &mut RunRecord,
     recommendation: MissionVerdict,
-) -> Result<(), SessionError> {
+) -> Result<(), RunError> {
     let state = record
         .result
         .as_ref()
         .map_or("unrecorded", |result| result.state.as_str());
     if state != "verifying" || record.status.is_closed() {
-        return Err(SessionError::Unsettled(state.to_owned()));
+        return Err(RunError::Unsettled(state.to_owned()));
     }
     record.recommendation = Some(recommendation);
     Ok(())
 }
 
 /// Marks `record` as asked to be probed; only an attempt being verified takes the request.
-pub(super) fn apply_probe_request(record: &mut SessionRecord, at: f64) -> Result<(), SessionError> {
+pub(super) fn apply_probe_request(record: &mut RunRecord, at: f64) -> Result<(), RunError> {
     let state = record
         .result
         .as_ref()
         .map_or("unrecorded", |result| result.state.as_str());
     if state != "verifying" || record.status.is_closed() {
-        return Err(SessionError::Unsettled(state.to_owned()));
+        return Err(RunError::Unsettled(state.to_owned()));
     }
     record.probe_requested = Some(at);
     Ok(())
@@ -1191,9 +1191,9 @@ pub(super) fn apply_probe_request(record: &mut SessionRecord, at: f64) -> Result
 /// Checks a final report's bounds before it is stored.
 pub(super) fn validate_final_report(
     report: &FinalReport,
-    limits: &SessionLimits,
+    limits: &RunLimits,
 ) -> io::Result<()> {
-    validate_session_id(&report.session_id, limits)?;
+    validate_run_id(&report.run_id, limits)?;
     if !limits.final_report_bytes.allows(report.text.len()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -1206,9 +1206,9 @@ pub(super) fn validate_final_report(
     Ok(())
 }
 
-/// Every exposure of `records` (one Mission's Sessions, in ID order), earliest first, one
+/// Every exposure of `records` (one Mission's Runs, in ID order), earliest first, one
 /// entry per source.
-pub(super) fn merged_exposure(records: impl IntoIterator<Item = SessionRecord>) -> Vec<Exposure> {
+pub(super) fn merged_exposure(records: impl IntoIterator<Item = RunRecord>) -> Vec<Exposure> {
     let mut merged: Vec<Exposure> = Vec::new();
     for record in records {
         for exposure in record.exposure {
@@ -1226,7 +1226,7 @@ pub(super) fn merged_exposure(records: impl IntoIterator<Item = SessionRecord>) 
 }
 
 /// The highest attempt among `records`.
-pub(super) fn latest(records: impl IntoIterator<Item = SessionRecord>) -> Option<SessionRecord> {
+pub(super) fn latest(records: impl IntoIterator<Item = RunRecord>) -> Option<RunRecord> {
     records.into_iter().max_by(|left, right| {
         left.attempt
             .cmp(&right.attempt)
@@ -1234,32 +1234,32 @@ pub(super) fn latest(records: impl IntoIterator<Item = SessionRecord>) -> Option
     })
 }
 
-/// Agent Session records with their fenced leases.
-pub trait SessionStore {
-    /// Records a new Session held by its Station and returns it with its fencing token.
+/// Agent Run records with their fenced leases.
+pub trait RunStore {
+    /// Records a new Run held by its Station and returns it with its fencing token.
     ///
     /// # Errors
     ///
     /// `Exists` when the ID is taken or the Mission already has a record of that attempt; `Io`
     /// for an invalid ID, record or Registry failure.
-    fn open_session(&self, new: NewSession, ttl: Duration) -> Result<SessionRecord, SessionError>;
+    fn open_run(&self, new: NewRun, ttl: Duration) -> Result<RunRecord, RunError>;
 
-    /// Reads one Session record.
-    fn session(&self, id: &str) -> io::Result<Option<SessionRecord>>;
+    /// Reads one Run record.
+    fn run(&self, id: &str) -> io::Result<Option<RunRecord>>;
 
-    /// Every way any Session of a Mission was exposed, earliest first, one entry per source.
+    /// Every way any Run of a Mission was exposed, earliest first, one entry per source.
     ///
     /// A later attempt inherits this, so exposure cannot be shed by starting again.
     ///
     /// # Errors
     ///
-    /// Returns an error when the Session records cannot be read.
+    /// Returns an error when the Run records cannot be read.
     fn mission_exposure(&self, mission_id: &str) -> io::Result<Vec<Exposure>>;
 
-    /// Lists every Session record in stable ID order.
-    fn sessions(&self) -> io::Result<Vec<SessionRecord>>;
+    /// Lists every Run record in stable ID order.
+    fn runs(&self) -> io::Result<Vec<RunRecord>>;
 
-    /// Takes the lease on a Session for `station`, or renews it when `station` already holds it.
+    /// Takes the lease on a Run for `station`, or renews it when `station` already holds it.
     ///
     /// A different holder's live lease is respected. A lapsed one is taken over with a fencing
     /// token above the previous holder's, which makes that holder's writes stale.
@@ -1267,54 +1267,54 @@ pub trait SessionStore {
     /// # Errors
     ///
     /// `NotFound`, `Ended`, `HeldBy` while another Station's lease is live, or `Io`.
-    fn take_session(
+    fn take_run(
         &self,
         id: &str,
         station: &str,
         ttl: Duration,
-    ) -> Result<SessionRecord, SessionError>;
+    ) -> Result<RunRecord, RunError>;
 
-    /// Extends the lease `station` holds on a Session, if it still holds it with `fence`.
+    /// Extends the lease `station` holds on a Run, if it still holds it with `fence`.
     ///
     /// # Errors
     ///
-    /// `Stale` when another Station took the Session or `fence` is not the current token.
-    fn renew_session(
+    /// `Stale` when another Station took the Run or `fence` is not the current token.
+    fn renew_run(
         &self,
         id: &str,
         station: &str,
         fence: u64,
         ttl: Duration,
-    ) -> Result<SessionRecord, SessionError>;
+    ) -> Result<RunRecord, RunError>;
 
-    /// Applies `update` to a Session if `station` still holds it with `fence`.
+    /// Applies `update` to a Run if `station` still holds it with `fence`.
     ///
     /// # Errors
     ///
-    /// `Stale` when another Station took the Session or `fence` is not the current token.
-    fn update_session(
+    /// `Stale` when another Station took the Run or `fence` is not the current token.
+    fn update_run(
         &self,
         id: &str,
         station: &str,
         fence: u64,
-        update: SessionUpdate,
-    ) -> Result<SessionRecord, SessionError>;
+        update: RunUpdate,
+    ) -> Result<RunRecord, RunError>;
 
-    /// Marks a Session whose holder stopped renewing its lease as lost, giving the reason.
+    /// Marks a Run whose holder stopped renewing its lease as lost, giving the reason.
     ///
     /// The fencing token moves on, so the holder's writes are refused if it comes back.
     ///
     /// # Errors
     ///
-    /// `NotFound`, `Ended` for a closed Session, `HeldBy` while its lease is live, or `Io`.
-    fn lose_session(&self, id: &str, reason: &str) -> Result<SessionRecord, SessionError>;
+    /// `NotFound`, `Ended` for a closed Run, `HeldBy` while its lease is live, or `Io`.
+    fn lose_run(&self, id: &str, reason: &str) -> Result<RunRecord, RunError>;
 
-    /// The latest attempt at a Mission: the Session record with the highest attempt number.
+    /// The latest attempt at a Mission: the Run record with the highest attempt number.
     ///
     /// # Errors
     ///
-    /// Returns an error when the Session records cannot be read.
-    fn latest_session(&self, mission_id: &str) -> io::Result<Option<SessionRecord>>;
+    /// Returns an error when the Run records cannot be read.
+    fn latest_run(&self, mission_id: &str) -> io::Result<Option<RunRecord>>;
 
     /// Records a person's verdict on the latest attempt at a Mission of `operation`, replacing any
     /// it has. It needs no lease: a person's word, not a holder's write.
@@ -1328,7 +1328,7 @@ pub trait SessionStore {
         operation: &str,
         mission_id: &str,
         verdict: &MissionVerdict,
-    ) -> Result<SessionRecord, SessionError>;
+    ) -> Result<RunRecord, RunError>;
 
     /// Records what a watch held at `desk` clearance advises for the latest attempt at a Mission
     /// of `operation`, replacing any it has. It settles nothing and needs no lease.
@@ -1342,7 +1342,7 @@ pub trait SessionStore {
         operation: &str,
         mission_id: &str,
         recommendation: &MissionVerdict,
-    ) -> Result<SessionRecord, SessionError>;
+    ) -> Result<RunRecord, RunError>;
 
     /// Asks for the latest attempt at a Mission of `operation` to have its deliverables probed;
     /// the Station that holds it does so on its next pass and clears the request. It needs no
@@ -1357,90 +1357,90 @@ pub trait SessionStore {
         operation: &str,
         mission_id: &str,
         at: f64,
-    ) -> Result<SessionRecord, SessionError>;
+    ) -> Result<RunRecord, RunError>;
 
-    /// Keeps a Session's final report, replacing the one it has.
+    /// Keeps a Run's final report, replacing the one it has.
     ///
     /// # Errors
     ///
-    /// `InvalidInput` for an invalid Session ID or a report over its limit; I/O errors otherwise.
+    /// `InvalidInput` for an invalid Run ID or a report over its limit; I/O errors otherwise.
     fn file_final_report(&self, report: &FinalReport) -> io::Result<()>;
 
-    /// A Session's final report, if it filed one.
+    /// A Run's final report, if it filed one.
     ///
     /// # Errors
     ///
-    /// `InvalidInput` for an invalid Session ID; I/O errors otherwise.
-    fn final_report(&self, session_id: &str) -> io::Result<Option<FinalReport>>;
+    /// `InvalidInput` for an invalid Run ID; I/O errors otherwise.
+    fn final_report(&self, run_id: &str) -> io::Result<Option<FinalReport>>;
 }
 
-impl SessionStore for FileRegistry {
-    fn open_session(&self, new: NewSession, ttl: Duration) -> Result<SessionRecord, SessionError> {
-        self.open_session_at(new, ttl, unix_time()?)
+impl RunStore for FileRegistry {
+    fn open_run(&self, new: NewRun, ttl: Duration) -> Result<RunRecord, RunError> {
+        self.open_run_at(new, ttl, unix_time()?)
     }
 
-    fn session(&self, id: &str) -> io::Result<Option<SessionRecord>> {
-        validate_session_id(id, &self.limits.sessions)?;
+    fn run(&self, id: &str) -> io::Result<Option<RunRecord>> {
+        validate_run_id(id, &self.limits.runs)?;
         let _lock = self.lock()?;
-        read_session(&self.session_path(id), &self.limits.sessions)
+        read_run(&self.run_path(id), &self.limits.runs)
     }
 
     fn mission_exposure(&self, mission_id: &str) -> io::Result<Vec<Exposure>> {
         Ok(merged_exposure(
-            self.sessions()?
+            self.runs()?
                 .into_iter()
                 .filter(|record| record.mission_id == mission_id),
         ))
     }
 
-    fn sessions(&self) -> io::Result<Vec<SessionRecord>> {
+    fn runs(&self) -> io::Result<Vec<RunRecord>> {
         let _lock = self.lock()?;
-        self.sessions_locked()
+        self.runs_locked()
     }
 
-    fn take_session(
+    fn take_run(
         &self,
         id: &str,
         station: &str,
         ttl: Duration,
-    ) -> Result<SessionRecord, SessionError> {
-        self.take_session_at(id, station, ttl, unix_time()?)
+    ) -> Result<RunRecord, RunError> {
+        self.take_run_at(id, station, ttl, unix_time()?)
     }
 
-    fn renew_session(
+    fn renew_run(
         &self,
         id: &str,
         station: &str,
         fence: u64,
         ttl: Duration,
-    ) -> Result<SessionRecord, SessionError> {
+    ) -> Result<RunRecord, RunError> {
         self.write_fenced(
             id,
             station,
             fence,
             unix_time()?,
             Some(ttl),
-            SessionUpdate::default(),
+            RunUpdate::default(),
         )
     }
 
-    fn update_session(
+    fn update_run(
         &self,
         id: &str,
         station: &str,
         fence: u64,
-        update: SessionUpdate,
-    ) -> Result<SessionRecord, SessionError> {
+        update: RunUpdate,
+    ) -> Result<RunRecord, RunError> {
         self.write_fenced(id, station, fence, unix_time()?, None, update)
     }
 
-    fn lose_session(&self, id: &str, reason: &str) -> Result<SessionRecord, SessionError> {
-        self.lose_session_at(id, reason, unix_time()?)
+    fn lose_run(&self, id: &str, reason: &str) -> Result<RunRecord, RunError> {
+        self.lose_run_at(id, reason, unix_time()?)
     }
 
-    fn latest_session(&self, mission_id: &str) -> io::Result<Option<SessionRecord>> {
+    fn latest_run(&self, mission_id: &str) -> io::Result<Option<RunRecord>> {
         Ok(latest(
-            self.sessions()?
+            self.runs()?
                 .into_iter()
                 .filter(|record| record.mission_id == mission_id),
         ))
@@ -1451,15 +1451,15 @@ impl SessionStore for FileRegistry {
         operation: &str,
         mission_id: &str,
         verdict: &MissionVerdict,
-    ) -> Result<SessionRecord, SessionError> {
-        validate_verdict(verdict, &self.limits.sessions)?;
+    ) -> Result<RunRecord, RunError> {
+        validate_verdict(verdict, &self.limits.runs)?;
         let _lock = self.lock()?;
-        let mut record = latest(self.sessions_locked()?.into_iter().filter(|record| {
+        let mut record = latest(self.runs_locked()?.into_iter().filter(|record| {
             record.mission_id == mission_id && record.operation.as_deref() == Some(operation)
         }))
-        .ok_or(SessionError::NotFound)?;
+        .ok_or(RunError::NotFound)?;
         apply_verdict(&mut record, verdict.clone())?;
-        self.write_session(&self.session_path(&record.session_id), &record)?;
+        self.write_run(&self.run_path(&record.run_id), &record)?;
         Ok(record)
     }
 
@@ -1468,15 +1468,15 @@ impl SessionStore for FileRegistry {
         operation: &str,
         mission_id: &str,
         recommendation: &MissionVerdict,
-    ) -> Result<SessionRecord, SessionError> {
-        validate_verdict(recommendation, &self.limits.sessions)?;
+    ) -> Result<RunRecord, RunError> {
+        validate_verdict(recommendation, &self.limits.runs)?;
         let _lock = self.lock()?;
-        let mut record = latest(self.sessions_locked()?.into_iter().filter(|record| {
+        let mut record = latest(self.runs_locked()?.into_iter().filter(|record| {
             record.mission_id == mission_id && record.operation.as_deref() == Some(operation)
         }))
-        .ok_or(SessionError::NotFound)?;
+        .ok_or(RunError::NotFound)?;
         apply_recommendation(&mut record, recommendation.clone())?;
-        self.write_session(&self.session_path(&record.session_id), &record)?;
+        self.write_run(&self.run_path(&record.run_id), &record)?;
         Ok(record)
     }
 
@@ -1485,28 +1485,28 @@ impl SessionStore for FileRegistry {
         operation: &str,
         mission_id: &str,
         at: f64,
-    ) -> Result<SessionRecord, SessionError> {
+    ) -> Result<RunRecord, RunError> {
         let _lock = self.lock()?;
-        let mut record = latest(self.sessions_locked()?.into_iter().filter(|record| {
+        let mut record = latest(self.runs_locked()?.into_iter().filter(|record| {
             record.mission_id == mission_id && record.operation.as_deref() == Some(operation)
         }))
-        .ok_or(SessionError::NotFound)?;
+        .ok_or(RunError::NotFound)?;
         apply_probe_request(&mut record, at)?;
-        self.write_session(&self.session_path(&record.session_id), &record)?;
+        self.write_run(&self.run_path(&record.run_id), &record)?;
         Ok(record)
     }
 
     fn file_final_report(&self, report: &FinalReport) -> io::Result<()> {
-        validate_final_report(report, &self.limits.sessions)?;
+        validate_final_report(report, &self.limits.runs)?;
         let bytes = serde_json::to_vec(report).map_err(io::Error::other)?;
         let _lock = self.lock()?;
-        self.write_atomic(&self.final_report_path(&report.session_id), &bytes)
+        self.write_atomic(&self.final_report_path(&report.run_id), &bytes)
     }
 
-    fn final_report(&self, session_id: &str) -> io::Result<Option<FinalReport>> {
-        validate_session_id(session_id, &self.limits.sessions)?;
+    fn final_report(&self, run_id: &str) -> io::Result<Option<FinalReport>> {
+        validate_run_id(run_id, &self.limits.runs)?;
         let _lock = self.lock()?;
-        match fs::read(self.final_report_path(session_id)) {
+        match fs::read(self.final_report_path(run_id)) {
             Ok(bytes) => serde_json::from_slice(&bytes)
                 .map(Some)
                 .map_err(|error| invalid_data(format!("invalid final report: {error}"))),
@@ -1521,10 +1521,10 @@ impl FileRegistry {
         self.root.join("final-reports").join(format!("{id}.json"))
     }
 
-    /// Every Session record, in ID order, under the lock the caller holds.
-    fn sessions_locked(&self) -> io::Result<Vec<SessionRecord>> {
+    /// Every Run record, in ID order, under the lock the caller holds.
+    fn runs_locked(&self) -> io::Result<Vec<RunRecord>> {
         let mut records = Vec::new();
-        let entries = match fs::read_dir(self.root.join("sessions")) {
+        let entries = match fs::read_dir(self.root.join("runs")) {
             Ok(entries) => entries,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(records),
             Err(error) => return Err(error),
@@ -1534,55 +1534,55 @@ impl FileRegistry {
             if path
                 .extension()
                 .is_some_and(|extension| extension == "json")
-                && let Some(record) = read_session(&path, &self.limits.sessions)?
+                && let Some(record) = read_run(&path, &self.limits.runs)?
             {
                 records.push(record);
             }
         }
-        records.sort_by(|left, right| left.session_id.cmp(&right.session_id));
+        records.sort_by(|left, right| left.run_id.cmp(&right.run_id));
         Ok(records)
     }
 }
 
-fn read_session(
+fn read_run(
     path: &std::path::Path,
-    limits: &SessionLimits,
-) -> io::Result<Option<SessionRecord>> {
+    limits: &RunLimits,
+) -> io::Result<Option<RunRecord>> {
     match fs::read(path) {
-        Ok(bytes) => parse_session(&bytes, limits).map(Some),
+        Ok(bytes) => parse_run(&bytes, limits).map(Some),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
     }
 }
 
-/// Reads a stored Session record, refusing one out of bounds.
-pub(super) fn parse_session(bytes: &[u8], limits: &SessionLimits) -> io::Result<SessionRecord> {
+/// Reads a stored Run record, refusing one out of bounds.
+pub(super) fn parse_run(bytes: &[u8], limits: &RunLimits) -> io::Result<RunRecord> {
     if !limits.record_bytes.allows(bytes.len()) {
-        return Err(invalid_data("Session record exceeds the size limit"));
+        return Err(invalid_data("Run record exceeds the size limit"));
     }
-    let record: SessionRecord = serde_json::from_slice(bytes)
-        .map_err(|error| invalid_data(format!("invalid Session record: {error}")))?;
+    let record: RunRecord = serde_json::from_slice(bytes)
+        .map_err(|error| invalid_data(format!("invalid Run record: {error}")))?;
     if !record.lease_expires.is_finite() || record.attempt == 0 {
-        return Err(invalid_data("invalid Session record"));
+        return Err(invalid_data("invalid Run record"));
     }
     Ok(record)
 }
 
-/// The stored form of a Session record, within the size limit.
-pub(super) fn session_json(record: &SessionRecord, limits: &SessionLimits) -> io::Result<Vec<u8>> {
+/// The stored form of a Run record, within the size limit.
+pub(super) fn run_json(record: &RunRecord, limits: &RunLimits) -> io::Result<Vec<u8>> {
     let bytes = serde_json::to_vec(record).map_err(io::Error::other)?;
     if !limits.record_bytes.allows(bytes.len()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "Session record exceeds the size limit",
+            "Run record exceeds the size limit",
         ));
     }
     Ok(bytes)
 }
 
 impl FileRegistry {
-    fn write_session(&self, path: &std::path::Path, record: &SessionRecord) -> io::Result<()> {
-        self.write_atomic(path, &session_json(record, &self.limits.sessions)?)
+    fn write_run(&self, path: &std::path::Path, record: &RunRecord) -> io::Result<()> {
+        self.write_atomic(path, &run_json(record, &self.limits.runs)?)
     }
 }
 
@@ -1598,50 +1598,50 @@ mod tests {
         a_stale_fencing_token_is_refused,
         a_live_lease_cannot_be_taken_but_the_holder_renews_it,
         the_fencing_token_follows_the_headquarters_term_and_only_grows,
-        status_changes_are_fenced_and_an_ended_session_is_closed,
-        a_session_keeps_its_agent_times_and_the_result_of_its_last_write,
-        only_a_lapsed_session_is_lost_and_its_holder_is_fenced_out,
+        status_changes_are_fenced_and_an_ended_run_is_closed,
+        a_run_keeps_its_agent_times_and_the_result_of_its_last_write,
+        only_a_lapsed_run_is_lost_and_its_holder_is_fenced_out,
         the_holder_records_launch_recent_events_and_checkpoints_within_bounds,
-        the_latest_session_is_the_highest_attempt,
+        the_latest_run_is_the_highest_attempt,
         unsafe_ids_are_rejected_before_touching_the_filesystem,
         a_verdict_lands_on_the_latest_attempt_that_ended,
         a_verdict_is_refused_on_an_attempt_with_no_outcome,
-        a_final_report_is_kept_by_its_session_and_cut_when_long,
+        a_final_report_is_kept_by_its_run_and_cut_when_long,
     );
 
     const NOW: f64 = 1_800_000_000.0;
     const TTL: Duration = Duration::from_secs(60);
 
-    fn new_session() -> NewSession {
-        NewSession::new("s-1", "mission-1", "station-a").with_theater("local")
+    fn new_run() -> NewRun {
+        NewRun::new("s-1", "mission-1", "station-a").with_theater("local")
     }
 
     fn two_stations_sharing_a_registry_see_the_same_record(store: &dyn Store) {
         let first = store.handle();
         let second = store.handle();
         let opened = first
-            .open_session_at(new_session().with_provider_session("provider-1"), TTL, NOW)
+            .open_run_at(new_run().with_provider_id("provider-1"), TTL, NOW)
             .unwrap();
 
-        let seen = second.session("s-1").unwrap().unwrap();
+        let seen = second.run("s-1").unwrap().unwrap();
         assert_eq!(seen, opened);
         assert_eq!(seen.station, "station-a");
         assert_eq!(seen.theater.as_deref(), Some("local"));
-        assert_eq!(seen.provider_session_id.as_deref(), Some("provider-1"));
+        assert_eq!(seen.provider_id.as_deref(), Some("provider-1"));
         assert_eq!(seen.attempt, 1);
-        assert_eq!(second.sessions().unwrap(), vec![seen]);
+        assert_eq!(second.runs().unwrap(), vec![seen]);
         assert!(matches!(
-            second.open_session_at(new_session(), TTL, NOW),
-            Err(SessionError::Exists)
+            second.open_run_at(new_run(), TTL, NOW),
+            Err(RunError::Exists)
         ));
     }
 
     fn a_later_attempt_links_to_its_predecessor(store: &dyn Store) {
         let registry = store.handle();
-        registry.open_session_at(new_session(), TTL, NOW).unwrap();
+        registry.open_run_at(new_run(), TTL, NOW).unwrap();
         let next = registry
-            .open_session_at(
-                NewSession::new("s-2", "mission-1", "station-a")
+            .open_run_at(
+                NewRun::new("s-2", "mission-1", "station-a")
                     .with_attempt(2, Some("s-1".to_owned())),
                 TTL,
                 NOW,
@@ -1655,57 +1655,57 @@ mod tests {
 
     fn a_stale_fencing_token_is_refused(store: &dyn Store) {
         let registry = store.handle();
-        let first = registry.open_session_at(new_session(), TTL, NOW).unwrap();
+        let first = registry.open_run_at(new_run(), TTL, NOW).unwrap();
 
         // The first holder stops renewing; the second takes the lapsed lease.
         let later = NOW + 120.0;
         let taken = registry
-            .take_session_at("s-1", "station-b", TTL, later)
+            .take_run_at("s-1", "station-b", TTL, later)
             .unwrap();
         assert_eq!(taken.station, "station-b");
         assert!(taken.fence > first.fence);
 
         // Its old token, and even the right Station name with the old token, are refused.
-        let update = SessionUpdate::default().provider_session("late-write");
+        let update = RunUpdate::default().provider_id("late-write");
         for (station, fence) in [("station-a", first.fence), ("station-b", first.fence)] {
             assert!(matches!(
                 registry.write_fenced("s-1", station, fence, later, None, update.clone()),
-                Err(SessionError::Stale)
+                Err(RunError::Stale)
             ));
         }
         assert!(matches!(
             registry.write_fenced("s-1", "station-a", taken.fence, later, None, update.clone()),
-            Err(SessionError::Stale)
+            Err(RunError::Stale)
         ));
-        let record = registry.session("s-1").unwrap().unwrap();
-        assert_eq!(record.provider_session_id, None);
+        let record = registry.run("s-1").unwrap().unwrap();
+        assert_eq!(record.provider_id, None);
 
         // The current holder's token still works.
         let written = registry
             .write_fenced("s-1", "station-b", taken.fence, later, None, update)
             .unwrap();
-        assert_eq!(written.provider_session_id.as_deref(), Some("late-write"));
+        assert_eq!(written.provider_id.as_deref(), Some("late-write"));
     }
 
     fn a_live_lease_cannot_be_taken_but_the_holder_renews_it(store: &dyn Store) {
         let registry = store.handle();
-        let opened = registry.open_session_at(new_session(), TTL, NOW).unwrap();
+        let opened = registry.open_run_at(new_run(), TTL, NOW).unwrap();
         assert!(matches!(
-            registry.take_session_at("s-1", "station-b", TTL, NOW + 30.0),
-            Err(SessionError::HeldBy(holder)) if holder == "station-a"
+            registry.take_run_at("s-1", "station-b", TTL, NOW + 30.0),
+            Err(RunError::HeldBy(holder)) if holder == "station-a"
         ));
         let renewed = registry
-            .take_session_at("s-1", "station-a", TTL, NOW + 30.0)
+            .take_run_at("s-1", "station-a", TTL, NOW + 30.0)
             .unwrap();
         assert_eq!(renewed.fence, opened.fence);
         assert!(renewed.lease_expires > opened.lease_expires);
         assert!(matches!(
-            registry.take_session_at("s-1", "station-b", TTL, NOW + 80.0),
-            Err(SessionError::HeldBy(_))
+            registry.take_run_at("s-1", "station-b", TTL, NOW + 80.0),
+            Err(RunError::HeldBy(_))
         ));
         assert!(
             registry
-                .take_session_at("s-1", "station-b", TTL, NOW + 200.0)
+                .take_run_at("s-1", "station-b", TTL, NOW + 200.0)
                 .is_ok()
         );
     }
@@ -1713,7 +1713,7 @@ mod tests {
     fn the_fencing_token_follows_the_headquarters_term_and_only_grows(store: &dyn Store) {
         let registry = store.handle();
         registry.elect("hq-a", DEFAULT_LEASE).unwrap();
-        let first = registry.open_session_at(new_session(), TTL, NOW).unwrap();
+        let first = registry.open_run_at(new_run(), TTL, NOW).unwrap();
         assert_eq!(
             first.fence,
             registry.headquarters().unwrap().unwrap().term()
@@ -1721,30 +1721,30 @@ mod tests {
 
         // A takeover inside the same election term still gets a larger token.
         let taken = registry
-            .take_session_at("s-1", "station-b", TTL, NOW + 500.0)
+            .take_run_at("s-1", "station-b", TTL, NOW + 500.0)
             .unwrap();
         assert!(taken.fence > first.fence);
         let again = registry
-            .take_session_at("s-1", "station-c", TTL, NOW + 1_000.0)
+            .take_run_at("s-1", "station-c", TTL, NOW + 1_000.0)
             .unwrap();
         assert!(again.fence > taken.fence);
     }
 
     /// A Mission of Operation `G` whose attempt `attempt` stands in `state`.
-    fn attempt_in(store: &dyn Store, mission: &str, attempt: u32, state: &str) -> SessionRecord {
+    fn attempt_in(store: &dyn Store, mission: &str, attempt: u32, state: &str) -> RunRecord {
         let registry = store.handle();
-        let new = NewSession::new(format!("{mission}-{attempt}"), mission, "station-a")
+        let new = NewRun::new(format!("{mission}-{attempt}"), mission, "station-a")
             .with_operation("G")
             .with_attempt(attempt, None);
-        let opened = registry.open_session_at(new, TTL, NOW).unwrap();
+        let opened = registry.open_run_at(new, TTL, NOW).unwrap();
         registry
             .write_fenced(
-                &opened.session_id,
+                &opened.run_id,
                 "station-a",
                 opened.fence,
                 NOW,
                 None,
-                SessionUpdate::default().result(SessionResult::new(state)),
+                RunUpdate::default().result(RunResult::new(state)),
             )
             .unwrap()
     }
@@ -1760,13 +1760,13 @@ mod tests {
             Some("the tag was never pushed".to_owned()),
         );
         let judged = registry.record_verdict("G", "m-1", &verdict).unwrap();
-        assert_eq!(judged.session_id, last.session_id);
+        assert_eq!(judged.run_id, last.run_id);
         assert_eq!(judged.verdict.as_ref(), Some(&verdict));
         assert_eq!(
-            registry.session(&last.session_id).unwrap().unwrap().verdict,
+            registry.run(&last.run_id).unwrap().unwrap().verdict,
             Some(verdict)
         );
-        assert_eq!(registry.session("m-1-1").unwrap().unwrap().verdict, None);
+        assert_eq!(registry.run("m-1-1").unwrap().unwrap().verdict, None);
 
         // A person changes their mind: the latest verdict stands.
         let confirmed = MissionVerdict::new(OutcomeVerdict::Confirmed, "person-2", NOW + 1.0, None);
@@ -1782,7 +1782,7 @@ mod tests {
                 &MissionVerdict::new(OutcomeVerdict::FailedVerification, "p", NOW, None),
             )
             .unwrap();
-        assert_eq!(judged.session_id, held.session_id);
+        assert_eq!(judged.run_id, held.run_id);
     }
 
     fn a_verdict_is_refused_on_an_attempt_with_no_outcome(store: &dyn Store) {
@@ -1790,13 +1790,13 @@ mod tests {
         let verdict = MissionVerdict::new(OutcomeVerdict::Disputed, "p", NOW, None);
         assert!(matches!(
             registry.record_verdict("G", "m-none", &verdict),
-            Err(SessionError::NotFound)
+            Err(RunError::NotFound)
         ));
         attempt_in(store, "m-1", 1, "done");
         assert!(
             matches!(
                 registry.record_verdict("other", "m-1", &verdict),
-                Err(SessionError::NotFound)
+                Err(RunError::NotFound)
             ),
             "another Operation's Mission is not found"
         );
@@ -1804,7 +1804,7 @@ mod tests {
             let mission = format!("m-{state}");
             attempt_in(store, &mission, 1, state);
             match registry.record_verdict("G", &mission, &verdict) {
-                Err(SessionError::Unsettled(found)) => assert_eq!(found, state),
+                Err(RunError::Unsettled(found)) => assert_eq!(found, state),
                 other => panic!("{state}: {other:?}"),
             }
         }
@@ -1813,7 +1813,7 @@ mod tests {
         attempt_in(store, "m-retried", 2, "working");
         assert!(matches!(
             registry.record_verdict("G", "m-retried", &verdict),
-            Err(SessionError::Unsettled(_))
+            Err(RunError::Unsettled(_))
         ));
         for bad in [
             MissionVerdict::new(OutcomeVerdict::Disputed, " ", NOW, None),
@@ -1829,20 +1829,20 @@ mod tests {
                 OutcomeVerdict::Disputed,
                 "p",
                 NOW,
-                Some("x".repeat(SessionLimits::default().verdict_note_bytes.or_max() + 1)),
+                Some("x".repeat(RunLimits::default().verdict_note_bytes.or_max() + 1)),
             ),
         ] {
             assert!(
                 matches!(
                     registry.record_verdict("G", "m-1", &bad),
-                    Err(SessionError::Io(error)) if error.kind() == io::ErrorKind::InvalidInput
+                    Err(RunError::Io(error)) if error.kind() == io::ErrorKind::InvalidInput
                 ),
                 "{bad:?}"
             );
         }
     }
 
-    fn a_final_report_is_kept_by_its_session_and_cut_when_long(store: &dyn Store) {
+    fn a_final_report_is_kept_by_its_run_and_cut_when_long(store: &dyn Store) {
         let registry = store.handle();
         assert_eq!(registry.final_report("s-1").unwrap(), None);
         let first = FinalReport::new("s-1", "m-1", "first", NOW, Limit::at(64));
@@ -1863,7 +1863,7 @@ mod tests {
         let over = FinalReport::new(
             "s-3",
             "m-1",
-            &"x".repeat(SessionLimits::default().final_report_bytes.or_max() + 1),
+            &"x".repeat(RunLimits::default().final_report_bytes.or_max() + 1),
             NOW,
             Limit::UNBOUNDED,
         );
@@ -1874,11 +1874,11 @@ mod tests {
         assert!(registry.final_report("../x").is_err());
     }
 
-    fn a_session_keeps_its_agent_times_and_the_result_of_its_last_write(store: &dyn Store) {
+    fn a_run_keeps_its_agent_times_and_the_result_of_its_last_write(store: &dyn Store) {
         let registry = store.handle();
-        let launch = SessionLaunch::new("claude", "pipe", "/w").with_agent(Some("007".to_owned()));
+        let launch = RunLaunch::new("claude", "pipe", "/w").with_agent(Some("007".to_owned()));
         let opened = registry
-            .open_session_at(new_session().with_launch(launch), TTL, NOW)
+            .open_run_at(new_run().with_launch(launch), TTL, NOW)
             .unwrap();
         assert_eq!(opened.opened_at, Some(NOW));
         assert_eq!((opened.closed_at, opened.result.clone()), (None, None));
@@ -1890,8 +1890,8 @@ mod tests {
                 opened.fence,
                 NOW + 10.0,
                 None,
-                SessionUpdate::default().result(
-                    SessionResult::new("blocked")
+                RunUpdate::default().result(
+                    RunResult::new("blocked")
                         .with_reason(Some("green-ink".to_owned()))
                         .with_denied_tools(2),
                 ),
@@ -1915,13 +1915,13 @@ mod tests {
                 opened.fence,
                 NOW + 90.0,
                 None,
-                SessionUpdate::default()
-                    .result(SessionResult::new("done"))
-                    .status(SessionStatus::Ended),
+                RunUpdate::default()
+                    .result(RunResult::new("done"))
+                    .status(RunStatus::Ended),
             )
             .unwrap();
         assert_eq!(ended.closed_at, Some(NOW + 90.0));
-        let read = registry.session("s-1").unwrap().unwrap();
+        let read = registry.run("s-1").unwrap().unwrap();
         assert_eq!(read, ended);
         assert_eq!(read.result.unwrap().state, "done");
         assert_eq!(
@@ -1931,9 +1931,9 @@ mod tests {
         );
     }
 
-    fn status_changes_are_fenced_and_an_ended_session_is_closed(store: &dyn Store) {
+    fn status_changes_are_fenced_and_an_ended_run_is_closed(store: &dyn Store) {
         let registry = store.handle();
-        let opened = registry.open_session_at(new_session(), TTL, NOW).unwrap();
+        let opened = registry.open_run_at(new_run(), TTL, NOW).unwrap();
         let parked = registry
             .write_fenced(
                 "s-1",
@@ -1941,12 +1941,12 @@ mod tests {
                 opened.fence,
                 NOW,
                 None,
-                SessionUpdate::default()
-                    .status(SessionStatus::Parked)
+                RunUpdate::default()
+                    .status(RunStatus::Parked)
                     .parked_until(NOW + 3_600.0),
             )
             .unwrap();
-        assert_eq!(parked.status, SessionStatus::Parked);
+        assert_eq!(parked.status, RunStatus::Parked);
         assert_eq!(parked.parked_until, Some(NOW + 3_600.0));
         let active = registry
             .write_fenced(
@@ -1955,7 +1955,7 @@ mod tests {
                 opened.fence,
                 NOW,
                 None,
-                SessionUpdate::default().status(SessionStatus::Active),
+                RunUpdate::default().status(RunStatus::Active),
             )
             .unwrap();
         assert_eq!(active.parked_until, None);
@@ -1966,12 +1966,12 @@ mod tests {
                 opened.fence,
                 NOW,
                 None,
-                SessionUpdate::default().status(SessionStatus::Ended),
+                RunUpdate::default().status(RunStatus::Ended),
             )
             .unwrap();
         assert!(matches!(
-            registry.take_session_at("s-1", "station-b", TTL, NOW + 1_000.0),
-            Err(SessionError::Ended)
+            registry.take_run_at("s-1", "station-b", TTL, NOW + 1_000.0),
+            Err(RunError::Ended)
         ));
         assert!(matches!(
             registry.write_fenced(
@@ -1980,24 +1980,24 @@ mod tests {
                 opened.fence,
                 NOW,
                 None,
-                SessionUpdate::default()
+                RunUpdate::default()
             ),
-            Err(SessionError::Ended)
+            Err(RunError::Ended)
         ));
     }
 
-    fn only_a_lapsed_session_is_lost_and_its_holder_is_fenced_out(store: &dyn Store) {
+    fn only_a_lapsed_run_is_lost_and_its_holder_is_fenced_out(store: &dyn Store) {
         let registry = store.handle();
-        let opened = registry.open_session_at(new_session(), TTL, NOW).unwrap();
+        let opened = registry.open_run_at(new_run(), TTL, NOW).unwrap();
         assert!(matches!(
-            registry.lose_session_at("s-1", "gone dark", NOW + 30.0),
-            Err(SessionError::HeldBy(holder)) if holder == "station-a"
+            registry.lose_run_at("s-1", "gone dark", NOW + 30.0),
+            Err(RunError::HeldBy(holder)) if holder == "station-a"
         ));
 
         let lost = registry
-            .lose_session_at("s-1", "Station station-a went dark", NOW + 120.0)
+            .lose_run_at("s-1", "Station station-a went dark", NOW + 120.0)
             .unwrap();
-        assert_eq!(lost.status, SessionStatus::Lost);
+        assert_eq!(lost.status, RunStatus::Lost);
         assert_eq!(lost.lost.as_deref(), Some("Station station-a went dark"));
         assert!(lost.fence > opened.fence);
         assert!(!lost.leased_at(NOW));
@@ -2010,28 +2010,28 @@ mod tests {
                 opened.fence,
                 NOW + 130.0,
                 Some(TTL),
-                SessionUpdate::default()
+                RunUpdate::default()
             ),
-            Err(SessionError::Stale)
+            Err(RunError::Stale)
         ));
         assert!(matches!(
-            registry.take_session_at("s-1", "station-b", TTL, NOW + 130.0),
-            Err(SessionError::Ended)
+            registry.take_run_at("s-1", "station-b", TTL, NOW + 130.0),
+            Err(RunError::Ended)
         ));
         assert!(matches!(
-            registry.lose_session_at("s-1", "again", NOW + 130.0),
-            Err(SessionError::Ended)
+            registry.lose_run_at("s-1", "again", NOW + 130.0),
+            Err(RunError::Ended)
         ));
     }
 
     fn the_holder_records_launch_recent_events_and_checkpoints_within_bounds(store: &dyn Store) {
         let registry = store.handle();
-        let launch = SessionLaunch::new("claude", "pty", "/srv/work")
+        let launch = RunLaunch::new("claude", "pty", "/srv/work")
             .with_model(Some("sonnet".to_owned()), None)
             .with_mode(ExecutionMode::Field)
             .with_runner("key-1");
         let opened = registry
-            .open_session_at(new_session().with_launch(launch.clone()), TTL, NOW)
+            .open_run_at(new_run().with_launch(launch.clone()), TTL, NOW)
             .unwrap();
         assert_eq!(opened.launch.as_ref(), Some(&launch));
 
@@ -2051,7 +2051,7 @@ mod tests {
                 opened.fence,
                 NOW,
                 None,
-                SessionUpdate::default()
+                RunUpdate::default()
                     .recent(many)
                     .checkpoint(checkpoint.clone(), NOW + 1.0),
             )
@@ -2066,34 +2066,34 @@ mod tests {
         );
         assert_eq!(written.checkpoint, Some(checkpoint));
         assert_eq!(written.checkpointed_at, Some(NOW + 1.0));
-        assert_eq!(registry.session("s-1").unwrap().unwrap(), written);
+        assert_eq!(registry.run("s-1").unwrap().unwrap(), written);
     }
 
-    fn the_latest_session_is_the_highest_attempt(store: &dyn Store) {
+    fn the_latest_run_is_the_highest_attempt(store: &dyn Store) {
         let registry = store.handle();
-        assert_eq!(registry.latest_session("mission-1").unwrap(), None);
-        registry.open_session_at(new_session(), TTL, NOW).unwrap();
+        assert_eq!(registry.latest_run("mission-1").unwrap(), None);
+        registry.open_run_at(new_run(), TTL, NOW).unwrap();
         registry
-            .open_session_at(
-                NewSession::new("s-0", "mission-1", "station-b")
+            .open_run_at(
+                NewRun::new("s-0", "mission-1", "station-b")
                     .with_attempt(2, Some("s-1".to_owned())),
                 TTL,
                 NOW,
             )
             .unwrap();
         registry
-            .open_session_at(NewSession::new("s-9", "mission-2", "station-b"), TTL, NOW)
+            .open_run_at(NewRun::new("s-9", "mission-2", "station-b"), TTL, NOW)
             .unwrap();
-        let latest = registry.latest_session("mission-1").unwrap().unwrap();
-        assert_eq!((latest.session_id.as_str(), latest.attempt), ("s-0", 2));
+        let latest = registry.latest_run("mission-1").unwrap().unwrap();
+        assert_eq!((latest.run_id.as_str(), latest.attempt), ("s-0", 2));
     }
 
     #[test]
     fn records_written_before_adoption_still_load() {
         let root = tempfile::tempdir().unwrap();
         let registry = FileRegistry::open(root.path());
-        registry.open_session_at(new_session(), TTL, NOW).unwrap();
-        let path = registry.session_path("s-1");
+        registry.open_run_at(new_run(), TTL, NOW).unwrap();
+        let path = registry.run_path("s-1");
         let mut value: serde_json::Value =
             serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         let object = value.as_object_mut().unwrap();
@@ -2101,7 +2101,7 @@ mod tests {
             object.remove(key);
         }
         fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
-        let record = registry.session("s-1").unwrap().unwrap();
+        let record = registry.run("s-1").unwrap().unwrap();
         assert_eq!((record.launch, record.recent.len()), (None, 0));
     }
 
@@ -2109,10 +2109,10 @@ mod tests {
         let registry = store.handle();
         for id in ["", "../escape", "a/b", ".hidden", &"x".repeat(129)] {
             assert!(matches!(
-                registry.open_session_at(NewSession::new(id, "m", "station-a"), TTL, NOW),
-                Err(SessionError::Io(_))
+                registry.open_run_at(NewRun::new(id, "m", "station-a"), TTL, NOW),
+                Err(RunError::Io(_))
             ));
         }
-        assert!(registry.session("../escape").is_err());
+        assert!(registry.run("../escape").is_err());
     }
 }

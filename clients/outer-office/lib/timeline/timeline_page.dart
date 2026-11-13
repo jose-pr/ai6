@@ -26,7 +26,7 @@ class TimelineItemSummary {
     this.stationId,
     this.missionId,
     this.handle,
-    this.sessionId,
+    this.runId,
     this.actor,
     this.target,
     this.detail = const {},
@@ -46,7 +46,7 @@ class TimelineItemSummary {
 
   /// What the Mission is called now.
   final String? handle;
-  final String? sessionId;
+  final String? runId;
   final String? actor;
   final String? target;
   final Map<String, String> detail;
@@ -61,7 +61,7 @@ class TimelineItemSummary {
         stationId: json['station_id'] as String?,
         missionId: json['mission_id'] as String?,
         handle: json['handle'] as String?,
-        sessionId: json['session_id'] as String?,
+        runId: json['run_id'] as String?,
         actor: json['actor'] as String?,
         target: json['target'] as String?,
         detail: {
@@ -76,8 +76,8 @@ class TimelineItemSummary {
     ('Operation $operationId', OoLinkTo.operation(operationId)),
     if (missionId case final mission?)
       ('Mission ${handle ?? mission}', OoLinkTo.mission(operationId, mission)),
-    if (sessionId case final session?)
-      ('Session $session', OoLinkTo.session(operationId, session)),
+    if (runId case final run?)
+      ('Run $run', OoLinkTo.run(operationId, run)),
     if (stationId case final station?)
       ('Station $station', OoLinkTo.station(station)),
     if (target case final target? when target != missionId) (target, null),
@@ -92,7 +92,7 @@ class TimelineItemSummary {
   /// Where it happened and who acted, as one line.
   String get context => [
     if (missionId != null) 'Mission ${handle ?? missionId}',
-    if (sessionId != null) 'Session $sessionId',
+    if (runId != null) 'Run $runId',
     if (stationId != null) 'Station $stationId',
     if (target != null && target != missionId) target!,
     if (actor != null) 'by $actor',

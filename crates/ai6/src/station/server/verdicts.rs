@@ -5,12 +5,12 @@
 use coqui_acp_provider::AgentEvent;
 
 use super::{
-    DaemonState, FinishOutcome, publish_finished_event, review, session_hold, verification, vetting,
+    DaemonState, FinishOutcome, publish_finished_event, review, run_hold, verification, vetting,
 };
 use crate::directorates::m::approvals::NO_APPROVAL_REASON;
 use crate::directorates::m::mission::{Mission, MissionState};
 use crate::directorates::registry::approvals::{ApprovalStatus, Decision};
-use crate::directorates::registry::sessions::{FinalReport, MissionVerdict, OutcomeVerdict};
+use crate::directorates::registry::runs::{FinalReport, MissionVerdict, OutcomeVerdict};
 
 /// The event kind that holds a Mission for a person's verdict.
 pub(super) const HELD_EVENT: &str = "held";
@@ -19,12 +19,12 @@ pub(super) const HELD_EVENT: &str = "held";
 #[cfg(feature = "publisher")]
 pub(super) const NO_APPROVAL_CODE: &str = "no-approval";
 
-/// Files the message the Agent ended its turn with, on the Session this Station holds. A review
+/// Files the message the Agent ended its turn with, on the Run this Station holds. A review
 /// may keep the Mission from ending here, and a later turn replaces it.
 pub(super) fn file_final_report(state: &DaemonState, mission_id: &str, text: Option<&str>) {
     let (Some(text), Some(hold)) = (
         text.filter(|text| !text.trim().is_empty()),
-        session_hold(state, mission_id),
+        run_hold(state, mission_id),
     ) else {
         return;
     };
@@ -33,7 +33,7 @@ pub(super) fn file_final_report(state: &DaemonState, mission_id: &str, text: Opt
         mission_id,
         text,
         state.clock.now() as f64,
-        state.intake.limits().sessions.final_report_bytes,
+        state.intake.limits().runs.final_report_bytes,
     );
     if let Err(error) = state.intake.file_final_report(&report) {
         eprintln!("ai6: Mission {mission_id:?}: its final report was not kept: {error}");
@@ -59,7 +59,7 @@ fn lacks_decision(state: &DaemonState, mission: &Mission) -> bool {
     {
         return false;
     }
-    let Some(session) = mission.session_ids.last() else {
+    let Some(run) = mission.run_ids.last() else {
         return true;
     };
     let now = state.clock.now() as f64;
@@ -72,7 +72,7 @@ fn lacks_decision(state: &DaemonState, mission: &Mission) -> bool {
                     status,
                     ApprovalStatus::Decided(approval)
                         if approval.decision != Decision::Expired
-                            && approval.request.session.as_str() == session.as_str()
+                            && approval.request.run.as_str() == run.as_str()
                 )
             })
         });
@@ -123,8 +123,8 @@ pub(super) fn settle_held(state: &DaemonState) {
         .filter(|mission| matches!(mission.state, MissionState::Held | MissionState::Verifying));
     for mission in waiting {
         let mission_id = mission.mission_id.as_str();
-        let verdict = session_hold(state, mission_id)
-            .and_then(|hold| state.intake.session(&hold.id).ok().flatten())
+        let verdict = run_hold(state, mission_id)
+            .and_then(|hold| state.intake.run(&hold.id).ok().flatten())
             .and_then(|record| record.verdict);
         match verdict {
             Some(verdict)
@@ -201,7 +201,7 @@ mod tests {
     };
     use super::*;
     use crate::directorates::m::approvals::ActionScope;
-    use crate::directorates::m::identity::{MissionId, SessionId};
+    use crate::directorates::m::identity::{MissionId, RunId};
     use crate::directorates::m::scorecard::{self, Judgment, ScorecardPolicy};
     use crate::directorates::registry::approvals::{ApprovalRequest, Ruling};
 
@@ -283,7 +283,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_role_that_requires_a_decision_holds_a_done_session_that_filed_no_request() {
+    async fn a_role_that_requires_a_decision_holds_a_done_run_that_filed_no_request() {
         let root = tempfile::tempdir().unwrap();
         let state = test_state(root.path(), "", AGENTS);
         let mission_id = mission_for(&state, "held", "releaser");
@@ -298,7 +298,7 @@ mod tests {
             .cloned()
             .unwrap();
         assert_eq!(mission.blocked_reason.as_deref(), Some(NO_APPROVAL_REASON));
-        let record = state.intake.latest_session(&mission_id).unwrap().unwrap();
+        let record = state.intake.latest_run(&mission_id).unwrap().unwrap();
         let result = record.result.clone().unwrap();
         assert_eq!(
             (result.state.as_str(), result.reason.as_deref()),
@@ -376,29 +376,29 @@ mod tests {
         stop(&state);
     }
 
-    /// One Mission of Agent 007 that has reported Session `session`.
-    fn with_session(state: &DaemonState, session: &str) -> Mission {
-        let mission_id = mission_for(state, session, "releaser");
+    /// One Mission of Agent 007 that has reported Run `run`.
+    fn with_run(state: &DaemonState, run: &str) -> Mission {
+        let mission_id = mission_for(state, run, "releaser");
         let mut missions = state.missions.lock().unwrap();
         missions
             .transition(&mission_id, MissionState::Working)
             .unwrap();
         missions
-            .attach_session(&mission_id, SessionId::try_new(session).unwrap())
+            .attach_run(&mission_id, RunId::try_new(run).unwrap())
             .unwrap();
         missions.get(&mission_id).cloned().unwrap()
     }
 
-    fn asked(state: &DaemonState, mission: &Mission, session: &str, ttl: u64) -> ApprovalRequest {
+    fn asked(state: &DaemonState, mission: &Mission, run: &str, ttl: u64) -> ApprovalRequest {
         let now = state.clock.now() as f64;
         let request = ApprovalRequest::try_new(
             "G",
             mission.mission_id.clone(),
-            SessionId::try_new(session).unwrap(),
+            RunId::try_new(run).unwrap(),
             "007",
             ActionScope::try_new("push", "origin:refs/heads/main").unwrap(),
             "the release is green",
-            session,
+            run,
             &Default::default(),
         )
         .unwrap()
@@ -413,11 +413,11 @@ mod tests {
         let state = test_state(root.path(), "", AGENTS);
         let now = state.clock.now() as f64;
 
-        let none = with_session(&state, "session-none");
+        let none = with_run(&state, "run-none");
         assert!(lacks_decision(&state, &none), "no request at all");
 
-        let approved = with_session(&state, "session-approved");
-        let request = asked(&state, &approved, "session-approved", 3_600);
+        let approved = with_run(&state, "run-approved");
+        let request = asked(&state, &approved, "run-approved", 3_600);
         assert!(lacks_decision(&state, &approved), "still undecided");
         state
             .intake
@@ -425,20 +425,20 @@ mod tests {
             .unwrap();
         assert!(!lacks_decision(&state, &approved));
 
-        let refused = with_session(&state, "session-refused");
-        let request = asked(&state, &refused, "session-refused", 3_600);
+        let refused = with_run(&state, "run-refused");
+        let request = asked(&state, &refused, "run-refused", 3_600);
         state
             .intake
             .decide_approval("G", &request.id, &Ruling::reject("p", now, None))
             .unwrap();
         assert!(!lacks_decision(&state, &refused), "a person decided");
 
-        let lapsed = with_session(&state, "session-lapsed");
-        asked(&state, &lapsed, "session-lapsed", 1);
+        let lapsed = with_run(&state, "run-lapsed");
+        asked(&state, &lapsed, "run-lapsed", 1);
         assert!(lacks_decision(&state, &lapsed), "an expiry is no decision");
 
-        let earlier = with_session(&state, "session-earlier");
-        let request = asked(&state, &earlier, "session-earlier", 3_600);
+        let earlier = with_run(&state, "run-earlier");
+        let request = asked(&state, &earlier, "run-earlier", 3_600);
         state
             .intake
             .decide_approval("G", &request.id, &Ruling::approve("p", now, now + 60.0))
@@ -447,9 +447,9 @@ mod tests {
             .missions
             .lock()
             .unwrap()
-            .attach_session(
+            .attach_run(
                 earlier.mission_id.as_str(),
-                SessionId::try_new("session-later").unwrap(),
+                RunId::try_new("run-later").unwrap(),
             )
             .unwrap();
         let later = state

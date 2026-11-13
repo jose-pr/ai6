@@ -1,7 +1,7 @@
-//! Token and cost accounting for Agent Sessions, and the budgets checked against it.
+//! Token and cost accounting for Agent Runs, and the budgets checked against it.
 //!
 //! Handlers report what the provider reports ([`Spend`]); a [`UsageTracker`] turns
-//! that into additions to a ledger, so a resumed Session is never counted twice. Measuring
+//! that into additions to a ledger, so a resumed Run is never counted twice. Measuring
 //! is always on. A [`Budget`] limit exists only when the operator sets one or chooses the
 //! `strict` preset.
 
@@ -15,8 +15,8 @@ use coqui_acp_api::Spend;
 /// Thousandths of a limit at which a warning is raised unless configured otherwise (80%).
 pub const DEFAULT_WARN_AT_PERMILLE: u16 = 800;
 
-/// Per-Session token limit of the `strict` preset.
-pub const STRICT_SESSION_TOKENS: u64 = 2_000_000;
+/// Per-Run token limit of the `strict` preset.
+pub const STRICT_RUN_TOKENS: u64 = 2_000_000;
 /// Per-Mission token limit of the `strict` preset.
 pub const STRICT_MISSION_TOKENS: u64 = 5_000_000;
 /// Per-Mission cost limit of the `strict` preset, in whole dollars.
@@ -24,7 +24,7 @@ pub const STRICT_MISSION_COST_USD: f64 = 10.0;
 /// Per-Operation daily cost limit of the `strict` preset, in whole dollars.
 pub const STRICT_OPERATION_COST_USD_PER_DAY: f64 = 50.0;
 
-/// The session spend an event carries, when its report has one.
+/// The run spend an event carries, when its report has one.
 pub fn spend_of(event: &coqui_acp_provider::AgentEvent) -> Option<&Spend> {
     event.report.as_ref()?.spend.as_ref()
 }
@@ -37,7 +37,7 @@ pub fn buckets_of(event: &coqui_acp_provider::AgentEvent) -> &[coqui_acp_api::Bu
         .map_or(&[], |report| report.buckets.as_slice())
 }
 
-/// Accumulated usage: the sum of everything a Session, Mission or day consumed.
+/// Accumulated usage: the sum of everything a Run, Mission or day consumed.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UsageTotals {
@@ -136,11 +136,11 @@ impl UsageTracker {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BudgetScope {
-    /// Tokens one Session may use.
-    SessionTokens,
-    /// Tokens all of a Mission's Sessions may use.
+    /// Tokens one Run may use.
+    RunTokens,
+    /// Tokens all of a Mission's Runs may use.
     MissionTokens,
-    /// Dollars all of a Mission's Sessions may spend.
+    /// Dollars all of a Mission's Runs may spend.
     MissionCost,
     /// Dollars an Operation's Missions may spend in one UTC day.
     OperationCost,
@@ -150,7 +150,7 @@ impl BudgetScope {
     /// The configuration key of the limit.
     pub fn key(self) -> &'static str {
         match self {
-            Self::SessionTokens => "session_tokens",
+            Self::RunTokens => "run_tokens",
             Self::MissionTokens => "mission_tokens",
             Self::MissionCost => "mission_cost_usd",
             Self::OperationCost => "operation_cost_usd_per_day",
@@ -231,11 +231,11 @@ pub enum BudgetPreset {
 /// Spending limits. Every field is optional and an unset limit is not enforced.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Budget {
-    /// Tokens one Session may use.
-    pub session_tokens: Option<u64>,
-    /// Tokens all of a Mission's Sessions may use.
+    /// Tokens one Run may use.
+    pub run_tokens: Option<u64>,
+    /// Tokens all of a Mission's Runs may use.
     pub mission_tokens: Option<u64>,
-    /// Micro-dollars all of a Mission's Sessions may spend.
+    /// Micro-dollars all of a Mission's Runs may spend.
     pub mission_cost_micro_usd: Option<u64>,
     /// Micro-dollars an Operation's Missions may spend in one UTC day.
     pub operation_cost_micro_usd_per_day: Option<u64>,
@@ -250,7 +250,7 @@ impl Budget {
         match preset {
             BudgetPreset::Observe => Self::default(),
             BudgetPreset::Strict => Self {
-                session_tokens: Some(STRICT_SESSION_TOKENS),
+                run_tokens: Some(STRICT_RUN_TOKENS),
                 mission_tokens: Some(STRICT_MISSION_TOKENS),
                 mission_cost_micro_usd: Some(micro_usd(STRICT_MISSION_COST_USD)),
                 operation_cost_micro_usd_per_day: Some(micro_usd(
@@ -263,7 +263,7 @@ impl Budget {
 
     /// Whether any limit is set.
     pub fn is_limited(&self) -> bool {
-        self.session_tokens.is_some()
+        self.run_tokens.is_some()
             || self.mission_tokens.is_some()
             || self.mission_cost_micro_usd.is_some()
             || self.operation_cost_micro_usd_per_day.is_some()
@@ -272,7 +272,7 @@ impl Budget {
     /// This budget with every field `child` sets taking precedence.
     pub fn merge(&self, child: &Self) -> Self {
         Self {
-            session_tokens: child.session_tokens.or(self.session_tokens),
+            run_tokens: child.run_tokens.or(self.run_tokens),
             mission_tokens: child.mission_tokens.or(self.mission_tokens),
             mission_cost_micro_usd: child.mission_cost_micro_usd.or(self.mission_cost_micro_usd),
             operation_cost_micro_usd_per_day: child
@@ -288,7 +288,7 @@ impl Budget {
     /// it was not computed. A ceiling is reported in place of the warning for the same limit.
     pub fn check(
         &self,
-        session: &UsageTotals,
+        run: &UsageTotals,
         mission: &UsageTotals,
         operation_day_cost: Option<u64>,
     ) -> Vec<BudgetBreach> {
@@ -296,9 +296,9 @@ impl Budget {
             f64::from(self.warn_at_permille.unwrap_or(DEFAULT_WARN_AT_PERMILLE)) / 1_000.0;
         [
             (
-                BudgetScope::SessionTokens,
-                self.session_tokens,
-                Some(session.tokens()),
+                BudgetScope::RunTokens,
+                self.run_tokens,
+                Some(run.tokens()),
             ),
             (
                 BudgetScope::MissionTokens,
@@ -362,13 +362,13 @@ pub struct BudgetDefinition {
     /// A starting point the values below are laid over. Measuring only sets no limit.
     #[schema(title = "Starting point")]
     preset: Option<BudgetPreset>,
-    /// The tokens one Session may use. Leave it empty for no limit.
-    #[schema(title = "Tokens per Session")]
-    session_tokens: Option<u64>,
-    /// The tokens all of a Mission's Sessions may use. Leave it empty for no limit.
+    /// The tokens one Run may use. Leave it empty for no limit.
+    #[schema(title = "Tokens per Run")]
+    run_tokens: Option<u64>,
+    /// The tokens all of a Mission's Runs may use. Leave it empty for no limit.
     #[schema(title = "Tokens per Mission")]
     mission_tokens: Option<u64>,
-    /// The dollars all of a Mission's Sessions may spend. Leave it empty for no limit.
+    /// The dollars all of a Mission's Runs may spend. Leave it empty for no limit.
     #[schema(title = "Dollars per Mission")]
     #[form(unit = "USD")]
     mission_cost_usd: Option<f64>,
@@ -391,7 +391,7 @@ impl BudgetDefinition {
     pub fn resolve(&self) -> Result<Budget, String> {
         let mut budget = self.preset.map(Budget::preset).unwrap_or_default();
         let explicit = Budget {
-            session_tokens: self.session_tokens,
+            run_tokens: self.run_tokens,
             mission_tokens: self.mission_tokens,
             mission_cost_micro_usd: dollars("mission_cost_usd", self.mission_cost_usd)?,
             operation_cost_micro_usd_per_day: dollars(
@@ -451,10 +451,10 @@ pub fn utc_day(unix_seconds: i64) -> String {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MissionUsage {
-    /// Everything the Mission's Sessions consumed.
+    /// Everything the Mission's Runs consumed.
     pub total: UsageTotals,
-    /// Each Session's share, keyed by AI6 Session ID.
-    pub sessions: BTreeMap<String, UsageTotals>,
+    /// Each Run's share, keyed by AI6 Run ID.
+    pub runs: BTreeMap<String, UsageTotals>,
     /// Cost per UTC day (`YYYY-MM-DD`) in micro-dollars, for the last few days.
     pub daily_cost_micro_usd: BTreeMap<String, u64>,
 }
@@ -464,7 +464,7 @@ mod tests {
     use super::*;
 
     fn usage(input: u64, output: u64, cost: u64) -> Spend {
-        let mut spend = Spend::new("session");
+        let mut spend = Spend::new("run");
         spend.input = input;
         spend.output = output;
         spend.cost_micro_usd = Some(cost);
@@ -527,7 +527,7 @@ mod tests {
         .unwrap();
         let budget = definition.resolve().unwrap();
         assert_eq!(budget.mission_cost_micro_usd, Some(2_500_000));
-        assert_eq!(budget.session_tokens, Some(STRICT_SESSION_TOKENS));
+        assert_eq!(budget.run_tokens, Some(STRICT_RUN_TOKENS));
         assert_eq!(budget.warn_at_permille, Some(500));
         assert!(!Budget::default().is_limited());
     }
@@ -535,7 +535,7 @@ mod tests {
     #[test]
     fn bad_values_are_refused_with_the_key_name() {
         for (text, key) in [
-            ("session_tokens = -1", "session_tokens"),
+            ("run_tokens = -1", "run_tokens"),
             ("mission_tokens = 1.5", "mission_tokens"),
             ("mission_cost_usd = -2.0", "mission_cost_usd"),
             (

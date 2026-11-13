@@ -7,7 +7,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/jose-pr/ai6/test.yml)](https://github.com/jose-pr/ai6/actions/workflows/test.yml)
 
 `ai6-agent-codex` implements AI6's Guatiao `AgentHandler` for the Codex app-server
-JSON-RPC protocol. The daemon supplies a terminal Session; this handler owns Codex
+JSON-RPC protocol. The daemon supplies a terminal Run; this handler owns Codex
 initialization, thread start/resume, turn submission and event decoding.
 
 ## Features
@@ -17,7 +17,7 @@ initialization, thread start/resume, turn submission and event decoding.
   preserves the Mission working directory.
 - Sends later messages as turns and emits provider events as AI6 `AgentEvent` values.
 - Reports a usage-limit error, with the reset time of the exhausted quota window, as an
-  `AgentEvent` of kind `limit` so AI6 can park the Session instead of failing it.
+  `AgentEvent` of kind `limit` so AI6 can park the Run instead of failing it.
 - Reports token usage per model request (Codex reports no cost) and names the web-search and
   tool calls a turn makes.
 - Uses per-process app-server configuration to connect to the AI6 Cable MCP endpoint;
@@ -45,7 +45,7 @@ Rust library and a dynamically loadable provider. Build it with
 
 | Module | Purpose |
 | --- | --- |
-| `ai6_agent_codex` | `CodexHandler`, `CodexConfig` and app-server JSON-RPC Session implementation |
+| `ai6_agent_codex` | `CodexHandler`, `CodexConfig` and app-server JSON-RPC Run implementation |
 
 ## Development
 

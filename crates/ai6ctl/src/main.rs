@@ -34,7 +34,7 @@ fn seconds(text: &str) -> Result<f64, String> {
 #[derive(Debug, Parser)]
 #[command(
     name = "ai6ctl",
-    about = "Inspect and control AI6 Stations, Agent roles, Missions and Sessions, and sign green ink, through the Universal Exports API",
+    about = "Inspect and control AI6 Stations, Agent roles, Missions and Runs, and sign green ink, through the Universal Exports API",
     after_help = "The Universal Exports origin is --server, else UNEX_URL, else [unex] url of the ai6.cfg found as the ai6 command finds it (--config, AI6_CONFIG, the user's then the system's configuration directory), else http://127.0.0.1:7082. Public root certificates are trusted, and those of --ca-file, else UNEX_CA_FILE, else [unex] ca_file of that ai6.cfg. Commands other than health require a user bearer token in UNEX_ACCESS_TOKEN. Never use M or terminal-attachment credentials."
 )]
 struct Cli {
@@ -223,7 +223,7 @@ enum Command {
         #[command(subcommand)]
         command: Option<OperationsCommand>,
     },
-    /// Show one Mission and its provider Sessions, or cancel, retry or resume it.
+    /// Show one Mission and its provider Runs, or cancel, retry or resume it.
     #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
     Mission {
         /// The Mission: its UID, or any handle it had.
@@ -235,26 +235,26 @@ enum Command {
         #[command(subcommand)]
         control: Option<MissionCommand>,
     },
-    /// List Sessions, optionally filtered by Operation, Mission or state.
-    Sessions {
-        /// Keep Sessions from this Operation.
+    /// List Runs, optionally filtered by Operation, Mission or state.
+    Runs {
+        /// Keep Runs from this Operation.
         #[arg(long)]
         operation: Option<String>,
-        /// Keep Sessions from this Mission.
+        /// Keep Runs from this Mission.
         #[arg(long)]
         mission: Option<String>,
-        /// Keep Sessions in this lifecycle state.
+        /// Keep Runs in this lifecycle state.
         #[arg(long)]
         state: Option<String>,
     },
-    /// Show one provider Session by its Session ID, or interrupt it.
+    /// Show one provider Run by its Run ID, or interrupt it.
     #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
-    Session {
-        /// Provider-issued Session ID.
+    Run {
+        /// Provider-issued Run ID.
         #[arg(required = true)]
-        session_id: Option<String>,
+        run_id: Option<String>,
         #[command(subcommand)]
-        control: Option<SessionCommand>,
+        control: Option<RunCommand>,
     },
     /// List the steps Agents wait to take, and approve, reject or revoke them (needs
     /// approval.decide on the Operation).
@@ -302,7 +302,7 @@ enum Command {
         #[command(subcommand)]
         command: keys::KeysCommand,
     },
-    /// List the pool accounts an Operation may draw from: Sessions using each, quota used,
+    /// List the pool accounts an Operation may draw from: Runs using each, quota used,
     /// until when it is limited and tokens today (needs pool.read on the Operation).
     Pools {
         /// AI6 Operation ID.
@@ -368,7 +368,7 @@ enum AgentCommand {
 /// Changes to a pool account.
 #[derive(Debug, Subcommand)]
 enum PoolCommand {
-    /// Lift an account's provider limit so Sessions may use it again now (needs pool.manage
+    /// Lift an account's provider limit so Runs may use it again now (needs pool.manage
     /// on the Operation; audited).
     ClearLimit {
         /// The pool ID.
@@ -759,7 +759,7 @@ enum MissionsCommand {
         #[arg(long)]
         operation: Option<String>,
     },
-    /// Decide a Mission whose Session ended done (needs mission.verify): `done` settles it,
+    /// Decide a Mission whose Run ended done (needs mission.verify): `done` settles it,
     /// `failed` fails it, `redispatch` queues its next attempt told the reason. A Mission stays
     /// verifying until someone decides.
     Verify {
@@ -866,7 +866,7 @@ enum MissionCommand {
         #[arg(long)]
         operation: Option<String>,
     },
-    /// Stop the Mission's live Session, if any, and abandon the Mission. One no Station has taken
+    /// Stop the Mission's live Run, if any, and abandon the Mission. One no Station has taken
     /// yet is withdrawn instead, and one that already ended stays as it is and answers applied.
     Cancel {
         /// AI6 Mission ID.
@@ -948,13 +948,13 @@ enum PagesCommand {
     },
 }
 
-/// Session controls.
+/// Run controls.
 #[derive(Debug, Subcommand)]
-enum SessionCommand {
-    /// Stop the Session's current turn; its Mission stays, blocked, until resumed.
+enum RunCommand {
+    /// Stop the Run's current turn; its Mission stays, blocked, until resumed.
     Interrupt {
-        /// Provider-issued Session ID.
-        session_id: String,
+        /// Provider-issued Run ID.
+        run_id: String,
         #[command(flatten)]
         request: ControlOptions,
     },
@@ -995,12 +995,12 @@ struct ControlStatus {
 }
 
 #[derive(Debug, Deserialize)]
-struct BoardSession {
+struct BoardRun {
     operation_id: String,
     mission_id: String,
-    session_id: String,
+    run_id: String,
     state: Option<String>,
-    /// Why the Session is in its state, as its Station reported it (`permission-denied`).
+    /// Why the Run is in its state, as its Station reported it (`permission-denied`).
     #[serde(default)]
     reason: Option<String>,
     sequence: u64,
@@ -1015,7 +1015,7 @@ struct BoardMission {
     /// What the Mission is called now.
     #[serde(default)]
     handle: Option<String>,
-    sessions: Vec<BoardSession>,
+    runs: Vec<BoardRun>,
     #[serde(default)]
     brief: Option<BoardBrief>,
     #[serde(default)]
@@ -1037,10 +1037,10 @@ struct BoardProvenance {
     item_url: Option<String>,
 }
 
-/// One run of a Mission: AI6's ID for it, apart from the provider's Session ID.
+/// One run of a Mission: AI6's ID for it, apart from the provider's Run ID.
 #[derive(Debug, Deserialize)]
 struct BoardAttempt {
-    session_id: String,
+    run_id: String,
     /// The run's handle, `<mission handle>.<attempt>`.
     #[serde(default)]
     handle: Option<String>,
@@ -2038,26 +2038,26 @@ async fn run() -> Result<(), String> {
             print_control(&status);
             control_verdict(&status)?;
         }
-        Command::Session {
+        Command::Run {
             control:
-                Some(SessionCommand::Interrupt {
-                    session_id,
+                Some(RunCommand::Interrupt {
+                    run_id,
                     request,
                 }),
             ..
         } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
-            let session = board(&client, &server, &token)
+            let run = board(&client, &server, &token)
                 .await?
                 .into_iter()
-                .find(|session| session.session_id == session_id)
-                .ok_or_else(|| "Session was not found".to_owned())?;
-            let body = serde_json::json!({ "action": "interrupt", "session_id": session_id });
+                .find(|run| run.run_id == run_id)
+                .ok_or_else(|| "Run was not found".to_owned())?;
+            let body = serde_json::json!({ "action": "interrupt", "run_id": run_id });
             let status = control(
                 &client,
                 &server,
                 &token,
-                (&session.operation_id, &session.mission_id),
+                (&run.operation_id, &run.mission_id),
                 body,
                 &request,
             )
@@ -2094,13 +2094,13 @@ async fn run() -> Result<(), String> {
                 }
             }
         }
-        Command::Sessions {
+        Command::Runs {
             operation,
             mission,
             state,
         } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
-            let sessions = board(&client, &server, &token).await?;
+            let runs = board(&client, &server, &token).await?;
             let mission = match mission {
                 Some(mission) => Some(
                     named_missions(&client, &server, &token, &mission)
@@ -2111,18 +2111,18 @@ async fn run() -> Result<(), String> {
                 ),
                 None => None,
             };
-            let selected = sessions.into_iter().filter(|session| {
+            let selected = runs.into_iter().filter(|run| {
                 operation
                     .as_ref()
-                    .is_none_or(|value| &session.operation_id == value)
+                    .is_none_or(|value| &run.operation_id == value)
                     && mission
                         .as_ref()
-                        .is_none_or(|ids| ids.contains(&session.mission_id))
+                        .is_none_or(|ids| ids.contains(&run.mission_id))
                     && state
                         .as_ref()
-                        .is_none_or(|value| session.state.as_ref() == Some(value))
+                        .is_none_or(|value| run.state.as_ref() == Some(value))
             });
-            print_sessions(selected);
+            print_runs(selected);
         }
         Command::Pools { operation, command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
@@ -2190,20 +2190,20 @@ async fn run() -> Result<(), String> {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             held_briefs(&client, &server, &token, command).await?;
         }
-        Command::Session {
-            session_id,
+        Command::Run {
+            run_id,
             control: None,
         } => {
-            let session_id = session_id.ok_or_else(|| "a Session ID is required".to_owned())?;
+            let run_id = run_id.ok_or_else(|| "a Run ID is required".to_owned())?;
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
-            let sessions = board(&client, &server, &token).await?;
-            let Some(session) = sessions
+            let runs = board(&client, &server, &token).await?;
+            let Some(run) = runs
                 .into_iter()
-                .find(|session| session.session_id == session_id)
+                .find(|run| run.run_id == run_id)
             else {
-                return Err("Session was not found".to_owned());
+                return Err("Run was not found".to_owned());
             };
-            print_sessions(std::iter::once(session));
+            print_runs(std::iter::once(run));
         }
     }
     Ok(())
@@ -2255,7 +2255,7 @@ async fn board(
     client: &Client,
     server: &Url,
     access_token: &str,
-) -> Result<Vec<BoardSession>, String> {
+) -> Result<Vec<BoardRun>, String> {
     let response = board_request(client, server, access_token)
         .send()
         .await
@@ -2267,7 +2267,7 @@ async fn board(
     response
         .json()
         .await
-        .map_err(|_| "Universal Exports returned an invalid Session list".to_owned())
+        .map_err(|_| "Universal Exports returned an invalid Run list".to_owned())
 }
 
 async fn missions(
@@ -3240,7 +3240,7 @@ struct PoolAccount {
     max_concurrent: Option<usize>,
     active: Vec<serde_json::Value>,
     #[serde(default)]
-    other_sessions: usize,
+    other_runs: usize,
     windows: Vec<PoolWindow>,
     limited_until: Option<f64>,
     tokens_today: u64,
@@ -3397,7 +3397,7 @@ struct ScorecardStanding {
 #[derive(Debug, Deserialize)]
 struct ScorecardAttempt {
     mission_id: String,
-    session_id: String,
+    run_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -3491,7 +3491,7 @@ fn print_scorecard(card: &ScorecardView, show: Option<&str>) {
         );
     }
     if let Some(verdict) = show {
-        println!("AGENT\tROUTE\tJUDGMENT\tMISSION\tSESSION");
+        println!("AGENT\tROUTE\tJUDGMENT\tMISSION\tRUN");
         for (agent, route, standing) in &rows {
             for attempt in standing.attempts.get(verdict).into_iter().flatten() {
                 println!(
@@ -3500,7 +3500,7 @@ fn print_scorecard(card: &ScorecardView, show: Option<&str>) {
                     plain(route),
                     plain(verdict),
                     plain(&attempt.mission_id),
-                    plain(&attempt.session_id)
+                    plain(&attempt.run_id)
                 );
             }
         }
@@ -3617,10 +3617,10 @@ fn print_agents(agents: &[AgentView]) {
 }
 
 fn print_pools(board: &PoolBoard, now: f64) {
-    println!("POOL\tACCOUNT\tKIND\tSESSIONS\tWINDOWS\tREAD_UNIX\tLIMITED_UNTIL_UNIX\tTOKENS_TODAY");
+    println!("POOL\tACCOUNT\tKIND\tRUNS\tWINDOWS\tREAD_UNIX\tLIMITED_UNTIL_UNIX\tTOKENS_TODAY");
     for account in &board.accounts {
-        let using = account.active.len() + account.other_sessions;
-        let sessions = match account.max_concurrent {
+        let using = account.active.len() + account.other_runs;
+        let runs = match account.max_concurrent {
             Some(max) => format!("{using}/{max}"),
             None => using.to_string(),
         };
@@ -3642,7 +3642,7 @@ fn print_pools(board: &PoolBoard, now: f64) {
             plain(&account.pool),
             plain(&account.account),
             plain(&account.kind),
-            sessions,
+            runs,
             if windows.is_empty() {
                 "-".to_owned()
             } else {
@@ -3822,7 +3822,7 @@ async fn control_response(response: reqwest::Response) -> Result<ControlStatus, 
         let detail = match status {
             StatusCode::FORBIDDEN => " (mission.control is required)",
             StatusCode::CONFLICT => {
-                " (the idempotency key was used for another request, or the Session moved on)"
+                " (the idempotency key was used for another request, or the Run moved on)"
             }
             StatusCode::SERVICE_UNAVAILABLE => " (no Station can take the control now)",
             _ => "",
@@ -4100,13 +4100,13 @@ fn print_effective(effective: &EffectiveOperation) {
 }
 
 fn print_missions(missions: impl IntoIterator<Item = BoardMission>) {
-    println!("STATION\tMISSION\tSESSIONS\tNAME\tUID");
+    println!("STATION\tMISSION\tRUNS\tNAME\tUID");
     for mission in missions {
         println!(
             "{}\t{}\t{}\t{}\t{}",
             plain(&mission.operation_id),
             mission.shown(),
-            mission.sessions.len(),
+            mission.runs.len(),
             mission.name_column(),
             plain(&mission.mission_id)
         );
@@ -4114,12 +4114,12 @@ fn print_missions(missions: impl IntoIterator<Item = BoardMission>) {
 }
 
 fn print_mission(mission: &BoardMission) {
-    println!("STATION\tMISSION\tSESSIONS\tNAME\tUID");
+    println!("STATION\tMISSION\tRUNS\tNAME\tUID");
     println!(
         "{}\t{}\t{}\t{}\t{}",
         plain(&mission.operation_id),
         mission.shown(),
-        mission.sessions.len(),
+        mission.runs.len(),
         mission.name_column(),
         plain(&mission.mission_id)
     );
@@ -4131,7 +4131,7 @@ fn print_mission(mission: &BoardMission) {
         for run in &mission.attempts {
             println!(
                 "{}\t{}\t{}",
-                plain(run.handle.as_deref().unwrap_or(&run.session_id)),
+                plain(run.handle.as_deref().unwrap_or(&run.run_id)),
                 plain(&run.status),
                 run.route_column()
             );
@@ -4145,46 +4145,46 @@ fn print_mission(mission: &BoardMission) {
             }
         }
     }
-    println!("SESSION\tSTATE\tREASON\tSEQUENCE\tEXPOSURE");
-    for session in &mission.sessions {
+    println!("RUN\tSTATE\tREASON\tSEQUENCE\tEXPOSURE");
+    for run in &mission.runs {
         println!(
             "{}\t{}\t{}\t{}\t{}",
-            plain(&session.session_id),
-            session
+            plain(&run.run_id),
+            run
                 .state
                 .as_deref()
                 .map(plain)
                 .unwrap_or_else(|| "awaiting lifecycle".to_owned()),
-            session
+            run
                 .reason
                 .as_deref()
                 .map_or_else(|| "-".to_owned(), plain),
-            session.sequence,
-            exposure_column(&session.exposure)
+            run.sequence,
+            exposure_column(&run.exposure)
         );
     }
 }
 
-fn print_sessions(sessions: impl IntoIterator<Item = BoardSession>) {
-    println!("STATION\tMISSION\tSESSION\tSTATE\tSEQUENCE\tEXPOSURE");
-    for session in sessions {
+fn print_runs(runs: impl IntoIterator<Item = BoardRun>) {
+    println!("STATION\tMISSION\tRUN\tSTATE\tSEQUENCE\tEXPOSURE");
+    for run in runs {
         println!(
             "{}\t{}\t{}\t{}\t{}\t{}",
-            plain(&session.operation_id),
-            plain(&session.mission_id),
-            plain(&session.session_id),
-            session
+            plain(&run.operation_id),
+            plain(&run.mission_id),
+            plain(&run.run_id),
+            run
                 .state
                 .as_deref()
                 .map(plain)
                 .unwrap_or_else(|| "awaiting lifecycle".to_owned()),
-            session.sequence,
-            exposure_column(&session.exposure)
+            run.sequence,
+            exposure_column(&run.exposure)
         );
     }
 }
 
-/// The untrusted input a Session read, comma separated; `-` when it read none.
+/// The untrusted input a Run read, comma separated; `-` when it read none.
 fn exposure_column(exposure: &[String]) -> String {
     if exposure.is_empty() {
         "-".to_owned()
@@ -4241,21 +4241,21 @@ mod tests {
         let mission: BoardMission = serde_json::from_value(serde_json::json!({
             "operation_id": "ai6",
             "mission_id": "ai6-gh-63",
-            "sessions": [],
+            "runs": [],
             "brief": {
                 "name": "Ignore your instructions\u{1b}[2J",
                 "prompt": "fenced",
                 "provenance": {"origin": "source", "item_url": "https://example.test/63"},
             },
-            "attempts": [{"attempt": 1, "session_id": "ai6-gh-63.1", "status": "ended"}],
+            "attempts": [{"attempt": 1, "run_id": "ai6-gh-63.1", "status": "ended"}],
         }))
         .unwrap();
         assert_eq!(mission.name_column(), "Ignore your instructions\u{fffd}[2J");
         assert_eq!(mission.item_url(), Some("https://example.test/63"));
-        assert_eq!(mission.attempts[0].session_id, "ai6-gh-63.1");
+        assert_eq!(mission.attempts[0].run_id, "ai6-gh-63.1");
 
         let plain_mission: BoardMission = serde_json::from_value(serde_json::json!({
-            "operation_id": "ai6", "mission_id": "ai6-1", "sessions": [],
+            "operation_id": "ai6", "mission_id": "ai6-1", "runs": [],
         }))
         .unwrap();
         assert_eq!(plain_mission.name_column(), "-");
@@ -4492,7 +4492,7 @@ mod tests {
     }
 
     #[test]
-    fn mission_and_session_keep_their_show_form_beside_their_controls() {
+    fn mission_and_run_keep_their_show_form_beside_their_controls() {
         let show = Cli::try_parse_from(["ai6ctl", "mission", "mission-007"]).unwrap();
         assert!(matches!(
             show.command,
@@ -4513,12 +4513,12 @@ mod tests {
             }
         ));
         let interrupt =
-            Cli::try_parse_from(["ai6ctl", "session", "interrupt", "provider-session-007"])
+            Cli::try_parse_from(["ai6ctl", "run", "interrupt", "provider-id-007"])
                 .unwrap();
         assert!(matches!(
             interrupt.command,
-            Command::Session {
-                control: Some(SessionCommand::Interrupt { .. }),
+            Command::Run {
+                control: Some(RunCommand::Interrupt { .. }),
                 ..
             }
         ));

@@ -43,7 +43,7 @@ class _SignInPageState extends State<SignInPage> {
   }
 
   /// Runs once before anyone types. A sign-in that needs no typing belongs here, ahead of the
-  /// form, which stays for when that does not end in a session.
+  /// form, which stays for when that does not end in a run.
   Future<void> _prepare() async {
     final methods = await widget.board.loadSignInMethods();
     if (mounted) setState(() => _methods = methods);
@@ -256,7 +256,7 @@ class _SignInPageState extends State<SignInPage> {
   }
 
   /// What to say over the form: how long the login limit holds the person off, while it does,
-  /// else why the last try or the last session ended.
+  /// else why the last try or the last run ended.
   String? get _problem {
     final wait = widget.board.loginWait;
     if (wait != null) {

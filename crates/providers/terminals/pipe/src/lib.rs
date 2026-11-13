@@ -31,7 +31,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use ai6::directorates::q::terminal::{ExitInfo, READ_TIMED_OUT, Spec, Terminal, TerminalSession};
+use ai6::directorates::q::terminal::{ExitInfo, READ_TIMED_OUT, Spec, Terminal, TerminalRun};
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue, Value};
 
@@ -140,9 +140,9 @@ impl TryFrom<PipeConfig> for Pipe {
 }
 
 impl Terminal for Pipe {
-    fn spawn(&self, spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError> {
+    fn spawn(&self, spec: &Value) -> Result<Object<dyn TerminalRun>, ProviderError> {
         let spec = Spec::from_value(spec).map_err(|e| refuse(Status::GUATIAO_ERR_BAD_VALUE, e))?;
-        Ok(PipeSession::start(&spec, self.config)?.into_object())
+        Ok(PipeRun::start(&spec, self.config)?.into_object())
     }
 
     fn tty(&self) -> bool {
@@ -150,7 +150,7 @@ impl Terminal for Pipe {
     }
 }
 
-struct PipeSession {
+struct PipeRun {
     pid: i64,
     chunks: Mutex<Receiver<Vec<u8>>>,
     /// The part of a chunk that did not fit the caller's buffer.
@@ -267,7 +267,7 @@ pub(crate) enum ErrorOutput {
     Pipe(PipeWriter),
 }
 
-impl PipeSession {
+impl PipeRun {
     fn start(spec: &Spec, config: PipeConfig) -> Result<Self, ProviderError> {
         let read_chunk = usize::try_from(config.read_chunk_bytes).unwrap_or(usize::MAX);
         let stderr = config.stderr;
@@ -287,7 +287,7 @@ impl PipeSession {
         };
         // A program may ask to be signalled when the thread that started it ends (Linux's
         // PR_SET_PDEATHSIG, which the Grok CLI sets), and the caller's thread can end at any
-        // time, so the start happens on a thread of its own that lasts as long as the session.
+        // time, so the start happens on a thread of its own that lasts as long as the run.
         let (started, start) = channel();
         let (starter, keep) = channel::<()>();
         let owned = (
@@ -426,7 +426,7 @@ impl PipeSession {
     }
 }
 
-impl TerminalSession for PipeSession {
+impl TerminalRun for PipeRun {
     fn pid(&self) -> i64 {
         self.pid
     }
@@ -541,9 +541,9 @@ impl TerminalSession for PipeSession {
     }
 }
 
-impl Drop for PipeSession {
+impl Drop for PipeRun {
     fn drop(&mut self) {
-        let _ = TerminalSession::kill(self);
+        let _ = TerminalRun::kill(self);
         if let Ok(mut child) = self.child.lock() {
             let _ = child.wait();
         }
@@ -552,7 +552,7 @@ impl Drop for PipeSession {
 
 fn lock<T>(m: &Mutex<T>) -> Result<std::sync::MutexGuard<'_, T>, ProviderError> {
     m.lock()
-        .map_err(|_| refuse(Status::GUATIAO_ERR_INTERNAL, "a session lock was poisoned"))
+        .map_err(|_| refuse(Status::GUATIAO_ERR_INTERNAL, "a run lock was poisoned"))
 }
 
 fn refuse(status: Status, message: impl std::fmt::Display) -> ProviderError {

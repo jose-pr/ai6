@@ -1,4 +1,4 @@
-//! A Session that ends done does not settle its Mission: the Mission is `verifying` until
+//! A Run that ends done does not settle its Mission: the Mission is `verifying` until
 //! someone decides it, and the Station only provides what a decision is made from.
 //!
 //! The Station records what the Mission was to deliver, reads those things back on request with
@@ -13,15 +13,15 @@ use std::time::Duration;
 use coqui_acp_provider::AgentEvent;
 
 use super::{
-    DaemonState, agents, head_of_station, observations, publish_lifecycle, session_hold, vetting,
+    DaemonState, agents, head_of_station, observations, publish_lifecycle, run_hold, vetting,
 };
 use crate::directorates::m::deliverables::{self, Deliverable, DeliverableKind};
 use crate::directorates::m::mission::{Mission, MissionState};
 use crate::directorates::m::theaters::{LOCAL_THEATER, TheaterAccess};
 use crate::directorates::registry::logbook::Severity;
 use crate::directorates::registry::reports::ReportFiler;
-use crate::directorates::registry::sessions::{
-    Evidence, MissionVerdict, ProbeResult, SessionStatus, SessionUpdate,
+use crate::directorates::registry::runs::{
+    Evidence, MissionVerdict, ProbeResult, RunStatus, RunUpdate,
 };
 use crate::directorates::registry::tracker::SourceRead;
 use crate::station::probes;
@@ -30,7 +30,7 @@ use crate::station::sources::{build_source, build_tracker};
 /// The event kind that leaves a Mission to be verified.
 pub(super) const VERIFYING_EVENT: &str = "verifying";
 
-/// The sessions a probe is running for, so a pass that finds the request still open does not
+/// The runs a probe is running for, so a pass that finds the request still open does not
 /// start a second one.
 static PROBING: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
@@ -68,17 +68,17 @@ pub(super) fn verify_done(
 /// Records on the Mission's latest attempt what it was to deliver: its role's deliverables and its
 /// brief's.
 pub(super) fn begin(state: &DaemonState, mission_id: &str) {
-    let Some(hold) = session_hold(state, mission_id) else {
+    let Some(hold) = run_hold(state, mission_id) else {
         return;
     };
     let declared = declared_by(state, mission_id).unwrap_or_else(|error| {
         eprintln!("ai6: Mission {mission_id:?}: its deliverables were not read: {error}");
         Vec::new()
     });
-    let update = SessionUpdate::default().deliverables(declared);
+    let update = RunUpdate::default().deliverables(declared);
     if let Err(error) = state
         .intake
-        .update_session(&hold.id, &state.station_id, hold.fence, update)
+        .update_run(&hold.id, &state.station_id, hold.fence, update)
     {
         eprintln!("ai6: Mission {mission_id:?}: its deliverables were not recorded: {error}");
     }
@@ -319,19 +319,19 @@ pub(super) fn probe_and_record(state: &DaemonState, mission_id: &str) -> Result<
         .ok()
         .and_then(|missions| missions.get(mission_id).cloned())
         .ok_or("the Mission is not in this Station's book")?;
-    let hold = session_hold(state, mission_id).ok_or("the Mission has no Session record")?;
+    let hold = run_hold(state, mission_id).ok_or("the Mission has no Run record")?;
     let record = state
         .intake
-        .session(&hold.id)
+        .run(&hold.id)
         .map_err(|error| error.to_string())?
-        .ok_or("the Session record is gone")?;
+        .ok_or("the Run record is gone")?;
     let evidence = probe_all(state, &mission, &record.deliverables);
     let found = evidence.len();
     let readback = evidence.clone();
-    let update = SessionUpdate::default().evidence(evidence).probed();
+    let update = RunUpdate::default().evidence(evidence).probed();
     state
         .intake
-        .update_session(&hold.id, &state.station_id, hold.fence, update)
+        .update_run(&hold.id, &state.station_id, hold.fence, update)
         .map_err(|error| error.to_string())?;
     report_readback(state, &mission, &hold.id, &readback);
     Ok(found)
@@ -403,12 +403,12 @@ pub(super) fn answer_probe_requests(state: &DaemonState) {
         })
         .unwrap_or_default();
     for mission_id in verifying {
-        let Some(hold) = session_hold(state, &mission_id) else {
+        let Some(hold) = run_hold(state, &mission_id) else {
             continue;
         };
         let asked = state
             .intake
-            .session(&hold.id)
+            .run(&hold.id)
             .ok()
             .flatten()
             .is_some_and(|record| record.probe_requested.is_some());
@@ -449,7 +449,7 @@ pub(super) fn redispatch(state: &DaemonState, mission: &Mission, verdict: &Missi
             return;
         }
     };
-    let attempt = session_hold(state, mission_id).map_or(1, |hold| hold.attempt);
+    let attempt = run_hold(state, mission_id).map_or(1, |hold| hold.attempt);
     let mut told = format!(
         "Attempt {attempt} of this Mission was not accepted by {}: {}",
         verdict.by,
@@ -459,12 +459,12 @@ pub(super) fn redispatch(state: &DaemonState, mission: &Mission, verdict: &Missi
         told.push_str("\n\n");
         told.push_str(amendment);
     }
-    if let Some(hold) = session_hold(state, mission_id) {
-        let _ = state.intake.update_session(
+    if let Some(hold) = run_hold(state, mission_id) {
+        let _ = state.intake.update_run(
             &hold.id,
             &state.station_id,
             hold.fence,
-            SessionUpdate::default().status(SessionStatus::Ended),
+            RunUpdate::default().status(RunStatus::Ended),
         );
     }
     let queued = state
@@ -493,7 +493,7 @@ mod tests {
     use super::*;
     use crate::directorates::m::identity::MissionId;
     use crate::directorates::m::scorecard::{self, Judgment};
-    use crate::directorates::registry::sessions::OutcomeVerdict;
+    use crate::directorates::registry::runs::OutcomeVerdict;
 
     /// Agents that finish at once, under a role that owes a branch that was never pushed and a
     /// file that was never written, and under one that owes nothing.
@@ -547,8 +547,8 @@ mod tests {
         git(&work, &["push", "origin", "main"]);
     }
 
-    fn latest(state: &DaemonState, mission_id: &str) -> crate::SessionRecord {
-        state.intake.latest_session(mission_id).unwrap().unwrap()
+    fn latest(state: &DaemonState, mission_id: &str) -> crate::RunRecord {
+        state.intake.latest_run(mission_id).unwrap().unwrap()
     }
 
     fn stop(state: &DaemonState) {
@@ -558,7 +558,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_done_session_leaves_its_mission_verifying_and_nothing_settles_it() {
+    async fn a_done_run_leaves_its_mission_verifying_and_nothing_settles_it() {
         let root = tempfile::tempdir().unwrap();
         let state = test_state(root.path(), "", AGENTS);
         let owing = mission_for(&state, "owing", "shipper");
@@ -609,7 +609,7 @@ mod tests {
         let mission_id = mission_for(&state, "probe", "shipper");
         start_mission_by_id(&state, &mission_id).await;
         wait_for_verifying(&state, &mission_id).await;
-        // The checkout is a repository only once the work is done: a Session in one would be
+        // The checkout is a repository only once the work is done: a Run in one would be
         // given a safe house, which this Station's test providers do not include.
         checkout_with_remote(root.path());
         assert!(latest(&state, &mission_id).evidence.is_empty());
@@ -745,7 +745,7 @@ mod tests {
         assert_eq!(second.attempt, 2);
         assert_eq!(
             second.predecessor.as_deref(),
-            Some(first.session_id.as_str())
+            Some(first.run_id.as_str())
         );
         assert!(second.verdict.is_none(), "the next attempt starts clean");
         stop(&state);

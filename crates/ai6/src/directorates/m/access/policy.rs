@@ -207,7 +207,7 @@ pub fn seeded_policy() -> AccessPolicy {
         "mission.read",
         "mission.status",
         "product.read",
-        "session.read",
+        "run.read",
         "agent.read",
         "roster.read",
         "station.read",
@@ -215,12 +215,12 @@ pub fn seeded_policy() -> AccessPolicy {
         "cable.read",
         "compartment.read",
     ];
-    const WATCH: [&str; 3] = ["audit.read", "access.read", "session.context"];
+    const WATCH: [&str; 3] = ["audit.read", "access.read", "run.context"];
     const VERIFY: [&str; 1] = ["mission.verify"];
     const WORK: [&str; 9] = [
         "mission.create",
         "mission.control",
-        "session.input",
+        "run.input",
         "cable.send",
         "approval.decide",
         "issue.link",

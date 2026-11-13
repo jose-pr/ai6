@@ -24,7 +24,7 @@ pub type TerminalFactory =
 /// Judges the `_meta` of an `authenticate` request.
 pub type Credential = dyn Fn(&Map<String, Value>) -> bool + Send + Sync;
 
-/// A method every client must authenticate with before it opens or resumes a session.
+/// A method every client must authenticate with before it opens or resumes a run.
 #[derive(Clone)]
 pub struct FacadeAuth {
     /// The advertised method id.
@@ -39,7 +39,7 @@ struct Operation {
     id: String,
     cwd: String,
     launch: Mutex<Option<LaunchMeta>>,
-    session: Mutex<Option<Arc<Object<dyn AgentSession>>>>,
+    run: Mutex<Option<Arc<Object<dyn AgentSession>>>>,
     /// `session/prompt` calls the current turn has yet to answer.
     pending: Mutex<Vec<Responder<Value>>>,
     sink: Mutex<Option<ConnectionTo<Client>>>,
@@ -53,7 +53,7 @@ struct Inner {
     operations: Mutex<HashMap<String, Arc<Operation>>>,
 }
 
-/// Serves any [`AgentHandler`] as an ACP agent: one operation per ACP session, each started
+/// Serves any [`AgentHandler`] as an ACP agent: one operation per ACP run, each started
 /// on its first `session/prompt` from the [`LaunchMeta`] its `session/new` carried.
 #[derive(Clone)]
 pub struct AcpFacade {
@@ -73,7 +73,7 @@ impl AcpFacade {
         }
     }
 
-    /// Requires clients to authenticate before opening a session.
+    /// Requires clients to authenticate before opening a run.
     #[must_use]
     pub fn with_auth(self, auth: FacadeAuth) -> Self {
         let inner = &*self.inner;
@@ -185,7 +185,7 @@ fn handle_request(
         "initialize" => Ok(initialize(inner)),
         "authenticate" => authenticate(inner, authenticated, &params),
         _ if !authenticated.load(Ordering::SeqCst) => Err(Error::auth_required()),
-        "session/new" => new_session(inner, &params, &cx),
+        "session/new" => new_run(inner, &params, &cx),
         "session/prompt" => {
             return prompt(inner, &params, responder, cx);
         }
@@ -211,13 +211,13 @@ fn handle_notification(inner: &Arc<Inner>, message: &UntypedMessage) {
         return;
     };
     std::thread::spawn(move || {
-        if let Some(session) = operation
-            .session
+        if let Some(run) = operation
+            .run
             .lock()
             .ok()
-            .and_then(|session| session.clone())
+            .and_then(|run| run.clone())
         {
-            let _ = session.interrupt();
+            let _ = run.interrupt();
         }
         answer_all(&operation, |responder| {
             responder.respond(json!({"stopReason": "cancelled"}))
@@ -259,7 +259,7 @@ fn authenticate(inner: &Inner, authenticated: &AtomicBool, params: &Value) -> Re
     }
 }
 
-fn new_session(
+fn new_run(
     inner: &Arc<Inner>,
     params: &Value,
     cx: &ConnectionTo<Client>,
@@ -275,7 +275,7 @@ fn new_session(
         id: id.clone(),
         cwd,
         launch: Mutex::new(Some(launch)),
-        session: Mutex::new(None),
+        run: Mutex::new(None),
         pending: Mutex::new(Vec::new()),
         sink: Mutex::new(Some(cx.clone())),
         stop: AtomicBool::new(false),
@@ -326,12 +326,12 @@ fn send_or_start(
     text: String,
 ) -> Result<(), Error> {
     let existing = operation
-        .session
+        .run
         .lock()
         .ok()
-        .and_then(|session| session.clone());
-    if let Some(session) = existing {
-        return session
+        .and_then(|run| run.clone());
+    if let Some(run) = existing {
+        return run
             .send_message(AgentMessage { text })
             .map_err(|error| failure(&error));
     }
@@ -343,11 +343,11 @@ fn send_or_start(
         .ok_or_else(|| Error::internal_error().data("the operation is already starting"))?;
     let terminal = (inner.terminal)().map_err(|error| failure(&error))?;
     let start = launch.into_start(text, operation.cwd.clone());
-    let session = inner
+    let run = inner
         .handler
         .start(start, terminal)
         .map_err(|error| failure(&error))?;
-    attach(inner, operation, session);
+    attach(inner, operation, run);
     Ok(())
 }
 
@@ -384,7 +384,7 @@ fn resume(
                 .ok_or_else(Error::invalid_params)?
                 .to_owned();
             let terminal = (inner.terminal)().map_err(|error| failure(&error))?;
-            let session = inner
+            let run = inner
                 .handler
                 .resume(meta.into_resume(cwd.clone()), terminal)
                 .map_err(|error| failure(&error))?;
@@ -392,7 +392,7 @@ fn resume(
                 id: id.clone(),
                 cwd,
                 launch: Mutex::new(None),
-                session: Mutex::new(None),
+                run: Mutex::new(None),
                 pending: Mutex::new(Vec::new()),
                 sink: Mutex::new(Some(cx.clone())),
                 stop: AtomicBool::new(false),
@@ -402,7 +402,7 @@ fn resume(
                 .lock()
                 .map_err(|_| Error::internal_error())?
                 .insert(id, operation.clone());
-            attach(&inner, &operation, session);
+            attach(&inner, &operation, run);
             Ok(json!({}))
         })();
         let _ = match outcome {
@@ -423,12 +423,12 @@ fn close(inner: &Arc<Inner>, params: &Value, responder: Responder<Value>) {
     let inner = inner.clone();
     std::thread::spawn(move || {
         operation.stop.store(true, Ordering::SeqCst);
-        let session = operation
-            .session
+        let run = operation
+            .run
             .lock()
             .ok()
-            .and_then(|session| session.clone());
-        let closed = session.map_or(Ok(()), |session| session.close());
+            .and_then(|run| run.clone());
+        let closed = run.map_or(Ok(()), |run| run.close());
         if let Ok(mut operations) = inner.operations.lock() {
             operations.remove(&operation.id);
         }
@@ -454,12 +454,12 @@ fn answer_all(operation: &Operation, answer: impl Fn(Responder<Value>) -> Result
 }
 
 /// Keeps the started operation and pumps its events to the client until it is closed.
-fn attach(inner: &Arc<Inner>, operation: &Arc<Operation>, session: Object<dyn AgentSession>) {
-    let session = Arc::new(session);
-    if let Ok(mut slot) = operation.session.lock() {
-        *slot = Some(session.clone());
+fn attach(inner: &Arc<Inner>, operation: &Arc<Operation>, run: Object<dyn AgentSession>) {
+    let run = Arc::new(run);
+    if let Ok(mut slot) = operation.run.lock() {
+        *slot = Some(run.clone());
     }
-    let provider = session.session_id().ok().flatten();
+    let provider = run.session_id().ok().flatten();
     notify(operation, &provider, None);
     let operation = operation.clone();
     let inner = inner.clone();
@@ -467,10 +467,10 @@ fn attach(inner: &Arc<Inner>, operation: &Arc<Operation>, session: Object<dyn Ag
         .name("ai6-acp-pump".to_owned())
         .spawn(move || {
             while !operation.stop.load(Ordering::SeqCst) {
-                let polled = session.next_event(100);
-                // After the read: a harness's first event may be what reports its Session, and
+                let polled = run.next_event(100);
+                // After the read: a harness's first event may be what reports its Run, and
                 // nothing else may follow it for a whole model turn.
-                let provider = session.session_id().ok().flatten();
+                let provider = run.session_id().ok().flatten();
                 match polled {
                     Ok(Some(event)) => {
                         notify(&operation, &provider, Some(&event));
@@ -501,7 +501,7 @@ fn attach(inner: &Arc<Inner>, operation: &Arc<Operation>, session: Object<dyn Ag
 
 /// A terminal event answers the prompts waiting on the turn.
 fn end_turn(operation: &Operation, provider: &Option<String>, event: &AgentEvent) {
-    let meta = json!({"providerSessionId": provider});
+    let meta = json!({"providerId": provider});
     match event.kind.as_str() {
         "completed" => answer_all(operation, |responder| {
             responder.respond(json!({"stopReason": "end_turn", "_meta": meta}))
@@ -542,7 +542,7 @@ fn notify(operation: &Operation, provider: &Option<String>, event: Option<&Agent
         EVENT_NOTIFICATION,
         json!({
             "sessionId": operation.id,
-            "providerSessionId": provider,
+            "providerId": provider,
             "event": event,
         }),
     );

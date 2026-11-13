@@ -38,7 +38,7 @@ class AgentTallySummary {
   final int abandoned;
   final int stalled;
 
-  /// Sessions lost with their Station or runner: not the Agent's failures.
+  /// Runs lost with their Station or runner: not the Agent's failures.
   final int lost;
   final int quarantined;
   final int budgetStops;
@@ -571,11 +571,11 @@ class _AgentsPageState extends State<AgentsPage>
     final shown = _shown;
     final named = widget.route['agent'];
     final mission = widget.route['mission_id'];
-    // The Agents whose Sessions ran the Mission, by Operation.
+    // The Agents whose Runs ran the Mission, by Operation.
     final ran = {
-      for (final session in widget.board.sessions)
-        if (session.missionId == mission && session.agent != null)
-          (session.operationId, session.agent!),
+      for (final run in widget.board.runs)
+        if (run.missionId == mission && run.agent != null)
+          (run.operationId, run.agent!),
     };
     final agents = [
       for (final row in _agents)
@@ -618,13 +618,13 @@ class _AgentsPageState extends State<AgentsPage>
                   (
                     field: 'mission_id',
                     values: [
-                      for (final session in widget.board.sessions)
-                        if (session.agent case final agent?
+                      for (final run in widget.board.runs)
+                        if (run.agent case final agent?
                             when shownAgents.contains((
-                              session.operationId,
+                              run.operationId,
                               agent,
                             )))
-                          session.missionId,
+                          run.missionId,
                     ],
                   ),
                 ],

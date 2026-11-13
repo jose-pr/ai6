@@ -6,7 +6,7 @@
 //! is audited and timelined the same way and settles nothing.
 
 use super::backend::RegistryBackend;
-use super::sessions::{MissionVerdict, OutcomeVerdict, SessionError, SessionRecord};
+use super::runs::{MissionVerdict, OutcomeVerdict, RunError, RunRecord};
 use super::store::AuditRecord;
 use super::timeline::TimelineEvent;
 
@@ -90,9 +90,9 @@ impl<'a> VerifyingDecision<'a> {
 ///
 /// `NotFound` for no attempt or another Operation's; `Unsettled` with its state otherwise.
 pub fn check_verifying(
-    latest: &Option<SessionRecord>,
+    latest: &Option<RunRecord>,
     operation: &str,
-) -> Result<(), SessionError> {
+) -> Result<(), RunError> {
     match latest {
         Some(record) if record.operation.as_deref() == Some(operation) => {
             let state = record
@@ -102,10 +102,10 @@ pub fn check_verifying(
             if state == "verifying" && !record.status.is_closed() {
                 Ok(())
             } else {
-                Err(SessionError::Unsettled(state.to_owned()))
+                Err(RunError::Unsettled(state.to_owned()))
             }
         }
-        _ => Err(SessionError::NotFound),
+        _ => Err(RunError::NotFound),
     }
 }
 
@@ -127,11 +127,11 @@ fn timeline(
     store: &dyn RegistryBackend,
     decision: &VerifyingDecision<'_>,
     kind: &str,
-    record: &SessionRecord,
+    record: &RunRecord,
 ) {
     let event = TimelineEvent::new(kind, decision.word(), decision.operation, decision.at)
         .mission(record.mission_id.clone())
-        .session(record.session_id.clone())
+        .run(record.run_id.clone())
         .actor(decision.by);
     let _ = store.record_event(&event);
 }
@@ -147,8 +147,8 @@ fn timeline(
 pub fn decide(
     store: &dyn RegistryBackend,
     decision: &VerifyingDecision<'_>,
-) -> Result<SessionRecord, SessionError> {
-    check_verifying(&store.latest_session(decision.mission)?, decision.operation)?;
+) -> Result<RunRecord, RunError> {
+    check_verifying(&store.latest_run(decision.mission)?, decision.operation)?;
     // Audited first: a decision that cannot be audited is not given.
     store.record_audit(&audit(decision, "mission.verify"))?;
     let record = store.record_verdict(
@@ -169,8 +169,8 @@ pub fn decide(
 pub fn recommend(
     store: &dyn RegistryBackend,
     decision: &VerifyingDecision<'_>,
-) -> Result<SessionRecord, SessionError> {
-    check_verifying(&store.latest_session(decision.mission)?, decision.operation)?;
+) -> Result<RunRecord, RunError> {
+    check_verifying(&store.latest_run(decision.mission)?, decision.operation)?;
     store.record_audit(&audit(decision, "mission.recommend"))?;
     let record = store.record_recommendation(
         decision.operation,

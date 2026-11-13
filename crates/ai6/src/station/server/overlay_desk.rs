@@ -8,7 +8,7 @@ use crate::directorates::q::overlays::{IssuedDigest, OverlayRecord};
 use crate::directorates::registry::timeline::TimelineEvent;
 use crate::station::overlays::{self, Delivered, Fit, Prepared, Request, Site};
 
-/// The overlays a Session of `agent` in `operation` is issued, fetched and verified, or why it
+/// The overlays a Run of `agent` in `operation` is issued, fetched and verified, or why it
 /// cannot start. `None` when none is issued. Blocks on the store and on a fetch.
 pub(super) fn prepare(
     state: &DaemonState,
@@ -49,9 +49,9 @@ pub(super) fn prepare(
     )
 }
 
-/// Where this Session stands with its overlays: what is issued, checked against where they go.
+/// Where this Run stands with its overlays: what is issued, checked against where they go.
 pub(super) struct Target<'a> {
-    /// The Theater the Session is placed on.
+    /// The Theater the Run is placed on.
     pub(super) theater: &'a str,
     /// The Theater is the Station's own host and the harness runs on it.
     pub(super) here: bool,
@@ -61,7 +61,7 @@ pub(super) struct Target<'a> {
     pub(super) commands: bool,
 }
 
-/// [`prepare`], and whether where the Session is placed has what those overlays need there. Its
+/// [`prepare`], and whether where the Run is placed has what those overlays need there. Its
 /// error is what the Mission waits with.
 pub(super) fn prepare_for(
     state: &DaemonState,
@@ -85,7 +85,7 @@ pub(super) fn prepare_for(
     Ok(Some((prepared, fit)))
 }
 
-/// Where overlays go for a Session on `theater`.
+/// Where overlays go for a Run on `theater`.
 pub(super) fn site_of(state: &DaemonState, theater: &str, here: bool) -> Result<Site, String> {
     if here {
         let state_dir = state
@@ -104,7 +104,7 @@ pub(super) fn site_of(state: &DaemonState, theater: &str, here: bool) -> Result<
 /// empty directory behind.
 pub(super) fn forget(state: &DaemonState, mission: &str, theater: &str, here: bool) {
     let removed =
-        site_of(state, theater, here).and_then(|site| overlays::forget_session(&site, mission));
+        site_of(state, theater, here).and_then(|site| overlays::forget_run(&site, mission));
     if let Err(error) = removed {
         eprintln!("ai6: what Mission {mission:?}'s overlays kept was not removed: {error}");
     }
@@ -138,7 +138,7 @@ pub(super) fn report(
     }
 }
 
-/// Says on the timeline that a resumed Session got other digests than it started with.
+/// Says on the timeline that a resumed Run got other digests than it started with.
 pub(super) fn report_change(
     state: &DaemonState,
     mission_id: &str,

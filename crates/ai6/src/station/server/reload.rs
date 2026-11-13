@@ -3,8 +3,8 @@
 //! Every poll ([`DEFAULT_CONFIG_POLL`](super::DEFAULT_CONFIG_POLL) unless the Station says
 //! otherwise) asks the configuration provider for the revision of the Station's own view. A
 //! new revision is loaded, which checks it as the family files are checked, and the families
-//! that apply live are applied: requests, the scheduler and new Sessions use them, while a
-//! running Session keeps the configuration it started with. A changed family that only a
+//! that apply live are applied: requests, the scheduler and new Runs use them, while a
+//! running Run keeps the configuration it started with. A changed family that only a
 //! restart applies is reported as needing one, at check-in and in the log. A revision that is
 //! not acceptable is refused once, logged and audited, and the last good configuration keeps
 //! running. When its loadouts change, the Station declares its pool accounts again.
@@ -178,7 +178,7 @@ pub(super) fn spawn(state: &DaemonState) -> Option<tokio::task::JoinHandle<()>> 
             if tokio::time::Instant::now() >= next {
                 let polling = state.clone();
                 // The source reads files or a database, so it is asked on the blocking pool. A
-                // login's revision is read at the same beat: a renewal reaches running Sessions
+                // login's revision is read at the same beat: a renewal reaches running Runs
                 // within one poll.
                 let _ = tokio::task::spawn_blocking(move || {
                     poll(&polling);

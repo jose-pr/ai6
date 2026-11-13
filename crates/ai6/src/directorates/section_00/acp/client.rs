@@ -1,6 +1,6 @@
-//! The ACP client: [`AcpSession`] drives one agent connection as an [`AgentSession`], over
+//! The ACP client: [`AcpRun`] drives one agent connection as an [`AgentRun`], over
 //! `coqui_acp`. This module adds what is AI6's: the launch extension and its event stream, the
-//! sequence numbers a reattaching Station acknowledges, what a restricted Session may use, and
+//! sequence numbers a reattaching Station acknowledges, what a restricted Run may use, and
 //! the words of `limit`, `blocked` and `failed` events.
 
 use coqui_acp::sdk::{Client as Role, ConnectTo};
@@ -30,17 +30,17 @@ const ACK_NOTIFICATION: &str = "_ai6/ack";
 /// How often a wait for the operation to start looks at the connection.
 const START_POLL: Duration = Duration::from_millis(50);
 
-/// An `authenticate` call to make before the first session request.
+/// An `authenticate` call to make before the first run request.
 pub use coqui_acp::Authenticate;
 
-/// How [`AcpSession::connect`] opens and drives a Session. Every number is a setting, none has
+/// How [`AcpRun::connect`] opens and drives a Run. Every number is a setting, none has
 /// a floor.
 pub struct AcpOptions {
     /// The agent's working directory (`session/new.cwd`).
     pub cwd: String,
-    /// MCP servers for the session, as ACP's `mcpServers` entries.
+    /// MCP servers for the run, as ACP's `mcpServers` entries.
     pub mcp_servers: Vec<Value>,
-    /// The `_meta` of the session request (the launch extension, an adapter's options).
+    /// The `_meta` of the run request (the launch extension, an adapter's options).
     pub meta: Map<String, Value>,
     /// The requested model, set through the agent's model config option.
     pub model: Option<String>,
@@ -52,18 +52,18 @@ pub struct AcpOptions {
     /// The config option id for the effort; default: the option whose category is
     /// `thought_level`, else `effort`.
     pub effort_option: Option<String>,
-    /// The first turn: sent as `session/prompt` once the session exists.
+    /// The first turn: sent as `session/prompt` once the run exists.
     pub prompt: Option<String>,
-    /// A session to resume (`session/resume`, else `session/load`) instead of a new one.
+    /// A run to resume (`session/resume`, else `session/load`) instead of a new one.
     pub resume: Option<String>,
-    /// Reattach to a live session by `session/load`, whatever else the agent offers, asking
+    /// Reattach to a live run by `session/load`, whatever else the agent offers, asking
     /// it to replay what follows this event sequence number (`0` for all it kept).
     pub reattach: Option<u64>,
-    /// Whether the Session only reads and answers: every permission request for a tool that
+    /// Whether the Run only reads and answers: every permission request for a tool that
     /// edits, deletes, moves or executes is refused, and a tool of those kinds that runs
-    /// without leave ends the Session.
+    /// without leave ends the Run.
     pub restricted: bool,
-    /// Sent before the session request, when the agent needs it.
+    /// Sent before the run request, when the agent needs it.
     pub authenticate: Option<Authenticate>,
     /// How long `initialize` may take.
     pub initialize_timeout_ms: u64,
@@ -76,11 +76,11 @@ pub struct AcpOptions {
     pub close_grace_ms: u64,
     /// Answers permission requests.
     pub decider: Arc<dyn PermissionDecider>,
-    /// Whether dropping the session without closing it closes the agent's session. A Station
-    /// reattaching to a runner's Session sets it off, so a lost connection ends nothing.
+    /// Whether dropping the run without closing it closes the agent's run. A Station
+    /// reattaching to a runner's Run sets it off, so a lost connection ends nothing.
     pub close_on_drop: bool,
     /// Whether a connection that ends mid-turn without being closed is a `failed` event. A
-    /// runner's Session is not failed by its link dropping: the Station attaches again.
+    /// runner's Run is not failed by its link dropping: the Station attaches again.
     pub fail_on_disconnect: bool,
     /// What marks a failed prompt as a provider's usage or rate limit, found in its error without
     /// regard to case. Empty counts no failure as a limit. A lost connection is never one.
@@ -100,16 +100,16 @@ pub struct AcpOptions {
 /// Asked at most once, when a connection has ended mid-turn without being closed.
 pub type DisconnectDetail = Box<dyn FnOnce() -> Option<String> + Send>;
 
-/// What a Session does with the agent's extension notifications (methods starting with `_`)
+/// What a Run does with the agent's extension notifications (methods starting with `_`)
 /// other than [`EVENT_NOTIFICATION`]. They are handed over as they are read, by whoever reads
-/// the Session's events, so a handler returns at once and does its work elsewhere.
+/// the Run's events, so a handler returns at once and does its work elsewhere.
 pub trait ExtensionHandler: Send + Sync {
     /// `method` and `params` as the agent sent them; `reply` notifies the agent back on the same
-    /// connection for as long as the Session holds it.
+    /// connection for as long as the Run holds it.
     fn handle(&self, method: &str, params: &Value, reply: Notifier);
 }
 
-/// Sends notifications to an agent on the connection a Session holds; once the Session is
+/// Sends notifications to an agent on the connection a Run holds; once the Run is
 /// gone, nothing is sent.
 #[derive(Clone)]
 pub struct Notifier(Arc<SendNotification>);
@@ -123,12 +123,12 @@ impl Notifier {
         Self(Arc::new(send))
     }
 
-    fn of(session: &Arc<Session>) -> Self {
-        let session = Arc::downgrade(session);
+    fn of(run: &Arc<Session>) -> Self {
+        let run = Arc::downgrade(run);
         Self::new(move |method, params| {
-            session
+            run
                 .upgrade()
-                .is_some_and(|session| session.notify(method, params).is_ok())
+                .is_some_and(|run| run.notify(method, params).is_ok())
         })
     }
 
@@ -233,8 +233,8 @@ fn notification_ends_turn(method: &str, params: &Value) -> bool {
         })
 }
 
-/// Whether a restricted Session lets the agent have what it asked for: reading, and the tools of
-/// the Session's own MCP servers. Nothing else, whatever its kind: the Grok CLI reports `monitor`,
+/// Whether a restricted Run lets the agent have what it asked for: reading, and the tools of
+/// the Run's own MCP servers. Nothing else, whatever its kind: the Grok CLI reports `monitor`,
 /// which runs any command, as `other`.
 fn restricted_allows(asked: &PermissionRequest, servers: &[String]) -> bool {
     if matches!(asked.kind.as_deref(), Some("read" | "search" | "think")) {
@@ -268,8 +268,8 @@ fn restricted_allows(asked: &PermissionRequest, servers: &[String]) -> bool {
     }
 }
 
-/// The decider of a restricted Session. `coqui_acp` already refuses the kinds that change
-/// something; this refuses the rest that is not reading or the Session's own tools.
+/// The decider of a restricted Run. `coqui_acp` already refuses the kinds that change
+/// something; this refuses the rest that is not reading or the Run's own tools.
 struct Restricting {
     inner: Arc<dyn PermissionDecider>,
     servers: Vec<String>,
@@ -281,7 +281,7 @@ impl PermissionDecider for Restricting {
             self.inner.decide(request)
         } else {
             PermissionDecision::Deny(format!(
-                "a restricted Session may not use a tool of the kind {}",
+                "a restricted Run may not use a tool of the kind {}",
                 request.kind.as_deref().unwrap_or("unknown")
             ))
         }
@@ -293,9 +293,9 @@ impl PermissionDecider for Restricting {
 struct State {
     /// Read from the agent and not yet handed out.
     queue: VecDeque<Queued>,
-    /// The identity the Station records: the provider Session ID a façade reports, else the
-    /// ACP session ID.
-    provider_session: Option<String>,
+    /// The identity the Station records: the provider ID a façade reports, else the
+    /// ACP run ID.
+    provider_id: Option<String>,
     /// The parameters of the notification that said the operation started.
     start_info: Option<Value>,
     /// The newest runner sequence number handed out by `next_event`.
@@ -321,8 +321,8 @@ impl State {
 
     /// What a façade's `_ai6/event` notification says.
     fn extension(&mut self, params: &Value) {
-        if let Some(started) = params.get("providerSessionId").and_then(Value::as_str) {
-            self.provider_session = Some(started.to_owned());
+        if let Some(started) = params.get("providerId").and_then(Value::as_str) {
+            self.provider_id = Some(started.to_owned());
         }
         match params.get("event") {
             Some(Value::Null) | None => self.start_info = Some(params.clone()),
@@ -343,9 +343,9 @@ fn provider_error(message: impl AsRef<str>) -> ProviderError {
     ProviderError::new(Status::GUATIAO_ERR_INTERNAL, message.as_ref())
 }
 
-/// One ACP connection to an agent, driven as an [`AgentSession`].
-pub struct AcpSession {
-    session: Arc<Session>,
+/// One ACP connection to an agent, driven as an [`AgentRun`].
+pub struct AcpRun {
+    run: Arc<Session>,
     /// Whoever reads the agent's events holds this, as the single reader.
     reader: Mutex<()>,
     state: Mutex<State>,
@@ -354,14 +354,14 @@ pub struct AcpSession {
     extensions: Option<Arc<dyn ExtensionHandler>>,
 }
 
-impl AcpSession {
-    /// Connects over `transport`, opens (or resumes) the session and sends the first prompt.
-    /// `on_close` runs when the Session ends or fails to open: it ends the agent's process.
+impl AcpRun {
+    /// Connects over `transport`, opens (or resumes) the run and sends the first prompt.
+    /// `on_close` runs when the Run ends or fails to open: it ends the agent's process.
     ///
     /// # Errors
     ///
     /// The agent's refusal or silence, in a sentence: an `initialize`, authentication or
-    /// session error, an agent without the capability the Session needs, a start timeout.
+    /// run error, an agent without the capability the Run needs, a start timeout.
     pub fn connect(
         transport: impl ConnectTo<Role> + 'static,
         mut options: AcpOptions,
@@ -371,35 +371,35 @@ impl AcpSession {
             options.prompt.is_some() || (options.resume.is_some() && options.reattach.is_none());
         let start_timeout = duration_of(options.start_timeout_ms);
         let has_prompt = options.prompt.is_some();
-        let mut session = Self::builder(&options);
+        let mut run = Self::builder(&options);
         if let Some(detail) = options.disconnect_detail.take() {
-            session = session.disconnect_detail(detail);
+            run = run.disconnect_detail(detail);
         }
         if let Some(on_close) = on_close {
-            session = session.on_close(on_close);
+            run = run.on_close(on_close);
         }
-        let session = session
+        let run = run
             .connect(transport)
             .map_err(|error| provider_error(error.to_string()))?;
-        let events_capability = session.extension_active();
+        let events_capability = run.extension_active();
         let opened = Self {
             reader: Mutex::new(()),
             state: Mutex::new(State {
-                provider_session: if events_capability {
+                provider_id: if events_capability {
                     None
                 } else {
-                    session.id()
+                    run.id()
                 },
                 ..State::default()
             }),
-            session: Arc::new(session),
+            run: Arc::new(run),
             events_capability,
             limit_phrases: options.limit_phrases,
             extensions: options.extensions,
         };
         if events_capability && waits {
             // A façade starts its operation on the first prompt, and a resumed one says it is
-            // running before the Session is handed out; what the start says is the start's.
+            // running before the Run is handed out; what the start says is the start's.
             opened
                 .await_start(has_prompt, start_timeout)
                 .map_err(provider_error)?;
@@ -494,7 +494,7 @@ impl AcpSession {
                     return Ok(());
                 }
             }
-            if self.session.connection_lost() {
+            if self.run.connection_lost() {
                 // What the agent said before it left is read before its leaving: it may have
                 // started, or said why it could not.
                 if !drained {
@@ -532,7 +532,7 @@ impl AcpSession {
     /// Reads one event from the agent, if one comes within `wait`, and turns it into what the
     /// Station hears.
     fn pump(&self, wait: Duration) -> bool {
-        let Some(event) = self.session.next_event(wait) else {
+        let Some(event) = self.run.next_event(wait) else {
             return false;
         };
         self.absorb(event);
@@ -557,7 +557,7 @@ impl AcpSession {
             && method != EVENT_NOTIFICATION
         {
             if let Some(handler) = &self.extensions {
-                handler.handle(method, params, Notifier::of(&self.session));
+                handler.handle(method, params, Notifier::of(&self.run));
             }
             return;
         }
@@ -612,7 +612,7 @@ impl AcpSession {
             Event::Failed(text) => {
                 // A lost connection's failure may quote the agent's last words, which are no
                 // provider's answer: only a turn's own failure counts as a limit.
-                let hit = (!self.events_capability && !self.session.connection_lost())
+                let hit = (!self.events_capability && !self.run.connection_lost())
                     .then(|| self.inferred_limit(&text))
                     .flatten();
                 let failed = match hit {
@@ -639,7 +639,7 @@ impl AcpSession {
                     "failed",
                     Some(format!(
                         "the agent's output was lost while no one was connected ({lines} lines, \
-                         {bytes} bytes), so what this Session shows has a gap"
+                         {bytes} bytes), so what this Run shows has a gap"
                     )),
                 ),
             ),
@@ -685,22 +685,22 @@ impl AcpSession {
             .lock()
             .ok()
             .and_then(|mut state| state.unacked.take());
-        if let (Some(seq), Some(id)) = (taken, self.session.id()) {
+        if let (Some(seq), Some(id)) = (taken, self.run.id()) {
             let _ = self
-                .session
+                .run
                 .notify(ACK_NOTIFICATION, json!({"sessionId": id, "seq": seq}));
         }
     }
 }
 
-impl AgentSession for AcpSession {
+impl AgentSession for AcpRun {
     fn session_id(&self) -> Result<Option<String>, ProviderError> {
         self.catch_up();
         Ok(self
             .state
             .lock()
             .map_err(|_| provider_error("ACP state lock was poisoned"))?
-            .provider_session
+            .provider_id
             .clone())
     }
 
@@ -709,7 +709,7 @@ impl AgentSession for AcpSession {
             state.finished = false;
             state.cancelling = false;
         }
-        self.session
+        self.run
             .send(message.text)
             .map_err(|_| provider_error("the ACP connection is closed"))
     }
@@ -739,7 +739,7 @@ impl AgentSession for AcpSession {
         if let Ok(mut state) = self.state.lock() {
             state.cancelling = true;
         }
-        self.session
+        self.run
             .cancel()
             .map_err(|_| provider_error("the ACP connection is closed"))
     }
@@ -747,14 +747,14 @@ impl AgentSession for AcpSession {
     fn close(&self) -> Result<(), ProviderError> {
         // What was taken is acknowledged, so nothing is left to replay.
         self.acknowledge_taken();
-        self.session.close();
+        self.run.close();
         Ok(())
     }
 }
 
-impl AcpSession {
+impl AcpRun {
     /// The parameters of the notification that said the operation started: the provider
-    /// Session ID and whatever else the agent told (a runner names the terminal it chose).
+    /// Run ID and whatever else the agent told (a runner names the terminal it chose).
     pub fn start_info(&self) -> Option<Value> {
         self.catch_up();
         self.state
@@ -774,10 +774,10 @@ impl AcpSession {
     /// Whether the connection ended without this side closing it: the agent, or the link to
     /// it, is gone.
     pub fn connection_lost(&self) -> bool {
-        self.session.connection_lost()
+        self.run.connection_lost()
     }
 
-    /// This session as the object handle a Station holds.
+    /// This run as the object handle a Station holds.
     pub fn into_handle(self) -> Object<dyn AgentSession> {
         self.into_object()
     }

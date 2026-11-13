@@ -1,4 +1,4 @@
-//! Per-Session authenticated MCP tools that act on a Theater through its transport.
+//! Per-Run authenticated MCP tools that act on a Theater through its transport.
 //!
 //! In remote-hands mode the harness runs on the Station and its own shell and file tools
 //! are turned off, so everything it does to the Theater goes through these tools and the

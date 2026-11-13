@@ -49,7 +49,7 @@ A vote is `pass`, `redo` with reasons, or `abstain`.
   as its handler's default.
 - **Rounds.** In round one each reviews alone. If neither `pass` nor `redo` reached the share, the
   next round gives each the others' reasons, up to `rounds`; past that it is `on_no_agreement`.
-- **Sent back.** A redo goes to the author's Session with the reasons, up to `redo_limit`; past
+- **Sent back.** A redo goes to the author's Run with the reasons, up to `redo_limit`; past
   that a person decides.
 
 ## Who chooses the policy
@@ -79,11 +79,11 @@ never reviewed by fewer.
 
 ## The output gate
 
-Where a Mission would be `done`, it waits as `blocked`, reason `review-output`. Its Session is
+Where a Mission would be `done`, it waits as `blocked`, reason `review-output`. Its Run is
 closed and its safe house kept. Nothing that says it is done moves: not a CX report, a status
 comment, a linked issue's state or a Source's report. Only a pass does.
 
-Each reviewer's turn is an answer-only Session of its own, on the Station's own host, with no tool
+Each reviewer's turn is an answer-only Run of its own, on the Station's own host, with no tool
 that changes anything, in an empty directory, started as a [Chief of Staff review](missions.md#vetting-and-held-briefs)
 is. It gets the goals, the Agent's own report (which is where any test results are: AI6 runs no
 tests of its own), the branch, its commits and the change, each cut to the Station's
@@ -97,13 +97,13 @@ An answer that is not plainly a pass never passes.
 | Outcome | What happens |
 | --- | --- |
 | Pass | The cover is audited on what is there now, the safe house finished, the Mission `done`, its reports sent |
-| Redo | The author's Session is resumed with the reasons, also quoted, up to `redo_limit`; past it `blocked`, reason `review-redo`, for a person |
+| Redo | The author's Run is resumed with the reasons, also quoted, up to `redo_limit`; past it `blocked`, reason `review-redo`, for a person |
 | No agreement, or the budget runs out | `on_no_agreement`: `blocked` for a person, or the Mission fails |
 | No panel can be filled, or no policy read | `blocked`, the reason on the review, until it can |
 
 Votes and where the review stands are in the Registry, one record per Mission and gate. A Station
 that restarts mid-review carries on from it: a seat has one vote a round, so a reviewer started
-again is not counted twice. A reviewer's lost harness is resumed when it named a Session and started
+again is not counted twice. A reviewer's lost harness is resumed when it named a Run and started
 again when it did not. Every vote, weight, reason, model and round is on the Operation's timeline
 (kind `review`) and in Audit, and so is a weakening or a naming that was ignored.
 
@@ -117,10 +117,10 @@ read and search its working directory, and its only AI6 tool is `submit_plan`. I
 command, send a Cable, write to an issue or propose a Mission; the checkout's own settings are not
 loaded. It submits its plan (or gives it as its final message) and ends its turn; the Mission waits as
 `blocked`, reason `review-plan`, and the panel judges the plan against the goals, as above. A redo
-resumes it, still at `read`, with the reasons. A pass resumes the same Session at the Mission's own
+resumes it, still at `read`, with the reasons. A pass resumes the same Run at the Mission's own
 clearance, with the Mission's tools.
 
-That needs a harness that takes up new tools on a resume of the same Session. A handler says whether
+That needs a harness that takes up new tools on a resume of the same Run. A handler says whether
 it can, and a Mission under a plan gate does not start on one that cannot; it waits, with the reason
 on the Mission:
 

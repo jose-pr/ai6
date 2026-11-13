@@ -7,7 +7,7 @@
 //! leases, secrets, safe houses, green ink, quarantine or Station policy.
 //!
 //! Each compartment compiles into two `coqui-roles` authorizers, one for people and one for
-//! Sessions, so "does this subject hold this action there" has one answer built from the
+//! Runs, so "does this subject hold this action there" has one answer built from the
 //! authorizer the rest of AI6 uses. Effective access is the union over compartments.
 //!
 //! A read or a Cable asks [`current`], which reads the records from the provider on every call:
@@ -188,9 +188,9 @@ pub enum ReadInSubject {
     Group(String),
     /// A sign-in account.
     Account(String),
-    /// Every Session of an Operation.
+    /// Every Run of an Operation.
     Operation(String),
-    /// Every Session of one Mission.
+    /// Every Run of one Mission.
     Mission(String),
     /// An Agent, in every Operation it works in.
     Agent(String),
@@ -231,7 +231,7 @@ impl ReadInSubject {
         })
     }
 
-    /// Whether the subject is a person, a group or an account, as opposed to a Session's.
+    /// Whether the subject is a person, a group or an account, as opposed to a Run's.
     pub const fn is_people(&self) -> bool {
         matches!(self, Self::Person(_) | Self::Group(_) | Self::Account(_))
     }
@@ -344,7 +344,7 @@ pub struct Compartment {
     pub covers: Vec<CompartmentCover>,
     /// Who holds it.
     pub read_in: Vec<ReadIn>,
-    /// The clearance a Session needs for the compartment to apply to it; `None` asks none.
+    /// The clearance a Run needs for the compartment to apply to it; `None` asks none.
     pub min_clearance: Option<String>,
     /// How much it may carry.
     pub limits: CompartmentLimits,
@@ -392,7 +392,7 @@ impl Compartment {
         self
     }
 
-    /// This compartment asking `clearance` of a Session.
+    /// This compartment asking `clearance` of a Run.
     #[must_use]
     pub fn with_min_clearance(mut self, clearance: impl Into<String>) -> Self {
         self.min_clearance = Some(clearance.into());
@@ -647,7 +647,7 @@ pub struct CompartmentSettings {
     #[schema(title = "What it grants")]
     #[map(default)]
     pub actions: Vec<CompartmentAction>,
-    /// The clearance a Session needs for the compartment to apply to it.
+    /// The clearance a Run needs for the compartment to apply to it.
     #[schema(title = "Clearance floor")]
     min_clearance: Option<ClearanceLevel>,
     /// How much it may carry.
@@ -840,22 +840,22 @@ impl fmt::Display for CompartmentResource {
     }
 }
 
-/// A Session asking: the Station supplies all of it, and a request never names its own identity.
+/// A Run asking: the Station supplies all of it, and a request never names its own identity.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldPrincipal {
     /// The Agent's codename.
     pub agent: String,
-    /// The Operation the Session works in.
+    /// The Operation the Run works in.
     pub operation: String,
-    /// The Mission the Session works on.
+    /// The Mission the Run works on.
     pub mission: Option<String>,
     /// The Agent's effective clearance now.
     pub clearance: String,
 }
 
 impl FieldPrincipal {
-    /// A Session of `agent` in `operation` on `mission`, at `clearance`.
+    /// A Run of `agent` in `operation` on `mission`, at `clearance`.
     pub fn new(
         agent: impl Into<String>,
         operation: impl Into<String>,
@@ -871,7 +871,7 @@ impl FieldPrincipal {
     }
 }
 
-/// A compartment as one Session holds it.
+/// A compartment as one Run holds it.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeldCompartment {
@@ -879,7 +879,7 @@ pub struct HeldCompartment {
     pub id: String,
     /// What it is for: configuration, not outside text.
     pub description: String,
-    /// What it grants a Session.
+    /// What it grants a Run.
     pub actions: Vec<CompartmentAction>,
     /// The Operations it reaches.
     pub operations: Vec<String>,
@@ -918,7 +918,7 @@ impl CompiledOne {
                 .filter(|action| keep(*action))
                 .map(CompartmentAction::as_str)
                 .collect();
-            // A compartment of only cable.read grants a Session nothing, and is still valid.
+            // A compartment of only cable.read grants a Run nothing, and is still valid.
             if names.is_empty() {
                 names.push(NOTHING);
             }
@@ -971,7 +971,7 @@ impl CompiledOne {
             .is_ok_and(|decision| decision.allowed)
     }
 
-    /// Whether the clearance floor lets a Session at `clearance` hold this. An unknown
+    /// Whether the clearance floor lets a Run at `clearance` hold this. An unknown
     /// clearance counts as the lowest.
     fn clears(&self, clearance: &str) -> bool {
         let Some(floor) = &self.compartment.min_clearance else {
@@ -984,13 +984,13 @@ impl CompiledOne {
     fn field_allows(
         &self,
         principal: &FieldPrincipal,
-        session: &Person,
+        run: &Person,
         action: CompartmentAction,
         resource: &CompartmentResource,
         lineage: &Lineage,
     ) -> bool {
         self.clears(&principal.clearance)
-            && Self::asks(&self.field, session, action, resource, lineage)
+            && Self::asks(&self.field, run, action, resource, lineage)
     }
 
     /// Every resource the covers name, Operations expanded down the tree.
@@ -1064,9 +1064,9 @@ fn request(
     }
 }
 
-/// The [`Person`] a Session asks as. Its groups are named by kind, so no person's group can be
-/// taken for them: people and Sessions are asked of different authorizers.
-fn session_person(principal: &FieldPrincipal, lineage: &Lineage) -> Person {
+/// The [`Person`] a Run asks as. Its groups are named by kind, so no person's group can be
+/// taken for them: people and Runs are asked of different authorizers.
+fn run_person(principal: &FieldPrincipal, lineage: &Lineage) -> Person {
     let mut groups = Vec::new();
     if let Some(mission) = &principal.mission {
         groups.push(format!("mission:{mission}"));
@@ -1116,23 +1116,23 @@ impl Default for CompiledCompartments {
 }
 
 impl CompiledCompartments {
-    /// The first compartment, in ID order, that gives this Session `action` on `resource`;
+    /// The first compartment, in ID order, that gives this Run `action` on `resource`;
     /// `None` for no. An unknown compartment, an unknown Operation and a floor above the
-    /// Session's clearance all answer `None`.
+    /// Run's clearance all answer `None`.
     pub fn field_allows(
         &self,
         principal: &FieldPrincipal,
         action: CompartmentAction,
         resource: &CompartmentResource,
     ) -> Option<&str> {
-        let session = session_person(principal, &self.lineage);
+        let run = run_person(principal, &self.lineage);
         self.compiled
             .iter()
-            .find(|(_, one)| one.field_allows(principal, &session, action, resource, &self.lineage))
+            .find(|(_, one)| one.field_allows(principal, &run, action, resource, &self.lineage))
             .map(|(id, _)| id.as_str())
     }
 
-    /// Whether compartment `id` gives this Session `action` on `resource`.
+    /// Whether compartment `id` gives this Run `action` on `resource`.
     pub fn field_allows_in(
         &self,
         id: &str,
@@ -1140,9 +1140,9 @@ impl CompiledCompartments {
         action: CompartmentAction,
         resource: &CompartmentResource,
     ) -> bool {
-        let session = session_person(principal, &self.lineage);
+        let run = run_person(principal, &self.lineage);
         self.compiled.get(id).is_some_and(|one| {
-            one.field_allows(principal, &session, action, resource, &self.lineage)
+            one.field_allows(principal, &run, action, resource, &self.lineage)
         })
     }
 
@@ -1191,7 +1191,7 @@ impl CompiledCompartments {
         })
     }
 
-    /// Whether this Session is named among those read into compartment `id` and meets its
+    /// Whether this Run is named among those read into compartment `id` and meets its
     /// clearance floor, whatever it covers or grants: as [`person_read_in`](Self::person_read_in).
     pub fn field_read_in(&self, id: &str, principal: &FieldPrincipal) -> bool {
         self.compiled.get(id).is_some_and(|one| {
@@ -1244,14 +1244,14 @@ impl CompiledCompartments {
             .collect()
     }
 
-    /// What a Session may reach with `action`: every covered Operation, expanded down the tree
+    /// What a Run may reach with `action`: every covered Operation, expanded down the tree
     /// where the cover propagates, and every covered Mission of the compartments that allow it.
     pub fn reachable(
         &self,
         principal: &FieldPrincipal,
         action: CompartmentAction,
     ) -> Vec<CompartmentResource> {
-        let session = session_person(principal, &self.lineage);
+        let run = run_person(principal, &self.lineage);
         let found: BTreeSet<CompartmentResource> = self
             .compiled
             .values()
@@ -1259,7 +1259,7 @@ impl CompiledCompartments {
                 one.resources(&self.lineage)
                     .into_iter()
                     .filter(|resource| {
-                        one.field_allows(principal, &session, action, resource, &self.lineage)
+                        one.field_allows(principal, &run, action, resource, &self.lineage)
                     })
                     .collect::<Vec<_>>()
             })
@@ -1288,9 +1288,9 @@ impl CompiledCompartments {
         found.into_iter().collect()
     }
 
-    /// The compartments this Session holds now, each with what it reaches.
+    /// The compartments this Run holds now, each with what it reaches.
     pub fn held(&self, principal: &FieldPrincipal) -> Vec<HeldCompartment> {
-        let session = session_person(principal, &self.lineage);
+        let run = run_person(principal, &self.lineage);
         self.compiled
             .values()
             .filter_map(|one| {
@@ -1299,7 +1299,7 @@ impl CompiledCompartments {
                     .into_iter()
                     .filter(|action| {
                         resources.iter().any(|resource| {
-                            one.field_allows(principal, &session, *action, resource, &self.lineage)
+                            one.field_allows(principal, &run, *action, resource, &self.lineage)
                         })
                     })
                     .collect();

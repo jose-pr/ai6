@@ -64,7 +64,7 @@ void main() {
         'WORK',
         'Overview',
         'Missions',
-        'Sessions',
+        'Runs',
         'Green Ink',
         'Briefings',
         'PEOPLE AND POLICY',
@@ -94,7 +94,7 @@ void main() {
       addTearDown(board.dispose);
       board.accessToken = 't';
       board.loading = false;
-      board.userSession = const UserSessionSummary(
+      board.userRun = const UserRunSummary(
         personId: 'ana',
         name: 'ana',
         displayName: null,
@@ -157,7 +157,7 @@ void main() {
       for (final label in [
         'Overview',
         'Missions',
-        'Sessions',
+        'Runs',
         'Green Ink',
         'More',
       ]) {
@@ -211,7 +211,7 @@ void main() {
     }
 
     testWidgets('on a phone in the bar', (tester) async {
-      await demoOpenAt(tester, phone, '/sessions');
+      await demoOpenAt(tester, phone, '/runs');
       expect(
         tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
         2,

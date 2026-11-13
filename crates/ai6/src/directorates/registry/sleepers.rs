@@ -89,11 +89,11 @@ pub struct Sleeper {
     #[schema(title = "One standing Mission")]
     #[map(default)]
     pub standing: bool,
-    /// Each window's attempt resumes the last attempt's provider Session when its handler can and
+    /// Each window's attempt resumes the last attempt's provider Run when its handler can and
     /// that attempt did not fail, else starts a new one, as it does when the resume is refused.
     /// Needs `standing`.
     #[serde(default, skip_serializing_if = "is_false")]
-    #[schema(title = "Resume the last attempt's Session")]
+    #[schema(title = "Resume the last attempt's Run")]
     #[map(default)]
     pub resume: bool,
 }

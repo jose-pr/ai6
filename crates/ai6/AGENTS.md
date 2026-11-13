@@ -9,8 +9,8 @@ Development documentation lives with the source at <https://github.com/jose-pr/a
 | (none) | Public AI6 contracts without daemon dependencies. | Yes |
 | `daemon` | The Station's HTTP service, scheduler and Guatiao provider host, and the field runner. | No |
 | `publisher` | Bounded lifecycle and raw terminal-byte publication to Universal Exports. | No |
-| `cables-mcp` | Per-Session authenticated MCP tools for Agent-to-Agent Cables. | No |
-| `acp` | The Agent Client Protocol wire (`section_00::acp`): `AcpSession`, `AcpFacade`; part of `daemon`. Adds `agent-client-protocol`, `coqui-acp` and `futures`; no async runtime. | No |
+| `cables-mcp` | Per-Run authenticated MCP tools for Agent-to-Agent Cables. | No |
+| `acp` | The Agent Client Protocol wire (`section_00::acp`): `AcpRun`, `AcpFacade`; part of `daemon`. Adds `agent-client-protocol`, `coqui-acp` and `futures`; no async runtime. | No |
 | `gate` | The green ink gate's client of a Station (`section_00::gate`), for agent providers; part of `daemon`. | No |
 | `station-tls` | Persistent Station certificate identities and peer/CA mutual TLS (`coqui-peer-tls`). | No |
 | `sqlite` | `SqlRegistry` and `SqlProvider` in a SQLite file. | No |
@@ -23,7 +23,7 @@ MSRV: Rust 1.89. The crate depends on Guatiao, `coqui-access`, `coqui-roles`, `c
 `sqlite` adds `rusqlite` with SQLite compiled in (a C compiler at build time); `postgres`
 adds `tokio-postgres`, Tokio, `tokio-rustls`, rustls (ring) and `rustls-native-certs`. `cli` adds clap and Tokio signal support. The crate builds as a
 Rust library and contains no `unsafe` code. `cables-mcp` adds RMCP's Streamable HTTP
-server, JSON Schema support, constant-time bearer checks and per-Session tokens; the
+server, JSON Schema support, constant-time bearer checks and per-Run tokens; the
 default feature set remains dependency-light.
 
 The library root re-exports common contracts. Two public modules group the rest.
@@ -31,7 +31,7 @@ The library root re-exports common contracts. Two public modules group the rest.
 roster, where it comes from (`config`) and cover; `directorates::registry` owns the Registry
 (intake), the traits a Registry store implements (`backend`) and Cables; `directorates::q`
 owns loadouts, secret leases, terminal contracts and the safe-house contract; `directorates::section_00` owns the
-AgentHandler contract; `directorates::medical` owns Session monitoring. `station` holds the
+AgentHandler contract; `directorates::medical` owns Run monitoring. `station` holds the
 node that runs them: `station::server` (daemon service and `serve*`), `station::limits` (the
 `station` record's tables), `station::plugins`
 (provider host), `station::safehouse` (opens a Mission's safe house through a provider),
@@ -71,7 +71,7 @@ pub const ACTIONS: &[&str];   // sorted: access.manage, access.read, account.man
                               // cable.read, cable.send, compartment.cover, compartment.manage,
                               // compartment.read, config.manage, config.read, mission.control, mission.create, mission.read, mission.review,
                               // mission.status, mission.verify, pool.manage, pool.read, product.read, roster.manage,
-                              // roster.read, session.input, session.read,
+                              // roster.read, run.input, run.read,
                               // station.configure, station.read; cable.* on operation:<id>
                               // bound Moneypenny's Cables for the person;
                               // assistant.memory.admin on config:assistant reads another
@@ -80,7 +80,7 @@ pub const ACTIONS: &[&str];   // sorted: access.manage, access.read, account.man
 pub const STATION_ACTIONS: &[&str];     // those that mean something at station:<id>: audit.read,
                               // station.configure, station.read
 pub const OPERATION_ACTIONS: &[&str];   // the ACTIONS that mean something on an Operation:
-                              // agent.*, approval.*, cable.*, mission.*, pool.*, session.*,
+                              // agent.*, approval.*, cable.*, mission.*, pool.*, run.*,
                               // audit.read, access.read, access.manage, compartment.cover,
                               // product.read. A role bound at an
                               // `operation:` scope grants only these there
@@ -276,25 +276,25 @@ wrote first); `tally(&[MissionReview]) -> BTreeMap<String, ReviewTally { put_up,
 disagreed, absent }>` for an Agent's scorecard; `update_mission_review(store, (mission, gate), tries, change)`. SQL table
 `ai6_mission_reviews`, made at the next open. `Mission.review_naming: Option<BriefNaming>`,
 `StationLimits.review: ReviewLimits` (`[review]`), and a safe house's change: `SafeHouseDiff { text,
-cut }`, the kind method `SafeHouseSession::diff(bytes)` (unsupported by default; `git` gives the working
+cut }`, the kind method `SafeHouseRun::diff(bytes)` (unsupported by default; `git` gives the working
 tree against the base and untracked names) and `SafeHouse::diff(Limit)`.
 
-The `AgentHandler` kind method `session_record(SessionRecordQuery { session_id, working_directory,
-environment }) -> Result<Option<SessionRecordFile { path, format }>, ProviderError>` (default: none)
-names where the harness keeps its own record of a Session on this host: `claude` (`claude-code-jsonl`),
+The `AgentHandler` kind method `run_record(RunRecordQuery { run_id, working_directory,
+environment }) -> Result<Option<RunRecordFile { path, format }>, ProviderError>` (default: none)
+names where the harness keeps its own record of a Run on this host: `claude` (`claude-code-jsonl`),
 `codex` (`codex-rollout-jsonl`) and `antigravity` (`antigravity-jsonl`) answer when the file is there.
 
 The `AgentHandler` kind method `program() -> Result<Option<String>, ProviderError>` (default: `None`)
 names the program the harness is started as, a bare name or a path: `claude`, `codex` and
 `antigravity` answer their `executable`, `acp` its `command`. Before a Station starts a harness on its
-own host it looks the program up with `section_00::programs::missing_program` on the Session's own
+own host it looks the program up with `section_00::programs::missing_program` on the Run's own
 environment; a refusal fails the Mission at once (`Mission.failure`), and its brief with that reason.
 A handler that answers `None` or an error is not looked up.
 
 The plan gate: `ai6::READ_CLEARANCE` (`"read"`, set only by AI6) and `clearance_reads_only(&str)`; the
 `AgentHandler` kind method `read_only_refusal() -> Result<Option<String>, ProviderError>` (default:
-refuses; `claude` and `codex` hold a Session to reading and take up the Mission's tools on a resume of
-the same Session). A Mission under a `plan` policy starts and is sent back at `read`, its only Cable
+refuses; `claude` and `codex` hold a Run to reading and take up the Mission's tools on a resume of
+the same Run). A Mission under a `plan` policy starts and is sent back at `read`, its only Cable
 tool `submit_plan`, kept in `Mission.plan` until it is put up; it does not start on a handler that
 refuses, nor in remote-hands mode, and waits with the reason in `Mission.waiting`.
 
@@ -357,9 +357,9 @@ impl CompiledCompartments {
 pub fn current(provider: &dyn ConfigProvider) -> Result<CompiledCompartments, RosterError>;
 ```
 
-A Session's tools (feature `cables-mcp`), listed only while it holds a compartment and working
-before the harness reports its Session ID: `compartments`, `missions_in`, `mission_brief`,
-`mission_products`; `propose_mission` takes `operation`. A brief or a product marks the Session
+A Run's tools (feature `cables-mcp`), listed only while it holds a compartment and working
+before the harness reports its Run ID: `compartments`, `missions_in`, `mission_brief`,
+`mission_products`; `propose_mission` takes `operation`. A brief or a product marks the Run
 `product:<operation>` first; a proposal into another Operation is `brief:compartment` there. Cable
 scope `compartment` (`CableTarget`, `CableSendRequest::with_operation` narrows it) needs `cable.send`
 through it and no receive grant; `CableConfig::cross_operation()` is `Compartments` by default, so any
@@ -379,12 +379,12 @@ false`; nothing reaches upward. Union across compartments; first match inside on
 `directorates::registry::products`: `mission_status(&dyn RegistryBackend, &FiledBrief) -> Value`, the fields
 any holder of `mission.status` sees and nothing else, and `mission_product(.., limit)`, with the outcome's
 `state`, `reason`, `branch` and `summary`, the CX report and the refs, each text cut with `CUT_MARKER`. An
-outcome's other keys (Session IDs, who recovered it) are not part of a product.
+outcome's other keys (Run IDs, who recovered it) are not part of a product.
 
 ## Settings (`ai6::settings`)
 
 ```rust
-pub fn schema(section: &str) -> Option<serde_json::Value>;   // a dotted path: provider, registry.limits.sessions, record.station.scheduler
+pub fn schema(section: &str) -> Option<serde_json::Value>;   // a dotted path: provider, registry.limits.runs, record.station.scheduler
 pub fn sections() -> Vec<(String, String)>;                  // every table's path and title
 pub mod reference {
     pub const DOCS: [&str; 4];                               // the docs holding generated tables
@@ -422,7 +422,7 @@ impl StationLimits { pub fn validate(&self) -> Result<(), String>; }   // zero q
 
 `ProbeLimits` (`[probes]`, the timeouts of a verifier's reads of a Mission's deliverables: `git_timeout` 30 s,
 `http_timeout` 20 s, `tracker_timeout` 30 s, `file_timeout` 5 s, and `comments` 100, the latest comments a
-tracker probe reads). `[registry.limits.sessions]` also holds `amendment_bytes` (8 KiB), `deliverables` (32 per
+tracker probe reads). `[registry.limits.runs]` also holds `amendment_bytes` (8 KiB), `deliverables` (32 per
 attempt), `evidence_entries` (64, the oldest go first) and `evidence_detail_chars` (300).
 
 `OverlayLimits` (`[overlays]`: `manifest_bytes` 1 MiB, `manifest_depth` 64, `files` 4096,
@@ -485,14 +485,14 @@ lines, a 10-second prompt timeout, no maximum runtime, 4,096 least-recently-used
 digests and no digit normalization. Its `with_stall_timeout`, `with_loop_timeout`, `with_loop_min_lines`,
 `with_blocked_after`, `with_max_runtime`, `with_history` and `with_normalize_digits` builders
 set those limits. `Watchdog::with_config` starts a monitor from the configuration;
-`ServeConfig::with_watchdog` applies it to daemon Sessions. Provider events and terminal
+`ServeConfig::with_watchdog` applies it to daemon Runs. Provider events and terminal
 output reset the inactivity deadline; accepted operator messages also reset prompt and
 repeated-line tracking. Terminal output is split on carriage returns and newlines, ANSI
 sequences are removed before comparison, and digit runs can be normalized to `#`. Repeated
 lines with no novel output for the configured loop timeout interrupt and close the handler
 operation as stalled. A quiet prompt-shaped tail marks the Mission blocked after the
 configured prompt timeout; later terminal output or an accepted operator message returns it
-to Working. The optional maximum runtime is measured from Session start and is not reset by
+to Working. The optional maximum runtime is measured from Run start and is not reset by
 activity; `is_max_runtime_exceeded()` and `max_runtime()` expose that deadline. The daemon
 publishes lifecycle updates through Universal Exports when configured. Each `[agent.<id>.limits]`
 table can override selected daemon defaults; numeric duration values are finite, non-negative
@@ -509,9 +509,9 @@ pub struct UsageTotals { pub input: u64, pub output: u64, pub cache_read: u64,
                          pub cache_write: u64, pub cost_micro_usd: u64 }   // serde, default 0
 impl UsageTotals { pub fn add(&mut self, other: &Self); pub fn tokens(&self) -> u64 /* input+output+cache_write */ }
 pub struct UsageTracker;   // default(); .observe(&Spend) -> UsageTotals (the addition)
-pub struct MissionUsage { pub total: UsageTotals, pub sessions: BTreeMap<String, UsageTotals>,
+pub struct MissionUsage { pub total: UsageTotals, pub runs: BTreeMap<String, UsageTotals>,
                           pub daily_cost_micro_usd: BTreeMap<String /* UTC YYYY-MM-DD */, u64> }
-pub struct Budget { pub session_tokens: Option<u64>, pub mission_tokens: Option<u64>,
+pub struct Budget { pub run_tokens: Option<u64>, pub mission_tokens: Option<u64>,
                     pub mission_cost_micro_usd: Option<u64>,
                     pub operation_cost_micro_usd_per_day: Option<u64>,
                     pub warn_at_permille: Option<u16> /* default 800 */ }
@@ -519,23 +519,23 @@ impl Budget {
     pub fn preset(p: BudgetPreset) -> Self;           // Observe (no limits) | Strict
     pub fn is_limited(&self) -> bool;
     pub fn merge(&self, child: &Self) -> Self;        // child's set fields win
-    pub fn check(&self, session: &UsageTotals, mission: &UsageTotals,
+    pub fn check(&self, run: &UsageTotals, mission: &UsageTotals,
                  operation_day_cost: Option<u64>) -> Vec<BudgetBreach>;   // Warn or Limit per scope
 }
 pub struct BudgetDefinition;  // the TOML table; .resolve() -> Result<Budget, String> naming the key
 pub fn micro_usd(dollars: f64) -> u64;  pub fn utc_day(unix_seconds: i64) -> String;
 
-// exposure — which Sessions read untrusted input
+// exposure — which Runs read untrusted input
 pub struct Exposure { pub source: String /* brief:source | brief:registry_drop | brief:compartment | cable:X | product:OPERATION | tool:X | review */, pub at: f64 }
 pub enum Restriction { Proposals, Approvals, Cables, Secrets }
 pub struct ExposurePolicy;   // default() = strict; ::preset(Strict | Observe); .restricts(r); .exposed_by_tool(name)
 pub struct ExposureDefinition;   // [operation.ID.exposure]: preset, restrict = [..], tools = [..]
-pub struct ExposureGate;     // clone-shared per Session: new(policy, inherited, &SessionLimits),
+pub struct ExposureGate;     // clone-shared per Run: new(policy, inherited, &RunLimits),
                              // mark(source, at) -> bool (sources cut to exposure_source_bytes,
                              // at most `exposures` kept), exposures(), is_exposed(), restricts(r),
                              // take_changes()
 pub fn cable_source(sender: &str, limit: Limit) -> String;   // "cable:SENDER" cut to limit bytes
-pub fn memory_source(id: &str, limit: Limit) -> String; // "memory:<id>": read what an exposed Session wrote
+pub fn memory_source(id: &str, limit: Limit) -> String; // "memory:<id>": read what an exposed Run wrote
 pub fn tool_source(tool: &str, limit: Limit) -> String;      // "tool:NAME" cut to limit bytes
 
 // quarantine — when an Agent is stopped everywhere
@@ -550,7 +550,7 @@ pub struct QuarantineDefinition;   // [operation.ID.quarantine]; 0 turns a count
 `Operation::{budget, exposure, quarantine}` and `Agent::budget` carry the resolved values
 (`[operation.ID.budget]`, `[agent.ID.budget]`, `[operation.ID.exposure]`,
 `[operation.ID.quarantine]`). Unset budget keys are not enforced; `preset = "strict"` sets
-2,000,000 session tokens, 5,000,000 Mission tokens, $10 per Mission and $50 per Operation
+2,000,000 run tokens, 5,000,000 Mission tokens, $10 per Mission and $50 per Operation
 per UTC day. A budget value that is negative, non-numeric (or fractional for token counts)
 fails the roster load with an error naming the key.
 
@@ -609,8 +609,8 @@ pub struct Agent {
     pub model: Option<String>, pub effort: Option<String>,
     pub handler_settings: serde_json::Map<String, serde_json::Value>,
     pub pool: Option<String>,
-    pub env: SessionEnv,                          // no credential's or AI6's variable (refused)
-    pub secrets: Vec<String>,                     // `[secret.NAME]`s, issued whatever the Session read
+    pub env: RunEnv,                          // no credential's or AI6's variable (refused)
+    pub secrets: Vec<String>,                     // `[secret.NAME]`s, issued whatever the Run read
     pub priority: i64,
 }
 impl AgentRoute { pub fn new(handler: impl Into<String>) -> Self; pub fn reference(&self) -> RouteRef; }
@@ -624,7 +624,7 @@ impl Agent {
     /// Complete: what a route leaves out from the Agent. One `handler` is one route; neither, none.
     pub fn route_list(&self) -> Vec<AgentRoute>;
     pub fn runs_on(&self, handlers: &[String]) -> bool;
-    /// As a Session on `route` works: its handler, model, effort, settings and pool; its env over the Agent's.
+    /// As a Run on `route` works: its handler, model, effort, settings and pool; its env over the Agent's.
     #[must_use] pub fn on_route(&self, route: &AgentRoute) -> Self;
     pub fn route_named(&self, reference: &RouteRef) -> Option<AgentRoute>;
     /// Its model, or for routes every model they name: what a clearance raise is signed for.
@@ -697,7 +697,7 @@ pub struct Operation {
     pub intake: SourceIntake,                     // [operation.ID] intake: Watch (default, items are Reports the watch decides) or Direct (each item queued as a brief); Direct is a reported non-default
     pub sleepers: BTreeMap<String, Sleeper>,      // standing orders; see Sleepers
     pub pools: Option<Vec<String>>,               // account pools it may use; None (default): every pool
-    pub overlays: Vec<String>,                    // [overlay.<name>] names its Sessions get after the loadout's; each once
+    pub overlays: Vec<String>,                    // [overlay.<name>] names its Runs get after the loadout's; each once
     pub harness: HarnessPolicy,                   // [operation.ID.harness]; ignore unless configured
     pub promotion: PromotionPolicy,               // [operation.ID.promotion]; see Promotion below
     pub scorecard: ScorecardPolicy,               // [operation.ID.scorecard]; see Scorecard below
@@ -1015,7 +1015,7 @@ nothing from its parent. Weakening reports read the resolved records.
 
 An Agent is a codename; its `handler`, `model` and `effort` are the codename's current
 occupant. An `AgentRole` (`[role.<id>]`) is a job description only: a `purpose` and a
-`policy`, passed to the Session as initial context. Neither grants authorization. An
+`policy`, passed to the Run as initial context. Neither grants authorization. An
 Agent's `roles` lists the roles it is qualified for; a qualified role name may carry a
 suffix (`case-officer/implementation` resolves to `case-officer`).
 
@@ -1400,7 +1400,7 @@ The daemon loads its own view at start (`ServeConfig::with_config_provider`; def
 `FileProvider` over the configuration directory) and polls `revision(station)` every
 `DEFAULT_CONFIG_POLL` (5 s; `StationConfig::with_config_poll`, `ai6.cfg [provider] poll`,
 0 off): a new revision is loaded and its live families applied to requests, the scheduler
-and new Sessions (running Sessions keep theirs); a changed family that only a restart applies
+and new Runs (running Runs keep theirs); a changed family that only a restart applies
 (`theater`) is logged and listed in `config.needs_restart` by name. A revision that fails with
 `Invalid` is refused once per revision, logged, audited (`config.refused`, actor and resource
 `station:<id>`) and reported at check-in (`config.refused`) while the last good configuration
@@ -1424,7 +1424,7 @@ transaction, or Stations do not see the change. The database may be the Registry
 
 ## Theaters (`ai6::directorates::m::theaters`)
 
-A Theater is where a Session works; a Station reaches it through a transport. Each Station
+A Theater is where a Run works; a Station reaches it through a transport. Each Station
 reads its own `theaters.toml` (`[theater.<id>]` with `access`, `labels`, `agents`, `egress`,
 `harnesses`, `workdir`, `runner`, `requires` and `provision`; `docs/theaters.md` has the
 table). The Station's own
@@ -1507,7 +1507,7 @@ pub struct Theater {
     pub id: String, pub access: TheaterAccess, pub labels: BTreeMap<String, String>,
     pub agents: AgentMode, pub egress: Egress, pub harnesses: Vec<String>, pub workdir: Option<String>,
     pub runner: Option<RunnerSettings>,
-    pub requires: Option<Requirements>,      // what Sessions need there; unchecked when absent
+    pub requires: Option<Requirements>,      // what Runs need there; unchecked when absent
     pub provision: Option<ProvisionSpec>,    // how `ai6 theater provision` installs it; never published
     pub cables: CableReach,                  // Optional: a wrapped harness with no `forward` starts
                                              // without Cables, a weakening; omitted when Required
@@ -1542,7 +1542,7 @@ pub struct TheaterSummary {                  // what a Station publishes; no use
     pub made_for: Option<String>,            // the Mission an ephemeral Theater was made for
     pub resources: Option<Resources>,        // `local`: the Station's sample; else the newer of the
                                              // resources-only sample and the report's
-    pub sessions: usize,                     // the Station's running Sessions there; omitted when 0
+    pub runs: usize,                     // the Station's running Runs there; omitted when 0
     pub cables: CableReach,                  // omitted when Required
 }
 impl TheaterSummary { pub fn local() -> Self; }
@@ -1565,7 +1565,7 @@ a harness and a runner `terminal` must be words that do not start with `-`; a po
 through 65535; a `host_key` is `sha256:` and 64 hex digits; runner paths and its command are
 non-empty text, and unknown runner keys are refused. `ServeConfig` loads `theaters.toml` from the
 configuration directory; `StationConfig::with_theater` adds one in code and wins on a shared
-ID. A Session's launch record carries `station_id`, `theater_id` and `mode` separately.
+ID. A Run's launch record carries `station_id`, `theater_id` and `mode` separately.
 
 A Station builds one transport per Theater at start (`TransportClient` over the provider the
 Theater's `access` names; no host is contacted), publishes each Theater's `Capabilities` in
@@ -1609,7 +1609,7 @@ Operation's `path`); the Station runs `q::provision::provision` on it when the t
 report. The launch record names the made Theater. After every check-in the Station adopts
 listed Theaters it does not know, destroys those whose Mission is `done` or `abandoned`, and
 keeps those whose Mission `failed`, was `blown` or is unknown here, at most `keep_failed`
-per template and for at most `keep_failed_hours`, newest first. A Theater with a Session
+per template and for at most `keep_failed_hours`, newest first. A Theater with a Run
 starting or running is never touched.
 
 ### Provisioning (`ai6::directorates::q::provision`)
@@ -1682,7 +1682,7 @@ every other operation is an appended slot with a default body that answers
 pub trait Transport: Send + Sync {
     fn capabilities(&self) -> Result<Value, ProviderError>;           // Capabilities; never contacts the host
     fn probe(&self) -> Result<Value, ProviderError>;                   // contacts the host; default = capabilities
-    fn open_terminal(&self, spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError>; // terminal::Spec
+    fn open_terminal(&self, spec: &Value) -> Result<Object<dyn TerminalRun>, ProviderError>; // terminal::Spec
     fn run(&self, spec: &Value) -> Result<Value, ProviderError>;       // RunSpec -> Output
     fn read_file(&self, spec: &Value) -> Result<Value, ProviderError>; // ReadSpec -> FileData
     fn write_file(&self, spec: &Value) -> Result<(), ProviderError>;   // WriteSpec
@@ -1750,7 +1750,7 @@ program has ended. The file functions are POSIX `sh` scripts over `Shell`
 
 ### Remote-hands tools
 
-When a Mission is placed in remote-hands mode, the Station starts a per-Session MCP endpoint
+When a Mission is placed in remote-hands mode, the Station starts a per-Run MCP endpoint
 (feature `cables-mcp`, `127.0.0.1`, bearer token) with `theater_run`, `theater_read`,
 `theater_write` and `theater_list`, and puts `AI6_THEATER_MCP_URL` and `AI6_THEATER_MCP_TOKEN`
 in the handler's environment. A handler that sees both is in remote-hands mode: it must switch
@@ -1840,7 +1840,7 @@ pub struct PlacementChoice { pub station: String, pub theater: String, pub agent
     pub score: f64 }                  // 0-4, thousandths; serde default 0; Eq holds (always finite)
 #[non_exhaustive]
 pub enum ExecutionMode { Field, RemoteHands }   // default Field; as_str() -> "field" | "remote-hands"
-/// How a Session would run on `theater`, or the capability that is missing.
+/// How a Run would run on `theater`, or the capability that is missing.
 pub fn execution_mode(theater: &TheaterSummary) -> Result<ExecutionMode, String>;
 /// Why the Theater's `requires` rule it out: unchecked, or an unmet os/tool/disk. Ok without
 /// `requires`, and for an ephemeral template (fitted out when a Theater is made from it).
@@ -1873,7 +1873,7 @@ or in remote-hands mode, the Operation must be bound to the Theater or the Theat
 `workdir`). Choices are pushed in a base order (Stations by `occupied()`, deciding Station,
 ID; `local` Theater first; Agent priority) and then stable-sorted by `score` (ascending for
 `Spread`, descending for `Pack`). `score` = occupied/capacity + `cpu_busy` + `memory_used`
-(of the Theater's resources, the Station's for `local` access) + the Theater's `sessions`
+(of the Theater's resources, the Station's for `local` access) + the Theater's `runs`
 /capacity, each capped at 1; an unreported figure adds 0.
 
 `execution_mode` is field mode when the harness can run on the Theater and reach the
@@ -1887,7 +1887,7 @@ capabilities is rejected unless it is the Station's own host. The reason names w
 A posted Agent is skipped for a missing handler on that Station (a Station that reported no
 handlers is not excluded), so the next qualified Agent is the backup, and per Theater by
 `harness_verdict` (with `station`, `theater` and `agent` set). A Station refuses to start a
-Session the same two checks rule out. Order is the
+Run the same two checks rule out. Order is the
 least-loaded Station (the deciding Station wins a tie, then Station ID), the `local`
 Theater first, then Agent priority. Reasons that apply to an Agent everywhere (not the
 requested Agent, no handler configured, role or tag mismatch) have no `station`.
@@ -1906,12 +1906,12 @@ pub fn parked_until(now: i64, resets_at: Option<i64>, fallback_secs: u64, grace_
 already-past one waits `fallback_secs` so a limit that outlives its stated reset cannot
 loop. An Operation sets `on_limit = "rotate" | "wait" | "backup"` and `limit_fallback_secs`
 (above zero) in `operations.toml`; an unknown value or zero fails the roster load. Whatever
-the policy, the Session's pool account is marked limited until the reset (or
+the policy, the Run's pool account is marked limited until the reset (or
 `fallback_secs` from now) and freed. `Rotate`, when another account of the Agent's pools has
 room, parks the Mission until now so the next scheduler pass resumes the same provider
-Session on another account (an account kind that `carries_session`), or queues the Mission
+Run on another account (an account kind that `carries_run`), or queues the Mission
 again for the same Agent as a new attempt (Codex and `config-dir` kinds); otherwise it waits.
-`Wait` parks the Mission and resumes the same provider Session; `Backup` posts the next
+`Wait` parks the Mission and resumes the same provider Run; `Backup` posts the next
 qualified Agent whose handler differs from the limited one as a new attempt, and parks when
 none exists.
 
@@ -1940,8 +1940,8 @@ pub trait ApprovalStore;     // green ink and class authorisations (approvals.rs
 pub trait AssistantLogStore; // Moneypenny's conversation log (assistant_log.rs)
 pub trait LogbookStore;      // each Station's Head of Station reports (logbook.rs)
 pub trait QuarantineStore;   // quarantines and incidents (quarantine.rs)
-pub trait SessionStore;      // Session records and fenced leases (sessions.rs)
-pub trait SessionContextStore; // each Session's harness context (contexts.rs)
+pub trait RunStore;      // Run records and fenced leases (runs.rs)
+pub trait RunContextStore; // each Run's harness context (contexts.rs)
 pub trait SleeperStore;      // Sleeper authorizations and fired windows (sleepers.rs)
 pub trait SourceStore;       // Source cursors, ingested items, reports owed (sources.rs)
 pub trait TimelineStore;     // the activity timeline (timeline.rs)
@@ -1952,7 +1952,7 @@ pub trait WatchStore;        // each watch's record, lease and logbook (watches.
 pub trait Limited { fn limits(&self) -> &RegistryLimits; }   // the bounds it was opened with
 pub trait RegistryBackend: Limited + AccountStore + AgentRecordStore + BriefStore + StationStore + AccessTokenStore + CableStore
     + AuditStore + AgentRoleStore + ApprovalStore + AssistantLogStore + ClearanceStore + LogbookStore
-    + QuarantineStore + ReportStore + SessionContextStore + SessionStore + SleeperStore + SourceStore + TimelineStore
+    + QuarantineStore + ReportStore + RunContextStore + RunStore + SleeperStore + SourceStore + TimelineStore
     + UsageStore + VettingStore + WatchStore + Send + Sync {}
 impl<T: /* every family */ + Send + Sync> RegistryBackend for T {}
 
@@ -1975,7 +1975,7 @@ pub struct RegistryLimits { pub accounts: AccountLimits, pub agents: AgentLimits
     pub briefs: BriefLimits, pub cables: CableLimits, pub clearance: ClearanceLimits,
     pub contexts: ContextLimits, pub files: FileLimits, pub held: HeldLimits, pub logbook: LogbookLimits,
     pub proposals: ProposalLimits, pub quarantine: QuarantineLimits, pub reports: ReportLimits,
-    pub sessions: SessionLimits,
+    pub runs: RunLimits,
     pub sleepers: SleeperLimits, pub sources: SourceLimits, pub stations: StationLimits,
     pub timeline: TimelineLimits, pub tokens: TokenLimits, pub usage: UsageLimits,
     pub watches: WatchLimits }
@@ -2069,26 +2069,26 @@ bootstrap file's `[provider]` and `[registry] password`); a password in the loca
 visible in the process list. Messages from the command show locations through `redact`.
 
 Timeouts (`SqlOptions::for_lease(L)`, no floor; a sub-millisecond server timeout is sent as
-1 ms, since PostgreSQL reads 0 as none): each session runs
+1 ms, since PostgreSQL reads 0 as none): each run runs
 `statement_timeout`, `lock_timeout` and `idle_in_transaction_session_timeout` of `L/4`, so a
 Station that stalls inside a transaction (a paused VM, a half-open connection) loses its
-session, and the clock row it held, well before a standby must take over; the connection
+run, and the clock row it held, well before a standby must take over; the connection
 uses `connect_timeout` and `keepalives_idle` of `L/6` and `tcp_user_timeout` of `L/4`. A
 location that sets one itself (the parameter, or `-c name=…` in `options`) keeps its own.
 `ai6 serve` derives them from its `[registry] headquarters_lease`. A lock or statement timeout maps
 to `TimedOut`.
 
 Each record family
-has its own table (`ai6_briefs`, `ai6_brief_leases`, `ai6_headquarters`, `ai6_sessions`,
+has its own table (`ai6_briefs`, `ai6_brief_leases`, `ai6_headquarters`, `ai6_runs`,
 `ai6_approvals` and so on), holding the record as JSON text in the file Registry's shape
 beside the columns a lookup needs, and a `revision` column. Every write transaction first
 advances its row of `ai6_clock` (`registry`): that row lock serializes writers across
 Stations as the directory lock does, so claims, brief leases, the Headquarters election and
-term, and Session fencing keep the file Registry's guarantees, and its new value is the
+term, and Run fencing keep the file Registry's guarantees, and its new value is the
 revision stamped on each row written. SQLite runs writes as `BEGIN IMMEDIATE` with a 30 s
 busy timeout and WAL. PostgreSQL runs writes `READ COMMITTED` and reads `REPEATABLE READ
 READ ONLY`, whatever the server's default, and serializes each open's check of one schema with an
-advisory lock. Brief, Headquarters and Session leases and check-in times
+advisory lock. Brief, Headquarters and Run leases and check-in times
 are taken from the database's clock (`clock_timestamp()`, SQLite `unixepoch('subsec')`)
 inside the transaction that writes them, so a Station whose clock is off cannot take a live
 lease early; the clock-explicit test hooks keep their given time. A unique violation maps
@@ -2115,7 +2115,7 @@ secret backends.
 #[non_exhaustive] pub struct Provenance {
     pub origin: Origin,
     pub principal: Option<String>,   // person ID | Source provider | sleeper name | proposing Agent; None for a drop
-    pub reference: Option<String>,   // Source item | sleeper fingerprint | proposing provider Session
+    pub reference: Option<String>,   // Source item | sleeper fingerprint | proposing provider Run
     pub item_url: Option<String>,
     pub received_at: i64,            // Unix seconds
     pub received_by: String,         // Station ID, or "universal-exports"
@@ -2142,7 +2142,7 @@ spends its provenance (file: moved to `STATE/<key>.provenance`; SQL: moved to
 `finished_provenance`), where only `unreported_source_briefs` reads it, so the same record
 queued again has none. `None` means the brief was put in the queue without one (by hand, or
 `submit_brief` with none). The Station then records it on the
-Mission as `Origin::RegistryDrop` with its own ID, and the Mission's Sessions start exposed
+Mission as `Origin::RegistryDrop` with its own ID, and the Mission's Runs start exposed
 by `brief:registry_drop` (`BRIEF_REGISTRY_DROP`). A finished `source:` brief is reported to
 its Source only when `reportable` holds: a `source` provenance for this record naming the
 provider and item, and the brief's Operation equal to its Source data's. Anything with write access to the Registry's own
@@ -2175,14 +2175,14 @@ pub struct MissionProposal {
     pub operation_id: String,
     pub parent_mission_id: MissionId,
     pub proposer_agent_id: String,
-    pub proposer_session_id: SessionId,
+    pub proposer_run_id: RunId,
     pub brief: Brief,
     pub created_at: f64,
     pub vetting: Option<Vetting>,   // serde default, skipped when None: set by Headquarters
-    pub parent_role: Option<String>, // serde default: the role the proposing Session's Mission was given
+    pub parent_role: Option<String>, // serde default: the role the proposing Run's Mission was given
 }
 impl MissionProposal {
-    pub fn try_new(operation_id, parent_mission_id: MissionId, proposer_agent_id, proposer_session_id: SessionId,
+    pub fn try_new(operation_id, parent_mission_id: MissionId, proposer_agent_id, proposer_run_id: RunId,
         idempotency_key: &str, brief: Brief, limits: &ProposalLimits) -> io::Result<Self>;   // key within limits
     pub fn with_parent_role(self, Option<String>) -> Self;   // set by the Station, never the Agent
 }
@@ -2293,12 +2293,12 @@ and never appear in `list_new()`. `promote_mission_proposal` moves an authorized
 `new/` and is safe to retry; `reject_mission_proposal` files it under `proposals/rejected/`.
 Universal Exports's authenticated, Operation-authorized review endpoints call these decision
 methods, and Headquarters promotes a proposal itself only when its vetting passed, its
-proposer Session was not exposed (no `exposure` in the brief's `data`) and a live class
+proposer Run was not exposed (no `exposure` in the brief's `data`) and a live class
 authorisation of kind `proposal` covers it: proposer Agent (or the role the proposal asks for)
 at that Agent's clearance, and the proposal's title against `target_pattern`. That approval
 is a green ink request on the parent Mission (`ApprovalStore::approve_by_class`, one use),
 audited as `mission.proposal.approved` with actor `class:ID`; the promoted brief is cleared of
-`review`. Provider Session identity is bound by AI6, never supplied in the proposed brief.
+`review`. Provider Run identity is bound by AI6, never supplied in the proposed brief.
 
 `record_audit` stores a validated metadata-only `AuditRecord` under `audit/` and rejects
 duplicate IDs. Each entry is bounded to 16 KiB and the listing scans at most 10,000
@@ -2319,13 +2319,13 @@ pub struct TimelineEvent {
     pub action: String,                     // a state, "<action>.<outcome>", "sent", "authorized", "revoked"
     pub operation: String,                  // whose timeline shows it
     pub station: Option<String>, pub mission: Option<String>,
-    pub session: Option<String>, pub actor: Option<String>,
+    pub run: Option<String>, pub actor: Option<String>,
     pub detail: BTreeMap<String, String>,   // at most detail_entries (8) safe names and IDs
 }
 impl TimelineEvent {
     pub fn new(kind, action, operation, at: f64) -> Self;
     pub fn station(self, ..) -> Self; pub fn mission(self, ..) -> Self;
-    pub fn session(self, ..) -> Self; pub fn actor(self, ..) -> Self;
+    pub fn run(self, ..) -> Self; pub fn actor(self, ..) -> Self;
     pub fn detail(self, key, value) -> Self;
 }
 ```
@@ -2337,7 +2337,7 @@ non-positive time (`[registry.limits.timeline]`: 64, 256, 8); it stores the even
 `timeline/` named by time, and past `records` (10,000) removes the oldest.
 `timeline_events(operation)` returns one Operation's events oldest first, skipping unreadable
 files. `submit_cable` records a `cable`/`sent` event for a new Cable under the sender's
-Operation (sender Station and Agent, Mission and Session, details `cable`, `scope`,
+Operation (sender Station and Agent, Mission and Run, details `cable`, `scope`,
 `recipients`; never the body or the target name), and `authorize_sleeper` /
 `revoke_sleeper` record `sleeper`/`authorized` and `revoked` (detail `sleeper`); see Sleepers for the
 rest of that kind. Universal
@@ -2351,7 +2351,7 @@ concurrent Mission count of at least 1; `set_station_settings` refuses one above
 reads the validated current value; `set_station_settings(station, settings)` persists it
 under a collision-resistant Station-specific file and the shared Registry lock. A daemon
 uses the live value for new Mission admission and scheduling; absent settings retain its
-startup default, and unreadable settings fail closed. Existing provider Sessions are not
+startup default, and unreadable settings fail closed. Existing provider Runs are not
 stopped when the limit is lowered. Every backend stores all four fields; a record missing one
 is invalid.
 
@@ -2400,8 +2400,8 @@ need synchronized clocks. The daemon publishes `roles`, `labels`, `capacity`, `r
 the host's `resources` (sysinfo: CPU count, CPU percent from the second sample on, the
 one-minute load average except on Windows, total and available memory; in this crate's own
 tests every check-in repeats the process's first sample), its `resource_limits` (Registry
-settings, else the defaults), each Theater's running `sessions`,
-local Operation paths (`operations`: the Operations with a checkout here, which placement reads), every Operation it may place a Mission of (`runnable_operations`: its `stations` list admits it and any Theater it names is one of this Station's, which Universal Exports reads to accept an Operation bound to a remote Theater), its Missions that wait for a person with no harness running (`waiting_missions`: verifying, held, or blocked with the Session closed, whose leases another Station placing work leaves out of this Station's load), available `handlers`, reachable `theaters` (with their capabilities) and each Operation's
+settings, else the defaults), each Theater's running `runs`,
+local Operation paths (`operations`: the Operations with a checkout here, which placement reads), every Operation it may place a Mission of (`runnable_operations`: its `stations` list admits it and any Theater it names is one of this Station's, which Universal Exports reads to accept an Operation bound to a remote Theater), its Missions that wait for a person with no harness running (`waiting_missions`: verifying, held, or blocked with the Run closed, whose leases another Station placing work leaves out of this Station's load), available `handlers`, reachable `theaters` (with their capabilities) and each Operation's
 placement policy (`operation_policies`, omitted with a log line when over 512 KiB), every
 roster Operation's ancestors nearest first (`operation_lineage`: `{"G": ["P", "ROOT"],
 "ROOT": []}`, omitted with a log line when over 512 KiB), the
@@ -2443,52 +2443,52 @@ every Station's published facts: a brief naming no Agent gets `None` from
 dropped from the policy first; the first choice whose Agent and Operation are within
 `max_concurrent` is taken. The Headquarters Station's own capacity plays no part.
 
-## Session records (`ai6::directorates::registry::sessions`)
+## Run records (`ai6::directorates::registry::runs`)
 
-The shared record of every Agent Session, under `sessions/<id>.json` in the Registry. A
+The shared record of every Agent Run, under `runs/<id>.json` in the Registry. A
 Station's `missions.json` dies with it; this record does not.
 
 ```rust
-#[non_exhaustive] pub enum SessionStatus { Active, Parked, Ended, Lost }
-impl SessionStatus { pub fn is_closed(self) -> bool }   // Ended or Lost
-#[non_exhaustive] pub struct SessionLaunch {         // what another Station needs to re-attach
+#[non_exhaustive] pub enum RunStatus { Active, Parked, Ended, Lost }
+impl RunStatus { pub fn is_closed(self) -> bool }   // Ended or Lost
+#[non_exhaustive] pub struct RunLaunch {         // what another Station needs to re-attach
     pub handler: String, pub terminal: String, pub working_directory: String,
     pub model: Option<String>, pub effort: Option<String>,
     pub mode: ExecutionMode,                 // default Field
-    pub runner: Option<String>,              // the runner's Session key; only these are adopted
+    pub runner: Option<String>,              // the runner's Run key; only these are adopted
     pub clearance: Option<String>,           // what the harness was launched at, which fixed its tools
     pub agent: Option<String>,               // the Agent codename it ran as; a scorecard groups by it
     pub overlays: Vec<IssuedDigest>,         // ai6::directorates::q::overlays: each overlay and its digest
 }
-impl SessionLaunch { pub fn new(handler, terminal, working_directory) -> Self;
+impl RunLaunch { pub fn new(handler, terminal, working_directory) -> Self;
     pub fn with_overlays(self, Vec<IssuedDigest>) -> Self;
     pub fn with_agent(self, Option<String>) -> Self;
     pub fn with_model(self, Option<String>, Option<String>) -> Self;
     pub fn with_mode(self, ExecutionMode) -> Self; pub fn with_runner(self, key) -> Self;
     pub fn with_clearance(self, Option<String>) -> Self; }
-#[non_exhaustive] pub struct SessionRecord {
-    pub session_id: String,                  // AI6's ID, the run's UID (not the provider's)
+#[non_exhaustive] pub struct RunRecord {
+    pub run_id: String,                  // AI6's ID, the run's UID (not the provider's)
     pub mission_id: String,                  // the Mission's UID
     pub handle: Option<String>,              // `<mission handle>.<attempt>` when it opened; a rename leaves it
     pub operation: Option<String>,           // the Mission's Operation, as the opening Station knew it
-    pub provider_session_id: Option<String>,
+    pub provider_id: Option<String>,
     pub station: String,                     // the lease holder
     pub theater: Option<String>,
     pub attempt: u32,                        // from 1
-    pub predecessor: Option<String>,         // AI6 ID of the Session this one replaced
-    pub status: SessionStatus,
+    pub predecessor: Option<String>,         // AI6 ID of the Run this one replaced
+    pub status: RunStatus,
     pub parked_until: Option<f64>,           // Unix seconds
     pub lease_expires: f64,
     pub fence: u64,                          // fencing token of the current lease
     pub exposure: Vec<Exposure>,             // untrusted input read; only grows
-    pub launch: Option<SessionLaunch>,       // how the harness was launched, to re-attach to it
+    pub launch: Option<RunLaunch>,       // how the harness was launched, to re-attach to it
     pub recent: Vec<String>,                 // last events seen, oldest first, bounded as above
     pub checkpoint: Option<SafeHouseCheckpoint>, pub checkpointed_at: Option<f64>,
-    pub lost: Option<String>,                // why, with SessionStatus::Lost
+    pub lost: Option<String>,                // why, with RunStatus::Lost
     pub account: Option<AccountRef>,         // the pool account it runs on, when pooled
     pub opened_at: Option<f64>,              // Unix seconds
     pub closed_at: Option<f64>,              // set when it becomes Ended or Lost
-    pub result: Option<SessionResult>,       // how its Mission stood at the holder's last write
+    pub result: Option<RunResult>,       // how its Mission stood at the holder's last write
     pub window: Option<String>,              // the standing Sleeper's window the run answers
     pub verdict: Option<MissionVerdict>,     // what a person found; needs no lease, the latest stands
     pub deliverables: Vec<Deliverable>,      // what the Mission was to deliver; set when the attempt goes verifying
@@ -2501,108 +2501,108 @@ impl SessionLaunch { pub fn new(handler, terminal, working_directory) -> Self;
 #[non_exhaustive] pub struct Evidence { pub deliverable: Deliverable, pub result: ProbeResult,
     pub detail: String /* one line, data: may quote a tracker or server */, pub at: f64 }
     // new(deliverable, result, detail, at); detail within evidence_detail_chars
-#[non_exhaustive] pub struct SessionResult { pub state: String /* the Mission state: working, blocked,
+#[non_exhaustive] pub struct RunResult { pub state: String /* the Mission state: working, blocked,
     stalled, done, failed, blown, abandoned, parked, quarantined, held, verifying */, pub reason: Option<String>
     /* a blocked Mission's reason (green-ink, issue, budget, interrupted, clearance-lowered), or
-       SessionResult::HANDED_OFF */, pub denied_tools: u32 }
-impl SessionResult { pub const HANDED_OFF: &'static str; pub fn new(state) -> Self;
+       RunResult::HANDED_OFF */, pub denied_tools: u32 }
+impl RunResult { pub const HANDED_OFF: &'static str; pub fn new(state) -> Self;
     pub fn with_reason(self, Option<String>) -> Self; pub fn with_denied_tools(self, usize) -> Self }
-impl SessionRecord { pub fn leased_at(&self, now: f64) -> bool;   // false once closed
-    pub fn takes_verdict(&self) -> Result<(), SessionError> }   // Unsettled unless it ended done or held, or is verifying
+impl RunRecord { pub fn leased_at(&self, now: f64) -> bool;   // false once closed
+    pub fn takes_verdict(&self) -> Result<(), RunError> }   // Unsettled unless it ended done or held, or is verifying
 #[non_exhaustive] pub enum OutcomeVerdict { Confirmed, Disputed, FailedVerification, Redispatch }   // serde kebab-case;
     // ALL, as_str(), from_name(), is_fault() (every verdict but Confirmed). Redispatch only settles a verifying Mission:
     // its next attempt, told the note and the amendment; the verified attempt counts against its Agent.
 #[non_exhaustive] pub struct MissionVerdict { pub verdict: OutcomeVerdict, pub note: Option<String>,
     pub amendment: Option<String> /* a redispatch's, within amendment_bytes (8 KiB) */,
     pub by: String, pub at: f64 }   // new(verdict, by, at, note) .with_amendment(Option<String>); note within verdict_note_bytes (4 KiB)
-#[non_exhaustive] pub struct FinalReport { pub session_id: String, pub mission_id: String, pub text: String,
-    pub at: f64 }   // new(session_id, mission_id, text, at, limit): a longer text is cut, the cut marked
-pub struct NewSession   // NewSession::new(session_id, mission_id, station); next_attempt() -> Option<Self>
+#[non_exhaustive] pub struct FinalReport { pub run_id: String, pub mission_id: String, pub text: String,
+    pub at: f64 }   // new(run_id, mission_id, text, at, limit): a longer text is cut, the cut marked
+pub struct NewRun   // NewRun::new(run_id, mission_id, station); next_attempt() -> Option<Self>
                         //   (a new UID, the next attempt) .with_handle(mission_handle) .attempt()
-                        //   .with_provider_session(id) .with_theater(id) .with_attempt(n, predecessor)
+                        //   .with_provider_id(id) .with_theater(id) .with_attempt(n, predecessor)
                         //   .with_operation(id)
-                        //   .with_exposure(Vec<Exposure>) .with_launch(SessionLaunch) .with_account(AccountRef)
+                        //   .with_exposure(Vec<Exposure>) .with_launch(RunLaunch) .with_account(AccountRef)
                         //   .with_window(label)
-pub struct SessionUpdate  // default() .provider_session(id) .status(SessionStatus) .parked_until(f64)
+pub struct RunUpdate  // default() .provider_id(id) .status(RunStatus) .parked_until(f64)
                           //   .exposed(Vec<Exposure>) (adds sources not yet recorded)
-                          //   .launch(SessionLaunch) .recent(Vec<String>) .checkpoint(SafeHouseCheckpoint, at)
-                          //   .account(AccountRef) .result(SessionResult) (closing the status sets closed_at)
+                          //   .launch(RunLaunch) .recent(Vec<String>) .checkpoint(SafeHouseCheckpoint, at)
+                          //   .account(AccountRef) .result(RunResult) (closing the status sets closed_at)
                           //   .deliverables(Vec<Deliverable>) (replaces) .evidence(Vec<Evidence>) (appends, bounded)
                           //   .probed() (answers a probe request)
-#[non_exhaustive] pub enum SessionError { NotFound, Exists, Ended, Unsettled(String), HeldBy(String), Stale,
+#[non_exhaustive] pub enum RunError { NotFound, Exists, Ended, Unsettled(String), HeldBy(String), Stale,
     Io(io::Error) }
 
-pub trait SessionStore {
-    fn open_session(&self, new: NewSession, ttl: Duration) -> Result<SessionRecord, SessionError>  // Exists: the ID, or the Mission's attempt, has a record
-    fn session(&self, id: &str) -> io::Result<Option<SessionRecord>>
-    fn sessions(&self) -> io::Result<Vec<SessionRecord>>          // stable ID order
-    fn mission_exposure(&self, mission_id: &str) -> io::Result<Vec<Exposure>>  // every Session of the Mission, earliest first
-    fn take_session(&self, id: &str, station: &str, ttl: Duration) -> Result<SessionRecord, SessionError>
-    fn renew_session(&self, id: &str, station: &str, fence: u64, ttl: Duration) -> Result<SessionRecord, SessionError>
-    fn update_session(&self, id: &str, station: &str, fence: u64, update: SessionUpdate) -> Result<SessionRecord, SessionError>
-    fn lose_session(&self, id: &str, reason: &str) -> Result<SessionRecord, SessionError>
-    fn latest_session(&self, mission_id: &str) -> io::Result<Option<SessionRecord>>  // highest attempt
-    fn record_verdict(&self, operation, mission_id, &MissionVerdict) -> Result<SessionRecord, SessionError>
+pub trait RunStore {
+    fn open_run(&self, new: NewRun, ttl: Duration) -> Result<RunRecord, RunError>  // Exists: the ID, or the Mission's attempt, has a record
+    fn run(&self, id: &str) -> io::Result<Option<RunRecord>>
+    fn runs(&self) -> io::Result<Vec<RunRecord>>          // stable ID order
+    fn mission_exposure(&self, mission_id: &str) -> io::Result<Vec<Exposure>>  // every Run of the Mission, earliest first
+    fn take_run(&self, id: &str, station: &str, ttl: Duration) -> Result<RunRecord, RunError>
+    fn renew_run(&self, id: &str, station: &str, fence: u64, ttl: Duration) -> Result<RunRecord, RunError>
+    fn update_run(&self, id: &str, station: &str, fence: u64, update: RunUpdate) -> Result<RunRecord, RunError>
+    fn lose_run(&self, id: &str, reason: &str) -> Result<RunRecord, RunError>
+    fn latest_run(&self, mission_id: &str) -> io::Result<Option<RunRecord>>  // highest attempt
+    fn record_verdict(&self, operation, mission_id, &MissionVerdict) -> Result<RunRecord, RunError>
         // on the latest attempt; NotFound, or Unsettled when it has not ended done or held or is not verifying
-    fn record_recommendation(&self, operation, mission_id, &MissionVerdict) -> Result<SessionRecord, SessionError>
+    fn record_recommendation(&self, operation, mission_id, &MissionVerdict) -> Result<RunRecord, RunError>
         // on a verifying latest attempt; no lease; NotFound, or Unsettled when it is not verifying
-    fn request_probe(&self, operation, mission_id, at: f64) -> Result<SessionRecord, SessionError>
+    fn request_probe(&self, operation, mission_id, at: f64) -> Result<RunRecord, RunError>
         // asks the Station that holds a verifying latest attempt to probe its deliverables; no lease needed;
         // NotFound, or Unsettled when the attempt is not verifying
-    fn file_final_report(&self, &FinalReport) -> io::Result<()>   // replaces the Session's; SQL: ai6_final_reports
-    fn final_report(&self, session_id) -> io::Result<Option<FinalReport>>
+    fn file_final_report(&self, &FinalReport) -> io::Result<()>   // replaces the Run's; SQL: ai6_final_reports
+    fn final_report(&self, run_id) -> io::Result<Option<FinalReport>>
 }
 ```
 
-`lose_session` marks a Session whose lease has lapsed `Lost` with the reason (cut to 300
+`lose_run` marks a Run whose lease has lapsed `Lost` with the reason (cut to 300
 characters) and moves its fencing token on, so the old holder's next write is `Stale`;
-`HeldBy` while the lease is live, `Ended` once closed. A `Lost` Session is closed like an
+`HeldBy` while the lease is live, `Ended` once closed. A `Lost` Run is closed like an
 `Ended` one: it cannot be taken or written. `recent` keeps the last 20 lines, each cut to
 300 characters.
 
-A Station acts on a Session only while it holds the lease. `open_session` creates the
-record held by `new`'s Station; `take_session` renews the lease for the current holder, takes
+A Station acts on a Run only while it holds the lease. `open_run` creates the
+record held by `new`'s Station; `take_run` renews the lease for the current holder, takes
 a lapsed one, and returns `HeldBy` while another Station's lease is live (`Ended` once the
-Session is over). A new holder's `fence` is the larger of the Headquarters term and the
-previous token plus one, so it only grows. `renew_session` and `update_session` present the
+Run is over). A new holder's `fence` is the larger of the Headquarters term and the
+previous token plus one, so it only grows. `renew_run` and `update_run` present the
 token and holder: any mismatch is `Stale`, and nothing is written. IDs are 1-128 letters,
 digits, `-`, `_` or `.`, not starting with `.`; records are bounded to 64 KiB. Times are
-wall-clock Unix seconds, so Stations need synchronized clocks. The daemon records a Session
+wall-clock Unix seconds, so Stations need synchronized clocks. The daemon records a Run
 when it starts, takes the lease again to resume it, mirrors Mission state into the record,
 renews its leases with the Station check-in, and closes and abandons a Mission whose token
 is refused. The daemon's launch record keeps the lease and fence in `missions.json`
-(`session`, `None` until the Session is recorded). It also writes the Session's launch, its recent
+(`run`, `None` until the Run is recorded). It also writes the Run's launch, its recent
 events (at most every 15 seconds) and, when the Operation sets
 `workspace.checkpoint_remote`, a safe-house checkpoint every `checkpoint_secs`.
 
-Recovery (`ai6::directorates::m::recovery`): when a Station's brief lease and its Session's
+Recovery (`ai6::directorates::m::recovery`): when a Station's brief lease and its Run's
 lease have both lapsed, the Headquarters Station either hands the brief's lease to a Station
-that adopts the Session or marks the Session lost and queues the brief again (or files it,
-`on_lost = "fail"`). A new attempt links to the lost Session, starts its safe house from the
+that adopts the Run or marks the Run lost and queues the brief again (or files it,
+`on_lost = "fail"`). A new attempt links to the lost Run, starts its safe house from the
 lost one's checkpoint and is told what it was doing.
 
-A live Station gives a Session up the same way when its runner (or detached-wrapper harness)
+A live Station gives a Run up the same way when its runner (or detached-wrapper harness)
 stays out of reach for the Operation's `lost_after_secs` and one more probe through the
-Theater's transport fails (runner gone, Session unknown to it, Theater unreachable; for the
+Theater's transport fails (runner gone, Run unknown to it, Theater unreachable; for the
 wrapper, also a quiet harness whose process is gone with no `exit`), or when a runner
-restart ends the Session with a `lost` event. It writes the Session's notes, lets its Session
+restart ends the Run with a `lost` event. It writes the Run's notes, lets its Run
 lease lapse and marks it lost, then lets its brief lease lapse and recovers it under
 `on_lost` (no new Registry method: a lapsed lease is lost and recovered as for a dark
 Station). Its Mission book says `abandoned` (or `failed` when filed, or without a brief),
 and a `lost` event carries the reason. The Headquarters treats an expired brief lease whose
-latest Session is already `lost` under `on_lost`. A Station handed the brief back re-queues
+latest Run is already `lost` under `on_lost`. A Station handed the brief back re-queues
 its own `abandoned` copy of the Mission (`MissionStore::retry`) and the new attempt, on the
-same Theater, first closes the lost runner Session. Re-attach tries after a restart or an
+same Theater, first closes the lost runner Run. Re-attach tries after a restart or an
 adoption back off by `reattach_delay`; once they have failed for `lost_after_secs`, the
-runner (or the Theater's transport) is probed and the Session given up the same way.
+runner (or the Theater's transport) is probed and the Run given up the same way.
 
 ```rust
-/// The live Station that should re-attach to `session`'s runner harness, placed like a new
-/// Session but only on that Theater, in field mode, never on `session.station`. Errs, with
-/// the reason, for a `local` Theater, a Session without a runner or recorded launch, or no
+/// The live Station that should re-attach to `run`'s runner harness, placed like a new
+/// Run but only on that Theater, in field mode, never on `run.station`. Errs, with
+/// the reason, for a `local` Theater, a Run without a runner or recorded launch, or no
 /// eligible Station.
 pub fn adopter(policy: &OperationPolicy, request: &PlacementRequest,
-               stations: &[StationFacts], session: &SessionRecord) -> Result<PlacementChoice, String>
+               stations: &[StationFacts], run: &RunRecord) -> Result<PlacementChoice, String>
 pub const DEFAULT_LOST_AFTER_SECS: u64 = 45;              // Operation::lost_after_secs default
 /// first_reattach_delay doubled per failed try after the first, up to max_reattach_delay:
 /// 5, 10, 20, 40, 60, 60, ... s by default
@@ -2614,7 +2614,7 @@ pub fn reattach_delay(failures: u32, limits: &RecoveryLimits) -> Duration
 ```rust
 pub trait UsageStore {
     // FileRegistry: usage/<operation>/<mission>.json; additions are made under the Registry lock
-    fn record_usage(&self, operation: Option<&str>, mission: &str, session: &str,
+    fn record_usage(&self, operation: Option<&str>, mission: &str, run: &str,
                     delta: &UsageTotals, now: i64) -> io::Result<MissionUsage>
     fn mission_usage(&self, operation: Option<&str>, mission: &str) -> io::Result<Option<MissionUsage>>
     fn operation_cost_on_day(&self, operation: Option<&str>, now: i64) -> io::Result<u64>  // micro-dollars, UTC day
@@ -2642,10 +2642,10 @@ skips the named Agents; the Station passes the quarantined ones.
 ## Scorecard (`ai6::directorates::m::scorecard`)
 
 How each Agent, route and model has done in an Operation over a window, computed on demand from
-the Session records and the usage ledger; nothing is stored. `judge(&SessionRecord)` gives each
+the Run records and the usage ledger; nothing is stored. `judge(&RunRecord)` gives each
 attempt one `Judgment` by whose doing the outcome was; only `done`, `failed`, `blown`, `stalled` and
 `disputed` (a person's verdict, whatever the state) are judged, and a limit, a lost Station, a
-hand-off, a person's stop or wait and a spending limit are listed but never held against the Agent. An attempt with no Session record (a failed checkout, a
+hand-off, a person's stop or wait and a spending limit are listed but never held against the Agent. An attempt with no Run record (a failed checkout, a
 brief with no Agent) is not an attempt.
 
 ```rust
@@ -2653,13 +2653,13 @@ brief with no Agent) is not an attempt.
     Parked, Lost, HandedOff, Withdrawn, Running, Unrecorded }   // serde snake_case
 impl Judgment { pub const ALL: [Self; 13]; pub fn as_str(self) -> &'static str;
     pub fn is_judged(self) -> bool; pub fn is_fault(self) -> bool /* failed, blown, stalled, disputed */ }
-pub fn judge(record: &SessionRecord) -> Judgment;
+pub fn judge(record: &RunRecord) -> Judgment;
 pub const DEFAULT_WINDOW_DAYS: u64 /* 30 */; pub const DEFAULT_SMALL_SAMPLE: u64 /* 5 */;
 pub struct ScorecardDefinition;   // [operation.ID.scorecard]: window_days (0 = every attempt), small_sample
 impl ScorecardDefinition { pub fn resolve(&self) -> ScorecardPolicy }
 #[non_exhaustive] pub struct ScorecardPolicy { pub window_days: u64, pub small_sample: u64 }  // Operation.scorecard,
                                   // and OperationPolicy.scorecard in the check-in
-#[non_exhaustive] pub struct AttemptRef { pub mission_id: String, pub session_id: String, pub attempt: u32 }
+#[non_exhaustive] pub struct AttemptRef { pub mission_id: String, pub run_id: String, pub attempt: u32 }
 #[non_exhaustive] pub struct Standing {
     pub attempts: BTreeMap<Judgment, Vec<AttemptRef>>,   // the numbers are their lengths
     pub judged: u64, pub failure_rate: Option<f64>,      // faults / judged
@@ -2673,12 +2673,12 @@ impl Standing { pub fn count(&self, Judgment) -> u64 }
 #[non_exhaustive] pub struct Scorecard { pub operation: String, pub window_days: u64, pub from: Option<f64>,
     pub until: f64, pub small_sample: u64, pub agents: Vec<AgentCard>, pub models: Vec<ModelCard>,
     pub unattributed: u64 /* attempts whose launch names no Agent: counted toward their model only */ }
-impl Scorecard { pub fn build(operation: &str, records: &[SessionRecord],
-    usage: &BTreeMap<String /* AI6 Session ID */, UsageTotals>, policy: &ScorecardPolicy, now: f64) -> Self }
+impl Scorecard { pub fn build(operation: &str, records: &[RunRecord],
+    usage: &BTreeMap<String /* AI6 Run ID */, UsageTotals>, policy: &ScorecardPolicy, now: f64) -> Self }
 ```
 
-The Station writes `SessionLaunch.agent` and a `SessionResult` at every sync of the Mission's state
-to its Session record; Universal Exports serves the scorecard (`GET .../agents/scorecard`).
+The Station writes `RunLaunch.agent` and a `RunResult` at every sync of the Mission's state
+to its Run record; Universal Exports serves the scorecard (`GET .../agents/scorecard`).
 
 ### Stewardship and holds (`ai6::directorates::m::stewardship`, `ai6::directorates::registry::holds`)
 
@@ -2722,7 +2722,7 @@ pub struct HoldLimits { pub record_bytes, pub holds, pub text_bytes }   // [regi
 
 Rows of text with a scope, the same three ways on every Registry. `ai6::directorates::m::memories`
 decides who may see and change one; every read goes through it. Moneypenny's tools and the routes
-are in `universal-exports`; a Session's tools (`memory_search`, `memory_read`, `memory_write`,
+are in `universal-exports`; a Run's tools (`memory_search`, `memory_read`, `memory_write`,
 `memory_forget`) are on its Cable endpoint, served by `station::server::memories`. Who holds what:
 `docs/memories.md`.
 
@@ -2731,8 +2731,8 @@ are in `universal-exports`; a Session's tools (`memory_search`, `memory_read`, `
 pub enum MemoryScope { Person(String), Operation(String), Global } // "person:<id>", "operation:<id>", "global"
 impl MemoryScope { pub fn parse(text: &str) -> Option<Self>; }     // Display and serde as that text
 pub struct MemorySource { pub by: String /* person:ID, agent:CODENAME or moneypenny:PERSON */,
-    pub session: Option<String>, pub exposures: Vec<String> /* empty: not exposed */ }
-impl MemorySource { pub fn new(by, session) -> Self; pub fn exposed_by(self, exposures) -> Self;
+    pub run: Option<String>, pub exposures: Vec<String> /* empty: not exposed */ }
+impl MemorySource { pub fn new(by, run) -> Self; pub fn exposed_by(self, exposures) -> Self;
     pub fn exposed(&self) -> bool; }
 pub struct MemoryHeader { pub id: String /* a generated UUID, lower case */, pub scope: MemoryScope,
     pub name: Option<String>, pub summary: String, pub created_at: f64, pub updated_at: f64,
@@ -2784,14 +2784,14 @@ pub const AUDIT_WRITE, AUDIT_FORGET, AUDIT_READ, AUDIT_COMPARTMENTS, AUDIT_MARK_
     AUDIT_PROPOSED, AUDIT_APPROVED, AUDIT_REJECTED, PERSON_RESOURCE, GLOBAL_RESOURCE: &str;
 pub enum MemoryWriteRight { Write, Propose, Refused }
 pub trait MemoryCaller {          // who is asking, read afresh for the call; what cannot be read is not held
-    fn by(&self) -> String; fn session(&self) -> Option<String>;
+    fn by(&self) -> String; fn run(&self) -> Option<String>;
     fn reads_scope(&self, &MemoryScope) -> bool;
     fn writes_scope(&self, &MemoryScope) -> MemoryWriteRight;
     fn read_in(&self, compartment: &str) -> bool; // unknown or unreadable: false
     fn sees_all_compartments(&self) -> bool;       // a chief
     fn acts_in_person(&self) -> bool;              // clears a mark, decides a proposal
     fn exposures(&self) -> Vec<String>;            // a write carries them
-    fn saw_marked(&self, source: &str);            // shown what an exposed Session wrote: memory:<id>
+    fn saw_marked(&self, source: &str);            // shown what an exposed Run wrote: memory:<id>
     fn mark_bytes(&self) -> Limit;
     fn now(&self) -> f64;
     fn audit(&self, action: &str, scope: &MemoryScope, target: &str) -> Result<(), String>;
@@ -2829,12 +2829,12 @@ pub fn summaries_for_a_model(headers, bytes: Limit, fence: impl Fn(&Value) -> St
 
 
 The Station's round (`station::server::stewardship`, Headquarters, with promotion) files each
-proposal as a green ink request under Session `m` and Mission `hold-AGENT`/`prefer-AGENT`,
+proposal as a green ink request under Run `m` and Mission `hold-AGENT`/`prefer-AGENT`,
 idempotency key `TARGET#(judged / small_sample)`. A `hold` a person signed (not an expiry, not a
 class authorisation) is spent and becomes a hold in the signer's name; a `prefer` only closes. With
 `auto_hold` it holds by itself and audits `agent.hold.applied`. Selection (`agents::select`,
 `reassign_if_unavailable`) passes held Agents over; `routes::standing_of` refuses a held route. Nothing
-touches a running Session.
+touches a running Run.
 
 ## Reports (`ai6::directorates::registry::reports`, `ai6::directorates::m::reports`)
 
@@ -2847,9 +2847,9 @@ Mission, brief or placement. General assessment and closing are not implemented:
 pub enum ReportScope { Operation(String), Station(String), M } // "operation:ID", "station:ID", "m"; Display, FromStr, serde
 impl ReportScope { pub fn operation(&self) -> Option<&str>; }
 #[non_exhaustive] pub enum ReportState { Open, Assessed, Closed }     // snake_case; as_str, FromStr
-#[non_exhaustive] pub enum ReportFiler { Source { source, item }, Agent { agent, session /* provider
-    Session, or the Mission's ID until known */, mission }, Person { person }, Probe { probe },
-    Review { mission }, Watchdog }       // serde tag "type"; is_person(), session(), source_key()
+#[non_exhaustive] pub enum ReportFiler { Source { source, item }, Agent { agent, run /* provider
+    Run, or the Mission's ID until known */, mission }, Person { person }, Probe { probe },
+    Review { mission }, Watchdog }       // serde tag "type"; is_person(), run(), source_key()
 #[non_exhaustive] pub enum ReportLinkKind { Mission, Report, Decision, Evidence } // as_str, FromStr
 pub struct ReportLink { pub kind: ReportLinkKind, pub id: String } // new(kind, id), mission(id)
 #[non_exhaustive] pub struct Tearline { pub text, pub classification: Option<String>, pub compartments: Vec<String> }
@@ -2881,7 +2881,7 @@ pub type ReportChange<'a> = &'a mut dyn FnMut(&mut Report) -> io::Result<()>;
 pub trait ReportStore {  // part of RegistryBackend; reports/SCOPE/ID.json, report-sources/; ai6_reports,
                          // ai6_report_links, ai6_report_sources
     fn file_report(&self, &Report) -> io::Result<()>;
-        // AlreadyExists; QuotaExceeded past per_session / per_operation (Agent filers, per scope,
+        // AlreadyExists; QuotaExceeded past per_run / per_operation (Agent filers, per scope,
         // over window); InvalidData past `reports`; drops Reports closed longer than keep_closed
     fn report(&self, id) -> io::Result<Option<Report>>;
     fn reports(&self, &ReportFilter) -> io::Result<Vec<Report>>;
@@ -2897,7 +2897,7 @@ pub trait ReportStore {  // part of RegistryBackend; reports/SCOPE/ID.json, repo
     fn revoke_report_clearance(&self, subject) -> io::Result<bool>;     // false: none held
 }
 pub struct ReportLimits { pub record_bytes, reports, text_bytes, name_bytes /* also the title */, links,
-    page, per_session /* 20 */, per_operation /* 200 */: Limit, pub window: Seconds /* 3600 */,
+    page, per_run /* 20 */, per_operation /* 200 */: Limit, pub window: Seconds /* 3600 */,
     pub keep_closed: TimeLimit /* none */ }   // [registry.limits.reports]: sizes, counts and rates only
 
 // ai6::directorates::m::reports
@@ -2935,10 +2935,10 @@ impl ReportFiling { pub fn into_report(self, scope, filer, links, at, &ReportLim
 pub fn new_report_id() -> String;   // "report-" + 32 hex
 ```
 
-Every Session (feature `cables-mcp`) has `file_report` (against its Mission's Operation, linked to
+Every Run (feature `cables-mcp`) has `file_report` (against its Mission's Operation, linked to
 its Mission; a Head of Station round's goes to the logbook, check-in and channel and is also a
 `station` Report of its Station), `reports` and `read_report`, answering inside `<ai6-data>`; another
-Operation's content marks the Session `product:<operation>`. Universal Exports serves `POST`, `GET
+Operation's content marks the Run `product:<operation>`. Universal Exports serves `POST`, `GET
 /v1/reports`, `GET /v1/reports/{id}` (`403` with the markings below Content), `PUT
 /v1/reports/{id}/markings` and `GET /v1/missions/{id}/reports`; filing needs `mission.create`, or
 `station.configure` on `station:ID` or `config:reports`. `GET /v1/reports/clearances` (`access.read`)
@@ -2951,7 +2951,7 @@ made. The Station and the gateway read the settings and the clearances at every 
 Autonomy is earned per Operation and signed by a person. M (the Headquarters Station, each
 check-in round) reads each posted Agent's record; when it meets the next step it files a
 green ink request of kind `clearance`, target `AGENT:CLEARANCE@OPERATION`, Mission
-`promotion-AGENT`, Session `m`, idempotency key `TARGET#ROUND`. A person's approval (never a
+`promotion-AGENT`, Run `m`, idempotency key `TARGET#ROUND`. A person's approval (never a
 class authorisation or an expiry) is spent first, then becomes a raising `ClearanceGrant` for
 the Agent's configured model and clearance, written only if the Agent's grant is unchanged
 since the round read it; so it raises once, and a lower written meanwhile stands. Storing a
@@ -2965,7 +2965,7 @@ pub const CLEARANCE_KIND: &str = "clearance";
     pub max_failure_rate: Option<f64> /* at most; (failed+blown)/(done+failed+blown) */,
     pub quiet_days: u64, pub quiet_on: Vec<AgentOutcome> }
 impl PromotionStep { pub fn after(missions: u64) -> Self;
-    /// counted: the current model's Sessions here (Missions, failure rate); incidents: the
+    /// counted: the current model's Runs here (Missions, failure rate); incidents: the
     /// tallies the quiet period is judged on (every model here, and NO_OPERATION).
     pub fn shortfall(&self, counted: &AgentTally, incidents: &[&AgentTally], now: f64) -> Option<String> }
 #[non_exhaustive] pub struct PromotionPolicy { pub field: PromotionStep /* desk -> field */,
@@ -3026,14 +3026,14 @@ pub const NO_OPERATION: &str = "";   // Operation key: outside any Operation, an
                                           BudgetStop, GreenInkRejected }   // snake_case; as_str(), from_name()
 impl AgentOutcome { pub const ALL: [Self; 9];
                     pub fn is_incident(self) -> bool         // not Done, Failed, Abandoned or Lost
-                    pub fn is_session_outcome(self) -> bool  // Done, Failed, Blown, Abandoned, Stalled, Lost }
+                    pub fn is_run_outcome(self) -> bool  // Done, Failed, Blown, Abandoned, Stalled, Lost }
 #[non_exhaustive] #[derive(Default)] pub struct AgentTally { pub done, failed, blown, abandoned, stalled,
     lost, quarantined, budget_stops, green_ink_rejected: u64, pub last: BTreeMap<AgentOutcome, f64 /* unix */> }
 impl AgentTally { pub fn count(&self, o) -> u64; pub fn last(&self, o) -> Option<f64>;
                   pub fn latest(&self, outcomes: &[AgentOutcome]) -> Option<f64>;
                   pub fn failure_rate(&self) -> Option<f64> /* (failed+blown)/(done+failed+blown); lost not counted */ }
 #[non_exhaustive] pub struct ModelTenure { pub model: Option<String> /* as launched; None: handler default */,
-    pub from: f64, pub to: Option<f64> /* None: current */, pub tally: AgentTally /* its Sessions' outcomes */ }
+    pub from: f64, pub to: Option<f64> /* None: current */, pub tally: AgentTally /* its Runs' outcomes */ }
 #[non_exhaustive] #[derive(Default)] pub struct OperationRecord { pub tally: AgentTally,
     pub by_clearance: BTreeMap<String, AgentTally> /* 8 kept */, pub last_mission_at: Option<f64>,
     pub model_history: Vec<ModelTenure> /* 16 kept */ }
@@ -3056,12 +3056,12 @@ pub trait AgentRecordStore {
 }
 ```
 
-A Session outcome opens a new `ModelTenure` in its Operation when its launch model differs
+A Run outcome opens a new `ModelTenure` in its Operation when its launch model differs
 from the current one; incidents do not. A record past `[registry.limits.agents]`
 `operations` (128), `clearances` in one (8) or `record_bytes` (1 MiB) is refused
-(`InvalidData`). Only the Station that holds a Mission's Session counts it:
+(`InvalidData`). Only the Station that holds a Mission's Run counts it:
 each finished or stalled state (key `MISSION#ATTEMPT#OUTCOME`, model from the launch record),
-a Session lost with its Station or runner as `lost` (`MISSION#ATTEMPT#lost`, never `failed`),
+a Run lost with its Station or runner as `lost` (`MISSION#ATTEMPT#lost`, never `failed`),
 budget stops (`budget#MISSION#ATTEMPT#REVISION`) and refused green ink told to an Agent
 (`green-ink#REQUEST`); the Registry counts each new quarantine. Chief of Staff review Missions
 are not counted.
@@ -3131,10 +3131,10 @@ renews lapses, so a dark Station's accounts free up. Names are 1-64 letters, dig
 `_` or `-`, starting with a letter or digit.
 
 The Station claims with a TTL of `[accounts] claim_ttl` (60 s), renews at each check-in (its held Missions
-and those whose account is being handed over), releases with the Session's leases, records
+and those whose account is being handed over), releases with the Run's leases, records
 quota from `AgentEvent::quota` and adds each usage delta's tokens. A limit is recorded until
 the reset, at most the Station's horizon (`[accounts] limit_horizon`, 8 days).
-A re-attached Session's recorded account is claimed again `in_use`. Each Station declares its
+A re-attached Run's recorded account is claimed again `in_use`. Each Station declares its
 configured accounts at start with the Operations of its roster that may draw from each pool;
 there is no reload, so a changed roster or loadout is declared at the next start.
 
@@ -3245,7 +3245,7 @@ IDs, at most `[registry.limits.approvals] mission_requests`, 64), `class-authori
 ```rust
 pub const EXPIRY_SIGNER: &str;   // "expiry"
 #[non_exhaustive] pub struct ApprovalRequest { pub id: String /* green-ink-<sha256> */, pub operation: String,
-    pub mission: MissionId, pub session: SessionId, pub agent: String, pub scope: ActionScope,
+    pub mission: MissionId, pub run: RunId, pub agent: String, pub scope: ActionScope,
     pub reason: String /* 1 to reason_bytes (2048), newlines allowed; never audited */, pub requested_at: f64, pub expires_at: f64,
     pub proposed_role: Option<String> /* serde default: the role a Mission proposal asks for */,
     pub rearmed: Option<Rearming> /* who last re-opened it after it expired */,
@@ -3256,7 +3256,7 @@ impl ApprovalRequest { pub fn with_links(self, Vec<ApprovalLink>) -> Self; }
 #[non_exhaustive] pub struct Rearming { pub by: String, pub at: f64, pub note: Option<String>,
     pub told_at: Option<f64> /* when the Mission's Station took it up */ }   // new(by, at, note)
 impl ApprovalRequest {
-    pub fn try_new(operation, mission, session, agent, scope, reason, idempotency_key: &str,
+    pub fn try_new(operation, mission, run, agent, scope, reason, idempotency_key: &str,
         limits: &ApprovalLimits) -> io::Result<Self>;   // key and reason within limits
     pub fn expiring(self, requested_at: f64, ttl: Duration) -> Self;   // required before storing
     pub fn proposing_role(self, Option<String>) -> Self;
@@ -3329,7 +3329,7 @@ pub const CABLE_URL_ENV: &str;      // "AI6_CABLE_MCP_URL"
 pub const CABLE_TOKEN_ENV: &str;    // "AI6_CABLE_MCP_TOKEN"
 pub const GATE_TIMEOUT_ENV: &str;   // "AI6_GREEN_INK_TIMEOUT": seconds per exchange; unset, 30
 pub const GATE_NESTING_ENV: &str;   // "AI6_GREEN_INK_NESTING": classify depth; unset, 4
-/// What a Station puts in a Session's environment from [green_ink] and [approvals].
+/// What a Station puts in a Run's environment from [green_ink] and [approvals].
 pub fn settings_environment(green_ink: &GreenInkLimits, approvals: &ApprovalLimits) -> [(String, String); 2];
 #[derive(Debug, Clone, PartialEq, Eq)] pub enum GateVerdict { Allow, Hold(String /* for the Agent */) }
 pub type Answers = Vec<(String /* status */, Option<String> /* why, for a refusal */)>;
@@ -3340,7 +3340,7 @@ pub type GitOutput = (bool /* success */, String /* stdout */);
 pub struct GitRepository<F>;   // a Repository read by running git through F (git's arguments)
 impl<F: Fn(&[String]) -> Result<GitOutput, String>> GitRepository<F> { pub fn new(base: Option<String>, run: F) -> Self }
 // feature `gate`:
-pub struct GateClient;   // the Station's check_approval tool over the Session's Cable endpoint
+pub struct GateClient;   // the Station's check_approval tool over the Run's Cable endpoint
 impl GateClient {
     pub fn from_environment(environment: &BTreeMap<String, String>) -> Option<Self>;
     pub fn from_process_environment(url: Option<String>) -> Option<Self>;   // url, else AI6_CABLE_MCP_URL
@@ -3381,7 +3381,7 @@ leading `~`, or `-` cannot be followed, so the command is held. A name that is n
 `Ok(None)`, a directory that is no repository an error. `gate` is `decide` over a
 `GitRepository` with `local_git` from `cwd` and `client`; without a client a governed step is
 held. `GateClient::check` speaks MCP 2025-06-18 over HTTP (initialize,
-initialized, `tools/call check_approval`, then `DELETE` of the MCP session), reading JSON or
+initialized, `tools/call check_approval`, then `DELETE` of the MCP run), reading JSON or
 server-sent events, within `AI6_GREEN_INK_TIMEOUT` (30 s unset) per request; `gate` follows
 nested shells as deep as the client's `AI6_GREEN_INK_NESTING` says. `pre_tool_use` takes the `PreToolUse` hook input
 (`tool_input.command`, `cwd`) and returns
@@ -3464,7 +3464,7 @@ floor), ingests the batch, then stores the cursor; every 15 s it posts a comment
 Tracker for each unreported finished source brief and applies the instance's
 `status_labels` / `status_transitions` entry for the outcome (`done`, else `failed`). The
 `provider` argument of `SourceStore` and the brief's key and `source` hold the instance name.
-The finished outcome carries `state`, `mission_id`, `session_ids`, `agent` and `branch`. Report
+The finished outcome carries `state`, `mission_id`, `run_ids`, `agent` and `branch`. Report
 wording follows `Cover::disclosure()`: `Hidden` (covert), `Assisted` (partial) or `Full`
 (overt).
 
@@ -3628,7 +3628,7 @@ six bytes are not matched) and credential shapes (`ghp_`/`gho_`/`ghs_`, `github_
 `check_person(text, max_bytes)` is what a person's own text passes: empty, too long, invisible
 characters and credential shapes are refused; links and mentions are theirs.
 
-On the Station, the issue tools live on the Session's Cable MCP endpoint (`issues`, `issue_read`,
+On the Station, the issue tools live on the Run's Cable MCP endpoint (`issues`, `issue_read`,
 `issue_comment`, `issue_request_info`, `issue_update`, `issue_link`; `station::server::issues`):
 tools write outbox entries (comments and questions `agent:CODENAME`, `held` with the approval IDs
 in `payload.approvals` until green ink is decided; `payload.retry_key` returns the first answer),
@@ -3676,7 +3676,7 @@ in flight, on each poll of the settled item, and for the newest `[sources] reope
 items per instance every `reopen_watch_every`. Reopens are audited `mission.reopened` and on the
 timeline as `source`/`reopened`; `comment` is a start-up weakening. A Station whose book holds the
 ended Mission and claims another brief for it (`Mission::brief_digest` differs) queues
-it with `MissionStore::reopen` (new prompt and name, the Session hold let go).
+it with `MissionStore::reopen` (new prompt and name, the Run hold let go).
 
 ## Sleepers (`ai6::directorates::registry::sleepers`)
 
@@ -3694,7 +3694,7 @@ pub struct Sleeper {
     pub stations: Vec<String>,   // narrows its briefs, like Brief.stations; empty adds no limit
     pub each_station: bool,      // one round per eligible Station per window (default false)
     pub standing: bool,          // one Mission, each window an attempt of it (default false)
-    pub resume: bool,            // needs standing: resume the last attempt's provider Session
+    pub resume: bool,            // needs standing: resume the last attempt's provider Run
 }   // standing and resume are left out of the serialized form when false, so the fingerprint
     // of a Sleeper that sets neither is what it was before they existed
 impl Sleeper {
@@ -3740,7 +3740,7 @@ with `MissionEntry::standing` and every later one through `reenter_brief`: `Alre
 brief is for that window, `InFlight` (logged once per window) when an earlier window's attempt is
 queued, held or claimed. Its data's `sleeper` object also carries `standing` and `resume`; a
 start whose claimed brief says `resume`, with the Registry's Sleeper provenance, resumes the
-latest run's provider Session when that run had the same handler, and records `sleeper`/
+latest run's provider Run when that run had the same handler, and records `sleeper`/
 `resumed` or `started` on the timeline. A brief's
 `stations` is the sleeper's, or `[station]` for a round; its data's `sleeper` object names
 `operation`, `name`, `window` and, for a round, `station`. For an `each_station` sleeper the
@@ -3760,7 +3760,7 @@ once when past the bound; `skipped_events` (64) are named one by one and any old
 event. A late firing is `sleeper`/`late`. A Sleeper brief filed as failed records
 `sleeper`/`attempt-failed` (details `sleeper`, `window`, `reason`; never a harness's words, which
 are in the outcome with `reason_from_harness`). A Station holding a standing attempt that is stalled,
-has no live Session or re-attach pending, or failed to start, when the next window is due, fails it,
+has no live Run or re-attach pending, or failed to start, when the next window is due, fails it,
 audits `sleeper.superseded` (target `<mission> <window>`) and records `sleeper`/`superseded`.
 
 ## Station logbooks (`ai6::directorates::registry::logbook`)
@@ -3772,7 +3772,7 @@ round of an authorized `each_station` Sleeper: the Registry kept `Origin::Sleepe
 for it, its `data.sleeper` names this Station, the Mission's Operation and the Sleeper, that
 Sleeper still exists with `each_station`, role `head-of-station` and the fingerprint the
 provenance names, and its stored authorization has that fingerprint. The Station starts a round with the logbook as fenced context, every line
-quoted (`> `), and marks its Session exposed (`STATION_LOGBOOK`) when the logbook holds reports.
+quoted (`> `), and marks its Run exposed (`STATION_LOGBOOK`) when the logbook holds reports.
 Universal Exports refuses a brief whose role `is_head_of_station_role`, and a Mission proposal
 asking for one is refused at the Cable endpoint.
 
@@ -3801,11 +3801,11 @@ LogbookStore::logbook(station: &str) -> io::Result<Vec<StationReport>>         /
 
 ## Watches (`ai6::directorates::m::watches`, `ai6::directorates::registry::watches`)
 
-A watch is one standing Session per scope (`m`, `operation:<codename>`, `station:<id>`), run by
+A watch is one standing Run per scope (`m`, `operation:<codename>`, `station:<id>`), run by
 the Station the scope names (M's on the Headquarters Station, an Operation's on an execution
 Station it allows, a Station's on itself) and woken by its area's events, one turn per wake. It is
-not a Mission: no Mission record, brief, placement, attempt or Session record names it. Its record
-(`watches/<hex of scope>.json`, SQL table `ai6_watches`) holds its lease, fence, provider Session
+not a Mission: no Mission record, brief, placement, attempt or Run record names it. Its record
+(`watches/<hex of scope>.json`, SQL table `ai6_watches`) holds its lease, fence, provider Run
 and handler, logbook, last wake, the turns of the last hour, what it was told, and controls.
 `docs/watches.md` has the behaviour. `Watch`, `WatchDefinition` and `WatchScope` are at the crate
 root.
@@ -3841,17 +3841,17 @@ pub const TURN_WINDOW_SECS: f64 = 3_600.0;
 #[non_exhaustive] pub struct WatchLogEntry { pub at: f64, pub kind: String, pub text: String }   // new(kind, text, at)
 #[non_exhaustive] pub struct WatchControl { pub id: String, pub by: String, pub note: String, pub at: f64 }
 #[non_exhaustive] pub struct WatchRecord { pub scope, pub agent, pub station, pub fence: u64, pub lease_expires: f64,
-    pub opened_at: f64, pub provider_session_id: Option<String>, pub handler: Option<String>, pub last_wake: Option<f64>,
+    pub opened_at: f64, pub provider_id: Option<String>, pub handler: Option<String>, pub last_wake: Option<f64>,
     pub turns: Vec<f64>, pub logbook: Vec<WatchLogEntry>, pub seen: Vec<String>, pub controls: Vec<WatchControl> }
 impl WatchRecord { pub fn turns_since(&self, since: f64) -> usize; }
-#[non_exhaustive] #[derive(Default)] pub struct WatchUpdate { pub session: Option<Option<(String, String)>>,
+#[non_exhaustive] #[derive(Default)] pub struct WatchUpdate { pub run: Option<Option<(String, String)>>,
     pub last_wake, pub turn_at, pub log: Vec<WatchLogEntry>, pub seen: Option<Vec<String>>, pub taken_controls: Vec<String> }
-impl WatchUpdate { session(handler, id), forget_session(), woke(at, turn: bool), log(entry), seen(keys), took_controls(ids) }
+impl WatchUpdate { run(handler, id), forget_run(), woke(at, turn: bool), log(entry), seen(keys), took_controls(ids) }
 #[non_exhaustive] pub enum WatchError { NotFound, HeldBy(String), Stale, Io(io::Error) }
 pub trait WatchStore {
     fn claim_watch(&self, scope, agent, station, ttl: Duration) -> Result<WatchRecord, WatchError>;
         // makes, renews (same Station, same fence) or takes over a lapsed lease (fence + 1, logged);
-        // another Agent forgets the provider Session; HeldBy while another's lease is live
+        // another Agent forgets the provider Run; HeldBy while another's lease is live
     fn update_watch(&self, scope, station, fence: u64, renew: Option<Duration>, update: WatchUpdate) -> Result<WatchRecord, WatchError>;  // Stale unless holder and fence
     fn request_watch_wake(&self, scope, by, note) -> Result<WatchControl, WatchError>;   // no lease; NotFound before a first claim
     fn watch(&self, scope: &str) -> io::Result<Option<WatchRecord>>;
@@ -3868,7 +3868,7 @@ Files `assistant-log/<conversation>/<micros>-<id>.json`; SQL table `ai6_assistan
 `conversation`, `person`, `at_micros`, `bytes`, `entry` JSON, `revision`), made at the next open.
 
 ```rust
-#[non_exhaustive] pub struct AssistantTurn { pub station: Option<String>, pub session: Option<String>,
+#[non_exhaustive] pub struct AssistantTurn { pub station: Option<String>, pub run: Option<String>,
     pub agent: Option<String>, pub route: Option<RouteRef>, pub account: Option<AccountRef>,
     pub model: Option<String>, pub tokens: Option<u64> }               // Default
 #[non_exhaustive] pub struct AssistantLogEntry { pub id: String /* UUIDv7 */, pub conversation: String,
@@ -3884,13 +3884,13 @@ AssistantLogStore::assistant_conversations(person: Option<&str>) -> io::Result<V
 AssistantLogStore::prune_assistant_log(before: Option<f64>, bytes: Limit) -> io::Result<u64> // by age, then the oldest past `bytes`
 ```
 
-## Session contexts (`ai6::directorates::registry::contexts`, also at the crate root)
+## Run contexts (`ai6::directorates::registry::contexts`, also at the crate root)
 
-What a Session's harness kept of it, one record per provider Session, replaced each time it is
+What a Run's harness kept of it, one record per provider Run, replaced each time it is
 filed. `[registry.limits.contexts]`: `context_bytes` (8 MiB; the newest part is kept, from a line
 start, with `cut_from` the size it had) and `records` (2,000; the oldest filed go). Files
-`contexts/<session>.json` (the record) and `.log` (its content); SQL table `ai6_session_contexts`
-(`session` key, `conversation` and `operation`, each `''` when it is not one, `filed_micros`,
+`contexts/<run>.json` (the record) and `.log` (its content); SQL table `ai6_run_contexts`
+(`run` key, `conversation` and `operation`, each `''` when it is not one, `filed_micros`,
 `record` JSON, `content` text, `revision`), made at the next open.
 
 ```rust
@@ -3898,19 +3898,19 @@ pub const EVENTS_FORMAT: &str = "ai6-events-jsonl";   // the root's CONTEXT_EVEN
 #[non_exhaustive] pub enum ContextOwner { Mission { operation: String, mission: String /* UID */ },
     Conversation { conversation: String } }            // JSON tagged by "kind"
 #[non_exhaustive] pub enum ContextSource { Harness, Events }   // "harness", "events"
-#[non_exhaustive] pub struct SessionContext { pub session: String, pub owner: ContextOwner,
+#[non_exhaustive] pub struct RunContext { pub run: String, pub owner: ContextOwner,
     pub station: String, pub handler: String, pub format: String, pub source: ContextSource,
     pub filed_at: f64, pub cut_from: Option<u64>, pub content: String /* not in its JSON */ }
-impl SessionContext { pub fn new(session, owner, station, handler, format, source, filed_at, content) -> Self;
+impl RunContext { pub fn new(run, owner, station, handler, format, source, filed_at, content) -> Self;
     pub fn cut_to(self, Limit) -> Self; pub fn conversation(&self) -> Option<&str>;
     pub fn operation(&self) -> Option<&str>; }
-SessionContextStore::file_session_context(&SessionContext) -> io::Result<()>   // InvalidInput without its parts
-SessionContextStore::session_context(session: &str) -> io::Result<Option<SessionContext>>
-SessionContextStore::conversation_contexts(conversation: &str) -> io::Result<Vec<SessionContext>> // oldest filed first
+RunContextStore::file_run_context(&RunContext) -> io::Result<()>   // InvalidInput without its parts
+RunContextStore::run_context(run: &str) -> io::Result<Option<RunContext>>
+RunContextStore::conversation_contexts(conversation: &str) -> io::Result<Vec<RunContext>> // oldest filed first
 ```
 
-The Station files a Mission Session's context when its event pump ends, and Moneypenny's after
-each turn and when her harness closes: the file the handler's `session_record` names, else the
+The Station files a Mission Run's context when its event pump ends, and Moneypenny's after
+each turn and when her harness closes: the file the handler's `run_record` names, else the
 events it saw (`EVENTS_FORMAT`, one `{at, kind, text, tools, usage?, data?}` per line). A harness a
 runner supervises on another host always gets its events. Helpers for a handler:
 `ai6::directorates::section_00::records::{home, configured_dir, file_safe, find_file}`.
@@ -3955,7 +3955,7 @@ pub struct VettingPolicy {   // Default: every check on
     pub review: VettingScope,                  // briefs a qualified chief-of-staff Agent reviews
     pub rate_hold_secs: Option<u64>,           // 24 h: a rate-only hold returns to the queue; None keeps it
     pub max_proposal_reviews_per_hour: Option<u32>,             // 20; past it a proposal is held (rate)
-    pub max_proposal_reviews_per_session_per_hour: Option<u32>, // 5, per proposing Session
+    pub max_proposal_reviews_per_run_per_hour: Option<u32>, // 5, per proposing Run
 }
 impl VettingPolicy { pub fn off() -> Self; pub fn weakenings(&self) -> Vec<String>; }
 pub struct VettingDefinition;   // the `[operation.ID.vetting]` table; .resolve() -> Result<VettingPolicy, String>
@@ -4080,20 +4080,20 @@ file Registry writes `held/` before it removes `new/`, and settles a brief found
 The Headquarters Station files a claimed brief whose cancel was first asked for at least
 `[registry.limits.briefs] cancel_settle_after` (`BriefLimits::cancel_settle_after: Seconds`, 300)
 ago as failed with `{"state": "failed", "mission_id", "reason": "cancelled; the Station did not
-confirm", "station", "session_id", "cancel_requested_at"}`, through `finish` with the lease's
-Station; the Station holding the Mission stops it at check-in while its last Session is still
-`session_id`.
+confirm", "station", "run_id", "cancel_requested_at"}`, through `finish` with the lease's
+Station; the Station holding the Mission stops it at check-in while its last Run is still
+`run_id`.
 
 ## Agent Client Protocol wire (`ai6::directorates::section_00::acp`, feature `acp`)
 
 The Station is an ACP client (agentclientprotocol.com, schema v1, newline-delimited JSON-RPC)
-for every Agent Session. One connection per Session; each connection runs on threads of its
+for every Agent Run. One connection per Run; each connection runs on threads of its
 own (a `futures` executor), so it needs no async runtime and works inside or outside Tokio.
 
 ```rust
 pub const LAUNCH_META_KEY: &str = "dev.coqui.ai6/launch";   // _meta of session/new|load|resume
 pub const EVENTS_CAPABILITY: &str = "dev.coqui.ai6/events"; // agentCapabilities._meta key
-pub const EVENT_NOTIFICATION: &str = "_ai6/event";          // {sessionId, providerSessionId, event?}
+pub const EVENT_NOTIFICATION: &str = "_ai6/event";          // {sessionId, providerId, event?}
 pub const RUNNER_TOKEN_METHOD: &str = "ai6-runner-token";   // authenticate._meta.token
 pub fn duplex() -> (Channel, Channel);                       // in-memory pair (the SDK's Channel)
 
@@ -4109,16 +4109,16 @@ impl LaunchMeta { pub fn from_start(&AgentStart) -> Self; pub fn into_start(self
     working_directory: String) -> AgentStart; pub fn with_handler(self, HandlerSpec) -> Self;
     pub fn with_terminal(self, Option<String>) -> Self; pub fn with_key(self, impl Into<String>) -> Self;
     pub fn with_cables(self, bool) -> Self; pub fn to_value(&self) -> Value }
-#[non_exhaustive] pub struct ResumeMeta { /* as AgentResume: session_id, message, clearance, environment, ... */ }
+#[non_exhaustive] pub struct ResumeMeta { /* as AgentResume: run_id, message, clearance, environment, ... */ }
 impl ResumeMeta { pub fn from_resume(&AgentResume) -> Self; pub fn into_resume(self, working_directory: String)
     -> AgentResume; /* with_handler, with_terminal, with_key, with_cables, to_value as LaunchMeta */ }
 
-// Re-exported from `coqui_acp`, the ACP client the Session is built on (pinned by revision):
+// Re-exported from `coqui_acp`, the ACP client the Run is built on (pinned by revision):
 // `Decider` as PermissionDecider, `Decision` as PermissionDecision, PermissionRequest,
 // PermissionOption, RefuseAll (the default decider), Authenticate, RpcFailure and `Exchange`, the
-// calls that are no session: `Exchange::new().client_info(name, version).authenticate(a)
+// calls that are no run: `Exchange::new().client_info(name, version).authenticate(a)
 // .initialize_timeout(Option<Duration>).request_timeout(Option<Duration>).describe_limits(l)`, then
-// `.run(transport, calls)` or `.describe(transport)` (what an agent offers before any session).
+// `.run(transport, calls)` or `.describe(transport)` (what an agent offers before any run).
 pub trait PermissionDecider: Send + Sync { fn decide(&self, &PermissionRequest) -> PermissionDecision; }
 pub enum PermissionDecision { Allow, Deny(String) }   // Allow -> the first allow_once option, Deny -> reject_once
 pub const UNBOUNDED_MS: u64 = u64::MAX;               // a timeout that never fires
@@ -4138,37 +4138,37 @@ pub struct AcpOptions {          // Default: timeouts 20000 / 30000 / 2000 ms, n
     pub max_tool_kinds: usize,                        // DEFAULT_MAX_TOOL_KINDS (4096); any value
     pub extensions: Option<Arc<dyn ExtensionHandler>> }  // the agent's `_` notifications but `_ai6/event`
 pub type DisconnectDetail = Box<dyn FnOnce() -> Option<String> + Send>;  // asked at most once
-/// Handed each extension notification as the Session's reader takes it: return at once.
+/// Handed each extension notification as the Run's reader takes it: return at once.
 pub trait ExtensionHandler: Send + Sync { fn handle(&self, method: &str, params: &Value, reply: Notifier); }
-#[derive(Clone)] pub struct Notifier;   // notifies the agent on the Session's connection while it is held
+#[derive(Clone)] pub struct Notifier;   // notifies the agent on the Run's connection while it is held
 impl Notifier { pub fn new(send: impl Fn(&str, Value) -> bool + Send + Sync + 'static) -> Self;
     pub fn notify(&self, method: &str, params: Value) -> bool; }  // whether it was taken
-pub struct AcpSession;           // implements AgentSession
-impl AcpSession {
+pub struct AcpRun;           // implements AgentRun
+impl AcpRun {
     /// initialize -> (authenticate) -> session/new | session/resume | session/load -> config
     /// options -> session/prompt. `on_close` ends the agent's process on close or failed open.
     pub fn connect(transport: impl ConnectTo<Client> + 'static, options: AcpOptions,
         on_close: Option<Box<dyn FnOnce() + Send>>) -> Result<Self, ProviderError>;
-    pub fn into_handle(self) -> Object<dyn AgentSession>;
+    pub fn into_handle(self) -> Object<dyn AgentRun>;
 }
 
 pub struct AcpFacade;            // an AgentHandler served as an ACP agent
 impl AcpFacade {
     pub fn new(handler: Arc<dyn AgentHandler>, terminal: TerminalFactory) -> Self;
-    pub fn with_auth(self, FacadeAuth) -> Self;           // authenticate required before session/*
+    pub fn with_auth(self, FacadeAuth) -> Self;           // authenticate required before run/*
     pub fn serve(&self, transport: impl ConnectTo<Agent> + 'static) -> JoinHandle<()>;
 }
 // NDJSON transports are `coqui_acp::lines::over_io(reader, writer, diagnostic_lines, max_line)`;
 // `UNBOUNDED_LINE_BYTES` as `max_line` sets no limit.
-pub struct TerminalIo;           // a TerminalSession as blocking Read + Write
+pub struct TerminalIo;           // a TerminalRun as blocking Read + Write
 ```
 
 - **Client behaviour.** The protocol state machine is `coqui_acp`'s (connect, resume, turns,
-  permissions, refused kinds, line transports); `AcpSession` adds the launch extension, the
+  permissions, refused kinds, line transports); `AcpRun` adds the launch extension, the
   runner's sequence numbers and the words of `limit`, `blocked` and `failed`. Client capabilities: no `fs`, no `terminal`. `session/resume` is used
   when advertised, else `session/load` (replayed `session/update`s before its answer are dropped),
   else the connect fails. `authenticate` is sent only when `AcpOptions::authenticate` is set; a
-  session error mentioning auth lists the agent's `authMethods`. MCP servers of `type` `http`/`sse`
+  run error mentioning auth lists the agent's `authMethods`. MCP servers of `type` `http`/`sse`
   need `mcpCapabilities`; without them the connect fails with that reason. Model and effort go
   through the agent's config options (by id, else category `model` / `thought_level`, else the
   ids `model` / `effort`); an option the agent lacks is reported as a `notice` event, not guessed.
@@ -4191,12 +4191,12 @@ pub struct TerminalIo;           // a TerminalSession as blocking Read + Write
 - **Restricted.** With `AcpOptions::restricted`, only a request of kind `read`, `search` or `think`
   or for a tool of a server in `mcp_servers` (the Grok CLI's `UseTool` input, else a title
   `mcp__<server>__`) reaches the decider; every other is refused. A tool of a `RESTRICTED_KINDS`
-  kind that runs unasked ends the Session.
+  kind that runs unasked ends the Run.
   No limit or quota detection for external agents.
 - **Permissions.** `session/request_permission` always gets an outcome: what cannot be parsed,
   decided or answered is `cancelled` with a `blocked` event, never an error. It goes to the decider on its own thread. With
   `restricted`, a request for a tool of kind `edit|delete|move|execute` is refused without asking
-  the decider, and a tool of those kinds that runs without a request ends the Session (`failed`).
+  the decider, and a tool of those kinds that runs without a request ends the Run (`failed`).
   An answer with no option of the needed kind cancels the request and emits `blocked`.
 - **Façade.** `session/new` needs `_meta[LAUNCH_META_KEY]` (`LaunchMeta`); the operation starts on
   the first `session/prompt` (`handler.start`), so a start failure is the prompt's error and the
@@ -4208,12 +4208,12 @@ pub struct TerminalIo;           // a TerminalSession as blocking Read + Write
   advertises `loadSession`, `sessionCapabilities.resume|close` and no MCP (the environment
   carries the native handlers' MCP servers).
 
-Station use: every Session a Station supervises itself (local, detached wrapper, Moneypenny's
-desk) is an `AcpSession` over an in-process `AcpFacade` of its handler (`station::acp`), with no
+Station use: every Run a Station supervises itself (local, detached wrapper, Moneypenny's
+desk) is an `AcpRun` over an in-process `AcpFacade` of its handler (`station::acp`), with no
 start, resume or close limit (`UNBOUNDED_MS`, as before). `Plugins::handler_with(provider,
 &agent.handler_settings)` builds a handler with an Agent's settings as the value of the type the handler's `config` names (an unknown key is refused naming the provider and the key, by the provider's schema); empty settings build it with defaults.
 `GateDecider::from_environment(&environment, cwd)` (feature `gate`) is a `PermissionDecider` that
-asks the Session's Cable endpoint, through the same `gate()` a Claude `PreToolUse` hook calls,
+asks the Run's Cable endpoint, through the same `gate()` a Claude `PreToolUse` hook calls,
 whether an `execute` request's command may run; other tool kinds are allowed. Each answer is a
 `permission` event. Operator terminal input for a handler that declares `HarnessStdio::Json` is
 not written to its pipes: typed lines become messages, Ctrl-C interrupts, other control bytes
@@ -4221,10 +4221,10 @@ are refused with a reason.
 
 ## Identity and handler API
 
-`MissionId::try_new(impl Into<String>)` and `SessionId::try_new(impl Into<String>)`
+`MissionId::try_new(impl Into<String>)` and `RunId::try_new(impl Into<String>)`
 validate non-empty values up to 256 UTF-8 bytes with no control characters. Both also
-implement `FromStr` and `Display`. A Mission can group several provider Sessions; a
-Session ID is issued by the provider and stays stable when that Session resumes.
+implement `FromStr` and `Display`. A Mission can group several provider Runs; a
+Run ID is issued by the provider and stays stable when that Run resumes.
 
 With `station-tls` (`ai6::station::identity`), a Station's mutual TLS is
 [`coqui-peer-tls`](https://github.com/Boriken-Dev/coqui-peer-tls) and `coqui-peer`, and this
@@ -4267,11 +4267,11 @@ state directory).
 `AccessTokenRecord` is the device-token metadata value. It holds the
 canonical UUID revocation ID, SHA-256 digest, authoritative Directory person ID, and issue,
 expiry and optional revocation times; its debug output redacts the digest. `into_session_cookie()`
-marks a record as a sign-in's session cookie (`is_session_cookie()`) and `in_sign_in(token_id)` a
+marks a record as a sign-in's run cookie (`is_session_cookie()`) and `in_sign_in(token_id)` a
 bearer token as belonging to that sign-in (`sign_in()`).
-`AccessTokenStore` (`store_access_token`; `find_access_token`, which never answers with a session
+`AccessTokenStore` (`store_access_token`; `find_access_token`, which never answers with a run
 cookie, nor with a token whose sign-in was revoked; `find_session_cookie`, the converse;
-`login_by_id`, an active session cookie or bearer record (whose sign-in stands) by its ID;
+`login_by_id`, an active run cookie or bearer record (whose sign-in stands) by its ID;
 `revoke_access_token`, where a token of a sign-in takes the sign-in with it;
 `extend_access_token`, which moves an active bearer record's expiry later and never earlier);
 `FileRegistry` stores and validates records in the `access-tokens/` and `access-token-digests/`
@@ -4299,7 +4299,7 @@ impl Loadout {
     pub fn mcp_names(&self) -> &[String];
     pub fn overlay_names(&self) -> &[String];   // [overlay.<name>] names, as declared
     pub fn secret_names(&self) -> &[String];
-    pub fn env(&self) -> &SessionEnv;   // [loadout.X] env: non-secret values a Session is given, which exposure does not strip
+    pub fn env(&self) -> &RunEnv;   // [loadout.X] env: non-secret values a Run is given, which exposure does not strip
     /// Declares only the account's secret (agent "pool:<id>/<name>"), so a broker leases it
     /// alone; None for a config-dir account.
     pub fn for_account(pool: &AccountPool, account: &Account) -> Option<Self>;
@@ -4310,9 +4310,9 @@ impl AccountKind {
     pub fn env(self) -> Option<&'static str>;          // CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN
     pub fn login_flag(self) -> Option<&'static str>;   // --with-api-key, --with-access-token
     pub fn reads_secret(self) -> bool;                 // all but ConfigDir
-    pub fn carries_session(self) -> bool;              // the env kinds: a Session may move accounts
+    pub fn carries_run(self) -> bool;              // the env kinds: a Run may move accounts
 }
-pub const CREDENTIAL_VARIABLES: &[&str];   // every provider credential variable a pooled Session is stripped of
+pub const CREDENTIAL_VARIABLES: &[&str];   // every provider credential variable a pooled Run is stripped of
 #[non_exhaustive] pub enum PoolStrategy { Headroom /* default */, RoundRobin, Priority }   // "headroom" | "round_robin" | "priority"
 pub struct Account;   // Account::new(name, kind) .secret(name) .dir(path) .env(var) .priority(i64) .max_concurrent(n) .label(k, v)
                       // HarnessLogin only: .files(paths in a home) .renew_command(argv) .renew_env(k, v)
@@ -4342,7 +4342,7 @@ pub fn choose_pools<'a>(pools: impl IntoIterator<Item = &'a AccountPool>, handle
 /// What `choose_route` compares of a route with room; `used_permille: None` counts as `unknown_use`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RouteStanding { pub used_permille: Option<u16>, pub active: usize, pub last_used: Option<f64>, pub priority: i64 }
-/// Which of `open` a Session takes; an earlier entry wins every tie. `None` when empty.
+/// Which of `open` a Run takes; an earlier entry wins every tie. `None` when empty.
 pub fn choose_route(strategy: PoolStrategy, open: &[RouteStanding], unknown_use: u16) -> Option<usize>;
 pub trait AccountLogin: Send + Sync {
     fn login(&self, pool: &AccountPool, account: &Account, home: &Path, credential: &str) -> Result<(), String>;
@@ -4368,8 +4368,8 @@ pub struct RegistrySecrets;   // ::new(Arc<Vault>): SecretProvider `registry`, r
 pub fn sealed_name(account: &AccountRef) -> String;   // "login/<pool>/<account>"
 pub fn add_login(vault, account, dir: &Path, files: &[String], stations: &[Recipient], now) -> Result<u64, LoginError>;   // reads dir, removes nothing
 pub struct LoginFiles;   // ::read(home, files, largest) .write(home) .get(file) .expires_at(); Debug shows paths; wiped on drop
-pub struct SessionLogin { pub account, pub files, pub home, pub revision, pub started, .. }   // kept beside the home as <home>.login.json
-impl SessionLogin { pub fn materialize(vault, account, files, home) -> Result<Self, LoginError>;
+pub struct RunLogin { pub account, pub files, pub home, pub revision, pub started, .. }   // kept beside the home as <home>.login.json
+impl RunLogin { pub fn materialize(vault, account, files, home) -> Result<Self, LoginError>;
     pub fn recall(home) -> Option<Self>; pub fn remove(&self) -> io::Result<()>; pub fn harness_starts(&mut self);
     pub fn sync(&mut self, vault, registry_revision: Option<u64>, now) -> Result<Synced, LoginError>; }
 pub enum Synced { Unchanged, Renewed(u64), Rewritten(u64), Restored(u64, &'static str) }
@@ -4397,13 +4397,13 @@ impl McpServer {
     pub fn command(&self) -> &[String];
     pub fn deny(&self) -> &[String];
 }
-pub struct SessionEnv;   // env = { NAME = "value" } on a record; From<BTreeMap<String, String>>, values(); ToValue, FromValue, Schema, Deserialize
+pub struct RunEnv;   // env = { NAME = "value" } on a record; From<BTreeMap<String, String>>, values(); ToValue, FromValue, Schema, Deserialize
 pub struct LoadoutCatalog;   // Default: empty
 impl LoadoutCatalog {
     pub fn load(path: impl AsRef<Path>, limits: &ConfigLimits) -> Result<Self, QError>;   // TooLarge past loadout_bytes
     pub fn parse(text: &str, limits: &ConfigLimits) -> Result<Self, QError>;   // FromStr: the default limits
     pub fn with_pool(self, pool: AccountPool) -> Result<Self, QError>;   // validates; replaces the same ID
-    pub fn check_session_env(&self, env: &SessionEnv, chars: Limit) -> Result<(), String>;   // refuses a credential's, secret's, pool account's or AI6_ variable
+    pub fn check_run_env(&self, env: &RunEnv, chars: Limit) -> Result<(), String>;   // refuses a credential's, secret's, pool account's or AI6_ variable
     pub fn pools(&self) -> impl Iterator<Item = &AccountPool>;
     pub fn pool(&self, id: &str) -> Option<&AccountPool>;
     pub fn for_agent(&self, agent: &str) -> Result<&Loadout, QError>;
@@ -4651,33 +4651,33 @@ apply this vector to AgentHandler startup.
 `CableScope` defines Agent unicast and Station, Theater, global, named-channel or Operation
 (serde `operation`: that Operation's Agents and those of every Operation under it) broadcast.
 `CableTarget::try_new(scope, name)` requires a name except for global.
-`CableRecipient::try_new(agent, session_id, state)` validates the relay-resolved
+`CableRecipient::try_new(agent, run_id, state)` validates the relay-resolved
 recipient. `CableDraft::new(sender_agent, sender_operation, sender_station, target, body,
 recipients, idempotency_key, id, created_at, expires_at)` creates the required fields;
-builder methods add the optional Theater, Mission, Session, conversation and reply
+builder methods add the optional Theater, Mission, Run, conversation and reply
 identities. `Cable::try_new(draft, &CableLimits)` validates a complete envelope. Bodies are
 limited to `body_bytes` UTF-8 (16 KiB), expiry must be later than creation and no more than
-`max_ttl` later (24 hours), and recipient `(agent, session_id)` pairs must be unique; a
+`max_ttl` later (24 hours), and recipient `(agent, run_id)` pairs must be unique; a
 Cable read back from its record is not held to them again. Serde uses the Registry's field names
 and rejects missing, unknown or invalid fields. `Debug` redacts Cable bodies.
-`with_recipient_state(agent, session_id, state)` returns a new Cable for a permitted
+`with_recipient_state(agent, run_id, state)` returns a new Cable for a permitted
 delivery transition, `None` for a recipient not in the audience, or `CableError` for an
 invalid transition. The relay must derive sender identity from the authenticated Agent
-Session; these value types do not authorize sends or resolve broadcast audiences.
+Run; these value types do not authorize sends or resolve broadcast audiences.
 
-`CablePrincipal::try_new(agent, operation, theater, station, session_id, mission_id)` is for
-trusted session adapters only; request objects have no sender identity. `CablePolicy`
+`CablePrincipal::try_new(agent, operation, theater, station, run_id, mission_id)` is for
+trusted run adapters only; request objects have no sender identity. `CablePolicy`
 holds deny-by-default `CableGrant`s and per-Agent `CableInboundMode` values. A grant
 names an Agent (or `*`), a `CableAction` (`Send`, `Receive`, `Discover`, `Release`) and one exact
 `CableTarget`. `CableRelay::new(Arc<dyn RegistryBackend>, policy, endpoint_source, channels)`
 (`limits()` gives that Registry's `RegistryLimits`)
-uses the shared Registry, an authoritative Agent/Session directory and named channel
+uses the shared Registry, an authoritative Agent/Run directory and named channel
 members. `with_limits` configures bounded fan-out (at least 1) and persistent sender/scope
 token buckets; `with_message_limits(CableConfig::message_limits())` the body size, longest and
 default lifetime a sender gets (16 KiB, a day and 15 minutes by default), which
 `body_bytes()` reports; the Registry's `[registry.limits.cables]` bound what it stores.
 `CableSendRequest::new` asks for the relay's default lifetime, `with_ttl` for another. `send(principal, CableSendRequest)` checks sender and every receiver,
-deduplicates the audience, snapshots recipient Sessions, applies deliver/hold/refuse and
+deduplicates the audience, snapshots recipient Runs, applies deliver/hold/refuse and
 stores an idempotent Cable. Same-Station unicast uses Station grants; cross-Station
 unicast uses explicit Agent grants. Theater, global and channel broadcasts require exact
 scope grants; an Operation broadcast needs a Send grant and each receiver a Receive grant on
@@ -4706,8 +4706,8 @@ control characters; `on_behalf_of()` reads it). The relay then stamps the Cable
 (`CableDraft::with_on_behalf_of`, `Cable::on_behalf_of() -> Option<&str>`; serde field
 `on_behalf_of`, default `None`, omitted when `None`), keeps the audience to endpoints of the
 principal's Operation other than its own Agent, and carries the person in
-`CableAuditRecord::on_behalf_of`. A reply to such a Cable reaches only the Session that sent
-it, never the Agent's other conversations (its `session_id` is required). Recipients see
+`CableAuditRecord::on_behalf_of`. A reply to such a Cable reaches only the Run that sent
+it, never the Agent's other conversations (its `run_id` is required). Recipients see
 `CableDelivery::on_behalf_of` and `CableDelivery::sent_as` (`"<from_agent> for <person>"`),
 both omitted from JSON when the Cable was not sent for a person. Its sender bucket is keyed
 by Agent and person (`sender:<agent>:person:<person>`), so each person has their own.
@@ -4733,39 +4733,39 @@ Liaison (Universal Exports' A2A) sends for a peer outside AI6 with
 reads it), its sender `a2a:<peer>` (`LIAISON_PREFIX`) and its Station `LIAISON_STATION`
 (`"liaison"`). The Cable carries it (`CableDraft::with_peer`, `Cable::peer()`, serde field
 `peer`, omitted when `None`; `CableDelivery::peer`, `CableAuditRecord::peer`). A reply to a peer's
-Cable reaches the sending Session as the Cable stamped it, wherever it runs, its `session_id`
+Cable reaches the sending Run as the Cable stamped it, wherever it runs, its `run_id`
 required as for one sent for a person; the grants still decide. A send whose Agent target names a
 peer (`a2a:<peer>` or `a2a:<peer>/<addressee>`, `liaison_peer(name) -> Option<(&str,
-Option<&str>)>` splits it) and matches no endpoint is addressed to `a2a:<peer>` with no Session,
+Option<&str>)>` splits it) and matches no endpoint is addressed to `a2a:<peer>` with no Run,
 waiting in the Registry for Liaison; a principal with a peer cannot send to one. A grant whose
 Agent target is `a2a:<peer>` also covers `a2a:<peer>/<addressee>`.
-`CableSendRequest::with_affinity(session)` binds a Cable to the provider Session its thread is
-with (`Cable::affinity()`, serde field `affinity`): `inbox` gives it to that Session only, or,
-once the Registry has that Session `Ended` or `Lost`, to a Session of the Agent whose record
-`opened_at` is later than its `closed_at`; a Session the Registry cannot tell about keeps it. A
-peer's Cable addressed to the Agent as a whole records the Session that took it
-(`CableRecipient::taken_by()`, serde field `taken_by`), and only that Session sees, acknowledges or
+`CableSendRequest::with_affinity(run)` binds a Cable to the provider Run its thread is
+with (`Cable::affinity()`, serde field `affinity`): `inbox` gives it to that Run only, or,
+once the Registry has that Run `Ended` or `Lost`, to a Run of the Agent whose record
+`opened_at` is later than its `closed_at`; a Run the Registry cannot tell about keeps it. A
+peer's Cable addressed to the Agent as a whole records the Run that took it
+(`CableRecipient::taken_by()`, serde field `taken_by`), and only that Run sees, acknowledges or
 answers it after. `withdraw(principal, cable_id) -> Result<Cable, CableRelayError>` lets the
-sending principal (Agent and Session) take back a Cable no recipient has had: queued and held
+sending principal (Agent and Run) take back a Cable no recipient has had: queued and held
 recipients become `CableState::Withdrawn`, which is final; `Unavailable` once any recipient has it.
 
 `CableRelay::with_residents(impl Fn(&CableTarget) -> Vec<CableEndpoint>)` says where a Cable waits
-when its addressee has no live Session: for an `agent` target none of whose endpoints is live, or an
-`operation` target with no endpoint, the relay adds what it returns (endpoints with no Session; the
+when its addressee has no live Run: for an `agent` target none of whose endpoints is live, or an
+`operation` target with no endpoint, the relay adds what it returns (endpoints with no Run; the
 daemon gives the Agent in each Operation it serves, or the Operation's 00 Agents), and the Cable is
 addressed to the Agent as a whole, queued; without it such a send is `Unavailable`. Grants and
 compartments are applied to those endpoints as to live ones. `deliver_new(principal, limit, permit)`
 reads as `inbox` does for what is newly queued only (what was delivered is not returned again), asks
 `permit` once before the first delivery and delivers nothing when it says no: a brief reads the
-Cables that waited for its Agent's next Session with a principal that has no Session (a Cable with an
-`affinity` is not given to it). `wake(principal, limit, wakes_per_hour)` is `deliver_new` for a Session
+Cables that waited for its Agent's next Run with a principal that has no Run (a Cable with an
+`affinity` is not given to it). `wake(principal, limit, wakes_per_hour)` is `deliver_new` for a Run
 between turns, its permit taking one wake of `wake:<agent>` (`wakes_per_hour` an hour, burst
 `wakes_per_hour`) and one token of `scope:agent:<agent>` through `take_quotas`; `0` delivers nothing.
 Both recheck the receiver's grants, compartments and inbound mode first, as `inbox` does. The daemon
-calls `wake` each beat for every live Session of an Agent with `wake_on_cable` whose Mission is
-`blocked` with no reason, and sends the deliveries as that Session's message (which turns the Mission
-`working`); such a Session is also a Cable endpoint, as a `working` one is. It fills the brief of a
-Mission start or resume (a standing window's too) through `deliver_new`, when the Session has the
+calls `wake` each beat for every live Run of an Agent with `wake_on_cable` whose Mission is
+`blocked` with no reason, and sends the deliveries as that Run's message (which turns the Mission
+`working`); such a Run is also a Cable endpoint, as a `working` one is. It fills the brief of a
+Mission start or resume (a standing window's too) through `deliver_new`, when the Run has the
 Cable tools. Neither creates a Mission, a brief or a placement.
 
 The daemon reads strict `cables.toml` from its config directory. Missing configuration
@@ -4780,12 +4780,12 @@ in the AI6 state directory so a restarted daemon stays the same Station.
 replacement and the same `.ai6-registry.lock` used by Registry claims. A retry with the
 same sender and idempotency key returns the stored record when immutable request content
 matches; conflicting content returns `AlreadyExists`. `find_cable(sender, key)` and
-`get_cable(id)` read accepted records. `cable_inbox(agent, session_id, limit, now)` lists
-unexpired queued/delivered records for an Agent Session, sorted by creation time and ID;
+`get_cable(id)` read accepted records. `cable_inbox(agent, run_id, limit, now)` lists
+unexpired queued/delivered records for an Agent Run, sorted by creation time and ID;
 `limit` is 1–1,000 and `now` is optional Unix time for deterministic callers.
-`update_cable_delivery(id, agent, session_id, state, taken_by, now)` serializes recipient state
+`update_cable_delivery(id, agent, run_id, state, taken_by, now)` serializes recipient state
 changes under the Registry lock and automatically expires overdue deliveries; `taken_by` records
-the Session that took a delivery addressed to the Agent as a whole
+the Run that took a delivery addressed to the Agent as a whole
 (`Cable::with_recipient_taken`). `cables_from(sender_agent, limit, now)` lists the unexpired
 Cables one sender sent, oldest first.
 `held_cables(limit, now)` lists unexpired envelopes containing at least one held recipient
@@ -4797,15 +4797,15 @@ and records to 2 MiB; `SqlRegistry` keeps Cables in `ai6_cables` and the buckets
 same way, in `ai6_cable_quotas`, with the same bounds.
 
 `ai6::directorates::section_00::agent` defines `AgentStart`, `AgentResume` and the `AgentHandler`
-Guatiao kind `ai6_agent_handler`. The Session a handler returns is the shared agent session kind of
-[`coqui-acp-provider`](https://github.com/Boriken-Dev/coqui-acp) (object kind `agent_session`,
-pinned by revision with `coqui-acp`, on the same Guatiao revision): `AgentSession`, `AgentMessage`,
+Guatiao kind `ai6_agent_handler`. The Run a handler returns is the shared agent run kind of
+[`coqui-acp-provider`](https://github.com/Boriken-Dev/coqui-acp) (object kind `agent_run`,
+pinned by revision with `coqui-acp`, on the same Guatiao revision): `AgentRun`, `AgentMessage`,
 `AgentEvent`, `LIMIT_EVENT` and `DENIED_EVENT` are re-exported at the crate root, with the usage model of
 `coqui-acp-api` (`Bucket`, `Coverage`, `Refill`, `Spend`, `LimitHit`, `UsageReport`, `UsageSupport`,
-`BucketStatus`, `UsageSource`, `infer_limit`, `DEFAULT_LIMIT_PHRASES`); they are re-exported at the crate root as `ai6::AgentSession` and so on; the event kinds `cancelled`
-(`CANCELLED_EVENT`) and `TURN_CANCELLED` are that crate's alone. `AgentSession::session_id`
-answers `Result<Option<String>, ProviderError>`: the Station checks the ID as a `SessionId` where
-it records it, and an ID that is not one fails the Session (`the provider reported a Session ID AI6
+`BucketStatus`, `UsageSource`, `infer_limit`, `DEFAULT_LIMIT_PHRASES`); they are re-exported at the crate root as `ai6::AgentRun` and so on; the event kinds `cancelled`
+(`CANCELLED_EVENT`) and `TURN_CANCELLED` are that crate's alone. `AgentRun::run_id`
+answers `Result<Option<String>, ProviderError>`: the Station checks the ID as a `RunId` where
+it records it, and an ID that is not one fails the Run (`the provider reported a Run ID AI6
 cannot record: ...`). Handlers own harness launch, initial-context delivery, resume,
 message submission and event decoding. AI6 supplies an `AgentTerminal` object bridge
 over its selected `Terminal` provider. `AgentHandler::stdio(&self) -> Result<HarnessStdio,
@@ -4821,7 +4821,7 @@ name: Option<String>, description: Option<String> }> }` (`ModelListing::unknown(
 harness that speaks JSON lines with exactly `environment`, kills it afterwards and returns what the
 closure reads (`Harness::send`, `Harness::next_where`); no credential of `environment` is ever part
 of a listing. The Station asks it for each pool account (the account's credential leased as for a
-Session, no claim made, the lease revoked after) and for each route no pool serves (its env and
+Run, no claim made, the lease revoked after) and for each route no pool serves (its env and
 secrets), every `[accounts] models_every` seconds (3600; 0 never on its own), on a thread of its
 own beside the check-in beat, asking `[accounts] model_probes` (`Limit`, 4; 0 none) at once and
 waiting `model_probe_timeout` (`TimeLimit`, 20 s) for each; one that takes longer keeps the last
@@ -4830,7 +4830,7 @@ answer for its source, or is unknown. It keeps the answers
 { source, pool, account, agent, route, handler, listing, at }`). Universal Exports serves them at
 `GET /v1/user/models` (`roster.read`), `ai6ctl models` prints them, and the Pools page shows them.
 `AgentHandler::clearance_refusal(&self, clearance: String) -> Result<Option<String>, ProviderError>`
-says why the handler, with its settings, would refuse a Mission's Session at that clearance; a route
+says why the handler, with its settings, would refuse a Mission's Run at that clearance; a route
 that would be refused is passed over (default: `None`).
 `AgentHandler::assistant_scripts(&self, environment: BTreeMap<String, String>) ->
 Result<Option<String>, ProviderError>` is another appended slot: `None` when the harness,
@@ -4855,7 +4855,7 @@ build; a field runner logs them at each launch.
 pub const LIMIT_EVENT: &str = "limit";
 pub const DENIED_EVENT: &str = "denied";
 // coqui_acp_provider::CANCELLED_EVENT = "cancelled": the turn stopped because of `interrupt`, or
-// the agent gave it up. The Station counts it as ending the turn; a Mission's Session that ends
+// the agent gave it up. The Station counts it as ending the turn; a Mission's Run that ends
 // one by itself leaves the Mission `Blocked`, and Moneypenny's answer ends with a notice.
 // coqui_acp_provider::TURN_CANCELLED = "the agent cancelled the turn": the text of a `blocked`
 // event that means `cancelled`, read the same way.
@@ -4864,19 +4864,19 @@ pub struct LimitHit { pub bucket: Option<String>, pub resets_at: Option<i64> /* 
                       pub retry_after: Option<Duration> /* a 429's wait: parks ahead of the fallback */,
                       pub source: Source, pub text: Option<String>, pub observed_at: i64 }
 pub struct UsageReport { pub supported: bool, pub buckets: Vec<Bucket>, pub spend: Option<Spend>, /* … */ }
-// Spend is a session's RUNNING totals, so a handler whose harness reports each request (codex,
+// Spend is a run's RUNNING totals, so a handler whose harness reports each request (codex,
 // antigravity) sums them; `UsageTracker::observe(&Spend)` turns a total into an addition.
 pub struct AgentEvent { pub kind: String, pub text: Option<String>, pub data: Option<Vec<u8>>,
                         pub limit: Option<LimitHit>, pub tools: Vec<String>,
                         pub report: Option<UsageReport> }
-// AgentHandler::usage_support() -> UsageSupport  (default: none; needs_turn / needs_session say it is
+// AgentHandler::usage_support() -> UsageSupport  (default: none; needs_turn / needs_run say it is
 //   not read between turns) and usage(environment) -> UsageReport (default: unsupported), read with no turn.
-// AgentStart and AgentResume carry `overlays: SessionOverlays` (default empty), what a Session's
+// AgentStart and AgentResume carry `overlays: RunOverlays` (default empty), what a Run's
 // overlays hand its harness beside their environment and `initial_context`:
-pub struct SessionOverlays { pub roots: Vec<String>, pub skills: Vec<OverlaySkill>, pub plugin_dir: Option<String> }
+pub struct RunOverlays { pub roots: Vec<String>, pub skills: Vec<OverlaySkill>, pub plugin_dir: Option<String> }
 pub struct OverlaySkill { pub name: String, pub overlay: String, pub description: String,
     pub path: String /* absolute, on the harness's host */, pub native: bool /* may load natively */ }
-impl SessionOverlays {
+impl RunOverlays {
     pub fn routing(&self, loads_skills: bool) -> Option<String>;       // lines naming each SKILL.md it does not load
     pub fn with_routing(&self, context: &[String], loads_skills: bool) -> Vec<String>;
 }
@@ -4908,12 +4908,12 @@ impl SessionOverlays {
 // Staff review and for Moneypenny, whose limits are the two above.
 pub fn clearance_runs_commands(clearance: &str) -> bool; // field and 00 true; desk and anything else
                                                          // false. A handler keeps commands from such a
-                                                         // Session, or refuses to start it.
+                                                         // Run, or refuses to start it.
 // AgentResume also carries `initial_context: Vec<String>` (serde default empty): the standing
 // part of the start-up context (the Agent's context, its role's purpose and policy; for
 // Moneypenny her instructions, never the conversation recap), which Claude Code is given again
-// as `--append-system-prompt` (2.1.310 reuses the prompt it recorded with the Session until
-// the Session is compacted, then builds it from the resuming launch); Codex keeps a thread's
+// as `--append-system-prompt` (2.1.310 reuses the prompt it recorded with the Run until
+// the Run is compacted, then builds it from the resuming launch); Codex keeps a thread's
 // instructions and ignores it.
 pub struct AssistantMode { pub mcp_servers: Vec<McpServerRef>,
                            pub interpreters: Vec<String> /* serde default */,
@@ -5008,7 +5008,7 @@ impl AssistantNetwork { pub fn reaches_nothing(&self) -> bool;   // denied, or l
 // directory, `denyRead`: `["/"]` and the Station's own paths, `allowRead`: the working
 // directory, the platform paths an interpreter needs (not `/etc` whole), each interpreter's
 // install directory and, on Linux, the sandbox's two relay sockets by name (in `/tmp`, or in
-// the Session's `CLAUDE_CODE_TMPDIR`)}, `network` {`allowedDomains`: the hosts, `["*"]` when open;
+// the Run's `CLAUDE_CODE_TMPDIR`)}, `network` {`allowedDomains`: the hosts, `["*"]` when open;
 // `deniedDomains`: the names and single addresses of `network.denied`; `strictAllowlist`},
 // `credentials.envVars` denying every environment variable but PATH, HOME, temp, locale ones,
 // and the model credentials, `credentials.files` denying the credential directories
@@ -5020,13 +5020,13 @@ impl AssistantNetwork { pub fn reaches_nothing(&self) -> bool;   // denied, or l
 // [--deny …]` (`onFailure: block`). Refused: a `network.denied` range with scripts that reach a
 // host (UNSUPPORTED), an environment variable name `credentials.envVars` cannot take
 // (BAD_VALUE). A network reaching nothing adds `CLAUDE_CODE_DISABLE_WEB_FETCH=1`;
-// a `context_file` is `--append-system-prompt-file`; every assistant Session has
+// a `context_file` is `--append-system-prompt-file`; every assistant Run has
 // `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. Codex refuses `files` and `context_file`
 // (UNSUPPORTED).
 ```
 
 `ai6::directorates::section_00::assistant` is the contract between Universal Exports and a
-Station for Moneypenny's Sessions (all also re-exported at the crate root):
+Station for Moneypenny's Runs (all also re-exported at the crate root):
 
 ```rust
 pub const ASSISTANT_MCP_ENV_PREFIX: &str = "AI6_MONEYPENNY_MCP";
@@ -5046,11 +5046,11 @@ pub const EVENT_NOTICE: &str = "notice";       // text: work saved elsewhere tha
 pub const EVENT_CABLE_PROPOSAL: &str = "cable_proposal"; // `cable`: held, body included
 pub const EVENT_CABLE_SENT: &str = "cable_sent";      // `cable`: sent, `cable_id` set
 pub struct AssistantJob { pub job_id: String, pub conversation_id: String, pub agent_id: String,
-    pub route: Option<RouteRef> /* default, omitted when None: the route `session_id` ran on, the only one it resumes on */,
+    pub route: Option<RouteRef> /* default, omitted when None: the route `run_id` ran on, the only one it resumes on */,
     pub message: String, pub context: Vec<String> /* default: standing context */,
     pub recap: Option<String> /* default, omitted when None: for a harness started afresh only */,
     pub mcp_token: String,
-    pub token_expires_at: f64, pub session_id: Option<String> /* default */,
+    pub token_expires_at: f64, pub run_id: Option<String> /* default */,
     pub close: bool /* default */,
     pub interrupt: bool /* default */,
     pub person_id: Option<String> /* default, omitted when None; required with workspace, commit or cables */,
@@ -5071,7 +5071,7 @@ pub struct AssistantJob { pub job_id: String, pub conversation_id: String, pub a
                                        reads the bytes from Universal Exports */ }
 pub struct AssistantImage { pub sha256: String /* lowercase hex */, pub media_type: String,
     pub bytes: u64 }   // validate(&AssistantLimits): IMAGE_MEDIA_TYPES, at most image_bytes
-// section_00::content: a message with images, as the text an AgentSession is sent:
+// section_00::content: a message with images, as the text an AgentRun is sent:
 pub const CONTENT_PREFIX: &str = "\u{0}ai6-content\n";   // then the JSON of MessageContent
 pub const IMAGE_MEDIA_TYPES: [&str; 4];   // image/png, image/jpeg, image/webp, image/gif
 pub struct MessageContent { pub text: String, pub images: Vec<MessageImage> }
@@ -5123,8 +5123,8 @@ pub struct AssistantCable { pub id: String /* desk's held ID, or the Cable ID wh
 impl AssistantCable { pub fn request_digest(&self) -> String; } // SHA-256 hex of operation,
     // target, recipient, ttl and body, each prefixed with its byte length and `:`
 pub struct AssistantReport { pub station_id: String, pub conversation_id: String,
-    pub job_id: Option<String>, pub session_id: Option<String>,
-    pub route: Option<RouteRef> /* default, omitted when None: the route that Session runs on */,
+    pub job_id: Option<String>, pub run_id: Option<String>,
+    pub route: Option<RouteRef> /* default, omitted when None: the route that Run runs on */,
     pub run: Option<AssistantRun> /* default, omitted when None */,
     pub events: Vec<AssistantEvent> }
 pub struct AssistantRun { pub account: Option<AccountRef>, pub model: Option<String>,
@@ -5163,7 +5163,7 @@ A handler reports a provider usage or rate limit as an event of kind `LIMIT_EVEN
 `limit` set, in place of the `completed` or `failed` event the same output would
 otherwise produce; `limit` is `None` on every other event. `resets_at` is `None` when the
 provider names no reset time. The daemon parks the Mission (or posts a backup Agent) and
-closes the Session.
+closes the Run.
 
 A handler reports calls its harness refused by its permission rules in a turn as an event of kind
 `DENIED_EVENT`, before that turn's `completed` or `failed`: `text` names the tools, separated by
@@ -5173,21 +5173,21 @@ A handler reports calls its harness refused by its permission rules in a turn as
 report quotes unless the disclosure is `Hidden`. The Mission's state is whatever the turn ended in.
 
 `report` is what the provider reported with the event (Claude Code on `result`, Codex on its
-token-usage notification): the session's `spend` is running totals for the provider process, which a
+token-usage notification): the run's `spend` is running totals for the provider process, which a
 handler whose harness reports each request sums itself. `UsageTracker` turns a total into additions, so a
 resumed process is never counted twice. `tools` names the tools an event
-calls (kind `tool` for Claude Code), which is how a call to a listed tool exposes a Session.
+calls (kind `tool` for Claude Code), which is how a call to a listed tool exposes a Run.
 The daemon also queues `budget` (warning or limit), `exposed` (text: the source) and
 `quarantined` events for the Mission.
 
 ## Terminal API (`ai6::directorates::q::terminal`)
 
-`Spec`, `ExitInfo`, `Terminal`, `AgentTerminal` and `TerminalSession` define the
+`Spec`, `ExitInfo`, `Terminal`, `AgentTerminal` and `TerminalRun` define the
 Guatiao terminal contracts. `Terminal` is a provider kind discovered by AI6;
 `AgentTerminal` is the object bridge AI6 wraps around that provider for a handler. What `spawn`
-starts is the Session: its output reaches viewers. What `spawn_private` starts is a probe of the
+starts is the Run: its output reaches viewers. What `spawn_private` starts is a probe of the
 handler's own: only the handler reads its output.
-The `ai6_terminal` and `ai6_terminal_session` kind floor hashes are pinned in tests.
+The `ai6_terminal` and `ai6_terminal_run` kind floor hashes are pinned in tests.
 `ExitInfo::code` is the signed 32-bit exit code the standard library reports, so Windows'
 `0xC000013A` is `-1073741510`; `pub fn exit_code_text(code: i64) -> String` renders it for a
 person, a negative code followed by its hex (`-1073741510 (0xC000013A)`), as the Claude Code
@@ -5198,8 +5198,8 @@ Which provider a harness runs in follows from what its handler declares
 
 ```rust
 pub trait Terminal {                          // kind ai6_terminal
-    fn spawn(&self, spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError>;
-    fn spawn_private(&self, spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError>;
+    fn spawn(&self, spec: &Value) -> Result<Object<dyn TerminalRun>, ProviderError>;
+    fn spawn_private(&self, spec: &Value) -> Result<Object<dyn TerminalRun>, ProviderError>;
     fn tty(&self) -> bool { true }            // appended slot: false when the program gets plain pipes (`pipe`, the detached wrapper)
 }
 pub enum HarnessStdio { Terminal /* default */, Json }  // crosses as "terminal" | "json"
@@ -5220,9 +5220,9 @@ else the first offer with a terminal, else the first offer, else `NoneAvailable`
 
 The daemon logs the handler and terminal provider of each harness it starts or resumes:
 `ai6: Mission "<id>": started the <handler> harness in the <terminal> terminal` (`resumed`;
-`runner Session "<key>" runs` when a field runner chose the terminal), and
-`ai6: assistant conversation <digest>: …` for Moneypenny. A Mission's Session record also keeps
-both, in `SessionLaunch { handler, terminal }`; an assistant Session has no record.
+`runner Run "<key>" runs` when a field runner chose the terminal), and
+`ai6: assistant conversation <digest>: …` for Moneypenny. A Mission's Run record also keeps
+both, in `RunLaunch { handler, terminal }`; an assistant Run has no record.
 
 A handler whose harness writes one JSON value per line reads it with `JsonLines`, because a
 pseudo-terminal is not a pipe: ConPTY on Windows renders a console, so its output carries
@@ -5261,7 +5261,7 @@ trimmed, never empty. Handlers spawn with `cols: STREAM_COLS` so that few lines 
 
 ## Mission lifecycle (`ai6::directorates::m::mission`)
 
-`MissionStore` validates lifecycle transitions, associates provider `SessionId` values
+`MissionStore` validates lifecycle transitions, associates provider `RunId` values
 with an AI6-owned `MissionId`, records safe-house disposition and optional `CoverReport`,
 and increments a revision for changes. Repeating the current state is a no-op and does not
 increment the revision. `MissionState` serializes as `queued`, `working`, `blocked`,
@@ -5274,18 +5274,18 @@ it needs a time); `due_parked(now)` lists parked Missions at or past their time;
 `requeue_for(id, agent_id)` queues an interrupted Mission again for another Agent.
 `retry(id, agent_id: Option<String>)` queues a `Stalled`, `Done`, `Failed`, `Blown` or
 `Abandoned` Mission again as a new attempt, for `agent_id` when given and otherwise its
-Agent; it keeps `session_ids` and the safe house report, and refuses every other state
+Agent; it keeps `run_ids` and the safe house report, and refuses every other state
 with `InvalidTransition`. `retry_past_brief(id, agent_id)` is that on the Station's own word, and
 sets `Mission.runs_past_brief` until it starts: such a Mission starts whatever its brief was filed as,
 while `forget_queued(id)` takes any other out of the book when its brief settled before it started.
 `fail_reported(id, said)` fails it as its harness reported, keeping `Mission.reported_failure` for the
-outcome; `refuse_resume(id, why)` sets `Mission.resume_refused`, so the next start begins a new Session.
+outcome; `refuse_resume(id, why)` sets `Mission.resume_refused`, so the next start begins a new Run.
 `reopen` sets `Mission.after_failure` when the Mission ended `Failed` or `Blown`, and a standing
-Sleeper's resume then starts a new Session too, whatever the last Session record says yet.
+Sleeper's resume then starts a new Run too, whatever the last Run record says yet.
 `reopen(id, agent_id, prompt, digest)` queues a `Done`, `Failed`,
 `Blown` or `Abandoned` Mission as its next attempt for a later claim of its brief (a reopened
 item, a standing Sleeper's window): the new prompt, the Agent, `Mission.brief_digest`, and the launch
-manifest's Session hold and runner let go, so the next start records a run after the last
+manifest's Run hold and runner let go, so the next start records a run after the last
 (`InvalidTransition` otherwise). `record_brief_digest(id, digest)` records `Mission.brief_digest`
 (`Option<String>`, serde default: the brief the Mission runs from; the same brief claimed
 again is a lapse recovered, not an attempt). A
@@ -5312,7 +5312,7 @@ also writes a `mission`/`waiting` timeline event once per new reason.
 `MissionStore::set_cover_report(mission_id, report)` persists the cover audit. A Mission
 returns this value as its optional `cover` field beside `safe_house`. `Mission.role_id`
 stores the canonical configured Agent role independently of `agent_id` and provider
-`session_ids`; selected handler/model/effort settings persist for reattachment.
+`run_ids`; selected handler/model/effort settings persist for reattachment.
 `MissionStore::open(path)` persists a JSON snapshot atomically after
 each mutation. The daemon opens `missions.json` under its state directory; this is
 runtime Mission state, separate from the durable Registry. The snapshot
@@ -5320,7 +5320,7 @@ stores non-secret handler, terminal, work-directory, model and effort settings f
 started Mission (the terminal is the one the Station chose at start), including the cover policy, starting commit and identity; environment values
 are never persisted. The snapshot format is version 1; any other version is refused. On
 startup, `Working` Missions
-become `Blocked` and the scheduler retries reattachment through the same provider Session ID.
+become `Blocked` and the scheduler retries reattachment through the same provider ID.
 The daemon's
 `/internal/missions` routes expose Mission state to local control components, each request with
 `Authorization: Bearer TOKEN` from `<state dir>/api-token` (`server::API_TOKEN_FILE`; 401
@@ -5328,7 +5328,7 @@ otherwise, from loopback too; `/healthz` is open); Universal Exports remains the
 
 ## Deliverables and verifying (`ai6::directorates::m::deliverables`)
 
-A Session that ends done does not settle its Mission: a Mission of an Operation goes `verifying`
+A Run that ends done does not settle its Mission: a Mission of an Operation goes `verifying`
 (`MissionState::Verifying`; non-terminal, no harness, its brief stays claimed) and leaves it only by a
 decision. Review and panel Missions, Head of Station rounds and Missions with no Operation settle done as
 before. A `held` Mission (a role's `require_approval_before_done` unmet) stays `held`.
@@ -5346,20 +5346,20 @@ pub fn declared(role: &[String], brief_data: &BTreeMap<String, serde_json::Value
 ```
 
 `AgentRole::deliverables` is validated with the role. The Station records `declared(..)` on the attempt's
-`SessionRecord::deliverables` when it goes verifying. Probes (crate-private, `station::probes`) read them
+`RunRecord::deliverables` when it goes verifying. Probes (crate-private, `station::probes`) read them
 back, each within its `[probes]` timeout, and never say whether they are enough: `branch` is `git ls-remote
 --exit-code --heads origin` in the Mission's working directory (else its Operation's checkout), `commit_on`
 adds a fetch of the branch to read its history, `file` stays inside the working directory, `artifact` is an
 http(s) GET with the body unread, `approval` is a decided, approved, unrevoked green ink request,
 `comment` reads the linked tracker item back by id and looks for the text (only a Station that holds the
 tracker's credentials can). Work on a Theater this Station cannot read is `unprobed`; a read that failed or
-timed out is `failed`, never `missing`. `SessionStore::request_probe` asks the Station holding the attempt
-to run them on its next pass; the findings are appended to `SessionRecord::evidence`.
+timed out is `failed`, never `missing`. `RunStore::request_probe` asks the Station holding the attempt
+to run them on its next pass; the findings are appended to `RunRecord::evidence`.
 
 A decision is a verdict on the verifying attempt (`record_verdict`): `Confirmed` settles the Mission done,
 `Disputed` and `FailedVerification` fail it, `Redispatch` queues its next attempt: attempt N+1 of the same
 Mission for the best qualified Agent (`MissionStore::redispatch(id, agent, amendment)`, which keeps the safe
-house and starts a new provider Session), told the person's reason and amendment after its brief
+house and starts a new provider Run), told the person's reason and amendment after its brief
 (`Mission::task()`). The verified attempt keeps its verdict and counts against its Agent on the scorecard.
 Nothing else leaves `verifying`.
 
@@ -5375,10 +5375,10 @@ impl<'a> VerifyingDecision<'a> {
     pub fn verdict_named(word: &str) -> Option<OutcomeVerdict>;   // "done" | "failed" | "redispatch"
     pub fn word(&self) -> &'static str;
 }
-pub fn check_verifying(latest: &Option<SessionRecord>, operation: &str) -> Result<(), SessionError>;
-pub fn decide(store: &dyn RegistryBackend, &VerifyingDecision) -> Result<SessionRecord, SessionError>;
+pub fn check_verifying(latest: &Option<RunRecord>, operation: &str) -> Result<(), RunError>;
+pub fn decide(store: &dyn RegistryBackend, &VerifyingDecision) -> Result<RunRecord, RunError>;
     // audit `mission.verify` first, then `record_verdict`, then the timeline entry (kind `verify`)
-pub fn recommend(store: &dyn RegistryBackend, &VerifyingDecision) -> Result<SessionRecord, SessionError>;
+pub fn recommend(store: &dyn RegistryBackend, &VerifyingDecision) -> Result<RunRecord, RunError>;
     // audit `mission.recommend`, `record_recommendation`, timeline kind `recommend`; settles nothing
 ```
 
@@ -5457,7 +5457,7 @@ looks at its area (Missions of its Operation in `verifying`, quarantines, dark S
 controls); every round it takes the watch's Cables, adds a `wake_every` timer, and starts one turn
 of waiting events when the hour's `max_turns_per_hour` has room. The harness runs on this host in
 `<state dir>/watches/watch--<scope>`, started as `AgentStart.mission_id = "watch--<scope>"` (no
-Mission has that ID), resumed with the record's provider Session, or started fresh with the
+Mission has that ID), resumed with the record's provider Run, or started fresh with the
 logbook when the resume is refused or fails before it answers. A Station's watch gets
 `station_report` and `file_report` on its Cable endpoint. Stopping closes every watch's harness.
 
@@ -5512,13 +5512,13 @@ holding Station through `request_probe`), `verify_mission(mission, done|failed, 
 `redispatch(mission, brief_amendment?, reason)`, which call `registry::decisions` as the watch
 (`watch:operation:CODENAME`), re-reading the Agent's effective clearance each time: at `desk` they
 `recommend`. It never replaces a verdict a person gave. `propose_mission` is its tool too, naming the
-watch's Session where a Mission's would be named. A Cable to `operation:CODENAME` waits for the watch's
+watch's Run where a Mission's would be named. A Cable to `operation:CODENAME` waits for the watch's
 Agent alone when the Operation has a watch, else for its 00 Agents.
 
 Each returns `std::io::Result<()>`; `F: Future<Output = ()> + Send + 'static`. The
 background scheduler starts assigned queued Missions and leases file-backed Registry
 briefs, resolving their Operation and Agent before creating durable Mission records.
-Global, Station and Agent concurrency limits apply to Session starts; transient failures
+Global, Station and Agent concurrency limits apply to Run starts; transient failures
 retry after five seconds. Active leases renew every 30 seconds. Expired leases from other
 Stations are recovered after three attempts, and invalid assignments or terminal Missions
 are filed under `failed/` or `done/` with an outcome record (in a SQL Registry, as the
@@ -5546,7 +5546,7 @@ clearance. AI6 drains provider events
 in a background worker and updates Mission state independently of Universal Exports polling;
 `GET .../events/next?timeout_ms=` reads from a bounded daemon event queue. The
 `POST .../messages`, `POST .../interrupt` and `POST .../resume` routes operate the
-provider Session. Resume passes the same provider-issued Session ID back to its handler
+provider Run. Resume passes the same provider ID back to its handler
 and rejects a handler that returns a different ID. After a process restart, resume rebuilds
 handler settings from the persisted operation and current Agent roster. The optional
 `environment` map in a resume request supplies fresh, non-persisted values such as new
@@ -5559,9 +5559,9 @@ Cable without caller-selected sender identity; `GET .../cables/held?limit=` list
 held metadata under Release grants; `POST .../cables/{cable_id}/release` releases eligible
 recipients; `POST .../cables/{cable_id}/ack` and
 `POST .../cables/{cable_id}/reply` acknowledge or reply to a delivered Cable. The relay
-snapshots only currently managed Sessions as recipients, and the internal API needs the
+snapshots only currently managed Runs as recipients, and the internal API needs the
 Station's API token.
-With `cables-mcp`, each managed Session receives its own loopback-only, random-token
+With `cables-mcp`, each managed Run receives its own loopback-only, random-token
 authenticated Streamable HTTP MCP endpoint. Claude and Codex handlers receive the endpoint
 URL and token through their launch environment; the bearer token is not placed in process
 arguments or persisted. Tools expose peer discovery, scoped Cable send, inbox read,
@@ -5572,14 +5572,14 @@ the Agent operation closes. Missing Cable grants continue to deny every action.
 The same endpoint offers `request_approval {kind, target, reason, idempotency_key}`, which
 answers at once with `{request_id?, status, expires_at?, message?}`: `not_required` when the
 Operation's green ink policy lets the Agent's clearance take the step, `approved` when a live
-class authorisation covers it (never for a Session exposed under the `approvals`
+class authorisation covers it (never for a Run exposed under the `approvals`
 restriction; the use is audited as `class_authorization.used` by `class:ID`), `rejected` or
 `expired` for a decided request, otherwise `pending`. A pending request blocks the Mission
 with `blocked_reason = "green-ink"` and pauses its Watchdog; terminal output and operator
-messages do not end that wait, and a turn that completes while it lasts ends the Session
+messages do not end that wait, and a turn that completes while it lasts ends the Run
 without finishing the Mission. Each scheduler pass delivers decisions from the Registry:
-an `AgentMessage` to a live Session, or a resume whose message carries the decisions when
-the Session ended, then the Mission returns to Working once nothing it asked for is
+an `AgentMessage` to a live Run, or a resume whose message carries the decisions when
+the Run ended, then the Mission returns to Working once nothing it asked for is
 pending. Requests and deliveries are `green_ink` timeline events; the lifecycle carries the
 reason (`green-ink`, `budget`) to Universal Exports.
 The Station audits `green_ink.requested` (actor `agent:CODENAME`) for each new pending
@@ -5592,13 +5592,13 @@ for it, its `data.sleeper` names this Station, the Mission's Operation and the S
 Sleeper still exists with `each_station`, role `head-of-station` and the fingerprint the
 provenance names, and its stored authorization has that fingerprint) also lists
 `station_report`, `file_report`, `tidy_safe_house` and `provision_theater` on its endpoint,
-whether started or resumed; any other Session's endpoint has no such tools, so a call is an
+whether started or resumed; any other Run's endpoint has no such tools, so a call is an
 MCP error. Every call checks again that the Mission is not over and still such a round, so
 revoking the Sleeper takes the tools away.
 `station_report` answers JSON: `station`, `at`, `capacity`, `missions` not over (`mission`,
-`operation`, `agent`, `role`, `state`, `session`), `disk` (`path`, `free_mb`, `total_mb` of the
+`operation`, `agent`, `role`, `state`, `run`), `disk` (`path`, `free_mb`, `total_mb` of the
 state directory), `resources`, `theaters` (each published `TheaterSummary` plus `unfit`, why
-placement would not run a Session there), `safe_houses` (each kept safe house still on disk:
+placement would not run a Run there), `safe_houses` (each kept safe house still on disk:
 `mission`, `operation`, `state`, `live`, `path`, `branch`, `size_bytes`, `size_complete` (false
 past 500,000 entries), `age_secs` (since it or anything at its top level changed), `caches`
 (`path` relative, `size_bytes`; outermost directories named in the hygiene list; `.git` is
@@ -5607,13 +5607,13 @@ every ignored path inside a cache directory), `unexported` and `ignored` (at mos
 `dirty`, `note` when the provider cannot tell), `plugins_weakened` and `limits` (the cache list
 and age and the unattended, green ink and never lists the Station enforces); no environment
 value, token, loadout or brief text. Commit subjects and branch names in it were written by
-other Missions' Agents, so a successful call marks the Session exposed (`STATION_REPORT`). `file_report {summary, findings: [{kind, severity, text}]}` files a `StationReport` (filed
+other Missions' Agents, so a successful call marks the Run exposed (`STATION_REPORT`). `file_report {summary, findings: [{kind, severity, text}]}` files a `StationReport` (filed
 by the Mission and its Agent) in the logbook, records a `head_of_station`/`reported` timeline
 event, and sends it as a Cable to channel `heads-of-station` (`HEAD_OF_STATION_CHANNEL`) when
 the Cable policy allows; it answers `{filed, at, cable}` where `cable` says `sent to N
-recipients` or why not (an exposed Session sends none).
+recipients` or why not (an exposed Run sends none).
 `tidy_safe_house {mission, action, reason?}` acts on the kept safe house of a Mission of this
-Station that is over (terminal and no Session here; otherwise refused, as is a Mission this
+Station that is over (terminal and no Run here; otherwise refused, as is a Mission this
 Station does not keep, the round itself, or an action other than `caches` and `remove`), after
 its provider re-attaches to it. The tidy holds the Mission's start reservation (`starting`)
 from its first check to its last change, so a start, retry or resume of it is refused
@@ -5627,7 +5627,7 @@ ignored path inside a cache directory; otherwise (or when `exports()` fails or i
 unsupported) it asks for green ink with `Desk::request_always`, kind `SAFE_HOUSE_DELETE`
 (`safe-house-delete`, compared as exact text), target `safe house MISSION on Station ID`,
 filed under the Operation that owns the safe house's Mission and on that Mission (the round's
-Session and Agent ask; idempotency key the target), so its policy and approvers decide, its
+Run and Agent ask; idempotency key the target), so its policy and approvers decide, its
 `unattended` list never skips the person and no class authorisation approves it. The
 request does not block the round: any later call, from this round or a later one, finds a
 pending or rejected request and answers it without asking again, or finds the live, unspent
@@ -5651,12 +5651,12 @@ recording anything: a JSON array of `{kind, target, status, request_id?, message
 ask).
 Credentials: a Station with a loadout catalog (`loadouts.toml` in the configuration
 directory, or `StationConfig::with_loadouts`) leases the Agent's loadout secrets at every
-Session start and resume, last before the launch (one-hour lease, each secret from the provider
+Run start and resume, last before the launch (one-hour lease, each secret from the provider
 its definition names: `file` relative to the secrets directory by default; at start and on each
 loadout reload the Station logs each env or inline secret as a weakening and each provider or
 secret it refuses) and puts each value in the start or
 resume request's `environment` under its `env`, after removing the loadout's variables an
-earlier Session held. A resume that re-attaches to a runner's live harness issues nothing.
+earlier Run held. A resume that re-attaches to a runner's live harness issues nothing.
 A provider refusal of an ordinary secret fails the start, and leases acquired by a failed
 issue are revoked. A `green_ink` secret is leased only while the Mission holds a live
 approval (`ApprovalStore::mission_approvals`) of one of its `kinds` whose target matches one of
@@ -5668,8 +5668,8 @@ a built-in provider (`file`, `env`, `inline`), whose values a revocation cannot 
 resume request's `environment` cannot set `AI6_GREEN_INK_GATE`. Each scheduler pass revokes, at the backend, every lease past its TTL
 and each green ink lease whose approval has expired or been revoked (a
 `credential`/`revoked` timeline event naming the secrets and the approval); an approval the
-Registry cannot read keeps its lease until the next pass. An exposed Session under the `secrets` restriction gets none. Leases are
-revoked when the Session's operation is finished, stopped, finalized or fenced out, on a
+Registry cannot read keeps its lease until the next pass. An exposed Run under the `secrets` restriction gets none. Leases are
+revoked when the Run's operation is finished, stopped, finalized or fenced out, on a
 failed start or resume, and when a later issue for the Mission replaces them. Each issue is a
 `credential`/`leased` timeline event (`secrets` = names, `approval` = request ID). Values are
 never written: the launch record and publication carry variable names only, the detached
@@ -5678,8 +5678,8 @@ Routes: for an Agent with `routes` the Station surveys each at the start (handle
 `AgentHandler::clearance_refusal` when it hosts the handler, secrets and `env` acceptable, account
 source with room), picks by `balance` (`choose_route`) and goes on as `Agent::on_route`. The route's
 `env` passes a review's filter, its `secrets` are leased through `Loadout::for_route` whatever the
-Session read, and one with no pool claims an account of its own (`route-<digest>`/`login`,
-`AccountKind::HarnessLogin`), so its limit is shared. `LaunchManifest` and `SessionLaunch` carry the
+Run read, and one with no pool claims an account of its own (`route-<digest>`/`login`,
+`AccountKind::HarnessLogin`), so its limit is shared. `LaunchManifest` and `RunLaunch` carry the
 `pool`. With no route open the Mission waits, naming each. A resume stays, moves to a route of the
 same handler whose accounts carry the history, or queues a new attempt.
 
@@ -5687,24 +5687,24 @@ Pool accounts: when the Agent's handler has pools (`choose_pools` with the Opera
 `pools` and the Agent's `pool`), loadout secrets whose `env` is a credential variable are not
 issued (logged), and after the loadout the issue removes `CREDENTIAL_VARIABLES` and every
 account's variable from the environment, claims an account (`AccountStore::claim_account`,
-preferring the Mission's last Session's account; a resume of a Codex or `config-dir` Session
-claims only that account, and a resume of an environment-kind Session only environment-kind
+preferring the Mission's last Run's account; a resume of a Codex or `config-dir` Run
+claims only that account, and a resume of an environment-kind Run only environment-kind
 accounts) and hands it over: an env kind as a leased value, a Codex login
 kind by `AccountLogin` into `<homes>/<mission>/<pool>--<account>` (with a `config.toml`
 setting `cli_auth_credentials_store = "file"`; only when the harness runs on the Station's
 own host), `config-dir` as its directory. A refused pool, no account with room or a failed
-hand-over fails the start with the reason. The Session record carries the account; the
+hand-over fails the start with the reason. The Run record carries the account; the
 claim is released with the leases, renewed at each check-in, and homes of Missions that are
 over are removed then. `account`/`claimed`, `account`/`limited` and `account`/`waiting`
 timeline events carry names only. A resume that re-attaches to a runner's harness issues
-nothing but claims the account the Session record names (`account`/`reclaimed`).
-On graceful shutdown, event workers interrupt and close active Sessions and move Working
-Missions to Blocked while preserving their safe houses; a Session on a runner is left
+nothing but claims the account the Run record names (`account`/`reclaimed`).
+On graceful shutdown, event workers interrupt and close active Runs and move Working
+Missions to Blocked while preserving their safe houses; a Run on a runner is left
 running and its Mission stays Working, so the next start re-attaches to it (see Field
 runner below). Mission records persist across
-daemon restarts, and a blocked Mission can reattach to its provider Session through its
+daemon restarts, and a blocked Mission can reattach to its provider Run through its
 handler. A parked Mission resumes through the same path once `parked_until` passes
-(`POST .../resume` also resumes it early). Recovery is described under Session records and
+(`POST .../resume` also resumes it early). Recovery is described under Run records and
 Provider limits above. `ai6::directorates::m::roster`
 loads global `operations.toml` and `agents.toml`; local `.ai6/agents.toml` is read only for
 a registered Operation. Agent watchdog `limits` inherit and merge by field, then override the
@@ -5723,13 +5723,13 @@ terminal (launch record `terminal_provider = "detached"`): the harness starts ov
 transport under `setsid` (or `nohup`) in `~/.ai6/detached/<mission>-<id>/` (`env`, FIFO
 `in`, `out`, `pid`, `exit`), reads resume at the last byte taken after a dropped link, there
 is no pty (resize does nothing) and the host's login environment is kept with the
-Session's added. A new start for the Mission ends a wrapper an earlier one left. A
+Run's added. A new start for the Mission ends a wrapper an earlier one left. A
 Mission on another host works in the bound Operation's path or the Theater's `workdir`
 (absolute; POSIX or Windows paths are accepted on any Station), with no safe house.
 The Cable endpoint reaches a harness on another host through a reverse forward on the
 Theater's loopback, re-opened on the same port when a read had to wait for the link. Placement
 (`execution_mode`) rules the wrapper out on a transport without `forward` unless the Theater
-says `cables = "optional"` (`CableReach`), and such a Session then starts with no Cable
+says `cables = "optional"` (`CableReach`), and such a Run then starts with no Cable
 endpoint, logged as a weakening.
 This private listener is for
 daemon health, provider discovery and Universal Exports-to-daemon operations; user-facing
@@ -5738,7 +5738,7 @@ Station and Mission operations belong to Universal Exports's authenticated API.
 ## Field runner (`ai6::station::runner`)
 
 `ai6 runner serve` is the binary's Theater mode: it supervises harnesses on the Theater they
-run on, so a Session outlives its Station. It loads AgentHandler and Terminal providers like a
+run on, so a Run outlives its Station. It loads AgentHandler and Terminal providers like a
 Station and has no scheduler, Registry or roster.
 
 ```rust
@@ -5775,42 +5775,42 @@ pub fn spawn_detached(program: &Path, arguments: &[OsString], state_dir: &Path, 
 `serve` takes `runner.lock` (a second runner on the same directory gets `AddrInUse`), creates
 `token` once (mode `0600` on Unix), writes `runner.json` (`address` is `host:port`) once it
 listens and removes it on a clean stop. It speaks the Agent Client Protocol, one JSON-RPC
-message per line, on that port; a connection serves any number of Sessions and several
+message per line, on that port; a connection serves any number of Runs and several
 connections may be open. `initialize` advertises `authMethods: [{id: "ai6-runner-token"}]`,
 `loadSession`, `sessionCapabilities.resume|close` and `_meta["dev.coqui.ai6/events"]`.
 `authenticate` with `_meta.token` (compared in constant time) must come before any
-`session/*` or `_ai6/*` call, and may come before `initialize`. Then:
+`run/*` or `_ai6/*` call, and may come before `initialize`. Then:
 
 - `session/new` with `_meta["dev.coqui.ai6/launch"]` (`LaunchMeta` with `handler`
-  (`HandlerSpec`: id and the Agent's `handler_settings`), `terminal` and `key`) names a Session
-  (letters, digits, `.`, `_`, `-`; the ACP session ID is the key); the first `session/prompt`
+  (`HandlerSpec`: id and the Agent's `handler_settings`), `terminal` and `key`) names a Run
+  (letters, digits, `.`, `_`, `-`; the ACP run ID is the key); the first `session/prompt`
   starts the harness with that text as the task. `session/resume` with `ResumeMeta` (also
-  `key`, `handler`) resumes a provider Session under a new key. Later prompts are messages.
-- `session/load {sessionId: key, _meta: {"dev.coqui.ai6/after": N}}` attaches to a Session the
+  `key`, `handler`) resumes a provider Run under a new key. Later prompts are messages.
+- `session/load {sessionId: key, _meta: {"dev.coqui.ai6/after": N}}` attaches to a Run the
   runner still holds and replays the events after `N` (the cursor the Station last
-  acknowledged when absent), then follows it live. A newer connection to a Session takes it
+  acknowledged when absent), then follows it live. A newer connection to a Run takes it
   over: the older gets an `_ai6/event` of kind `detached` and is closed.
-- Every event is sent as `_ai6/event {sessionId, providerSessionId, seq, replay, event}`; the
+- Every event is sent as `_ai6/event {sessionId, providerId, seq, replay, event}`; the
   start marker (no `event`) carries `terminal`, `handler` and `last`. `_ai6/ack {sessionId,
-  seq}` stores the cursor. `session/cancel` interrupts, `session/close` ends the Session and
-  its harness, `_ai6/session_status {key}` answers handler, terminal, `session_id`, `ended`,
+  seq}` stores the cursor. `session/cancel` interrupts, `session/close` ends the Run and
+  its harness, `_ai6/run_status {key}` answers handler, terminal, `run_id`, `ended`,
   `last`, `cursor` (`-32002` when unknown). A `completed` event answers the waiting prompt `end_turn`, a
   `cancelled` one (or `blocked` with `TURN_CANCELLED`) `cancelled`, a `failed` or `limit` one an
   error.
 
-Every event is appended to `sessions/<key>/events.jsonl` with its sequence number (from 1)
+Every event is appended to `runs/<key>/events.jsonl` with its sequence number (from 1)
 before any Station can read it, and the cursor is kept in `cursor`, so a Station that comes
 back replays what it missed (at least once: the last event it took may come again). A
-`completed`, `failed` or `limit` event ends the Session and stops the harness. A runner that
-restarts ends every Session it had running with a `lost` event saying so (a Station gives
-such a Session up as lost); ended Sessions older than `keep_ended` (seven days) are removed
+`completed`, `failed` or `limit` event ends the Run and stops the harness. A runner that
+restarts ends every Run it had running with a `lost` event saying so (a Station gives
+such a Run up as lost); ended Runs older than `keep_ended` (seven days) are removed
 when a runner starts. `serve` builds providers with `[providers.<id>]` when a request gives no
 configuration, and records its settings in `SETTINGS_FILE`; `ai6 runner serve --settings PATH`
 (`-`: standard input, which `--detach` writes to `SETTINGS_FILE` and passes on) reads them.
 When the launch's `LaunchMeta::cables` (or `ResumeMeta::cables`) is set, the runner starts a
 loopback relay with its own URL and token and gives the harness those as `AI6_CABLE_MCP_URL`
 and `_TOKEN` (any it was handed are dropped). Each HTTP request goes to the connection bound to
-the Session now as `_ai6/cable_request {sessionId, id, method, headers, body}` (base64 body,
+the Run now as `_ai6/cable_request {sessionId, id, method, headers, body}` (base64 body,
 MCP's headers only); that Station answers with `_ai6/cable_answer {sessionId, id, status,
 headers}`, then `{data}` pieces and `{end}`, or `{error}`, and the relay sends
 `_ai6/cable_cancel {sessionId, id}` when the harness stops reading. With no Station bound the
@@ -5827,7 +5827,7 @@ in raw mode on Unix) and relays standard input and output both ways; it exits
 with output in `runner.log`, and answers once that process serves; on Windows it inherits
 the caller's inheritable handles, such as an output pipe.
 
-A Station uses the runner of the Theater a Session runs on when the Theater declares one
+A Station uses the runner of the Theater a Run runs on when the Theater declares one
 (`Theater::runner`). On its own host it connects to the port directly, authenticating with
 the token file, and starts the runner with `spawn_detached` (its own binary unless `command`
 is set) when none answers, its `[runner]` and `[providers.<id>]` written to the runner's
@@ -5837,21 +5837,21 @@ connect [--state-dir D]` on a terminal through the Theater's transport (`command
 --settings -` with the settings' plugin paths and terminal, and the settings JSON on standard
 input, starts the runner when none answers. The Theater's `runner` settings
 `connect_timeout_ms` (30000), `initialize_timeout_ms` (20000) and `request_timeout_ms` (30000)
-bound those steps. A launch is an `AcpSession` with `close_on_drop` and `fail_on_disconnect`
-off, and, for a Session with a Cable endpoint, `AcpOptions::extensions` set to a `CableTunnel`
-that answers the relayed requests from the Session's endpoint with its bearer (at most
+bound those steps. A launch is an `AcpRun` with `close_on_drop` and `fail_on_disconnect`
+off, and, for a Run with a Cable endpoint, `AcpOptions::extensions` set to a `CableTunnel`
+that answers the relayed requests from the Run's endpoint with its bearer (at most
 `[runner] cable_streams` at once, reaching it within `cable_connect_timeout`), on that and on
 every later connection; the launch environment carries neither the endpoint's URL nor its
-bearer. `RemoteSession` wraps it: one read waits at most `read_wait` for an event, a dropped
+bearer. `RemoteRun` wraps it: one read waits at most `read_wait` for an event, a dropped
 connection costs only time, the next `next_event` attaches again with `session/load` after the
 last event taken. Past the Operation's `lost_after_secs` out of reach it probes once more and, if
-the runner is gone (or answers not found for the Session), gives the Session up as lost (see
-Recovery). A Session another connection took over stops reading (`detached`). The start records
-the runner Session's key in the launch record before the harness starts. Shutdown and losing
-the Session lease let go without stopping the harness; the Mission stays Working, so a restarted
-Station re-attaches to the same runner Session (a parked Mission is resumed instead) and
+the runner is gone (or answers not found for the Run), gives the Run up as lost (see
+Recovery). A Run another connection took over stops reading (`detached`). The start records
+the runner Run's key in the launch record before the harness starts. Shutdown and losing
+the Run lease let go without stopping the harness; the Mission stays Working, so a restarted
+Station re-attaches to the same runner Run (a parked Mission is resumed instead) and
 answers its Cable relay from its own endpoint. Events are acknowledged when the Station asks for
-the next one, and closing the Session acknowledges what it took, so nothing is replayed after
+the next one, and closing the Run acknowledges what it took, so nothing is replayed after
 it. Watchdog terminal-output checks (blocked prompt, loops) do not see a harness on a runner;
 its events still count as activity.
 
@@ -5865,17 +5865,17 @@ publishes nothing. `Config::with_ca_certificates(&[der])` (`[unex] ca_file`, rea
 `bootstrap::read_ca_file`; a bad file stops `ai6 serve` at start) trusts those authorities
 besides the public roots on every link to the gateway: publishing, input, controls and the
 assistant desk. Without it the built-in public roots alone apply. Redirects are disabled. A bounded
-background thread orders Session registration, lifecycle updates and raw terminal chunks
+background thread orders Run registration, lifecycle updates and raw terminal chunks
 on one event cursor. A separate authenticated long-poll receives validated Guatiao input
 and resize frames from `/v1/station/inputs/next`; AI6 dispatches them only to the live terminal
-bound to the matching Station, Mission and provider Session. The gateway's user-scoped
+bound to the matching Station, Mission and provider Run. The gateway's user-scoped
 write grant and lease checks remain the authorization boundary. Requests time out after
 two seconds; outbound writes are not retried, while input polling retries after errors.
 A queue overflow (64 events) or outbound gateway error disables publication and is reported
 by `GET /internal/publisher`; it does not block Mission execution. Terminal chunks and the
 pre-registration output buffer are each bounded to 1 MiB. The `station` record's
 `[publisher]` table sets each of these. Output read before the provider
-Session ID is observed is queued until registration; overflowing that buffer disables
+Run ID is observed is queued until registration; overflowing that buffer disables
 publication.
 
 With a publisher, the Station also takes operator controls (cancel, retry, resume,
@@ -5883,16 +5883,16 @@ interrupt) queued for it: a third thread long-polls
 `/v1/station/controls/next?station=<id>`, hands each DipTel control to the daemon one at a
 time and posts the outcome to `/v1/station/controls/{id}/result`. The daemon applies it
 only to a Mission in its own book under the control's Operation, while it holds that
-Mission's Session lease with its current fencing token, and, when the control names a
-provider Session, while that Session is still the Mission's latest; otherwise it rejects
+Mission's Run lease with its current fencing token, and, when the control names a
+provider Run, while that Run is still the Mission's latest; otherwise it rejects
 with a reason. It acts through the loopback paths: `cancel` is the `abandoned` transition
-(interrupts and closes the live Session, finishes the safe house keeping the work),
-`retry` closes a live stalled Session, ends its Session record and calls
+(interrupts and closes the live Run, finishes the safe house keeping the work),
+`retry` closes a live stalled Run, ends its Run record and calls
 `MissionStore::retry` (an Agent must be configured for the Operation, qualified for the
 Mission's role and not quarantined), `resume` is `/resume` with the message, and
-`interrupt` is `/interrupt` on a working Session. When no live Session reported the new
+`interrupt` is `/interrupt` on a working Run. When no live Run reported the new
 state, the daemon publishes it as a lifecycle event on the Mission's latest provider
-Session (`queued` after a retry, `abandoned` after a cancel). A provider's refusal is
+Run (`queued` after a retry, `abandoned` after a cancel). A provider's refusal is
 reported as "the provider refused the request", never in the provider's words.
 
 With a publisher, the Station is also an assistant desk for Moneypenny: a fourth thread
@@ -5910,23 +5910,23 @@ removes every `<temp>/ai6-assistant-*` directory whose lock it can take, or whic
 is an hour old, with the context files and git directories in it, and lock files an hour old
 whose directory is gone and nobody holds; the same path on every
 start of that conversation,
-because Claude Code resumes a Session only from the directory that recorded it; removed when
+because Claude Code resumes a Run only from the directory that recorded it; removed when
 the harness closes), and the MCP URL `<gateway origin>/v1/moneypenny/mcp` plus the job's token
 in its environment. A later job goes to the running harness as a message, unless its token
 expires within two minutes, when the harness is closed and resumed with the new token; a job
 for a conversation whose harness is still closing waits up to ten seconds for it, then is
-rejected. A harness idle for ten minutes is closed; the next job resumes its provider Session
-(the job's `session_id`, else the one the desk remembers) with the Agent's context and the
+rejected. A harness idle for ten minutes is closed; the next job resumes its provider Run
+(the job's `run_id`, else the one the desk remembers) with the Agent's context and the
 job's `context` again as `AgentResume::initial_context`, or starts afresh with them and the
 job's `recap` when that fails: when `resume` errs, or when the resumed harness fails (a
-`failed` event or a read error) before its `session_id()` is known. Either failure is logged
-(`ai6: assistant conversation <digest>: resuming provider Session <id> failed, …`) and not
+`failed` event or a read error) before its `run_id()` is known. Either failure is logged
+(`ai6: assistant conversation <digest>: resuming provider Run <id> failed, …`) and not
 reported to the conversation. Handler events `text`, `tool`, `completed`, `failed` and
 `limit` are reported; `failed` and `limit` close the harness at once, freeing its slot, and
 a harness busy answering that reports nothing for ten minutes is closed after a `failed`
 event saying so. A closed harness reports `closed` with the reason (`idle`, `the harness
 stopped`, `the Station is stopping`, …). An `interrupt` job calls the running harness's
-`AgentSession::interrupt` while it is answering (nothing when it is idle or not running there;
+`AgentRun::interrupt` while it is answering (nothing when it is idle or not running there;
 `rejected` with the reason when the handler fails), and that turn's `completed` is reported as
 `interrupted`; the harness stays up for the next message. Its directory is removed after `close`, tried again
 for up to 2 s while Windows still holds it. Reports go in the order they were made, and a
@@ -5935,7 +5935,7 @@ has sent its `accepted` or `rejected`, the conversation's reports wait (at most 
 follow it. When Universal Exports refuses a job's `accepted` report with 403, 404 or 409 (the
 job moved to another Station or was given up), the desk closes the harness it started for that
 conversation, and for a message nothing more of that conversation is reported until the
-harness has closed. An assistant Session is not a Mission: no
+harness has closed. An assistant Run is not a Mission: no
 Operation, board entry or usage ledger record.
 
 A job's `skills` must all be ones this Station's own roster gives its person
@@ -6002,8 +6002,8 @@ transcripts) stays out and each conversation keeps its own, and its own temporar
 derives the sandbox's `$TMPDIR` from the harness's `TMPDIR`, which would otherwise be the
 `/tmp/claude-<uid>` every conversation shares).
 
-Her conversations carry no exposure: nothing she reads marks one, a Session's exposure
-(`medical::exposure`) is for a Mission's Session only.
+Her conversations carry no exposure: nothing she reads marks one, a Run's exposure
+(`medical::exposure`) is for a Mission's Run only.
 
 A job with a `workspace` or a `commit` must name `person_id`, and the Station refuses
 one whose repositories its own roster does not give: the personal repository of a workspace
@@ -6026,7 +6026,7 @@ endpoint (loopback, its own bearer token, accepted until the job's `token_expire
 further server, `mode.with_cables()`, with `AI6_ASSISTANT_CABLE_MCP_URL`/`_TOKEN` in the
 harness environment. Its tools are `discover_agents`, `send_cable`, `read_cables`,
 `acknowledge_cable` and `reply_to_cable`, each naming an `operation`. Each call is made as the
-principal (Agent `job.agent_id`, the call's Operation, this Station, Session
+principal (Agent `job.agent_id`, the call's Operation, this Station, Run
 `assistant-<conversation digest>`, no Mission) `with_on_behalf_of(job.person_id)`;
 `cables.toml` grants for that Agent, the quotas and fan-out apply as for any Agent. Before
 every call the desk asks `GET /v1/station/assistant/cables?station&conversation&operation`,
@@ -6035,10 +6035,10 @@ an answer the call is refused. A send or reply needs the job grant's `send` and 
 acknowledgement `read` in both, discovery either; otherwise the answer is the relay's own
 indistinguishable refusal. Reads use `inbox_from` the call's Operation; a reply or
 acknowledgement only touches a Cable of that Operation delivered to the conversation. Retry
-keys are scoped to the conversation. The Session is in the relay's endpoint directory,
+keys are scoped to the conversation. The Run is in the relay's endpoint directory,
 conversation-only, while the harness runs, so replies to its Cables reach it and nothing else
-does. A later job's grants replace the endpoint's. A Cable she reads marks nothing, and a Session
-that reads a Cable from her is not exposed by it: her Session is no Mission's. `send_cable` and
+does. A later job's grants replace the endpoint's. A Cable she reads marks nothing, and a Run
+that reads a Cable from her is not exposed by it: her Run is no Mission's. `send_cable` and
 `reply_to_cable` send nothing, whatever she has read: the
 request (refused if its body holds a character `vetting::is_invisible` names) is held in
 memory for an hour, at most 32 per conversation (the 33rd is refused, none is dropped), a
@@ -6053,16 +6053,16 @@ the person is reported as `cable_sent`.
 ## Safe houses (`ai6::directorates::q::safehouse`, `ai6::station::safehouse`)
 
 A safe house is the isolated working directory a Mission's Agent works in. Providers are
-Guatiao libraries of two kinds; the Station loads them where the Session runs, and the
+Guatiao libraries of two kinds; the Station loads them where the Run runs, and the
 daemon runs no version-control command itself. Slot order is the ABI: append, never reorder.
 
 ```rust
 #[guatiao::kind(name = "ai6_safehouse")]
 pub trait SafeHouseProvider: Send + Sync {
-    fn open(&self, spec: &Value) -> Result<Object<dyn SafeHouseSession>, ProviderError>; // SafeHouseSpec
+    fn open(&self, spec: &Value) -> Result<Object<dyn SafeHouseRun>, ProviderError>; // SafeHouseSpec
 }
-#[guatiao::kind(object, name = "ai6_safehouse_session")]
-pub trait SafeHouseSession: Send + Sync {
+#[guatiao::kind(object, name = "ai6_safehouse_run")]
+pub trait SafeHouseRun: Send + Sync {
     fn info(&self) -> Result<Value, ProviderError>;    // SafeHouseInfo
     fn changes(&self) -> Result<Value, ProviderError>; // ChangeLog, newest first; empty without history
     fn finish(&self) -> Result<Value, ProviderError>;  // SafeHouseReport; idempotent
@@ -6132,7 +6132,7 @@ a safe house in place alone. Floor hashes are pinned by tests in `safehouse.rs`;
 grows by optional fields only. Providers: `git` (`ai6-safehouse-git`) and `copy` (`ai6-safehouse-copy`, no history).
 
 `station::safehouse::SafeHouse::open(&dyn SafeHouseProvider, &SafeHouseSpec)` wraps a
-session: `path()`, `branch()`, `base()`, `supports_history()`, `is_isolated()`,
+run: `path()`, `branch()`, `base()`, `supports_history()`, `is_isolated()`,
 `changes()`, `finish()`, `checkpoint(&CheckpointSpec)`, `exports() -> Result<Option<SafeHouseExports>, _>`
 (`None` when the provider cannot tell), `discard()` and `active_report()`.
 `SafeHouseHygiene` (`Default`: `DEFAULT_CACHE_DIRS` = `target`, `node_modules`, `.dart_tool`

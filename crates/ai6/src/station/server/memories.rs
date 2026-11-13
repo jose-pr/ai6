@@ -1,4 +1,4 @@
-//! The Station's side of a Session's memory tools.
+//! The Station's side of a Run's memory tools.
 //!
 //! An Agent reads its own Operation's memory and the global one, and another Operation's through a
 //! compartment granting `memory.read`, which is written to the audit log before anything is read.
@@ -6,9 +6,9 @@
 //! clearance write (`memory_write`); it proposes to the global memory and to no other Operation's.
 //!
 //! Every call asks the configuration what is granted now, so a read out holds from the next call,
-//! and a call works from the Session as the Station started it, not its provider Session ID, which
+//! and a call works from the Run as the Station started it, not its provider ID, which
 //! a harness reports only on its stream. What it reads is fenced as data, and an entry written by
-//! an exposed Session exposes this one.
+//! an exposed Run exposes this one.
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -37,8 +37,8 @@ const UNAVAILABLE: &str = "memory is unavailable";
 /// What an audit record's text may hold.
 const AUDIT_BYTES: Limit = Limit::at(512);
 
-/// A Session, asking of the memory.
-struct SessionCaller<'a> {
+/// A Run, asking of the memory.
+struct RunCaller<'a> {
     state: &'a DaemonState,
     reader: &'a Reader,
     principal: FieldPrincipal,
@@ -48,7 +48,7 @@ struct SessionCaller<'a> {
     crossed: Mutex<BTreeMap<String, bool>>,
 }
 
-impl SessionCaller<'_> {
+impl RunCaller<'_> {
     /// Whether a compartment lets it read `operation`, written to the audit log first.
     fn crosses_into(&self, operation: &str) -> bool {
         let mut crossed = self
@@ -97,12 +97,12 @@ impl SessionCaller<'_> {
     }
 }
 
-impl MemoryCaller for SessionCaller<'_> {
+impl MemoryCaller for RunCaller<'_> {
     fn by(&self) -> String {
         format!("agent:{}", self.reader.agent)
     }
 
-    fn session(&self) -> Option<String> {
+    fn run(&self) -> Option<String> {
         self.reader.mission.clone()
     }
 
@@ -167,7 +167,7 @@ impl MemoryCaller for SessionCaller<'_> {
     }
 
     fn mark_bytes(&self) -> Limit {
-        self.state.intake.limits().sessions.exposure_source_bytes
+        self.state.intake.limits().runs.exposure_source_bytes
     }
 
     fn now(&self) -> f64 {
@@ -186,7 +186,7 @@ impl MemoryCaller for SessionCaller<'_> {
     }
 }
 
-/// A Session's way to its memory.
+/// A Run's way to its memory.
 #[derive(Clone)]
 pub(super) struct MemoryDesk {
     state: DaemonState,
@@ -202,13 +202,13 @@ impl MemoryDesk {
     fn with_caller(
         &self,
         reader: &Reader,
-        work: impl FnOnce(&DaemonState, &SessionCaller<'_>) -> Result<Value, MemoryRefusal>,
+        work: impl FnOnce(&DaemonState, &RunCaller<'_>) -> Result<Value, MemoryRefusal>,
     ) -> Result<Value, String> {
         let state = self.state.current();
         let clearance = agents::effective(&state, Some(&reader.operation), &reader.agent)
             .map_err(|_| UNAVAILABLE.to_owned())?
             .clearance;
-        let caller = SessionCaller {
+        let caller = RunCaller {
             state: &state,
             reader,
             principal: FieldPrincipal::new(

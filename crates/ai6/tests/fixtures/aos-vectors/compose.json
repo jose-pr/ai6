@@ -2435,7 +2435,7 @@
     },
     {
       "id": "env-pre-env-failed-report",
-      "description": "A failed pre-env hook applies nothing, is reported, and the session goes on.",
+      "description": "A failed pre-env hook applies nothing, is reported, and the run goes on.",
       "overlays": {
         "low": {
           "priority": 100,
@@ -2529,7 +2529,7 @@
     },
     {
       "id": "env-pre-env-refuse",
-      "description": "With on_failure = refuse, a failed pre-env hook refuses the session: no environment is built and the harness is not started.",
+      "description": "With on_failure = refuse, a failed pre-env hook refuses the run: no environment is built and the harness is not started.",
       "overlays": {
         "low": {
           "priority": 100

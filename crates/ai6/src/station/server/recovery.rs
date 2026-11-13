@@ -1,13 +1,13 @@
 //! The Station's side of recovery ("extraction"): what the Headquarters does with a Mission
-//! whose Station went dark, how a Station adopts a Session it is handed, and the notes and
+//! whose Station went dark, how a Station adopts a Run it is handed, and the notes and
 //! checkpoints a later attempt's hand-off is made of.
 //!
-//! A Session a runner supervises on a Theater other Stations reach is adopted: another
-//! Station takes its lease and re-attaches, so nothing is launched twice. Any other Session
+//! A Run a runner supervises on a Theater other Stations reach is adopted: another
+//! Station takes its lease and re-attaches, so nothing is launched twice. Any other Run
 //! ended with its Station, so it is marked lost and its brief is queued again; the next
 //! attempt links to it, starts from its last checkpoint and is told what it was doing.
 //!
-//! A live Station gives up a Session the same way when its runner, or wrapped harness, stays
+//! A live Station gives up a Run the same way when its runner, or wrapped harness, stays
 //! out of reach past the Operation's `lost_after_secs` and a last probe fails, or when a
 //! re-attach keeps failing for that long ([`give_up`], [`reattach_failed`]).
 
@@ -16,41 +16,41 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::{
-    DaemonState, credentials, ensure_leased_mission, queue_event, runner_link, session_hold,
+    DaemonState, credentials, ensure_leased_mission, queue_event, runner_link, run_hold,
     unix_now,
 };
-use crate::directorates::m::mission::{LaunchManifest, MissionState, SessionHold};
+use crate::directorates::m::mission::{LaunchManifest, MissionState, RunHold};
 use crate::directorates::m::placement::{OperationPolicy, PlacementRequest, StationFacts};
 use crate::directorates::m::recovery::{DEFAULT_LOST_AFTER_SECS, adopter, reattach_delay};
 use crate::directorates::m::roster::OnLost;
 use crate::directorates::m::theaters::TheaterAccess;
 use crate::directorates::q::safehouse::{CheckpointSpec, SafeHouseCheckpoint};
-use crate::directorates::registry::limits::SessionLimits;
-use crate::directorates::registry::sessions::{
-    SessionError, SessionLaunch, SessionRecord, SessionStatus, SessionUpdate,
+use crate::directorates::registry::limits::RunLimits;
+use crate::directorates::registry::runs::{
+    RunError, RunLaunch, RunRecord, RunStatus, RunUpdate,
 };
 use crate::directorates::registry::store::{Lease, LeaseRecovery};
 use crate::station::reach::ReachWatch;
-use crate::{MissionId, SessionId};
+use crate::{MissionId, RunId};
 use coqui_acp_provider::{AgentEvent, AgentSession};
 
 /// How long a lease this Station gives up is renewed for: it lapses at once, so the
-/// Registry treats the Session or brief like one whose Station stopped renewing it.
+/// Registry treats the Run or brief like one whose Station stopped renewing it.
 const LAPSE: Duration = Duration::from_nanos(1);
 
-/// The brief-lease metadata key that hands a Station a Session to adopt; its value is the
-/// Session record's ID.
+/// The brief-lease metadata key that hands a Station a Run to adopt; its value is the
+/// Run record's ID.
 pub(super) const ADOPT_KEY: &str = "adopt";
 
 /// What the Headquarters does with an expired brief lease of another Station.
 pub(super) enum Extraction {
-    /// Nothing ran for the brief, or its last Session already ended: queue it again.
+    /// Nothing ran for the brief, or its last Run already ended: queue it again.
     Requeue,
-    /// The lease went to a Station that re-attaches to the Session.
+    /// The lease went to a Station that re-attaches to the Run.
     HandedOver,
-    /// The Session's own lease is still live; decide once it lapses too.
+    /// The Run's own lease is still live; decide once it lapses too.
     Wait,
-    /// The Session was lost; queue the brief again for a new attempt, or file it as failed
+    /// The Run was lost; queue the brief again for a new attempt, or file it as failed
     /// when the Operation says so.
     Lost {
         /// The Operation's response.
@@ -75,7 +75,7 @@ impl Extraction {
 }
 
 /// Whether the attempt ended and its Mission waits for a person: it is being verified or held.
-fn waits_for_verdict(record: &SessionRecord) -> bool {
+fn waits_for_verdict(record: &RunRecord) -> bool {
     record
         .result
         .as_ref()
@@ -83,18 +83,18 @@ fn waits_for_verdict(record: &SessionRecord) -> bool {
 }
 
 /// Decides what happens to the Mission behind an expired brief lease whose Station stopped
-/// renewing it: hand it to a Station that adopts its Session, or mark the Session lost.
+/// renewing it: hand it to a Station that adopts its Run, or mark the Run lost.
 pub(super) fn extract(state: &DaemonState, lease: &Lease) -> Extraction {
     let Some(mission_id) = meta_str(lease, "mission_id") else {
         return Extraction::Requeue;
     };
-    let record = match state.intake.latest_session(mission_id) {
+    let record = match state.intake.latest_run(mission_id) {
         // A Mission waiting on a person has no harness to lose, so its Station going dark spends
         // no attempt; the verdict settles it once the Station is back.
         Ok(Some(record)) if waits_for_verdict(&record) => return Extraction::Wait,
         Ok(Some(record)) if !record.status.is_closed() => record,
-        // A live Station that gave its Session up lets the brief lease lapse as well.
-        Ok(Some(record)) if record.status == SessionStatus::Lost => {
+        // A live Station that gave its Run up lets the brief lease lapse as well.
+        Ok(Some(record)) if record.status == RunStatus::Lost => {
             return Extraction::Lost {
                 on_lost: operation_on_lost(state, lease),
             };
@@ -111,14 +111,14 @@ pub(super) fn extract(state: &DaemonState, lease: &Lease) -> Extraction {
     let why = match adoption_choice(state, lease, &record) {
         Ok(station) => {
             let meta =
-                BTreeMap::from([(ADOPT_KEY.to_owned(), serde_json::json!(record.session_id))]);
+                BTreeMap::from([(ADOPT_KEY.to_owned(), serde_json::json!(record.run_id))]);
             match state
                 .intake
                 .hand_over(lease, &station, state.mission_lease(), meta)
             {
                 Ok(Some(_)) => eprintln!(
                     "ai6: Station {:?} went dark; Station {station:?} adopts Mission \
-                     {mission_id:?} and re-attaches to its Session",
+                     {mission_id:?} and re-attaches to its Run",
                     record.station
                 ),
                 Ok(None) => {}
@@ -137,10 +137,10 @@ pub(super) fn extract(state: &DaemonState, lease: &Lease) -> Extraction {
             .map(|theater| format!(" with Theater {theater:?}"))
             .unwrap_or_default()
     );
-    match state.intake.lose_session(&record.session_id, &reason) {
-        Ok(_) => eprintln!("ai6: Mission {mission_id:?} lost its Session: {reason}"),
-        Err(SessionError::Ended) => {}
-        Err(SessionError::HeldBy(_)) => return Extraction::Wait,
+    match state.intake.lose_run(&record.run_id, &reason) {
+        Ok(_) => eprintln!("ai6: Mission {mission_id:?} lost its Run: {reason}"),
+        Err(RunError::Ended) => {}
+        Err(RunError::HeldBy(_)) => return Extraction::Wait,
         Err(error) => {
             eprintln!("ai6: Mission {mission_id:?} not recovered yet: {error}");
             return Extraction::Wait;
@@ -158,7 +158,7 @@ fn operation_on_lost(state: &DaemonState, lease: &Lease) -> OnLost {
         .map_or(OnLost::default(), |operation| operation.on_lost)
 }
 
-/// The watch for a Session of `operation_id`, with that Operation's `lost_after_secs`.
+/// The watch for a Run of `operation_id`, with that Operation's `lost_after_secs`.
 pub(super) fn reach_watch(state: &DaemonState, operation_id: Option<&str>) -> ReachWatch {
     let secs = operation_id
         .and_then(|id| state.roster.operation(id).ok())
@@ -168,33 +168,33 @@ pub(super) fn reach_watch(state: &DaemonState, operation_id: Option<&str>) -> Re
     ReachWatch::new(Duration::from_secs(secs))
 }
 
-/// Gives up a Session this Station holds whose harness is gone or stayed out of reach.
+/// Gives up a Run this Station holds whose harness is gone or stayed out of reach.
 ///
-/// The Station stops acting on it and lets its leases lapse: the Session is marked lost with
+/// The Station stops acting on it and lets its leases lapse: the Run is marked lost with
 /// `reason`, and the Mission's brief goes back to the Registry, which queues it again as a new
-/// attempt or files it under the Operation's `on_lost`, as for a Session lost with its
-/// Station. A Mission that came from no brief has nothing to queue again and fails. `session`
+/// attempt or files it under the Operation's `on_lost`, as for a Run lost with its
+/// Station. A Mission that came from no brief has nothing to queue again and fails. `run`
 /// is the harness the caller reads, when it reads one; another one is left alone.
 pub(super) fn give_up(
     state: &DaemonState,
     mission_id: &str,
-    session: Option<&Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>>,
+    run: Option<&Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>>,
     reason: &str,
 ) {
-    let operation = state.sessions.lock().ok().and_then(|mut sessions| {
-        let current = sessions.get(mission_id).is_some_and(|operation| {
-            session.is_none_or(|session| Arc::ptr_eq(&operation.session, session))
+    let operation = state.runs.lock().ok().and_then(|mut runs| {
+        let current = runs.get(mission_id).is_some_and(|operation| {
+            run.is_none_or(|run| Arc::ptr_eq(&operation.run, run))
         });
         if current {
-            sessions.remove(mission_id)
+            runs.remove(mission_id)
         } else {
             None
         }
     });
-    if session.is_some() && operation.is_none() {
+    if run.is_some() && operation.is_none() {
         return;
     }
-    eprintln!("ai6: Mission {mission_id:?} lost its Session: {reason}");
+    eprintln!("ai6: Mission {mission_id:?} lost its Run: {reason}");
     if let Some(operation) = &operation {
         operation.gate.close();
         // A runner that comes back keeps nothing for this Station; the next attempt ends it.
@@ -203,16 +203,16 @@ pub(super) fn give_up(
                 .detached
                 .store(true, std::sync::atomic::Ordering::Release);
         }
-        if let Ok(session) = operation.session.lock() {
-            let _ = session.close();
+        if let Ok(run) = operation.run.lock() {
+            let _ = run.close();
         }
     }
     credentials::release(state, mission_id);
 
-    // The hold goes first, so nothing renews the Session lease this Station lets lapse.
+    // The hold goes first, so nothing renews the Run lease this Station lets lapse.
     let hold = state.missions.lock().ok().and_then(|mut missions| {
         let mut manifest = missions.operation(mission_id)?;
-        let hold = manifest.session.take();
+        let hold = manifest.run.take();
         manifest.runner = None;
         let _ = missions.set_operation(mission_id, manifest);
         hold
@@ -252,35 +252,35 @@ pub(super) fn give_up(
     state.event_ready.notify_waiters();
 }
 
-/// Lets the Session lease `hold` names lapse and marks the Session lost.
-fn lose_held(state: &DaemonState, hold: &SessionHold, reason: &str) {
+/// Lets the Run lease `hold` names lapse and marks the Run lost.
+fn lose_held(state: &DaemonState, hold: &RunHold, reason: &str) {
     let station = state.station_id.as_str();
     for _ in 0..state.station.limits().recovery.give_up_tries {
         match state
             .intake
-            .renew_session(&hold.id, station, hold.fence, LAPSE)
+            .renew_run(&hold.id, station, hold.fence, LAPSE)
         {
             Ok(_) => {}
             // Ended, or another Station holds it now: it is not this Station's to lose.
-            Err(SessionError::Ended | SessionError::Stale | SessionError::HeldBy(_)) => return,
+            Err(RunError::Ended | RunError::Stale | RunError::HeldBy(_)) => return,
             Err(error) => {
-                eprintln!("ai6: Session {:?} not marked lost: {error}", hold.id);
+                eprintln!("ai6: Run {:?} not marked lost: {error}", hold.id);
                 return;
             }
         }
-        match state.intake.lose_session(&hold.id, reason) {
-            Ok(_) | Err(SessionError::Ended) => return,
+        match state.intake.lose_run(&hold.id, reason) {
+            Ok(_) | Err(RunError::Ended) => return,
             // Within the clock tick it lapsed in, the lease reads as live.
-            Err(SessionError::HeldBy(holder)) if holder == station => {
+            Err(RunError::HeldBy(holder)) if holder == station => {
                 std::thread::sleep(Duration::from_millis(5));
             }
             Err(error) => {
-                eprintln!("ai6: Session {:?} not marked lost: {error}", hold.id);
+                eprintln!("ai6: Run {:?} not marked lost: {error}", hold.id);
                 return;
             }
         }
     }
-    eprintln!("ai6: Session {:?} not marked lost yet", hold.id);
+    eprintln!("ai6: Run {:?} not marked lost yet", hold.id);
 }
 
 /// Lets this Station's brief lease on the Mission lapse and recovers it under the
@@ -341,7 +341,7 @@ fn hand_back(state: &DaemonState, mission_id: &str) -> MissionState {
 }
 
 /// Whether a lost attempt at a Mission this Station had left behind is what a new brief lease
-/// asks it to run: the Mission ended here, holds no Session, and its latest Session is lost. One
+/// asks it to run: the Mission ended here, holds no Run, and its latest Run is lost. One
 /// AI6 failed itself ended for a reason trying again will not change.
 pub(super) fn retries_lost_attempt(state: &DaemonState, mission_id: &str) -> bool {
     let failed_here = state.missions.lock().ok().is_some_and(|missions| {
@@ -350,22 +350,22 @@ pub(super) fn retries_lost_attempt(state: &DaemonState, mission_id: &str) -> boo
             .is_some_and(|mission| mission.failure.is_some())
     });
     !failed_here
-        && session_hold(state, mission_id).is_none()
+        && run_hold(state, mission_id).is_none()
         && state
             .intake
-            .latest_session(mission_id)
+            .latest_run(mission_id)
             .ok()
             .flatten()
-            .is_some_and(|record| record.status == SessionStatus::Lost)
+            .is_some_and(|record| record.status == RunStatus::Lost)
 }
 
 /// Re-attach tries that failed in a row, and since when, by Station and Mission.
 static REATTACHING: Mutex<BTreeMap<(String, String), (u32, Instant)>> = Mutex::new(BTreeMap::new());
 
-/// A try at re-attaching to (or resuming) a Mission's Session after a restart or adoption
+/// A try at re-attaching to (or resuming) a Mission's Run after a restart or adoption
 /// failed. Answers when to try again; once the tries have failed for the Operation's
-/// `lost_after_secs`, the Session's runner or Theater is probed once more, and if that fails
-/// too the Session is given up as lost and `None` is answered.
+/// `lost_after_secs`, the Run's runner or Theater is probed once more, and if that fails
+/// too the Run is given up as lost and `None` is answered.
 pub(super) fn reattach_failed(state: &DaemonState, mission_id: &str) -> Option<Instant> {
     let key = (state.station_id.clone(), mission_id.to_owned());
     let now = Instant::now();
@@ -390,7 +390,7 @@ pub(super) fn reattach_failed(state: &DaemonState, mission_id: &str) -> Option<I
                     mission_id,
                     None,
                     &format!(
-                        "its Session could not be re-attached for {}s and a probe through the \
+                        "its Run could not be re-attached for {}s and a probe through the \
                          Theater's transport failed: {why}",
                         grace.as_secs()
                     ),
@@ -415,7 +415,7 @@ pub(super) fn reattached(state: &DaemonState, mission_id: &str) {
     }
 }
 
-/// Probes what a Mission's Session ran on: its runner when one supervised it, else the
+/// Probes what a Mission's Run ran on: its runner when one supervised it, else the
 /// Theater's transport. `None` when the harness ran on this Station's own host.
 fn probe_harness(state: &DaemonState, mission_id: &str) -> Option<Result<(), String>> {
     let manifest = state.missions.lock().ok()?.operation(mission_id)?;
@@ -428,7 +428,7 @@ fn probe_harness(state: &DaemonState, mission_id: &str) -> Option<Result<(), Str
         };
         return Some(match link.status(key) {
             Ok(Some(_)) => Ok(()),
-            Ok(None) => Err(format!("the runner no longer has Session {key:?}")),
+            Ok(None) => Err(format!("the runner no longer has Run {key:?}")),
             Err(why) => Err(why),
         });
     }
@@ -460,7 +460,7 @@ fn probe_harness(state: &DaemonState, mission_id: &str) -> Option<Result<(), Str
 fn adoption_choice(
     state: &DaemonState,
     lease: &Lease,
-    record: &SessionRecord,
+    record: &RunRecord,
 ) -> Result<String, String> {
     let operation = meta_str(lease, "operation").ok_or("its brief names no Operation")?;
     let policy =
@@ -498,21 +498,21 @@ fn adoption_choice(
     adopter(&policy, &request, &facts, record).map(|choice| choice.station)
 }
 
-/// What became of a brief lease that may ask this Station to adopt a Session.
+/// What became of a brief lease that may ask this Station to adopt a Run.
 pub(super) enum Adoption {
     /// The lease asks for nothing to be adopted, or the Mission is already here.
     NotAsked,
-    /// The Session cannot be taken yet; try again on the next pass.
+    /// The Run cannot be taken yet; try again on the next pass.
     Pending,
-    /// The Session is now this Station's and is queued to re-attach.
+    /// The Run is now this Station's and is queued to re-attach.
     Adopted,
 }
 
-/// Takes over the Session a brief lease handed to this Station: takes its lease, records the
-/// Mission as its last Station launched it, and queues the re-attach. A Session that ended
+/// Takes over the Run a brief lease handed to this Station: takes its lease, records the
+/// Mission as its last Station launched it, and queues the re-attach. A Run that ended
 /// in the meantime is not adopted, so the Mission starts as a new attempt instead.
 pub(super) fn adopt(state: &DaemonState, lease: &Lease) -> Adoption {
-    let (Some(session_id), Some(mission_id)) =
+    let (Some(run_id), Some(mission_id)) =
         (meta_str(lease, ADOPT_KEY), meta_str(lease, "mission_id"))
     else {
         return Adoption::NotAsked;
@@ -525,26 +525,26 @@ pub(super) fn adopt(state: &DaemonState, lease: &Lease) -> Adoption {
     if here {
         return Adoption::NotAsked;
     }
-    let launch = match state.intake.session(session_id) {
+    let launch = match state.intake.run(run_id) {
         Ok(Some(record)) if !record.status.is_closed() => match record.launch {
             Some(launch) => launch,
             None => return Adoption::NotAsked,
         },
         Ok(_) => return Adoption::NotAsked,
         Err(error) => {
-            eprintln!("ai6: Session {session_id:?} not adopted yet: {error}");
+            eprintln!("ai6: Run {run_id:?} not adopted yet: {error}");
             return Adoption::Pending;
         }
     };
     let record =
         match state
             .intake
-            .take_session(session_id, &state.station_id, state.mission_lease())
+            .take_run(run_id, &state.station_id, state.mission_lease())
         {
             Ok(record) => record,
-            Err(SessionError::Ended | SessionError::NotFound) => return Adoption::NotAsked,
+            Err(RunError::Ended | RunError::NotFound) => return Adoption::NotAsked,
             Err(error) => {
-                eprintln!("ai6: Session {session_id:?} not adopted yet: {error}");
+                eprintln!("ai6: Run {run_id:?} not adopted yet: {error}");
                 return Adoption::Pending;
             }
         };
@@ -555,7 +555,7 @@ pub(super) fn adopt(state: &DaemonState, lease: &Lease) -> Adoption {
     match record_adopted(state, mission_id, &record, launch) {
         Ok(()) => {
             eprintln!(
-                "ai6: adopted Mission {mission_id:?}; re-attaching to its Session on Theater {:?}",
+                "ai6: adopted Mission {mission_id:?}; re-attaching to its Run on Theater {:?}",
                 record.theater.as_deref().unwrap_or_default()
             );
             Adoption::Adopted
@@ -567,13 +567,13 @@ pub(super) fn adopt(state: &DaemonState, lease: &Lease) -> Adoption {
     }
 }
 
-/// Records an adopted Session in this Station's Mission book as its last Station launched
-/// it, and queues the re-attach (or the resume, for a parked Session).
+/// Records an adopted Run in this Station's Mission book as its last Station launched
+/// it, and queues the re-attach (or the resume, for a parked Run).
 fn record_adopted(
     state: &DaemonState,
     mission_id: &str,
-    record: &SessionRecord,
-    launch: SessionLaunch,
+    record: &RunRecord,
+    launch: RunLaunch,
 ) -> Result<(), String> {
     let manifest = LaunchManifest {
         handler_provider: launch.handler,
@@ -586,8 +586,8 @@ fn record_adopted(
         station_id: Some(state.station_id.clone()),
         theater_id: record.theater.clone(),
         mode: launch.mode,
-        session: Some(SessionHold {
-            id: record.session_id.clone(),
+        run: Some(RunHold {
+            id: record.run_id.clone(),
             attempt: record.attempt,
             fence: record.fence,
         }),
@@ -603,19 +603,19 @@ fn record_adopted(
         .set_operation(mission_id, manifest)
         .map_err(|error| format!("{error:?}"))?;
     if let Some(provider) = record
-        .provider_session_id
+        .provider_id
         .as_deref()
-        .and_then(|id| SessionId::try_new(id).ok())
+        .and_then(|id| RunId::try_new(id).ok())
     {
         missions
-            .attach_session(mission_id, provider)
+            .attach_run(mission_id, provider)
             .map_err(|error| format!("{error:?}"))?;
     }
     missions
         .transition(mission_id, MissionState::Working)
         .map_err(|error| format!("{error:?}"))?;
     match (record.status, record.parked_until) {
-        (SessionStatus::Parked, Some(until)) => {
+        (RunStatus::Parked, Some(until)) => {
             missions
                 .park(mission_id, until as i64)
                 .map_err(|error| format!("{error:?}"))?;
@@ -635,10 +635,10 @@ fn record_adopted(
 
 /// The latest earlier attempt at a Mission recorded in the shared Registry, which a new
 /// attempt replaces.
-pub(super) fn predecessor(state: &DaemonState, mission_id: &MissionId) -> Option<SessionRecord> {
+pub(super) fn predecessor(state: &DaemonState, mission_id: &MissionId) -> Option<RunRecord> {
     state
         .intake
-        .latest_session(mission_id.as_str())
+        .latest_run(mission_id.as_str())
         .unwrap_or_else(|error| {
             eprintln!("ai6: earlier attempts at Mission {mission_id} unreadable: {error}");
             None
@@ -657,7 +657,7 @@ pub(super) enum WorkFrom {
 }
 
 /// The brief a new attempt is given about the lost attempt it replaces.
-pub(super) fn hand_off(lost: &SessionRecord, work: WorkFrom) -> String {
+pub(super) fn hand_off(lost: &RunRecord, work: WorkFrom) -> String {
     let mut lines = vec![format!(
         "This Mission continues attempt {}, which was lost: {}.",
         lost.attempt,
@@ -697,9 +697,9 @@ fn short(commit: &str) -> &str {
     commit.get(..12).unwrap_or(commit)
 }
 
-/// How this Station launched a Mission's Session, as another Station needs it to re-attach.
-pub(super) fn launch_of(manifest: &LaunchManifest, agent: Option<&str>) -> SessionLaunch {
-    let mut launch = SessionLaunch::new(
+/// How this Station launched a Mission's Run, as another Station needs it to re-attach.
+pub(super) fn launch_of(manifest: &LaunchManifest, agent: Option<&str>) -> RunLaunch {
+    let mut launch = RunLaunch::new(
         manifest.handler_provider.clone(),
         manifest.terminal_provider.clone(),
         manifest.working_directory.clone(),
@@ -716,7 +716,7 @@ pub(super) fn launch_of(manifest: &LaunchManifest, agent: Option<&str>) -> Sessi
     launch
 }
 
-/// Writes how the Mission's Session is launched now into its record, after a resume or a
+/// Writes how the Mission's Run is launched now into its record, after a resume or a
 /// re-attach changed it.
 pub(super) fn record_launch(state: &DaemonState, mission_id: &str) {
     let Some(manifest) = state
@@ -727,7 +727,7 @@ pub(super) fn record_launch(state: &DaemonState, mission_id: &str) {
     else {
         return;
     };
-    let Some(hold) = manifest.session.clone() else {
+    let Some(hold) = manifest.run.clone() else {
         return;
     };
     let agent = state
@@ -735,31 +735,31 @@ pub(super) fn record_launch(state: &DaemonState, mission_id: &str) {
         .lock()
         .ok()
         .and_then(|missions| missions.get(mission_id)?.agent_id.clone());
-    let update = SessionUpdate::default().launch(launch_of(&manifest, agent.as_deref()));
+    let update = RunUpdate::default().launch(launch_of(&manifest, agent.as_deref()));
     if let Err(error) = state
         .intake
-        .update_session(&hold.id, &state.station_id, hold.fence, update)
+        .update_run(&hold.id, &state.station_id, hold.fence, update)
     {
         eprintln!(
-            "ai6: Session record {:?} launch not recorded: {error}",
+            "ai6: Run record {:?} launch not recorded: {error}",
             hold.id
         );
     }
 }
 
-/// What a Session has recently done, kept in its record so a later attempt can be told if
-/// this one is lost. The event pump owns one per Session.
+/// What a Run has recently done, kept in its record so a later attempt can be told if
+/// this one is lost. The event pump owns one per Run.
 #[derive(Default)]
 pub(super) struct Notes {
     lines: VecDeque<String>,
     changed: bool,
     written: Option<Instant>,
-    limits: SessionLimits,
+    limits: RunLimits,
 }
 
 impl Notes {
-    /// Notes kept within the Registry's Session `limits`.
-    pub(super) fn new(limits: &SessionLimits) -> Self {
+    /// Notes kept within the Registry's Run `limits`.
+    pub(super) fn new(limits: &RunLimits) -> Self {
         Self {
             limits: limits.clone(),
             ..Self::default()
@@ -777,7 +777,7 @@ impl Notes {
         let line = match (text, event.tools.is_empty()) {
             (Some(text), _) => format!("{}: {text}", event.kind),
             (None, false) => format!("{}: {}", event.kind, event.tools.join(", ")),
-            // A bare kind says something only when it is a state the Session stopped in.
+            // A bare kind says something only when it is a state the Run stopped in.
             (None, true) if matches!(event.kind.as_str(), "blocked" | "stalled") => {
                 event.kind.clone()
             }
@@ -797,8 +797,8 @@ impl Notes {
         self.changed = true;
     }
 
-    /// Writes the notes to the Session record when they changed and the last write is old
-    /// enough, so a busy Session costs a Registry write every few seconds at most.
+    /// Writes the notes to the Run record when they changed and the last write is old
+    /// enough, so a busy Run costs a Registry write every few seconds at most.
     pub(super) fn write_if_due(&mut self, state: &DaemonState, mission_id: &str) {
         let every = state.station.limits().recovery.notes_every.0;
         if self.written.is_some_and(|at| at.elapsed() < every) {
@@ -807,22 +807,22 @@ impl Notes {
         self.write_now(state, mission_id);
     }
 
-    /// Writes the notes to the Session record now if they changed, as before it is given up.
+    /// Writes the notes to the Run record now if they changed, as before it is given up.
     pub(super) fn write_now(&mut self, state: &DaemonState, mission_id: &str) {
         if !self.changed {
             return;
         }
-        let Some(hold) = session_hold(state, mission_id) else {
+        let Some(hold) = run_hold(state, mission_id) else {
             return;
         };
-        let update = SessionUpdate::default().recent(self.lines.iter().cloned().collect());
+        let update = RunUpdate::default().recent(self.lines.iter().cloned().collect());
         match state
             .intake
-            .update_session(&hold.id, &state.station_id, hold.fence, update)
+            .update_run(&hold.id, &state.station_id, hold.fence, update)
         {
-            Ok(_) | Err(SessionError::Ended) => {}
+            Ok(_) | Err(RunError::Ended) => {}
             Err(error) => eprintln!(
-                "ai6: Session record {:?} notes not written: {error}",
+                "ai6: Run record {:?} notes not written: {error}",
                 hold.id
             ),
         }
@@ -831,18 +831,18 @@ impl Notes {
     }
 }
 
-/// Sessions whose checkpoint is being saved now, by Session record ID.
+/// Runs whose checkpoint is being saved now, by Run record ID.
 static CHECKPOINTING: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 
-/// Saves a checkpoint of every running Session's safe house whose Operation pushes them
+/// Saves a checkpoint of every running Run's safe house whose Operation pushes them
 /// and whose last one is older than the Operation's interval. Each runs on a blocking
-/// worker; one Session never has two at once.
+/// worker; one Run never has two at once.
 pub(super) fn checkpoint_due(state: &DaemonState) {
     let houses = state
-        .sessions
+        .runs
         .lock()
-        .map(|sessions| {
-            sessions
+        .map(|runs| {
+            runs
                 .iter()
                 .filter_map(|(mission_id, operation)| {
                     let house = operation.safe_house.clone()?;
@@ -865,12 +865,12 @@ pub(super) fn checkpoint_due(state: &DaemonState) {
         let Some(remote) = operation.workspace.checkpoint_remote.clone() else {
             continue;
         };
-        let Some(hold) = session_hold(state, &mission_id) else {
+        let Some(hold) = run_hold(state, &mission_id) else {
             continue;
         };
         let due = state
             .intake
-            .session(&hold.id)
+            .run(&hold.id)
             .ok()
             .flatten()
             .is_some_and(|record| {
@@ -914,14 +914,14 @@ pub(super) fn checkpoint_due(state: &DaemonState) {
     }
 }
 
-fn save_checkpoint(state: &DaemonState, hold: &SessionHold, checkpoint: SafeHouseCheckpoint) {
-    let update = SessionUpdate::default().checkpoint(checkpoint, unix_now());
+fn save_checkpoint(state: &DaemonState, hold: &RunHold, checkpoint: SafeHouseCheckpoint) {
+    let update = RunUpdate::default().checkpoint(checkpoint, unix_now());
     if let Err(error) = state
         .intake
-        .update_session(&hold.id, &state.station_id, hold.fence, update)
+        .update_run(&hold.id, &state.station_id, hold.fence, update)
     {
         eprintln!(
-            "ai6: Session record {:?} checkpoint not recorded: {error}",
+            "ai6: Run record {:?} checkpoint not recorded: {error}",
             hold.id
         );
     }
@@ -996,14 +996,14 @@ mod tests {
 
     /// The Station dies: it lets go of nothing and tells no one, and its leases run out.
     fn go_dark(state: &DaemonState, mission_id: &str) {
-        let crashed = state.sessions.lock().unwrap().remove(mission_id);
+        let crashed = state.runs.lock().unwrap().remove(mission_id);
         drop(crashed);
         let gone = Duration::from_nanos(1);
         let station = state.station_id.as_str();
-        let hold = session_hold(state, mission_id).unwrap();
+        let hold = run_hold(state, mission_id).unwrap();
         state
             .intake
-            .renew_session(&hold.id, station, hold.fence, gone)
+            .renew_run(&hold.id, station, hold.fence, gone)
             .unwrap();
         for lease in state.intake.leases().unwrap() {
             if lease.station() == station {
@@ -1110,8 +1110,8 @@ mod tests {
             ticks(&seen).0.len() >= 2
         })
         .await;
-        let first = session_hold(&a, &mission_id).unwrap();
-        let record = a.intake.session(&first.id).unwrap().unwrap();
+        let first = run_hold(&a, &mission_id).unwrap();
+        let record = a.intake.run(&first.id).unwrap().unwrap();
         let launch = record.launch.as_ref().unwrap();
         assert_eq!(launch.clearance.as_deref(), Some("field"));
         let key = launch.runner.clone().unwrap();
@@ -1144,7 +1144,7 @@ mod tests {
                 })
         })
         .await;
-        assert!(!b.sessions.lock().unwrap().contains_key(&mission_id));
+        assert!(!b.runs.lock().unwrap().contains_key(&mission_id));
         assert!(
             b.intake
                 .audit_records()
@@ -1187,7 +1187,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_runner_session_of_a_station_that_goes_dark_is_adopted_by_another_without_a_second_launch()
+    async fn a_runner_run_of_a_station_that_goes_dark_is_adopted_by_another_without_a_second_launch()
      {
         let root = tempfile::tempdir().unwrap();
         let registry = root.path().join("registry");
@@ -1228,13 +1228,13 @@ mod tests {
             ticks(&seen).0.len() >= 5
         })
         .await;
-        let first = session_hold(&a, &mission_id).unwrap();
-        let record = a.intake.session(&first.id).unwrap().unwrap();
+        let first = run_hold(&a, &mission_id).unwrap();
+        let record = a.intake.run(&first.id).unwrap().unwrap();
         let key = record
             .launch
             .as_ref()
             .and_then(|launch| launch.runner.clone())
-            .expect("the runner Session is in the shared record");
+            .expect("the runner Run is in the shared record");
         assert_eq!(record.theater.as_deref(), Some("field"));
 
         go_dark(&a, &mission_id);
@@ -1250,13 +1250,13 @@ mod tests {
         })
         .await;
 
-        // Station B becomes Headquarters, is handed the brief and adopts the Session.
+        // Station B becomes Headquarters, is handed the brief and adopts the Run.
         publish_station_check_in(&b);
         assert!(schedule_intake_once(&b));
         let lease = b.intake.leases().unwrap().pop().unwrap();
         assert_eq!(lease.station(), "station-b");
         assert_eq!(lease.meta()[ADOPT_KEY], first.id.as_str());
-        let adopted = session_hold(&b, &mission_id).expect("station-b holds the Session");
+        let adopted = run_hold(&b, &mission_id).expect("station-b holds the Run");
         assert_eq!(
             (adopted.id.as_str(), adopted.attempt),
             (first.id.as_str(), 1)
@@ -1266,17 +1266,17 @@ mod tests {
         schedule_queued_once(&b).await;
         schedule_recovered_once(&b).await;
         assert!(
-            b.sessions
+            b.runs
                 .lock()
                 .unwrap()
                 .get(&mission_id)
                 .and_then(|operation| operation.runner.as_ref().map(|r| r.key.clone()))
                 == Some(key.clone()),
-            "station-b re-attached to the same runner Session"
+            "station-b re-attached to the same runner Run"
         );
 
         let mut replayed = Vec::new();
-        until("the rest of the Session on station-b", || {
+        until("the rest of the Run on station-b", || {
             while let Some(event) = pop_event(&b, &mission_id) {
                 replayed.push(event);
             }
@@ -1295,20 +1295,20 @@ mod tests {
         assert_eq!(after, (after[0]..=DRIP_TICKS).collect::<Vec<_>>());
 
         // One harness ran from start to end: nothing was launched again.
-        let launched = std::fs::read_dir(runner_dir.join("sessions"))
+        let launched = std::fs::read_dir(runner_dir.join("runs"))
             .unwrap()
             .count();
-        assert_eq!(launched, 1, "the runner kept one Session");
+        assert_eq!(launched, 1, "the runner kept one Run");
         assert!(link.status(&key).unwrap().unwrap().ended);
-        let record = b.intake.session(&first.id).unwrap().unwrap();
+        let record = b.intake.run(&first.id).unwrap().unwrap();
         assert_eq!(record.station, "station-b");
-        assert_eq!(record.status, SessionStatus::Ended);
+        assert_eq!(record.status, RunStatus::Ended);
         a.stopping.store(true, Ordering::Release);
         b.stopping.store(true, Ordering::Release);
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_session_lost_with_its_station_is_tried_again_elsewhere_from_its_checkpoint() {
+    async fn a_run_lost_with_its_station_is_tried_again_elsewhere_from_its_checkpoint() {
         let root = tempfile::tempdir().unwrap();
         let registry = root.path().join("registry");
         let operation = "workspace = { provider = \"mock-safehouse\", settings = { checkpoint_remote = \"origin\", checkpoint_secs = 1 } }\n";
@@ -1335,15 +1335,15 @@ mod tests {
         assert!(schedule_intake_once(&a));
         schedule_queued_once(&a).await;
         wait_for_state(&a, &mission_id, MissionState::Blocked).await;
-        let first = session_hold(&a, &mission_id).unwrap();
+        let first = run_hold(&a, &mission_id).unwrap();
         assert_eq!(first.attempt, 1);
-        let handle = |id: &str| a.intake.session(id).unwrap().unwrap().handle;
+        let handle = |id: &str| a.intake.run(id).unwrap().unwrap().handle;
         assert_eq!(handle(&first.id), Some(format!("{mission_id}.1")));
 
-        // What the Session did and where its work is saved reach the shared record.
+        // What the Run did and where its work is saved reach the shared record.
         until("station-a's notes", || {
             a.intake
-                .session(&first.id)
+                .run(&first.id)
                 .unwrap()
                 .is_some_and(|record| record.recent == ["blocked"])
         })
@@ -1351,27 +1351,27 @@ mod tests {
         checkpoint_due(&a);
         until("station-a's checkpoint", || {
             a.intake
-                .session(&first.id)
+                .run(&first.id)
                 .unwrap()
                 .is_some_and(|record| record.checkpoint.is_some())
         })
         .await;
         let saved = a
             .intake
-            .session(&first.id)
+            .run(&first.id)
             .unwrap()
             .unwrap()
             .checkpoint
             .unwrap();
         assert_eq!(saved.remote, "origin");
 
-        // Station A was also the Theater: nothing can re-attach, so the Session is lost and
+        // Station A was also the Theater: nothing can re-attach, so the Run is lost and
         // the brief goes to Station B as a second attempt.
         go_dark(&a, &mission_id);
         publish_station_check_in(&b);
         assert!(schedule_intake_once(&b));
-        let lost = b.intake.session(&first.id).unwrap().unwrap();
-        assert_eq!(lost.status, SessionStatus::Lost);
+        let lost = b.intake.run(&first.id).unwrap().unwrap();
+        assert_eq!(lost.status, RunStatus::Lost);
         let reason = lost.lost.clone().unwrap();
         assert!(
             reason.contains("Station \"station-a\" went dark with Theater \"local\"")
@@ -1384,10 +1384,10 @@ mod tests {
 
         schedule_queued_once(&b).await;
         wait_for_state(&b, &mission_id, MissionState::Blocked).await;
-        let second = session_hold(&b, &mission_id).unwrap();
+        let second = run_hold(&b, &mission_id).unwrap();
         assert_eq!(second.attempt, 2);
         assert_eq!(handle(&second.id), Some(format!("{mission_id}.2")));
-        let record = b.intake.session(&second.id).unwrap().unwrap();
+        let record = b.intake.run(&second.id).unwrap().unwrap();
         assert_eq!(
             (record.attempt, record.predecessor.as_deref()),
             (2, Some(first.id.as_str()))
@@ -1424,7 +1424,7 @@ mod tests {
     /// Pops `mission_id`'s events on `state` until it completes, and answers its ticks.
     async fn finish(state: &DaemonState, mission_id: &str) -> Vec<u32> {
         let mut events = Vec::new();
-        until("the Session completes", || {
+        until("the Run completes", || {
             while let Some(event) = pop_event(state, mission_id) {
                 events.push(event);
             }
@@ -1436,7 +1436,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_runner_that_dies_under_a_live_station_loses_its_session_and_the_mission_is_tried_again()
+    async fn a_runner_that_dies_under_a_live_station_loses_its_run_and_the_mission_is_tried_again()
      {
         let root = tempfile::tempdir().unwrap();
         let registry = root.path().join("registry");
@@ -1465,7 +1465,7 @@ mod tests {
             ticks(&seen).0.len() >= 3
         })
         .await;
-        let first = session_hold(&a, &mission_id).unwrap();
+        let first = run_hold(&a, &mission_id).unwrap();
 
         // The runner dies and the Station lives: it waits out the grace, probes, gives up.
         let saved = kill_runner(&runner_dir);
@@ -1473,8 +1473,8 @@ mod tests {
             mission_state(&a, &mission_id) == Some(MissionState::Abandoned)
         })
         .await;
-        let lost = a.intake.session(&first.id).unwrap().unwrap();
-        assert_eq!(lost.status, SessionStatus::Lost);
+        let lost = a.intake.run(&first.id).unwrap().unwrap();
+        assert_eq!(lost.status, RunStatus::Lost);
         let reason = lost.lost.clone().unwrap();
         assert!(reason.contains("out of reach for 1s"), "{reason}");
         assert!(
@@ -1484,7 +1484,7 @@ mod tests {
             "its last events are kept for the next attempt: {:?}",
             lost.recent
         );
-        assert!(!a.sessions.lock().unwrap().contains_key(&mission_id));
+        assert!(!a.runs.lock().unwrap().contains_key(&mission_id));
         while let Some(event) = pop_event(&a, &mission_id) {
             seen.push(event);
         }
@@ -1503,8 +1503,8 @@ mod tests {
         let lease = a.intake.leases().unwrap().pop().unwrap();
         assert_eq!((lease.station(), lease.attempt()), ("station-a", 2));
         schedule_queued_once(&a).await;
-        let second = session_hold(&a, &mission_id).expect("the second attempt holds a Session");
-        let record = a.intake.session(&second.id).unwrap().unwrap();
+        let second = run_hold(&a, &mission_id).expect("the second attempt holds a Run");
+        let record = a.intake.run(&second.id).unwrap().unwrap();
         assert_eq!(
             (record.attempt, record.predecessor.as_deref()),
             (2, Some(first.id.as_str()))
@@ -1517,7 +1517,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_station_that_adopts_a_session_whose_runner_is_gone_gives_it_up_instead_of_waiting() {
+    async fn a_station_that_adopts_a_run_whose_runner_is_gone_gives_it_up_instead_of_waiting() {
         let root = tempfile::tempdir().unwrap();
         let registry = root.path().join("registry");
         let runner_dir = root.path().join("runner");
@@ -1550,14 +1550,14 @@ mod tests {
             ticks(&seen).0.len() >= 3
         })
         .await;
-        let first = session_hold(&a, &mission_id).unwrap();
+        let first = run_hold(&a, &mission_id).unwrap();
 
-        // Station A goes dark and its runner dies with it; Station B adopts the Session.
+        // Station A goes dark and its runner dies with it; Station B adopts the Run.
         go_dark(&a, &mission_id);
         let saved = kill_runner(&runner_dir);
         publish_station_check_in(&b);
         assert!(schedule_intake_once(&b));
-        assert_eq!(session_hold(&b, &mission_id).unwrap().id, first.id);
+        assert_eq!(run_hold(&b, &mission_id).unwrap().id, first.id);
 
         // The re-attach fails; the next try waits the first backoff, not a fixed 5 s loop.
         let tried = tokio::time::Instant::now();
@@ -1573,8 +1573,8 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(1_100)).await;
         b.retry_after.lock().unwrap().clear();
         schedule_recovered_once(&b).await;
-        let lost = b.intake.session(&first.id).unwrap().unwrap();
-        assert_eq!(lost.status, SessionStatus::Lost);
+        let lost = b.intake.run(&first.id).unwrap().unwrap();
+        assert_eq!(lost.status, RunStatus::Lost);
         let reason = lost.lost.clone().unwrap();
         assert!(
             reason.contains("could not be re-attached for 1s"),
@@ -1595,8 +1595,8 @@ mod tests {
         let lease = b.intake.leases().unwrap().pop().unwrap();
         assert_eq!((lease.station(), lease.attempt()), ("station-b", 2));
         schedule_queued_once(&b).await;
-        let second = session_hold(&b, &mission_id).expect("the second attempt holds a Session");
-        let record = b.intake.session(&second.id).unwrap().unwrap();
+        let second = run_hold(&b, &mission_id).expect("the second attempt holds a Run");
+        let record = b.intake.run(&second.id).unwrap().unwrap();
         assert_eq!(
             (record.attempt, record.predecessor.as_deref()),
             (2, Some(first.id.as_str()))
@@ -1649,9 +1649,9 @@ mod tests {
         }
         assert_eq!(notes.lines.len(), 20);
         assert_eq!(notes.lines[0], "text: line 0");
-        let limits = SessionLimits {
+        let limits = RunLimits {
             recent_events: crate::bounds::Limit::at(2),
-            ..SessionLimits::default()
+            ..RunLimits::default()
         };
         let mut short = Notes::new(&limits);
         for index in 0..5 {

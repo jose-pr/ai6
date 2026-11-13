@@ -112,7 +112,7 @@ impl CableTarget {
 pub enum CableState {
     /// Accepted and waiting for the recipient's next read.
     Queued,
-    /// Presented to the recipient's Agent Session.
+    /// Presented to the recipient's Agent Run.
     Delivered,
     /// Temporarily held by relay policy.
     Held,
@@ -128,12 +128,12 @@ pub enum CableState {
     Withdrawn,
 }
 
-/// One relay-resolved Agent Session and its delivery state.
+/// One relay-resolved Agent Run and its delivery state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "CableRecipientWire")]
 pub struct CableRecipient {
     agent: String,
-    session_id: Option<String>,
+    run_id: Option<String>,
     state: CableState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     taken_by: Option<String>,
@@ -144,7 +144,7 @@ pub struct CableRecipient {
 struct CableRecipientWire {
     agent: String,
     #[serde(deserialize_with = "deserialize_required_option")]
-    session_id: Option<String>,
+    run_id: Option<String>,
     state: CableState,
     #[serde(default)]
     taken_by: Option<String>,
@@ -154,10 +154,10 @@ impl TryFrom<CableRecipientWire> for CableRecipient {
     type Error = CableError;
 
     fn try_from(wire: CableRecipientWire) -> Result<Self, Self::Error> {
-        let mut recipient = Self::try_new(wire.agent, wire.session_id, wire.state)?;
-        if let Some(session) = wire.taken_by {
-            validate_text("Cable recipient taken_by", Some(&session), 512, true)?;
-            recipient.taken_by = Some(session);
+        let mut recipient = Self::try_new(wire.agent, wire.run_id, wire.state)?;
+        if let Some(run) = wire.taken_by {
+            validate_text("Cable recipient taken_by", Some(&run), 512, true)?;
+            recipient.taken_by = Some(run);
         }
         Ok(recipient)
     }
@@ -167,16 +167,16 @@ impl CableRecipient {
     /// Constructs a validated delivery recipient.
     pub fn try_new(
         agent: String,
-        session_id: Option<String>,
+        run_id: Option<String>,
         state: CableState,
     ) -> Result<Self, CableError> {
         validate_text("Cable recipient agent", Some(&agent), 256, true)?;
-        if let Some(session_id) = session_id.as_deref() {
-            validate_text("Cable recipient session_id", Some(session_id), 512, true)?;
+        if let Some(run_id) = run_id.as_deref() {
+            validate_text("Cable recipient run_id", Some(run_id), 512, true)?;
         }
         Ok(Self {
             agent,
-            session_id,
+            run_id,
             state,
             taken_by: None,
         })
@@ -187,9 +187,9 @@ impl CableRecipient {
         &self.agent
     }
 
-    /// Returns the targeted provider Session, if the relay resolved one.
-    pub fn session_id(&self) -> Option<&str> {
-        self.session_id.as_deref()
+    /// Returns the targeted provider Run, if the relay resolved one.
+    pub fn run_id(&self) -> Option<&str> {
+        self.run_id.as_deref()
     }
 
     /// Returns the current delivery state.
@@ -197,8 +197,8 @@ impl CableRecipient {
         self.state
     }
 
-    /// Returns the provider Session that took this recipient's delivery, when it was addressed
-    /// to the Agent as a whole and a Liaison peer sent it: only that Session sees it after.
+    /// Returns the provider Run that took this recipient's delivery, when it was addressed
+    /// to the Agent as a whole and a Liaison peer sent it: only that Run sees it after.
     pub fn taken_by(&self) -> Option<&str> {
         self.taken_by.as_deref()
     }
@@ -217,7 +217,7 @@ pub struct Cable {
     recipients: Vec<CableRecipient>,
     idempotency_key: String,
     mission_id: Option<String>,
-    session_id: Option<String>,
+    run_id: Option<String>,
     conversation_id: Option<String>,
     reply_to: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -253,8 +253,8 @@ pub struct CableDraft {
     pub idempotency_key: String,
     /// AI6 Mission identity, when applicable.
     pub mission_id: Option<String>,
-    /// Provider-issued Session identity, when applicable.
-    pub session_id: Option<String>,
+    /// Provider-issued Run identity, when applicable.
+    pub run_id: Option<String>,
     /// Conversation grouping identity, when applicable.
     pub conversation_id: Option<String>,
     /// Parent Cable identity, when this is a reply.
@@ -264,8 +264,8 @@ pub struct CableDraft {
     /// The Liaison peer that sent this Cable, when an agent outside AI6 did: its proven key on a
     /// link, or its principal over HTTP.
     pub peer: Option<String>,
-    /// The provider Session its thread is bound to: only that Session receives it, or, once that
-    /// one has ended, the Agent's next Session.
+    /// The provider Run its thread is bound to: only that Run receives it, or, once that
+    /// one has ended, the Agent's next Run.
     pub affinity: Option<String>,
     /// Unique Cable identifier supplied by the relay.
     pub id: String,
@@ -300,7 +300,7 @@ impl CableDraft {
             recipients,
             idempotency_key,
             mission_id: None,
-            session_id: None,
+            run_id: None,
             conversation_id: None,
             reply_to: None,
             on_behalf_of: None,
@@ -324,9 +324,9 @@ impl CableDraft {
         self
     }
 
-    /// Associates this Cable with the sending provider Session.
-    pub fn with_session(mut self, session_id: impl Into<String>) -> Self {
-        self.session_id = Some(session_id.into());
+    /// Associates this Cable with the sending provider Run.
+    pub fn with_run(mut self, run_id: impl Into<String>) -> Self {
+        self.run_id = Some(run_id.into());
         self
     }
 
@@ -354,9 +354,9 @@ impl CableDraft {
         self
     }
 
-    /// Binds this Cable to the provider Session its thread is with.
-    pub fn with_affinity(mut self, session: impl Into<String>) -> Self {
-        self.affinity = Some(session.into());
+    /// Binds this Cable to the provider Run its thread is with.
+    pub fn with_affinity(mut self, run: impl Into<String>) -> Self {
+        self.affinity = Some(run.into());
         self
     }
 }
@@ -374,7 +374,7 @@ impl fmt::Debug for CableDraft {
             .field("recipients", &self.recipients)
             .field("idempotency_key", &self.idempotency_key)
             .field("mission_id", &self.mission_id)
-            .field("session_id", &self.session_id)
+            .field("run_id", &self.run_id)
             .field("conversation_id", &self.conversation_id)
             .field("reply_to", &self.reply_to)
             .field("on_behalf_of", &self.on_behalf_of)
@@ -400,7 +400,7 @@ impl fmt::Debug for Cable {
             .field("recipients", &self.recipients)
             .field("idempotency_key", &self.idempotency_key)
             .field("mission_id", &self.mission_id)
-            .field("session_id", &self.session_id)
+            .field("run_id", &self.run_id)
             .field("conversation_id", &self.conversation_id)
             .field("reply_to", &self.reply_to)
             .field("on_behalf_of", &self.on_behalf_of)
@@ -428,7 +428,7 @@ struct CableWire {
     #[serde(deserialize_with = "deserialize_required_option")]
     mission_id: Option<String>,
     #[serde(deserialize_with = "deserialize_required_option")]
-    session_id: Option<String>,
+    run_id: Option<String>,
     #[serde(deserialize_with = "deserialize_required_option")]
     conversation_id: Option<String>,
     #[serde(deserialize_with = "deserialize_required_option")]
@@ -459,7 +459,7 @@ impl TryFrom<CableWire> for Cable {
                 recipients: wire.recipients,
                 idempotency_key: wire.idempotency_key,
                 mission_id: wire.mission_id,
-                session_id: wire.session_id,
+                run_id: wire.run_id,
                 conversation_id: wire.conversation_id,
                 reply_to: wire.reply_to,
                 on_behalf_of: wire.on_behalf_of,
@@ -537,14 +537,14 @@ impl Cable {
         }
         for (index, recipient) in draft.recipients.iter().enumerate() {
             if draft.recipients[..index].iter().any(|previous| {
-                previous.agent == recipient.agent && previous.session_id == recipient.session_id
+                previous.agent == recipient.agent && previous.run_id == recipient.run_id
             }) {
                 return Err(CableError::new("Cable recipients must be unique"));
             }
         }
         for (label, value, limit) in [
             ("mission_id", draft.mission_id.as_deref(), 512),
-            ("session_id", draft.session_id.as_deref(), 512),
+            ("run_id", draft.run_id.as_deref(), 512),
             ("conversation_id", draft.conversation_id.as_deref(), 64),
             ("reply_to", draft.reply_to.as_deref(), 64),
             ("on_behalf_of", draft.on_behalf_of.as_deref(), 256),
@@ -583,7 +583,7 @@ impl Cable {
             recipients: draft.recipients,
             idempotency_key: draft.idempotency_key,
             mission_id: draft.mission_id,
-            session_id: draft.session_id,
+            run_id: draft.run_id,
             conversation_id: draft.conversation_id,
             reply_to: draft.reply_to,
             on_behalf_of: draft.on_behalf_of,
@@ -620,9 +620,9 @@ impl Cable {
         self.mission_id.as_deref()
     }
 
-    /// Returns the provider-issued sending Session identity, when present.
-    pub fn session_id(&self) -> Option<&str> {
-        self.session_id.as_deref()
+    /// Returns the provider-issued sending Run identity, when present.
+    pub fn run_id(&self) -> Option<&str> {
+        self.run_id.as_deref()
     }
 
     /// Returns the explicit audience.
@@ -667,7 +667,7 @@ impl Cable {
         self.peer.as_deref()
     }
 
-    /// Returns the provider Session this Cable's thread is bound to, when it is bound.
+    /// Returns the provider Run this Cable's thread is bound to, when it is bound.
     pub fn affinity(&self) -> Option<&str> {
         self.affinity.as_deref()
     }
@@ -698,14 +698,14 @@ impl Cable {
             && self
                 .recipients
                 .iter()
-                .map(|recipient| (&recipient.agent, &recipient.session_id))
+                .map(|recipient| (&recipient.agent, &recipient.run_id))
                 .eq(other
                     .recipients
                     .iter()
-                    .map(|recipient| (&recipient.agent, &recipient.session_id)))
+                    .map(|recipient| (&recipient.agent, &recipient.run_id)))
             && self.idempotency_key == other.idempotency_key
             && self.mission_id == other.mission_id
-            && self.session_id == other.session_id
+            && self.run_id == other.run_id
             && self.conversation_id == other.conversation_id
             && self.reply_to == other.reply_to
             && self.on_behalf_of == other.on_behalf_of
@@ -714,25 +714,25 @@ impl Cable {
     }
 
     /// As [`with_recipient_state`](Self::with_recipient_state), recording `taken_by` as the
-    /// Session that took a delivery addressed to the Agent as a whole.
+    /// Run that took a delivery addressed to the Agent as a whole.
     pub fn with_recipient_taken(
         &self,
         agent: &str,
-        session_id: Option<&str>,
+        run_id: Option<&str>,
         state: CableState,
         taken_by: Option<&str>,
     ) -> Result<Option<Self>, CableError> {
-        let Some(mut updated) = self.with_recipient_state(agent, session_id, state)? else {
+        let Some(mut updated) = self.with_recipient_state(agent, run_id, state)? else {
             return Ok(None);
         };
-        if let Some(session) = taken_by {
-            validate_text("Cable recipient taken_by", Some(session), 512, true)?;
+        if let Some(run) = taken_by {
+            validate_text("Cable recipient taken_by", Some(run), 512, true)?;
             if let Some(recipient) = updated.recipients.iter_mut().find(|recipient| {
                 recipient.agent == agent
-                    && recipient.session_id.as_deref() == session_id
+                    && recipient.run_id.as_deref() == run_id
                     && recipient.taken_by.is_none()
             }) {
-                recipient.taken_by = Some(session.to_owned());
+                recipient.taken_by = Some(run.to_owned());
             }
         }
         Ok(Some(updated))
@@ -742,11 +742,11 @@ impl Cable {
     pub fn with_recipient_state(
         &self,
         agent: &str,
-        session_id: Option<&str>,
+        run_id: Option<&str>,
         state: CableState,
     ) -> Result<Option<Self>, CableError> {
         let Some(index) = self.recipients.iter().position(|recipient| {
-            recipient.agent == agent && recipient.session_id.as_deref() == session_id
+            recipient.agent == agent && recipient.run_id.as_deref() == run_id
         }) else {
             return Ok(None);
         };
@@ -835,7 +835,7 @@ mod tests {
             CableTarget::try_new(CableScope::Station, Some("station-a".into())).unwrap(),
             "Need a review".into(),
             vec![
-                CableRecipient::try_new("008".into(), Some("session-8".into()), CableState::Queued)
+                CableRecipient::try_new("008".into(), Some("run-8".into()), CableState::Queued)
                     .unwrap(),
             ],
             "request-1".into(),
@@ -845,7 +845,7 @@ mod tests {
         )
         .with_sender_theater("theater-a")
         .with_mission("mission-1")
-        .with_session("session-7")
+        .with_run("run-7")
         .with_conversation("conversation-1")
     }
 
@@ -907,17 +907,17 @@ mod tests {
     fn recipient_delivery_transitions_are_checked() {
         let cable = Cable::try_new(draft(), &CableLimits::default()).unwrap();
         let delivered = cable
-            .with_recipient_state("008", Some("session-8"), CableState::Delivered)
+            .with_recipient_state("008", Some("run-8"), CableState::Delivered)
             .unwrap()
             .unwrap();
         let acked = delivered
-            .with_recipient_state("008", Some("session-8"), CableState::Acked)
+            .with_recipient_state("008", Some("run-8"), CableState::Acked)
             .unwrap()
             .unwrap();
         assert_eq!(acked.recipients()[0].state(), CableState::Acked);
         assert!(
             acked
-                .with_recipient_state("008", Some("session-8"), CableState::Queued)
+                .with_recipient_state("008", Some("run-8"), CableState::Queued)
                 .is_err()
         );
         assert!(

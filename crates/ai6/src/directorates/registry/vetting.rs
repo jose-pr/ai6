@@ -810,12 +810,12 @@ mod tests {
     }
 
     fn proposal(key: &str) -> crate::directorates::registry::store::MissionProposal {
-        use crate::directorates::m::identity::{MissionId, SessionId};
+        use crate::directorates::m::identity::{MissionId, RunId};
         crate::directorates::registry::store::MissionProposal::try_new(
             "G",
             MissionId::try_new("parent").unwrap(),
             "coordinator",
-            SessionId::try_new("session-1").unwrap(),
+            RunId::try_new("run-1").unwrap(),
             key,
             brief("child"),
             &Default::default(),

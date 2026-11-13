@@ -8,7 +8,7 @@ use crate::directorates::registry::store::Brief;
 
 /// Records where the Mission's brief came from. A brief the Registry kept no provenance
 /// for was dropped into the queue by hand: the Mission is marked so, by this Station, and
-/// its Sessions start exposed, since nobody AI6 authenticated wrote its text.
+/// its Runs start exposed, since nobody AI6 authenticated wrote its text.
 pub(super) fn record_origin(
     state: &DaemonState,
     missions: &mut MissionStore,

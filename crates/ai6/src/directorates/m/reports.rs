@@ -3,7 +3,7 @@
 //! Reading a Report's content takes three things at once: the scope's read (an Operation's
 //! `mission.read`, its own or through a compartment), being read in to each of its compartments,
 //! and a clearance at or above its classification. It applies to a person and to an Agent's
-//! Session alike, and nobody is exempt. Short of that, a reader cleared for the tearline's marking
+//! Run alike, and nobody is exempt. Short of that, a reader cleared for the tearline's marking
 //! reads the tearline in its place, and anyone else, or anything linking to it, is shown its ID
 //! and markings: a link is not access.
 //!

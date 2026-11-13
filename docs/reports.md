@@ -17,7 +17,7 @@ assessment and resolution fields are empty.
 | `scope` | `operation:ID`, `station:ID` or `m` |
 | `kind`, `severity` | A short label (`finding` by default) and `info`, `warning` or `critical` |
 | `title`, `text` | What the filer said. Untrusted unless a person filed it |
-| `filer` | A Source and its item, an Agent with its Session and Mission, a person, a probe, a review or the Watchdog |
+| `filer` | A Source and its item, an Agent with its Run and Mission, a person, a probe, a review or the Watchdog |
 | `sub_source`, `from` | Who passed it on to the filer, and when the information is from; `created` is when it was reported |
 | `links` | Missions, other Reports, decisions (green ink requests) and evidence |
 | `state` | `open`, `assessed` or `closed`, with `assessment` (the assessor's verdict and comment, apart from the filed text) and `resolution` |
@@ -43,7 +43,7 @@ Reading a Report's content takes all three:
 
 1. **The scope's read.** For an Operation, `mission.read` there: for a person from the
    [access policy](access.md) or a [compartment](compartments.md) granting `mission.read` on it,
-   for an Agent's Session its own Operation, or another through such a compartment. A read
+   for an Agent's Run its own Operation, or another through such a compartment. A read
    through a compartment is a crossing, written to the audit log first. A Station's Reports need
    `station.read` on `station:ID` (and for an Agent, being that Station's Head of Station
    round), M's `station.read` on `config:reports`.
@@ -55,7 +55,7 @@ Reading a Report's content takes all three:
    Registry. A Report with no
    classification is at the lowest.
 
-The rule is the same for a person and for an Agent's Session, and nobody is exempt. A reader
+The rule is the same for a person and for an Agent's Run, and nobody is exempt. A reader
 who has the first but not the other two sees:
 
 - the **tearline** in the Report's place, when it carries one and they are cleared for the
@@ -78,17 +78,17 @@ Liaison). It is kept and shown; the checks at each crossing come with assessment
 
 ## Filing
 
-**Agents.** Every Agent's Session has `file_report` on its AI6 MCP server, filed against its
+**Agents.** Every Agent's Run has `file_report` on its AI6 MCP server, filed against its
 Mission's Operation and linked to its Mission ([Agents](agents.md#reports)). It takes a summary
 (its first line is the title), detail, typed findings, a proposed priority and deadline, and the
-markings. `reports` lists and `read_report` reads what the Session may, inside `<ai6-data>`; a
-Report from another Operation marks the Session exposed as that Operation's product.
+markings. `reports` lists and `read_report` reads what the Run may, inside `<ai6-data>`; a
+Report from another Operation marks the Run exposed as that Operation's product.
 
 A **Head of Station** round's `file_report` keeps its logbook, check-in and channel
 ([Stations](stations.md)), and is also stored as a Report of its Station, kind `station`, linked
 to the round.
 
-An Agent's filings are rate limited per Session (`per_session`) and per scope (`per_operation`)
+An Agent's filings are rate limited per Run (`per_run`) and per scope (`per_operation`)
 over `window`; past either, `file_report` answers to wait.
 
 **People.** Filing needs `mission.create` on the Operation, or `station.configure` on the Station
@@ -184,5 +184,5 @@ classification since removed from the list is shown to nobody but by its ID and 
 
 Sizes, counts and rates are Registry limits, in `[registry.limits.reports]` of `ai6.cfg`, read by
 the Stations and the gateway alike when they start ([Configuration](configuration.md)):
-`record_bytes`, `reports`, `text_bytes`, `name_bytes`, `links`, `page`, `per_session`,
+`record_bytes`, `reports`, `text_bytes`, `name_bytes`, `links`, `page`, `per_run`,
 `per_operation`, `window` and `keep_closed`.

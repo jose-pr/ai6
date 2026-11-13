@@ -1,6 +1,6 @@
-//! The usage ledger: what every Station's Sessions have consumed, per Mission.
+//! The usage ledger: what every Station's Runs have consumed, per Mission.
 //!
-//! One file per Mission (`usage/OPERATION/MISSION.json`) holds each Session's totals and
+//! One file per Mission (`usage/OPERATION/MISSION.json`) holds each Run's totals and
 //! the Mission's cost per UTC day. Writes happen under the Registry lock, so concurrent
 //! Stations never lose an addition, and every Station reads the same spend.
 
@@ -25,7 +25,7 @@ impl FileRegistry {
 
 /// Usage ledgers per Mission and spending per Operation and day.
 pub trait UsageStore {
-    /// Adds `delta` to a Session's totals in its Mission's ledger and returns the Mission's
+    /// Adds `delta` to a Run's totals in its Mission's ledger and returns the Mission's
     /// usage afterwards. `now` (Unix seconds) picks the UTC day the cost counts toward.
     ///
     /// # Errors
@@ -35,7 +35,7 @@ pub trait UsageStore {
         &self,
         operation: Option<&str>,
         mission: &str,
-        session: &str,
+        run: &str,
         delta: &UsageTotals,
         now: i64,
     ) -> io::Result<MissionUsage>;
@@ -65,7 +65,7 @@ impl UsageStore for FileRegistry {
         &self,
         operation: Option<&str>,
         mission: &str,
-        session: &str,
+        run: &str,
         delta: &UsageTotals,
         now: i64,
     ) -> io::Result<MissionUsage> {
@@ -73,7 +73,7 @@ impl UsageStore for FileRegistry {
         let path = self.usage_path(operation, mission);
         let limits = &self.limits.usage;
         let mut usage = read_ledger(&path, limits)?.unwrap_or_default();
-        add_usage(&mut usage, session, delta, now, limits);
+        add_usage(&mut usage, run, delta, now, limits);
         let bytes = serde_json::to_vec(&usage).map_err(io::Error::other)?;
         self.write_atomic(&path, &bytes)?;
         Ok(usage)
@@ -111,19 +111,19 @@ impl UsageStore for FileRegistry {
     }
 }
 
-/// Adds `delta` to a Session's totals and the Mission's, and its cost to the UTC day of
+/// Adds `delta` to a Run's totals and the Mission's, and its cost to the UTC day of
 /// `now`, keeping the last `limits.kept_days` days.
 pub(super) fn add_usage(
     usage: &mut MissionUsage,
-    session: &str,
+    run: &str,
     delta: &UsageTotals,
     now: i64,
     limits: &UsageLimits,
 ) {
     usage.total.add(delta);
     usage
-        .sessions
-        .entry(session.to_owned())
+        .runs
+        .entry(run.to_owned())
         .or_default()
         .add(delta);
     if delta.cost_micro_usd > 0 {
@@ -166,7 +166,7 @@ mod tests {
     use super::*;
     use crate::directorates::registry::suite::{Store, backend_tests};
 
-    backend_tests!(additions_accumulate_per_session_and_mission_and_day,);
+    backend_tests!(additions_accumulate_per_run_and_mission_and_day,);
 
     fn totals(input: u64, cost: u64) -> UsageTotals {
         UsageTotals {
@@ -176,7 +176,7 @@ mod tests {
         }
     }
 
-    fn additions_accumulate_per_session_and_mission_and_day(store: &dyn Store) {
+    fn additions_accumulate_per_run_and_mission_and_day(store: &dyn Store) {
         let registry = store.handle();
         assert_eq!(registry.mission_usage(Some("op"), "m1").unwrap(), None);
         registry
@@ -189,8 +189,8 @@ mod tests {
             .record_usage(Some("op"), "m1", "s1", &totals(10, 100), 1_790_086_400)
             .unwrap();
         assert_eq!(usage.total.input, 160);
-        assert_eq!(usage.sessions["s1"].input, 110);
-        assert_eq!(usage.sessions["s2"].cost_micro_usd, 500);
+        assert_eq!(usage.runs["s1"].input, 110);
+        assert_eq!(usage.runs["s2"].cost_micro_usd, 500);
         assert_eq!(usage.daily_cost_micro_usd["2026-09-21"], 1_500);
         assert_eq!(usage.daily_cost_micro_usd["2026-09-22"], 100);
         assert_eq!(

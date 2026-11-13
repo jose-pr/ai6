@@ -1,5 +1,5 @@
 //! The activity timeline: durable, metadata-only events correlated by Station, Operation,
-//! Mission and Session.
+//! Mission and Run.
 //!
 //! It records what the audit log does not: lifecycle transitions, the outcomes of operator
 //! controls, Cables sent and Sleeper authorizations. An event never carries a prompt, a
@@ -38,9 +38,9 @@ pub struct TimelineEvent {
     /// The Mission involved, when there is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mission: Option<String>,
-    /// The provider Session involved, when there is one.
+    /// The provider Run involved, when there is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session: Option<String>,
+    pub run: Option<String>,
     /// Who acted: a person ID or an Agent codename.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actor: Option<String>,
@@ -68,7 +68,7 @@ impl TimelineEvent {
             operation: operation.into(),
             station: None,
             mission: None,
-            session: None,
+            run: None,
             actor: None,
             detail: BTreeMap::new(),
         }
@@ -88,10 +88,10 @@ impl TimelineEvent {
         self
     }
 
-    /// Names the provider Session involved.
+    /// Names the provider Run involved.
     #[must_use]
-    pub fn session(mut self, session: impl Into<String>) -> Self {
-        self.session = Some(session.into());
+    pub fn run(mut self, run: impl Into<String>) -> Self {
+        self.run = Some(run.into());
         self
     }
 
@@ -143,7 +143,7 @@ impl TimelineEvent {
         if !name(&self.kind) || !name(&self.action) {
             return invalid("kind or action");
         }
-        let optional = [&self.station, &self.mission, &self.session, &self.actor];
+        let optional = [&self.station, &self.mission, &self.run, &self.actor];
         if !text(&self.operation) || optional.into_iter().flatten().any(|value| !text(value)) {
             return invalid("identity");
         }
@@ -314,7 +314,7 @@ mod tests {
         let second = TimelineEvent::new("lifecycle", "working", "G", 2.0)
             .station("hq")
             .mission("mission-1")
-            .session("provider-1");
+            .run("provider-1");
         let first = TimelineEvent::new("control", "cancel.applied", "G", 1.0)
             .actor("operator-007")
             .detail("state", "abandoned");

@@ -309,7 +309,7 @@ async fn held_link(
         .ok_or_else(ApiError::not_found)
 }
 
-/// Whether the Operation knows this Mission: a link, a Session record or its brief names it, and
+/// Whether the Operation knows this Mission: a link, a Run record or its brief names it, and
 /// nothing names another Operation. Refused before anything is audited or told.
 async fn known_mission(
     gateway: &Gateway,
@@ -321,8 +321,8 @@ async fn known_mission(
         (registry.clone(), mission.to_owned(), operation.to_string());
     let on_board = {
         let inner = gateway.inner.lock().await;
-        inner.sessions.values().any(|session| {
-            session.mission_id.as_str() == mission && session.operation_id == *operation
+        inner.runs.values().any(|run| {
+            run.mission_id.as_str() == mission && run.operation_id == *operation
         }) || inner
             .missions
             .keys()
@@ -333,7 +333,7 @@ async fn known_mission(
             .issue_links(&wanted)?
             .iter()
             .any(|link| link.operation == operation_key);
-        let recorded = store.sessions()?.into_iter().any(|record| {
+        let recorded = store.runs()?.into_iter().any(|record| {
             record.mission_id == wanted
                 && record.operation.as_deref() == Some(operation_key.as_str())
         });

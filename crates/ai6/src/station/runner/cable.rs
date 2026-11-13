@@ -1,8 +1,8 @@
 //! The Cable MCP endpoint a runner hands a harness, and the Station's side of it.
 //!
 //! The runner listens on a loopback port of the Theater with a token of its own, and carries
-//! each request to the Station attached to the Session over that Session's ACP connection, as
-//! [`REQUEST`] notifications. The Station answers from its own Cable endpoint for the Session,
+//! each request to the Station attached to the Run over that Run's ACP connection, as
+//! [`REQUEST`] notifications. The Station answers from its own Cable endpoint for the Run,
 //! with that endpoint's bearer, in [`ANSWER`] notifications: the head, the body in pieces, the
 //! end. The bearer never leaves the Station, and the Theater needs no forward. The harness keeps
 //! one URL and token while Stations come and go; with none attached it is told so and may try
@@ -64,9 +64,9 @@ fn decode(text: &str) -> Option<Vec<u8>> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Request {
-    /// The runner's name for the Session.
-    pub(crate) session_id: String,
-    /// Unique among this Session's requests.
+    /// The runner's name for the Run.
+    pub(crate) run_id: String,
+    /// Unique among this Run's requests.
     pub(crate) id: u64,
     pub(crate) method: String,
     /// The headers of [`REQUEST_HEADERS`] the harness sent.
@@ -82,7 +82,7 @@ pub(crate) struct Request {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Answer {
-    pub(crate) session_id: String,
+    pub(crate) run_id: String,
     pub(crate) id: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) status: Option<u16>,
@@ -110,7 +110,7 @@ pub(super) struct Opened {
     pub(super) cancel: Box<dyn FnOnce() + Send>,
 }
 
-/// How a runner's relay reaches the Station attached to its Session now.
+/// How a runner's relay reaches the Station attached to its Run now.
 pub(super) trait Route: Send + Sync {
     /// Sends `request` to the attached Station; `None` when none is attached.
     fn open(&self, request: &Request) -> Option<Opened>;
@@ -134,7 +134,7 @@ pub(super) struct CableProxy {
 }
 
 impl CableProxy {
-    /// Listens on a loopback port and relays Session `key`'s requests along `route`, within
+    /// Listens on a loopback port and relays Run `key`'s requests along `route`, within
     /// the `cable_*` keys of `limits`.
     pub(super) async fn start(
         key: &str,
@@ -224,7 +224,7 @@ async fn relay(State(shared): State<Shared>, request: HttpRequest) -> Response {
         }
     }
     let request = Request {
-        session_id: shared.key.to_string(),
+        run_id: shared.key.to_string(),
         id: shared.next.fetch_add(1, Ordering::Relaxed),
         method: parts.method.as_str().to_owned(),
         headers,
@@ -237,7 +237,7 @@ async fn relay(State(shared): State<Shared>, request: HttpRequest) -> Response {
     else {
         return refuse(
             StatusCode::SERVICE_UNAVAILABLE,
-            "no Station is attached to this Session now; try again later",
+            "no Station is attached to this Run now; try again later",
         );
     };
     let mut reading = Reading {
@@ -263,7 +263,7 @@ async fn relay(State(shared): State<Shared>, request: HttpRequest) -> Response {
             );
         }
     };
-    // The answer may be a stream that lasts as long as the MCP session: it is handed on piece
+    // The answer may be a stream that lasts as long as the MCP run: it is handed on piece
     // by piece, and a harness that stops reading tells the Station so.
     let stream = futures_util::stream::unfold(
         (answers, reading),
@@ -297,7 +297,7 @@ async fn relay(State(shared): State<Shared>, request: HttpRequest) -> Response {
     response
 }
 
-/// The requests a Session's connection carries to the Station and has no full answer to yet.
+/// The requests a Run's connection carries to the Station and has no full answer to yet.
 #[derive(Default)]
 pub(super) struct Pending {
     open: Mutex<BTreeMap<u64, UnboundedSender<Answer>>>,
@@ -334,8 +334,8 @@ impl Pending {
     }
 }
 
-/// The Station's side of a runner Session's Cable relay: answers each relayed request from the
-/// Station's own Cable endpoint for that Session, with its bearer.
+/// The Station's side of a runner Run's Cable relay: answers each relayed request from the
+/// Station's own Cable endpoint for that Run, with its bearer.
 #[cfg_attr(
     not(feature = "cables-mcp"),
     allow(
@@ -367,7 +367,7 @@ struct TunnelShared {
     )
 )]
 impl CableTunnel {
-    /// Answers Session `key`'s relayed requests from the endpoint at `url`, which takes
+    /// Answers Run `key`'s relayed requests from the endpoint at `url`, which takes
     /// `token`, within the `cable_*` keys of `limits`.
     pub(crate) fn new(key: &str, url: &str, token: &str, limits: &RunnerLimits) -> Self {
         Self {
@@ -413,7 +413,7 @@ impl crate::directorates::section_00::acp::ExtensionHandler for CableTunnel {
                     send(
                         &reply,
                         &Answer {
-                            session_id: shared.key.clone(),
+                            run_id: shared.key.clone(),
                             id,
                             error: Some(error),
                             ..Answer::default()
@@ -439,7 +439,7 @@ impl crate::directorates::section_00::acp::ExtensionHandler for CableTunnel {
                     return fail(
                         request.id,
                         format!(
-                            "{} Cable requests are open for this Session; try again once one ends",
+                            "{} Cable requests are open for this Run; try again once one ends",
                             shared.streams
                         ),
                     );
@@ -483,7 +483,7 @@ fn answer(
         send(
             reply,
             &Answer {
-                session_id: shared.key.clone(),
+                run_id: shared.key.clone(),
                 id: request.id,
                 ..answer
             },
@@ -594,7 +594,7 @@ mod tests {
             if !authorized {
                 return StatusCode::UNAUTHORIZED.into_response();
             }
-            let session = request
+            let run = request
                 .headers()
                 .get("mcp-session-id")
                 .and_then(|value| value.to_str().ok())
@@ -605,7 +605,7 @@ mod tests {
                 .await
                 .unwrap();
             let mut response = axum::Json(serde_json::json!({
-                "session": session,
+                "run": run,
                 "leaked": leaked,
                 "body": String::from_utf8_lossy(&body),
             }))
@@ -686,7 +686,7 @@ mod tests {
             .content_type("application/json")
             .send(body)
             .unwrap();
-        let session = response
+        let run = response
             .headers()
             .get("mcp-session-id")
             .map(|value| value.to_str().unwrap().to_owned());
@@ -694,7 +694,7 @@ mod tests {
         let text = response.body_mut().read_to_string().unwrap();
         (
             status,
-            session,
+            run,
             serde_json::from_str(&text).unwrap_or(serde_json::Value::Null),
         )
     }
@@ -730,12 +730,12 @@ mod tests {
             "station-token",
             &RunnerLimits::default(),
         )));
-        let (status, session, body) = call(token.clone(), r#"{"id":1}"#).await.unwrap();
+        let (status, run, body) = call(token.clone(), r#"{"id":1}"#).await.unwrap();
         assert_eq!(status, 200, "{body}");
-        assert_eq!(body["session"], "harness-1");
+        assert_eq!(body["run"], "harness-1");
         assert_eq!(body["body"], r#"{"id":1}"#);
         assert_eq!(body["leaked"], false, "only MCP's headers are relayed");
-        assert_eq!(session.as_deref(), Some("upstream-1"));
+        assert_eq!(run.as_deref(), Some("upstream-1"));
         assert!(
             super::super::lock_of(&wire.cancelled).is_empty(),
             "an answer read to its end cancels nothing"
@@ -769,7 +769,7 @@ mod tests {
     }
 
     #[test]
-    fn the_station_answers_only_its_own_session_within_its_limits() {
+    fn the_station_answers_only_its_own_run_within_its_limits() {
         let seen: Arc<Mutex<Vec<Answer>>> = Arc::default();
         let recorder = seen.clone();
         let notifier = crate::directorates::section_00::acp::Notifier::new(move |_, params| {
@@ -782,9 +782,9 @@ mod tests {
             ..RunnerLimits::default()
         };
         let tunnel = CableTunnel::new("k1", "http://127.0.0.1:1/mcp", "t", &limits);
-        let request = |session: &str, id: u64, method: &str, body: &[u8]| {
+        let request = |run: &str, id: u64, method: &str, body: &[u8]| {
             serde_json::to_value(Request {
-                session_id: session.to_owned(),
+                run_id: run.to_owned(),
                 id,
                 method: method.to_owned(),
                 headers: Vec::new(),
@@ -812,7 +812,7 @@ mod tests {
         assert_eq!(
             errors.len(),
             3,
-            "another Session's request is not answered: {errors:?}"
+            "another Run's request is not answered: {errors:?}"
         );
         assert!(errors[0].1.contains("no PUT request"), "{errors:?}");
         assert!(errors[1].1.contains("too large"), "{errors:?}");

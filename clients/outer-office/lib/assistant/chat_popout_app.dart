@@ -35,7 +35,7 @@ class ChatPopoutApp extends StatelessWidget {
             board.demo ||
             (board.accessToken != null &&
                 board.moneypennyServed &&
-                board.userSession != null);
+                board.userRun != null);
         if (ready) {
           return _PopoutChat(
             board: board,
@@ -92,17 +92,17 @@ class _PopoutChat extends StatefulWidget {
 }
 
 class _PopoutChatState extends State<_PopoutChat> {
-  late final PopoutSession _session = PopoutSession(
+  late final PopoutRun _run = PopoutRun(
     widget.popups,
-    person: widget.board.userSession?.personId,
+    person: widget.board.userRun?.personId,
   );
   MoneypennyChat? _chat;
 
   @override
   void initState() {
     super.initState();
-    _session.onAppearance = _look;
-    _session.state.then((state) {
+    _run.onAppearance = _look;
+    _run.state.then((state) {
       if (!mounted) return;
       _look(state.appearance);
       final chat = moneypennyChatFor(
@@ -111,7 +111,7 @@ class _PopoutChatState extends State<_PopoutChat> {
         conversation: Future.value(state.conversation),
         remember: false,
       );
-      _session.attach(chat, draft: state.draft);
+      _run.attach(chat, draft: state.draft);
       setState(() => _chat = chat);
     });
   }
@@ -126,7 +126,7 @@ class _PopoutChatState extends State<_PopoutChat> {
   @override
   void dispose() {
     _chat?.dispose();
-    _session.dispose();
+    _run.dispose();
     super.dispose();
   }
 
@@ -134,13 +134,13 @@ class _PopoutChatState extends State<_PopoutChat> {
   Widget build(BuildContext context) => OoActivity(
     onActivity: () {
       widget.board.markActive();
-      _session.activity();
+      _run.activity();
     },
     child: _body(),
   );
 
   Widget _body() => ValueListenableBuilder(
-    valueListenable: _session.openerClosed,
+    valueListenable: _run.openerClosed,
     builder: (context, gone, _) {
       if (gone) {
         return const _Note(
@@ -158,8 +158,8 @@ class _PopoutChatState extends State<_PopoutChat> {
             chat: chat,
             placement: ChatPlacement.away,
             inWindow: true,
-            onBringBack: _session.bringBack,
-            onHide: _session.hide,
+            onBringBack: _run.bringBack,
+            onHide: _run.hide,
           ),
         ),
       );

@@ -33,7 +33,7 @@ MissionBoard _board(FakeChannel channel, List<http.BaseRequest> requests) {
   );
   board.accessToken = 'user-token';
   board.loading = false;
-  board.userSession = const UserSessionSummary(
+  board.userRun = const UserRunSummary(
     personId: 'ana',
     moneypenny: true,
     name: 'ana',
@@ -47,18 +47,18 @@ MissionBoard _board(FakeChannel channel, List<http.BaseRequest> requests) {
       ),
     ],
   );
-  board.sessions = const [
-    SessionSummary(
+  board.runs = const [
+    RunSummary(
       operationId: 'G',
       missionId: 'g-failed',
-      sessionId: 's-g-failed',
+      runId: 's-g-failed',
       state: 'failed',
       sequence: 3,
     ),
-    SessionSummary(
+    RunSummary(
       operationId: 'G',
       missionId: 'g-working',
-      sessionId: 's-g-working',
+      runId: 's-g-working',
       state: 'working',
       sequence: 2,
     ),
@@ -264,8 +264,8 @@ void main() {
     final preferences = await SharedPreferences.getInstance();
     expect(preferences.getBool('oo.chat.ana.follow'), isTrue);
 
-    await _offer(tester, channel, {'page': 'sessions'});
-    expect(locations(reported).last, ('/sessions', false));
+    await _offer(tester, channel, {'page': 'runs'});
+    expect(locations(reported).last, ('/runs', false));
   });
 
   testWidgets('following from an expanded chat docks it so the page is in '

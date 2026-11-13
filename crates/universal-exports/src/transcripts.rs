@@ -1,23 +1,23 @@
-//! Reading what was said and done in a Session: Moneypenny's conversation log and each
-//! Session's harness context, as the Registry keeps them.
+//! Reading what was said and done in a Run: Moneypenny's conversation log and each
+//! Run's harness context, as the Registry keeps them.
 //!
-//! - `GET /v1/user/operations/{operation_id}/sessions/{session_id}/context`: a Mission's
-//!   Session's context, with `session.context` on the Operation; audited
-//!   `session.context.read`.
+//! - `GET /v1/user/operations/{operation_id}/runs/{run_id}/context`: a Mission's
+//!   Run's context, with `run.context` on the Operation; audited
+//!   `run.context.read`.
 //! - `GET /v1/user/assistant/conversations[?person=ID|?everyone=true]`: the person's own
 //!   conversations in the log, or another's (or everyone's) with `audit.read` and
-//!   `session.context` on `config:assistant`; audited `assistant.log.list`.
+//!   `run.context` on `config:assistant`; audited `assistant.log.list`.
 //! - `GET /v1/user/assistant/conversations/{id}/log`: a conversation's entries, each with the
 //!   turn that ran it.
 //! - `GET /v1/user/assistant/conversations/{id}/context`: the contexts of its harnesses'
-//!   Sessions.
+//!   Runs.
 //!
 //! A person reads their own conversations freely. Another person's needs both actions on
 //! `config:assistant`, and the read is audited (`assistant.log.read`,
 //! `assistant.context.read`) before anything is read. A conversation that is not there, and
 //! another person's to someone without the actions, answer the same `404`.
 
-use ai6::{AuditRecord, Person, SessionContext};
+use ai6::{AuditRecord, Person, RunContext};
 use ai6_diptel::OperationId;
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -33,13 +33,13 @@ use crate::{
 
 /// Where the actions that read another person's conversations are held.
 const ASSISTANT_RESOURCE: &str = "config:assistant";
-/// Reads what an agent was given and did in a Session.
-pub(crate) const SESSION_CONTEXT: &str = "session.context";
-/// Reads the audit trail; with [`SESSION_CONTEXT`], another person's conversations.
+/// Reads what an agent was given and did in a Run.
+pub(crate) const RUN_CONTEXT: &str = "run.context";
+/// Reads the audit trail; with [`RUN_CONTEXT`], another person's conversations.
 const AUDIT_READ: &str = "audit.read";
 
 /// A context as the app reads it: its record, and its content as kept.
-fn context_json(context: &SessionContext) -> Value {
+fn context_json(context: &RunContext) -> Value {
     let mut shown = serde_json::to_value(context).unwrap_or_else(|_| json!({}));
     shown["bytes"] = Value::from(context.content.len());
     shown["content"] = Value::from(context.content.as_str());
@@ -83,9 +83,9 @@ async fn audit(
 }
 
 /// Whether `person` may read another person's conversations: `audit.read` and
-/// `session.context` on `config:assistant`.
+/// `run.context` on `config:assistant`.
 async fn reads_others(gateway: &Gateway, person: &Person) -> Result<(), ApiError> {
-    for action in [AUDIT_READ, SESSION_CONTEXT] {
+    for action in [AUDIT_READ, RUN_CONTEXT] {
         authorize_resource_action(
             gateway,
             person.clone(),
@@ -97,18 +97,18 @@ async fn reads_others(gateway: &Gateway, person: &Person) -> Result<(), ApiError
     Ok(())
 }
 
-/// `GET /v1/user/operations/{operation_id}/sessions/{session_id}/context`.
+/// `GET /v1/user/operations/{operation_id}/runs/{run_id}/context`.
 pub(crate) async fn mission_context(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
-    Path((operation_id, session_id)): Path<(String, String)>,
+    Path((operation_id, run_id)): Path<(String, String)>,
 ) -> Result<Json<Value>, ApiError> {
     let person = resolve_user(&gateway, bearer(&headers)?).await?;
     let operation = OperationId::new(operation_id).map_err(|_| ApiError::bad_request())?;
-    authorize_operation_action(&gateway, person.clone(), &operation, SESSION_CONTEXT).await?;
+    authorize_operation_action(&gateway, person.clone(), &operation, RUN_CONTEXT).await?;
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
-    let wanted = session_id.clone();
-    let context = tokio::task::spawn_blocking(move || registry.session_context(&wanted))
+    let wanted = run_id.clone();
+    let context = tokio::task::spawn_blocking(move || registry.run_context(&wanted))
         .await
         .map_err(|_| ApiError::internal())?
         .map_err(|_| ApiError::internal())?
@@ -121,10 +121,10 @@ pub(crate) async fn mission_context(
     audit(
         &gateway,
         &person,
-        "session.context.read",
+        "run.context.read",
         Some(operation.as_str()),
         format!("mission:{mission}"),
-        session_id,
+        run_id,
     )
     .await?;
     Ok(Json(context_json(&context)))

@@ -6,18 +6,18 @@ daemon validates the brief, resolves its Operation and Agent policy, and schedul
 Mission at an eligible Station.
 
 ```text
-source ─► brief ─► Registry ─► AI6 Station ─► AgentHandler ─► provider Session
+source ─► brief ─► Registry ─► AI6 Station ─► AgentHandler ─► provider Run
                                                 │
                                                 └─► outcome and DipTels to Universal Exports
 ```
 
-## Mission and Session identities
+## Mission and Run identities
 
-A **Mission ID** identifies one unit of work and may group multiple agent Sessions. It is a
+A **Mission ID** identifies one unit of work and may group multiple agent Runs. It is a
 **UID**, a UUIDv7 in lower-case text (`019a1b2c-3d4e-7f00-8123-456789abcdef`), minted where the
-brief enters the Registry. It is the Registry's key, and every relation uses it: Session
+brief enters the Registry. It is the Registry's key, and every relation uses it: Run
 records, Cables, reviews, linked issues, green ink, memories, audit records, the timeline,
-controls and routes. It never changes. A **Session ID** comes from the provider and remains
+controls and routes. It never changes. A **Run ID** comes from the provider and remains
 stable when AI6 resumes that same agent operation.
 
 What people see is the Mission's **handle**, which AI6 gives where the brief enters, so a person
@@ -75,10 +75,10 @@ compared without case, and answers with its UID (`mission_id`) and its current `
 is written: the branch of its safe house, a tracker comment, a report. A rename does not rewrite
 them.
 
-A **run** is one Session record of a Mission. It has a UID of its own, and a handle
+A **run** is one Run record of a Mission. It has a UID of its own, and a handle
 `<mission handle>.<attempt>` from the handle the Mission had when the run opened: `ai6-42.1`,
 `ai6-42.2`. A Mission has one record per attempt. The run keeps its handle through a resume and
-a rename, and the provider's Session ID stays apart from it, shown as it always was.
+a rename, and the provider's Run ID stays apart from it, shown as it always was.
 
 A **name** sits beside the handle and is no part of it: a person's title, or an issue's title on
 one line and cut to `[registry.limits.sources] name_bytes`. Whoever can open an issue writes that
@@ -108,7 +108,7 @@ curl -f -X POST "$UNEX_URL/v1/user/operations/G/missions" \
 
 Outer Office's Operations view offers the same action. The AI6 daemon claims the brief
 from the shared file-backed Registry, then resolves the Agent role, Operation
-cover, Station capacity and provider handler before it starts a Session.
+cover, Station capacity and provider handler before it starts a Run.
 
 Work on a ticket is numbered by the ticket:
 
@@ -156,10 +156,10 @@ its Station:
 
 | Action | Accepted when the Mission is | Effect |
 | --- | --- | --- |
-| `cancel` | any state | The live Session is interrupted and closed; the Mission is `abandoned` and its safe house is finished with the work kept. A Mission no Station has taken yet is withdrawn instead (below), and one that already ended stays as it is and answers `applied` with its state. |
+| `cancel` | any state | The live Run is interrupted and closed; the Mission is `abandoned` and its safe house is finished with the work kept. A Mission no Station has taken yet is withdrawn instead (below), and one that already ended stays as it is and answers `applied` with its state. |
 | `retry` | stalled, done, failed, blown or abandoned | The Mission is `queued` again as a new attempt, for `agent` when one is named (configured for the Operation, qualified for the Mission's role and not quarantined), else for the Agent the roster gives it now; it continues in the same safe house. |
-| `resume` | parked, blocked or stalled | The Mission resumes now on its provider Session, with `message` sent to the Agent, or a line telling it to carry on: a harness started again does nothing until it reads one. |
-| `interrupt` | working | The Session's current turn stops, however the harness reports that; the Mission waits, `blocked` with reason `interrupted`, until it is resumed. |
+| `resume` | parked, blocked or stalled | The Mission resumes now on its provider Run, with `message` sent to the Agent, or a line telling it to carry on: a harness started again does nothing until it reads one. |
+| `interrupt` | working | The Run's current turn stops, however the harness reports that; the Mission waits, `blocked` with reason `interrupted`, until it is resumed. |
 
 There is no pause: providers have none. A quarantined Mission is released by an operator
 (`ai6 quarantine release`), not retried.
@@ -171,25 +171,25 @@ curl -f -X POST "$UNEX_URL/v1/user/operations/G/missions/mission-007/actions" \
   -d '{"action":"resume","message":"The review is unblocked; carry on.","idempotency_key":"resume-1"}'
 ```
 
-A Mission Universal Exports does not know under the Operation in the path (no Session record,
+A Mission Universal Exports does not know under the Operation in the path (no Run record,
 brief lease, brief in any state or board entry of that Operation), or that any of them puts in
 another Operation, is refused `404`, before anything is audited. Otherwise
 Universal Exports audits the request (`mission.cancel`, `mission.retry`, `mission.resume`,
-`session.interrupt`) and queues the control for the Station holding the Mission's latest
-Session record; failing that, the Station holding its brief's lease; failing that, the
+`run.interrupt`) and queues the control for the Station holding the Mission's latest
+Run record; failing that, the Station holding its brief's lease; failing that, the
 Headquarters Station. A Station that has gone dark is passed over. That Station is the
 authority: it checks that the Mission is in its book under that Operation, that it still
-holds the Session's lease with its fencing token and, when the request named a
-`session_id`, that the Session is still the Mission's current one, then applies the
+holds the Run's lease with its fencing token and, when the request named a
+`run_id`, that the Run is still the Mission's current one, then applies the
 control and reports `applied` or `rejected` with the Mission's state and a reason. A cancel of a
 Mission no book holds, whose brief has ended, is `applied` with the brief's state; with no Station to
 ask, Universal Exports answers that itself. Follow
 the control with `GET .../actions/{control_id}`; one no Station acts on within two minutes
 is `expired`. Repeating a request with the same `idempotency_key` returns the first one.
 
-`ai6ctl mission cancel|retry|resume` and `ai6ctl session interrupt` do the same and wait for
+`ai6ctl mission cancel|retry|resume` and `ai6ctl run interrupt` do the same and wait for
 the outcome; Outer Office offers them in each Mission card's menu, with the reason any action
-is unavailable. Closing a Session view never sends a control.
+is unavailable. Closing a Run view never sends a control.
 
 A retry that names no Agent chooses one again from the roster as it is now, as placement would:
 the best posted Agent qualified for the Mission's role and its brief's tags, not quarantined, held
@@ -219,11 +219,11 @@ and a `cancel` of such a Mission withdraws it with no note and answers `applied`
 
 Universal Exports records when a cancel of a claimed brief was first asked for. When the Station
 holding it has not finished the brief `[registry.limits.briefs] cancel_settle_after` (300 s) later,
-because its Session is wedged, the control never reached it, or it went to another Station, the
+because its Run is wedged, the control never reached it, or it went to another Station, the
 Headquarters Station files the brief as failed, "cancelled; the Station did not confirm", with the
-Station and the Mission's Session at the time, and releases its lease. The Station holding the
+Station and the Mission's Run at the time, and releases its lease. The Station holding the
 Mission, finding at its next check-in that its brief was settled so while it is still on that
-Session, stops the Mission; one retried since runs on.
+Run, stops the Mission; one retried since runs on.
 
 ### A brief that settles before its Mission starts
 
@@ -235,8 +235,8 @@ once (`mission`, `dropped`). A retry an operator or a review asks for after the 
 still runs.
 
 A Mission that was working when the Station stopped is checked the same way at start: a brief that
-ended or went elsewhere ends the Mission without resuming it, and one whose Session record is gone,
-ended, lost or another Station's has its attempt handed back as "Session lost at restart" under the
+ended or went elsewhere ends the Mission without resuming it, and one whose Run record is gone,
+ended, lost or another Station's has its attempt handed back as "Run lost at restart" under the
 Operation's `on_lost`.
 
 A start that cannot succeed whatever is tried fails the Mission at once with that reason, and its
@@ -244,7 +244,7 @@ brief with it: an Agent not posted to the Operation, an Operation with no checko
 house provider that is not there, or a safe house that cannot be opened. A start that fails any other
 way is tried again after `[scheduler] retry_backoff` (5 seconds), each further failure in a row
 doubling the wait up to `[scheduler] retry_backoff_max` (600 seconds); neither has a floor. A failed
-start leaves no Session record.
+start leaves no Run record.
 
 If a claimed Mission's Station no longer answers, `ai6ctl mission settle HANDLE --reason TEXT` files
 its brief as failed with that reason (needs `mission.control`, audited). A Station that answers is
@@ -255,8 +255,8 @@ asked with `mission cancel`.
 An Agent saying it finished is not the work being done, so what it said is kept and a person can
 record what they found.
 
-**The final report.** The message an Agent ends its turn with is filed against its Session, up to
-`[registry.limits.sessions] final_report_bytes` (64 KiB) with a cut marked, and goes into the Mission's
+**The final report.** The message an Agent ends its turn with is filed against its Run, up to
+`[registry.limits.runs] final_report_bytes` (64 KiB) with a cut marked, and goes into the Mission's
 outcome as `final_report` when its brief is filed. A later turn replaces it. Everyone who may read the
 Mission reads it, in `GET /v1/operations/{operation_id}/missions/{mission_id}` (each attempt's
 `final_report`; the list of Missions leaves it out), in `ai6ctl mission ID` and in the Outcome section
@@ -283,7 +283,7 @@ ai6ctl missions verdict "$MISSION" disputed --note "not on main"
 | `failed-verification` | Stays `done`, and shows it | Becomes `failed` | Disputed: a failure of that Agent |
 
 A later verdict replaces the earlier one while the attempt stands `done` or `held`. The verdict is kept
-on the attempt's Session record, so a retry starts clean and the failure stays with the Agent that ran
+on the attempt's Run record, so a retry starts clean and the failure stays with the Agent that ran
 it. M's holds and proposals read the same scorecard. It is audited as `mission.verdict` (target
 `MISSION VERDICT`, never the note) and goes on the timeline (kind `verdict`, action the verdict). The
 Mission's page and the board's attempts show it.
@@ -297,7 +297,7 @@ policy = "..."
 require_approval_before_done = true          # default false
 ```
 
-holds its Missions' `done`: a Session that ends done with no green ink request decided in that attempt,
+holds its Missions' `done`: a Run that ends done with no green ink request decided in that attempt,
 approved or refused, by a person or a class authorisation, leaves the Mission `held` with the reason
 `no approval was decided` instead. A request that expired was not decided. What a brief or a prompt
 says it will do cannot be read, so this is what can be enforced: the role that must ask, and did not.
@@ -305,13 +305,13 @@ says it will do cannot be read, so this is what can be enforced: the role that m
 A held Mission has no harness and its safe house is finished with the work kept. It holds no place in
 the Station's capacity, keeps its lease and brief, and waits for a person: a verdict settles it within a
 scheduler pass, and its brief is then filed with the outcome and the verdict. It cannot be resumed or
-retried while held; `cancel` abandons it. If its Station is lost, its Session is lost like any other's,
+retried while held; `cancel` abandons it. If its Station is lost, its Run is lost like any other's,
 and [Recovery](#recovery) decides. Review Missions are never held. It counts as waiting on a person on
 the scorecard until the verdict.
 
 ## Verifying
 
-A Session saying it is done does not make its Mission done. A Mission of an Operation whose Session ends
+A Run saying it is done does not make its Mission done. A Mission of an Operation whose Run ends
 done is `verifying`: its work is kept, no harness runs, its brief stays claimed, and it holds no place in
 the Station's capacity. It leaves `verifying` only by a decision, and never by itself: not when it is
 old, and not when it declares nothing to check. Review and panel Missions, Head of Station rounds and
@@ -349,7 +349,7 @@ probe reports `found`, `missing` (the place was read and the thing is not there,
 (this Station cannot look: the work is on a Theater it does not reach, or no tracker item is linked) or
 `failed` (the look failed or ran out of time, so nothing is known). Each has its timeout in the Station's
 `[probes]` table (`git_timeout`, `http_timeout`, `tracker_timeout`, `file_timeout`), and what each
-found is kept on the attempt as `evidence`, oldest first, up to `[registry.limits.sessions]
+found is kept on the attempt as `evidence`, oldest first, up to `[registry.limits.runs]
 evidence_entries`. A tracker probe works where the Station holds the tracker's credentials, and an
 `artifact` probe makes a request from the Station to the address the role or brief names.
 
@@ -375,7 +375,7 @@ Its Station then settles the Mission within a scheduler pass:
 | --- | --- | --- |
 | `done` | Becomes `done` | Counts as done on the scorecard |
 | `failed` | Becomes `failed` | Disputed: a failure of that Agent |
-| `redispatch` | Is queued as attempt N+1 of the same Mission, for the best qualified Agent, in the safe house the last attempt kept, with a new provider Session told the reason and the amendment after its brief | Disputed: a failure of the Agent that ran it |
+| `redispatch` | Is queued as attempt N+1 of the same Mission, for the best qualified Agent, in the safe house the last attempt kept, with a new provider Run told the reason and the amendment after its brief | Disputed: a failure of the Agent that ran it |
 
 The watch's decision takes this same path: it is audited (`mission.verify`, by `watch:operation:CODENAME`),
 recorded as the attempt's verdict, put on the timeline and counted on the scorecard, and a redispatch is a
@@ -394,7 +394,7 @@ Before an irreversible step (a push to a protected branch or tag, a merge, a rel
 deletion, a change of clearance) an Agent asks for green ink: a person's recorded approval
 of exactly that step. (M files the `clearance` requests itself, to promote an Agent; see
 [Track record and promotion](agents.md#track-record-and-promotion).) It calls
-`request_approval` on its Session's AI6 tool endpoint with
+`request_approval` on its Run's AI6 tool endpoint with
 the `kind` of step, its `target` (for a push, `REMOTE:REF` such as
 `origin:refs/heads/main`), a `reason` and a retry key, and optionally `links`: up to 8
 `{label, url}` pairs naming what the request is about, each an `https` address with no credentials
@@ -409,14 +409,14 @@ the `kind` of step, its `target` (for a push, `REMOTE:REF` such as
 
 While a request is pending the Mission's [Watchdog](watchdog.md) is paused: waiting for a
 person is not a stall, and terminal output or an operator message does not end the wait.
-If the Agent's turn ends meanwhile, the Session closes and the Mission stays blocked.
+If the Agent's turn ends meanwhile, the Run closes and the Mission stays blocked.
 
 An operator with `approval.decide` on the Operation sees the waiting steps on Outer Office's
 Green Ink page, or from `GET /v1/user/operations/{operation_id}/green-ink`,
 and approves one for a chosen time (one hour unless chosen) or rejects it with a reason.
 The signer is always the signed-in person. The Station holding the Mission tells the Agent
-the outcome, the step and the expiry (in a message to its live Session, or by resuming the
-Session with it), and the Mission is `working` again once nothing it asked for is pending.
+the outcome, the step and the expiry (in a message to its live Run, or by resuming the
+Run with it), and the Mission is `working` again once nothing it asked for is pending.
 
 The Green Ink page renders a reason as Markdown and links what it names to the Operation's
 [Sources](operations.md#sources): a Jira key of a configured project, `#12` or `owner/name#12`, a commit
@@ -436,7 +436,7 @@ curl -f -X POST "$UNEX_URL/v1/user/operations/G/green-ink/$REQUEST_ID/approve" \
 A **class authorisation** approves a kind of step in advance: step kinds, a target glob
 (`origin:refs/heads/ai6/*`), the Agents (`*` for any) or roles it covers, the lowest
 clearance, an optional use limit and an expiry. A matching request is approved at once and
-the use is counted and audited as `class_authorization.used` by `class:<id>`. A Session that
+the use is counted and audited as `class_authorization.used` by `class:<id>`. A Run that
 has read untrusted input never uses one under the default exposure policy (the `approvals`
 restriction, see [Exposure](medical.md#exposure)). Operators with `approval.class` grant,
 list and revoke them from `/v1/user/operations/{operation_id}/class-authorizations` or
@@ -444,16 +444,16 @@ Outer Office's Class authorisations tab.
 
 A class authorisation of kind `proposal` lets M promote Agents' Mission proposals without
 asking: its target pattern is matched against the proposal's title, its Agents against the
-proposing Agent and its roles against the role the proposing Session's own Mission was given
+proposing Agent and its roles against the role the proposing Run's own Mission was given
 (recorded with the proposal, never the proposal's word for it). A proposal that asks for a
 role must ask for that same role or one the class authorisation lists in `proposed_roles`.
 Headquarters vets each pending proposal (the [vetting rules](#vetting-and-held-briefs)
 other than the hourly rate, then the Chief of Staff's review when the Operation has one) and
 shows the result in the proposal inbox. A proposal whose vetting found nothing is promoted
 when such a class authorisation covers it, once it is 30 seconds old (so the proposing
-Session's last tool results have reached the Registry) and only if its Session had not read
+Run's last tool results have reached the Registry) and only if its Run had not read
 untrusted input: neither the proposal's own mark nor, under an Operation that restricts
-proposals, the parent Mission's Session records may show an exposure. One use is counted
+proposals, the parent Mission's Run records may show an exposure. One use is counted
 and the approval is audited as `mission.proposal.approved` by `class:<id>`. Every other
 proposal waits for an operator, as before; none is runnable before it is promoted. A
 promotion, by a class authorisation or an operator, clears the promoted brief in the same
@@ -503,8 +503,8 @@ kind needs. Only an expired, undecided request can be re-armed: one still waitin
 decided is `409`.
 
 The Station holding the Mission takes it up within a scheduler pass. A working Mission is `blocked`
-with reason `green-ink` again, and a live Session is told it waits again, having heard it expired. A
-Mission still waiting stays so, with no resume. One whose Session ended and which went on to end has
+with reason `green-ink` again, and a live Run is told it waits again, having heard it expired. A
+Mission still waiting stays so, with no resume. One whose Run ended and which went on to end has
 nobody to tell: the approval is still recorded, and a retry of the Mission can use it.
 
 ### What holds a step
@@ -553,7 +553,7 @@ arguments built at run time, `gh` aliases and other programs that push are not s
 approval is not tied to one commit.
 
 The **credential** is the guarantee. A loadout secret marked `green_ink` (say, the token
-that can push to `main`) reaches a Session only while the Mission holds a live approval of a
+that can push to `main`) reaches a Run only while the Mission holds a live approval of a
 kind and target it names, once per approval on any Station, and its lease is revoked as soon
 as the approval expires or is revoked (see [Credentials](agents.md#credentials)). Credentials already on the
 Theater are outside that, which is why the Station reports them as weakenings.
@@ -565,43 +565,43 @@ from `GET /v1/user/operations/{operation_id}/timeline` or Outer Office's Timelin
 
 | Kind | Recorded by | What it says |
 | --- | --- | --- |
-| `lifecycle` | Universal Exports | A Mission's state changed, on which Session and Station. |
+| `lifecycle` | Universal Exports | A Mission's state changed, on which Run and Station. |
 | `control` | Universal Exports | A cancel, retry, resume or interrupt was applied, rejected or expired, and the state after. |
 | `cable` | the sending Station | An Agent sent a Cable: sender, scope and recipient count. |
-| `sleeper` | the Registry, the Stations | A Sleeper was authorized or revoked, and by whom; a window was `skipped` and why, or fired `late`; an attempt `started` or `resumed` its Session, `attempt-failed` or was `superseded`. |
+| `sleeper` | the Registry, the Stations | A Sleeper was authorized or revoked, and by whom; a window was `skipped` and why, or fired `late`; an attempt `started` or `resumed` its Run, `attempt-failed` or was `superseded`. |
 | `green_ink` | the Station | An Agent asked for green ink (`requested`), or was told the decision (`approved`, `rejected`, `expired`): the step, its target and the request, and who signed. |
 | `audit` | Universal Exports | Mission requests and controls, proposal decisions, Agent role, quarantine and Station settings changes. |
 
-Each item names its Station, Mission and Session where it has one, so the view filters by
+Each item names its Station, Mission and Run where it has one, so the view filters by
 Mission (`?mission=`). It never holds a prompt, a resume message, a Cable's body or target,
 terminal bytes or a secret, and a Cable shows only in its sender's Operation; live terminal
-output stays on the Session's own stream. Pages hold at most 200 items and follow an opaque
+output stays on the Run's own stream. Pages hold at most 200 items and follow an opaque
 `cursor`; activity arriving meanwhile goes on top without shifting older pages. The
 Registry keeps the newest 10,000 activity events.
 
-## Session context
+## Run context
 
-When a Mission's Session ends, the Station files what the agent was given and did, as its
-harness kept it, in the Registry: the Session's **context**. It asks the Session's handler where
-its harness keeps the Session (`AgentHandler::session_record`) and reads that file: Claude Code's
-transcript (`claude-code-jsonl`, `projects/*/<session>.jsonl` under `CLAUDE_CONFIG_DIR` or
-`~/.claude`), Codex's rollout (`codex-rollout-jsonl`, `sessions/*/*/*/rollout-*-<thread>.jsonl`
+When a Mission's Run ends, the Station files what the agent was given and did, as its
+harness kept it, in the Registry: the Run's **context**. It asks the Run's handler where
+its harness keeps the Run (`AgentHandler::run_record`) and reads that file: Claude Code's
+transcript (`claude-code-jsonl`, `projects/*/<run>.jsonl` under `CLAUDE_CONFIG_DIR` or
+`~/.claude`), Codex's rollout (`codex-rollout-jsonl`, `runs/*/*/*/rollout-*-<thread>.jsonl`
 under `CODEX_HOME` or `~/.codex`), or the Antigravity CLI's transcript (`antigravity-jsonl`,
 `~/.gemini/antigravity-cli/brain/<conversation>/transcript.jsonl`). A handler that names none, such
 as `acp`, a file that cannot be read, and a harness a runner supervises on another host get the
 events the Station saw instead (`ai6-events-jsonl`, one `{at, kind, text, tools, usage, data}` per
-line), and the record says so (`source`: `harness` or `events`). Moneypenny's Sessions are filed
+line), and the record says so (`source`: `harness` or `events`). Moneypenny's Runs are filed
 the same way after each of her turns and when her harness closes.
 
 A context keeps its newest 8 MiB, from a line start, and records how large it was (`cut_from`);
 the Registry keeps 2,000 of them, the oldest filed going first (`[registry.limits.contexts]`
-`context_bytes`, `records`). One is filed again in place of the last for the same Session.
+`context_bytes`, `records`). One is filed again in place of the last for the same Run.
 
-`GET /v1/user/operations/{operation_id}/sessions/{session_id}/context` answers `{session, owner,
-station, handler, format, source, filed_at, cut_from?, bytes, content}` with `session.context` on
-the Operation, and each read is audited (`session.context.read`, resource `mission:<uid>`). A
-Session of another Operation, or with no context, answers `404`. Outer Office shows it in the
-Context tab of a Session's page: the turns, each tool call and its result folded, and
+`GET /v1/user/operations/{operation_id}/runs/{run_id}/context` answers `{run, owner,
+station, handler, format, source, filed_at, cut_from?, bytes, content}` with `run.context` on
+the Operation, and each read is audited (`run.context.read`, resource `mission:<uid>`). A
+Run of another Operation, or with no context, answers `404`. Outer Office shows it in the
+Context tab of a Run's page: the turns, each tool call and its result folded, and
 **Download** for the file as kept.
 
 ## File-backed intake
@@ -626,7 +626,7 @@ brief record (in a directory Registry, `provenance/KEY.json`; in a database, a c
 | `operator` | the person, from the gateway's Directory | | Universal Exports (`POST .../missions`) |
 | `source` | the Source provider (`github`) | the item; `item_url` its link | the Headquarters Station's poll |
 | `sleeper` | the sleeper's name | its definition's fingerprint | the Headquarters Station |
-| `proposal` | the proposing Agent | its provider Session | the approval (`universal-exports`) |
+| `proposal` | the proposing Agent | its provider Run | the approval (`universal-exports`) |
 | `review` | nobody | the review's identity | the Headquarters Station, for a [Chief of Staff review](agents.md#chief-of-staff) |
 | `registry_drop` | nobody | | the Station that took the brief |
 
@@ -637,7 +637,7 @@ it was accepted, its Operation, assignment, Stations, link, data or text, loses 
 a rename does not. When a brief finishes, its provenance is spent: it moves
 beside the outcome (`STATE/KEY.provenance`, or the `finished_provenance` column), where only
 the CX report reads it, so the same record queued again is a `registry_drop`. A brief found in the queue with none, written there by hand or
-by an integration that did not go through AI6, is accepted as `registry_drop`: its Sessions
+by an integration that did not go through AI6, is accepted as `registry_drop`: its Runs
 start exposed (`brief:registry_drop`, see [Medical](medical.md#exposure)), and a finished
 brief named `source:PROVIDER` is reported to that Source only when it has a `source`
 provenance for it naming that provider and item, and its Operation is the one its Source
@@ -645,7 +645,7 @@ data names. The Mission record, the gateway's Mission detail (`brief.provenance`
 Outer Office's Mission brief page show the origin. Anything that can write the Registry's own
 records can still forge them: the queue is the integration point this separates.
 
-Distributed Registry placement is not implemented. A Session runs on its Station's host,
+Distributed Registry placement is not implemented. A Run runs on its Station's host,
 or, for a Theater reached only through a transport, on the Station in remote-hands mode
 (see [Theaters](theaters.md)).
 
@@ -654,18 +654,18 @@ or, for a Theater reached only through a transport, on the Station in remote-han
 Work should survive a refused quota, a lost lease and a Station that goes dark (the
 tradecraft word is *extraction*).
 
-### Session records and fencing
+### Run records and fencing
 
-Besides the Station's own `missions.json`, every Session has a record in the shared
-Registry (`sessions/`). It holds AI6's Session ID, the run's UID and its handle `<mission handle>.<attempt>` (distinct from the provider's), the
-provider Session ID, the Station that supervises it, its Theater, the attempt number and the
-ID of the Session it replaced, its exposure to untrusted input, its status (`active`,
+Besides the Station's own `missions.json`, every Run has a record in the shared
+Registry (`runs/`). It holds AI6's Run ID, the run's UID and its handle `<mission handle>.<attempt>` (distinct from the provider's), the
+provider ID, the Station that supervises it, its Theater, the attempt number and the
+ID of the Run it replaced, its exposure to untrusted input, its status (`active`,
 `parked`, `ended` or `lost`), how its harness was launched (handler, terminal, working
 directory, model, effort, mode and the runner's key), the last 20 things it was seen doing
 and its last safe-house checkpoint. Another Station that opens the same Registry sees the
 same records.
 
-A Station acts on a Session only while it holds the record's **lease**, and every write
+A Station acts on a Run only while it holds the record's **lease**, and every write
 presents the **fencing token** the lease was granted with. The token comes from the
 Headquarters election term and always grows past the previous holder's, so a Station that
 was paused, lost its lease and woke up again is refused: it closes its harness, abandons
@@ -677,20 +677,20 @@ the next time it resumes.
 ### Station loss: adoption
 
 When a Station goes dark its brief leases stop being renewed. Once a brief's lease and its
-Session's lease have both run out, the Headquarters Station decides what happens to the
+Run's lease have both run out, the Headquarters Station decides what happens to the
 Mission (a brief whose Mission never started is simply queued again):
 
 - **Adopted.** The harness ran on a Theater's [field runner](theaters.md#the-field-runner),
   so it is still running. The Headquarters hands the brief's lease (same claim, same
-  attempt) to a live Station that reaches that runner, placed as a new Session would be
-  but only on that Theater and never on the dark Station. That Station takes the Session's
+  attempt) to a live Station that reaches that runner, placed as a new Run would be
+  but only on that Theater and never on the dark Station. That Station takes the Run's
   lease with a larger fencing token, records the Mission as the dark Station launched it
-  and re-attaches to the runner Session, receiving every event the dark Station did not
-  take. Nothing is launched twice, and a parked Session resumes when its quota resets.
+  and re-attaches to the runner Run, receiving every event the dark Station did not
+  take. Nothing is launched twice, and a parked Run resumes when its quota resets.
 - **Lost.** The harness ran on the dark Station's own host (Theater `local`), or with no
   runner, so it ended with the Station. Its record is marked `lost` with the reason, its
   fencing token moves on so the Station is refused if it comes back, and the brief is
-  queued again for a [new attempt](#lost-sessions-a-new-attempt-with-a-hand-off). An
+  queued again for a [new attempt](#lost-runs-a-new-attempt-with-a-hand-off). An
   Operation with `on_lost = "fail"` files the brief as lost instead. A brief that has
   already been tried three times is filed as lost either way.
 
@@ -699,18 +699,18 @@ Station through its private API lives only in that Station's book.
 
 ### Runner loss: the Station lives
 
-A Station that cannot reach a Session's runner keeps waiting, since a dropped link costs
+A Station that cannot reach a Run's runner keeps waiting, since a dropped link costs
 only time: the runner spools what it misses. It does not wait forever. Once the runner has
 been out of reach for the Operation's `lost_after_secs` (45 seconds, three check-ins, unless
 set), the Station probes it once more through the Theater's transport. If the runner answers,
 the Station carries on reading where it stopped and the wait starts over. If the runner is
-gone, no longer has the Session, or the Theater cannot be reached, the Station gives the
-Session up:
+gone, no longer has the Run, or the Theater cannot be reached, the Station gives the
+Run up:
 
-- it stops reading the harness and lets its Session lease lapse, so the record is marked
+- it stops reading the harness and lets its Run lease lapse, so the record is marked
   `lost` with the reason (the last events it saw are kept for the hand-off);
 - it hands the brief back, which the Registry queues again as a [new
-  attempt](#lost-sessions-a-new-attempt-with-a-hand-off), or files when the Operation says
+  attempt](#lost-runs-a-new-attempt-with-a-hand-off), or files when the Operation says
   `on_lost = "fail"`; the Mission is `abandoned` in this Station's book, or `failed` when it
   came from no brief;
 - the Mission's events end with a `lost` event naming the reason.
@@ -720,19 +720,19 @@ which the Station handles the same way at once. A harness the [detached
 wrapper](theaters.md#the-detached-wrapper) runs without a runner is treated alike: out of reach
 for the grace, or quiet for it while its process is gone with no exit recorded, it is lost.
 
-The same holds after a restart or an adoption. A Station that cannot re-attach to a Session
+The same holds after a restart or an adoption. A Station that cannot re-attach to a Run
 tries again after 5 seconds, then 10, 20 and 40, and every minute after that; once its tries
 have failed for `lost_after_secs`, it probes the runner (or the Theater) and gives the
-Session up the same way when the probe fails too.
+Run up the same way when the probe fails too.
 
 When the next attempt runs on the Theater the lost one ran on, its Station first ends the
 lost harness if the runner still has it, so the two never work side by side.
 
-### Lost Sessions: a new attempt with a hand-off
+### Lost Runs: a new attempt with a hand-off
 
 The Station that takes the brief starts the Mission as attempt N+1, linked to the lost
-Session as its predecessor, with new AI6 and provider Session IDs (provider transcripts stay
-on the Theater that held them, so the provider Session cannot be resumed). The Agent is told
+Run as its predecessor, with new AI6 and provider IDs (provider transcripts stay
+on the Theater that held them, so the provider Run cannot be resumed). The Agent is told
 about the attempt it continues:
 
 ```text
@@ -747,7 +747,7 @@ What it was last seen doing, oldest first:
 ```
 
 The work survives only if it was **checkpointed**. With `workspace.settings.checkpoint_remote` set
-(see [Operations](operations.md#workspace)), the Station saves each running Session's safe
+(see [Operations](operations.md#workspace)), the Station saves each running Run's safe
 house every `checkpoint_secs`: one commit on top of the branch's own commits that also
 holds the uncommitted changes, pushed to the Mission's branch on that remote, without
 touching the Agent's worktree, staging area or `HEAD`. The commit follows the Operation's
@@ -778,7 +778,7 @@ parked by a provider that gave no reset time waits the wait the refusal states, 
 `retry-after`, or words such as "try again in 90 seconds"), as it is; a time already past, or none at all,
 waits `limit_fallback_secs` (30 minutes by default) instead of retrying in a loop. The reset time wins over the
 stated wait, and the stated wait over the fallback. The safe house
-stays in place. When the time comes the daemon resumes the **same provider Session** and
+stays in place. When the time comes the daemon resumes the **same provider Run** and
 tells it to carry on; the Mission returns to `working`. Parking survives a daemon restart,
 and an operator can resume a parked Mission early with the ordinary resume request.
 
@@ -789,48 +789,48 @@ pass, hours before the time they were parked to; a reset the provider moved late
 
 An Operation chooses the response with `on_limit` ([settings](operations.md#provider-limits)):
 
-- `rotate` (the default, also for a Mission outside any Operation) first marks the Session's [pool account](agents.md#account-pools)
+- `rotate` (the default, also for a Mission outside any Operation) first marks the Run's [pool account](agents.md#account-pools)
   limited until the reset and frees it. When another account of the Agent's pools has
-  headroom, a Session whose history goes with it (Claude Code on an environment
+  headroom, a Run whose history goes with it (Claude Code on an environment
   credential, moving to another environment credential) is parked only until the next
-  scheduler pass and resumed, same provider Session, on that account; otherwise (a Codex or
-  `config-dir` Session, or no environment account with headroom) it is queued again as a new
+  scheduler pass and resumed, same provider Run, on that account; otherwise (a Codex or
+  `config-dir` Run, or no environment account with headroom) it is queued again as a new
   attempt,
   told it continues an earlier one, and starts on the other account. The timeline records
-  `account` / `limited` with the account, the reset and what happens next. A Session with no
+  `account` / `limited` with the account, the reset and what happens next. A Run with no
   pool account, or whose pools have no account with headroom, parks as for `wait`.
 - `wait` parks as above.
 - `backup` posts the next qualified Agent, as [Organization](organization.md) describes,
   among those whose handler differs from the limited one. The Mission is queued again for
-  that Agent as a **new attempt** (a new Session record whose predecessor is the limited
-  one), starting a new provider Session in the same safe house with a note that an earlier
+  that Agent as a **new attempt** (a new Run record whose predecessor is the limited
+  one), starting a new provider Run in the same safe house with a note that an earlier
   attempt stopped at a limit. With no such Agent available it parks instead.
 
-The Outer Office board shows `parked` as a Session state, and the stream of Mission events
+The Outer Office board shows `parked` as a Run state, and the stream of Mission events
 carries the `limit` event.
 
 The Headquarters Station also keeps a brief **queued** while every account of the pools its
-Agent would draw from is limited or at its `max_concurrent`, instead of starting a Session
+Agent would draw from is limited or at its `max_concurrent`, instead of starting a Run
 that cannot run. The reason ("no account with headroom in pools …", with the first reset
 when every account is limited) is recorded once on the Operation's timeline (`account` /
 `waiting`), and the brief is placed on the first pass after an account frees up.
 Outer Office's **Account pools** view and `ai6ctl pools --operation <id>` show each account's
-Sessions, quota used, limit and tokens today (`pool.read`).
+Runs, quota used, limit and tokens today (`pool.read`).
 
 ### Budgets, exposure and quarantine
 
 [Medical](medical.md) adds three things to a Mission:
 
-- **Usage.** Tokens and cost reported by the provider are recorded per Session and Mission
+- **Usage.** Tokens and cost reported by the provider are recorded per Run and Mission
   in the shared Registry, and `GET /v1/operations/{operation_id}/missions/{mission_id}`
-  returns them as `usage`. A [budget](medical.md#budgets) that is reached stops the Session
+  returns them as `usage`. A [budget](medical.md#budgets) that is reached stops the Run
   and leaves the Mission `blocked` with `blocked_reason: "budget"`; raise the limit and resume.
-- **Exposure.** A Session that read a Source item, called a web tool or read a Cable from an
-  exposed Session is marked on the board (`exposure`, shown as an `EXPOSED` chip in Outer Office)
+- **Exposure.** A Run that read a Source item, called a web tool or read a Cable from an
+  exposed Run is marked on the board (`exposure`, shown as an `EXPOSED` chip in Outer Office)
   and, under the default `strict` policy, restricted. See [Exposure](medical.md#exposure).
 - **Quarantine.** A Mission whose Agent is [quarantined](medical.md#quarantine) is
   `quarantined`: its safe house is kept, it is not resumed, and releasing the Agent returns it
-  to the queue with the next qualified Agent. `quarantined` is a Session state in the board,
+  to the queue with the next qualified Agent. `quarantined` is a Run state in the board,
   `ai6ctl` and Outer Office.
 
 ## Review
@@ -925,7 +925,7 @@ the watch, or a person, decides it** ([Items are Reports](#items-are-reports)).
   stopped. A poll searches `settling_secs` (default 60; 0 for none) behind the cursor, since a
   listing can show an item after a newer one; what repeats changes nothing.
 - **Brief identity.** An item's Mission ID comes from its Operation, instance and item
-  ([the table above](#mission-and-session-identities)), and polling it again finds the same
+  ([the table above](#mission-and-run-identities)), and polling it again finds the same
   one. If the item changes while its brief is still in `new/`, the brief is updated in place.
   With `intake = "direct"` the brief is made as soon as the item is polled; otherwise once the
   item is decided `mission`.
@@ -948,11 +948,11 @@ the watch, or a person, decides it** ([Items are Reports](#items-are-reports)).
   transition): the outcome, plus what the
   Operation's cover policy allows. `covert` says only that the work finished or could not
   be completed, and the branch; `partial` adds that AI helped and the Mission ID; `overt`
-  also names the Agent and the provider Session IDs. `partial` and `overt` also list the tools
+  also names the Agent and the provider IDs. `partial` and `overt` also list the tools
   the harness [refused in its last turn](agents.md#what-a-claude-code-mission-may-call). A report
   that fails is retried a few times, then dropped.
 - **Limits.** Review comments on a pull request are not forwarded to the Mission's
-  Session. Jira issues are not transitioned when a Mission starts, only when it ends.
+  Run. Jira issues are not transitioned when a Mission starts, only when it ends.
 
 ### Items are Reports
 
@@ -1051,8 +1051,8 @@ leaves on what it writes (a hidden `<!-- ai6:… -->` on GitHub and GitLab, the 
 own reply is delivered like anyone's. Any other author is a timeline event naming them, never
 their text. The Station that holds the Mission delivers a
 permitted reply as untrusted text in the same fence as an issue's body: a message to a live
-Session, a resume of one that ended its turn while it waited. A stalled, parked or quarantined
-Mission keeps the reply until it goes on; a queued or finished one is not told. The Session is
+Run, a resume of one that ended its turn while it waited. A stalled, parked or quarantined
+Mission keeps the reply until it goes on; a queued or finished one is not told. The Run is
 marked exposed (`issue:TRACKER`), which a later attempt inherits. One
 question per issue may be open. Nobody answering within `reply_ttl_secs` (3 days) resumes the
 Agent told so (`on_timeout = "resume"`), fails the Mission (`"fail"`) or keeps waiting
@@ -1073,16 +1073,16 @@ When the Mission ends the report is a new comment, so people are notified. Every
 **Creating, splitting and mirroring.** An Agent asks for issues with `issue_create`,
 `issue_split` and `issue_mirror`; its text passes the same check as a comment, and it carries on
 without waiting. By default a person approves each request (`create = "propose"`), or a class
-authorisation `issue-create` approves one from an unexposed Session with no findings; `create =
+authorisation `issue-create` approves one from an unexposed Run with no findings; `create =
 "direct"` is a weakening that lets `field` and `00` Agents create at once, except from an exposed
-Session, and `create = "off"` refuses them. A Mission may hold `max_created` (10) issues, those
+Run, and `create = "off"` refuses them. A Mission may hold `max_created` (10) issues, those
 waiting included, an Operation's Agents `max_created_per_day` (50), and a split may go
 `max_split_depth` (2) levels below an issue a person made; past any of these the call is refused.
 A title equal to an open linked issue, or to one AI6 created in the Operation in the last 30 days,
 is a finding `duplicate`, which stops a class authorisation and never a person.
 
 The Headquarters Station then creates what was approved through the outbox, ties each new issue
-to the Mission, and the Agent is told the outcome with the new keys, as soon as a Session of the
+to the Mission, and the Agent is told the outcome with the new keys, as soon as a Run of the
 Mission can hear it. A created issue never starts
 work: every intake label of the Operation's instances is stripped, and an Agent cannot add one
 later. The person who approves may tick **mark ready** (which needs `mission.create` too): the
@@ -1165,24 +1165,24 @@ ai6 sleeper revoke G nightly-deps
   Station](stations.md#head-of-station) runs.
 - **A standing Mission.** With `standing = true` the sleeper is one Mission (one per Station with
   `each_station`), `<operation>-<sleeper>-<n>`, and each window is a new attempt of it: the run
-  `<handle>.<attempt>` records the window it answers (`window` on its Session record), and the
+  `<handle>.<attempt>` records the window it answers (`window` on its Run record), and the
   board and scorecards show one Mission with a run history. A window that comes while an attempt
   is queued, held or running does not fire; it fires when the attempt settles if it is still the
   latest window and within `catch_up`, and is on the timeline as skipped otherwise.
-  With `resume = true` as well, an attempt resumes the last attempt's provider Session when that
+  With `resume = true` as well, an attempt resumes the last attempt's provider Run when that
   attempt ran on the same handler, did not fail, and its provider gave it an ID, and starts a new
-  Session otherwise, as it does when the provider refuses the resume; the timeline says which
+  Run otherwise, as it does when the provider refuses the resume; the timeline says which
   (`sleeper`, `resumed` or `started`, with the window). `resume` without `standing` is refused when
   the roster loads.
 - **A failed attempt.** A failed attempt leaves the order standing: the next window fires as the
   next attempt, and the reason is in the attempt's outcome. The attempt of any Sleeper that fails
   is on the timeline (`sleeper`, `attempt-failed`, with the window and the reason, or a line saying
-  the harness's words are in the outcome) and, with a provider Session, on the board (reason
+  the harness's words are in the outcome) and, with a provider Run, on the board (reason
   `order-attempt-failed`). It asks for no approval. Cancelling an attempt is not a failure, and leaves
   the order standing too; `ai6 sleeper revoke` stops it.
 - **A stalled attempt.** The Station holding a standing Mission's attempt looks at each check-in:
   when the order's next window has come and the attempt is `stalled` (past its Agent's
-  `stall_timeout`), has no live Session on the Station and no re-attach that may still bring one
+  `stall_timeout`), has no live Run on the Station and no re-attach that may still bring one
   back, or did not start, the window supersedes it. The attempt fails with that reason, its harness
   stopped, audited (`sleeper.superseded`) and on the timeline (`sleeper`, `superseded`), and the
   window fires as the next attempt. It is not charged to the Agent. An attempt waiting for a person
@@ -1207,14 +1207,14 @@ ai6 sleeper revoke G nightly-deps
 ## Restart recovery and publication
 
 AI6 persists the selected Agent, handler, terminal, working directory, model, effort,
-provider Session ID and cover settings for a started Mission. Environment values are
+provider ID and cover settings for a started Mission. Environment values are
 not stored. On restart, the scheduler retries reattachment using the saved provider
-Session ID and verified Station safe house. A handler must return the same Session ID or
+Run ID and verified Station safe house. A handler must return the same Run ID or
 AI6 refuses the resume.
 
 A Station can publish lifecycle and terminal events to Universal Exports. When
 enabled, it consumes the gateway's authenticated input/resize queue and routes frames to
-the matching live provider Session. Set `[unex] url` and `token` in `ai6.cfg`; without a
+the matching live provider Run. Set `[unex] url` and `token` in `ai6.cfg`; without a
 token the Station publishes nothing. Events use a
 bounded background worker and finite request timeouts, so a gateway outage does not block
-the provider Session. Terminal bytes remain binary.
+the provider Run. Terminal bytes remain binary.

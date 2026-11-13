@@ -55,21 +55,21 @@ grants nothing: covers are added one at a time, and an Operation may always with
 
 **Read-ins** are who holds it: `person:`, `group:`, `account:`, `operation:`, `mission:` or `agent:`.
 An Operation read in includes the Operations under it unless the entry says `propagate = false`;
-nothing reaches upward. A Mission read in reaches only that Mission's Sessions. An Agent read in
+nothing reaches upward. A Mission read in reaches only that Mission's Runs. An Agent read in
 applies in every Operation it works in: read in a Mission or an Operation to narrow.
 
 Compartments add up: access is the union over all of them, and for a person the union with the
 [access policy](access.md). A person's compartment never narrows a grant, and it does not count
 towards what an editor may hand out.
 
-`min_clearance` skips the compartment for a Session below it, read at each call, so a lowered
+`min_clearance` skips the compartment for a Run below it, read at each call, so a lowered
 clearance holds from the next one. People have no clearance and are not asked.
 
 ## What is checked, and when
 
 - **At every call.** Every read and every Cable asks the configuration provider what is granted at
   that moment, so a removed grant holds from the next call. Nothing is remembered between calls,
-  and a running Session is held to it like any other.
+  and a running Run is held to it like any other.
 - **A record that cannot be read grants nothing**, and the others go on. A provider that cannot be
   read refuses the call rather than answering from memory.
 - **Every crossing is audited first.** A read, a send or a proposal across Operations is written to
@@ -90,22 +90,22 @@ person, compartment, resource and action every 60 seconds by default; `0` writes
 
 ## Agents
 
-A Session holding a compartment has these tools on its AI6 MCP server. They are listed only while
-it holds one, and work from the identity the Station started the Session with. A harness lists its
-tools when it starts, so a Session read in later sees them when it resumes.
+A Run holding a compartment has these tools on its AI6 MCP server. They are listed only while
+it holds one, and work from the identity the Station started the Run with. A harness lists its
+tools when it starts, so a Run read in later sees them when it resumes.
 
 | Tool | Needs | Answers |
 | --- | --- | --- |
 | `compartments` | Holding one | Each one's ID, description, what it grants, and the Operations and Missions it reaches |
-| `missions_in(operation` or `compartment, limit)` | `mission.status` | Each Mission's ID, Operation, state, role, Agent, attempts, creation time and why it is blocked. Never a brief, a Session ID, a Station, a Theater, a safe house, a launch manifest, usage or cost |
+| `missions_in(operation` or `compartment, limit)` | `mission.status` | Each Mission's ID, Operation, state, role, Agent, attempts, creation time and why it is blocked. Never a brief, a Run ID, a Station, a Theater, a safe house, a launch manifest, usage or cost |
 | `mission_brief(mission)` | `mission.read` | The status and the brief's text |
 | `mission_products(mission)` | `product.read` | The status, the outcome's `state`, `reason`, `branch` and `summary`, the CX report and the refs, each text cut at `max_product_bytes` |
 
 These answer for other Operations only: an Operation's own work is read as it always was. Its
 [memory tools](memories.md#agents) read another Operation's memory through `memory.read`. A
-Mission the Session may not see answers as a Mission that does not exist.
+Mission the Run may not see answers as a Mission that does not exist.
 
-A brief or a product is outside text, so reading one marks the Session
+A brief or a product is outside text, so reading one marks the Run
 [exposed](medical.md#exposure) as `product:<operation>` before the text is returned, and the
 Operation's exposure policy then applies. Status is not text and does not expose.
 
@@ -117,7 +117,7 @@ nothing promotes it but a person.
 
 ## Cables
 
-`send_cable` takes scope `compartment` with the compartment as target: the live Sessions of every
+`send_cable` takes scope `compartment` with the compartment as target: the live Runs of every
 Operation and Mission it covers, minus the sender's own, snapshotted when it is accepted. Optional
 `operation` narrows that to one covered Operation. The sender needs `cable.send` in it, and being
 covered is the receiving side's consent, so no receive grant is asked. The receiver's `[inbound]`
@@ -133,13 +133,13 @@ cross_operation = "compartments"       # default; "station_grants" lets a Statio
 
 `"station_grants"` is a weakening, logged at start and reported at check-in as `cables_weakened`.
 Discovery follows the same line: `discover_agents` shows another Operation's Agents only through a
-compartment, by codename, Operation and Mission, never by Station, Theater or Session.
+compartment, by codename, Operation and Mission, never by Station, Theater or Run.
 
 Delivery asks the grant again: a Cable waiting when the sender is read out is refused, one already
 delivered is not shown again, and one that cannot be checked stays where it is. A reply stays on
-the grant that opened the conversation, back to that Session alone, so a covered Agent can answer
+the grant that opened the conversation, back to that Run alone, so a covered Agent can answer
 without being read in; once the opener is read out, the reply is refused. Reading a Cable from
-another Operation marks the Session `cable:SENDER`, as ever.
+another Operation marks the Run `cable:SENDER`, as ever.
 
 A `compartment` grant in the `cables` record names only `action = "release"`, for who may release
 what a `hold` mode held; any other action there is invalid.
@@ -160,7 +160,7 @@ what a `hold` mode held; any other action there is invalid.
 bound. A limit looser than its default is a weakening, shown in the record
 and logged when the configuration is applied. The roster's `max_compartment_rules` (10,000) bounds
 read-ins times covers per compartment; `none` lifts it. The sending Station's per-Agent bucket, the
-one-hop rule and the body limit still apply. A relay sees the Sessions of its own Station, so a
+one-hop rule and the body limit still apply. A relay sees the Runs of its own Station, so a
 compartment audience reaches those.
 
 Moneypenny has no `compartment:` audience: her Cables stay per Operation, in the Operations the

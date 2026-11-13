@@ -8,7 +8,7 @@ actions = [
   "access.manage", "access.read", "account.manage", "agent.configure", "agent.read",
   "approval.class", "approval.decide", "audit.read", "cable.read", "cable.send",
   "mission.control", "mission.create", "mission.read", "mission.verify", "pool.manage",
-  "pool.read", "roster.manage", "roster.read", "session.context", "session.input", "session.read",
+  "pool.read", "roster.manage", "roster.read", "run.context", "run.input", "run.read",
   "station.configure", "station.read",
 ]
 
@@ -16,15 +16,15 @@ actions = [
 description = "A regular user: reads and runs work"
 actions = [
   "agent.read", "approval.decide", "cable.read", "cable.send", "mission.control",
-  "mission.create", "mission.read", "pool.read", "roster.read", "session.input",
-  "session.read", "station.read",
+  "mission.create", "mission.read", "pool.read", "roster.read", "run.input",
+  "run.read", "station.read",
 ]
 
 [role.auditor]
 description = "Views everything and gives verdicts on Missions' outcomes; changes nothing else"
 actions = [
   "access.read", "agent.read", "audit.read", "cable.read", "mission.read", "mission.verify",
-  "pool.read", "roster.read", "session.context", "session.read", "station.read",
+  "pool.read", "roster.read", "run.context", "run.read", "station.read",
 ]
 
 # Controller for the Operation G (and the Operations under it).

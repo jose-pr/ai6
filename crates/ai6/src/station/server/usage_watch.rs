@@ -10,7 +10,7 @@
 //! - room in every bucket that covers a parked Mission's model frees the account and resumes the
 //!   Missions waiting on it at the next scheduler pass;
 //! - a reset the provider moved later re-parks them to the new time;
-//! - a handler that learns its usage only during a turn (`needs_turn`), or only with a session
+//! - a handler that learns its usage only during a turn (`needs_turn`), or only with a run
 //!   open, is never read: its account waits for the time the limit stated.
 //!
 //! The settings are the `usage` table of the `roster` record, read on every pass, so a change to
@@ -90,7 +90,7 @@ pub(super) fn run(state: &DaemonState) {
 }
 
 /// Why `handler` is not asked to read an account between turns, when it is not: it learns its
-/// usage only during a turn, or with a session open, or reports none. Asking costs no credential.
+/// usage only during a turn, or with a run open, or reports none. Asking costs no credential.
 pub(super) fn unreadable(handler: &dyn AgentHandler) -> Option<Read> {
     let support = match handler.usage_support() {
         Ok(support) => support,
@@ -106,7 +106,7 @@ pub(super) fn unreadable(handler: &dyn AgentHandler) -> Option<Read> {
     }
     if support.needs_session {
         return Some(Read::NotPolled(
-            "this handler learns its usage only with a session open".to_owned(),
+            "this handler learns its usage only with a run open".to_owned(),
         ));
     }
     None
@@ -799,7 +799,7 @@ mod tests {
     }
 
     #[test]
-    fn a_handler_that_needs_a_turn_or_a_session_or_reports_nothing_is_not_asked_to_read() {
+    fn a_handler_that_needs_a_turn_or_a_run_or_reports_nothing_is_not_asked_to_read() {
         use coqui_acp_api::Source;
         let reporting = UsageSupport::new(vec![Source::Reported], true);
         for support in [

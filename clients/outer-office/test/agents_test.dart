@@ -103,15 +103,15 @@ const _scorecard = {
       'standing': {
         'attempts': {
           'done': [
-            {'mission_id': 'm-1', 'session_id': 'm-1.1'},
-            {'mission_id': 'm-2', 'session_id': 'm-2.1'},
-            {'mission_id': 'm-3', 'session_id': 'm-3.1'},
+            {'mission_id': 'm-1', 'run_id': 'm-1.1'},
+            {'mission_id': 'm-2', 'run_id': 'm-2.1'},
+            {'mission_id': 'm-3', 'run_id': 'm-3.1'},
           ],
           'failed': [
-            {'mission_id': 'm-4', 'session_id': 'm-4.1'},
+            {'mission_id': 'm-4', 'run_id': 'm-4.1'},
           ],
           'lost': [
-            {'mission_id': 'm-5', 'session_id': 'm-5.1'},
+            {'mission_id': 'm-5', 'run_id': 'm-5.1'},
           ],
         },
         'judged': 4,
@@ -127,7 +127,7 @@ const _scorecard = {
           'standing': {
             'attempts': {
               'done': [
-                {'mission_id': 'm-1', 'session_id': 'm-1.1'},
+                {'mission_id': 'm-1', 'run_id': 'm-1.1'},
               ],
             },
             'judged': 1,
@@ -199,7 +199,7 @@ MissionBoard signedIn(
   );
   board.accessToken = 'operator-token';
   board.loading = false;
-  board.userSession = UserSessionSummary(
+  board.userRun = UserRunSummary(
     personId: 'operator-007',
     name: 'operator-007',
     displayName: null,
@@ -435,7 +435,7 @@ void main() {
       );
       board.accessToken = 'operator-token';
       board.loading = false;
-      board.userSession = UserSessionSummary(
+      board.userRun = UserRunSummary(
         personId: 'operator-007',
         name: 'operator-007',
         displayName: null,

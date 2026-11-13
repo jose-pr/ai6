@@ -372,7 +372,7 @@ mod tests {
                         station_id: Some("test".to_owned()),
                         theater_id: Some("build-box".to_owned()),
                         mode: Default::default(),
-                        session: None,
+                        run: None,
                         runner: None,
                         clearance: None,
                         overlays: Vec::new(),

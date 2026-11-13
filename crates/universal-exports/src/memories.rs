@@ -103,12 +103,12 @@ pub(crate) struct PersonCaller {
 }
 
 impl PersonCaller {
-    /// How many marks a conversation keeps: `[registry.limits.sessions] exposures`.
+    /// How many marks a conversation keeps: `[registry.limits.runs] exposures`.
     pub(crate) fn marks_limit(&self) -> ai6::Limit {
-        self.registry.limits().sessions.exposures
+        self.registry.limits().runs.exposures
     }
 
-    /// The entries this call showed her that were written by an exposed Session.
+    /// The entries this call showed her that were written by an exposed Run.
     pub(crate) fn seen_marks(&self) -> Vec<String> {
         self.seen
             .lock()
@@ -153,7 +153,7 @@ impl MemoryCaller for PersonCaller {
         }
     }
 
-    fn session(&self) -> Option<String> {
+    fn run(&self) -> Option<String> {
         self.conversation.clone()
     }
 
@@ -219,7 +219,7 @@ impl MemoryCaller for PersonCaller {
     }
 
     fn mark_bytes(&self) -> ai6::Limit {
-        self.registry.limits().sessions.exposure_source_bytes
+        self.registry.limits().runs.exposure_source_bytes
     }
 
     fn now(&self) -> f64 {

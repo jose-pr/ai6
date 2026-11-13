@@ -47,11 +47,11 @@ Future<MissionBoard> _board(
           'operation_id': 'G',
           'mission_id': 'm1',
           'handle': 'G-1',
-          'sessions': const <Object>[],
+          'runs': const <Object>[],
           'attempts': [
             {
               'attempt': 1,
-              'session_id': 's1',
+              'run_id': 's1',
               'station': 'hq',
               'status': 'ended',
               'final_report': ?report,
@@ -67,7 +67,7 @@ Future<MissionBoard> _board(
             'operation_id': 'G',
             'mission_id': 'm1',
             'attempt': 1,
-            'session_id': 's1',
+            'run_id': 's1',
             ...standing!,
           });
         }(),

@@ -22,7 +22,7 @@ String scopeLabel(OoRoute? route) {
   if (route == null) return 'All accessible Operations';
   for (final (field, word) in const [
     ('mission_id', 'Mission'),
-    ('session_id', 'Session'),
+    ('run_id', 'Run'),
     ('station_id', 'Station'),
     ('operation_id', 'Operation'),
   ]) {

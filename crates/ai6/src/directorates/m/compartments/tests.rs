@@ -36,7 +36,7 @@ fn compile(compartments: impl IntoIterator<Item = Compartment>) -> CompiledCompa
         .unwrap()
 }
 
-fn session(agent: &str, operation: &str) -> FieldPrincipal {
+fn run(agent: &str, operation: &str) -> FieldPrincipal {
     FieldPrincipal::new(agent, operation, Some(format!("{operation}-1")), "field")
 }
 
@@ -62,7 +62,7 @@ fn a_cover_reaches_a_child_s_missions_unless_it_does_not_propagate() {
     let down = compile([kestrel()
         .with_cover(operation("P"))
         .with_read_in(subject("operation:A"))]);
-    let reader = session("007", "A");
+    let reader = run("007", "A");
     assert_eq!(
         down.field_allows(&reader, MissionStatus, &mission("C-1", "C")),
         Some("KESTREL")
@@ -84,7 +84,7 @@ fn a_cover_reaches_a_child_s_missions_unless_it_does_not_propagate() {
         "a covered Operation always includes its own Missions"
     );
     assert_eq!(
-        down.field_allows(&session("007", "Q"), MissionStatus, &on("P")),
+        down.field_allows(&run("007", "Q"), MissionStatus, &on("P")),
         None
     );
     assert_eq!(
@@ -95,32 +95,32 @@ fn a_cover_reaches_a_child_s_missions_unless_it_does_not_propagate() {
 }
 
 #[test]
-fn a_read_in_reaches_a_child_s_session_unless_it_does_not_propagate() {
+fn a_read_in_reaches_a_child_s_run_unless_it_does_not_propagate() {
     let cover_q =
         |read_in: ReadIn| compile([kestrel().with_cover(operation("Q")).with_read_in(read_in)]);
     let tree = cover_q(subject("operation:P"));
     assert_eq!(
-        tree.field_allows(&session("007", "C"), MissionStatus, &on("Q")),
+        tree.field_allows(&run("007", "C"), MissionStatus, &on("Q")),
         Some("KESTREL")
     );
     let only = cover_q(subject("operation:P").with_propagate(false));
     assert_eq!(
-        only.field_allows(&session("007", "C"), MissionStatus, &on("Q")),
+        only.field_allows(&run("007", "C"), MissionStatus, &on("Q")),
         None
     );
     assert_eq!(
-        only.field_allows(&session("007", "P"), MissionStatus, &on("Q")),
+        only.field_allows(&run("007", "P"), MissionStatus, &on("Q")),
         Some("KESTREL")
     );
 }
 
 #[test]
-fn a_mission_read_in_reaches_only_that_mission_s_sessions() {
+fn a_mission_read_in_reaches_only_that_mission_s_runs() {
     let compiled = compile([kestrel()
         .with_cover(operation("Q"))
         .with_read_in(subject("mission:A-1"))]);
     assert_eq!(
-        compiled.field_allows(&session("007", "A"), MissionStatus, &on("Q")),
+        compiled.field_allows(&run("007", "A"), MissionStatus, &on("Q")),
         Some("KESTREL")
     );
     let other = FieldPrincipal::new("007", "A", Some("A-2".to_owned()), "field");
@@ -134,18 +134,18 @@ fn an_agent_read_in_applies_in_every_operation_it_works_in() {
         .with_read_in(subject("agent:007"))]);
     for operation in ["A", "C"] {
         assert_eq!(
-            compiled.field_allows(&session("007", operation), MissionStatus, &on("Q")),
+            compiled.field_allows(&run("007", operation), MissionStatus, &on("Q")),
             Some("KESTREL")
         );
     }
     assert_eq!(
-        compiled.field_allows(&session("008", "A"), MissionStatus, &on("Q")),
+        compiled.field_allows(&run("008", "A"), MissionStatus, &on("Q")),
         None
     );
 }
 
 #[test]
-fn a_clearance_floor_skips_a_session_below_it() {
+fn a_clearance_floor_skips_a_run_below_it() {
     let compiled = compile([kestrel()
         .with_cover(operation("Q"))
         .with_read_in(subject("operation:A"))
@@ -179,7 +179,7 @@ fn two_compartments_give_their_union() {
             .with_cover(operation("Q"))
             .with_read_in(subject("operation:A")),
     ]);
-    let reader = session("007", "A");
+    let reader = run("007", "A");
     assert_eq!(
         compiled.field_allows(&reader, MissionStatus, &on("Q")),
         Some("KESTREL")
@@ -200,7 +200,7 @@ fn reading_a_brief_implies_its_status_and_nothing_else() {
         .with_actions([CompartmentAction::MissionRead])
         .with_cover(operation("Q"))
         .with_read_in(subject("operation:A"))]);
-    let reader = session("007", "A");
+    let reader = run("007", "A");
     assert!(
         compiled
             .field_allows(&reader, MissionStatus, &on("Q"))
@@ -222,7 +222,7 @@ fn an_action_for_one_kind_of_subject_alone_is_valid_and_grants_the_other_nothing
         .with_read_in(subject("group:release"))]);
     assert_eq!(
         proposing.field_allows(
-            &session("007", "A"),
+            &run("007", "A"),
             CompartmentAction::MissionPropose,
             &on("Q")
         ),
@@ -241,12 +241,12 @@ fn an_action_for_one_kind_of_subject_alone_is_valid_and_grants_the_other_nothing
         .with_cover(operation("Q"))
         .with_read_in(subject("operation:A"))
         .with_read_in(subject("group:release"))]);
-    assert!(reading.held(&session("007", "A")).is_empty());
+    assert!(reading.held(&run("007", "A")).is_empty());
     assert_eq!(reading.person_compartments(&person, "Q"), vec!["K"]);
 }
 
 #[test]
-fn people_and_sessions_are_asked_of_different_rules() {
+fn people_and_runs_are_asked_of_different_rules() {
     let compiled = compile([Compartment::new("KESTREL")
         .with_actions(CompartmentAction::ALL)
         .with_cover(operation("Q"))
@@ -267,7 +267,7 @@ fn people_and_sessions_are_asked_of_different_rules() {
         None,
         "proposing is for Agents"
     );
-    let reader = session("007", "A");
+    let reader = run("007", "A");
     assert_eq!(
         compiled.field_allows(&reader, CompartmentAction::CableRead, &on("Q")),
         None,
@@ -299,7 +299,7 @@ fn a_covered_mission_is_reachable_and_its_operation_is_not() {
             "Q-7".to_owned(),
         )))
         .with_read_in(subject("operation:A"))]);
-    let reader = session("007", "A");
+    let reader = run("007", "A");
     assert_eq!(
         compiled.field_allows(&reader, MissionStatus, &mission("Q-7", "Q")),
         Some("KESTREL")
@@ -322,12 +322,12 @@ fn a_covered_mission_is_reachable_and_its_operation_is_not() {
 }
 
 #[test]
-fn reachable_expands_the_tree_and_held_says_what_a_session_holds() {
+fn reachable_expands_the_tree_and_held_says_what_a_run_holds() {
     let compiled = compile([kestrel()
         .with_description("Release work")
         .with_cover(operation("P"))
         .with_read_in(subject("operation:A"))]);
-    let reader = session("007", "A");
+    let reader = run("007", "A");
     assert_eq!(
         compiled.reachable(&reader, MissionStatus),
         vec![on("C"), on("D"), on("P")]
@@ -338,7 +338,7 @@ fn reachable_expands_the_tree_and_held_says_what_a_session_holds() {
     assert_eq!(held[0].description, "Release work");
     assert_eq!(held[0].actions, vec![MissionStatus]);
     assert_eq!(held[0].operations, vec!["C", "D", "P"]);
-    assert!(compiled.held(&session("007", "Q")).is_empty());
+    assert!(compiled.held(&run("007", "Q")).is_empty());
 }
 
 #[test]
@@ -633,7 +633,7 @@ mod sql {
         let root = tempfile::tempdir().unwrap();
         let provider = provider(root.path());
         let global = ConfigScope::Global;
-        let reader = session("007", "A");
+        let reader = run("007", "A");
         assert_eq!(
             current(&provider)
                 .unwrap()
@@ -715,7 +715,7 @@ fn a_record_that_cannot_be_read_grants_nothing_and_the_rest_still_answer() {
     let provider = FileProvider::new(root.path());
     assert!(provider.load("").is_err(), "a snapshot refuses it whole");
     let compiled = current(&provider).unwrap();
-    let reader = session("007", "A");
+    let reader = run("007", "A");
     assert_eq!(
         compiled.field_allows(&reader, MissionStatus, &on("Q")),
         Some("GOOD")
@@ -739,7 +739,7 @@ fn a_tree_moved_under_a_cover_or_out_of_it_is_read_at_once() {
     )
     .unwrap();
     let provider = FileProvider::new(root.path());
-    let reader = session("007", "A");
+    let reader = run("007", "A");
     assert!(
         current(&provider)
             .unwrap()

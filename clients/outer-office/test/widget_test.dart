@@ -74,7 +74,7 @@ String stationBoardResponse() => jsonEncode({
             'memory_total_mb': 256,
             'sampled_at': 1010,
           },
-          'sessions': 1,
+          'runs': 1,
         },
         {
           'id': 'lab',
@@ -124,7 +124,7 @@ String userProfileResponse({
   List<String> actions = const [
     'mission.read',
     'mission.create',
-    'session.read',
+    'run.read',
   ],
   List<Map<String, Object>> stations = const [],
 }) => jsonEncode({
@@ -262,8 +262,8 @@ void main() {
     );
     board.accessToken = 'user-token';
     board.loading = false;
-    board.userSession = UserSessionSummary.fromJson(
-      jsonDecode(userProfileResponse(actions: ['mission.read', 'session.read']))
+    board.userRun = UserRunSummary.fromJson(
+      jsonDecode(userProfileResponse(actions: ['mission.read', 'run.read']))
           as Map<String, dynamic>,
     );
     addTearDown(board.dispose);
@@ -272,7 +272,7 @@ void main() {
       OuterOfficeApp(board: board, desktopWindows: false),
     );
 
-    for (final page in ['Overview', 'Operations', 'Missions', 'Sessions']) {
+    for (final page in ['Overview', 'Operations', 'Missions', 'Runs']) {
       expect(await offersPage(tester, page), isTrue, reason: page);
     }
     expect(await offersPage(tester, 'Stations'), isTrue);
@@ -323,7 +323,7 @@ void main() {
     );
     board.accessToken = 'operator-token';
     board.loading = false;
-    board.userSession = UserSessionSummary.fromJson(
+    board.userRun = UserRunSummary.fromJson(
       jsonDecode(
         userProfileResponse(
           stations: [
@@ -409,7 +409,7 @@ void main() {
     );
     board.accessToken = 'operator-token';
     board.loading = false;
-    board.userSession = UserSessionSummary.fromJson(
+    board.userRun = UserRunSummary.fromJson(
       jsonDecode(
         userProfileResponse(
           stations: [
@@ -625,7 +625,7 @@ void main() {
                   'operation_id': 'operation-alpha',
                   'parent_mission_id': 'parent-1',
                   'proposer_agent_id': 'coordinator-007',
-                  'proposer_session_id': 'provider-session-9',
+                  'proposer_run_id': 'provider-id-9',
                   'created_at': 1_798_000_000,
                   'brief': {
                     'title': 'Review the gateway',
@@ -666,13 +666,13 @@ void main() {
         }),
       );
       board.accessToken = 'operator-token';
-      board.userSession = UserSessionSummary.fromJson(
+      board.userRun = UserRunSummary.fromJson(
         jsonDecode(userProfileResponse()) as Map<String, dynamic>,
       );
       addTearDown(board.dispose);
 
       final proposals = await board.loadMissionProposals('operation-alpha');
-      expect(proposals.single.proposerSessionId, 'provider-session-9');
+      expect(proposals.single.proposerRunId, 'provider-id-9');
       expect(proposals.single.body, 'Check its permission boundaries.');
       await board.decideMissionProposal(
         operationId: 'operation-alpha',
@@ -693,7 +693,7 @@ void main() {
   );
 
   test(
-    'operator menu identity uses the authenticated gateway session',
+    'operator menu identity uses the authenticated gateway run',
     () async {
       final requests = <http.Request>[];
       final themeWrites = <String>[];
@@ -713,7 +713,7 @@ void main() {
               'operations': [
                 {
                   'operation_id': 'operation-alpha',
-                  'actions': ['mission.read', 'session.read'],
+                  'actions': ['mission.read', 'run.read'],
                 },
               ],
             }),
@@ -724,7 +724,7 @@ void main() {
       board.accessToken = 'operator-token';
       addTearDown(board.dispose);
 
-      final identity = await board.loadUserSession();
+      final identity = await board.loadUserRun();
       expect(identity.personId, 'operator-007');
       expect(identity.expiresAt, 1_900_000_000);
       expect(requests.single.url.path, '/v1/user/profile');
@@ -836,7 +836,7 @@ void main() {
     },
   );
 
-  test('session attachment exchanges a scoped grant for a cookie', () async {
+  test('run attachment exchanges a scoped grant for a cookie', () async {
     final requests = <http.Request>[];
     final board = MissionBoard(
       apiOrigin: Uri.parse('https://oo.example'),
@@ -857,11 +857,11 @@ void main() {
     board.accessToken = 'user-token';
     addTearDown(board.dispose);
 
-    final cookie = await board.prepareSessionSocket(
-      const SessionSummary(
+    final cookie = await board.prepareRunSocket(
+      const RunSummary(
         operationId: 'station-a',
         missionId: 'mission-1',
-        sessionId: 'agent-session-1',
+        runId: 'agent-run-1',
         state: 'working',
         sequence: 4,
       ),
@@ -877,7 +877,7 @@ void main() {
     expect(jsonDecode(requests.first.body), {
       'operation_id': 'station-a',
       'mission_id': 'mission-1',
-      'session_id': 'agent-session-1',
+      'run_id': 'agent-run-1',
       'mode': 'read',
     });
     expect(requests.last.headers['origin'], 'https://oo.example');
@@ -889,7 +889,7 @@ void main() {
     );
   });
 
-  testWidgets('board groups and renders gateway Session snapshots', (
+  testWidgets('board groups and renders gateway Run snapshots', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(800, 1000);
@@ -915,7 +915,7 @@ void main() {
               {
                 'operation_id': 'operation-alpha',
                 'mission_id': 'mission-007',
-                'sessions': [],
+                'runs': [],
                 'brief': {
                   'prompt': 'Review the requested change.',
                   'agent_id': 'technical-officer',
@@ -939,8 +939,8 @@ void main() {
                 'attempts': [
                   {
                     'attempt': 1,
-                    'session_id': 'attempt-1',
-                    'provider_session_id': 'claude-session-000',
+                    'run_id': 'attempt-1',
+                    'provider_id': 'claude-session-000',
                     'predecessor': null,
                     'station': 'station-beta',
                     'theater': 'local',
@@ -950,8 +950,8 @@ void main() {
                   },
                   {
                     'attempt': 2,
-                    'session_id': 'attempt-2',
-                    'provider_session_id': 'claude-session-123',
+                    'run_id': 'attempt-2',
+                    'provider_id': 'claude-session-123',
                     'predecessor': 'attempt-1',
                     'station': 'station-alpha',
                     'theater': 'local',
@@ -1027,7 +1027,7 @@ void main() {
             {
               'operation_id': 'operation-alpha',
               'mission_id': 'mission-007',
-              'session_id': 'claude-session-123',
+              'run_id': 'claude-session-123',
               'state': 'working',
               'sequence': 4,
               'updated_at': 100,
@@ -1035,7 +1035,7 @@ void main() {
             {
               'operation_id': 'operation-alpha',
               'mission_id': 'mission-007',
-              'session_id': 'codex-session-456',
+              'run_id': 'codex-session-456',
               'state': 'blocked',
               'sequence': 9,
               'updated_at': 200,
@@ -1043,7 +1043,7 @@ void main() {
             {
               'operation_id': 'operation-alpha',
               'mission_id': 'mission-007',
-              'session_id': 'claude-session-789',
+              'run_id': 'claude-session-789',
               'state': 'parked',
               'sequence': 3,
               'exposure': ['brief:source', 'tool:WebFetch'],
@@ -1051,7 +1051,7 @@ void main() {
             {
               'operation_id': 'operation-alpha',
               'mission_id': 'mission-007',
-              'session_id': 'claude-session-901',
+              'run_id': 'claude-session-901',
               'state': 'quarantined',
               'sequence': 2,
             },
@@ -1095,7 +1095,7 @@ void main() {
     await openPage(tester, 'Stations');
     expect(find.text('HQS'), findsOneWidget);
     expect(find.text('station-alpha'), findsOneWidget);
-    expect(find.textContaining('2 of 4 Sessions'), findsOneWidget);
+    expect(find.textContaining('2 of 4 Runs'), findsOneWidget);
     expect(
       find.text(
         '8 CPUs \u00b7 25% busy \u00b7 load 1.50 \u00b7 12.0 GiB free of 16.0 GiB '
@@ -1204,8 +1204,8 @@ void main() {
     await tester.pageBack();
     await tester.pumpAndSettle();
 
-    // The Mission's latest Session is the blocked one, so it is a blocked Mission with all of
-    // its Sessions, and not a parked one for an older Session.
+    // The Mission's latest Run is the blocked one, so it is a blocked Mission with all of
+    // its Runs, and not a parked one for an older Run.
     await tester.tap(find.byTooltip('Missions that are blocked'));
     await tester.pumpAndSettle();
     expect(find.text('claude-session-123'), findsOneWidget);
@@ -1224,10 +1224,10 @@ void main() {
 
     await tester.tap(find.text('claude-session-123'));
     await tester.pumpAndSettle();
-    expect(find.text('Session claude-session-123'), findsOneWidget);
+    expect(find.text('Run claude-session-123'), findsOneWidget);
   });
 
-  testWidgets('demo Session details explain that terminal data is offline', (
+  testWidgets('demo Run details explain that terminal data is offline', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(800, 1000);
@@ -1245,33 +1245,33 @@ void main() {
       OuterOfficeApp(board: board, desktopWindows: false),
     );
     await openPage(tester, 'Missions');
-    await tester.tap(find.text('preview-session-007'));
+    await tester.tap(find.text('preview-run-007'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Session preview-session-007'), findsOneWidget);
+    expect(find.text('Run preview-run-007'), findsOneWidget);
     expect(
       find.text(
-        'Demo Sessions are sample data. No terminal connection is available.',
+        'Demo Runs are sample data. No terminal connection is available.',
       ),
       findsOneWidget,
     );
     expect(
-      find.text('Sign in to Universal Exports to attach to this Session.'),
+      find.text('Sign in to Universal Exports to attach to this Run.'),
       findsNothing,
     );
 
     await tester.pageBack();
     await tester.pumpAndSettle();
-    expect(find.text('preview-session-007'), findsOneWidget);
+    expect(find.text('preview-run-007'), findsOneWidget);
     expect(
-      board.sessions
-          .singleWhere((session) => session.sessionId == 'preview-session-007')
+      board.runs
+          .singleWhere((run) => run.runId == 'preview-run-007')
           .state,
       'working',
     );
   });
 
-  testWidgets('wide web view keeps the Mission board beside Session detail', (
+  testWidgets('wide web view keeps the Mission board beside Run detail', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1600, 1000);
@@ -1289,25 +1289,25 @@ void main() {
       OuterOfficeApp(board: board, desktopWindows: false),
     );
     await openPage(tester, 'Missions');
-    await tester.tap(find.text('preview-session-007'));
+    await tester.tap(find.text('preview-run-007'));
     await tester.pumpAndSettle();
 
     expect(
       find.text('Each Mission is one brief of work under an Operation.'),
       findsOneWidget,
     );
-    expect(find.text('preview-session-007'), findsOneWidget);
-    expect(find.text('Session preview'), findsOneWidget);
-    expect(find.byTooltip('Close Session details'), findsOneWidget);
+    expect(find.text('preview-run-007'), findsOneWidget);
+    expect(find.text('Run preview'), findsOneWidget);
+    expect(find.byTooltip('Close Run details'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Close Session details'));
+    await tester.tap(find.byTooltip('Close Run details'));
     await tester.pumpAndSettle();
     expect(
       find.text('Each Mission is one brief of work under an Operation.'),
       findsOneWidget,
     );
-    expect(find.text('Session preview'), findsNothing);
-    expect(find.text('preview-session-007'), findsOneWidget);
+    expect(find.text('Run preview'), findsNothing);
+    expect(find.text('preview-run-007'), findsOneWidget);
   });
 
   testWidgets('demo audit view renders only sample event metadata', (
@@ -1358,7 +1358,7 @@ void main() {
               'operations': [
                 {
                   'operation_id': 'operation-alpha',
-                  'actions': ['mission.read', 'session.read'],
+                  'actions': ['mission.read', 'run.read'],
                 },
               ],
             }),
@@ -1370,7 +1370,7 @@ void main() {
     );
     board.accessToken = 'operator-token';
     board.loading = false;
-    board.userSession = UserSessionSummary.fromJson({
+    board.userRun = UserRunSummary.fromJson({
       'person_id': 'operator-007',
       'name': 'operator',
       'display_name': 'Operator 007',
@@ -1379,7 +1379,7 @@ void main() {
       'operations': [
         {
           'operation_id': 'operation-alpha',
-          'actions': ['mission.read', 'session.read'],
+          'actions': ['mission.read', 'run.read'],
         },
       ],
     });
@@ -1398,7 +1398,7 @@ void main() {
     expect(find.text('Person ID: operator-007'), findsOneWidget);
     expect(find.text('Your access by Operation'), findsOneWidget);
     expect(find.byTooltip('mission.read'), findsOneWidget);
-    expect(find.byTooltip('session.read'), findsOneWidget);
+    expect(find.byTooltip('run.read'), findsOneWidget);
     await tester.ensureVisible(find.text('Light'));
     await tester.tap(find.text('Light'));
     await tester.pumpAndSettle();
@@ -1441,7 +1441,7 @@ void main() {
     );
     board.accessToken = 'operator-token';
     board.loading = false;
-    board.userSession = UserSessionSummary.fromJson(
+    board.userRun = UserRunSummary.fromJson(
       jsonDecode(userProfileResponse(actions: ['mission.read', 'audit.read']))
           as Map<String, dynamic>,
     );
@@ -1537,7 +1537,7 @@ void main() {
             {
               'operation_id': 'operation-alpha',
               'mission_id': 'mission-007',
-              'session_id': 'claude-session-123',
+              'run_id': 'claude-session-123',
               'state': 'working',
               'sequence': 4,
             },

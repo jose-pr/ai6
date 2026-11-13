@@ -51,7 +51,7 @@ impl PromotionStep {
     }
 
     /// Why the record does not meet the step at `now`, or `None` when it does. `counted` is
-    /// what the Missions and failure rate are judged on (the current model's Sessions);
+    /// what the Missions and failure rate are judged on (the current model's Runs);
     /// `incidents` are the tallies the quiet period is judged on (every model's, and the
     /// outcomes that apply in every Operation).
     pub fn shortfall(

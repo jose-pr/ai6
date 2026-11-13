@@ -57,10 +57,10 @@ impl std::str::FromStr for Tidy {
     }
 }
 
-/// Who asks: the round's Mission and its provider Session.
+/// Who asks: the round's Mission and its provider Run.
 pub(super) struct Round<'a> {
     pub(super) mission: &'a Mission,
-    pub(super) session: &'a str,
+    pub(super) run: &'a str,
 }
 
 /// What a tidy did.
@@ -330,7 +330,7 @@ fn remove_with_green_ink(
             let asked = Asked {
                 operation: operation.clone(),
                 mission: mission.mission_id.to_string(),
-                session: round.session.to_owned(),
+                run: round.run.to_owned(),
                 agent,
                 kind: scope.kind.clone(),
                 target: scope.target.clone(),
@@ -497,7 +497,7 @@ mod tests {
     fn round_of<'a>(mission: &'a Mission) -> Round<'a> {
         Round {
             mission,
-            session: "provider-session-hos",
+            run: "provider-id-hos",
         }
     }
 

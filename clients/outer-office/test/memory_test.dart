@@ -35,7 +35,7 @@ Map<String, dynamic> entry(
   'updated_by': by,
   'source': {
     'by': by,
-    'session': null,
+    'run': null,
     'exposed': exposures.isNotEmpty,
     'exposures': exposures,
   },
@@ -213,7 +213,7 @@ MissionBoard signedIn(MemoryGateway gateway, {ScopedGateway? scoped}) {
   );
   board.accessToken = 'operator-token';
   board.loading = false;
-  board.userSession = UserSessionSummary.fromJson({
+  board.userRun = UserRunSummary.fromJson({
     'person_id': 'operator-007',
     'name': 'operator-007',
     'groups': <String>[],

@@ -222,7 +222,7 @@ fn propose(
         },
         status: "pending",
         created_at: now(),
-        session: digest(&conversation.bearer),
+        run: digest(&conversation.bearer),
         result: None,
         work: None,
         cable: Some(hold),

@@ -1318,10 +1318,10 @@ fn a_detached_runner_relays_acp_until_it_stops() {
     let init = ask(1, "initialize", serde_json::json!({"protocolVersion": 1}));
     assert_eq!(init["result"]["agentInfo"]["name"], "ai6-runner", "{init}");
     assert_eq!(init["result"]["authMethods"][0]["id"], "ai6-runner-token");
-    // The runner's refusal is relayed, not hidden: it has no such Session.
+    // The runner's refusal is relayed, not hidden: it has no such Run.
     let missing = ask(
         2,
-        "_ai6/session_status",
+        "_ai6/run_status",
         serde_json::json!({"key": "nothing"}),
     );
     assert_eq!(missing["error"]["code"], -32002, "{missing}");
@@ -1384,7 +1384,7 @@ fn gate(command: &str) -> std::process::Output {
         .spawn()
         .expect("the AI6 command should start");
     let input = serde_json::json!({
-        "session_id": "abc123",
+        "run_id": "abc123",
         "cwd": std::env::temp_dir(),
         "hook_event_name": "PreToolUse",
         "tool_name": "Bash",

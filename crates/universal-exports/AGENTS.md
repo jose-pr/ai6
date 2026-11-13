@@ -31,8 +31,8 @@ The crate forbids unsafe code with `#![forbid(unsafe_code)]`.
 
 ```rust
 pub struct GatewayLimits {
-    pub max_sessions: usize,
-    pub max_clients_per_session: usize,
+    pub max_runs: usize,
+    pub max_clients_per_run: usize,
     pub scrollback_events: usize,
     pub max_frame_bytes: usize,
     pub max_input_frames_per_second: u32,
@@ -71,7 +71,7 @@ pub struct LoginLimits {
 }
 ```
 
-`GatewayLimits::default()` allows 16 Sessions, 12 clients per Session, 64
+`GatewayLimits::default()` allows 16 Runs, 12 clients per Run, 64
 scrollback events, 256 KiB per frame, 40 input frames per second, 64 queued
 inputs and 8 fanout events. Config validation requires an HTTPS origin of at most
 `origin_bytes`, a Station credential of at least `station_token_min_bytes` (32), finite non-zero
@@ -99,7 +99,7 @@ pub enum AttachMode { Read, Write }
 pub struct AttachGrant {
     pub operation_id: OperationId,
     pub mission_id: MissionId,
-    pub session_id: SessionId,
+    pub run_id: RunId,
     pub mode: AttachMode,
 }
 
@@ -152,23 +152,23 @@ pub const PROXY_SECRET_HEADER: &str = "x-ai6-proxy-secret";
 with the `unex` record's `proxy_user_header` but no secret.
 
 All fields are public; `AttachMode` is non-exhaustive. M is the authority that
-chooses the Operation, Mission ID, Session ID and mode. The gateway refuses a
-grant if its Operation or Mission differs from the registered Session.
+chooses the Operation, Mission ID, Run ID and mode. The gateway refuses a
+grant if its Operation or Mission differs from the registered Run.
 
 ## Board models
 
 ```rust
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct BoardSession {
+pub struct BoardRun {
     pub operation_id: String,
     pub mission_id: String,
-    pub session_id: String,
+    pub run_id: String,
     pub state: Option<String>,
     pub reason: Option<String>,  // why AI6 holds that state: "green-ink", "budget"
     pub sequence: u64,
     pub updated_at: Option<f64>, // Unix seconds of the latest lifecycle event
-    pub exposure: Vec<String>,   // untrusted input the Session read, from its Registry record
+    pub exposure: Vec<String>,   // untrusted input the Run read, from its Registry record
     pub station_id: Option<String>, // the Station holding it, from its Registry record
     pub agent: Option<String>,   // the Agent its Mission's published brief names
 }
@@ -179,19 +179,19 @@ pub struct BoardMission {
     pub operation_id: String,
     pub mission_id: String,            // the Mission's UID when it came from the Registry
     pub handle: String,                // what it is called now; its ID when the Registry names it no other way
-    pub sessions: Vec<BoardSession>,
+    pub runs: Vec<BoardRun>,
     pub brief: Option<LaunchManifest>,
     pub usage: Option<MissionUsage>,   // tokens and cost from the Registry ledger
-    pub attempts: Vec<MissionAttempt>, // every attempt, first first, from the Session records
+    pub attempts: Vec<MissionAttempt>, // every attempt, first first, from the Run records
 }
 
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MissionAttempt {
     pub attempt: u32,
-    pub session_id: String,                  // AI6's Session ID, the run's UID
+    pub run_id: String,                  // AI6's Run ID, the run's UID
     pub handle: Option<String>,              // the run's `<mission handle>.<attempt>` when it opened
-    pub provider_session_id: Option<String>,
+    pub provider_id: Option<String>,
     pub predecessor: Option<String>,         // AI6 ID of the attempt it replaced
     pub station: String, pub theater: Option<String>,
     pub status: String,                      // "active" | "parked" | "ended" | "lost"
@@ -267,11 +267,11 @@ pub struct BoardTheater {
     pub workdir: Option<String>,     // where a remote-hands Mission works without an Operation path
     pub unavailable: Option<String>, // why the Station cannot reach it now
     pub weakened: Vec<String>,       // loose settings and ambient credentials found there
-    pub requires: Option<ai6::Requirements>, // what Sessions need there
+    pub requires: Option<ai6::Requirements>, // what Runs need there
     pub report: Option<ai6::ProbeReport>,    // the Station's last probe: unmet, found, free space
     pub made_for: Option<String>,    // the Mission an ephemeral Theater was made for
     pub resources: Option<ai6::Resources>, // last sample; omitted until one succeeds
-    pub sessions: usize,             // the Station's running Sessions there; omitted when 0
+    pub runs: usize,             // the Station's running Runs there; omitted when 0
 }
 
 #[non_exhaustive]
@@ -296,20 +296,20 @@ pub struct LaunchManifest {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub environment_keys: Vec<String>,
-    pub station_id: String,          // Station that supervises the Session
+    pub station_id: String,          // Station that supervises the Run
     pub theater_id: Option<String>,  // Theater the harness works on, when the Station knows it
     pub mode: String,                // "field" | "remote-hands"
     pub provenance: Option<ai6::Provenance>, // where the brief came from (origin, principal, received_by, ...); absent for a Mission started on a Station
 }
 ```
 
-`BoardSession` has no `state`, sequence `0` and no `updated_at` until the Session's first
-lifecycle event. `state` is the Mission's state as that Session last reported it; an
+`BoardRun` has no `state`, sequence `0` and no `updated_at` until the Run's first
+lifecycle event. `state` is the Mission's state as that Run last reported it; an
 earlier attempt keeps the state it last reported (often `queued` after a retry), so the
-Mission's current state is the one of its Session with the latest `updated_at`. `reason` is the
-lifecycle event's reason, if any, and clears with the next state. `exposure` lists where the Session read untrusted input (`brief:source`,
-`cable:SENDER`, `tool:NAME`, `review`) and is empty for a clean Session. `BoardMission` groups registered Sessions by Station and
-Mission ID. A Mission with no registered Session is listed too, with `sessions: []` and
+Mission's current state is the one of its Run with the latest `updated_at`. `reason` is the
+lifecycle event's reason, if any, and clears with the next state. `exposure` lists where the Run read untrusted input (`brief:source`,
+`cable:SENDER`, `tool:NAME`, `review`) and is empty for a clean Run. `BoardMission` groups registered Runs by Station and
+Mission ID. A Mission with no registered Run is listed too, with `runs: []` and
 `pending` (`BoardPending`): `state` (`queued` or `failed`), `kind` (`unplaced` = a brief no Station
 has taken, `waiting`, `retrying`, `recovering`, `queued`, `failed`), `reason`, `failures`, `retry_at`
 (Unix seconds), `agent`, `station`, `name`, `at`. They come from the Registry: a Station's check-in
@@ -317,11 +317,11 @@ has taken, `waiting`, `retrying`, `recovering`, `queued`, `failed`), `reason`, `
 Mission that failed before a harness started, newest first within `[registry.limits.briefs] records`),
 and the queued briefs with the latest `waiting` timeline reason for each. Only an Operation the person
 may read with `mission.read` is listed; a compartment filter leaves them out. A Mission that has a
-Session is never listed twice, and has no `pending`.
+Run is never listed twice, and has no `pending`.
 `brief` is present when AI6 published the exact Mission prompt and sanitized launch
-manifest during Session registration. It contains environment variable names only;
+manifest during Run registration. It contains environment variable names only;
 values and initial context are never returned. The detail is scoped by the same
-`mission.read` authorization as the Session list.
+`mission.read` authorization as the Run list.
 Both models are non-exhaustive; downstream Rust code should deserialize them or
 read their public fields instead of constructing struct literals.
 
@@ -363,7 +363,7 @@ pub struct ControlStatus {
     pub control_id: String,
     pub operation_id: String,
     pub mission_id: String,
-    pub session_id: Option<String>,  // provider Session expected to be current
+    pub run_id: Option<String>,  // provider Run expected to be current
     pub action: String,              // "cancel" | "retry" | "resume" | "interrupt"
     pub agent: Option<String>,       // a retry's Agent
     pub station_id: String,          // the Station asked to act
@@ -379,15 +379,15 @@ pub struct ControlStatus {
 Returned by the control routes below. A resume's `message` is never in a status or an
 audit record; it travels only in the control frame to the Station.
 
-Routing: the Station holding the Mission's latest Session record (highest attempt), else
+Routing: the Station holding the Mission's latest Run record (highest attempt), else
 the Station holding a brief lease whose `mission_id` matches, else the Headquarters Station;
 Stations whose check-in is older than 45 seconds are passed over, and with none the request
-is refused `503` with `Retry-After: 15`. When the request names `session_id` and the
-Registry knows another provider Session as current, it is refused `409`; otherwise the
+is refused `503` with `Retry-After: 15`. When the request names `run_id` and the
+Registry knows another provider Run as current, it is refused `409`; otherwise the
 current one is attached. The Mission must be known under the Operation of the route: a
-Session record's `operation`, its brief lease's `operation` metadata, its queued brief's
+Run record's `operation`, its brief lease's `operation` metadata, its queued brief's
 `operation` or a board entry names it, and none of them names another. Otherwise it is `404`,
-refused before anything is routed, audited or queued, with no Station or Session in the body. A
+refused before anything is routed, audited or queued, with no Station or Run in the body. A
 `cancel` of a Mission whose brief is filed `done` or `failed`, with no Station to ask, is settled here:
 `202`, `applied`, the brief's state, `station_id` empty, audited.
 
@@ -395,9 +395,9 @@ Bounds (in memory, per gateway): 1,024 controls kept, oldest finished dropped fi
 when all are open; 64 queued per Station, `409` beyond; a control queued or delivered for
 more than 120 seconds becomes `expired`. The idempotency key is scoped to the person,
 Operation and Mission (1-128 bytes, no control characters); the same key with the same
-action, Agent, message and Session returns the first status with `200`, with anything else
+action, Agent, message and Run returns the first status with `200`, with anything else
 `409`. Every accepted request is audited as `mission.cancel`, `mission.retry`,
-`mission.resume` or `session.interrupt` with the Mission ID as target.
+`mission.resume` or `run.interrupt` with the Mission ID as target.
 
 ## Activity timeline
 
@@ -424,7 +424,7 @@ pub struct TimelineItem {
     pub station_id: Option<String>,
     pub mission_id: Option<String>,    // the Mission's UID
     pub handle: Option<String>,        // what that Mission is called now
-    pub session_id: Option<String>,
+    pub run_id: Option<String>,
     pub actor: Option<String>,         // person ID or Agent codename
     pub target: Option<String>,        // an audit record's target
     pub detail: BTreeMap<String, String>,
@@ -437,7 +437,7 @@ unknown parameters refused) needs `audit.read` on the Operation; another Operati
 whose Operation it is and, for each Station that hosts the Operation and whose `audit.read`
 the caller also holds, that Station's records (shown with `station_id`). Audit records of
 `mission.create.requested`, `mission.cancel`, `mission.retry`, `mission.resume` and
-`session.interrupt` carry their target as `mission_id`. `mission=` keeps items of that
+`run.interrupt` carry their target as `mission_id`. `mission=` keeps items of that
 Mission. Order is `at` descending, then `id` descending; `cursor` returns the items after
 that position, so newer activity never shifts older pages. `limit` outside 1-200, an
 unknown or malformed cursor and an invalid Mission ID are `400`. Every text field is cut
@@ -502,7 +502,7 @@ pool account, model and tokens. The person's access token and her tool token are
 `[redacted]` wherever they appear. The log is trimmed every `log_prune_every` (1 hour) to
 `log_age` (90 days) and `log_bytes` (1 GiB), and flushed when `serve_loopback` stops. A conversation asked for in a hello that the
 gateway does not hold is rebuilt from the log when it is that person's, with the Station,
-provider Session and route of its last turn; a proposal that was waiting shows as expired.
+provider Run and route of its last turn; a proposal that was waiting shows as expired.
 
 The command reads `[assistant.limits]`, `[assistant.gateway]`, `[assistant.views]` and the
 `cables` record at start. Defaults: 20 conversations a person and 2,000 in all (oldest idle one
@@ -516,7 +516,7 @@ calls a conversation per minute; 2 conversations a person with a harness running
 pending. Past that last bound, a new message closes the person's least recently used idle
 harness (a `close` job to its Station, and the conversation's tokens withdrawn); when every
 other one is answering, the message is refused with `busy_elsewhere`. Conversations live in the
-gateway's memory only and are lost when it restarts (the provider Session on the Station
+gateway's memory only and are lost when it restarts (the provider Run on the Station
 survives, but the app shows a new conversation).
 
 The model runs on a Station, as the roster Agent named here (see `ai6::AssistantJob`), not in
@@ -529,7 +529,7 @@ from in its link form, `app:/<page>?k=v&…`, when the message's `route` is one;
 is not), Moneypenny's instructions and the field dictionary
 (`docs/organization.md`) as context, a recap of the conversation's last 8 KiB apart as
 `recap` (a Station gives it only to a harness that starts afresh, never on resume), the provider
-Session to resume, and an MCP token bound to the person, the conversation and the Station the
+Run to resume, and an MCP token bound to the person, the conversation and the Station the
 job is placed on. The token is set when the job is placed: the conversation's token for that
 Station is reused while more than 10 minutes of it remain (so a running harness keeps the
 token it started with), otherwise a new random one is made; placing the job on another
@@ -638,7 +638,7 @@ Station gives her its Cable endpoint (see the `ai6` header, assistant desk), and
 for the person to confirm. A `cable_proposal` event becomes a proposal: tool
 `send_cable` or `reply_to_cable`, request `CABLE <target>` with body `{operation, recipient,
 ttl_seconds, body}`, summary naming the recipient and lifetime,
-needs `cable.send` on `operation:<id>`, the session of the conversation's current access
+needs `cable.send` on `operation:<id>`, the run of the conversation's current access
 token; a Cable whose ID, Operation, target or recipient is not a valid identity, whose digest
 is not `AssistantCable::request_digest` of what is shown, whose body exceeds 16 KiB or holds a
 hidden character, is an `error` entry instead. With 32 proposals pending or confirming, none
@@ -669,10 +669,10 @@ made: `memory.write`, `memory.forget`, `memory.compartments`, `memory.mark_clear
 `operation`, the global under `config:memory`, a person's under `config:assistant` with target
 `PERSON ID`), and one that cannot be audited is not made (`503`). Her tools `memory_search`,
 `memory_read`, `memory_write` and `memory_forget` run as the person (`moneypenny:PERSON`, the
-conversation as session): her memory of the person at once, shown as a `notice` with `data.diff`;
-an Operation's or the global one as a proposal, told as a `notice`. An entry an exposed Session
+conversation as run): her memory of the person at once, shown as a `notice` with `data.diff`;
+an Operation's or the global one as a proposal, told as a `notice`. An entry an exposed Run
 wrote that she is shown adds `memory:<id>` to the conversation (`Conversation::memory_marks`, at
-most `[registry.limits.sessions] exposures`), which every later write of hers carries. A message's
+most `[registry.limits.runs] exposures`), which every later write of hers carries. A message's
 job holds the newest summaries of her memory of the person and of the global memory in `context`,
 fenced in `<ai6-data tool="memory_search">`, within `[assistant.gateway] memory_context_bytes` and
 what `context_bytes` leaves after the rest of the job's context and recap. An input with a hidden
@@ -694,7 +694,7 @@ numbers, booleans or null; the whole view ≤ 64 KiB. A view outside it answers 
 `data: {"id": "view-<hex>", "view"}`. The app's `{"type":"submit","view":ID,"values":{…}}`
 fills the form's tool from `fixed` plus the values of its own fields (a `json` field's text is
 parsed; a choice must be listed; another name is `bad_request`) and records a proposal as the
-tool would, in the submitting socket's session (`refused` with the tool's answer otherwise).
+tool would, in the submitting socket's run (`refused` with the tool's answer otherwise).
 
 The `navigate` tool (`readOnlyHint`) takes exactly `{"to": ROUTE, "label": TEXT}`: `to` an app
 route in its JSON form, checked by `routes.rs` (its schema is flat, `page` plus every field of
@@ -772,25 +772,25 @@ impl Gateway {
     #[must_use]
     pub fn with_job_poll_max_wait(self, max_wait: Duration) -> Self;
     pub fn authenticate_station(&self, presented: &str) -> Result<(), GatewayError>;
-    pub async fn register_session(
+    pub async fn register_run(
         &self,
         station_token: &str,
         operation_id: OperationId,
         mission_id: MissionId,
-        session_id: SessionId,
+        run_id: RunId,
     ) -> Result<(), GatewayError>;
-    pub async fn board_sessions(&self) -> Vec<BoardSession>;
+    pub async fn board_runs(&self) -> Vec<BoardRun>;
     pub async fn board_missions(&self) -> Vec<BoardMission>;
     pub async fn publish_lifecycle(
         &self,
         station_token: &str,
         event: LifecycleEvent,
     ) -> Result<(), GatewayError>;
-    pub fn terminal_bytes(&self, session_id: &SessionId) -> usize;
+    pub fn terminal_bytes(&self, run_id: &RunId) -> usize;
     pub async fn publish_terminal_output(
         &self,
         station_token: &str,
-        session_id: SessionId,
+        run_id: RunId,
         sequence: u64,
         bytes: Vec<u8>,
     ) -> Result<(), GatewayError>;
@@ -803,27 +803,27 @@ impl Gateway {
         -> Result<String, GatewayError>;
     pub async fn attach(
         &self,
-        session_id: &SessionId,
+        run_id: &RunId,
         ticket: &str,
         after_sequence: u64,
     ) -> Result<Attachment, GatewayError>;
     pub async fn ingest(
         &self,
         station_token: &str,
-        session_id: &SessionId,
+        run_id: &RunId,
         sequence: u64,
         frame: Vec<u8>,
     ) -> Result<(), GatewayError>;
     pub async fn submit_input(
         &self,
-        session_id: &SessionId,
+        run_id: &RunId,
         connection_id: &str,
         frame: Vec<u8>,
     ) -> Result<(), GatewayError>;
     pub async fn disconnect(&self, attachment: Attachment);
     pub async fn disconnect_connection(
         &self,
-        session_id: &SessionId,
+        run_id: &RunId,
         connection_id: &str,
     );
     pub async fn receive_agent_input(&self) -> Option<AgentInput>;
@@ -840,13 +840,13 @@ impl Gateway {
 }
 ```
 
-`BoardMission` groups registered provider Sessions by Station and Mission ID.
-It reflects Sessions known to this gateway; a queued Mission with no registered
-provider Session is not included.
+`BoardMission` groups registered provider Runs by Station and Mission ID.
+It reflects Runs known to this gateway; a queued Mission with no registered
+provider Run is not included.
 
 `new` creates bounded in-memory state and one bounded M input queue. `authenticate_station`
-compares the presented bearer credential with the configured Station credential. Session
-registration is idempotent only for the same Station/Mission/Session tuple. Session
+compares the presented bearer credential with the configured Station credential. Run
+registration is idempotent only for the same Station/Mission/Run tuple. Run
 and credential tables have configured capacity limits.
 
 `issue_attach_token` returns a random, short-lived, single-use token. It can only
@@ -857,22 +857,22 @@ The HTTP route keeps that ticket in an HttpOnly, Secure, SameSite=Strict cookie;
 neither credential is placed in a URL or server log.
 
 `attach` consumes a ticket, reserves a viewer slot and, for `Write`, acquires the
-Session's only expiring writer lease. Its replay contains the latest schema for
+Run's only expiring writer lease. Its replay contains the latest schema for
 each channel followed by retained value frames newer than `after_sequence`. A
 reader receives no write permission. Call `disconnect` or
 `disconnect_connection` when a socket closes to release the slot and lease.
 
 `ingest` accepts M's guatiao schema, value and close frames on protocol channels
 1 and 2. Schema/close frames use sequence zero. Value frames must have a positive
-monotonic sequence and match their Station/Mission/Session identity and terminal
+monotonic sequence and match their Station/Mission/Run identity and terminal
 direction. Frames are bounded before fanout. Socket write buffers are bounded
 too, and their configured capacity counts toward the aggregate budget.
 
 `attach`'s replay holds a `TerminalGap` (`ai6-diptel`) ahead of any frame that follows a position or
 a frame with a sequence skipped between them, and a frame published past a skipped sequence is
 preceded by one on the live stream; the gateway keeps no record of gaps but its history.
-`terminal_bytes` is the most terminal output one event of the Session may carry, at any sequence;
-`POST /v1/station/sessions` answers it beside `next_sequence`, and a Station splits longer output.
+`terminal_bytes` is the most terminal output one event of the Run may carry, at any sequence;
+`POST /v1/station/runs` answers it beside `next_sequence`, and a Station splits longer output.
 `publish_lifecycle` and `publish_terminal_output` are the higher-level M path:
 they construct guatiao values with the shared protocol crate, announce each
 channel schema on first use, then submit the value through the same validation
@@ -882,7 +882,7 @@ quarantined), `done`, `failed` and `abandoned`. The HTTP routes use JSON for lif
 bytes for terminal output; both remain bearer-authenticated as M.
 
 `submit_input` accepts a guatiao terminal input or resize value for the same provider
-Session, with a newer sequence and an unexpired write lease. It enforces per-connection
+Run, with a newer sequence and an unexpired write lease. It enforces per-connection
 rate and queue limits. `receive_agent_input` waits for the next bounded frame for M;
 there is one receiver for the gateway instance.
 
@@ -898,7 +898,7 @@ pub struct Attachment {
 pub struct AgentInput {
     pub operation_id: OperationId,
     pub mission_id: MissionId,
-    pub session_id: SessionId,
+    pub run_id: RunId,
     pub frame: Vec<u8>,
 }
 ```
@@ -921,16 +921,16 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | Method and path | Contract |
 | --- | --- |
 | `GET /health` | Returns `204 No Content` while the gateway is serving. |
-| `GET /v1/board` | Requires a user bearer and returns Sessions for Operations allowed by `mission.read`, each with the `station_id` of its Registry record and the `agent` of its Mission's brief (`null` when unknown). |
+| `GET /v1/board` | Requires a user bearer and returns Runs for Operations allowed by `mission.read`, each with the `station_id` of its Registry record and the `agent` of its Mission's brief (`null` when unknown). |
 | `GET /v1/stations` | Requires a user bearer; returns visible Station health, hosted Operations and current Headquarters Station. |
 | `GET /v1/user/operations/{operation_id}/placement-preview` | Requires `mission.read` at the Operation; returns the eligible (Station, Theater, Agent) choices, best first, and a reason for each rejection. Optional `agent`, `role`, `stations`, `tags` query parameters narrow it. |
-| `GET /v1/missions` | Requires a user bearer; groups registered Sessions by Mission and filters each Operation through `mission.read`, and lists Missions with no Session yet (`pending`, above). `?operation=P` keeps P's Missions; with `&subtree=true`, those of P and of every Operation under it. `?mission=ID` keeps the one Mission `ID` names. |
+| `GET /v1/missions` | Requires a user bearer; groups registered Runs by Mission and filters each Operation through `mission.read`, and lists Missions with no Run yet (`pending`, above). `?operation=P` keeps P's Missions; with `&subtree=true`, those of P and of every Operation under it. `?mission=ID` keeps the one Mission `ID` names. |
 | Any route with `{mission_id}` (and `held-briefs/{key}`, `missions/{id}/products`, the timeline's `?mission=`) | Takes the Mission's UID, the key of a brief dropped by hand, or any handle it was ever given, compared without case (`ai6::BriefStore::resolve_mission`); an ID the Registry does not know is taken as it is. Answers carry `mission_id` (the UID) and `handle` (the current one). |
-| `POST /v1/user/operations/{operation_id}/missions/{mission_id}/verdict` | Requires `mission.verify`; body `{"verdict": "confirmed" \| "disputed" \| "failed-verification", "note"?}`, unknown fields refused. Puts it on the latest attempt, replacing any it has, and returns `{operation_id, mission_id, attempt, session_id, verdict, note?, by, at}`; a refusal is `{"error": TEXT}` with `400` (malformed), `409` (the attempt has not ended done or held) or `404`. Audited `mission.verdict` first (resource `mission:UID`, target `UID VERDICT`, never the note), timeline kind `verdict` action the verdict. A Station settles a held or verifying Mission by it; `redispatch` is refused here (`400`): it goes by `verify`. |
-| `POST /v1/user/operations/{operation_id}/missions/{mission_id}/verify` | Requires `mission.verify`; body `{"decision": "done" \| "redispatch" \| "failed", "reason", "amendment"?}` (`reason` required, `amendment` only with `redispatch`), unknown fields refused. Decides a Mission whose latest attempt is `verifying`: it becomes the attempt's verdict (`confirmed`, `failed-verification` or `redispatch`, the reason as its note), and its Station then settles the Mission done or failed, or queues attempt N+1 told the reason and amendment. Returns `{operation_id, mission_id, attempt, session_id, decision, verdict, note, amendment?, by, at}`; `400` (malformed), `409` (the latest attempt is not verifying) or `404`. Audited `mission.verify` first (resource `mission:UID`, target `UID DECISION`, never the reason), timeline kind `verify` action the decision. |
-| `POST /v1/user/operations/{operation_id}/missions/{mission_id}/probe` | Requires `mission.verify`, no body. Asks the Station holding a verifying Mission to read back what it was to deliver (`branch`, `commit_on`, `comment`, `artifact`, `approval`, `file`) on its next pass; returns `{operation_id, mission_id, attempt, session_id, requested_at}`, `409` unless the latest attempt is verifying. Audited `mission.probe`. The findings are the latest attempt's `evidence` (`{deliverable, result: found \| missing \| unprobed \| failed, detail, at}`) in the Mission's detail beside its `deliverables` (`kind` or `kind:target`), and `probe_requested` clears when the Station has answered. An Operation's watch at `desk` clearance leaves its advice as `recommendation` (`{verdict, note, by, at}`) beside it, which settles nothing. |
+| `POST /v1/user/operations/{operation_id}/missions/{mission_id}/verdict` | Requires `mission.verify`; body `{"verdict": "confirmed" \| "disputed" \| "failed-verification", "note"?}`, unknown fields refused. Puts it on the latest attempt, replacing any it has, and returns `{operation_id, mission_id, attempt, run_id, verdict, note?, by, at}`; a refusal is `{"error": TEXT}` with `400` (malformed), `409` (the attempt has not ended done or held) or `404`. Audited `mission.verdict` first (resource `mission:UID`, target `UID VERDICT`, never the note), timeline kind `verdict` action the verdict. A Station settles a held or verifying Mission by it; `redispatch` is refused here (`400`): it goes by `verify`. |
+| `POST /v1/user/operations/{operation_id}/missions/{mission_id}/verify` | Requires `mission.verify`; body `{"decision": "done" \| "redispatch" \| "failed", "reason", "amendment"?}` (`reason` required, `amendment` only with `redispatch`), unknown fields refused. Decides a Mission whose latest attempt is `verifying`: it becomes the attempt's verdict (`confirmed`, `failed-verification` or `redispatch`, the reason as its note), and its Station then settles the Mission done or failed, or queues attempt N+1 told the reason and amendment. Returns `{operation_id, mission_id, attempt, run_id, decision, verdict, note, amendment?, by, at}`; `400` (malformed), `409` (the latest attempt is not verifying) or `404`. Audited `mission.verify` first (resource `mission:UID`, target `UID DECISION`, never the reason), timeline kind `verify` action the decision. |
+| `POST /v1/user/operations/{operation_id}/missions/{mission_id}/probe` | Requires `mission.verify`, no body. Asks the Station holding a verifying Mission to read back what it was to deliver (`branch`, `commit_on`, `comment`, `artifact`, `approval`, `file`) on its next pass; returns `{operation_id, mission_id, attempt, run_id, requested_at}`, `409` unless the latest attempt is verifying. Audited `mission.probe`. The findings are the latest attempt's `evidence` (`{deliverable, result: found \| missing \| unprobed \| failed, detail, at}`) in the Mission's detail beside its `deliverables` (`kind` or `kind:target`), and `probe_requested` clears when the Station has answered. An Operation's watch at `desk` clearance leaves its advice as `recommendation` (`{verdict, note, by, at}`) beside it, which settles nothing. |
 | `POST /v1/user/operations/{operation_id}/missions/{mission_id}/rename` | Requires `mission.control`; body `{"handle"}`. Returns `{operation_id, mission_id, handle, previous}`; a refusal is `{"error": TEXT}` with `400` (malformed), `409` (a handle another Mission had) or `404` (no such Mission in the Operation). Audited `mission.rename` (resource `mission:UID`, target the UID), timeline kind `control` action `rename.done` with details `handle` and `previous`. |
-| `GET /v1/operations/{operation_id}/missions/{mission_id}` | Requires a user bearer; returns one authorized Mission, its AI6-published brief when available, its `usage` (tokens and cost per Session and UTC day) once a provider has reported any, and its `attempts` from the shared Session records. `GET /v1/missions` carries `attempts` too. |
+| `GET /v1/operations/{operation_id}/missions/{mission_id}` | Requires a user bearer; returns one authorized Mission, its AI6-published brief when available, its `usage` (tokens and cost per Run and UTC day) once a provider has reported any, and its `attempts` from the shared Run records. `GET /v1/missions` carries `attempts` too. |
 | `GET /v1/auth/methods` | No token. `{"methods": [...]}`: `password` when the Authenticator takes a name and a secret (it says so in `describe`, or says nothing), `proxy` with a proxy identity header. Names no account. |
 | `POST /v1/auth/login` | Resolves the sanitized identity header from the trusted reverse proxy, or uses the configured Authenticator and Directory; returns a one-time user bearer secret, `expires_at`, `expires_in` (seconds left, for a client that does not trust its clock) and `ends_at`. `ttl_seconds` is optional, default `[gateway] access_token_ttl`, at most `access_token_max_ttl`. A request with `Origin` (checked) also gets `Set-Cookie: ai6_session=…; Path=/v1/auth; HttpOnly; Secure; SameSite=Strict; Max-Age=…`, ending `session_max` after signing in, unless `[gateway] session_cookie` is `false`, `session_max` is `0` or the body says `"session_cookie": false`; and, when pages share the API's origin, the page cookie `ai6_pages` (see Pages she publishes), which `resume` and a renewal with `Origin` set again and `logout` with `Origin` drops. |
 | `POST /v1/auth/resume` | Takes the `ai6_session` cookie, not a bearer. `Origin` must be the public origin (`403`). Answers `201` as login does, with a new token of the same sign-in: its time still runs from signing in, and its renewals stop at the same `ends_at`. `401` and the cookie cleared when it is refused: not active, past the end, the person gone from the directory, a proven proxy identity naming someone else, or the setting off; `401` with nothing cleared when no cookie came. Refused cookies are counted by address alone (`login_tries_per_address`), apart from login tries, and past that answer `429`. |
@@ -946,7 +946,7 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/user/operations/{operation_id}/source-items?tracker=&query=` | Requires `mission.read`; `{items: [SourceReadItem], error}` of what the Operation's sources find now (at most `source_items`, titles holding `query`), as `source-item` relays it. |
 | `GET /v1/station/source-reads/next?station=&wait_ms=` | Station token. The oldest waiting `ai6::SourceRead`, or `204` after `wait_ms` (at most `[assistant.gateway] max_wait`). The Headquarters Station asks while it holds the lease. |
 | `POST /v1/station/source-reads/{id}/result?station=` | Station token; body `ai6::SourceReadAnswer`, at most `source_answer_bytes`. `204`, `404` when nobody waits for it any more. |
-| `GET /v1/user/operations/{operation_id}/pools` | Requires `pool.read` on the Operation; returns a `PoolBoard { operation_id, accounts: Vec<BoardAccount> }`: each account a Station declared for the Operation with `pool`, `account`, `handler`, `kind`, `priority`, `max_concurrent`, `labels`, `active` (`BoardClaim { station_id, mission_id, since }`, this Operation's live claims only), `other_sessions` (the count of other Operations' live claims), `windows` (`BoardWindow { name, used_permille, resets_at, status }`), `limited_until` (only while in the future), `last_used`, `tokens_today` (UTC) and `login` (`BoardLogin { stations, expires_at, renewed_at, renewal_held_by, failures, needs_person }`, for a login sealed in the Registry). Never a credential, its secret's name, a login directory or a sealed value. |
+| `GET /v1/user/operations/{operation_id}/pools` | Requires `pool.read` on the Operation; returns a `PoolBoard { operation_id, accounts: Vec<BoardAccount> }`: each account a Station declared for the Operation with `pool`, `account`, `handler`, `kind`, `priority`, `max_concurrent`, `labels`, `active` (`BoardClaim { station_id, mission_id, since }`, this Operation's live claims only), `other_runs` (the count of other Operations' live claims), `windows` (`BoardWindow { name, used_permille, resets_at, status }`), `limited_until` (only while in the future), `last_used`, `tokens_today` (UTC) and `login` (`BoardLogin { stations, expires_at, renewed_at, renewal_held_by, failures, needs_person }`, for a login sealed in the Registry). Never a credential, its secret's name, a login directory or a sealed value. |
 | `GET /v1/user/roster/{kind}` | `kind` is a family's name or its plural: `watches` (the `watch` family, gated by `config.read`/`config.manage` on `config:watch`; likewise `theaters`, `loadouts`, `sandboxes`, `mcps`, `overlays`, `secrets`, `secret_providers`, `pools`, `plugins`, `tls`, `cables` and `unex`; an optional `?station=ID` names a Station's own records for a family that has them, and `PUT`/`DELETE` take it too; a write is audited with the family's resource, not `config:roster`), `operations`, `agents`, `roles`, `covers`, `assistant` (Moneypenny's `[assistant]` settings: at most one record, keyed `assistant`) or `roster` (the roster-wide `[roster]` settings, such as `max_operation_depth`: at most one record, keyed `settings`); else `404`. Requires `roster.read` on `config:roster`; returns `RosterRecords { kind, revision, writable, records: Vec<RosterRecord { key, definition, revision }> }`: each definition is the JSON object of its table in the configuration files, its `revision` a digest of it for `If-Match`, the list's `revision` the roster revision in decimal (compare `BoardStation.config.revision`), `writable` whether edits are taken. `503` without a roster source. |
 | `GET /v1/user/roster/{kind}/schema` | Requires `roster.read` on `config:roster`; `404` for any other kind. Returns `ai6::RecordForm { schema, form, key { title, description, fixed? } }`: the record's JSON Schema and Guatiao form, as its type declares them. A `format` of `record:<kind>` names another kind's record, `reported:handlers`, `reported:theaters` or `reported:stations` what Stations report, `used:<field>` what other records of the kind hold there, `settings-of:<field>` settings for the provider that field names, and `seconds` and `bytes` what a number counts. A record keyed `schema` is still written with `PUT` and `DELETE` on this path. |
 | `PUT /v1/user/roster/{kind}/{key}` | Body: the record's definition, a JSON object (else `400`). Requires `roster.manage` on `config:roster`. The source checks the whole roster first: `200` `RosterChange { revision, weakened }` (`weakened`, omitted when empty: for a stored `assistant` record, `AssistantSettings::changes_from` the settings the source held just before it) and a `roster.update` audit event; `422` `{"refused": reason}` and a `roster.refused` audit event (target `<kind> <key>: <reason>`) when the roster it would leave is not acceptable, nothing changed; `409` for a read-only source (a configuration directory). With `If-Match: "<revision>"` (the record's, or `0` for a record that must be new) a record that no longer has it answers `409` `{"changed": revision}` and nothing changes; without it what is there is replaced. Audit resource `config:roster`, target `<kind> <key>`. Every Station takes up an accepted edit at its next poll. |
@@ -957,9 +957,9 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/user/operations/{operation_id}/agent-roles` | Requires `agent.read`; returns the Headquarters Station catalog merged with validated Operation-scoped Registry overrides. Each role includes `operation_override` provenance. |
 | `PUT /v1/user/operations/{operation_id}/agent-roles/{role_id}` | Requires `agent.configure`; validates and stores the role override and records only actor/action/Operation/role ID/time in audit. |
 | `DELETE /v1/user/operations/{operation_id}/agent-roles/{role_id}` | Requires `agent.configure`; removes the override, falls back to the Station definition and records a metadata-only audit event. |
-| `GET /v1/user/operations/{operation_id}/agents` | Requires `agent.read`; returns `Vec<AgentView>` by codename: every Agent the Headquarters Station's check-in posts to the Operation (`operation_policies`) and every Agent with a record there. `AgentView { agent, posted, operation: AgentTally /* this Operation */, every_operation: AgentTally /* outside any Operation, and quarantines in every one */, by_clearance: BTreeMap<String, AgentTally> /* this Operation */, last_mission_at /* this Operation */, model_history: Vec<ModelTenure> /* this Operation, each with its Sessions' tally; a model with no finished Mission here is not in it */, routes: Vec<AgentRoute { handler, model /* None: the record sets none, the handler's default */ }> /* what the roster record says, from the HQS check-in's `operation_policies`; empty without `roster.read` and for an Agent not posted */, retirement: Option<RetirementNotice { retire_on, on_retire, status /* retiring, desk_duty, retired */ }> /* from the HQS check-in's `retirements` */, clearance, configured_clearance /* from the HQS check-in's `agent_clearances` */, grant: Option<ClearanceGrant>, promotion: Option<ApprovalRequest> /* M's pending promotion: kind `clearance`, Session `m`, Mission `promotion-AGENT`; a clearance request an Agent filed itself is not shown */, grant_unreadable: bool /* then clearance is "desk" */ }`. Nothing of other Operations is shown. |
+| `GET /v1/user/operations/{operation_id}/agents` | Requires `agent.read`; returns `Vec<AgentView>` by codename: every Agent the Headquarters Station's check-in posts to the Operation (`operation_policies`) and every Agent with a record there. `AgentView { agent, posted, operation: AgentTally /* this Operation */, every_operation: AgentTally /* outside any Operation, and quarantines in every one */, by_clearance: BTreeMap<String, AgentTally> /* this Operation */, last_mission_at /* this Operation */, model_history: Vec<ModelTenure> /* this Operation, each with its Runs' tally; a model with no finished Mission here is not in it */, routes: Vec<AgentRoute { handler, model /* None: the record sets none, the handler's default */ }> /* what the roster record says, from the HQS check-in's `operation_policies`; empty without `roster.read` and for an Agent not posted */, retirement: Option<RetirementNotice { retire_on, on_retire, status /* retiring, desk_duty, retired */ }> /* from the HQS check-in's `retirements` */, clearance, configured_clearance /* from the HQS check-in's `agent_clearances` */, grant: Option<ClearanceGrant>, promotion: Option<ApprovalRequest> /* M's pending promotion: kind `clearance`, Run `m`, Mission `promotion-AGENT`; a clearance request an Agent filed itself is not shown */, grant_unreadable: bool /* then clearance is "desk" */ }`. Nothing of other Operations is shown. |
 | `PUT /v1/user/operations/{operation_id}/agents/{agent}/clearance` | Requires `agent.configure`; `{agent}` is a codename or unique alias the Headquarters Station's check-in (`agent_clearances`) lists for the Operation, stored under the codename; `404` for any other name; body `{"clearance": "desk"\|"field"\|"00", "reason": 1-512 characters, "expires_in_secs"?: 1..=31536000}`, unknown fields refused. Stores a lowering `ClearanceGrant` (signer = caller, no approval: it never raises the Agent above its configured clearance), replacing any grant there and revoking the approval of a replaced raise; returns the grant. Audited first as `agent.clearance.lowered` (target `AGENT CLEARANCE`). |
-| `GET /v1/user/operations/{operation_id}/agents/scorecard[?window_days=N]` | Requires `agent.read` on the Operation **and** `roster.read` (`403` otherwise: it shows which handler and model each Agent ran on); returns an `ai6::Scorecard` computed from the Registry's Session records and usage ledger: per Agent, per route within it and per model, each `Standing` listing the attempts behind every judgment. The window and small-sample line come from the Operation's `scorecard` settings in the HQS check-in (`operation_policies`), defaults before it checks in; `window_days` overrides the window, `0` covering every attempt on record. |
+| `GET /v1/user/operations/{operation_id}/agents/scorecard[?window_days=N]` | Requires `agent.read` on the Operation **and** `roster.read` (`403` otherwise: it shows which handler and model each Agent ran on); returns an `ai6::Scorecard` computed from the Registry's Run records and usage ledger: per Agent, per route within it and per model, each `Standing` listing the attempts behind every judgment. The window and small-sample line come from the Operation's `scorecard` settings in the HQS check-in (`operation_policies`), defaults before it checks in; `window_days` overrides the window, `0` covering every attempt on record. |
 | `GET /v1/user/models` | Requires `roster.read`; returns what every Station last reported at check-in under `models`, newest look first: `[{station, source /* pool/account, or agent/handler/model for a route no pool serves */, pool?, account?, agent?, route?, handler, listing: {known, unknown_because?, models: [{id, name?, description?}]}, at}]`. A handler that cannot list has `known: false` with why, and no models; nothing is guessed, and no credential is in a report. It makes no route. |
 | `DELETE /v1/user/operations/{operation_id}/agents/{agent}/hold[?handler=H[&model=M][&pool=P]]` | Requires `agent.configure`; lifts the hold on the Agent, or with `handler` on that one route, and returns it; `400` for a `model` or `pool` without `handler`, `404` when there is no such hold. Audited first as `agent.hold.lifted`. `AgentView.holds` lists an Agent's holds; a route hold is left out without `roster.read`. Signing M's proposal of kind `hold` also needs `agent.configure`, and revoking its approval lifts the hold it put on. |
 | `DELETE /v1/user/operations/{operation_id}/agents/{agent}/clearance` | Requires `agent.configure`; `{agent}` resolves as for `PUT`, else is taken as a codename; removes the grant (the Agent works at its configured clearance) and revokes the approval of a removed raise; returns it, `404` when there is none. Audited first as `agent.clearance.revoked`. Raising a clearance is only ever M's promotion request, approved through green ink. |
@@ -974,7 +974,7 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `POST /v1/user/operations/{operation_id}/green-ink/{request_id}/rearm` | Requires `approval.decide`; body `{"expires_in_secs"?, "note"?}`, unknown fields refused. Re-opens a request that expired undecided and returns the `ai6::ApprovalRequest`, waiting until `expires_in_secs` from now (default as long as it first waited); `409` for one a person decided or still waiting, `404` for an unknown request. Audited as `green_ink.rearmed` before it is applied (target as approve, never the note), timeline kind `green_ink` action `rearmed`. The Mission's Station takes it up. |
 | `POST /v1/user/operations/{operation_id}/green-ink/{request_id}/revoke` | Requires `approval.decide`; optional body `{"reason"}`, kept as `revoked.note`. Withdraws an approval before it expires (again is harmless and not audited again) and returns the `ai6::Approval` with `revoked`; `404` for an unknown or undecided request, `409` for a refusal. Audited as `green_ink.revoked` before it is applied, so a revocation that cannot be recorded (`500`) is not made; the Station revokes a credential leased against it.  Revoking a promotion (kind `clearance`) also removes the clearance grant it raised, while it is still the Agent's grant, audited as `agent.clearance.revoked`. |
 | `GET /v1/user/operations/{operation_id}/class-authorizations` | Requires `approval.class`; returns every `ai6::ClassAuthorization` of the Operation, oldest first, revoked and expired ones included. |
-| `POST /v1/user/operations/{operation_id}/class-authorizations` | Requires `approval.class`; body `{"kinds", "target_pattern", "agents"?, "roles"?, "proposed_roles"?, "clearance_min"?, "max_uses"?, "expires_in_secs"}` (at least one Agent or role; `"*"` is every Agent; for kind `proposal`, `roles` match the proposing Session's own Mission role and `proposed_roles` lists the other roles a proposal may ask for). Signs as the caller, returns `201` and the record, audited as `class_authorization.created` (target: `ID KINDS PATTERN`). |
+| `POST /v1/user/operations/{operation_id}/class-authorizations` | Requires `approval.class`; body `{"kinds", "target_pattern", "agents"?, "roles"?, "proposed_roles"?, "clearance_min"?, "max_uses"?, "expires_in_secs"}` (at least one Agent or role; `"*"` is every Agent; for kind `proposal`, `roles` match the proposing Run's own Mission role and `proposed_roles` lists the other roles a proposal may ask for). Signs as the caller, returns `201` and the record, audited as `class_authorization.created` (target: `ID KINDS PATTERN`). |
 | `DELETE /v1/user/operations/{operation_id}/class-authorizations/{id}` | Requires `approval.class`; revokes it (again is harmless) and returns the record, audited as `class_authorization.revoked`. |
 | `GET /v1/user/operations/{operation_id}/mission-proposals` | Requires `mission.create`; returns at most 100 pending `ai6::MissionProposal`s, oldest first, each with `vetting` once Headquarters has vetted it (absent until then). |
 | `POST /v1/user/operations/{operation_id}/mission-proposals/{proposal_id}/approve` | Requires `mission.create`; promotes the proposal to the queue (`202`, `{operation_id, proposal_id, mission_id, state: "queued"}`) and clears the promoted brief of every vetting finding kind but `malformed` (the operator saw them) in the same Registry step (`promote_cleared`), and audits `mission.proposal.approved`. `409` for a rejected proposal. |
@@ -1000,20 +1000,20 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/user/providers` | Returns `{providers, hosts, differs}`: every provider of the hosts the person may read (`station.read`; `config.read` on `config:unex` for the gateway), once each with the `hosts` that have it; `differs` lists IDs whose schema is not the same on every host; `?kind=` limits to a Guatiao kind. A roster write whose provider settings are not the chosen provider's, or whose provider is unreported while others of its kind are, is refused (422) naming the provider and the key. |
 | `GET /v1/user/stations/{station_id}/settings` | Requires `station.read`; returns the live concurrent Mission limit, `min_free_memory_mb` and `max_cpu_percent` (defaults 512 and 95 when unset), whether it has an explicit Registry override, and whether the Station has the execution role. |
 | `PUT /v1/user/stations/{station_id}/settings` | Requires `station.configure`; execution Stations only; body `{"max_concurrent_missions", "min_free_memory_mb"?, "max_cpu_percent"?}` (an absent limit keeps its current value); validates a 1–1,024 concurrent Mission limit and a `max_cpu_percent` of at most 100, persists them in the shared Registry, and records a Station-scoped metadata-only audit event whose target names the fields sent. |
-| `POST /v1/user/attach-grants` | Requires a user bearer; checks `session.read` or `session.input` at the registered Operation before issuing an attach token. |
-| `POST /v1/user/operations/{operation_id}/missions/{mission_id}/actions` | Requires `mission.control` (`session.input` is not enough). Body `{"action", "agent"?, "message"?, "session_id"?, "station"?, "idempotency_key"}`, unknown fields refused; `agent` only with `retry`, `message` (1 byte to 16 KiB, not blank) only with `resume`, `station` only with `drop` or `reload` (the entries of that Station's own queue, whoever holds the claim; `404` for a Station not known). `drop` fails a Mission waiting to start there (abandons one waiting to resume), `reload` clears its retry wait. A Station asking for its controls with `fresh=true` is handed again the ones it took and never reported on. Audits, queues the control (see Operator controls) and returns `202` with a `ControlStatus`; a repeated key returns `200`. A `cancel` of a Mission whose brief is still queued or held withdraws it (as `/withdraw`, no note) and returns `202` with the control already `applied`, state `failed`, `station_id` empty; a `cancel` of a claimed brief also records when it was first asked (`ai6::BriefStore::request_cancel`), from which the Headquarters Station settles it after `[registry.limits.briefs] cancel_settle_after`. |
+| `POST /v1/user/attach-grants` | Requires a user bearer; checks `run.read` or `run.input` at the registered Operation before issuing an attach token. |
+| `POST /v1/user/operations/{operation_id}/missions/{mission_id}/actions` | Requires `mission.control` (`run.input` is not enough). Body `{"action", "agent"?, "message"?, "run_id"?, "station"?, "idempotency_key"}`, unknown fields refused; `agent` only with `retry`, `message` (1 byte to 16 KiB, not blank) only with `resume`, `station` only with `drop` or `reload` (the entries of that Station's own queue, whoever holds the claim; `404` for a Station not known). `drop` fails a Mission waiting to start there (abandons one waiting to resume), `reload` clears its retry wait. A Station asking for its controls with `fresh=true` is handed again the ones it took and never reported on. Audits, queues the control (see Operator controls) and returns `202` with a `ControlStatus`; a repeated key returns `200`. A `cancel` of a Mission whose brief is still queued or held withdraws it (as `/withdraw`, no note) and returns `202` with the control already `applied`, state `failed`, `station_id` empty; a `cancel` of a claimed brief also records when it was first asked (`ai6::BriefStore::request_cancel`), from which the Headquarters Station settles it after `[registry.limits.briefs] cancel_settle_after`. |
 | `POST /v1/user/operations/{operation_id}/missions/{mission_id}/withdraw` | Requires `mission.control`; body `{"note"?}` (at most `[text] held_reason_chars`, no control characters but newlines). Files the queued or held brief as failed (`ai6::VettingStore::withdraw_brief`) and returns `WithdrawnBrief { operation_id, mission_id, state: "withdrawn", reason }`, the reason "withdrawn by PERSON[: NOTE]"; again returns the same. `404` when the Operation has no such brief queued or held, `409` (naming `mission cancel`) once a Station took it or it finished. Audited `mission.withdraw` (target: the key), timeline `intake` `withdrawn`. |
 | `POST /v1/user/operations/{operation_id}/missions/{mission_id}/settle` | Requires `mission.control`; body `{"reason"}` (not blank, at most `[controls] reason_chars`, no control characters). Files a claimed Mission's brief as failed with that reason when the Station holding the claim has gone dark (`ai6::BriefStore::finish`), and returns `SettledMission { operation_id, mission_id, station_id, state: "failed" }`; a Station that still answers gets `409` naming `mission cancel`, a brief not claimed `409`, an unknown one `404`. Audited `mission.settle`. The Station, if it comes back, stops the Mission it still holds. |
 | `POST /v1/user/operations/{operation_id}/sleepers/{name}/disable`, `.../enable` | Requires `mission.control`. Stops (or resumes) an authorized Sleeper minting briefs without touching its definition or authorization (`ai6::SleeperStore::set_sleeper_disabled`); returns `SleeperState { operation_id, name, state }`, `404` for a Sleeper with no authorization. Audited `sleeper.disable` / `sleeper.enable`, timeline `sleeper` `disabled` / `enabled`. |
 | `GET /v1/user/operations/{operation_id}/missions/{mission_id}/actions/{control_id}` | Requires `mission.read`; returns the control's `ControlStatus`, `404` for an unknown control or one of another Mission. |
 | `POST /v1/user/operations/{operation_id}/missions` | Body may carry `review: {plan?, output?}` (policy names, `none` included), which needs `mission.review` too; requires `mission.create` at the target Operation and atomically enqueues a bounded explicit brief in the shared Registry; returns the queued Mission ID. The body may carry `stations` to limit the Mission to those Stations (it can only narrow the Operation's list); one that names no Station that ever checked in, or one the Operation's published policy leaves out, is refused `400` with a plain-text reason naming it, an unknown pin with the Station IDs it equals ignoring case and those of Stations whose `host` it names. A `role` that `ai6::is_head_of_station_role` accepts is `400`: only an authorized Sleeper queues a Head of Station round. `issue: {tracker, item}` follows up an item that has a Mission: the handle is that Mission's current handle and the item's next follow-up number from 2 (`G-gh-31-2`), the brief's `data.follow_up` names the item, and the Mission is linked to it (`related`, by `person:<subject>`); an item with no Mission is `400` with the reason. `create_issue: {tracker, title?, body?}` (with `issue` it is `400`) also needs `issue.create`: it stores an approved issue proposal whose one issue carries the brief (`ProposedIssue::mission`), audits `issue.create.queued` and `mission.create.requested` (target `issue-proposal ID`), and answers `{operation_id, proposal, state: "awaiting_issue"}` with no `mission_id` or `handle`; the Headquarters Station enters the Mission once the issue exists. A tracker the Operation's roster does not name is `400`. |
 | `GET /v1/auth/session` | Validates a user bearer and reports its token ID, person ID and expiry. |
-| `POST /v1/station/sessions` | Bearer-authenticated registration request with `operation_id`, `mission_id`, `session_id`, and optional sanitized Mission brief metadata. |
-| `POST /v1/station/sessions/{session_id}/lifecycle/{sequence}` | Bearer-authenticated JSON lifecycle update with Station, Mission ID and state. |
-| `POST /v1/station/sessions/{session_id}/terminal/{sequence}` | Bearer-authenticated raw terminal output bytes. |
-| `POST /v1/station/sessions/{session_id}/events/{sequence}` | Bearer-authenticated binary guatiao frame. |
+| `POST /v1/station/runs` | Bearer-authenticated registration request with `operation_id`, `mission_id`, `run_id`, and optional sanitized Mission brief metadata. |
+| `POST /v1/station/runs/{run_id}/lifecycle/{sequence}` | Bearer-authenticated JSON lifecycle update with Station, Mission ID and state. |
+| `POST /v1/station/runs/{run_id}/terminal/{sequence}` | Bearer-authenticated raw terminal output bytes. |
+| `POST /v1/station/runs/{run_id}/events/{sequence}` | Bearer-authenticated binary guatiao frame. |
 | `POST /v1/station/attach-grants` | Bearer-authenticated grant request; returns token in JSON response body. |
-| `GET /v1/station/inputs/next?wait_ms=<n>` | Bearer-authenticated long poll, held as a control poll is (`wait_ms` default 1000, capped at 25000; `204` when nothing came); returns one binary Guatiao terminal input or resize frame with `x-ai6-operation-id`, `x-ai6-mission-id` and `x-ai6-session-id` headers. AI6 validates the frame and dispatches it to that live Session's terminal. |
+| `GET /v1/station/inputs/next?wait_ms=<n>` | Bearer-authenticated long poll, held as a control poll is (`wait_ms` default 1000, capped at 25000; `204` when nothing came); returns one binary Guatiao terminal input or resize frame with `x-ai6-operation-id`, `x-ai6-mission-id` and `x-ai6-run-id` headers. AI6 validates the frame and dispatches it to that live Run's terminal. |
 | `GET /v1/station/controls/next?station=<id>&wait_ms=<n>` | Bearer-authenticated long poll for that Station's next control (`wait_ms` default 1000, capped at 25000); `200` with one `application/vnd.ai6.guatiao` control value frame on channel 4 (the receiver builds the schema from any control) and the control becomes `delivered`, or `204`. Stations share one credential, so `station` is the caller's own word. |
 | `POST /v1/station/controls/{control_id}/result` | Bearer-authenticated outcome `{"station","outcome":"applied"\|"rejected","state"?,"reason"?}`; `state` is a Mission state name, `reason` is cut to 512 characters without control characters. `204`; `404` unknown, `403` another Station's control, `409` already finished. |
 | `GET /v1/user/moneypenny` | WebSocket, text frames only. First frame within 10 s: `{"type":"hello","token":ACCESS_TOKEN,"conversation"?:ID}` (the token in the socket, since a browser cannot set a header); a bad token gets `{"type":"error","code":"unauthorized","message"}` and close 1008. Answers `{"type":"ready","conversation","entries":[{role,text,at}],"earlier","busy","view_limits":{…}}` (the newest 100 entries within 512 KiB; `earlier` counts those left out); a conversation of another person is never opened (a new one is). Then `{"type":"message","text":1..=16 KiB,"route"?:ROUTE,"images"?:[{"media_type","data"}]}` (an app route in its JSON form, `{"page":"missions","operation_id":"G",…}`; images base64, PNG, JPEG, WebP or GIF by their bytes, at most `[assistant.limits] images` of `image_bytes` each, kept per person by SHA-256 in `{pages dir}/.images`; the person's entry carries `data.images: [{sha256, media_type, bytes}]` and the job `images`; the socket takes a frame of `socket_message_bytes` plus that many images) (`error` `busy` while one is answered, `unauthorized` once the token ended) `{"type":"new"}`, `{"type":"confirm","proposal":ID}`, `{"type":"cancel","proposal":ID}`, `{"type":"submit","view":ID,"values":{…}}` and `{"type":"interrupt"}` (answered `{"type":"interrupt","stopping":bool}`; see Moneypenny, the assistant); the gateway sends `{"type":"entry","entry":{"role":"person"\|"moneypenny"\|"tools"\|"error"\|"proposal"\|"view"\|"navigation"\|"notice","text","at","data"?}}`, `{"type":"proposal","proposal":{…}}` and `{"type":"busy","busy"}`. `503` without `with_assistant`. |
@@ -1022,10 +1022,10 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/station/assistant/images/{sha256}?station=&conversation=` | Station token; an image the person of a conversation the Station runs sent; `403` for a conversation another Station runs, `404` for an image not kept for that person. |
 | `POST /v1/moneypenny/mcp` | Moneypenny's tools (see Moneypenny, the assistant); bearer: a job's MCP token only. |
 | `GET /v1/user/assistant/memory[?person=ID][&q=TEXT]` | User bearer. `{"person","entries","total"}`, with no content: newest change first, or with `q` best first and at most `search_results`. Another person's needs `assistant.memory.admin` (`403`), audited `memory.read`. |
-| `GET /v1/user/assistant/conversations[?person=ID\|?everyone=true]` | User bearer. `{"conversations":[{conversation,person,first_at,last_at,entries,bytes}]}` from her conversation log, newest first: the person's own, or another's or everyone's with `audit.read` and `session.context` on `config:assistant` (`403`), audited `assistant.log.list`. |
+| `GET /v1/user/assistant/conversations[?person=ID\|?everyone=true]` | User bearer. `{"conversations":[{conversation,person,first_at,last_at,entries,bytes}]}` from her conversation log, newest first: the person's own, or another's or everyone's with `audit.read` and `run.context` on `config:assistant` (`403`), audited `assistant.log.list`. |
 | `GET /v1/user/assistant/conversations/{id}/log` | User bearer. `{"conversation","person","entries"}`, each an `ai6::AssistantLogEntry` (with its `turn`). Another person's needs both actions above, audited `assistant.log.read` (resource `config:assistant`, target `<person> <id>`) before it is read; without them `404`, as for one not logged. |
-| `GET /v1/user/assistant/conversations/{id}/context` | User bearer. `{"conversation","person","contexts"}`, each as the Session context route gives it; another person's as for `/log`, audited `assistant.context.read`. |
-| `GET /v1/user/operations/{operation_id}/sessions/{session_id}/context` | User bearer and `session.context` on the Operation (`403`). `{session,owner,station,handler,format,source,filed_at,cut_from?,bytes,content}`; audited `session.context.read` (resource `mission:<uid>`, target the Session); `404` for a Session of another Operation or with no context. |
+| `GET /v1/user/assistant/conversations/{id}/context` | User bearer. `{"conversation","person","contexts"}`, each as the Run context route gives it; another person's as for `/log`, audited `assistant.context.read`. |
+| `GET /v1/user/operations/{operation_id}/runs/{run_id}/context` | User bearer and `run.context` on the Operation (`403`). `{run,owner,station,handler,format,source,filed_at,cut_from?,bytes,content}`; audited `run.context.read` (resource `mission:<uid>`, target the Run); `404` for a Run of another Operation or with no context. |
 | `POST /v1/user/assistant/memory` | User bearer. Body `{"name"?, "summary", "content"}`; `201` with the entry's header. `400` out of bounds, `409` when the memory is full. |
 | `GET /v1/user/assistant/memory/{id}[?person=ID]` | User bearer. The entry with `content`; `404` for an ID that is not this person's, the same whoever's it is. |
 | `PUT /v1/user/assistant/memory/{id}` | User bearer, own memory only. Body `{"name"?, "summary", "content", "revision"}`; the header. `409` with `revision` when it has moved on. |
@@ -1042,7 +1042,7 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `POST /v1/station/assistant/reports` | Station bearer; body `ai6::AssistantReport` (at most 64 events). `204`; `404` unknown conversation, `409` a job no longer waited for, `403` a Station that does not run the conversation. `text` events become `moneypenny` entries, `tool` events `tools` entries, `completed` ends the answer (its text shown only when no text came before), `interrupted` ends it with a `notice` entry, `failed`, `limit` and a `closed` while answering become `error` entries; `cable_proposal` and `cable_sent` as under Cables in Moneypenny, the assistant. |
 | `GET /v1/station/assistant/cables?station=ID&conversation=ID&operation=ID` | Station bearer. `{"send", "read"}` for a conversation the Station runs: whether its person holds `cable.send` and `cable.read` there now (both false once the person's sign-in ended); `404` unknown conversation, `403` a Station that does not run it. |
 | `POST /v1/attach` | Requires exact `Origin` and trusted HTTPS proxy marker; exchanges token from JSON body for a scoped cookie. |
-| `GET /v1/socket/{session_id}?after={sequence}` | Requires the cookie, exact `Origin` and trusted HTTPS marker. Streams binary guatiao messages. |
+| `GET /v1/socket/{run_id}?after={sequence}` | Requires the cookie, exact `Origin` and trusted HTTPS marker. Streams binary guatiao messages. |
 
 Only the `/v1/station/` routes accept the Station bearer credential. The configured Station token
 must be loaded from Q's scoped credential lease and must never be logged. Browser
@@ -1057,7 +1057,7 @@ policy rule denies access.
 ## Errors
 
 `GatewayError` is non-exhaustive and implements `std::error::Error`. It reports
-invalid configuration, authentication, scope, missing Session, capacity
+invalid configuration, authentication, scope, missing Run, capacity
 conflict, oversized/invalid frames, queue backpressure, or an invalid/expired
 credential. Error text is fixed and does not quote request data. HTTP routes
 map these to 400, 401, 403, 404, 409 or 413 responses. The login route also answers
@@ -1183,7 +1183,7 @@ A2A 1.0 at AI6's boundary, as the wire format of Cables: a peer's message is a C
 `ai6`'s `CableRelay` (sender `a2a:<peer>`, acting for its principal, `with_peer` stamped), the
 addressee's reply Cable is the answer, and a Cable to `a2a:<peer>` leaves as A2A. Nothing is kept
 but Cables, and nothing becomes a Mission or brief. A Task ID is the peer's Cable ID, a context ID
-the Cable conversation; a context's replies come back to the Session `liaison-<context>`.
+the Cable conversation; a context's replies come back to the Run `liaison-<context>`.
 
 ```rust
 pub const ADDRESSEE_MEMBER: &str = "addressee";            // message or request metadata naming the addressee
@@ -1215,7 +1215,7 @@ pub struct LiaisonError;                                     // Display, Error
   the bearer of a person who is a peer's principal: 401 without one, 403 for anyone else, 404 without Liaison.
 - Each message needs the principal's `cable.send` on the addressee's Operation, each read its `cable.read`; the
   relay's grants name `a2a:<peer>`. Refusals are `PermissionDeniedError`, another peer's Task `TaskNotFoundError`.
-- A follow-up in a context carries `with_affinity` of the Session that took the context's first Cable.
+- A follow-up in a context carries `with_affinity` of the Run that took the context's first Cable.
 - `SendMessage` blocks until a reply (answered with the reply `Message`) or the Task ends, unless
   `returnImmediately`; `CancelTask` withdraws a Cable nobody has had.
 - Outbound: Cables to `a2a:<peer>[/<addressee>]` are read from each Operation where the principal holds `cable.read`,
@@ -1261,8 +1261,8 @@ The command does not log the credential.
   `X-Forwarded-Proto` header before forwarding. It must also overwrite the
   configured authenticated-user header and never forward a client-supplied value.
 - A schema frame is not a cursor event; send it with sequence zero. Value events
-  carry their own positive per-Session sequence.
+  carry their own positive per-Run sequence.
 - Reconnect after a slow viewer is closed for lag. Replay is bounded and may not
   retain every old event.
-- A write lease expires independently of the agent Session. A later writer may
+- A write lease expires independently of the agent Run. A later writer may
   acquire it while an old socket is still closing; stale connections cannot send.

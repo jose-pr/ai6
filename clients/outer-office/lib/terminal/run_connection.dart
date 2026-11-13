@@ -5,28 +5,28 @@ import 'package:flutter/foundation.dart';
 import 'package:guatiao/wire.dart' as wire;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-import '../main.dart' show MissionBoard, SessionSummary;
+import '../main.dart' show MissionBoard, RunSummary;
 import '../routes/socket_uri.dart';
 import 'socket_connector.dart';
 
-/// What the terminal shows where events of its Session cannot be had: the gateway trimmed them from
+/// What the terminal shows where events of its Run cannot be had: the gateway trimmed them from
 /// its history or lost them restarting, or the Station dropped them while the gateway was away.
 const missingOutputNotice =
     '\r\n\x1b[2m[AI6: output is missing here]\x1b[0m\r\n';
 
-/// Owns one read-only-by-default attachment to an existing provider Session.
-/// The socket of [sessionId] on the gateway's origin, from the output after [after].
-Uri sessionSocketUri(Uri apiOrigin, String sessionId, int after) => socketUri(
+/// Owns one read-only-by-default attachment to an existing provider Run.
+/// The socket of [runId] on the gateway's origin, from the output after [after].
+Uri runSocketUri(Uri apiOrigin, String runId, int after) => socketUri(
   apiOrigin,
-  '/v1/socket/${Uri.encodeComponent(sessionId)}',
+  '/v1/socket/${Uri.encodeComponent(runId)}',
   {'after': '$after'},
 );
 
-class SessionConnection extends ChangeNotifier {
-  SessionConnection({required this.board, required this.session});
+class RunConnection extends ChangeNotifier {
+  RunConnection({required this.board, required this.run});
 
   final MissionBoard board;
-  final SessionSummary session;
+  final RunSummary run;
   final StreamController<List<int>> _output =
       StreamController<List<int>>.broadcast(sync: true);
 
@@ -88,13 +88,13 @@ class SessionConnection extends ChangeNotifier {
     wire.Receiver? receiver;
     WebSocketChannel? channel;
     try {
-      final cookie = await board.prepareSessionSocket(
-        session,
+      final cookie = await board.prepareRunSocket(
+        run,
         write: _writeRequested,
       );
       if (_disposed || generation != _generation) return;
-      channel = connectSessionSocket(
-        sessionSocketUri(board.apiOrigin, session.sessionId, _cursor),
+      channel = connectRunSocket(
+        runSocketUri(board.apiOrigin, run.runId, _cursor),
         protocols: const ['ai6.guatiao'],
         origin: board.apiOrigin.origin,
         cookie: cookie,
@@ -150,7 +150,7 @@ class SessionConnection extends ChangeNotifier {
         final raw = value.toDart();
         if (raw is! Map) return;
         final frame = Map<String, Object?>.from(raw);
-        if (frame['session_id'] != session.sessionId) return;
+        if (frame['run_id'] != run.runId) return;
         if (event.channel == 5) {
           _gap(frame['before']);
           return;
@@ -165,7 +165,7 @@ class SessionConnection extends ChangeNotifier {
           if (state is String) {
             final reason = frame['reason'];
             board.applyLifecycle(
-              session.sessionId,
+              run.runId,
               state,
               sequence,
               reason: reason is String ? reason : null,
@@ -195,7 +195,7 @@ class SessionConnection extends ChangeNotifier {
   void sendInput(List<int> bytes) {
     if (!_canSend) return;
     _send(2, {
-      'session_id': session.sessionId,
+      'run_id': run.runId,
       'sequence': ++_inputSequence,
       'direction': 'input',
       'bytes': Uint8List.fromList(bytes),
@@ -205,7 +205,7 @@ class SessionConnection extends ChangeNotifier {
   void sendResize(int columns, int rows) {
     if (!_canSend) return;
     _send(3, {
-      'session_id': session.sessionId,
+      'run_id': run.runId,
       'sequence': ++_inputSequence,
       'columns': columns,
       'rows': rows,

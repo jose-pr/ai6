@@ -1,4 +1,4 @@
-//! A message that carries images to a harness. An Agent Session's messages are text, so a
+//! A message that carries images to a harness. An Agent Run's messages are text, so a
 //! message with images is one text in this form, which only a handler that takes images reads:
 //! [`CONTENT_PREFIX`] and then the JSON of a [`MessageContent`]. The Station sends the form only
 //! to a handler whose [`AgentHandler::image_input`] says it takes images, and a message whose
@@ -35,7 +35,7 @@ pub struct MessageContent {
 }
 
 impl MessageContent {
-    /// The message as an Agent Session's text.
+    /// The message as an Agent Run's text.
     pub fn encode(&self) -> String {
         let json = serde_json::to_string(self).unwrap_or_default();
         format!("{CONTENT_PREFIX}{json}")

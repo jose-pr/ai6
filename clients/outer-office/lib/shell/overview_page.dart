@@ -23,7 +23,7 @@ import 'top_bar.dart';
 
 /// The command overview, all from what the board has loaded: the theme's hero art, the
 /// person's Operations with their progress, counts of Operations, Stations, active Missions
-/// and waiting Sessions, recent activity, the Missions waiting to run, Moneypenny, and what
+/// and waiting Runs, recent activity, the Missions waiting to run, Moneypenny, and what
 /// needs the person's attention.
 class OverviewPage extends StatelessWidget {
   const OverviewPage({
@@ -81,10 +81,10 @@ class OverviewPage extends StatelessWidget {
     final working = active.where((mission) => mission.state == 'working');
     final stations = board.stationBoard.stations;
     final online = stations.where((station) => station.healthy).length;
-    final waiting = board.sessions
-        .where((session) => session.state == 'blocked')
+    final waiting = board.runs
+        .where((run) => run.state == 'blocked')
         .toList();
-    final operations = board.userSession?.operations ?? const [];
+    final operations = board.userRun?.operations ?? const [];
     final busyOperations = active.map((mission) => mission.operationId).toSet();
     final attention = attentionItems(board, tokens);
     final open = [
@@ -185,12 +185,12 @@ class OverviewPage extends StatelessWidget {
       ),
       _Stat(
         compact: phone,
-        icon: OoIconName.sessions,
-        label: 'Sessions waiting',
+        icon: OoIconName.runs,
+        label: 'Runs waiting',
         count: waiting.length,
-        route: OoLinkTo.sessions(state: 'blocked'),
+        route: OoLinkTo.runs(state: 'blocked'),
         detail: TextSpan(
-          text: 'of ${board.sessions.length} Sessions',
+          text: 'of ${board.runs.length} Runs',
           style: TextStyle(
             color: waiting.isEmpty ? tokens.muted : tokens.warning,
           ),
@@ -450,7 +450,7 @@ class _ActiveOperations extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = OoTokens.of(context);
     final text = Theme.of(context).textTheme;
-    final operations = board.userSession?.operations ?? const [];
+    final operations = board.userRun?.operations ?? const [];
     final stations = board.stationBoard.stations;
     return OoPanel(
       title: 'OPERATIONS',
@@ -1020,11 +1020,11 @@ class _MoneypennyCardState extends State<_MoneypennyCard> {
         : hour < 18
         ? 'afternoon'
         : 'evening';
-    final session = widget.board.userSession;
+    final run = widget.board.userRun;
     final name =
-        (session?.displayName?.trim().isNotEmpty == true
-                ? session!.displayName!
-                : session?.name ?? '')
+        (run?.displayName?.trim().isNotEmpty == true
+                ? run!.displayName!
+                : run?.name ?? '')
             .trim()
             .split(RegExp(r'\s+'))
             .first;

@@ -6,12 +6,12 @@ import 'package:outer_office/assistant/assistant_controller.dart';
 import 'package:outer_office/assistant/chat_layout.dart';
 import 'package:outer_office/assistant/chat_popout.dart';
 import 'package:outer_office/shell/oo_freshness.dart' show ooClock;
-import 'package:outer_office/shell/sessions_page.dart';
+import 'package:outer_office/shell/runs_page.dart';
 import 'package:outer_office/shell/sign_in_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'chat_popout_test.dart' show FakePopups;
-import 'session_renewal_test.dart'
+import 'run_renewal_test.dart'
     show FakeChannel, FakeGateway, close, settle, signedIn;
 import 'shell_navigation.dart';
 
@@ -118,8 +118,8 @@ void main() {
       'keeps the route for the next sign-in', (tester) async {
     final gateway = _gateway();
     final board = await signedIn(tester, gateway);
-    await openPage(tester, 'Sessions');
-    expect(find.byType(SessionsPage), findsOneWidget);
+    await openPage(tester, 'Runs');
+    expect(find.byType(RunsPage), findsOneWidget);
 
     await _toDue(tester);
     await tester.pump(_wait + const Duration(seconds: 1));
@@ -146,7 +146,7 @@ void main() {
     await board.login('ana', 'secret');
     await settle(tester);
     expect(board.accessToken, 'token-2');
-    expect(find.byType(SessionsPage), findsOneWidget);
+    expect(find.byType(RunsPage), findsOneWidget);
     await close(tester, board);
   });
 
@@ -205,16 +205,16 @@ void main() {
 
   test('a pop-out reports input once until its opener says it renewed', () {
     final popups = FakePopups();
-    final session = PopoutSession(popups, person: 'ana');
-    addTearDown(session.dispose);
+    final run = PopoutRun(popups, person: 'ana');
+    addTearDown(run.dispose);
     final link = popups.links.single;
     int reports() => link.sent.where((m) => m['t'] == 'active').length;
 
-    session.activity();
-    session.activity();
+    run.activity();
+    run.activity();
     expect(reports(), 1);
     link.hear({'t': 'renewed'});
-    session.activity();
+    run.activity();
     expect(reports(), 2);
   });
 
@@ -222,7 +222,7 @@ void main() {
       'question', (tester) async {
     final gateway = FakeGateway(
       idle: _idle,
-      session: const Duration(minutes: 40),
+      run: const Duration(minutes: 40),
     );
     final board = await signedIn(tester, gateway);
     await tester.pump(_wait + const Duration(seconds: 1));

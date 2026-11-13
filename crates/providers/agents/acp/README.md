@@ -3,7 +3,7 @@
 `ai6-agent-acp` implements AI6's Guatiao `AgentHandler` for any agent that speaks the
 [Agent Client Protocol](https://agentclientprotocol.com) (ACP) on its standard input and
 output: the Claude and Codex adapters, `gemini --acp`, or an agent of your own. AI6 starts the
-agent through its terminal provider with the Session's full environment (roster `env`, `AI6_*`,
+agent through its terminal provider with the Run's full environment (roster `env`, `AI6_*`,
 credentials, the pool account) and drives it as an ACP client.
 
 An Agent selects it with `handler = "acp"` and `handler_settings`:
@@ -17,7 +17,7 @@ handler_settings = { command = "npx", args = ["-y", "@agentclientprotocol/claude
 
 ## Settings
 
-`command` (required), `args`, `env` (under the Session's own), `meta` (a table passed as
+`command` (required), `args`, `env` (under the Run's own), `meta` (a table passed as
 `session/new._meta`, for an adapter's options), `model_option` and `effort_option` (config option
 ids), `protocol` (`"v1"`), and the timeouts `initialize_timeout_ms` (20000), `request_timeout_ms`
 (30000), `start_timeout_ms` (60000) and `close_grace_ms` (2000), `diagnostic_lines` (20),
@@ -26,16 +26,16 @@ that mark a failed turn as a provider's limit). Unknown keys are refused when th
 
 ## Behaviour
 
-- Permission requests go through the green-ink gate; restricted Sessions (answer only, assistant)
+- Permission requests go through the green-ink gate; restricted Runs (answer only, assistant)
   refuse every request but reading and the tools of their own MCP servers. A tool the agent runs
   without asking is its own settings' to take away.
 - An agent that dies is reported with its exit status and the last lines it wrote outside the
   protocol.
-- A Mission's Session at `desk` clearance is refused, because AI6 does not choose an external
+- A Mission's Run at `desk` clearance is refused, because AI6 does not choose an external
   agent's tools, unless `unconfined_desk = true`, reported as a weakening.
 - Cable and assistant MCP servers are passed as HTTP `mcpServers`; an agent without HTTP MCP
-  support is refused when the Session needs it. Remote-hands mode is refused.
-- The Agent's context and a restricted Session's limits go in front of the first prompt (ACP v1
+  support is refused when the Run needs it. Remote-hands mode is refused.
+- The Agent's context and a restricted Run's limits go in front of the first prompt (ACP v1
   has no system prompt).
 - No token counts or quota windows: cost is reported when the agent sends it. A failed turn whose
   error holds one of `limit_phrases` stops as limited, so its route or account is passed over.

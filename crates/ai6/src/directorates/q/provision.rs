@@ -4,7 +4,7 @@
 
 //! Q provisioning: what a Theater must have, what is on it, and fitting it out.
 //!
-//! A Theater declares what Sessions need there ([`Requirements`], `[theater.ID.requires]`)
+//! A Theater declares what Runs need there ([`Requirements`], `[theater.ID.requires]`)
 //! and how to install what is missing ([`ProvisionSpec`], `[theater.ID.provision]`).
 //! [`probe`] looks over the Theater's transport and reports what it found, including
 //! credentials already on the host that AI6 did not lease ([`ProbeReport::ambient`]).
@@ -12,7 +12,7 @@
 //! on a fit Theater changes nothing.
 //!
 //! Every call here blocks on the transport; call it from `spawn_blocking`, never on an async
-//! worker. Nothing here carries a secret: credentials reach a Session as leases, never as
+//! worker. Nothing here carries a secret: credentials reach a Run as leases, never as
 //! files on the Theater.
 
 use std::collections::BTreeMap;
@@ -161,7 +161,7 @@ fn join_numbers(numbers: &[u64]) -> String {
         .join(".")
 }
 
-/// What a Theater must have before Sessions run there: `[theater.ID.requires]`.
+/// What a Theater must have before Runs run there: `[theater.ID.requires]`.
 ///
 /// ```toml
 /// [theater.build-box.requires]
@@ -181,7 +181,7 @@ pub struct Requirements {
     /// Theater that lists harnesses runs only those in field mode.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub harnesses: Vec<RequiredProgram>,
-    /// Other programs Sessions use there (`git`, `cargo`).
+    /// Other programs Runs use there (`git`, `cargo`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<RequiredProgram>,
     /// Free space, in MiB, in the Theater's `workdir` (the transport's default directory when
@@ -296,7 +296,7 @@ impl Requirements {
 }
 
 /// How to fit a Theater out: `[theater.ID.provision]`. It holds paths and commands only;
-/// credentials are leased per Session and never installed.
+/// credentials are leased per Run and never installed.
 ///
 /// ```toml
 /// [theater.build-box.provision]

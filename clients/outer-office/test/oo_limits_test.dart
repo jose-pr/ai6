@@ -7,7 +7,7 @@ import 'package:outer_office/settings/oo_config.dart';
 void main() {
   test('every limit defaults to the value Outer Office used before', () {
     final limits = OoConfig.parse('').limits;
-    expect(limits.refresh.sessions, const Duration(seconds: 3));
+    expect(limits.refresh.runs, const Duration(seconds: 3));
     expect(limits.refresh.overview, const Duration(seconds: 10));
     expect(limits.refresh.timeline, const Duration(seconds: 10));
     expect(limits.refresh.pools, const Duration(seconds: 15));
@@ -28,7 +28,7 @@ void main() {
     'the tables set each value in any format, and 0 turns a refresh off',
     () {
       final limits = OoConfig.parse(
-        '[oo.refresh]\nsessions = 7\noverview = 0\ntimeline = 2.5\n'
+        '[oo.refresh]\nruns = 7\noverview = 0\ntimeline = 2.5\n'
         '[oo.controls]\nwait = 0\npoll = 0.25\n'
         '[oo.pages]\ntimeline = 20\naudit = 500\n'
         '[oo.terminal]\nscrollback_lines = 200\nconnect_timeout = 3\n'
@@ -36,7 +36,7 @@ void main() {
         '[oo.limits]\nmission_title_chars = 80\nmission_prompt_chars = 0\n'
         'reason_chars = 120\n',
       ).limits;
-      expect(limits.refresh.sessions, const Duration(seconds: 7));
+      expect(limits.refresh.runs, const Duration(seconds: 7));
       expect(limits.refresh.overview, isNull);
       expect(limits.refresh.timeline, const Duration(milliseconds: 2500));
       expect(limits.refresh.pools, const Duration(seconds: 15));
@@ -58,8 +58,8 @@ void main() {
 
   test('nonsense and unknown keys are refused, naming the key', () {
     for (final (text, message) in [
-      ('[oo.refresh]\nsessions = -1\n', 'refresh.sessions'),
-      ('[oo.refresh]\nsessions = "soon"\n', 'refresh.sessions'),
+      ('[oo.refresh]\nruns = -1\n', 'refresh.runs'),
+      ('[oo.refresh]\nruns = "soon"\n', 'refresh.runs'),
       ('[oo.controls]\npoll = 0\n', 'controls.poll'),
       ('[oo.pages]\ntimeline = 0\n', 'pages.timeline'),
       ('[oo.pages]\naudit = 1.5\n', 'pages.audit'),
@@ -82,14 +82,14 @@ void main() {
     }
   });
 
-  testWidgets('[oo.refresh] sessions = 7 makes the board ask every 7 seconds', (
+  testWidgets('[oo.refresh] runs = 7 makes the board ask every 7 seconds', (
     tester,
   ) async {
-    final config = OoConfig.parse('[oo.refresh]\nsessions = 7\n');
+    final config = OoConfig.parse('[oo.refresh]\nruns = 7\n');
     var boards = 0;
     final board = MissionBoard(
       apiOrigin: Uri.parse('https://oo.example'),
-      pollInterval: config.limits.refresh.sessions,
+      pollInterval: config.limits.refresh.runs,
       limits: config.limits,
       client: MockClient((request) async {
         if (request.url.path == '/v1/board') boards++;
@@ -108,11 +108,11 @@ void main() {
   });
 
   testWidgets('a refresh of 0 starts no timer at all', (tester) async {
-    final config = OoConfig.parse('[oo.refresh]\nsessions = 0\n');
+    final config = OoConfig.parse('[oo.refresh]\nruns = 0\n');
     var boards = 0;
     final board = MissionBoard(
       apiOrigin: Uri.parse('https://oo.example'),
-      pollInterval: config.limits.refresh.sessions,
+      pollInterval: config.limits.refresh.runs,
       limits: config.limits,
       client: MockClient((request) async {
         if (request.url.path == '/v1/board') boards++;

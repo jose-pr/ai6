@@ -82,7 +82,7 @@ pub enum LinkHosts {
 #[map(rename_all = "snake_case")]
 pub enum IssueCreate {
     /// A person approves each creation, or a class authorisation approves one from an
-    /// unexposed Session with no findings.
+    /// unexposed Run with no findings.
     #[schema(label = "A person approves each one")]
     Propose,
     /// The Agent creates the issue at once.
@@ -153,7 +153,7 @@ pub struct IssuePolicy {
     #[map(default = IssuePolicy::default().links)]
     pub links: LinkHosts,
     /// `propose`: a person approves each creation, or a class authorisation `issue-create` one
-    /// from an unexposed Session with no findings; `direct`: the Agent creates at once;
+    /// from an unexposed Run with no findings; `direct`: the Agent creates at once;
     /// `off`: Agents cannot ask.
     #[schema(title = "Creating issues")]
     #[map(default = IssuePolicy::default().create)]

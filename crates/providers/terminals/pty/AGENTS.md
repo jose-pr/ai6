@@ -28,7 +28,7 @@ JSON over standard input and output (`HarnessStdio::Json`), when several termina
 are available and none is pinned with `ai6 serve --terminal`; a JSON harness is never given
 `pty`, pinned or not. Agents and handlers do not choose a provider.
 
-## Session behaviour
+## Run behaviour
 
 - **Start**: `argv[0]` with the rest as separate arguments, on a new pseudo-terminal of
   `rows` × `cols`, each capped at 32767 (ConPTY takes them as `i16`). `TERM` is set to
@@ -37,7 +37,7 @@ are available and none is pinned with `ai6 serve --terminal`; a JSON harness is 
 - **Output** is read on a thread into a channel, so `read` honours its timeout; a chunk
   larger than the caller's buffer is kept for the next `read`.
 - **Cursor position queries** (`ESC[6n`, also split across reads) are, on Windows only,
-  removed from the output and answered with `ESC[1;1R` by a thread of the session's own, so
+  removed from the output and answered with `ESC[1;1R` by a thread of the run's own, so
   the reader never waits on a write that holds the writer. ConPTY sends one before its
   program's first output and holds that output until it is answered, because `portable-pty`
   0.9 creates every pseudo-console with `PSEUDOCONSOLE_INHERIT_CURSOR` and offers no way not
@@ -65,12 +65,12 @@ are available and none is pinned with `ai6 serve --terminal`; a JSON harness is 
   running keeps the terminal open; either way the caller sees the end after the child's
   last output. A waiting `read` asks for the exit every 50 ms. After the first `0`, every
   `read` returns `0`.
-- **Kill** takes the whole process tree. On Unix the child is a session leader; every process
-  of its group and, on Linux and Android, its session, and every process whose parent is in the
+- **Kill** takes the whole process tree. On Unix the child is a run leader; every process
+  of its group and, on Linux and Android, its run, and every process whose parent is in the
   tree (found from `/proc` on Linux and Android, from `ps` elsewhere, until a scan finds
   nothing new), is stopped with `SIGSTOP`, then all are killed with `SIGKILL`, so a process
   that left the group (`setsid`, `setpgid`) is killed too. A process reparented away from the
-  tree (its parent exited first) and outside the group and session is not found. On Windows
+  tree (its parent exited first) and outside the group and run is not found. On Windows
   the child is assigned to a Job Object with `KILL_ON_JOB_CLOSE` just after it starts
   (`portable-pty` starts it and takes no Job Object), and every process it started before then,
   found by parent and created after it, is assigned too; one whose parent already exited in

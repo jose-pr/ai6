@@ -27,7 +27,7 @@ pub use super::api_keys::ApiKeyStore;
 pub use super::approvals::ApprovalStore;
 pub use super::assistant_log::AssistantLogStore;
 pub use super::clearance::ClearanceStore;
-pub use super::contexts::SessionContextStore;
+pub use super::contexts::RunContextStore;
 pub use super::holds::HoldStore;
 pub use super::logbook::LogbookStore;
 pub use super::memories::MemoryStore;
@@ -37,7 +37,7 @@ pub use super::quarantine::QuarantineStore;
 pub use super::reports::ReportStore;
 pub use super::reviews::MissionReviewStore;
 pub use super::sealed::SealedStore;
-pub use super::sessions::SessionStore;
+pub use super::runs::RunStore;
 pub use super::sleepers::SleeperStore;
 pub use super::sources::SourceStore;
 pub use super::store::{
@@ -84,8 +84,8 @@ pub trait RegistryBackend:
     + QuarantineStore
     + ReportStore
     + SealedStore
-    + SessionContextStore
-    + SessionStore
+    + RunContextStore
+    + RunStore
     + SleeperStore
     + SourceStore
     + TimelineStore
@@ -172,8 +172,8 @@ impl<T> RegistryBackend for T where
         + QuarantineStore
         + ReportStore
         + SealedStore
-        + SessionContextStore
-        + SessionStore
+        + RunContextStore
+        + RunStore
         + SleeperStore
         + SourceStore
         + TimelineStore

@@ -11,7 +11,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use crate::directorates::registry::approvals::{ApprovalStatus, Decision};
-use crate::directorates::registry::sessions::ProbeResult;
+use crate::directorates::registry::runs::ProbeResult;
 
 /// What a probe found, and the line that says what it read.
 pub(crate) type Found = (ProbeResult, String);

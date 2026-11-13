@@ -215,16 +215,16 @@ fn mission_state(state: &DaemonState, mission_id: &str) -> Option<MissionState> 
         .map(|mission| mission.state)
 }
 
-/// Whether a Session of the Mission is starting or running on this Station.
+/// Whether a Run of the Mission is starting or running on this Station.
 fn in_use(state: &DaemonState, mission_id: &str) -> bool {
     state
         .starting
         .lock()
         .is_ok_and(|starting| starting.contains(mission_id))
         || state
-            .sessions
+            .runs
             .lock()
-            .is_ok_and(|sessions| sessions.contains_key(mission_id))
+            .is_ok_and(|runs| runs.contains_key(mission_id))
 }
 
 fn destroy(state: &DaemonState, maker: &TheaterMaker, id: &str, why: &str) {

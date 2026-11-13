@@ -23,7 +23,7 @@ fn put(tx: &mut Tx<'_>, report: &Report, text: String, revision: i64) -> io::Res
     )?;
     tx.execute(
         "INSERT INTO ai6_reports \
-         (id, scope, state, kind, session_id, source_key, priority, deadline, credibility, \
+         (id, scope, state, kind, run_id, source_key, priority, deadline, credibility, \
           created, updated, record, revision) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
         &[
@@ -31,7 +31,7 @@ fn put(tx: &mut Tx<'_>, report: &Report, text: String, revision: i64) -> io::Res
             report.scope.to_string().into(),
             report.state.as_str().into(),
             report.kind.as_str().into(),
-            report.filer.session().unwrap_or_default().into(),
+            report.filer.run().unwrap_or_default().into(),
             report.filer.source_key().into(),
             report.priority.as_deref().unwrap_or_default().into(),
             report.deadline.map_or(Value::Null, Value::from),
@@ -79,8 +79,8 @@ impl ReportStore for SqlRegistry {
             }
             let recent = tx
                 .query(
-                    "SELECT session_id FROM ai6_reports \
-                     WHERE scope = $1 AND created >= $2 AND session_id <> ''",
+                    "SELECT run_id FROM ai6_reports \
+                     WHERE scope = $1 AND created >= $2 AND run_id <> ''",
                     &[
                         scope.as_str().into(),
                         window_start(limits, report.created).into(),

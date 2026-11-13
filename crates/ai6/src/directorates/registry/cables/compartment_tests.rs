@@ -58,26 +58,26 @@ fn kestrel() -> Compartment {
         .with_read_in(ReadIn::new(ReadInSubject::Operation("A".to_owned())))
 }
 
-fn principal(agent: &str, operation: &str, session: &str) -> CablePrincipal {
+fn principal(agent: &str, operation: &str, run: &str) -> CablePrincipal {
     CablePrincipal::try_new(
         agent.into(),
         operation.into(),
         None,
         "station-a".into(),
-        Some(session.into()),
-        Some(format!("{operation}-{session}")),
+        Some(run.into()),
+        Some(format!("{operation}-{run}")),
     )
     .unwrap()
 }
 
-fn endpoint(agent: &str, operation: &str, session: &str) -> CableEndpoint {
+fn endpoint(agent: &str, operation: &str, run: &str) -> CableEndpoint {
     CableEndpoint::try_new(
         agent.into(),
         operation.into(),
         None,
         "station-a".into(),
-        Some(session.into()),
-        Some(format!("{operation}-{session}")),
+        Some(run.into()),
+        Some(format!("{operation}-{run}")),
     )
     .unwrap()
 }
@@ -180,7 +180,7 @@ fn a_sender_read_in_reaches_what_the_compartment_covers_and_nothing_else() {
 }
 
 #[test]
-fn a_compartment_cable_can_be_narrowed_to_one_operation_and_never_reaches_its_own_session() {
+fn a_compartment_cable_can_be_narrowed_to_one_operation_and_never_reaches_its_own_run() {
     let dir = tempfile::tempdir().unwrap();
     let registry = Arc::new(FileRegistry::open(dir.path()));
     let both = kestrel()
@@ -371,7 +371,7 @@ fn a_cable_released_across_an_operation_is_in_the_log_and_a_failing_log_keeps_it
 }
 
 #[test]
-fn a_recipient_with_no_session_is_not_in_a_compartment_s_audience() {
+fn a_recipient_with_no_run_is_not_in_a_compartment_s_audience() {
     let dir = tempfile::tempdir().unwrap();
     let registry = Arc::new(FileRegistry::open(dir.path()));
     let endpoints = vec![
@@ -727,7 +727,7 @@ fn what_cannot_be_read_grants_no_crossing() {
 }
 
 #[test]
-fn a_clearance_floor_stops_a_send_from_a_session_below_it() {
+fn a_clearance_floor_stops_a_send_from_a_run_below_it() {
     let dir = tempfile::tempdir().unwrap();
     let registry = Arc::new(FileRegistry::open(dir.path()));
     let held = answers(vec![kestrel().with_min_clearance("00")]);

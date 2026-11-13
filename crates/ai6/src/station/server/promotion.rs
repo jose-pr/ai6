@@ -4,7 +4,7 @@
 //! Each round, for every Agent posted to an Operation, M reads its record there. When it
 //! meets the Operation's promotion step, M files a green ink request of kind `clearance`
 //! (target `AGENT:CLEARANCE@OPERATION`) on the Agent's behalf: Mission `promotion-AGENT`,
-//! Session `m`. Filing again finds the same request, so there is one per step until the
+//! Run `m`. Filing again finds the same request, so there is one per step until the
 //! record meets the step's Mission count once more. A request a person approved is spent,
 //! then becomes a clearance grant for the model and configured clearance the Agent has, so
 //! removing the grant is final. A quarantine takes away a raised grant (the Registry removes
@@ -23,10 +23,10 @@ use crate::directorates::registry::approvals::{
 use crate::directorates::registry::clearance::ClearanceGrant;
 use crate::directorates::registry::store::AuditRecord;
 use crate::directorates::registry::timeline::TimelineEvent;
-use crate::{MissionId, SessionId};
+use crate::{MissionId, RunId};
 
-/// The Session M files promotion requests under.
-pub(super) const PROMOTION_SESSION: &str = "m";
+/// The Run M files promotion requests under.
+pub(super) const PROMOTION_RUN: &str = "m";
 const TIMELINE_KIND: &str = "clearance";
 
 /// The Mission a promotion request for `agent` is filed under.
@@ -121,7 +121,7 @@ fn consider(
         }
         Ok(ApprovalStatus::Decided(approval)) => {
             let signed_by_a_person = approval.decision == Decision::Approved
-                && approval.request.session.as_str() == PROMOTION_SESSION
+                && approval.request.run.as_str() == PROMOTION_RUN
                 && approval.request.scope.kind == CLEARANCE_KIND
                 && approval.request.scope.target == target
                 && approval.signer != EXPIRY_SIGNER
@@ -153,7 +153,7 @@ fn promotion_request(
     let request = ApprovalRequest::try_new(
         operation.id.clone(),
         MissionId::try_new(promotion_mission(agent)).map_err(invalid)?,
-        SessionId::try_new(PROMOTION_SESSION).map_err(invalid)?,
+        RunId::try_new(PROMOTION_RUN).map_err(invalid)?,
         agent,
         ActionScope::try_new(CLEARANCE_KIND, target)?,
         promotion.reason.clone(),

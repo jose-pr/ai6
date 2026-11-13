@@ -10,7 +10,7 @@ sentinel colours `#F6D58E`, `#B9832F`, `#2A1C08` that `OoDuotone` swaps for the 
 Cinzel (`ooDisplayFamily`) only for the wordmark and section labels. The wallpaper
 (`OoBackdrop`, one SVG recoloured from `OoWallpaper`) and the hero art (`OoHero`, Overview only;
 files by width in `OoArt`, each within `ooArtBudget`) never sit behind tables,
-terminals, Session pages, dialogs, green ink, briefings or the chat, and nothing is plotted
+terminals, Run pages, dialogs, green ink, briefings or the chat, and nothing is plotted
 on the hero. Ornament (glows, decorative gradients, art) reads `OoTokens.decorated`, which
 high contrast clears; never infer it from colours. Accent edges and glow belong to the
 selection and the primary action only. `test/contrast.dart` lists the pairs text is drawn
@@ -20,11 +20,11 @@ native windows build their app with `boardThemedApp`.
 
 ## Boundaries
 
-- Universal Exports owns Station, Mission, provider Session and terminal-stream state; the app only presents it.
+- Universal Exports owns Station, Mission, provider Run and terminal-stream state; the app only presents it.
 - Never pass M's ingress credential to this application.
 - Do not put attach tokens in URLs, browser storage, logs or UI text.
 - Terminal input requires an explicit user-scoped write lease; keep viewing read-only by default.
-- A window closing only closes the view. It never stops or resumes the provider Session.
+- A window closing only closes the view. It never stops or resumes the provider Run.
 - Treat API fields as untrusted input and keep terminal bytes separate from lifecycle metadata.
 - Moneypenny's views (`lib/assistant/`) are data in the version 1 view schema, rendered with
   the app's own widgets: never render model-written HTML, run a script or follow an outside
@@ -48,14 +48,14 @@ native windows build their app with `boardThemedApp`.
 - Stable Flutter lacks the first-party Desktop Windowing API; use the Flutter `main` commit `tools/sdk/sdk.lock` names, installed as `README.md` describes.
 - `env.sh` and `env.ps1` under the SDK prefix set `FLUTTER_WINDOWING`; any other Flutter needs `enable-windowing` before running or building a desktop client.
 - The API is experimental and internal in this Flutter revision; keep its use isolated in this package and do not describe it as production-stable.
-- Web uses one ordinary Flutter app view. Session details navigate inside that page;
+- Web uses one ordinary Flutter app view. Run details navigate inside that page;
   do not enable Flutter multi-view: a view added to a `window.open`ed window draws but takes
   no typing (measured, `docs/assistant.md` "Her own window on the web"). Moneypenny's web
   pop-out is a second copy of the app at `?oo_window=chat` (`lib/assistant/chat_popout*.dart`),
   tied to the page by a `BroadcastChannel`; both sockets are on one conversation.
 - Native desktop windows are a separate, experimental Flutter feature. Opening or closing
-  a Session window must not start, resume or stop its provider Session.
-- Every native window (a Session's, Moneypenny's popped-out chat) opens through
+  a Run window must not start, resume or stop its provider Run.
+- Every native window (a Run's, Moneypenny's popped-out chat) opens through
   `openAppWindow` (`lib/shell/app_window.dart`). Moneypenny's conversation and layout live
   in one `MoneypennyChat` per sign-in (`lib/assistant/chat_layout.dart`), so every layout
   and window shows the same conversation and only one `AssistantPanel` is mounted at a time.

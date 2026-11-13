@@ -164,7 +164,7 @@ pub struct AssistantDeskLimits {
     #[schema(title = "Retry a report after")]
     #[map(default = AssistantDeskLimits::default().report_retry)]
     pub report_retry: Seconds,
-    /// Conversations whose provider Session the desk remembers for a resume.
+    /// Conversations whose provider Run the desk remembers for a resume.
     #[schema(title = "Conversations remembered for a resume")]
     #[map(default = AssistantDeskLimits::default().known)]
     pub known: Limit,

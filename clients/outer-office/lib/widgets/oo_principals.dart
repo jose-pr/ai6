@@ -82,7 +82,7 @@ class OoPrincipalRef {
   String get subject => '$kind:$id';
 }
 
-/// The names of people, learned from the gateway and kept for the session.
+/// The names of people, learned from the gateway and kept for the run.
 ///
 /// Asking for an ID the gateway has never seen is answered once, as unknown: the ID is shown,
 /// muted. A name is for display only; nothing here decides what a person may do.
@@ -160,7 +160,7 @@ class OoPrincipals extends ChangeNotifier {
   }
 }
 
-/// Gives the pages below it the session's [OoPrincipals].
+/// Gives the pages below it the run's [OoPrincipals].
 class OoPrincipalsScope extends InheritedNotifier<OoPrincipals> {
   const OoPrincipalsScope({
     required OoPrincipals principals,

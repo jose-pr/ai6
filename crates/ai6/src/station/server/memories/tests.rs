@@ -108,7 +108,7 @@ fn unfenced(answer: &str, tool: &str) -> Value {
 }
 
 fn new_in(scope: MemoryScope, summary: &str) -> MemoryChange {
-    MemoryChange::new(MemoryTarget::New(scope), None, summary, "from a Session")
+    MemoryChange::new(MemoryTarget::New(scope), None, summary, "from a Run")
 }
 
 fn audits(state: &DaemonState, action: &str) -> Vec<AuditRecord> {
@@ -194,7 +194,7 @@ fn an_agents_write_is_a_proposal_unless_its_operation_lets_its_clearance_write()
     let waiting = state.intake.memory_proposals(&operation("G")).unwrap();
     assert_eq!(waiting.len(), 1);
     assert_eq!(waiting[0].source.by, "agent:007");
-    assert_eq!(waiting[0].source.session.as_deref(), Some("G-1"));
+    assert_eq!(waiting[0].source.run.as_deref(), Some("G-1"));
     assert_eq!(audits(&state, "memory.proposed").len(), 2);
 
     // Allowing `00` lets 00 write at once, and field still only proposes.
@@ -245,7 +245,7 @@ fn an_agents_write_is_a_proposal_unless_its_operation_lets_its_clearance_write()
 fn a_poisoned_entry_marks_the_next_reader_stays_fenced_and_carries_its_mark_on() {
     let root = tempfile::tempdir().unwrap();
     let state = station(root.path(), "memory_write = \"field\"");
-    // A Session that read outside text writes what an attacker asked.
+    // A Run that read outside text writes what an attacker asked.
     let attacker = reader("007");
     attacker.exposure.mark("tool:WebFetch", 1.0);
     let answer: Value = serde_json::from_str(
@@ -267,7 +267,7 @@ fn a_poisoned_entry_marks_the_next_reader_stays_fenced_and_carries_its_mark_on()
     let stored = state.intake.memory(&id).unwrap().unwrap();
     assert_eq!(stored.header.source.exposures, ["tool:WebFetch"]);
 
-    // A later Mission finds it: the search alone, which shows its summary, marks that Session.
+    // A later Mission finds it: the search alone, which shows its summary, marks that Run.
     let next = reader("licensed");
     assert!(!next.exposure.is_exposed());
     let found = desk(&state).search(&next, "deploy", None).unwrap();
@@ -327,7 +327,7 @@ fn a_poisoned_entry_marks_the_next_reader_stays_fenced_and_carries_its_mark_on()
     desk(&state).write(&clean, change).unwrap();
     let stored = state.intake.memory(&id).unwrap().unwrap();
     assert_eq!(stored.header.source.exposures, ["tool:WebFetch"]);
-    // A clean Session reading a person's entry is not exposed by it.
+    // A clean Run reading a person's entry is not exposed by it.
     let plain = written(&state, operation("G"), "plain", by_a_person());
     let untouched = reader("licensed");
     desk(&state).read(&untouched, &plain).unwrap();
@@ -542,7 +542,7 @@ mod over_mcp {
 
     use super::super::super::cables_mcp::Endpoint;
     use super::*;
-    use crate::directorates::m::identity::SessionId;
+    use crate::directorates::m::identity::RunId;
     use crate::directorates::registry::cables::CablePrincipal;
 
     async fn call(
@@ -563,7 +563,7 @@ mod over_mcp {
         text.text.clone()
     }
 
-    /// A Session's tools before its provider Session ID arrives on its stream, as a native
+    /// A Run's tools before its provider ID arrives on its stream, as a native
     /// harness lists and calls them; with `gate` its exposure.
     async fn unbound(state: &DaemonState, agent: &str, gate: ExposureGate) -> Endpoint {
         let identity = CablePrincipal::try_new(
@@ -589,7 +589,7 @@ mod over_mcp {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn the_memory_tools_work_before_the_session_id_arrives_and_mark_through_the_gate() {
+    async fn the_memory_tools_work_before_the_run_id_arrives_and_mark_through_the_gate() {
         let root = tempfile::tempdir().unwrap();
         let state = station(root.path(), "memory_write = \"field\"");
         let exposed = ExposureGate::default();
@@ -634,7 +634,7 @@ mod over_mcp {
         assert_eq!(stored.header.source.exposures, ["tool:WebFetch"]);
         client.cancel().await.unwrap();
 
-        // Another Session reads it over its own endpoint and is marked through its gate.
+        // Another Run reads it over its own endpoint and is marked through its gate.
         let gate = ExposureGate::default();
         let reader = unbound(&state, "licensed", gate.clone()).await;
         let client = ()
@@ -654,7 +654,7 @@ mod over_mcp {
         // Bound later, nothing changes for these tools.
         let mut reader = reader;
         reader
-            .bind_session(Some(&SessionId::try_new("provider-session").unwrap()))
+            .bind_run(Some(&RunId::try_new("provider-id").unwrap()))
             .unwrap();
         let found = call(
             &client,

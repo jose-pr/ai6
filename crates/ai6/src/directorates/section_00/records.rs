@@ -1,5 +1,5 @@
-//! Finding a harness's own record of a Session on the host it ran on, for a handler's
-//! [`session_record`](super::agent::AgentHandler::session_record) answer.
+//! Finding a harness's own record of a Run on the host it ran on, for a handler's
+//! [`run_record`](super::agent::AgentHandler::run_record) answer.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -33,14 +33,14 @@ pub fn configured_dir(
         .or_else(|| home(environment).map(|home| home.join(fallback)))
 }
 
-/// Whether `session` can be part of a file name: no separator, no `..`, nothing that is not
+/// Whether `run` can be part of a file name: no separator, no `..`, nothing that is not
 /// printable.
-pub fn file_safe(session: &str) -> bool {
-    !session.is_empty()
-        && session.len() <= 256
-        && session != "."
-        && !session.contains("..")
-        && session
+pub fn file_safe(run: &str) -> bool {
+    !run.is_empty()
+        && run.len() <= 256
+        && run != "."
+        && !run.contains("..")
+        && run
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }

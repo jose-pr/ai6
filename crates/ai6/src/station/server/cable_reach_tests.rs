@@ -1,6 +1,6 @@
-//! Cables reach a Session wherever its harness runs: over its runner's connection, on this host
+//! Cables reach a Run wherever its harness runs: over its runner's connection, on this host
 //! or another, through a forward for the detached wrapper, and not at all on a Theater that
-//! offers neither, which placement refuses unless the Theater accepts Sessions without Cables.
+//! offers neither, which placement refuses unless the Theater accepts Runs without Cables.
 #![cfg_attr(
     not(feature = "cables-mcp"),
     allow(
@@ -43,8 +43,8 @@ impl AgentHandler for MockCablesHandler {
         request: AgentStart,
         terminal: Object<dyn AgentTerminal>,
     ) -> Result<Object<dyn AgentSession>, ProviderError> {
-        let session_id =
-            SessionId::try_new(format!("provider-session-cables-{}", request.mission_id)).map_err(
+        let run_id =
+            RunId::try_new(format!("provider-id-cables-{}", request.mission_id)).map_err(
                 |error| {
                     ProviderError::new(guatiao::Status::GUATIAO_ERR_INTERNAL, &error.to_string())
                 },
@@ -61,8 +61,8 @@ impl AgentHandler for MockCablesHandler {
             queue.extend(said.into_iter().map(|line| event("text", Some(line))));
             queue.push_back(event("completed", None));
         });
-        Ok(CablesSession {
-            session_id,
+        Ok(CablesRun {
+            run_id,
             events,
             _terminal: Some(terminal),
         }
@@ -75,8 +75,8 @@ impl AgentHandler for MockCablesHandler {
         _terminal: Object<dyn AgentTerminal>,
     ) -> Result<Object<dyn AgentSession>, ProviderError> {
         let events = Arc::new(Mutex::new(VecDeque::from([event("completed", None)])));
-        Ok(CablesSession {
-            session_id: request.session_id,
+        Ok(CablesRun {
+            run_id: request.run_id,
             events,
             _terminal: None,
         }
@@ -95,16 +95,16 @@ fn event(kind: &str, text: Option<String>) -> AgentEvent {
     }
 }
 
-struct CablesSession {
-    session_id: SessionId,
+struct CablesRun {
+    run_id: RunId,
     events: Arc<Mutex<VecDeque<AgentEvent>>>,
     /// Held as a harness's process holds it: the detached wrapper's forward lives with it.
     _terminal: Option<Object<dyn AgentTerminal>>,
 }
 
-impl AgentSession for CablesSession {
+impl AgentSession for CablesRun {
     fn session_id(&self) -> Result<Option<String>, ProviderError> {
-        Ok(Some(self.session_id.to_string()))
+        Ok(Some(self.run_id.to_string()))
     }
 
     fn send_message(&self, _message: AgentMessage) -> Result<(), ProviderError> {
@@ -225,7 +225,7 @@ fn cable_read(said: &[String], text: &str) -> Option<String> {
 }
 
 /// 007 tells 008 something and waits for the answer; 008 waits for it and replies, which is
-/// all a Session that read a Cable from another Operation may send.
+/// all a Run that read a Cable from another Operation may send.
 fn scripts() -> (String, String) {
     let send = |to: &str, body: &str, key: &str| {
         serde_json::json!({
@@ -288,10 +288,10 @@ fn cable_station(root: &Path, theater_of_g: &str) -> DaemonState {
             grants.push(CableGrant::try_new(agent.to_owned(), action, station.clone()).unwrap());
         }
     }
-    let (roster, missions, sessions, station_id) = (
+    let (roster, missions, runs, station_id) = (
         state.roster.clone(),
         state.missions.clone(),
-        state.sessions.clone(),
+        state.runs.clone(),
         state.station_id.clone(),
     );
     state.cables = Arc::new(
@@ -300,7 +300,7 @@ fn cable_station(root: &Path, theater_of_g: &str) -> DaemonState {
                 root.join("cables"),
             )),
             CablePolicy::try_new(grants, BTreeMap::new()).unwrap(),
-            move || cable_endpoints(&roster, &missions, &sessions, &station_id),
+            move || cable_endpoints(&roster, &missions, &runs, &station_id),
             BTreeMap::new(),
         )
         .with_cross_operation(CrossOperation::StationGrants)
@@ -347,7 +347,7 @@ async fn said(state: &DaemonState, missions: &[&str]) -> BTreeMap<String, Vec<St
         }
     })
     .await;
-    assert!(finished.is_ok(), "the Sessions did not complete: {said:?}");
+    assert!(finished.is_ok(), "the Runs did not complete: {said:?}");
     said
 }
 
@@ -392,11 +392,11 @@ fn exchanged(said: &BTreeMap<String, Vec<String>>, remote: &str) {
     assert!(answer(far, "read_cables").contains("hello back"), "{far:?}");
 }
 
-/// On this host too, a runner's Session reaches its Cables over the runner's connection: the
+/// On this host too, a runner's Run reaches its Cables over the runner's connection: the
 /// harness is given the runner's relay, never this Station's endpoint or bearer.
 #[cfg(feature = "cables-mcp")]
 #[tokio::test(flavor = "multi_thread")]
-async fn a_session_on_a_runner_sends_and_reads_cables_over_the_runners_connection() {
+async fn a_run_on_a_runner_sends_and_reads_cables_over_the_runners_connection() {
     let root = tempfile::tempdir().unwrap();
     let runner_dir = root.path().join("runner");
     let _runner = start_test_runner(&runner_dir).await;
@@ -467,7 +467,7 @@ fn box_theater(root: &Path) -> Theater {
     .with_workdir(work.to_string_lossy().into_owned())
 }
 
-/// A runner on another host carries its Session's Cables over the connection the Station
+/// A runner on another host carries its Run's Cables over the connection the Station
 /// reaches it by, with no forward: the same relay works over any transport that runs it.
 #[cfg(all(unix, feature = "cables-mcp"))]
 #[tokio::test(flavor = "multi_thread")]
@@ -499,7 +499,7 @@ async fn a_runner_on_another_host_carries_cables_over_its_connection_with_no_for
             .unwrap()
             .load(Ordering::Acquire),
         0,
-        "the runner's Session needs no forward"
+        "the runner's Run needs no forward"
     );
 }
 
@@ -545,7 +545,7 @@ async fn a_wrapped_harness_on_another_host_sends_and_reads_cables_through_a_forw
 
 /// A Theater with neither a runner nor a forward cannot take the wrapped harness to its Cable
 /// endpoint: field mode there is refused with the reason, and only `cables = "optional"` starts
-/// a Session without Cables, which the Theater reports as weakened.
+/// a Run without Cables, which the Theater reports as weakened.
 #[cfg(all(unix, feature = "cables-mcp"))]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_theater_with_no_way_to_the_cable_endpoint_refuses_field_mode_unless_it_accepts() {
@@ -607,6 +607,6 @@ async fn a_theater_with_no_way_to_the_cable_endpoint_refuses_field_mode_unless_i
     assert_eq!(
         said["mission-1"],
         ["cables:none"],
-        "the Session started without Cables"
+        "the Run started without Cables"
     );
 }

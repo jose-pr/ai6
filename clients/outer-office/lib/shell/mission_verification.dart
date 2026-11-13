@@ -5,7 +5,7 @@ import '../theme/oo_theme.dart';
 import 'oo_freshness.dart';
 import 'oo_markdown.dart';
 
-/// A Mission whose Session ended done and that waits for a decision: what it was to deliver
+/// A Mission whose Run ended done and that waits for a decision: what it was to deliver
 /// with what the Station's probes found of each, the Agent's final report, and, for a person
 /// with `mission.verify`, a way to probe again and to decide.
 class MissionVerificationPanel extends StatefulWidget {
@@ -108,7 +108,7 @@ class _MissionVerificationPanelState extends State<MissionVerificationPanel> {
           Text(
             'Waiting for a decision: '
             '${attempt == null ? 'its' : 'attempt ${attempt.attempt}\'s'} '
-            'Session ended done, and the Mission is not done until it is '
+            'Run ended done, and the Mission is not done until it is '
             'decided.',
             style: text.bodyMedium,
           ),
@@ -347,7 +347,7 @@ class _DecisionDialogState extends State<_DecisionDialog> {
             padding: EdgeInsets.only(bottom: 8),
             child: Text(
               'The Mission is queued again as the next attempt, and its new '
-              'Session is told the reason and the amendment after its brief.',
+              'Run is told the reason and the amendment after its brief.',
             ),
           ),
         TextField(

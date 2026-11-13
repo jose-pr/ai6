@@ -43,7 +43,7 @@ poll = 5
 [registry]
 password = { file = "db-password" }
 
-[registry.limits.sessions]
+[registry.limits.runs]
 records = 100000
 
 [unex]
@@ -591,7 +591,7 @@ void main() {
         isNull,
         reason: 'a host file name is not the public\'s business',
       );
-      expect(config.limits.refresh.sessions, const Duration(seconds: 3));
+      expect(config.limits.refresh.runs, const Duration(seconds: 3));
       final bootstrap = File('web/flutter_bootstrap.js').readAsStringSync();
       expect(bootstrap, contains("fetch('ai6.cfg'"));
       expect(bootstrap, contains("table === 'oo.assets'"));

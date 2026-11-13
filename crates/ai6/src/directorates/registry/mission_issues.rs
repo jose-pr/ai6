@@ -245,7 +245,7 @@ pub struct IssueProposal {
     pub proposer: String,
     /// The issues to create.
     pub specs: Vec<ProposedIssue>,
-    /// The exposure sources of the proposing Session; an exposed one never auto-approves.
+    /// The exposure sources of the proposing Run; an exposed one never auto-approves.
     #[serde(default)]
     pub exposure: Vec<String>,
     /// What the vetting found: `duplicate`, or anything that blocks a class authorisation.

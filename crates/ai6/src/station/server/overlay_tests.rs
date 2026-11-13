@@ -1,4 +1,4 @@
-//! Overlays reaching a Mission's Session through the Station: what its handler is given, what a
+//! Overlays reaching a Mission's Run through the Station: what its handler is given, what a
 //! commit holds, and what makes the Mission wait.
 
 use std::path::Path;
@@ -151,9 +151,9 @@ async fn a_mission_gets_its_overlays_outside_the_checkout_and_a_commit_holds_non
         assert!(output.status.success(), "{arguments:?}");
         String::from_utf8_lossy(&output.stdout).into_owned()
     };
-    fs::write(work.join("work.txt"), "the Session's work\n").unwrap();
+    fs::write(work.join("work.txt"), "the Run's work\n").unwrap();
     git(&["add", "-A"]);
-    git(&["commit", "-q", "-m", "the Session's commit"]);
+    git(&["commit", "-q", "-m", "the Run's commit"]);
     let committed = git(&["show", "--name-only", "--format=", "HEAD"]);
     assert_eq!(
         committed.trim(),
@@ -173,7 +173,7 @@ async fn a_mission_gets_its_overlays_outside_the_checkout_and_a_commit_holds_non
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_desk_session_gets_the_text_and_the_root_and_nothing_to_run() {
+async fn a_desk_run_gets_the_text_and_the_root_and_nothing_to_run() {
     let root = tempfile::tempdir().unwrap();
     let mission = format!("overlay-desk-{}", std::process::id());
     let dir = tools(root.path());
@@ -305,7 +305,7 @@ async fn a_resume_gets_the_same_digests_or_the_change_is_on_the_timeline() {
     );
     assert_eq!(changes(), 0, "the same digests say nothing");
 
-    // The operator pins other bytes: the Session gets them, and the timeline says so.
+    // The operator pins other bytes: the Run gets them, and the timeline says so.
     let other = overlay_dir(root.path(), "source-other", &[("kb/new.md", "new\n")]);
     let mut station = state.station.clone();
     station = station.with_loadouts(
@@ -344,7 +344,7 @@ async fn a_resume_gets_the_same_digests_or_the_change_is_on_the_timeline() {
 }
 
 /// Overlays on a Theater reached through a transport: a POSIX host whose harness runs under the
-/// detached wrapper, as over SSH, and what the Session's own commands see there.
+/// detached wrapper, as over SSH, and what the Run's own commands see there.
 #[cfg(unix)]
 mod theater {
     use std::os::unix::fs::PermissionsExt;
@@ -436,12 +436,12 @@ mod theater {
             }
         })
         .await
-        .unwrap_or_else(|_| panic!("the Session did not complete: {lines:?}"));
+        .unwrap_or_else(|_| panic!("the Run did not complete: {lines:?}"));
         Ok(lines)
     }
 
     /// A directory holding links to `programs` from the host's PATH, and nothing else: a Theater
-    /// with no Python, as far as a Session's PATH can tell.
+    /// with no Python, as far as a Run's PATH can tell.
     fn bare_path(root: &Path, programs: &[&str]) -> PathBuf {
         let dir = root.join("bare-path");
         fs::create_dir_all(&dir).unwrap();
@@ -515,7 +515,7 @@ mod theater {
             0o555
         );
 
-        // A second Session reuses the copy: it is the same inode, not written again.
+        // A second Run reuses the copy: it is the same inode, not written again.
         use std::os::unix::fs::MetadataExt;
         let inode = fs::metadata(tree.join("bin/ship-helper")).unwrap().ino();
         let second = format!("overlay-helper-again-{}", std::process::id());
@@ -697,9 +697,9 @@ mod theater {
     }
 
     /// Setup in its phases: `install` with no record, nothing for the recorded digest, `sync` for
-    /// another; its state read-only to the Session and kept across digests.
+    /// another; its state read-only to the Run and kept across digests.
     #[tokio::test(flavor = "multi_thread")]
-    async fn setup_runs_install_then_nothing_then_sync_and_its_state_is_read_only_to_a_session() {
+    async fn setup_runs_install_then_nothing_then_sync_and_its_state_is_read_only_to_a_run() {
         let root = tempfile::tempdir().unwrap();
         let script = "#!/bin/sh\nset -eu\necho \"$1 $AOS_SETUP_PHASE $AOS_OVERLAY_NAME\" >> \"$AOS_OVERLAY_STATE/phases\"\n";
         let manifest = "[[setup]]\ninterpreter = \"sh\"\npath = \"setup.sh\"\n";
@@ -890,7 +890,7 @@ mod theater {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn an_env_script_runs_outside_the_session_and_what_it_prints_reaches_it() {
+    async fn an_env_script_runs_outside_the_run_and_what_it_prints_reaches_it() {
         let root = tempfile::tempdir().unwrap();
         let dir = overlay_dir(
             root.path(),

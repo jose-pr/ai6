@@ -16,7 +16,7 @@ import 'oo_freshness.dart';
 import 'oo_link.dart';
 import 'oo_shell.dart';
 
-/// One Mission, read-only: its state and the Session that sets it, every attempt with its
+/// One Mission, read-only: its state and the Run that sets it, every attempt with its
 /// Station and Theater (each a link), the brief and timeline, the actions the person has, and
 /// for a queued Mission the placement its Operation would get now.
 ///
@@ -27,7 +27,7 @@ class MissionDetail extends StatelessWidget {
     required this.mission,
     required this.pages,
     required this.onRoute,
-    required this.onOpenSession,
+    required this.onOpenRun,
     required this.onClose,
     super.key,
   });
@@ -38,7 +38,7 @@ class MissionDetail extends StatelessWidget {
   /// The pages this person may open; a link goes only to one of these.
   final List<OoPage> pages;
   final ValueChanged<OoRoute> onRoute;
-  final ValueChanged<SessionSummary> onOpenSession;
+  final ValueChanged<RunSummary> onOpenRun;
   final VoidCallback onClose;
 
   @override
@@ -52,8 +52,8 @@ class MissionDetail extends StatelessWidget {
     final latest = mission.latest;
     final held = {for (final attempt in attempts) attempt.station};
     final unattached = [
-      for (final session in mission.sessions)
-        if (!held.contains(session.stationId)) session,
+      for (final run in mission.runs)
+        if (!held.contains(run.stationId)) run,
     ];
     final control = board.controls[(operationId, mission.missionId)];
     return FocusTraversalGroup(
@@ -93,7 +93,7 @@ class MissionDetail extends StatelessWidget {
                 board: board,
                 operationId: operationId,
                 missionId: mission.missionId,
-                sessions: mission.sessions,
+                runs: mission.runs,
                 state: mission.state,
               ),
             ],
@@ -141,7 +141,7 @@ class MissionDetail extends StatelessWidget {
               [
                 'State from',
                 if (current != null) 'attempt ${current.attempt}',
-                'Session ${latest.sessionId}',
+                'Run ${latest.runId}',
               ].join(' · '),
               style: text.bodySmall?.copyWith(color: tokens.muted),
             ),
@@ -174,27 +174,27 @@ class MissionDetail extends StatelessWidget {
           for (final attempt in attempts)
             _AttemptCard(
               attempt: attempt,
-              sessions: [
-                for (final session in mission.sessions)
-                  if (session.stationId == attempt.station) session,
+              runs: [
+                for (final run in mission.runs)
+                  if (run.stationId == attempt.station) run,
               ],
               pages: pages,
               onRoute: onRoute,
-              onOpenSession: onOpenSession,
+              onOpenRun: onOpenRun,
             ),
           if (unattached.isNotEmpty) ...[
             const SizedBox(height: 8),
             Text(
-              attempts.isEmpty ? 'SESSIONS' : 'OTHER SESSIONS',
+              attempts.isEmpty ? 'RUNS' : 'OTHER RUNS',
               style: ooSectionLabel(context),
             ),
             Wrap(
               spacing: 8,
               children: [
-                for (final session in unattached)
+                for (final run in unattached)
                   TextButton(
-                    onPressed: () => onOpenSession(session),
-                    child: Text('Open Session ${session.sessionId}'),
+                    onPressed: () => onOpenRun(run),
+                    child: Text('Open Run ${run.runId}'),
                   ),
               ],
             ),
@@ -256,19 +256,19 @@ class MissionDetail extends StatelessWidget {
 class _AttemptCard extends StatelessWidget {
   const _AttemptCard({
     required this.attempt,
-    required this.sessions,
+    required this.runs,
     required this.pages,
     required this.onRoute,
-    required this.onOpenSession,
+    required this.onOpenRun,
   });
 
   final MissionAttemptSummary attempt;
 
-  /// The Sessions the board holds on this attempt's Station.
-  final List<SessionSummary> sessions;
+  /// The Runs the board holds on this attempt's Station.
+  final List<RunSummary> runs;
   final List<OoPage> pages;
   final ValueChanged<OoRoute> onRoute;
-  final ValueChanged<SessionSummary> onOpenSession;
+  final ValueChanged<RunSummary> onOpenRun;
 
   @override
   Widget build(BuildContext context) {
@@ -326,19 +326,19 @@ class _AttemptCard extends StatelessWidget {
                 'Checkpointed to branch $branch',
                 style: text.bodySmall?.copyWith(color: tokens.muted),
               ),
-            if (sessions.isEmpty)
+            if (runs.isEmpty)
               Text(
-                'No Session of this Mission is recorded on this Station.',
+                'No Run of this Mission is recorded on this Station.',
                 style: text.bodySmall?.copyWith(color: tokens.muted),
               )
             else
               Wrap(
                 spacing: 8,
                 children: [
-                  for (final session in sessions)
+                  for (final run in runs)
                     TextButton(
-                      onPressed: () => onOpenSession(session),
-                      child: Text('Open Session ${session.sessionId}'),
+                      onPressed: () => onOpenRun(run),
+                      child: Text('Open Run ${run.runId}'),
                     ),
                 ],
               ),

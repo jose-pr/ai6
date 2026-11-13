@@ -1,6 +1,6 @@
-//! The assistant Session contract between Universal Exports and a Station.
+//! The assistant Run contract between Universal Exports and a Station.
 //!
-//! Moneypenny, the operator's assistant, runs as an Agent Session on a Station through the
+//! Moneypenny, the operator's assistant, runs as an Agent Run on a Station through the
 //! same AgentHandler providers as every Agent, started with [`AgentStart::assistant`]. Its
 //! tools are not on the Station: Universal Exports serves them on an MCP endpoint of its own,
 //! authenticated by a token bound to the person and the conversation, and every tool runs as
@@ -41,7 +41,7 @@ pub const ASSISTANT_CABLE_MCP_TOKEN_ENV: &str = "AI6_ASSISTANT_CABLE_MCP_TOKEN";
 pub const ASSISTANT_CABLE_MCP_SERVER: &str = "cables";
 
 impl AssistantMode {
-    /// The mode of a Moneypenny Session that has only her own tools: the Universal Exports
+    /// The mode of a Moneypenny Run that has only her own tools: the Universal Exports
     /// endpoint, no interpreter and no skill.
     pub fn moneypenny() -> Self {
         Self {
@@ -347,7 +347,7 @@ pub const EVENT_LIMIT: &str = "limit";
 /// for the next message.
 pub const EVENT_INTERRUPTED: &str = "interrupted";
 /// The Station closed the conversation's harness (idle, closed by request, or stopping). The
-/// provider Session can be resumed by a later job.
+/// provider Run can be resumed by a later job.
 pub const EVENT_CLOSED: &str = "closed";
 /// Something the person and the assistant should know about her workspace, in `text`: work
 /// saved to a branch of its own because `main` refused it, or a repository that could not be
@@ -639,10 +639,10 @@ pub struct AssistantJob {
     /// When `mcp_token` stops being accepted, as Unix seconds. A harness started with an older
     /// token is restarted (resumed) with this one before the token it has expires.
     pub token_expires_at: f64,
-    /// The provider Session the conversation last ran, which a new harness resumes.
+    /// The provider Run the conversation last ran, which a new harness resumes.
     #[serde(default)]
-    pub session_id: Option<String>,
-    /// The route that Session ran on, when its Agent has routes: it resumes only there.
+    pub run_id: Option<String>,
+    /// The route that Run ran on, when its Agent has routes: it resumes only there.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub route: Option<RouteRef>,
     /// Close the conversation's harness instead of sending a message; `message` is empty.
@@ -810,10 +810,10 @@ impl AssistantJob {
                 ));
             }
         }
-        if let Some(session) = &self.session_id
-            && !valid_identity(session)
+        if let Some(run) = &self.run_id
+            && !valid_identity(run)
         {
-            return Err("session_id is empty, too long or has control characters".to_owned());
+            return Err("run_id is empty, too long or has control characters".to_owned());
         }
         if let Some(route) = &self.route
             && ![
@@ -950,7 +950,7 @@ impl fmt::Debug for AssistantJob {
             .field("recap_bytes", &self.recap.as_ref().map(String::len))
             .field("mcp_token", &"[REDACTED]")
             .field("token_expires_at", &self.token_expires_at)
-            .field("session_id", &self.session_id)
+            .field("run_id", &self.run_id)
             .field("close", &self.close)
             .field("interrupt", &self.interrupt)
             .field("person_id", &self.person_id)
@@ -1010,10 +1010,10 @@ pub struct AssistantReport {
     /// The job the events answer, when they answer one.
     #[serde(default)]
     pub job_id: Option<String>,
-    /// The provider Session the harness runs, once the provider has issued it.
+    /// The provider Run the harness runs, once the provider has issued it.
     #[serde(default)]
-    pub session_id: Option<String>,
-    /// The route that Session runs on, when its Agent has routes.
+    pub run_id: Option<String>,
+    /// The route that Run runs on, when its Agent has routes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub route: Option<RouteRef>,
     /// What the harness ran on for these events, for her conversation log.
@@ -1183,7 +1183,7 @@ mod tests {
             recap: None,
             mcp_token: "t".repeat(43),
             token_expires_at: 1_800_000_000.0,
-            session_id: None,
+            run_id: None,
             close: false,
             interrupt: false,
             person_id: None,
@@ -1586,7 +1586,7 @@ mod tests {
             station_id: "s".to_owned(),
             conversation_id: "c".to_owned(),
             job_id: None,
-            session_id: None,
+            run_id: None,
             events: vec![AssistantEvent::new(EVENT_TEXT, Some("é".repeat(4)))],
         };
         report.cut_texts(&limits);

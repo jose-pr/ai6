@@ -14,8 +14,8 @@ read-in holds from the next call. The tables, limits and searches work the same 
 Registry, SQLite and PostgreSQL.
 
 An entry is an ID (a generated UUID, set once), an optional name, a one-line summary, its content,
-when it was made and last changed and by whom, its **source** (who wrote it, from which Session,
-and whether that Session was exposed), its compartments, and its revision. Names and summaries may
+when it was made and last changed and by whom, its **source** (who wrote it, from which Run,
+and whether that Run was exposed), its compartments, and its revision. Names and summaries may
 repeat. A change names the revision it was read at and is refused once the entry has moved on;
 prior versions are kept (8 by default) and go with a forget.
 
@@ -62,18 +62,18 @@ memory_write = "00"   # field or 00; none by default: every Agent proposes
 
 It proposes to the global memory at any clearance, and to no other Operation's. A proposal waits
 (64 a scope by default) for a person who may change the scope and may see the entry; they approve
-or reject it in the app or with `ai6ctl memories decide`. The tools work from the Session as its
-Station started it, so they answer before the provider's Session ID arrives on its stream.
+or reject it in the app or with `ai6ctl memories decide`. The tools work from the Run as its
+Station started it, so they answer before the provider's Run ID arrives on its stream.
 
 ## A memory can carry an attack
 
 An Agent that read an issue, a web page or a Cable can write a note a later Agent trusts. So an
 entry keeps its source:
 
-- What an [exposed](medical.md) Session writes stays **marked** with how it was exposed, and so
+- What an [exposed](medical.md) Run writes stays **marked** with how it was exposed, and so
   does what it proposes. Approving a proposal is not an edit: the entry stays marked.
-- Reading a marked entry, or seeing it in a search, marks the reader's Session exposed
-  (`memory:<id>`), as a Cable from an exposed sender does, and what that Session writes afterwards
+- Reading a marked entry, or seeing it in a search, marks the reader's Run exposed
+  (`memory:<id>`), as a Cable from an exposed sender does, and what that Run writes afterwards
   is marked in turn. Moneypenny's conversation is never exposed, but one that read a marked entry
   marks what she writes from it.
 - An Agent's edit keeps the mark. A person's own edit clears it, audited `memory.mark_cleared`.
@@ -83,7 +83,7 @@ entry keeps its source:
 Outer Office's **Memory** page (`app:/memory`, `?scope=global`, `?operation_id=G`) shows one memory
 at a time, chosen at its top: what Moneypenny keeps of you, everyone's, or an Operation's you may
 read; an Operation's own page links to its memory. It lists the entries, newest change first, with
-who wrote each, any compartment protecting it, and a warning on one an exposed Session wrote;
+who wrote each, any compartment protecting it, and a warning on one an exposed Run wrote;
 searches them; and opens one in a form (summary, name, compartments, content) saved from the
 revision that was opened, or forgotten once you confirm. Where you may change that memory, what
 Agents proposed for it waits at the top, with who asked and their mark, to approve or reject.
@@ -106,7 +106,7 @@ Agents proposed for it waits at the top, with who asked and their mark, to appro
 
 An entry you may not see answers `404`, the same as an ID that does not exist. Every change is
 audited before it is made (`memory.write`, `memory.forget`, `memory.proposed`,
-`memory.proposal.approved`, `memory.proposal.rejected`), naming the entry and the Session it came
+`memory.proposal.approved`, `memory.proposal.rejected`), naming the entry and the Run it came
 from: an Operation's under that Operation, where its timeline shows them, the global memory's under
 `config:memory`, and a person's under `config:assistant`. One that cannot be audited is not made.
 `ai6ctl memories` does the same from a shell.

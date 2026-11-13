@@ -98,17 +98,17 @@ similar = { version = "2.7", default-features = false, features = ["text"] }
 roxmltree = { version = "0.21.2", default-features = false, features = ["std"] }
 pulldown-cmark = { version = "0.13.5", default-features = false, features = ["html"] }
 data-encoding = { version = "2", default-features = false }
-# Validates gateway origins and encodes Session IDs as URL path segments.
+# Validates gateway origins and encodes Run IDs as URL path segments.
 url = { version = "2", default-features = false, features = ["std"] }
 futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
-# The Agent Client Protocol: the wire between the Station and every agent Session. It is
+# The Agent Client Protocol: the wire between the Station and every agent Run. It is
 # runtime-agnostic; AI6 drives each connection on a thread of its own.
 agent-client-protocol = { version = "3.6", default-features = false }
 futures = { version = "0.3", default-features = false, features = ["std", "async-await", "executor"] }
 # The ACP client above the SDK: connect, resume and turn state, permission deciding, line transports.
 # Pinned by revision until a release.
 coqui-acp = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "2972b6ad93cd5a922469bfedb12fc2949024d5f5" }
-# The agent session kind a handler returns and its events, shared with every project hosting agent
+# The agent run kind a handler returns and its events, shared with every project hosting agent
 # providers. Same revision as coqui-acp, and on the same Guatiao revision as above.
 coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "2972b6ad93cd5a922469bfedb12fc2949024d5f5" }
 # The usage model (buckets, limits, spend) and the words that read a failed turn as a limit; the same

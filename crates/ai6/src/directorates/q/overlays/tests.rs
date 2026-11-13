@@ -109,7 +109,7 @@ fn an_operation_adds_to_a_loadout_s_overlays_and_cannot_take_one_away() {
 }
 
 #[test]
-fn a_cycle_a_missing_requirement_and_an_unknown_name_refuse_the_session() {
+fn a_cycle_a_missing_requirement_and_an_unknown_name_refuse_the_run() {
     let (mut records, mut manifests) = catalog();
     manifests.insert("a".into(), manifest("requires = [\"b\"]\n"));
     manifests.insert("b".into(), manifest("requires = [\"a\"]\n"));

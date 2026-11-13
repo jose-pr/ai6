@@ -17,7 +17,7 @@ ai6 serve --station hq-1
 
 A standby control Station takes over the Headquarters lease if it expires
 (*relocation* to a *fallback Station*). The lease carries an election **term** that grows
-each time a different Station takes it; Session leases draw their fencing tokens from it
+each time a different Station takes it; Run leases draw their fencing tokens from it
 ([Recovery](missions.md#recovery)):
 
 ```toml
@@ -40,7 +40,7 @@ The record's tables bound and pace the Station's own work: how often it checks i
 (`[scheduler] check_in`), how long its leases on Missions last without a renewal
 (`[scheduler] lease`, 180 seconds by default: keep it well above the longest a check-in takes on a
 distant Registry), how much it holds for Universal Exports (`[publisher]`), how it
-probes Theaters and re-attaches to Sessions, how long its secret leases last, and so on, each
+probes Theaters and re-attaches to Runs, how long its secret leases last, and so on, each
 key with a default ([Station runtime limits](configuration.md#station-runtime-limits)). Its
 `[providers.<id>]` tables configure the handlers, terminals and safe houses it builds:
 
@@ -73,7 +73,7 @@ combinations that pass these checks:
 | Mission `stations` | the brief narrows to Stations and this one is not among them. A Mission can only narrow the Operation's list, never widen it |
 | Role | the Station has no `execution` role |
 | Health | its last check-in is older than `[registry.limits.stations] gone_dark_after`, 180 seconds by default (gone dark) |
-| Capacity | its capacity is 0, or it already holds that many Missions: its leases or the Sessions it reported running, whichever is more |
+| Capacity | its capacity is 0, or it already holds that many Missions: its leases or the Runs it reported running, whichever is more |
 | Resources | it reported less free memory than `min_free_memory_mb` (default 512) or a CPU busier than `max_cpu_percent` (default 95). The same limits rule out a Theater by its own sample. A figure that was not reported never rules anything out |
 | Theater binding | the Operation's `theater` names a different Theater |
 | Theater reachable | the Station cannot reach the Theater now (no transport provider, or the last contact failed), or has not reported what its transport can do |
@@ -87,7 +87,7 @@ combinations that pass these checks:
 Each (Station, Theater) that remains gets a load **score** from 0 (idle) to 4, the sum of
 four shares from 0 to 1: the Missions the Station holds against its capacity, how busy the
 CPU is (the CPU percent, or for a Theater the load average per CPU), the memory in use, and
-the Station's Sessions on that Theater against its capacity. A Theater on the Station's own
+the Station's Runs on that Theater against its capacity. A Theater on the Station's own
 host is judged by the Station's sample. A figure that was not reported adds nothing, so a
 Station that reports no resources scores on its Missions alone. The Operation's `placement`
 decides the order: `spread` (the default) puts the lowest score first, `pack` the highest
@@ -109,7 +109,7 @@ Exports (needs `mission.read` on the Operation) returns the eligible choices, be
 each with its `score`, and a reason for every rejection. Outer Office's Stations view has a
 **Placement preview** panel for it, and each Station card shows the host's CPUs, CPU busy,
 load, free memory and when they were sampled (`unknown` for a figure not reported); a
-Theater's tooltip shows its own and how many Sessions run there. `ai6ctl stations` prints
+Theater's tooltip shows its own and how many Runs run there. `ai6ctl stations` prints
 the same figures as columns. The query parameters `agent`, `role`, `stations` and `tags` narrow it the
 way a Mission would. The preview uses the Operation's policy as the Headquarters Station
 published it at its last check-in, and it lists every Station in the Registry, not only
@@ -144,7 +144,7 @@ password = { provider = "file", key = "db-password" }   # relative to this file
 In a directory Registry lease expiry uses each Station's clock, so Stations need
 synchronized clocks; a SQL Registry uses the database's clock. Check-ins expire after 45
 seconds; a Station whose check-ins lapse has *gone dark* and its leased briefs are
-recovered by the Headquarters Station: a Session a runner still supervises is adopted by
+recovered by the Headquarters Station: a Run a runner still supervises is adopted by
 another Station, any other is lost and tried again ([Recovery](missions.md#recovery)). The
 Headquarters lease lasts 60 seconds between renewals; `ai6.cfg`'s `[registry]
 headquarters_lease` sets how long a standby control Station waits before taking over from one
@@ -172,9 +172,9 @@ build makes it with: one that lacks a column, such as one dropped by hand, stops
 table and column, while a column the build does not know, as a later build leaves after a
 rollback, is allowed.
 
-Every write first takes the Registry's row in `ai6_clock`, so writers queue as they do on the directory's lock, and leases, the Headquarters term and Session
+Every write first takes the Registry's row in `ai6_clock`, so writers queue as they do on the directory's lock, and leases, the Headquarters term and Run
 fencing behave the same on every backend. A Station that stalls inside a write (a paused
-VM, a half-open connection) loses its session after a quarter of the Headquarters lease,
+VM, a half-open connection) loses its run after a quarter of the Headquarters lease,
 so it cannot hold the others back from taking over: the statement, lock and idle
 timeouts, and the connection's own, are derived from the Headquarters lease, and a
 location that sets one itself keeps it. No secret is stored there: access tokens are kept
@@ -190,7 +190,7 @@ start. Keep the password out of the location, where a process listing shows it: 
 "inline", value = "…" }`; the last two are printed as a warning and reported at check-in. Messages print locations with the password hidden.
 
 Stations and Universal Exports reach the Registry only through the `RegistryBackend`
-traits (one per kind of record: briefs, Stations, Sessions, Cables, approvals and so on),
+traits (one per kind of record: briefs, Stations, Runs, Cables, approvals and so on),
 which the directory (`FileRegistry`) and the database (`SqlRegistry`) implement; a program
 embedding the Station can pass another store with `ServeConfig::with_registry`.
 
@@ -239,7 +239,7 @@ Qualify an Agent for the role (`roles = [..., "head-of-station"]`) and authorize
 - **A round per Station per window.** Headquarters queues one brief for each Station whose
   last check-in placement accepts for the Operation, keyed by the window and the Station, so
   a failover never doubles a round. A busy Station's round waits for room.
-- **Rounds, not one long Session.** A single endless Session would hit context limits, park
+- **Rounds, not one long Run.** A single endless Run would hit context limits, park
   on provider limits and spend tokens idling; each round is a Mission of its own. What one
   round saw reaches the next through the Station's **logbook**: the newest 20 reports, kept
   in the Registry (`logbook/<station>.json`, or the `ai6_logbooks` table) and handed to each
@@ -257,7 +257,7 @@ Qualify an Agent for the role (`roles = [..., "head-of-station"]`) and authorize
 
 ### Station tools and reports
 
-A round's Cable endpoint also lists two tools that no other Session has:
+A round's Cable endpoint also lists two tools that no other Run has:
 
 - `station_report`: the Station's capacity and the Missions not over, free space where its
   state and safe houses are, its resources, each Theater it reaches and why placement would
@@ -289,7 +289,7 @@ the round's Mission), read with `station.read` on `station:ID`; when it cannot b
 entry stands and the answer says why.
 
 Every call checks again that its Mission is still a live round of this Station; a round that is over
-is refused. A Session of any other role has none of the Station's tools, and its `file_report` files
+is refused. A Run of any other role has none of the Station's tools, and its `file_report` files
 a Report of its own Operation, not a round's report.
 
 ### Safe-house hygiene: fixed limits
@@ -337,32 +337,32 @@ yet.
 
 ## When Universal Exports goes away
 
-A Station publishes each Session's states and terminal output to Universal Exports. A gateway that
-stops answering costs the Session nothing: the harness runs on, and the Station tries again with
+A Station publishes each Run's states and terminal output to Universal Exports. A gateway that
+stops answering costs the Run nothing: the harness runs on, and the Station tries again with
 growing pauses (`[publisher] publish_retry_delay`, `retry_max_delay`). Its `/internal/publisher`
 reports it unhealthy, with the reason, until an event gets through.
 
-Universal Exports holds its Sessions in memory, so one that comes back has forgotten them. When it
+Universal Exports holds its Runs in memory, so one that comes back has forgotten them. When it
 answers, and every `refresh_every` seconds in case it restarted during a quiet spell, the Station
-registers each live Session again with its Mission's brief and sends its latest state, and its
+registers each live Run again with its Mission's brief and sends its latest state, and its
 sequence goes on from where it was, so a viewer's cursor stays good. Operator controls and terminal
 input resume by themselves, since each is a poll the Station keeps making.
 
 What is lost while it is away:
 
 - **Terminal output past the queue.** `[publisher] queue` frames wait, of up to `terminal_bytes`
-  each, across the Station's Sessions; past that the oldest go. The Station counts them
-  (`lost_terminal_bytes` in `/internal/publisher`), and the Session's sequence skips a number there.
-- **States in between.** When the queue is full, a Session's newer state replaces its older one, so
-  the gateway's timeline can skip a state the Session passed through. Its latest state always
+  each, across the Station's Runs; past that the oldest go. The Station counts them
+  (`lost_terminal_bytes` in `/internal/publisher`), and the Run's sequence skips a number there.
+- **States in between.** When the queue is full, a Run's newer state replaces its older one, so
+  the gateway's timeline can skip a state the Run passed through. Its latest state always
   arrives.
-- **Whatever the gateway held, if it restarted**: every Session's scrollback, and any Session that
+- **Whatever the gateway held, if it restarted**: every Run's scrollback, and any Run that
   ended before the gateway came back and has no state still waiting. The Registry keeps the
   Missions themselves.
 - **Input typed into a gateway that went away**, and controls it had queued and not handed over,
   since it holds them in memory too.
 
-The Session itself loses nothing: its harness and its record of the work are on the Station.
+The Run itself loses nothing: its harness and its record of the work are on the Station.
 
 A viewer is told when output is missing: a sequence that skips a number, or a position older than
 what the gateway holds, [reaches its terminal as a notice](terminals.md#a-viewer-reconnects-from-what-it-has).

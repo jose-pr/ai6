@@ -12,7 +12,7 @@
 //!
 //! Her tools, `memory_search`, `memory_read`, `memory_write` and `memory_forget`, reach every scope
 //! the person may: her memory of them at once, and shown in the conversation; an Operation's or the
-//! global one as a proposal the person decides. What an exposed Session wrote marks the
+//! global one as a proposal the person decides. What an exposed Run wrote marks the
 //! conversation, and whatever she writes from it after that carries the mark.
 //!
 //! Errors are `{"error": "<what happened>"}`, worded for the person.

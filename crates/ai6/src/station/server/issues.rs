@@ -1,12 +1,12 @@
 //! The Station's side of a Mission's linked issues: the tools an Agent reads and writes its
 //! issues with, a question that blocks the Mission until someone answers it, and the delivery
-//! of replies to the Session.
+//! of replies to the Run.
 //!
 //! The Agent never calls a tracker. A write is an outbox entry the Headquarters Station sends
 //! (see [`crate::station::issues`]); a reply is read by the Headquarters Station and stored in
 //! the Registry, and the Station that holds the Mission delivers it here, as untrusted text.
 //! Everything an Agent writes passes [`outbound::check`], and what changes an issue's state or
-//! assignees, or what an exposed Session posts, waits for a person's green ink.
+//! assignees, or what an exposed Run posts, waits for a person's green ink.
 
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 use super::green_ink::{Asked, Desk};
 use super::{
     DaemonState, ResumeMission, TransitionMission, publish_lifecycle, resume_mission,
-    sync_session_record, transition_mission,
+    sync_run_record, transition_mission,
 };
 use crate::directorates::m::approvals::{
     ActionScope, ISSUE_ASSIGN, ISSUE_CLOSE, ISSUE_COMMENT, ISSUE_CREATE,
@@ -33,17 +33,17 @@ use crate::directorates::registry::store::AuditRecord;
 use crate::station::issues::{ISSUE_REASON, audit, instances, is_intake_label, update_payload};
 use crate::station::limits::SourceLimits;
 use crate::station::sources::{SourceSetup, source_setups};
-use crate::{MissionId, SessionId};
+use crate::{MissionId, RunId};
 use axum::Json;
 use axum::extract::{Path, State};
 use coqui_acp_provider::AgentMessage;
 
-/// Who is calling a tool: the Agent's Session, as the Cable endpoint bound it.
+/// Who is calling a tool: the Agent's Run, as the Cable endpoint bound it.
 #[derive(Clone)]
 pub(super) struct Caller {
     pub(super) operation: String,
     pub(super) mission: String,
-    pub(super) session: String,
+    pub(super) run: String,
     pub(super) agent: String,
     pub(super) exposure: ExposureGate,
 }
@@ -155,7 +155,7 @@ impl IssueDesk {
         }
     }
 
-    /// Whether an exposed Session may post on the link without green ink: the issue whose text
+    /// Whether an exposed Run may post on the link without green ink: the issue whose text
     /// exposed it, and the children it created.
     fn direct_when_exposed(link: &IssueLink, caller: &Caller) -> bool {
         match link.relation {
@@ -271,9 +271,9 @@ impl IssueDesk {
         }))
     }
 
-    /// Marks the Session exposed by text read from an issue of `tracker`.
+    /// Marks the Run exposed by text read from an issue of `tracker`.
     fn mark_exposed(&self, caller: &Caller, tracker: &str) {
-        let limits = &self.state.intake.limits().sessions;
+        let limits = &self.state.intake.limits().runs;
         caller.exposure.mark(
             &issue_source(tracker, limits.exposure_source_bytes),
             self.now(),
@@ -305,7 +305,7 @@ impl IssueDesk {
                 caller,
                 ISSUE_COMMENT,
                 &link,
-                "posting on an issue its Session did not read",
+                "posting on an issue its Run did not read",
                 retry_key,
                 true,
             )?)
@@ -362,7 +362,7 @@ impl IssueDesk {
                 caller,
                 ISSUE_COMMENT,
                 &link,
-                "asking on an issue its Session did not read",
+                "asking on an issue its Run did not read",
                 retry_key,
                 true,
             )?)
@@ -844,7 +844,7 @@ impl IssueDesk {
             .exposure
             .restricts(crate::directorates::medical::exposure::Restriction::Issues);
         let by = if exposed {
-            // An exposed Session's issues wait for a person, whatever the policy says.
+            // An exposed Run's issues wait for a person, whatever the policy says.
             None
         } else if policy.create == IssueCreate::Direct && clearance != "desk" {
             Some("policy:direct".to_owned())
@@ -931,7 +931,7 @@ impl IssueDesk {
         let request = ApprovalRequest::try_new(
             caller.operation.clone(),
             MissionId::try_new(&caller.mission).ok()?,
-            SessionId::try_new(&caller.session).ok()?,
+            RunId::try_new(&caller.run).ok()?,
             caller.agent.clone(),
             scope,
             format!("proposal {} to create issues", proposal.id),
@@ -1064,7 +1064,7 @@ impl IssueDesk {
         with_footer(text, disclosure, &shown, &caller.agent)
     }
 
-    /// The secret values the Station holds for the Mission: the Session's own environment (its
+    /// The secret values the Station holds for the Mission: the Run's own environment (its
     /// tokens and leases) and the credentials of the Operation's trackers.
     fn secrets(
         &self,
@@ -1073,13 +1073,13 @@ impl IssueDesk {
     ) -> SecretSet {
         let mut values: Vec<String> = self
             .state
-            .sessions
+            .runs
             .lock()
             .ok()
-            .and_then(|sessions| {
-                sessions
+            .and_then(|runs| {
+                runs
                     .get(&caller.mission)
-                    .map(|session| session.environment.values().cloned().collect())
+                    .map(|run| run.environment.values().cloned().collect())
             })
             .unwrap_or_default();
         for setup in source_setups(operation, &SourceLimits::default())
@@ -1203,7 +1203,7 @@ impl IssueDesk {
         let asked = Asked {
             operation: caller.operation.clone(),
             mission: caller.mission.clone(),
-            session: caller.session.clone(),
+            run: caller.run.clone(),
             agent: caller.agent.clone(),
             kind: kind.to_owned(),
             target: link.name(),
@@ -1304,11 +1304,11 @@ fn proposal_answer(proposal: &IssueProposal) -> serde_json::Value {
 /// Whether what a Mission's Agent is owed can reach it, by the state of the Mission.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Delivery {
-    /// A Session is working or waiting.
+    /// A Run is working or waiting.
     Now,
     /// Stalled, parked or quarantined: it can still go on, so it keeps what it is owed.
     Later,
-    /// Queued, held for a person's verdict or finished: no Session of it will hear it.
+    /// Queued, held for a person's verdict or finished: no Run of it will hear it.
     Never,
 }
 
@@ -1475,13 +1475,13 @@ pub(super) fn block_for_issue(state: &DaemonState, mission_id: &str) {
         .lock()
         .ok()
         .is_some_and(|mut missions| missions.block_for(mission_id, ISSUE_REASON).is_ok());
-    if let Ok(sessions) = state.sessions.lock()
-        && let Some(operation) = sessions.get(mission_id)
+    if let Ok(runs) = state.runs.lock()
+        && let Some(operation) = runs.get(mission_id)
     {
         operation.watchdog.pause();
     }
     if blocked {
-        sync_session_record(state, mission_id);
+        sync_run_record(state, mission_id);
         publish_lifecycle(state, mission_id, MissionState::Blocked);
     }
 }
@@ -1492,13 +1492,13 @@ fn release_from_issue(state: &DaemonState, mission_id: &str) {
             .transition(mission_id, MissionState::Working)
             .is_ok()
     });
-    if let Ok(sessions) = state.sessions.lock()
-        && let Some(operation) = sessions.get(mission_id)
+    if let Ok(runs) = state.runs.lock()
+        && let Some(operation) = runs.get(mission_id)
     {
         operation.watchdog.resume();
     }
     if working {
-        sync_session_record(state, mission_id);
+        sync_run_record(state, mission_id);
         publish_lifecycle(state, mission_id, MissionState::Working);
     }
 }
@@ -1508,21 +1508,21 @@ fn waits_for_issue(mission: &crate::directorates::m::mission::Mission) -> bool {
         && mission.blocked_reason.as_deref() == Some(ISSUE_REASON)
 }
 
-/// Gives the Agent `text`: a message to a live Session, or a resume of one that ended its turn.
+/// Gives the Agent `text`: a message to a live Run, or a resume of one that ended its turn.
 /// Returns whether it was delivered.
 async fn tell(state: &DaemonState, mission_id: &str, text: String, resume_if_ended: bool) -> bool {
-    let live = state.sessions.lock().ok().and_then(|sessions| {
-        sessions
+    let live = state.runs.lock().ok().and_then(|runs| {
+        runs
             .get(mission_id)
-            .map(|operation| (operation.session.clone(), operation.gate.clone()))
+            .map(|operation| (operation.run.clone(), operation.gate.clone()))
     });
     match live {
-        Some((session, gate)) => {
+        Some((run, gate)) => {
             let message = AgentMessage { text };
             tokio::task::spawn_blocking(move || {
-                gate.lock(&session)
+                gate.lock(&run)
                     .ok()
-                    .is_some_and(|session| session.send_message(message).is_ok())
+                    .is_some_and(|run| run.send_message(message).is_ok())
             })
             .await
             .unwrap_or(false)
@@ -1541,13 +1541,13 @@ async fn tell(state: &DaemonState, mission_id: &str, text: String, resume_if_end
     }
 }
 
-/// Marks the Mission's Session exposed by an issue of `tracker`, live or, when it has ended,
+/// Marks the Mission's Run exposed by an issue of `tracker`, live or, when it has ended,
 /// in the Registry, so later attempts start exposed too.
 fn expose(state: &DaemonState, mission_id: &str, tracker: &str, now: f64) {
-    let limit = state.intake.limits().sessions.exposure_source_bytes;
+    let limit = state.intake.limits().runs.exposure_source_bytes;
     let source = issue_source(tracker, limit);
-    let live = state.sessions.lock().ok().and_then(|sessions| {
-        sessions
+    let live = state.runs.lock().ok().and_then(|runs| {
+        runs
             .get(mission_id)
             .map(|operation| operation.exposure.clone())
     });
@@ -1807,7 +1807,7 @@ mod tests {
         Caller {
             operation: "G".to_owned(),
             mission: mission.to_owned(),
-            session: "provider-session-direct".to_owned(),
+            run: "provider-id-direct".to_owned(),
             agent: agent.to_owned(),
             exposure: ExposureGate::default(),
         }
@@ -2079,7 +2079,7 @@ mod tests {
     }
 
     #[test]
-    fn an_exposed_session_posts_directly_only_where_its_text_came_from() {
+    fn an_exposed_run_posts_directly_only_where_its_text_came_from() {
         let root = tempfile::tempdir().unwrap();
         let (state, mission, desk) = station(root.path(), "exposed", "");
         let mut me = caller(&mission, "007");
@@ -2094,7 +2094,7 @@ mod tests {
             .find(|entry| entry.item == "o/r#2")
             .unwrap();
         assert_eq!(held.state, OutboxState::Held);
-        // The same call from a Session that read nothing untrusted goes straight through.
+        // The same call from a Run that read nothing untrusted goes straight through.
         me.exposure = ExposureGate::default();
         assert_eq!(
             desk.comment(&me, "gh:o/r#2", "status", "e3").unwrap()["status"],
@@ -2159,7 +2159,7 @@ mod tests {
     }
 
     #[test]
-    fn reading_returns_fenced_text_and_marks_the_session_exposed() {
+    fn reading_returns_fenced_text_and_marks_the_run_exposed() {
         let root = tempfile::tempdir().unwrap();
         let (state, mission, desk) = station(root.path(), "read", "");
         state
@@ -2198,7 +2198,7 @@ mod tests {
         );
     }
 
-    /// A Mission started on the recording handler, blocked by its mock Session.
+    /// A Mission started on the recording handler, blocked by its mock Run.
     async fn live(root: &FsPath, name: &str, issues: &str) -> (DaemonState, String, IssueDesk) {
         let (state, mission, desk) = station(root, name, issues);
         start_mission_by_id(&state, &mission).await;
@@ -2230,7 +2230,7 @@ mod tests {
         }
     }
 
-    /// Returns once everything already sent on the Session has reached the harness: a connection
+    /// Returns once everything already sent on the Run has reached the harness: a connection
     /// keeps its messages in order, so what follows this one has no earlier message still to
     /// come, and a test may say one never came.
     async fn arrived(state: &DaemonState, mission: &str) {
@@ -2275,7 +2275,7 @@ mod tests {
     async fn a_question_blocks_the_mission_and_a_reply_answers_it_exposed_and_fenced() {
         let root = tempfile::tempdir().unwrap();
         let (state, mission, desk) = live(root.path(), "ask", "").await;
-        let gate = state.sessions.lock().unwrap()[&mission].exposure.clone();
+        let gate = state.runs.lock().unwrap()[&mission].exposure.clone();
         let mut me = caller(&mission, "007");
         me.exposure = gate.clone();
         let answer = desk
@@ -2337,7 +2337,7 @@ mod tests {
             gate.exposures()
                 .iter()
                 .any(|exposure| exposure.source == "issue:gh"),
-            "the reply exposed the Session"
+            "the reply exposed the Run"
         );
         // Delivering again tells nothing twice.
         deliver_replies(&state).await;
@@ -2347,7 +2347,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_comment_reaches_a_working_session_and_a_queued_mission_gets_nothing() {
+    async fn a_comment_reaches_a_working_run_and_a_queued_mission_gets_nothing() {
         let root = tempfile::tempdir().unwrap();
         let (state, mission, _desk) = live(root.path(), "working", "").await;
         state
@@ -2454,7 +2454,7 @@ mod tests {
             StreamableHttpClientTransport,
             streamable_http_client::StreamableHttpClientTransportConfig,
         };
-        let environment = state.sessions.lock().unwrap()[mission_id]
+        let environment = state.runs.lock().unwrap()[mission_id]
             .environment
             .clone();
         let transport = StreamableHttpClientTransport::from_config(
@@ -2495,7 +2495,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_issue_tools_are_served_on_the_sessions_own_endpoint() {
+    async fn the_issue_tools_are_served_on_the_runs_own_endpoint() {
         let root = tempfile::tempdir().unwrap();
         let (state, mission, _desk) = live(root.path(), "mcp", "").await;
         let listing: serde_json::Value = serde_json::from_str(
@@ -2537,11 +2537,11 @@ mod tests {
         let (state, mission, desk) = live(root.path(), "turn", "").await;
         desk.request_info(&caller(&mission, "007"), "gh:o/r#1", "Which tag?", "turn1")
             .unwrap();
-        let session = state.sessions.lock().unwrap()[&mission].session.clone();
+        let run = state.runs.lock().unwrap()[&mission].run.clone();
         assert!(super::super::green_ink::end_turn_waiting(
-            &state, &mission, &session
+            &state, &mission, &run
         ));
-        assert!(!state.sessions.lock().unwrap().contains_key(&mission));
+        assert!(!state.runs.lock().unwrap().contains_key(&mission));
         let waiting = state
             .missions
             .lock()
@@ -2574,7 +2574,7 @@ mod tests {
             .iter()
             .find(|resume| resume.mission_id.as_str() == mission)
             .cloned()
-            .expect("the answer resumes the Session");
+            .expect("the answer resumes the Run");
         let message = resumed.message.unwrap_or_default();
         assert!(
             message.contains("MARKER-TURN") && message.contains("untrusted data"),
@@ -2706,7 +2706,7 @@ mod tests {
     }
 
     #[test]
-    fn an_exposed_session_waits_for_a_person_under_any_policy() {
+    fn an_exposed_run_waits_for_a_person_under_any_policy() {
         let root = tempfile::tempdir().unwrap();
         let (_state, mission, desk) = station(root.path(), "exposed", "create = \"direct\"");
         let mut me = caller(&mission, "007");
@@ -3073,7 +3073,7 @@ mod tests {
     async fn a_persons_answer_resumes_the_mission_unexposed_and_unfenced() {
         let root = tempfile::tempdir().unwrap();
         let (state, mission, desk) = live(root.path(), "operator", "").await;
-        let gate = state.sessions.lock().unwrap()[&mission].exposure.clone();
+        let gate = state.runs.lock().unwrap()[&mission].exposure.clone();
         let mut me = caller(&mission, "007");
         me.exposure = gate.clone();
         desk.request_info(&me, "gh:o/r#1", "Which branch?", "op1")
@@ -3104,7 +3104,7 @@ mod tests {
     }
 
     #[test]
-    fn listing_what_an_issue_says_exposes_the_session() {
+    fn listing_what_an_issue_says_exposes_the_run() {
         let root = tempfile::tempdir().unwrap();
         let (_state, mission, desk) = station(root.path(), "list", "");
         let mut me = caller(&mission, "007");

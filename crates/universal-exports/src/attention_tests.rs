@@ -122,10 +122,10 @@ impl Fixture {
         body
     }
 
-    async fn lifecycle(&self, operation: &str, mission: &str, session: &str, reason: &str) {
+    async fn lifecycle(&self, operation: &str, mission: &str, run: &str, reason: &str) {
         let response = reqwest::Client::new()
             .post(format!(
-                "{}/v1/station/sessions/{session}/lifecycle/1",
+                "{}/v1/station/runs/{run}/lifecycle/1",
                 self.served.base
             ))
             .bearer_auth(STATION_TOKEN)
@@ -287,7 +287,7 @@ async fn what_the_person_may_not_read_is_named_and_the_rest_is_still_answered() 
         assert!(read["checked"].as_array().unwrap().is_empty());
     }
     assert_eq!(coverage(&summary, "stations")["status"], "checked");
-    assert_eq!(coverage(&summary, "sessions")["status"], "checked");
+    assert_eq!(coverage(&summary, "runs")["status"], "checked");
     // The refusal history is not theirs to see, so it is not listed.
     assert!(items(&summary, "config_refused").is_empty());
     let headline = summary["headline"].as_str().unwrap();
@@ -296,18 +296,18 @@ async fn what_the_person_may_not_read_is_named_and_the_rest_is_still_answered() 
 }
 
 #[tokio::test]
-async fn a_request_for_green_ink_is_one_item_with_its_blocked_session() {
+async fn a_request_for_green_ink_is_one_item_with_its_blocked_run() {
     let fixture = fixture().await;
     fixture.report(json!({"revision": "79"}));
     fixture
-        .lifecycle("G", "mission-g", "session-g", "green-ink")
+        .lifecycle("G", "mission-g", "run-g", "green-ink")
         .await;
 
-    // Blocked for green ink with no request visible: the Session is the item.
+    // Blocked for green ink with no request visible: the Run is the item.
     let summary = fixture.summary(&fixture.served.viewer).await;
-    let blocked = items(&summary, "blocked_session");
+    let blocked = items(&summary, "blocked_run");
     assert_eq!(blocked.len(), 1, "{summary}");
-    assert_eq!(blocked[0]["entity"]["id"], "session-g");
+    assert_eq!(blocked[0]["entity"]["id"], "run-g");
     assert!(
         blocked[0]["title"]
             .as_str()
@@ -316,11 +316,11 @@ async fn a_request_for_green_ink_is_one_item_with_its_blocked_session() {
     );
     assert_eq!(blocked[0]["link"], "app:/green_ink?operation_id=G");
 
-    // Where the person may decide, the request is the item and the Session is not a second.
+    // Where the person may decide, the request is the item and the Run is not a second.
     let request = ApprovalRequest::try_new(
         "G",
         ai6::MissionId::try_new("mission-g").unwrap(),
-        ai6::SessionId::try_new("session-g").unwrap(),
+        ai6::RunId::try_new("run-g").unwrap(),
         "007",
         ActionScope::try_new("push", "origin main").unwrap(),
         "release",
@@ -331,7 +331,7 @@ async fn a_request_for_green_ink_is_one_item_with_its_blocked_session() {
     .expiring(now(), std::time::Duration::from_secs(3600));
     fixture.served.registry.request_approval(&request).unwrap();
     let summary = fixture.summary(&fixture.served.operator).await;
-    assert!(items(&summary, "blocked_session").is_empty(), "{summary}");
+    assert!(items(&summary, "blocked_run").is_empty(), "{summary}");
     let asked = items(&summary, "green_ink");
     assert_eq!(asked.len(), 1, "{summary}");
     assert_eq!(asked[0]["entity"]["kind"], "approval");
@@ -349,7 +349,7 @@ async fn an_operation_filter_narrows_the_scope_and_says_so() {
     let fixture = fixture().await;
     fixture.report(json!({"revision": "79"}));
     fixture
-        .lifecycle("G", "mission-g", "session-g", "budget")
+        .lifecycle("G", "mission-g", "run-g", "budget")
         .await;
     let (status, summary) = fixture
         .get(
@@ -361,7 +361,7 @@ async fn an_operation_filter_narrows_the_scope_and_says_so() {
     assert_eq!(summary["scope"]["kind"], "operation");
     assert_eq!(summary["scope"]["label"], "Operation L");
     assert!(
-        items(&summary, "blocked_session").is_empty(),
+        items(&summary, "blocked_run").is_empty(),
         "G is not in the scope"
     );
 
@@ -371,7 +371,7 @@ async fn an_operation_filter_narrows_the_scope_and_says_so() {
             "/v1/user/attention?operation_id=G",
         )
         .await;
-    assert_eq!(items(&all, "blocked_session").len(), 1, "{all}");
+    assert_eq!(items(&all, "blocked_run").len(), 1, "{all}");
 
     let (status, _) = fixture
         .get(&fixture.served.operator, "/v1/user/attention?operation_id=")
@@ -382,15 +382,15 @@ async fn an_operation_filter_narrows_the_scope_and_says_so() {
 }
 
 #[tokio::test]
-async fn a_blocked_session_read_through_a_compartment_is_listed_and_the_crossing_is_audited() {
+async fn a_blocked_run_read_through_a_compartment_is_listed_and_the_crossing_is_audited() {
     let fixture = fixture().await;
     fixture.report(json!({"revision": "79"}));
     fixture
-        .lifecycle("L", "mission-l", "session-l", "budget")
+        .lifecycle("L", "mission-l", "run-l", "budget")
         .await;
     // The viewer holds no rule on L.
     let before = fixture.summary(&fixture.served.viewer).await;
-    assert!(items(&before, "blocked_session").is_empty(), "{before}");
+    assert!(items(&before, "blocked_run").is_empty(), "{before}");
     let audits = |fixture: &Fixture| {
         fixture
             .served
@@ -417,7 +417,7 @@ async fn a_blocked_session_read_through_a_compartment_is_listed_and_the_crossing
         )
         .unwrap();
     let after = fixture.summary(&fixture.served.viewer).await;
-    let blocked = items(&after, "blocked_session");
+    let blocked = items(&after, "blocked_run");
     assert_eq!(blocked.len(), 1, "{after}");
     assert_eq!(blocked[0]["entity"]["operation_id"], "L");
     assert!(

@@ -1,9 +1,9 @@
 //! The harness gate: before a shell command runs, it names the governed steps the command
-//! would take ([`classify`]) and asks the Session's Station whether a live green ink approval
+//! would take ([`classify`]) and asks the Run's Station whether a live green ink approval
 //! covers each one; a step that needs one and has none holds the command, with a message
 //! telling the Agent to call `request_approval`.
 //!
-//! The Station is reached through the Session's Cable endpoint (`AI6_CABLE_MCP_URL` and
+//! The Station is reached through the Run's Cable endpoint (`AI6_CABLE_MCP_URL` and
 //! `AI6_CABLE_MCP_TOKEN` in the harness environment), so a gate works wherever the harness
 //! runs. Claude Code and the Antigravity CLI run `ai6 green-ink gate` as a `PreToolUse` hook; the
 //! Codex handler calls [`gate`] for each command approval the app-server asks for; the Station's
@@ -21,9 +21,9 @@ use crate::directorates::m::approvals::{ActionScope, GitContext, Repository};
 /// Station, or the field runner on the Theater. A Station drops it from a start or resume
 /// request's environment and reports a roster value as a weakening.
 pub const GATE_PROGRAM_ENV: &str = "AI6_GREEN_INK_GATE";
-/// The variable carrying the Session's Cable endpoint URL.
+/// The variable carrying the Run's Cable endpoint URL.
 pub const CABLE_URL_ENV: &str = "AI6_CABLE_MCP_URL";
-/// The variable carrying the Session's Cable endpoint bearer token.
+/// The variable carrying the Run's Cable endpoint bearer token.
 pub const CABLE_TOKEN_ENV: &str = "AI6_CABLE_MCP_TOKEN";
 /// The variable carrying the seconds one exchange with the Station may take, the Station's
 /// `[green_ink] gate_timeout`; unset, the default of 30.
@@ -32,7 +32,7 @@ pub const GATE_TIMEOUT_ENV: &str = "AI6_GREEN_INK_TIMEOUT";
 /// Station's `[approvals] classify_nesting`; unset, the default of 4.
 pub const GATE_NESTING_ENV: &str = "AI6_GREEN_INK_NESTING";
 
-/// The variables a Station sets in a Session's environment so its gate runs as the
+/// The variables a Station sets in a Run's environment so its gate runs as the
 /// `station` record says: [`GATE_TIMEOUT_ENV`] and [`GATE_NESTING_ENV`].
 pub fn settings_environment(
     green_ink: &crate::station::limits::GreenInkLimits,
@@ -252,7 +252,7 @@ mod client {
     /// The MCP revision the client speaks.
     const PROTOCOL_VERSION: &str = "2025-06-18";
 
-    /// A client of the Station's `check_approval` tool on the Session's Cable endpoint.
+    /// A client of the Station's `check_approval` tool on the Run's Cable endpoint.
     pub struct GateClient {
         url: String,
         token: String,
@@ -324,21 +324,21 @@ mod client {
         ///
         /// Why the Station could not be asked or did not answer.
         pub fn check(&self, steps: &[ActionScope]) -> Result<Answers, String> {
-            let (session, version) = self.initialize()?;
-            let answer = self.call(&session, &version, steps);
-            // Ending the MCP session is a courtesy; the Station drops idle ones itself.
+            let (run, version) = self.initialize()?;
+            let answer = self.call(&run, &version, steps);
+            // Ending the MCP run is a courtesy; the Station drops idle ones itself.
             let _ = self
                 .agent
                 .delete(&self.url)
                 .header("Authorization", &format!("Bearer {}", self.token))
-                .header("Mcp-Session-Id", &session)
+                .header("Mcp-Session-Id", &run)
                 .header("MCP-Protocol-Version", &version)
                 .call();
             answer
         }
 
         fn initialize(&self) -> Result<(String, String), String> {
-            let (session, reply) = self.post(
+            let (run, reply) = self.post(
                 None,
                 PROTOCOL_VERSION,
                 &json!({
@@ -352,7 +352,7 @@ mod client {
                     }
                 }),
             )?;
-            let session = session.ok_or("the Station's endpoint opened no MCP session")?;
+            let run = run.ok_or("the Station's endpoint opened no MCP run")?;
             let version = reply
                 .and_then(|reply| {
                     reply
@@ -362,16 +362,16 @@ mod client {
                 })
                 .unwrap_or_else(|| PROTOCOL_VERSION.to_owned());
             self.post(
-                Some(&session),
+                Some(&run),
                 &version,
                 &json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
             )?;
-            Ok((session, version))
+            Ok((run, version))
         }
 
         fn call(
             &self,
-            session: &str,
+            run: &str,
             version: &str,
             steps: &[ActionScope],
         ) -> Result<Vec<(String, Option<String>)>, String> {
@@ -380,7 +380,7 @@ mod client {
                 .map(|step| json!({ "kind": step.kind, "target": step.target }))
                 .collect();
             let (_, reply) = self.post(
-                Some(session),
+                Some(run),
                 version,
                 &json!({
                     "jsonrpc": "2.0",
@@ -418,11 +418,11 @@ mod client {
                 .collect()
         }
 
-        /// Posts one JSON-RPC message; returns the session the Station named and the reply
+        /// Posts one JSON-RPC message; returns the run the Station named and the reply
         /// with the message's `id`, which arrives as JSON or as a server-sent event.
         fn post(
             &self,
-            session: Option<&str>,
+            run: Option<&str>,
             version: &str,
             message: &Value,
         ) -> Result<(Option<String>, Option<Value>), String> {
@@ -432,8 +432,8 @@ mod client {
                 .header("Authorization", &format!("Bearer {}", self.token))
                 .header("Accept", "application/json, text/event-stream")
                 .header("MCP-Protocol-Version", version);
-            if let Some(session) = session {
-                request = request.header("Mcp-Session-Id", session);
+            if let Some(run) = run {
+                request = request.header("Mcp-Session-Id", run);
             }
             let mut response = request
                 .send_json(message)
@@ -442,13 +442,13 @@ mod client {
             if !status.is_success() {
                 return Err(format!("the Station's endpoint answered {status}"));
             }
-            let session = response
+            let run = response
                 .headers()
                 .get("mcp-session-id")
                 .and_then(|value| value.to_str().ok())
                 .map(str::to_owned);
             let Some(id) = message.get("id") else {
-                return Ok((session, None));
+                return Ok((run, None));
             };
             let body = response
                 .body_mut()
@@ -458,7 +458,7 @@ mod client {
                 .chain(body.lines().filter_map(|line| line.strip_prefix("data:")))
                 .filter_map(|data| serde_json::from_str::<Value>(data.trim()).ok())
                 .find(|value| value.get("id") == Some(id));
-            Ok((session, reply))
+            Ok((run, reply))
         }
     }
 
@@ -544,7 +544,7 @@ mod client {
             classify(command, &repository, nesting),
             |steps| match client {
                 Some(client) => client.check(steps),
-                None => Err("this Session has no Station to check green ink with".to_owned()),
+                None => Err("this Run has no Station to check green ink with".to_owned()),
             },
         )
     }

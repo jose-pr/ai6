@@ -26,10 +26,10 @@ Station in `[providers.copy]`:
   `base` and `branch` are ignored.
 - **Re-attach** (`reopen = Some(report)`): the report must be `kept` and name the existing
   copy this Mission would get; nothing is copied.
-- **In place** (`isolate = false`): the session works in `source` and never removes it.
+- **In place** (`isolate = false`): the run works in `source` and never removes it.
 - **A clone** (`clone = Some(..)`): refused with `GUATIAO_ERR_UNSUPPORTED`; nothing is made.
 
-## Session behaviour
+## Run behaviour
 
 - `info()`: the path, no branch, no base, `supports_history = false` and `isolated`.
 - `changes()`: always empty. With no history the daemon records the Mission's cover report

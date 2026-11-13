@@ -206,7 +206,7 @@ Duration _seconds(double seconds) =>
 /// page's automatic refresh off.
 class RefreshSettings {
   const RefreshSettings({
-    this.sessions = defaultSessions,
+    this.runs = defaultRuns,
     this.overview = defaultOverview,
     this.timeline = defaultTimeline,
     this.pools = defaultPools,
@@ -218,7 +218,7 @@ class RefreshSettings {
     this.renewRetry = defaultRenewRetry,
   });
 
-  static const defaultSessions = OoDefaults.refreshSessions;
+  static const defaultRuns = OoDefaults.refreshRuns;
   static const defaultOverview = OoDefaults.refreshOverview;
   static const defaultTimeline = OoDefaults.refreshTimeline;
   static const defaultPools = OoDefaults.refreshPools;
@@ -229,9 +229,9 @@ class RefreshSettings {
   static const defaultRenewBefore = OoDefaults.refreshRenewBefore;
   static const defaultRenewRetry = OoDefaults.refreshRenewRetry;
 
-  /// `sessions`: what the page shown displays from the board of Sessions, Stations and
+  /// `runs`: what the page shown displays from the board of Runs, Stations and
   /// Missions.
-  final Duration? sessions;
+  final Duration? runs;
 
   /// `overview`: the overview's activity.
   final Duration? overview;
@@ -242,7 +242,7 @@ class RefreshSettings {
   /// `pools`: the account pools.
   final Duration? pools;
 
-  /// `slow`: what the page shown does not display but the bell and the search need: Sessions,
+  /// `slow`: what the page shown does not display but the bell and the search need: Runs,
   /// Stations, held briefs, green ink requests and Mission proposals; `null` (0) reads them
   /// with every refresh.
   final Duration? slow;
@@ -256,7 +256,7 @@ class RefreshSettings {
   final Duration? hidden;
 
   /// `silent_intervals`: a Station that has not checked in for this many refresh intervals
-  /// (of `sessions`) is shown as silent.
+  /// (of `runs`) is shown as silent.
   final int silentIntervals;
 
   /// `renew_before`: how long before the access token ends the app renews it, and before the
@@ -264,8 +264,8 @@ class RefreshSettings {
   /// the token. A shorter lifetime than this is renewed halfway through.
   final Duration? renewBefore;
 
-  /// `renew_retry`: how soon a renewal that failed is tried again when [sessions] is off; else
-  /// it is tried again at [sessions].
+  /// `renew_retry`: how soon a renewal that failed is tried again when [runs] is off; else
+  /// it is tried again at [runs].
   final Duration renewRetry;
 }
 
@@ -410,7 +410,7 @@ class OoLimits {
     final retryMax = seconds(terminalTable, 'retry_max_delay');
     return OoLimits(
       refresh: RefreshSettings(
-        sessions: refresh(refreshTable, 'sessions', refreshDefaults.sessions!),
+        runs: refresh(refreshTable, 'runs', refreshDefaults.runs!),
         overview: refresh(refreshTable, 'overview', refreshDefaults.overview!),
         timeline: refresh(refreshTable, 'timeline', refreshDefaults.timeline!),
         pools: refresh(refreshTable, 'pools', refreshDefaults.pools!),

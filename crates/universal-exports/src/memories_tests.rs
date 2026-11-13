@@ -621,7 +621,7 @@ async fn nobody_sets_a_compartment_they_are_not_read_into() {
     assert_eq!(kept["compartments"], json!(["MINE", "THEIRS"]));
 }
 
-/// An entry an exposed Session wrote in Operation G.
+/// An entry an exposed Run wrote in Operation G.
 fn poisoned(fixture: &Fixture) -> String {
     fixture
         .served

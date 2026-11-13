@@ -330,13 +330,13 @@ static READ_TOOLS: &[Tool] = &[
         name: "board",
         description: "The live board: every Station the person may see (health, roles, \
                       running and capacity, resources, Theaters, the Headquarters Station) and \
-                      every Session of the Missions they may read with its state. Call it for \
+                      every Run of the Missions they may read with its state. Call it for \
                       anything about what is running, busy, idle, healthy or stuck.",
         schema: || object(&[], &[]),
         plan: |_, _| {
             Ok(Plan::Read(vec![
                 ("stations", Call::get("/v1/stations".to_owned())),
-                ("sessions", Call::get("/v1/board".to_owned())),
+                ("runs", Call::get("/v1/board".to_owned())),
             ]))
         },
         post: None,
@@ -418,7 +418,7 @@ static READ_TOOLS: &[Tool] = &[
     },
     Tool {
         name: "mission",
-        description: "One Mission: its Sessions and states, its brief (the exact prompt and \
+        description: "One Mission: its Runs and states, its brief (the exact prompt and \
                       launch manifest), its usage (tokens and cost), every attempt, and the \
                       issues it is linked to with what it posted. Needs mission.read.",
         schema: || {
@@ -467,10 +467,10 @@ static READ_TOOLS: &[Tool] = &[
     },
     Tool {
         name: "missions",
-        description: "The Missions the person may read, each with its Sessions, states and \
+        description: "The Missions the person may read, each with its Runs, states and \
                       attempts, filtered as the Missions page filters them: by Operation, by \
-                      the state of their latest Session, then by the Station or Agent of any \
-                      of their Sessions and by text in the Operation, Mission, Session IDs or \
+                      the state of their latest Run, then by the Station or Agent of any \
+                      of their Runs and by text in the Operation, Mission, Run IDs or \
                       brief.",
         schema: || {
             object(
@@ -481,22 +481,22 @@ static READ_TOOLS: &[Tool] = &[
                         json!({
                             "type": "array",
                             "items": {"type": "string", "enum": routes::STATES},
-                            "description": "Only Missions whose latest Session is in one of these \
-                                            states (a Session that reported none is working)."
+                            "description": "Only Missions whose latest Run is in one of these \
+                                            states (a Run that reported none is working)."
                         }),
                     ),
                     (
                         "station_id",
-                        text("Only Missions with a Session on this Station."),
+                        text("Only Missions with a Run on this Station."),
                     ),
                     (
                         "agent",
-                        text("Only Missions with a Session for this Agent."),
+                        text("Only Missions with a Run for this Agent."),
                     ),
                     (
                         "text",
                         text(
-                            "Only Missions whose Operation, Mission, Session IDs or brief \
+                            "Only Missions whose Operation, Mission, Run IDs or brief \
                               contain this, in any case.",
                         ),
                     ),
@@ -563,8 +563,8 @@ static READ_TOOLS: &[Tool] = &[
     },
     Tool {
         name: "pools",
-        description: "The account pools an Operation's Sessions draw from: each account's \
-                      Sessions, quota windows, tokens today and limits. Needs pool.read.",
+        description: "The account pools an Operation's Runs draw from: each account's \
+                      Runs, quota windows, tokens today and limits. Needs pool.read.",
         schema: || object(&[operation()], &["operation_id"]),
         plan: |input, _| operation_path(input, "pools"),
         post: None,

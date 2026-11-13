@@ -108,7 +108,7 @@ class _DrawingState extends State<_Drawing> {
 /// [ooArtPanelOpacity] so text over it keeps its contrast.
 ///
 /// Only for the sign-in page, the Overview header and empty states: never behind tables,
-/// terminals, Session pages, dialogs, green ink, briefings or the chat. Paints only the panel
+/// terminals, Run pages, dialogs, green ink, briefings or the chat. Paints only the panel
 /// when the theme has no wallpaper, it is turned off, or high contrast is on.
 ///
 /// With [labelClear], the width kept for a centred panel, it also draws the wallpaper's label at

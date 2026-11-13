@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 use crate::bounds::TimeLimit;
 
 use crate::bounds::Limit;
-use crate::directorates::m::identity::{MissionId, SessionId};
+use crate::directorates::m::identity::{MissionId, RunId};
 use crate::directorates::m::placement::ResourceLimits;
 use crate::directorates::m::roster::AgentRole;
 use crate::directorates::m::vetting::{Vetting, is_invisible};
@@ -208,12 +208,12 @@ pub(super) fn one_line_within(text: &str, bytes: usize) -> String {
 ///
 /// Proposals are held outside `new/` and are never visible to the scheduler until an
 /// M-controlled path promotes them. The proposal identity is derived from its parent
-/// Mission, provider Session and idempotency key.
+/// Mission, provider Run and idempotency key.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MissionProposal {
-    /// Stable proposal identity derived from the authenticated Session and retry key.
+    /// Stable proposal identity derived from the authenticated Run and retry key.
     pub id: String,
     /// Operation that owns the parent Mission and proposed work.
     pub operation_id: String,
@@ -221,8 +221,8 @@ pub struct MissionProposal {
     pub parent_mission_id: MissionId,
     /// Authenticated Agent identity supplied by AI6, not by the proposal body.
     pub proposer_agent_id: String,
-    /// Provider-issued Session bound to the authenticated MCP endpoint.
-    pub proposer_session_id: SessionId,
+    /// Provider-issued Run bound to the authenticated MCP endpoint.
+    pub proposer_run_id: RunId,
     /// Proposed child Mission brief.
     pub brief: Brief,
     /// Unix timestamp when the proposal was first stored.
@@ -237,9 +237,9 @@ pub struct MissionProposal {
 }
 
 impl MissionProposal {
-    /// Builds a Mission proposal tied to the caller's parent Mission and provider Session.
+    /// Builds a Mission proposal tied to the caller's parent Mission and provider Run.
     ///
-    /// `idempotency_key` is scoped to the parent Mission and Session. The proposed brief's
+    /// `idempotency_key` is scoped to the parent Mission and Run. The proposed brief's
     /// Operation is set from `operation_id`; its source and ID are reserved by AI6.
     ///
     /// # Errors
@@ -250,7 +250,7 @@ impl MissionProposal {
         operation_id: impl Into<String>,
         parent_mission_id: MissionId,
         proposer_agent_id: impl Into<String>,
-        proposer_session_id: SessionId,
+        proposer_run_id: RunId,
         idempotency_key: &str,
         mut brief: Brief,
         limits: &ProposalLimits,
@@ -279,7 +279,7 @@ impl MissionProposal {
         for component in [
             operation_id.as_bytes(),
             parent_mission_id.as_str().as_bytes(),
-            proposer_session_id.as_str().as_bytes(),
+            proposer_run_id.as_str().as_bytes(),
             idempotency_key.as_bytes(),
         ] {
             digest.update((component.len() as u64).to_be_bytes());
@@ -298,7 +298,7 @@ impl MissionProposal {
             operation_id,
             parent_mission_id,
             proposer_agent_id,
-            proposer_session_id,
+            proposer_run_id,
             brief,
             created_at: 0.0,
             vetting: None,
@@ -530,7 +530,7 @@ impl StationSettings {
         &self.station
     }
 
-    /// Returns the Station's maximum number of simultaneous provider Sessions.
+    /// Returns the Station's maximum number of simultaneous provider Runs.
     pub fn max_concurrent_missions(&self) -> usize {
         self.max_concurrent_missions
     }
@@ -2495,19 +2495,19 @@ pub trait AccessTokenStore {
     /// once and is never written to the Registry. Token IDs and digests are unique.
     fn store_access_token(&self, record: &crate::AccessTokenRecord) -> io::Result<()>;
 
-    /// Returns an active bearer token's record by its lowercase SHA-256 digest: never a session
+    /// Returns an active bearer token's record by its lowercase SHA-256 digest: never a run
     /// cookie's, and nothing for a token whose sign-in was revoked.
     fn find_access_token(&self, digest: &str) -> io::Result<Option<crate::AccessTokenRecord>>;
 
-    /// Returns an active session cookie's record by its lowercase SHA-256 digest; a bearer
+    /// Returns an active run cookie's record by its lowercase SHA-256 digest; a bearer
     /// token's digest finds nothing.
     fn find_session_cookie(&self, digest: &str) -> io::Result<Option<crate::AccessTokenRecord>>;
 
-    /// Returns the record of a sign-in that stands, by its public UUID: an active session
+    /// Returns the record of a sign-in that stands, by its public UUID: an active run
     /// cookie, or an active bearer token whose sign-in, when it has one, stands too.
     fn login_by_id(&self, token_id: &str) -> io::Result<Option<crate::AccessTokenRecord>>;
 
-    /// Revokes a token or session cookie by its public UUID, returning false when unknown or
+    /// Revokes a token or run cookie by its public UUID, returning false when unknown or
     /// already revoked. A token of a sign-in takes that sign-in with it, and so every other
     /// token of it, including one issued a moment later.
     fn revoke_access_token(&self, token_id: &str) -> io::Result<bool>;
@@ -2515,7 +2515,7 @@ pub trait AccessTokenStore {
     /// Moves an active token's expiry to `expires_at` (Unix seconds) when that is later, and
     /// answers the record as it now stands; a time no later leaves it as it was. Its value,
     /// issue time and revocation never change. `None` when unknown, revoked or expired. A
-    /// session cookie moves the same way, which is how a sign-in that is used stays signed in.
+    /// run cookie moves the same way, which is how a sign-in that is used stays signed in.
     fn extend_access_token(
         &self,
         token_id: &str,
@@ -2702,14 +2702,14 @@ pub trait CableStore {
     /// Reads a Cable by its relay-generated identifier.
     fn get_cable(&self, cable_id: &str) -> io::Result<Option<Cable>>;
 
-    /// Returns unexpired queued or delivered Cables for an Agent Session.
+    /// Returns unexpired queued or delivered Cables for an Agent Run.
     ///
-    /// `limit` must be between 1 and 1,000. A recipient with no provider Session is
-    /// visible to the Agent's current Session.
+    /// `limit` must be between 1 and 1,000. A recipient with no provider Run is
+    /// visible to the Agent's current Run.
     fn cable_inbox(
         &self,
         agent: &str,
-        session_id: Option<&str>,
+        run_id: Option<&str>,
         limit: usize,
         now: Option<f64>,
     ) -> io::Result<Vec<Cable>>;
@@ -2718,12 +2718,12 @@ pub trait CableStore {
     fn held_cables(&self, limit: usize, now: Option<f64>) -> io::Result<Vec<Cable>>;
 
     /// Atomically changes one recipient's state and returns the updated Cable; `taken_by` records
-    /// the Session that took a delivery addressed to the Agent as a whole.
+    /// the Run that took a delivery addressed to the Agent as a whole.
     fn update_cable_delivery(
         &self,
         cable_id: &str,
         agent: &str,
-        session_id: Option<&str>,
+        run_id: Option<&str>,
         state: CableState,
         taken_by: Option<&str>,
         now: Option<f64>,
@@ -2798,7 +2798,7 @@ impl CableStore for FileRegistry {
     fn cable_inbox(
         &self,
         agent: &str,
-        session_id: Option<&str>,
+        run_id: Option<&str>,
         limit: usize,
         now: Option<f64>,
     ) -> io::Result<Vec<Cable>> {
@@ -2820,8 +2820,8 @@ impl CableStore for FileRegistry {
                     && cable.recipients().iter().any(|recipient| {
                         recipient.agent() == agent
                             && recipient
-                                .session_id()
-                                .is_none_or(|target| Some(target) == session_id)
+                                .run_id()
+                                .is_none_or(|target| Some(target) == run_id)
                             && matches!(
                                 recipient.state(),
                                 CableState::Queued | CableState::Delivered
@@ -2900,7 +2900,7 @@ impl CableStore for FileRegistry {
         &self,
         cable_id: &str,
         agent: &str,
-        session_id: Option<&str>,
+        run_id: Option<&str>,
         state: CableState,
         taken_by: Option<&str>,
         now: Option<f64>,
@@ -2920,7 +2920,7 @@ impl CableStore for FileRegistry {
             state
         };
         let Some(updated) = cable
-            .with_recipient_taken(agent, session_id, next_state, taken_by)
+            .with_recipient_taken(agent, run_id, next_state, taken_by)
             .map_err(cable_error)?
         else {
             return Ok(None);
@@ -3429,8 +3429,8 @@ pub(super) fn cable_sent_event(cable: &Cable) -> TimelineEvent {
     if let Some(mission) = cable.mission_id() {
         event = event.mission(mission);
     }
-    if let Some(session) = cable.session_id() {
-        event = event.session(session);
+    if let Some(run) = cable.run_id() {
+        event = event.run(run);
     }
     event
 }
@@ -3863,7 +3863,7 @@ mod tests {
     use crate::directorates::registry::suite::{Store, backend_tests, brief, lapse};
     use std::fs;
 
-    fn test_cable(id: &str, key: &str, body: &str, session_id: &str) -> Cable {
+    fn test_cable(id: &str, key: &str, body: &str, run_id: &str) -> Cable {
         Cable::try_new(
             CableDraft::new(
                 "007".into(),
@@ -3874,7 +3874,7 @@ mod tests {
                 vec![
                     CableRecipient::try_new(
                         "008".into(),
-                        Some(session_id.into()),
+                        Some(run_id.into()),
                         CableState::Queued,
                     )
                     .unwrap(),
@@ -3905,7 +3905,7 @@ mod tests {
             "operation-a",
             MissionId::try_new("parent-mission").unwrap(),
             "coordinator",
-            SessionId::try_new("provider-session").unwrap(),
+            RunId::try_new("provider-id").unwrap(),
             retry_key,
             Brief {
                 title: title.to_owned(),
@@ -3986,7 +3986,7 @@ mod tests {
         an_expired_lease_is_handed_over_once_with_its_claim_and_attempt,
         leased_claim_is_exclusive_and_registry_keys_are_checked,
         cable_store_is_idempotent_and_rejects_conflicting_retries,
-        cable_inbox_and_delivery_updates_follow_session_and_expiry,
+        cable_inbox_and_delivery_updates_follow_run_and_expiry,
         cable_quotas_are_atomic_and_shared,
         access_tokens_are_shared_by_registries_and_revocation_is_immediate,
         an_access_token_is_extended_never_shortened,
@@ -4273,7 +4273,7 @@ mod tests {
             .expect("an approval records its origin");
         assert_eq!(provenance.origin, bona_fides::Origin::Proposal);
         assert_eq!(provenance.principal.as_deref(), Some("coordinator"));
-        assert_eq!(provenance.reference.as_deref(), Some("provider-session"));
+        assert_eq!(provenance.reference.as_deref(), Some("provider-id"));
         assert_eq!(provenance.received_by, "station-a");
         assert_eq!(
             Brief {
@@ -4825,10 +4825,10 @@ mod tests {
 
     fn cable_store_is_idempotent_and_rejects_conflicting_retries(store: &dyn Store) {
         let registry = store.handle();
-        let cable = test_cable("cable-1", "send-1", "Review this", "session-8");
+        let cable = test_cable("cable-1", "send-1", "Review this", "run-8");
 
         assert_eq!(registry.submit_cable(&cable).unwrap(), cable);
-        let retry = test_cable("cable-retry", "send-1", "Review this", "session-8");
+        let retry = test_cable("cable-retry", "send-1", "Review this", "run-8");
         assert_eq!(store.handle().submit_cable(&retry).unwrap(), cable);
         assert_eq!(
             registry.find_cable("007", "send-1").unwrap(),
@@ -4837,7 +4837,7 @@ mod tests {
         assert_eq!(registry.get_cable("cable-1").unwrap(), Some(cable));
         assert_eq!(registry.get_cable("cable-retry").unwrap(), None);
 
-        let conflict = test_cable("cable-2", "send-1", "Different body", "session-8");
+        let conflict = test_cable("cable-2", "send-1", "Different body", "run-8");
         assert_eq!(
             registry.submit_cable(&conflict).unwrap_err().kind(),
             io::ErrorKind::AlreadyExists
@@ -4866,20 +4866,20 @@ mod tests {
         );
     }
 
-    fn cable_inbox_and_delivery_updates_follow_session_and_expiry(store: &dyn Store) {
+    fn cable_inbox_and_delivery_updates_follow_run_and_expiry(store: &dyn Store) {
         let registry = store.handle();
-        let cable = test_cable("cable-1", "send-1", "Review this", "session-8");
+        let cable = test_cable("cable-1", "send-1", "Review this", "run-8");
         registry.submit_cable(&cable).unwrap();
 
         assert!(
             registry
-                .cable_inbox("008", Some("session-other"), 10, Some(1_700_000_100.0))
+                .cable_inbox("008", Some("run-other"), 10, Some(1_700_000_100.0))
                 .unwrap()
                 .is_empty()
         );
         assert_eq!(
             registry
-                .cable_inbox("008", Some("session-8"), 10, Some(1_700_000_100.0))
+                .cable_inbox("008", Some("run-8"), 10, Some(1_700_000_100.0))
                 .unwrap()
                 .len(),
             1
@@ -4889,7 +4889,7 @@ mod tests {
             .update_cable_delivery(
                 "cable-1",
                 "008",
-                Some("session-8"),
+                Some("run-8"),
                 CableState::Held,
                 None,
                 Some(1_700_000_100.0),
@@ -4913,7 +4913,7 @@ mod tests {
             .update_cable_delivery(
                 "cable-1",
                 "008",
-                Some("session-8"),
+                Some("run-8"),
                 CableState::Delivered,
                 None,
                 Some(1_700_000_100.0),
@@ -4931,7 +4931,7 @@ mod tests {
             .update_cable_delivery(
                 "cable-1",
                 "008",
-                Some("session-8"),
+                Some("run-8"),
                 CableState::Acked,
                 None,
                 Some(1_700_001_000.0),
@@ -4941,7 +4941,7 @@ mod tests {
         assert_eq!(expired.recipients()[0].state(), CableState::Expired);
         assert!(
             registry
-                .cable_inbox("008", Some("session-8"), 10, Some(1_700_000_100.0))
+                .cable_inbox("008", Some("run-8"), 10, Some(1_700_000_100.0))
                 .unwrap()
                 .is_empty()
         );

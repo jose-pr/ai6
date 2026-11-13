@@ -11,9 +11,9 @@ use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
-use ai6::directorates::q::terminal::{AgentTerminal, ExitInfo, STREAM_COLS, Spec, TerminalSession};
+use ai6::directorates::q::terminal::{AgentTerminal, ExitInfo, STREAM_COLS, Spec, TerminalRun};
 use ai6::directorates::section_00::acp::{
-    AcpOptions, AcpSession, DEFAULT_MAX_TOOL_KINDS, DEFAULT_TEXT_FLUSH_BYTES, Exchange,
+    AcpOptions, AcpRun, DEFAULT_MAX_TOOL_KINDS, DEFAULT_TEXT_FLUSH_BYTES, Exchange,
     GateDecider, TerminalIo, UNBOUNDED_LINE_BYTES, UNBOUNDED_MS,
 };
 use ai6::directorates::section_00::agent::{
@@ -33,14 +33,14 @@ use serde_json::{Map, Value, json};
 #[map(crate = ::ai6::guatiao, deny_unknown_fields)]
 pub struct AcpSettings {
     /// The program that speaks ACP on its standard input and output; an Agent sets it, and
-    /// without one the handler starts no Session.
+    /// without one the handler starts no Run.
     #[schema(section = "agent")]
     pub command: Option<String>,
     /// Its arguments.
     #[schema(section = "agent")]
     #[map(default)]
     pub args: Vec<String>,
-    /// Environment added under the Session's own (the Session wins).
+    /// Environment added under the Run's own (the Run wins).
     #[schema(section = "agent")]
     #[map(default)]
     pub env: BTreeMap<String, String>,
@@ -87,14 +87,14 @@ pub struct AcpSettings {
     #[schema(section = "agent")]
     #[map(default = 200)]
     pub poll_ms: i64,
-    /// Starts a `desk` Session with whatever tools the agent has: AI6 does not choose an ACP
-    /// agent's tools, so it cannot keep commands from one, and without this the Session is
+    /// Starts a `desk` Run with whatever tools the agent has: AI6 does not choose an ACP
+    /// agent's tools, so it cannot keep commands from one, and without this the Run is
     /// refused. Reported as a weakening.
     #[schema(section = "agent")]
     #[map(default)]
     pub unconfined_desk: bool,
     /// What marks a failed turn as a provider's usage or rate limit, found in its error without
-    /// regard to case: such a Session stops as limited rather than failed, so its route or account
+    /// regard to case: such a Run stops as limited rather than failed, so its route or account
     /// is passed over until the limit is likely over.
     #[schema(section = "agent")]
     #[map(default = limit_phrases())]
@@ -108,7 +108,7 @@ pub struct AcpSettings {
     #[schema(section = "agent")]
     #[map(default = DEFAULT_MAX_TOOL_KINDS)]
     pub max_tool_kinds: usize,
-    /// What asking the agent for its models, before any Session, keeps of its answer: options.
+    /// What asking the agent for its models, before any Run, keeps of its answer: options.
     #[schema(section = "agent")]
     #[map(default = DescribeLimits::new().options)]
     pub describe_options: usize,
@@ -120,15 +120,15 @@ pub struct AcpSettings {
     #[schema(section = "agent")]
     #[map(default = DescribeLimits::new().modes)]
     pub describe_modes: usize,
-    /// Sessions kept of the agent's list, across its pages.
+    /// Runs kept of the agent's list, across its pages.
     #[schema(section = "agent")]
     #[map(default = DescribeLimits::new().sessions)]
-    pub describe_sessions: usize,
+    pub describe_runs: usize,
     /// UTF-8 bytes past which an identifier is dropped and other text cut.
     #[schema(section = "agent")]
     #[map(default = DescribeLimits::new().text)]
     pub describe_text_bytes: usize,
-    /// Pages of the agent's session list asked for.
+    /// Pages of the agent's run list asked for.
     #[schema(section = "agent")]
     #[map(default = DescribeLimits::new().pages)]
     pub describe_pages: usize,
@@ -158,7 +158,7 @@ fn limit_phrases() -> Vec<String> {
         .collect()
 }
 
-/// Runs an ACP agent for each Session.
+/// Runs an ACP agent for each Run.
 #[derive(Provider)]
 #[provider(
     AgentHandler,
@@ -222,7 +222,7 @@ fn last_words(diagnostics: &Diagnostics) -> String {
 
 /// What became of an agent whose connection ended: how its process ended and what it last wrote.
 fn lost_agent(
-    process: &Object<dyn TerminalSession>,
+    process: &Object<dyn TerminalRun>,
     diagnostics: &Diagnostics,
     exit_wait_ms: i64,
 ) -> Option<String> {
@@ -255,7 +255,7 @@ fn http_server(name: &str, url: &str, token: &str) -> Value {
     })
 }
 
-/// The MCP servers a Session's environment names: the Cable tools and an assistant's own.
+/// The MCP servers a Run's environment names: the Cable tools and an assistant's own.
 fn mcp_servers(
     environment: &BTreeMap<String, String>,
     assistant: Option<&AssistantMode>,
@@ -284,12 +284,12 @@ fn mcp_servers(
 }
 
 /// The text before the first prompt: ACP v1 has no system prompt, so the Agent's context and
-/// the limits of a restricted Session go in front of the task.
+/// the limits of a restricted Run go in front of the task.
 fn briefing(context: &[String], restricted: bool, prompt: &str) -> String {
     let mut parts: Vec<String> = context.to_vec();
     if restricted {
         parts.push(
-            "This is a read-only Session: answer from what you are given. Do not edit, delete or move files, and do not run commands."
+            "This is a read-only Run: answer from what you are given. Do not edit, delete or move files, and do not run commands."
                 .to_owned(),
         );
     }
@@ -305,7 +305,7 @@ struct Launch<'a> {
     effort: Option<&'a String>,
     restricted: bool,
     assistant: Option<&'a AssistantMode>,
-    /// The Session is a Mission's at a clearance that may not run commands.
+    /// The Run is a Mission's at a clearance that may not run commands.
     desk: bool,
     prompt: Option<String>,
     resume: Option<String>,
@@ -322,7 +322,7 @@ impl AcpHandler {
             return Err(ProviderError::new(
                 Status::GUATIAO_ERR_UNSUPPORTED,
                 "this Agent works at desk clearance, which allows no command tool, and AI6 does \
-                 not choose an ACP agent's tools, so the Session was not started: give the Agent \
+                 not choose an ACP agent's tools, so the Run was not started: give the Agent \
                  field clearance, or set unconfined_desk = true in its handler_settings to start \
                  it with whatever tools the agent has",
             ));
@@ -338,7 +338,7 @@ impl AcpHandler {
             rows: 24,
             cols: STREAM_COLS,
         };
-        let process: Arc<Object<dyn TerminalSession>> =
+        let process: Arc<Object<dyn TerminalRun>> =
             Arc::new(terminal.spawn(&spec.to_value().map_err(refuse)?)?);
         let io = TerminalIo::new(process.clone(), settings.poll_ms);
         let (lines, diagnostics) = over_io(
@@ -387,8 +387,8 @@ impl AcpHandler {
             let _ = ended.kill();
             stopper.stop();
         });
-        AcpSession::connect(lines, options, Some(on_close))
-            .map(AcpSession::into_handle)
+        AcpRun::connect(lines, options, Some(on_close))
+            .map(AcpRun::into_handle)
             .map_err(|error| {
                 let said = last_words(&diagnostics);
                 if said.is_empty() {
@@ -414,7 +414,7 @@ fn models_of(options: &[Value]) -> ModelListing {
         .iter()
         .find(|option| option["category"] == "model" && option["type"] == "select")
     else {
-        return ModelListing::unknown("the agent offers no model to choose before a Session");
+        return ModelListing::unknown("the agent offers no model to choose before a Run");
     };
     let value = |entry: &Value| {
         Some(ModelInfo {
@@ -436,8 +436,8 @@ fn models_of(options: &[Value]) -> ModelListing {
 }
 
 impl AcpHandler {
-    /// Starts the agent with exactly `environment` over the settings' own, as a Session would
-    /// be, and asks what it offers before any Session; the agent is ended once it has answered.
+    /// Starts the agent with exactly `environment` over the settings' own, as a Run would
+    /// be, and asks what it offers before any Run; the agent is ended once it has answered.
     fn describe(&self, environment: BTreeMap<String, String>) -> Result<ModelListing, String> {
         let settings = self.settings().map_err(|error| error.to_string())?;
         let mut merged = settings.env.clone();
@@ -472,7 +472,7 @@ impl AcpHandler {
                             .options(settings.describe_options)
                             .values(settings.describe_values)
                             .modes(settings.describe_modes)
-                            .sessions(settings.describe_sessions)
+                            .sessions(settings.describe_runs)
                             .text(settings.describe_text_bytes)
                             .pages(settings.describe_pages),
                     )
@@ -490,7 +490,7 @@ impl AcpHandler {
             ),
             Answer::Unknown(reason) => ModelListing::unknown(reason),
             Answer::NotSupported => {
-                ModelListing::unknown("the agent does not say what it offers before a Session")
+                ModelListing::unknown("the agent does not say what it offers before a Run")
             }
         })
     }
@@ -516,7 +516,7 @@ impl AgentHandler for AcpHandler {
             .map(|settings| settings.command().to_owned()))
     }
 
-    /// What the agent's model option offers, asked before any Session; an agent that does not
+    /// What the agent's model option offers, asked before any Run; an agent that does not
     /// say is unknown, with its reason.
     fn models(&self, environment: BTreeMap<String, String>) -> Result<ModelListing, ProviderError> {
         Ok(self
@@ -524,24 +524,24 @@ impl AgentHandler for AcpHandler {
             .unwrap_or_else(ModelListing::unknown))
     }
 
-    /// AI6 does not choose an ACP agent's tools, so it cannot keep commands from a `desk` Session.
+    /// AI6 does not choose an ACP agent's tools, so it cannot keep commands from a `desk` Run.
     fn clearance_refusal(&self, clearance: String) -> Result<Option<String>, ProviderError> {
         let settings = self.settings()?;
         Ok((!clearance_runs_commands(&clearance) && !settings.unconfined_desk).then(|| {
-            "AI6 does not choose an ACP agent's tools, so it cannot keep commands from a Session \
+            "AI6 does not choose an ACP agent's tools, so it cannot keep commands from a Run \
              at this clearance, and the route's unconfined_desk is not set"
                 .to_owned()
         }))
     }
 
-    /// `unconfined_desk`: a `desk` Session runs with the agent's own tools.
+    /// `unconfined_desk`: a `desk` Run runs with the agent's own tools.
     fn weakenings(&self) -> Result<Vec<String>, ProviderError> {
         Ok(self
             .settings
             .as_ref()
             .filter(|settings| settings.unconfined_desk)
             .map(|_| {
-                "unconfined_desk starts its desk Sessions with whatever tools the ACP agent has, \
+                "unconfined_desk starts its desk Runs with whatever tools the ACP agent has, \
                  commands among them"
                     .to_owned()
             })
@@ -593,7 +593,7 @@ impl AgentHandler for AcpHandler {
                 assistant: request.assistant.as_ref(),
                 desk: !restricted && !clearance_runs_commands(&request.clearance),
                 prompt: request.message.clone(),
-                resume: Some(request.session_id.to_string()),
+                resume: Some(request.run_id.to_string()),
             },
             terminal,
         )
@@ -618,7 +618,7 @@ mod route_tests {
     }
 
     #[test]
-    fn it_cannot_hold_a_session_to_a_plan_however_it_is_set() {
+    fn it_cannot_hold_a_run_to_a_plan_however_it_is_set() {
         for settings in [
             "command = \"grok\"
 ",
@@ -658,21 +658,21 @@ unconfined_desk = true
                 .any(|phrase| phrase == "usage-exhausted"),
             "the Grok CLI's words count by default"
         );
-        let session = |text: &str| {
+        let run = |text: &str| {
             let settings = confined.settings().unwrap();
             let phrases: Vec<&str> = settings.limit_phrases.iter().map(String::as_str).collect();
             ai6::infer_limit(text, &phrases).is_some()
         };
         assert!(
-            session("Rate limited: try again later"),
+            run("Rate limited: try again later"),
             "the shared words count by default"
         );
         assert!(
-            !session("503 No capacity available"),
+            !run("503 No capacity available"),
             "a shortage of capacity is no quota"
         );
         assert!(
-            session(
+            run(
                 "Internal error: API error (status 402 Payment Required): \
                  personal-team-blocked:spending-limit: You have run out of credits"
             ),

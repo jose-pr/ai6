@@ -78,7 +78,7 @@ fn the_seeded_roles_hold_exactly_the_default_table() {
         "pool.read",
         "product.read",
         "roster.read",
-        "session.read",
+        "run.read",
         "station.read",
     ];
     let work = [
@@ -90,7 +90,7 @@ fn the_seeded_roles_hold_exactly_the_default_table() {
         "issue.update",
         "mission.control",
         "mission.create",
-        "session.input",
+        "run.input",
     ];
     let mut operator: Vec<&str> = [&read[..], &work[..]].concat();
     operator.sort_unstable();
@@ -100,7 +100,7 @@ fn the_seeded_roles_hold_exactly_the_default_table() {
             "access.read",
             "audit.read",
             "mission.verify",
-            "session.context",
+            "run.context",
         ][..],
     ]
     .concat();
@@ -122,7 +122,7 @@ fn the_seeded_roles_hold_exactly_the_default_table() {
             "mission.verify",
             "pool.manage",
             "roster.manage",
-            "session.context",
+            "run.context",
             "station.configure",
         ][..],
     ]

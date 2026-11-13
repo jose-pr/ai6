@@ -33,7 +33,7 @@ read_chunk_bytes = 16384              # the pty terminal's read size
 drain_quiet_ms = 400
 
 [providers.claude]
-tail_lines = 16                       # lines of a failed Session's output quoted
+tail_lines = 16                       # lines of a failed Run's output quoted
 ```
 
 Every key has a default and a table may name only what it changes

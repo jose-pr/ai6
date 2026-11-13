@@ -32,7 +32,7 @@ impl Default for Limits {
     }
 }
 
-/// The states of a Mission or Session on the board, in the board's order.
+/// The states of a Mission or Run on the board, in the board's order.
 pub(crate) const STATES: [&str; 10] = [
     "queued",
     "working",
@@ -47,13 +47,13 @@ pub(crate) const STATES: [&str; 10] = [
 ];
 
 const MISSION_SORTS: &[&str] = &["updated", "created", "state", "operation", "mission"];
-const SESSION_SORTS: &[&str] = &[
+const RUN_SORTS: &[&str] = &[
     "updated",
     "created",
     "state",
     "operation",
     "mission",
-    "session",
+    "run",
 ];
 const ORDERS: &[&str] = &["asc", "desc"];
 const AGENT_SORTS: &[&str] = &["agent", "handler", "model", "done"];
@@ -113,7 +113,7 @@ pub(crate) enum Page {
     Overview,
     Operations,
     Missions,
-    Sessions,
+    Runs,
     Stations,
     Agents,
     GreenInk,
@@ -133,7 +133,7 @@ impl Page {
         Self::Overview,
         Self::Operations,
         Self::Missions,
-        Self::Sessions,
+        Self::Runs,
         Self::Stations,
         Self::Agents,
         Self::GreenInk,
@@ -154,7 +154,7 @@ impl Page {
             Self::Overview => "overview",
             Self::Operations => "operations",
             Self::Missions => "missions",
-            Self::Sessions => "sessions",
+            Self::Runs => "runs",
             Self::Stations => "stations",
             Self::Agents => "agents",
             Self::GreenInk => "green_ink",
@@ -200,14 +200,14 @@ impl Page {
                 ("compartment", Identifier),
                 ("reviews", OneOf(&["show"])),
             ],
-            Self::Sessions => &[
+            Self::Runs => &[
                 ("operation_id", Identifier),
                 ("state", OneOf(&STATES)),
                 ("station_id", Identifier),
                 ("agent", Identifier),
-                ("sort", OneOf(SESSION_SORTS)),
+                ("sort", OneOf(RUN_SORTS)),
                 ("order", OneOf(ORDERS)),
-                ("session_id", Identifier),
+                ("run_id", Identifier),
                 ("text", Text),
             ],
             Self::Stations => &[
@@ -406,12 +406,12 @@ impl Route {
 
     /// Whether this Missions route's page shows `mission`, an item of `GET /v1/missions`; the
     /// app's `routeMissions` decides the same, and `assistant_routes.json` holds the cases both
-    /// test. A state filter looks at the Mission's state: that of its latest Session, the one
+    /// test. A state filter looks at the Mission's state: that of its latest Run, the one
     /// with the highest `updated_at`, none counting as oldest and the first of equals winning
-    /// (a Session without a state is working). It is never `sequence`, a cursor within one
-    /// provider Session: a long first attempt would outrank the newer retry after it. A
+    /// (a Run without a state is working). It is never `sequence`, a cursor within one
+    /// provider Run: a long first attempt would outrank the newer retry after it. A
     /// Mission ID is its UID or its handle, the handle without regard to case. Station, Agent
-    /// and text look at any of its Sessions, the text also at the Operation, the Mission, its
+    /// and text look at any of its Runs, the text also at the Operation, the Mission, its
     /// handle and the brief's prompt, without regard to case. Any other page shows none.
     pub(crate) fn shows_mission(&self, mission: &Value) -> bool {
         if self.page != Page::Missions {
@@ -421,11 +421,11 @@ impl Route {
             Field::States(states) => Some(states),
             Field::Text(_) | Field::List(_) => None,
         });
-        let sessions = mission["sessions"]
+        let runs = mission["runs"]
             .as_array()
             .map_or(&[][..], Vec::as_slice);
-        let Some(latest) = sessions.iter().reduce(|left, right| {
-            // `None` orders below every number, so a Session with no time is the oldest.
+        let Some(latest) = runs.iter().reduce(|left, right| {
+            // `None` orders below every number, so a Run with no time is the oldest.
             if right["updated_at"].as_f64() > left["updated_at"].as_f64() {
                 right
             } else {
@@ -439,9 +439,9 @@ impl Route {
             return false;
         }
         let equals = |key: &str, value: &Value| self.text(key).is_none_or(|wanted| value == wanted);
-        let any_session = |key: &str, field: &str| {
+        let any_run = |key: &str, field: &str| {
             self.text(key)
-                .is_none_or(|wanted| sessions.iter().any(|session| session[field] == wanted))
+                .is_none_or(|wanted| runs.iter().any(|run| run[field] == wanted))
         };
         let text = self.text("text").is_none_or(|wanted| {
             let wanted = wanted.to_lowercase();
@@ -452,7 +452,7 @@ impl Route {
                 &mission["brief"]["prompt"],
             ]
             .into_iter()
-            .chain(sessions.iter().map(|session| &session["session_id"]))
+            .chain(runs.iter().map(|run| &run["run_id"]))
             .filter_map(Value::as_str)
             .any(|item| item.to_lowercase().contains(&wanted))
         });
@@ -469,8 +469,8 @@ impl Route {
         review
             && equals("operation_id", &mission["operation_id"])
             && named
-            && any_session("station_id", "station_id")
-            && any_session("agent", "agent")
+            && any_run("station_id", "station_id")
+            && any_run("agent", "agent")
             && text
     }
 
@@ -623,11 +623,11 @@ pub(crate) fn schema() -> Value {
         for (name, kind) in page.fields() {
             let schema = match kind {
                 Kind::Identifier | Kind::Text => serde_json::json!({"type": "string"}),
-                // `state` is a list on Missions and one state on Sessions.
+                // `state` is a list on Missions and one state on Runs.
                 Kind::States | Kind::OneOf(_) if *name == "state" => serde_json::json!({
                     "type": ["array", "string"],
                     "items": {"type": "string", "enum": STATES},
-                    "description": "Missions: a list of board states; Sessions: one."
+                    "description": "Missions: a list of board states; Runs: one."
                 }),
                 Kind::States | Kind::List => {
                     serde_json::json!({"type": "array", "items": {"type": "string"}})
@@ -896,7 +896,7 @@ mod tests {
                 .collect();
             assert_eq!(shown, expected, "{}", case["route"]);
         }
-        let other = Route::from_json(&json!({"page": "sessions"}), Limits::default()).unwrap();
+        let other = Route::from_json(&json!({"page": "runs"}), Limits::default()).unwrap();
         assert!(
             !other.shows_mission(&missions[0]),
             "only a Missions route shows Missions"

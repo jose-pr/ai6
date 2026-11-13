@@ -1,7 +1,7 @@
 //! Operator controls: cancel, retry, resume and interrupt, taken from Universal Exports.
 //!
 //! Universal Exports queues each control for the Station that holds the Mission; this Station
-//! checks the Mission, its Operation and its own Session lease, applies the control through
+//! checks the Mission, its Operation and its own Run lease, applies the control through
 //! the same paths its loopback API uses, and reports the outcome.
 
 use std::sync::atomic::Ordering;
@@ -17,14 +17,14 @@ use ai6_diptel::{ControlAction, MissionControl};
 
 use super::{
     ApiErrorResponse, DaemonState, ResumeMission, TransitionMission, agents, interrupt_mission,
-    is_terminal_state, lifecycle_name, medical, resume_mission, session_hold, transition_mission,
+    is_terminal_state, lifecycle_name, medical, resume_mission, run_hold, transition_mission,
     unix_now,
 };
 use crate::bounds::Limit;
 use crate::directorates::m::issues::OnSecret;
 use crate::directorates::m::mission::{Mission, MissionState};
 use crate::directorates::q::outbound::{self, LinkRule, SecretSet};
-use crate::directorates::registry::sessions::{SessionStatus, SessionUpdate};
+use crate::directorates::registry::runs::{RunStatus, RunUpdate};
 use crate::station::publisher::{ControlDelivery, ControlOutcome};
 
 /// How often the consumer looks up from an empty queue to see whether the Station is stopping.
@@ -70,7 +70,7 @@ pub(super) async fn apply(state: &DaemonState, control: &MissionControl) -> Cont
         };
     };
     let current = Some(mission.state.as_str());
-    // An entry in this Station's queue is this Station's to end, whoever holds the Session.
+    // An entry in this Station's queue is this Station's to end, whoever holds the Run.
     let own_queue = matches!(
         control.action(),
         ControlAction::Drop | ControlAction::Reload
@@ -78,10 +78,10 @@ pub(super) async fn apply(state: &DaemonState, control: &MissionControl) -> Cont
     if !own_queue && let Err(reason) = check_lease(state, mission_id) {
         return ControlOutcome::rejected(current, reason);
     }
-    if let Some(expected) = control.session_id()
-        && mission.session_ids.last().map(|id| id.as_str()) != Some(expected.as_str())
+    if let Some(expected) = control.run_id()
+        && mission.run_ids.last().map(|id| id.as_str()) != Some(expected.as_str())
     {
-        return ControlOutcome::rejected(current, "the Mission has moved on to another Session");
+        return ControlOutcome::rejected(current, "the Mission has moved on to another Run");
     }
     let result = match control.action() {
         ControlAction::Cancel => cancel(state, &mission).await,
@@ -140,19 +140,19 @@ struct Applied {
     announced: bool,
 }
 
-/// Refuses a control while another Station holds the Mission's Session, or this one's
+/// Refuses a control while another Station holds the Mission's Run, or this one's
 /// fencing token is stale.
 fn check_lease(state: &DaemonState, mission_id: &str) -> Result<(), String> {
-    let Some(hold) = session_hold(state, mission_id) else {
+    let Some(hold) = run_hold(state, mission_id) else {
         return Ok(());
     };
-    match state.intake.session(&hold.id) {
+    match state.intake.run(&hold.id) {
         Ok(Some(record)) if record.station != state.station_id => Err(format!(
-            "Station {:?} holds this Mission's Session",
+            "Station {:?} holds this Mission's Run",
             record.station
         )),
         Ok(Some(record)) if record.fence != hold.fence => {
-            Err("this Station's lease on the Session is stale".to_owned())
+            Err("this Station's lease on the Run is stale".to_owned())
         }
         Ok(_) => Ok(()),
         Err(_) => Err("the Registry could not be read".to_owned()),
@@ -166,7 +166,7 @@ async fn cancel(state: &DaemonState, mission: &Mission) -> Result<Applied, Strin
             announced: true,
         });
     }
-    let live = has_live_session(state, mission);
+    let live = has_live_run(state, mission);
     let cancelled = transition_mission(
         State(state.clone()),
         Path(mission.mission_id.to_string()),
@@ -206,14 +206,14 @@ async fn retry(
     };
     let agent = Some(agent);
     let mission_id = mission.mission_id.as_str();
-    stop_live_session(state, mission_id).await;
-    if let Some(hold) = session_hold(state, mission_id) {
+    stop_live_run(state, mission_id).await;
+    if let Some(hold) = run_hold(state, mission_id) {
         // The stopped attempt is over; the next start records its replacement.
-        let _ = state.intake.update_session(
+        let _ = state.intake.update_run(
             &hold.id,
             &state.station_id,
             hold.fence,
-            SessionUpdate::default().status(SessionStatus::Ended),
+            RunUpdate::default().status(RunStatus::Ended),
         );
     }
     let retried = state
@@ -334,9 +334,9 @@ fn reload_entry(state: &DaemonState, mission: &Mission) -> Result<Applied, Strin
 }
 
 async fn interrupt(state: &DaemonState, mission: &Mission) -> Result<Applied, String> {
-    if mission.state != MissionState::Working || !has_live_session(state, mission) {
+    if mission.state != MissionState::Working || !has_live_run(state, mission) {
         return Err(format!(
-            "only a working Session can be interrupted; this Mission is {}",
+            "only a working Run can be interrupted; this Mission is {}",
             mission.state.as_str()
         ));
     }
@@ -349,25 +349,25 @@ async fn interrupt(state: &DaemonState, mission: &Mission) -> Result<Applied, St
     })
 }
 
-fn has_live_session(state: &DaemonState, mission: &Mission) -> bool {
+fn has_live_run(state: &DaemonState, mission: &Mission) -> bool {
     state
-        .sessions
+        .runs
         .lock()
-        .is_ok_and(|sessions| sessions.contains_key(mission.mission_id.as_str()))
+        .is_ok_and(|runs| runs.contains_key(mission.mission_id.as_str()))
 }
 
-/// Closes a Mission's live provider Session and leaves its safe house for the next attempt.
-async fn stop_live_session(state: &DaemonState, mission_id: &str) {
-    let operation = state.sessions.lock().ok().and_then(|mut sessions| {
-        sessions
+/// Closes a Mission's live provider Run and leaves its safe house for the next attempt.
+async fn stop_live_run(state: &DaemonState, mission_id: &str) {
+    let operation = state.runs.lock().ok().and_then(|mut runs| {
+        runs
             .remove(mission_id)
             .inspect(|operation| operation.gate.close())
     });
     if let Some(operation) = operation {
         let _ = tokio::task::spawn_blocking(move || {
-            if let Ok(session) = operation.session.lock() {
-                let _ = session.interrupt();
-                let _ = session.close();
+            if let Ok(run) = operation.run.lock() {
+                let _ = run.interrupt();
+                let _ = run.close();
             }
         })
         .await;
@@ -379,7 +379,7 @@ pub(super) const CANCEL_UNCONFIRMED: &str = "cancelled; the Station did not conf
 
 /// On the Headquarters Station: files each claimed brief whose cancel was asked for at least
 /// `[registry.limits.briefs] cancel_settle_after` ago as failed, releasing its lease, when its
-/// Station has not finished it. The outcome names the Mission's Session at the time, which tells
+/// Station has not finished it. The outcome names the Mission's Run at the time, which tells
 /// the Station holding the Mission which attempt to stop.
 pub(super) fn settle_unconfirmed_cancels(state: &DaemonState) {
     let Ok(requests) = state.intake.cancel_requests() else {
@@ -408,18 +408,18 @@ pub(super) fn settle_unconfirmed_cancels(state: &DaemonState) {
             .and_then(serde_json::Value::as_str)
             .unwrap_or(&key)
             .to_owned();
-        let session = state
+        let run = state
             .intake
-            .latest_session(&mission_id)
+            .latest_run(&mission_id)
             .ok()
             .flatten()
-            .and_then(|record| record.provider_session_id);
+            .and_then(|record| record.provider_id);
         let outcome = serde_json::json!({
             "state": "failed",
             "mission_id": mission_id,
             "reason": CANCEL_UNCONFIRMED,
             "station": lease.station(),
-            "session_id": session,
+            "run_id": run,
             "cancel_requested_at": asked,
         });
         if state
@@ -439,7 +439,7 @@ pub(super) fn settle_unconfirmed_cancels(state: &DaemonState) {
 
 /// Stops each Mission in this Station's book whose brief Headquarters settled after an
 /// unconfirmed cancel, when it is still on the attempt the settlement names. A Mission retried
-/// since is queued, or on a new Session, and runs on.
+/// since is queued, or on a new Run, and runs on.
 pub(super) async fn stop_settled(state: &DaemonState) {
     let candidates: Vec<Mission> = state
         .missions
@@ -483,20 +483,20 @@ pub(super) async fn stop_settled(state: &DaemonState) {
                 (filed.state == "failed"
                     && (outcome["reason"] == CANCEL_UNCONFIRMED
                         || outcome.get("settled_by").is_some()))
-                .then(|| (id, outcome["session_id"].as_str().map(str::to_owned)))
+                .then(|| (id, outcome["run_id"].as_str().map(str::to_owned)))
             })
             .collect::<Vec<_>>()
     })
     .await
     .unwrap_or_default();
-    for (id, session) in settled {
+    for (id, run) in settled {
         let Some(mission) = candidates
             .iter()
             .find(|mission| mission.mission_id.as_str() == id)
         else {
             continue;
         };
-        if mission.session_ids.last().map(|id| id.as_str()) != session.as_deref() {
+        if mission.run_ids.last().map(|id| id.as_str()) != run.as_deref() {
             continue;
         }
         eprintln!("ai6: Mission {id:?} is stopped: its brief was settled as {CANCEL_UNCONFIRMED}");
@@ -510,19 +510,19 @@ pub(super) async fn stop_settled(state: &DaemonState) {
     }
 }
 
-/// Publishes the Mission's new state on its latest provider Session, for a control that
-/// changed it while no Session was live to report it.
+/// Publishes the Mission's new state on its latest provider Run, for a control that
+/// changed it while no Run was live to report it.
 fn announce(state: &DaemonState, mission: &Mission, after: MissionState) {
-    let (Some(publisher), Some(name), Some(operation), Some(session)) = (
+    let (Some(publisher), Some(name), Some(operation), Some(run)) = (
         &state.publisher,
         lifecycle_name(after),
         &mission.operation_id,
-        mission.session_ids.last(),
+        mission.run_ids.last(),
     ) else {
         return;
     };
-    let telemetry = publisher.session(operation.clone(), mission.mission_id.clone());
-    telemetry.bind(session.clone());
+    let telemetry = publisher.run(operation.clone(), mission.mission_id.clone());
+    telemetry.bind(run.clone());
     telemetry.publish_lifecycle(name);
 }
 
@@ -587,7 +587,7 @@ fn reason_for(state: &DaemonState, mission: &Mission, error: ApiErrorResponse) -
 mod tests {
     use std::path::Path as FsPath;
 
-    use ai6_diptel::{ControlId, MissionId, OperationId, SessionId};
+    use ai6_diptel::{ControlId, MissionId, OperationId, RunId};
 
     use super::super::tests::{
         mission_state, start_mission_by_id, test_state, wait_for_done, wait_for_state,
@@ -596,11 +596,11 @@ mod tests {
     use super::*;
     use crate::directorates::registry::store::FileRegistry;
 
-    /// 008's mock provider issues its own Session ID and then stays quiet, working.
+    /// 008's mock provider issues its own Run ID and then stays quiet, working.
     const TWO_AGENTS: &str = "[agent.007]\nhandler = \"mock-agent\"\nroles = [\"case-officer\"]\n\
                               [agent.008]\nhandler = \"mock-spend\"\nroles = [\"case-officer\"]\n\
                               [agent.009]\nhandler = \"mock-agent\"\n";
-    const PROVIDER_SESSION: &str = "provider-session-007";
+    const PROVIDER_ID: &str = "provider-id-007";
 
     fn control(mission: &str, action: ControlAction) -> MissionControl {
         MissionControl::new(
@@ -611,53 +611,53 @@ mod tests {
         )
     }
 
-    fn on_session(control: MissionControl) -> MissionControl {
-        control.with_session(SessionId::new(PROVIDER_SESSION).unwrap())
+    fn on_run(control: MissionControl) -> MissionControl {
+        control.with_run(RunId::new(PROVIDER_ID).unwrap())
     }
 
     fn state_in(root: &FsPath, agents: &str) -> DaemonState {
         test_state(root, "", agents)
     }
 
-    /// Ends the event pumps of Sessions a test leaves live.
+    /// Ends the event pumps of Runs a test leaves live.
     fn stop(state: &DaemonState) {
         state.stopping.store(true, Ordering::Release);
     }
 
-    /// Starts `mission-1`; the mock provider reports it blocked with its Session still live.
+    /// Starts `mission-1`; the mock provider reports it blocked with its Run still live.
     async fn blocked_mission(state: &DaemonState) {
         start_mission_by_id(state, "mission-1").await;
         wait_for_state(state, "mission-1", MissionState::Blocked).await;
     }
 
     #[tokio::test]
-    async fn cancel_stops_the_live_session_and_abandons_the_mission_once() {
+    async fn cancel_stops_the_live_run_and_abandons_the_mission_once() {
         let root = tempfile::tempdir().unwrap();
         let state = state_in(root.path(), TWO_AGENTS);
         blocked_mission(&state).await;
-        let hold = session_hold(&state, "mission-1").unwrap();
+        let hold = run_hold(&state, "mission-1").unwrap();
 
         let outcome = apply(
             &state,
-            &on_session(control("mission-1", ControlAction::Cancel)),
+            &on_run(control("mission-1", ControlAction::Cancel)),
         )
         .await;
         assert_eq!(outcome, ControlOutcome::applied("abandoned"));
         let mission = mission_state(&state, "mission-1");
         assert_eq!(mission.state, MissionState::Abandoned);
-        assert_eq!(mission.session_ids[0].as_str(), PROVIDER_SESSION);
-        assert!(state.sessions.lock().unwrap().is_empty(), "no live Session");
+        assert_eq!(mission.run_ids[0].as_str(), PROVIDER_ID);
+        assert!(state.runs.lock().unwrap().is_empty(), "no live Run");
         assert_eq!(
-            state.intake.session(&hold.id).unwrap().unwrap().status,
-            SessionStatus::Ended
+            state.intake.run(&hold.id).unwrap().unwrap().status,
+            RunStatus::Ended
         );
 
-        // Repeating the request is harmless; a queued Mission with no Session is abandoned too.
+        // Repeating the request is harmless; a queued Mission with no Run is abandoned too.
         let again = apply(&state, &control("mission-1", ControlAction::Cancel)).await;
         assert_eq!(again, ControlOutcome::applied("abandoned"));
         let queued = apply(&state, &control("mission-2", ControlAction::Cancel)).await;
         assert_eq!(queued, ControlOutcome::applied("abandoned"));
-        assert!(mission_state(&state, "mission-2").session_ids.is_empty());
+        assert!(mission_state(&state, "mission-2").run_ids.is_empty());
     }
 
     #[tokio::test]
@@ -723,7 +723,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let state = state_in(root.path(), TWO_AGENTS);
         blocked_mission(&state).await;
-        let first = session_hold(&state, "mission-1").unwrap();
+        let first = run_hold(&state, "mission-1").unwrap();
 
         // A live Mission is not retried.
         let refused = apply(&state, &control("mission-1", ControlAction::Retry)).await;
@@ -745,24 +745,24 @@ mod tests {
         );
         let queued = mission_state(&state, "mission-1");
         assert_eq!(queued.agent_id.as_deref(), Some("008"));
-        assert_eq!(queued.session_ids[0].as_str(), PROVIDER_SESSION);
+        assert_eq!(queued.run_ids[0].as_str(), PROVIDER_ID);
 
         // The scheduler starts it as the second attempt, continuing the first.
         schedule_queued_once(&state).await;
         wait_for_state(&state, "mission-1", MissionState::Working).await;
-        let second = session_hold(&state, "mission-1").unwrap();
-        let record = state.intake.session(&second.id).unwrap().unwrap();
+        let second = run_hold(&state, "mission-1").unwrap();
+        let record = state.intake.run(&second.id).unwrap().unwrap();
         assert_eq!(record.attempt, 2);
         assert_eq!(record.predecessor.as_deref(), Some(first.id.as_str()));
         assert_eq!(record.station, "test");
         assert_eq!(
-            record.provider_session_id.as_deref(),
-            Some("provider-session-spend")
+            record.provider_id.as_deref(),
+            Some("provider-id-spend")
         );
-        let ids = mission_state(&state, "mission-1").session_ids;
+        let ids = mission_state(&state, "mission-1").run_ids;
         assert_eq!(
             ids.iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-            [PROVIDER_SESSION, "provider-session-spend"]
+            [PROVIDER_ID, "provider-id-spend"]
         );
         stop(&state);
     }
@@ -796,7 +796,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resume_continues_the_same_provider_session_with_the_message() {
+    async fn resume_continues_the_same_provider_id_with_the_message() {
         let root = tempfile::tempdir().unwrap();
         let state = state_in(root.path(), TWO_AGENTS);
         let queued = apply(&state, &control("mission-1", ControlAction::Resume)).await;
@@ -804,21 +804,21 @@ mod tests {
         assert_eq!(queued.state, Some("queued"));
 
         blocked_mission(&state).await;
-        let resume = on_session(control("mission-1", ControlAction::Resume))
+        let resume = on_run(control("mission-1", ControlAction::Resume))
             .with_message("the review is unblocked; carry on")
             .unwrap();
         assert_eq!(
             apply(&state, &resume).await,
             ControlOutcome::applied("working")
         );
-        // The mock's resumed turn completes on the provider Session it was given.
+        // The mock's resumed turn completes on the provider Run it was given.
         wait_for_done(&state, "mission-1").await;
         let mission = mission_state(&state, "mission-1");
-        assert_eq!(mission.session_ids.len(), 1);
-        assert_eq!(mission.session_ids[0].as_str(), PROVIDER_SESSION);
+        assert_eq!(mission.run_ids.len(), 1);
+        assert_eq!(mission.run_ids[0].as_str(), PROVIDER_ID);
     }
 
-    /// A refused resume has told the gateway of the Session again, which then shows it working.
+    /// A refused resume has told the gateway of the Run again, which then shows it working.
     #[cfg(feature = "publisher")]
     #[tokio::test]
     async fn a_refused_resume_publishes_the_missions_state() {
@@ -830,14 +830,14 @@ mod tests {
         state.publisher =
             Some(Publisher::start(Config::try_new(&origin, "test-token").unwrap()).unwrap());
         blocked_mission(&state).await;
-        let registered = |path: &str, _: &serde_json::Value| path == "/v1/station/sessions";
+        let registered = |path: &str, _: &serde_json::Value| path == "/v1/station/runs";
         wait_for_publication(&requests, |path, body| {
             path.contains("/lifecycle/") && body["state"] == "blocked"
         })
         .expect("the start publishes the block");
         // A handler that does not build, which a resume finds out after it binds its telemetry.
         state
-            .sessions
+            .runs
             .lock()
             .unwrap()
             .get_mut("mission-1")
@@ -846,13 +846,13 @@ mod tests {
 
         let refused = apply(
             &state,
-            &on_session(control("mission-1", ControlAction::Resume)),
+            &on_run(control("mission-1", ControlAction::Resume)),
         )
         .await;
 
         assert_eq!(refused.outcome, "rejected");
         assert_eq!(refused.state, Some("blocked"));
-        wait_for_publication(&requests, registered).expect("the resume binds the Session again");
+        wait_for_publication(&requests, registered).expect("the resume binds the Run again");
         let lifecycle = wait_for_publication(&requests, |path, _| path.contains("/lifecycle/"))
             .expect("the Mission's state is published after that");
         assert_eq!(lifecycle["state"], "blocked");
@@ -860,7 +860,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn interrupt_stops_the_turn_and_keeps_the_session() {
+    async fn interrupt_stops_the_turn_and_keeps_the_run() {
         let root = tempfile::tempdir().unwrap();
         let state = state_in(root.path(), "[agent.007]\nhandler = \"mock-spend\"\n");
         let idle = apply(&state, &control("mission-1", ControlAction::Interrupt)).await;
@@ -869,12 +869,12 @@ mod tests {
         start_mission_by_id(&state, "mission-1").await;
         wait_for_state(&state, "mission-1", MissionState::Working).await;
         let interrupt = control("mission-1", ControlAction::Interrupt)
-            .with_session(SessionId::new("provider-session-spend").unwrap());
+            .with_run(RunId::new("provider-id-spend").unwrap());
         assert_eq!(
             apply(&state, &interrupt).await,
             ControlOutcome::applied("blocked")
         );
-        assert!(state.sessions.lock().unwrap().contains_key("mission-1"));
+        assert!(state.runs.lock().unwrap().contains_key("mission-1"));
         assert_eq!(
             mission_state(&state, "mission-1").state,
             MissionState::Blocked
@@ -883,7 +883,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_control_is_refused_for_another_operation_session_or_station() {
+    async fn a_control_is_refused_for_another_operation_run_or_station() {
         let root = tempfile::tempdir().unwrap();
         let state = state_in(root.path(), TWO_AGENTS);
         blocked_mission(&state).await;
@@ -901,13 +901,13 @@ mod tests {
         );
 
         let stale = control("mission-1", ControlAction::Cancel)
-            .with_session(SessionId::new("provider-session-old").unwrap());
+            .with_run(RunId::new("provider-id-old").unwrap());
         assert_eq!(apply(&state, &stale).await.outcome, "rejected");
 
-        // Another Station took the Session's lease: this one may not act on it.
-        let hold = session_hold(&state, "mission-1").unwrap();
+        // Another Station took the Run's lease: this one may not act on it.
+        let hold = run_hold(&state, "mission-1").unwrap();
         FileRegistry::open(root.path().join("registry"))
-            .take_session_at(
+            .take_run_at(
                 &hold.id,
                 "other-station",
                 DEFAULT_LEASE,

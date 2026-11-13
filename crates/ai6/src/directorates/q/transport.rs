@@ -11,7 +11,7 @@
 //! ABI: required slots come first and a new slot is appended with a default body.
 //!
 //! The Terminal kind stays what a transport opens: [`Transport::open_terminal`] hands back
-//! the same [`TerminalSession`] a Terminal provider does.
+//! the same [`TerminalRun`] a Terminal provider does.
 //!
 //! Provider calls block; call them from `spawn_blocking`, never on an async worker.
 
@@ -21,7 +21,7 @@ use guatiao::library::{Object, ProviderError};
 use guatiao::{Bytes, FromValue, Schema, Status, ToValue, Value};
 use serde::{Deserialize, Serialize};
 
-use crate::directorates::q::terminal::TerminalSession;
+use crate::directorates::q::terminal::TerminalRun;
 
 pub mod kit;
 
@@ -227,7 +227,7 @@ pub trait Transport: Send + Sync {
 
     /// Starts `spec` (a Terminal [`Spec`](crate::directorates::q::terminal::Spec) as a
     /// value) on a terminal on the host.
-    fn open_terminal(&self, spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError> {
+    fn open_terminal(&self, spec: &Value) -> Result<Object<dyn TerminalRun>, ProviderError> {
         let _ = spec;
         Err(unsupported("a terminal"))
     }
@@ -319,7 +319,7 @@ impl TransportClient {
     pub fn open_terminal(
         &self,
         spec: &crate::directorates::q::terminal::Spec,
-    ) -> Result<Object<dyn TerminalSession>, ProviderError> {
+    ) -> Result<Object<dyn TerminalRun>, ProviderError> {
         self.transport.open_terminal(&encode(spec)?)
     }
 

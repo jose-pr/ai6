@@ -17,8 +17,8 @@ use ai6::directorates::registry::cables::{
 use ai6::directorates::registry::store::FileRegistry;
 use ai6::guatiao::library::ProviderError;
 use ai6::{
-    Attempt, Authenticator, Directory, Lookup, MemoryProvider, NewSession, Operation, Person,
-    Roster, SessionStatus, SessionUpdate, Verdict, access_from_toml,
+    Attempt, Authenticator, Directory, Lookup, MemoryProvider, NewRun, Operation, Person,
+    Roster, RunStatus, RunUpdate, Verdict, access_from_toml,
 };
 use coqui_a2a::error::{A2aError, ErrorKind};
 use coqui_a2a::model::{
@@ -289,31 +289,31 @@ impl World {
         found
     }
 
-    /// Opens a Registry record for provider Session `session` of Agent 007, as its Station would.
-    fn open_session(&self, session: &str) -> (String, u64) {
+    /// Opens a Registry record for provider Run `run` of Agent 007, as its Station would.
+    fn open_run(&self, run: &str) -> (String, u64) {
         let record = self
             .registry
-            .open_session(
-                NewSession::new(
-                    format!("record-{session}"),
-                    format!("mission-{session}"),
+            .open_run(
+                NewRun::new(
+                    format!("record-{run}"),
+                    format!("mission-{run}"),
                     STATION,
                 )
                 .with_operation("G")
-                .with_provider_session(session),
+                .with_provider_id(run),
                 Duration::from_secs(600),
             )
             .unwrap();
-        (record.session_id, record.fence)
+        (record.run_id, record.fence)
     }
 
-    fn end_session(&self, (record, fence): &(String, u64)) {
+    fn end_run(&self, (record, fence): &(String, u64)) {
         self.registry
-            .update_session(
+            .update_run(
                 record,
                 STATION,
                 *fence,
-                SessionUpdate::default().status(SessionStatus::Ended),
+                RunUpdate::default().status(RunStatus::Ended),
             )
             .unwrap();
     }
@@ -348,14 +348,14 @@ fn over_link<R>(
     Ok(result)
 }
 
-fn station_relay(registry: FileRegistry, session: &str) -> (CableRelay, CablePrincipal) {
+fn station_relay(registry: FileRegistry, run: &str) -> (CableRelay, CablePrincipal) {
     let endpoint = CableEndpoint::try_new(
         "007".to_owned(),
         "G".to_owned(),
         None,
         STATION.to_owned(),
-        Some(session.to_owned()),
-        Some(format!("mission-{session}")),
+        Some(run.to_owned()),
+        Some(format!("mission-{run}")),
     )
     .unwrap();
     let relay = CableRelay::new(
@@ -369,14 +369,14 @@ fn station_relay(registry: FileRegistry, session: &str) -> (CableRelay, CablePri
         "G".to_owned(),
         None,
         STATION.to_owned(),
-        Some(session.to_owned()),
-        Some(format!("mission-{session}")),
+        Some(run.to_owned()),
+        Some(format!("mission-{run}")),
     )
     .unwrap();
     (relay, principal)
 }
 
-/// Agent 007 working in one provider Session on Station `worker`: it reads its Cables, and
+/// Agent 007 working in one provider Run on Station `worker`: it reads its Cables, and
 /// answers each `re: <body>` when told to.
 struct StandIn {
     stop: Arc<AtomicBool>,
@@ -385,13 +385,13 @@ struct StandIn {
 }
 
 impl StandIn {
-    fn start(registry: FileRegistry, session: &str, replies: bool) -> Self {
+    fn start(registry: FileRegistry, run: &str, replies: bool) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let read: Arc<Mutex<Vec<CableDelivery>>> = Arc::default();
         let (flag, seen) = (stop.clone(), read.clone());
-        let session = session.to_owned();
+        let run = run.to_owned();
         let thread = thread::spawn(move || {
-            let (relay, principal) = station_relay(registry, &session);
+            let (relay, principal) = station_relay(registry, &run);
             while !flag.load(Ordering::SeqCst) {
                 for delivery in relay.inbox(&principal, 50).unwrap() {
                     let mut seen = seen.lock().unwrap();
@@ -496,7 +496,7 @@ fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
 #[test]
 fn a_peer_s_message_reaches_the_agent_as_a_cable_and_its_reply_comes_back_with_no_mission() {
     let world = World::new();
-    let standin = StandIn::start(world.registry.clone(), "session-7", true);
+    let standin = StandIn::start(world.registry.clone(), "run-7", true);
     let (card, reply, task) = world
         .over_link(&world.acme, |mux| {
             let client = client(mux);
@@ -535,9 +535,9 @@ fn a_peer_s_message_reaches_the_agent_as_a_cable_and_its_reply_comes_back_with_n
     assert_eq!(cable.conversation_id(), task.context_id.as_deref());
     assert_eq!(cable.mission_id(), None, "a peer's Cable names no Mission");
     assert_ne!(
-        cable.session_id(),
+        cable.run_id(),
         Some(task.id.as_str()),
-        "the Task ID is no Session ID"
+        "the Task ID is no Run ID"
     );
     let read = standin.read();
     assert_eq!(read.len(), 1);
@@ -547,8 +547,8 @@ fn a_peer_s_message_reaches_the_agent_as_a_cable_and_its_reply_comes_back_with_n
     );
     assert_eq!(
         cable.recipients()[0].taken_by(),
-        Some("session-7"),
-        "the Session that took it holds the thread"
+        Some("run-7"),
+        "the Run that took it holds the thread"
     );
 
     assert!(world.registry.list_new().unwrap().is_empty(), "no brief");
@@ -584,7 +584,7 @@ fn a_peer_s_message_reaches_the_agent_as_a_cable_and_its_reply_comes_back_with_n
 #[test]
 fn a_role_reaches_the_agent_the_roster_selects_and_a_stream_follows_it_to_the_reply() {
     let world = World::new();
-    let standin = StandIn::start(world.registry.clone(), "session-7", true);
+    let standin = StandIn::start(world.registry.clone(), "run-7", true);
     let items = world
         .over_link(&world.acme, |mux| {
             client(mux)
@@ -645,7 +645,7 @@ fn an_undelivered_message_is_withdrawn_and_a_delivered_one_cannot_be() {
     assert_eq!(canceled.status.state, TaskState::Canceled);
     let cable = world.registry.get_cable(&canceled.id).unwrap().unwrap();
     assert_eq!(cable.recipients()[0].state(), CableState::Withdrawn);
-    let late = StandIn::start(world.registry.clone(), "session-7", true);
+    let late = StandIn::start(world.registry.clone(), "run-7", true);
     thread::sleep(Duration::from_millis(300));
     assert!(late.read().is_empty(), "a withdrawn Cable reaches nobody");
 
@@ -669,7 +669,7 @@ fn an_undelivered_message_is_withdrawn_and_a_delivered_one_cannot_be() {
 #[test]
 fn an_unpaired_key_an_ungranted_peer_and_a_principal_without_cable_send_are_refused() {
     let world = World::new();
-    let standin = StandIn::start(world.registry.clone(), "session-7", true);
+    let standin = StandIn::start(world.registry.clone(), "run-7", true);
     // Its own half of the proof may finish before the gateway refuses it; nothing works after.
     let stranger = world.over_link(&world.stranger, |mux| client(mux).agent_card());
     assert!(
@@ -780,10 +780,10 @@ fn a_peer_sees_only_its_own_tasks_and_one_message_id_is_one_cable() {
 }
 
 #[test]
-fn a_follow_up_in_a_context_reaches_the_session_that_took_it_then_the_agent_s_next_session() {
+fn a_follow_up_in_a_context_reaches_the_run_that_took_it_then_the_agent_s_next_run() {
     let world = World::new();
-    let first = world.open_session("session-a");
-    let a = StandIn::start(world.registry.clone(), "session-a", true);
+    let first = world.open_run("run-a");
+    let a = StandIn::start(world.registry.clone(), "run-a", true);
     let context = world
         .over_link(&world.acme, |mux| {
             reply_of(
@@ -795,8 +795,8 @@ fn a_follow_up_in_a_context_reaches_the_session_that_took_it_then_the_agent_s_ne
             .unwrap()
         })
         .unwrap();
-    world.open_session("session-b");
-    let b = StandIn::start(world.registry.clone(), "session-b", true);
+    world.open_run("run-b");
+    let b = StandIn::start(world.registry.clone(), "run-b", true);
     let second = world
         .over_link(&world.acme, |mux| {
             reply_of(
@@ -810,19 +810,19 @@ fn a_follow_up_in_a_context_reaches_the_session_that_took_it_then_the_agent_s_ne
     assert_eq!(
         a.bodies(),
         ["one", "two"],
-        "the follow-up goes to the Session of the thread"
+        "the follow-up goes to the Run of the thread"
     );
     assert!(
         b.bodies().is_empty(),
-        "never to another open Session of the Agent"
+        "never to another open Run of the Agent"
     );
 
-    // Session a ends; b was open before it did, c opens after: the thread goes to c.
+    // Run a ends; b was open before it did, c opens after: the thread goes to c.
     drop(a);
-    world.end_session(&first);
+    world.end_run(&first);
     thread::sleep(Duration::from_millis(20));
-    world.open_session("session-c");
-    let c = StandIn::start(world.registry.clone(), "session-c", true);
+    world.open_run("run-c");
+    let c = StandIn::start(world.registry.clone(), "run-c", true);
     let third = world
         .over_link(&world.acme, |mux| {
             reply_of(
@@ -836,14 +836,14 @@ fn a_follow_up_in_a_context_reaches_the_session_that_took_it_then_the_agent_s_ne
     assert_eq!(c.bodies(), ["three"]);
     assert!(
         b.bodies().is_empty(),
-        "a Session open when the thread's ended is not its next"
+        "a Run open when the thread's ended is not its next"
     );
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn the_http_binding_carries_the_same_exchange_with_a_bearer_and_refuses_without_one() {
     let world = Arc::new(World::new());
-    let _standin = StandIn::start(world.registry.clone(), "session-7", true);
+    let _standin = StandIn::start(world.registry.clone(), "run-7", true);
     let token = |person: &str| {
         let registry = Arc::new(world.registry.clone());
         let person = person.to_owned();
@@ -968,7 +968,7 @@ async fn the_coqui_a2a_loopback_endpoint_carries_a_message_and_its_reply() {
     use coqui_a2a::loopback::{Config, Hub, Loopback};
 
     let world = Arc::new(World::new());
-    let _standin = StandIn::start(world.registry.clone(), "session-7", true);
+    let _standin = StandIn::start(world.registry.clone(), "run-7", true);
     let hub = Hub::new();
     let token = "loopback-token-for-the-test";
     let endpoint = Loopback::start(
@@ -1144,7 +1144,7 @@ fn a_cable_to_a_peer_leaves_as_a2a_and_its_answer_comes_back_as_a_reply_cable() 
         ..world
     };
 
-    let (relay, principal) = station_relay(world.registry.clone(), "session-7");
+    let (relay, principal) = station_relay(world.registry.clone(), "run-7");
     let to_peer = |name: &str, body: &str, key: &str| {
         relay.send(
             &principal,
@@ -1256,7 +1256,7 @@ async fn the_official_a2a_javascript_sdk_completes_exchanges_on_both_bindings() 
     let node = std::env::var("AI6_TEST_NODE").expect("AI6_TEST_NODE names node");
     let sdk = std::env::var("A2A_JS_SDK_DIR").expect("A2A_JS_SDK_DIR holds @a2a-js/sdk");
     let world = Arc::new(World::new());
-    let _standin = StandIn::start(world.registry.clone(), "session-7", true);
+    let _standin = StandIn::start(world.registry.clone(), "run-7", true);
     let bearer = crate::issue_access_token_record(
         Arc::new(world.registry.clone()),
         "acme-bot".to_owned(),

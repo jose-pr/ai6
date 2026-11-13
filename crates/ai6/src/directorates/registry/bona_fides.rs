@@ -2,7 +2,7 @@
 //!
 //! A [`Provenance`] records who asked for a Mission. AI6 sets it at the point of entry from
 //! what it authenticated there (the gateway's person, the Source provider and item, the
-//! Sleeper, the proposing Agent and Session) and the Registry keeps it apart from the brief
+//! Sleeper, the proposing Agent and Run) and the Registry keeps it apart from the brief
 //! record, so a `provenance` field written into a brief file or row is never read. A brief
 //! the Registry holds no provenance for was dropped into the queue by hand; the Station that
 //! takes it records it as [`Origin::RegistryDrop`]. Anything that can write the Registry's own
@@ -70,7 +70,7 @@ pub struct Provenance {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub principal: Option<String>,
     /// What identifies the request at its principal: the Source item, the Sleeper
-    /// definition's fingerprint, the proposing Session.
+    /// definition's fingerprint, the proposing Run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference: Option<String>,
     /// The Source item's link, when it has one.
@@ -209,7 +209,7 @@ pub(super) fn now_secs() -> i64 {
         .map_or(0, |elapsed| elapsed.as_secs() as i64)
 }
 
-/// The provenance of `brief`, an approved proposal's: the proposing Agent and its Session.
+/// The provenance of `brief`, an approved proposal's: the proposing Agent and its Run.
 pub(super) fn proposal_provenance(
     proposal: &MissionProposal,
     brief: &Brief,
@@ -217,7 +217,7 @@ pub(super) fn proposal_provenance(
 ) -> Provenance {
     Provenance::new(Origin::Proposal, brief, received_by, now_secs())
         .with_principal(proposal.proposer_agent_id.clone())
-        .with_reference(proposal.proposer_session_id.to_string())
+        .with_reference(proposal.proposer_run_id.to_string())
 }
 
 /// Splits what the Registry stores: the brief record without provenance, and the provenance

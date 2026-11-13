@@ -561,7 +561,7 @@ void main() {
       await tester.pumpWidget(
         boardThemedApp(
           board,
-          title: 'Session s',
+          title: 'Run s',
           home: Builder(
             builder: (context) {
               tokens = OoTokens.of(context);

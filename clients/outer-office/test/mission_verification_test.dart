@@ -13,10 +13,10 @@ import 'package:outer_office/shell/missions_board.dart';
 import 'package:outer_office/shell/oo_shell.dart' show OoPage;
 import 'package:outer_office/theme/oo_theme.dart';
 
-const _session = SessionSummary(
+const _run = RunSummary(
   operationId: 'G',
   missionId: 'm1',
-  sessionId: 's1',
+  runId: 's1',
   state: 'verifying',
   sequence: 5,
   stationId: 'hq',
@@ -66,7 +66,7 @@ Future<MissionBoard> _board(
           {
             'operation_id': 'G',
             'mission_id': 'm1',
-            'session_id': 's1',
+            'run_id': 's1',
             'state': 'verifying',
             'sequence': 5,
           },
@@ -87,11 +87,11 @@ Future<MissionBoard> _board(
           'operation_id': 'G',
           'mission_id': 'm1',
           'handle': 'G-1',
-          'sessions': const <Object>[],
+          'runs': const <Object>[],
           'attempts': [
             {
               'attempt': 2,
-              'session_id': 's1',
+              'run_id': 's1',
               'station': 'hq',
               'status': 'ended',
               'final_report': 'Pushed the branch.',
@@ -130,11 +130,11 @@ Future<void> _detail(WidgetTester tester, MissionBoard board) => _show(
     mission: MissionGroup(
       operationId: 'G',
       missionId: 'm1',
-      sessions: const [_session],
+      runs: const [_run],
     ),
     pages: const [OoPage.missions],
     onRoute: (_) {},
-    onOpenSession: (_) {},
+    onOpenRun: (_) {},
     onClose: () {},
   ),
 );
@@ -148,10 +148,10 @@ void main() {
   testWidgets('the board counts verifying Missions as waiting for a decision', (
     tester,
   ) async {
-    const working = SessionSummary(
+    const working = RunSummary(
       operationId: 'G',
       missionId: 'm2',
-      sessionId: 's2',
+      runId: 's2',
       state: 'working',
       sequence: 1,
     );
@@ -159,7 +159,7 @@ void main() {
       tester,
       Material(
         child: BoardHeader(
-          missions: groupMissions(const [_session, working]),
+          missions: groupMissions(const [_run, working]),
           selectedStates: const [],
           onSelectStates: (_) {},
           sort: const SizedBox.shrink(),
@@ -386,7 +386,7 @@ void main() {
           '/v1/operations/G/missions/m1' => json({
             'operation_id': 'G',
             'mission_id': 'm1',
-            'sessions': const <Object>[],
+            'runs': const <Object>[],
             'attempts': const <Object>[],
           }),
           _ => json(const <Object>[]),
@@ -424,7 +424,7 @@ void main() {
         board: board,
         operationId: 'G',
         missionId: 'm1',
-        sessions: const [_session],
+        runs: const [_run],
         state: 'verifying',
       ),
     ),

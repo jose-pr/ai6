@@ -88,21 +88,21 @@ impl<'de> Deserialize<'de> for MemoryScope {
 pub struct MemorySource {
     /// `person:<id>`, `agent:<codename>`, or `moneypenny:<person id>` for what she wrote for them.
     pub by: String,
-    /// The Mission Session or the conversation it was written from, when one was.
+    /// The Mission Run or the conversation it was written from, when one was.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session: Option<String>,
-    /// How that Session was exposed when it wrote this; empty means it was not. An entry with any
+    pub run: Option<String>,
+    /// How that Run was exposed when it wrote this; empty means it was not. An entry with any
     /// exposes whoever reads it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exposures: Vec<String>,
 }
 
 impl MemorySource {
-    /// Written by `by`, from `session` when there is one, with no mark.
-    pub fn new(by: impl Into<String>, session: Option<String>) -> Self {
+    /// Written by `by`, from `run` when there is one, with no mark.
+    pub fn new(by: impl Into<String>, run: Option<String>) -> Self {
         Self {
             by: by.into(),
-            session,
+            run,
             exposures: Vec::new(),
         }
     }

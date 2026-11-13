@@ -190,7 +190,7 @@ pub(crate) struct Span {
 pub(crate) struct Node {
     pub(crate) id: String,
     pub(crate) label: String,
-    /// `operation`, `station`, `theater`, `mission`, `session`, `agent` or `other`.
+    /// `operation`, `station`, `theater`, `mission`, `run`, `agent` or `other`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -769,11 +769,11 @@ fn graph_bounds(
         if let Some(kind) = &node.kind
             && !matches!(
                 kind.as_str(),
-                "operation" | "station" | "theater" | "mission" | "session" | "agent" | "other"
+                "operation" | "station" | "theater" | "mission" | "run" | "agent" | "other"
             )
         {
             return Err(
-                "a node's kind is operation, station, theater, mission, session, agent or other"
+                "a node's kind is operation, station, theater, mission, run, agent or other"
                     .to_owned(),
             );
         }
@@ -918,7 +918,7 @@ pub(crate) fn schema(limits: &ViewLimits) -> Value {
         "type": "object", "additionalProperties": false, "required": ["id", "label"],
         "properties": {
             "id": {"type": "string"}, "label": {"type": "string"},
-            "kind": {"enum": ["operation", "station", "theater", "mission", "session", "agent",
+            "kind": {"enum": ["operation", "station", "theater", "mission", "run", "agent",
                               "other"]},
             "state": {"type": "string"}, "link": {"type": "string"}
         }

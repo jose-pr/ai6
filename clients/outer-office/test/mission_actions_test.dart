@@ -39,7 +39,7 @@ Future<MissionBoard> signedIn(
           {
             'operation_id': 'operation-alpha',
             'mission_id': 'mission-007',
-            'session_id': 'claude-session-001',
+            'run_id': 'claude-session-001',
             'state': 'queued',
             'sequence': 9,
             'updated_at': 100.0,
@@ -47,7 +47,7 @@ Future<MissionBoard> signedIn(
           {
             'operation_id': 'operation-alpha',
             'mission_id': 'mission-007',
-            'session_id': 'claude-session-002',
+            'run_id': 'claude-session-002',
             'state': current,
             'sequence': 2,
             'updated_at': 200.0,
@@ -109,7 +109,7 @@ void main() {
     final stalled = offered('stalled');
     expect(stalled['retry'], isNull);
     expect(stalled['resume'], isNull);
-    expect(stalled['interrupt'], contains('working Session'));
+    expect(stalled['interrupt'], contains('working Run'));
 
     final failed = offered('failed');
     expect(failed['retry'], isNull);
@@ -126,54 +126,54 @@ void main() {
     });
   });
 
-  test('the most recently updated Session carries the Mission state', () {
-    const earlier = SessionSummary(
+  test('the most recently updated Run carries the Mission state', () {
+    const earlier = RunSummary(
       operationId: 'G',
       missionId: 'm',
-      sessionId: 'first',
+      runId: 'first',
       state: 'queued',
       sequence: 40,
       updatedAt: 10,
     );
-    const later = SessionSummary(
+    const later = RunSummary(
       operationId: 'G',
       missionId: 'm',
-      sessionId: 'second',
+      runId: 'second',
       state: 'working',
       sequence: 1,
       updatedAt: 20,
     );
-    expect(currentSession([earlier, later])?.sessionId, 'second');
-    expect(currentSession([later, earlier])?.sessionId, 'second');
-    expect(currentSession(const []), isNull);
+    expect(currentRun([earlier, later])?.runId, 'second');
+    expect(currentRun([later, earlier])?.runId, 'second');
+    expect(currentRun(const []), isNull);
 
-    const unreported = SessionSummary(
+    const unreported = RunSummary(
       operationId: 'G',
       missionId: 'm',
-      sessionId: 'unreported',
+      runId: 'unreported',
       state: 'parked',
       sequence: 50,
     );
     expect(
-      currentSession([unreported, earlier])?.sessionId,
+      currentRun([unreported, earlier])?.runId,
       'first',
-      reason: 'a Session with no update time counts as oldest',
+      reason: 'a Run with no update time counts as oldest',
     );
     expect(
-      currentSession([unreported, unreported])?.state,
+      currentRun([unreported, unreported])?.state,
       'parked',
       reason: 'the first of equals',
     );
-    const alsoAt20 = SessionSummary(
+    const alsoAt20 = RunSummary(
       operationId: 'G',
       missionId: 'm',
-      sessionId: 'also',
+      runId: 'also',
       state: 'stalled',
       sequence: 99,
       updatedAt: 20,
     );
-    expect(currentSession([later, alsoAt20])?.sessionId, 'second');
-    expect(currentSession([alsoAt20, later])?.sessionId, 'also');
+    expect(currentRun([later, alsoAt20])?.runId, 'second');
+    expect(currentRun([alsoAt20, later])?.runId, 'also');
   });
 
   testWidgets('the action menu explains unavailable controls and interrupts', (
@@ -188,7 +188,7 @@ void main() {
       requests,
       control: (body) {
         expect(body['action'], 'interrupt');
-        expect(body['session_id'], 'claude-session-002');
+        expect(body['run_id'], 'claude-session-002');
         expect(body['idempotency_key'], startsWith('oo-'));
         return outcome('interrupt', 'applied', state: 'blocked');
       },
@@ -202,7 +202,7 @@ void main() {
     await tester.tap(find.byTooltip('Mission actions'));
     await tester.pumpAndSettle();
     expect(find.text('Cancel Mission'), findsOneWidget);
-    expect(find.text('Interrupt Session'), findsOneWidget);
+    expect(find.text('Interrupt Run'), findsOneWidget);
     expect(
       find.text(
         'Only a stalled or finished Mission can be retried; cancel it first.',
@@ -218,9 +218,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Resume Mission mission-007?'), findsNothing);
 
-    await tester.tap(find.text('Interrupt Session'));
+    await tester.tap(find.text('Interrupt Run'));
     await tester.pumpAndSettle();
-    expect(find.text('Interrupt the Session?'), findsOneWidget);
+    expect(find.text('Interrupt the Run?'), findsOneWidget);
     await tester.tap(find.text('Interrupt'));
     await tester.pumpAndSettle();
 
@@ -234,7 +234,7 @@ void main() {
       reason: 'the board refreshes after the outcome',
     );
     expect(
-      find.text('Interrupt Session applied · Mission is blocked'),
+      find.text('Interrupt Run applied · Mission is blocked'),
       findsNWidgets(2),
     );
   });
@@ -245,12 +245,12 @@ void main() {
       requests,
       control: (body) {
         expect(body, containsPair('action', 'cancel'));
-        expect(body.containsKey('session_id'), isFalse);
+        expect(body.containsKey('run_id'), isFalse);
         return outcome(
           'cancel',
           'rejected',
           state: 'working',
-          reason: 'Station "station-beta" holds this Mission\'s Session',
+          reason: 'Station "station-beta" holds this Mission\'s Run',
         );
       },
     );
@@ -271,7 +271,7 @@ void main() {
     expect(
       find.text(
         'Cancel Mission rejected by station-alpha: '
-        'Station "station-beta" holds this Mission\'s Session',
+        'Station "station-beta" holds this Mission\'s Run',
       ),
       findsWidgets,
     );
@@ -337,7 +337,7 @@ void main() {
     );
   });
 
-  testWidgets('closing a Session view sends no control', (tester) async {
+  testWidgets('closing a Run view sends no control', (tester) async {
     tester.view.physicalSize = const Size(1600, 1000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -352,7 +352,7 @@ void main() {
 
     await tester.tap(find.text('claude-session-002'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Close Session details'));
+    await tester.tap(find.byTooltip('Close Run details'));
     await tester.pumpAndSettle();
     expect(
       requests.where((request) => request.url.path.endsWith('/actions')),

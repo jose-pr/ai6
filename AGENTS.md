@@ -77,9 +77,9 @@ file names; asked for without them, they fail. Their fixtures are recorded and s
 - Agent identity, role, Operation policy, Mission ID, Run ID and provider ID are
   distinct contracts.
 - A Run is one AI6 agent run of a Mission or a charge, named by one UUID (`id`); a Mission or a Run is
-  executed; a watch is a charge; Moneypenny's chats are conversations. "Session" stays only where another
-  protocol or product owns the word (ACP's `sessionId`, the Claude Code and Codex CLIs' own session ids,
-  a person's sign-in session, MCP's `Mcp-Session-Id`); a Run is never called a Session.
+  executed; a watch is a charge; Moneypenny's chats are conversations. "Run" stays only where another
+  protocol or product owns the word (ACP's `sessionId`, the Claude Code and Codex CLIs' own run ids,
+  a person's sign-in session, MCP's `Mcp-Session-Id`); a Run is never called a Run.
 - Directorates are modules of the `ai6` crate. Providers live under `crates/providers/` and
   carry their own Guatiao entry point; do not add forwarding-only crates.
 - Access kinds, the role authorizer, the access providers and Station mutual TLS are the shared
@@ -100,7 +100,7 @@ file names; asked for without them, they fail. Their fixtures are recorded and s
 - MPL-2.0. Outside contributors sign `CLA.md`.
 - A harness on a remote Theater runs under the field runner (`ai6 runner`) or the
   Station's detached wrapper over the transport; remote safe houses, cross-Station adoption
-  of a running Session and federated Registry placement are not implemented, so do not
+  of a running Run and federated Registry placement are not implemented, so do not
   describe them as available.
 
 ## CI and release

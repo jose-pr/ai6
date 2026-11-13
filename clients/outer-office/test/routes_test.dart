@@ -41,29 +41,29 @@ Future<List<MethodCall>> openAt(WidgetTester tester, String location) async {
     pollInterval: null,
   );
   addTearDown(board.dispose);
-  board.sessions = const [
-    SessionSummary(
+  board.runs = const [
+    RunSummary(
       operationId: 'G',
       missionId: 'g-failed',
-      sessionId: 's-g-failed',
+      runId: 's-g-failed',
       state: 'failed',
       sequence: 3,
       stationId: 'hq',
       agent: '007',
     ),
-    SessionSummary(
+    RunSummary(
       operationId: 'G',
       missionId: 'g-working',
-      sessionId: 's-g-working',
+      runId: 's-g-working',
       state: 'working',
       sequence: 2,
       stationId: 'worker',
       agent: '008',
     ),
-    SessionSummary(
+    RunSummary(
       operationId: 'L',
       missionId: 'l-failed',
-      sessionId: 's-l-failed',
+      runId: 's-l-failed',
       state: 'failed',
       sequence: 4,
       stationId: 'hq',
@@ -131,11 +131,11 @@ void main() {
               apiOrigin: Uri.parse('https://oo.example'),
               pollInterval: null,
             )
-            ..sessions = [
+            ..runs = [
               for (final mission in missions)
-                for (final session in mission['sessions'] as List)
-                  SessionSummary.fromJson(
-                    (session as Map).cast<String, dynamic>(),
+                for (final run in mission['runs'] as List)
+                  RunSummary.fromJson(
+                    (run as Map).cast<String, dynamic>(),
                   ),
             ]
             ..missionBriefs = [
@@ -276,9 +276,9 @@ void main() {
     expect(find.text('Clear filters'), findsOneWidget);
 
     // Another page is a new history entry.
-    await openPage(tester, 'Sessions');
+    await openPage(tester, 'Runs');
     expect(locations(reported).last, (
-      '/sessions',
+      '/runs',
       false,
     ), reason: 'a page change pushes');
     await browserBackTo(tester, '/missions?operation_id=G&state=failed');
@@ -304,10 +304,10 @@ void main() {
     expect(find.text('Mission g-working'), findsOneWidget);
   });
 
-  testWidgets('the Station and Agent filters read each Session\'s own', (
+  testWidgets('the Station and Agent filters read each Run\'s own', (
     tester,
   ) async {
-    await openAt(tester, '/sessions?station_id=hq');
+    await openAt(tester, '/runs?station_id=hq');
     expect(find.text('s-g-failed'), findsOneWidget);
     expect(find.text('s-l-failed'), findsOneWidget);
     expect(find.text('s-g-working'), findsNothing);
@@ -344,7 +344,7 @@ void main() {
   testWidgets('Copy link copies the gateway origin and the route after #', (
     tester,
   ) async {
-    await openAt(tester, '/sessions?state=working');
+    await openAt(tester, '/runs?state=working');
     expect(find.text('s-g-working'), findsOneWidget);
     expect(find.text('s-g-failed'), findsNothing);
     String? copied;
@@ -365,6 +365,6 @@ void main() {
     );
     await tester.tap(find.byTooltip('Copy link to this page'));
     await tester.pump();
-    expect(copied, 'https://oo.example/#/sessions?state=working');
+    expect(copied, 'https://oo.example/#/runs?state=working');
   });
 }

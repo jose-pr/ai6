@@ -28,11 +28,11 @@ const _areas = <(String, Map<String, String>)>[
     },
   ),
   (
-    'Sessions',
+    'Runs',
     {
-      'session.read': 'watch',
-      'session.input': 'type into',
-      'session.context': 'read the context of',
+      'run.read': 'watch',
+      'run.input': 'type into',
+      'run.context': 'read the context of',
     },
   ),
   (

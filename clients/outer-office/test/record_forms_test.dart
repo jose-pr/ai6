@@ -257,7 +257,7 @@ MissionBoard _signedIn(
   );
   board.accessToken = 'operator-token';
   board.loading = false;
-  board.userSession = UserSessionSummary(
+  board.userRun = UserRunSummary(
     personId: 'operator-007',
     name: 'operator-007',
     displayName: null,
@@ -385,7 +385,7 @@ void main() {
         'workspace': {
           'settings': {'branch': '{id}', 'isolate': false},
         },
-        'budget': {'session_tokens': 10, 'mission_cost_usd': 1.5},
+        'budget': {'run_tokens': 10, 'mission_cost_usd': 1.5},
         'cover_identity': {'name': 'Field', 'email': 'f@example.invalid'},
         'green_ink': {
           'unattended': {
@@ -487,12 +487,12 @@ void main() {
       final model = _model('agents');
       addTearDown(model.dispose);
       model.setText('priority', 'soon');
-      model.setText('budget.session_tokens', '1.5');
+      model.setText('budget.run_tokens', '1.5');
       final issues = <String, String>{};
       model.value(issues: issues);
       expect(
         issues.keys,
-        unorderedEquals(['priority', 'budget.session_tokens']),
+        unorderedEquals(['priority', 'budget.run_tokens']),
       );
     });
 

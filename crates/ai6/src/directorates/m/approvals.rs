@@ -38,7 +38,7 @@ pub const BUILTIN_KINDS: [&str; 9] = [
     ISSUE_COMMENT,
 ];
 /// The kind a class authorisation names to approve an Agent's proposal to create issues, from
-/// an unexposed Session whose proposal has no findings; its target is the tracker instance.
+/// an unexposed Run whose proposal has no findings; its target is the tracker instance.
 /// A proposal waits for a person otherwise, not for green ink, so it is not a governed step.
 pub const ISSUE_CREATE: &str = "issue-create";
 /// The kind of step that closes or reopens an issue, or moves it into a done status; its
@@ -46,7 +46,7 @@ pub const ISSUE_CREATE: &str = "issue-create";
 pub const ISSUE_CLOSE: &str = "issue-close";
 /// The kind of step that changes an issue's assignees; its target names the issue.
 pub const ISSUE_ASSIGN: &str = "issue-assign";
-/// The kind of step that posts on an issue an exposed Session may not post on directly; its
+/// The kind of step that posts on an issue an exposed Run may not post on directly; its
 /// target names the issue.
 pub const ISSUE_COMMENT: &str = "issue-comment";
 /// The kind of step that removes a kept safe house holding work that exists nowhere else; its

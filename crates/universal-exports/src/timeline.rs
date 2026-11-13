@@ -27,7 +27,7 @@ const MISSION_AUDITS: [&str; 6] = [
     "mission.retry",
     "mission.resume",
     "mission.rename",
-    "session.interrupt",
+    "run.interrupt",
 ];
 
 /// One entry of an Operation's activity timeline: metadata only.
@@ -51,8 +51,8 @@ pub struct TimelineItem {
     pub mission_id: Option<String>,
     /// What that Mission is called now.
     pub handle: Option<String>,
-    /// The provider Session involved, when there is one.
-    pub session_id: Option<String>,
+    /// The provider Run involved, when there is one.
+    pub run_id: Option<String>,
     /// Who acted: a person ID or an Agent codename.
     pub actor: Option<String>,
     /// An audit record's target: a Mission, proposal, role, Agent or setting name.
@@ -106,7 +106,7 @@ fn from_event(event: TimelineEvent, chars: usize) -> TimelineItem {
         station_id: clean_option(event.station.as_deref(), chars),
         mission_id: clean_option(event.mission.as_deref(), chars),
         handle: None,
-        session_id: clean_option(event.session.as_deref(), chars),
+        run_id: clean_option(event.run.as_deref(), chars),
         actor: clean_option(event.actor.as_deref(), chars),
         target: None,
         detail: event
@@ -135,7 +135,7 @@ fn from_audit(record: &AuditRecord, operation: &str, chars: usize) -> TimelineIt
             .contains(&record.action.as_str())
             .then(|| clean(&record.target, chars)),
         handle: None,
-        session_id: None,
+        run_id: None,
         actor: clean_option(Some(&record.actor), chars),
         target: clean_option(Some(&record.target), chars),
         detail: BTreeMap::new(),
@@ -312,8 +312,8 @@ pub(crate) async fn record_control(gateway: &Gateway, status: &ControlStatus) {
     .mission(status.mission_id.clone())
     .actor(status.requested_by.clone())
     .detail("control", status.control_id.clone());
-    if let Some(session) = &status.session_id {
-        event = event.session(session.clone());
+    if let Some(run) = &status.run_id {
+        event = event.run(run.clone());
     }
     if let Some(agent) = &status.agent {
         event = event.detail("agent", agent.clone());
@@ -330,11 +330,11 @@ pub(crate) async fn record_control(gateway: &Gateway, status: &ControlStatus) {
     let _ = tokio::task::spawn_blocking(move || registry.record_event(&event)).await;
 }
 
-/// A Session's lifecycle transition as the gateway saw it.
+/// A Run's lifecycle transition as the gateway saw it.
 pub(crate) struct Transition {
     pub(crate) operation: String,
     pub(crate) mission: String,
-    pub(crate) session: String,
+    pub(crate) run: String,
     pub(crate) state: String,
     pub(crate) station: Option<String>,
     pub(crate) at: f64,
@@ -352,7 +352,7 @@ pub(crate) async fn record_transition(gateway: &Gateway, transition: Transition)
         transition.at,
     )
     .mission(transition.mission)
-    .session(transition.session);
+    .run(transition.run);
     if let Some(station) = transition.station {
         event = event.station(station);
     }
@@ -388,7 +388,7 @@ mod tests {
     async fn publish(served: &Served, path: &str, body: Vec<u8>, json: bool) {
         let mut request = reqwest::Client::new()
             .post(format!(
-                "{}/v1/station/sessions/session-g/{path}",
+                "{}/v1/station/runs/run-g/{path}",
                 served.base
             ))
             .bearer_auth(STATION_TOKEN)
@@ -495,7 +495,7 @@ mod tests {
         assert_eq!(items[0]["station_id"], "worker");
         assert_eq!(items[0]["actor"], "operator-007");
         assert_eq!(items[0]["detail"]["state"], "working");
-        assert_eq!(items[2]["session_id"], "session-g");
+        assert_eq!(items[2]["run_id"], "run-g");
         assert_eq!(viewed["next_cursor"], serde_json::Value::Null);
 
         // The operator may read the Station's records too.
@@ -519,7 +519,7 @@ mod tests {
         {
             let mut event = TimelineEvent::new("lifecycle", "working", "G", at)
                 .mission("mission-g")
-                .session("session-g");
+                .run("run-g");
             event.id = format!("event-{index}");
             served.registry.record_event(&event).unwrap();
         }

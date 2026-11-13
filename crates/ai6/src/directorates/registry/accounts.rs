@@ -5,7 +5,7 @@
 //! claim reads the candidates' states, picks by the pool's strategy and records the claim
 //! under the same lock (file Registry) or transaction (SQL Registry) that serializes every
 //! other write. A claim names its Station and Mission and lapses unless its Station renews
-//! it, so a Station that goes dark frees its accounts with its Session leases.
+//! it, so a Station that goes dark frees its accounts with its Run leases.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -47,14 +47,14 @@ impl fmt::Display for AccountRef {
     }
 }
 
-/// A Session's hold on an account.
+/// A Run's hold on an account.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AccountClaim {
-    /// The Station running the Session.
+    /// The Station running the Run.
     pub station: String,
-    /// The Mission the Session works for.
+    /// The Mission the Run works for.
     pub mission: String,
     /// When the claim was made, as Unix seconds.
     pub since: f64,
@@ -153,7 +153,7 @@ pub struct AccountProfile {
     pub operations: Vec<String>,
     /// The account's priority.
     pub priority: i64,
-    /// The most Sessions that may use it at once.
+    /// The most Runs that may use it at once.
     pub max_concurrent: Option<usize>,
     /// Labels shown with the account.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -216,7 +216,7 @@ pub struct LoginState {
     /// When a person was last warned it may lapse with no way to renew it, as Unix seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warned_at: Option<f64>,
-    /// Why it can no longer be renewed without a person; `None` while it can. Its Sessions go to
+    /// Why it can no longer be renewed without a person; `None` while it can. Its Runs go to
     /// the next account or route.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub needs_person: Option<String>,
@@ -245,7 +245,7 @@ pub struct AccountState {
     /// different rosters each keep their own.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub profiles: BTreeMap<String, AccountProfile>,
-    /// The Sessions using it now.
+    /// The Runs using it now.
     #[serde(default)]
     pub active: Vec<AccountClaim>,
     /// The quota windows last reported, one per name.
@@ -253,9 +253,9 @@ pub struct AccountState {
     pub windows: Vec<QuotaWindow>,
     /// Until when its provider refuses work, as Unix seconds.
     pub limited_until: Option<f64>,
-    /// When a Session last claimed it, as Unix seconds.
+    /// When a Run last claimed it, as Unix seconds.
     pub last_used: Option<f64>,
-    /// Tokens its Sessions used per UTC day (`YYYY-MM-DD`), the last few days.
+    /// Tokens its Runs used per UTC day (`YYYY-MM-DD`), the last few days.
     #[serde(default)]
     pub daily_tokens: BTreeMap<String, u64>,
     /// Its login, when one is kept sealed in the Registry.
@@ -329,13 +329,13 @@ pub struct AccountCandidate {
     pub account: String,
     /// Its priority; higher first.
     pub priority: i64,
-    /// The most Sessions that may use it at once.
+    /// The most Runs that may use it at once.
     pub max_concurrent: Option<usize>,
     /// Its login is kept sealed in the Registry, so it has room only where that can be opened.
     pub sealed_login: bool,
 }
 
-/// A Session's request for one account of a pool.
+/// A Run's request for one account of a pool.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AccountClaimRequest {
     pool: String,
@@ -351,7 +351,7 @@ pub struct AccountClaimRequest {
 }
 
 impl AccountClaimRequest {
-    /// A claim on any account of `pool` for `station`'s Session of `mission`, balanced as
+    /// A claim on any account of `pool` for `station`'s Run of `mission`, balanced as
     /// the pool says, held for `ttl` unless renewed.
     pub fn new(
         pool: &AccountPool,
@@ -397,7 +397,7 @@ impl AccountClaimRequest {
     }
 
     /// Records a claim on the first candidate whatever its room: a harness already running
-    /// on the account (a re-attached Session) is counted even past `max_concurrent` or a
+    /// on the account (a re-attached Run) is counted even past `max_concurrent` or a
     /// limit.
     #[must_use]
     pub fn in_use(mut self) -> Self {
@@ -405,7 +405,7 @@ impl AccountClaimRequest {
         self
     }
 
-    /// Takes `account` whenever it has room, before the strategy is consulted: a Session
+    /// Takes `account` whenever it has room, before the strategy is consulted: a Run
     /// keeps the account its provider history lives with.
     #[must_use]
     pub fn prefer(mut self, account: impl Into<String>) -> Self {
@@ -421,7 +421,7 @@ impl AccountClaimRequest {
         self
     }
 
-    /// Considers `account` alone: a provider Session that cannot move to another account.
+    /// Considers `account` alone: a provider Run that cannot move to another account.
     #[must_use]
     pub fn only(mut self, account: &str) -> Self {
         self.candidates
@@ -503,7 +503,7 @@ pub fn choose_account<'a>(
 }
 
 /// Applies a claim to the candidates' `states`: drops lapsed claims and any earlier claim of
-/// the same Session, then records the claim on the chosen account. Returns the chosen
+/// the same Run, then records the claim on the chosen account. Returns the chosen
 /// account and the names of every state that changed.
 pub(super) fn claim_in(
     states: &mut BTreeMap<String, AccountState>,
@@ -561,7 +561,7 @@ pub(super) fn claim_in(
 }
 
 /// Applies a claim to every recorded account: [`claim_in`] on the request's pool, and the
-/// Session's claims on any other account dropped, so a Mission holds one account at a time.
+/// Run's claims on any other account dropped, so a Mission holds one account at a time.
 /// Returns the chosen account's state and every state that changed.
 pub(super) fn claim_among(
     all: Vec<AccountState>,
@@ -665,7 +665,7 @@ pub(super) fn validate_ref(account: &AccountRef) -> io::Result<()> {
 /// Pool accounts: their claims, quota and daily tokens.
 pub trait AccountStore {
     /// Records what `station`'s configuration says about an account, replacing only that
-    /// Station's profile and keeping what Sessions recorded.
+    /// Station's profile and keeping what Runs recorded.
     ///
     /// # Errors
     ///
@@ -678,7 +678,7 @@ pub trait AccountStore {
     ) -> io::Result<()>;
 
     /// Drops `station`'s profile of an account its configuration no longer declares, keeping
-    /// other Stations' profiles and what Sessions recorded.
+    /// other Stations' profiles and what Runs recorded.
     ///
     /// # Errors
     ///
@@ -686,7 +686,7 @@ pub trait AccountStore {
     fn withdraw_account(&self, account: &AccountRef, station: &str) -> io::Result<()>;
 
     /// Picks an account of the request's pool and records the claim, in one write; the
-    /// Session's claims on any other account are dropped in the same write. `None` when no
+    /// Run's claims on any other account are dropped in the same write. `None` when no
     /// account has room: each is limited or at its `max_concurrent`.
     ///
     /// # Errors
@@ -698,7 +698,7 @@ pub trait AccountStore {
         now: f64,
     ) -> io::Result<Option<AccountState>>;
 
-    /// Drops `station`'s claims for `mission`, once its Session ends, is fenced out or fails;
+    /// Drops `station`'s claims for `mission`, once its Run ends, is fenced out or fails;
     /// whether there were any.
     ///
     /// # Errors
@@ -1008,8 +1008,8 @@ mod tests {
         a_limited_account_is_skipped_until_its_reset,
         headroom_prefers_the_least_used_then_the_least_busy_account,
         round_robin_and_priority_pick_as_they_say,
-        a_session_keeps_its_preferred_account_while_it_has_room,
-        claims_are_released_on_session_end_and_lapse_with_a_dark_station,
+        a_run_keeps_its_preferred_account_while_it_has_room,
+        claims_are_released_on_run_end_and_lapse_with_a_dark_station,
         quota_reports_and_usage_are_kept_per_account,
         a_claim_in_another_pool_frees_the_missions_earlier_account,
         stations_with_different_rosters_keep_their_own_profiles,
@@ -1038,7 +1038,7 @@ mod tests {
     }
 
     /// A limit one Station saw on a route with no pool holds on another until it resets, and the
-    /// row is an account like any other: it counts Sessions and when it was last used.
+    /// row is an account like any other: it counts Runs and when it was last used.
     fn a_routes_own_account_is_limited_for_every_station(store: &dyn Store) {
         let first = store.handle();
         let second = store.handle();
@@ -1204,7 +1204,7 @@ mod tests {
             Some("c")
         );
         report("c", 600);
-        // b and c are equally used; b's Session has ended and c's has not.
+        // b and c are equally used; b's Run has ended and c's has not.
         assert!(registry.release_account("s", "m1").unwrap());
         assert_eq!(
             claim(registry.as_ref(), &pool, "s", "m3", NOW).as_deref(),
@@ -1244,7 +1244,7 @@ mod tests {
         assert_eq!(
             picks,
             ["a", "b", "c", "a"],
-            "b is full after its one Session"
+            "b is full after its one Run"
         );
 
         let ranked = AccountPool::new("ranked", "claude")
@@ -1266,7 +1266,7 @@ mod tests {
         );
     }
 
-    fn a_session_keeps_its_preferred_account_while_it_has_room(store: &dyn Store) {
+    fn a_run_keeps_its_preferred_account_while_it_has_room(store: &dyn Store) {
         let registry = store.handle();
         let pool = pool(PoolStrategy::Headroom, &[("a", 0, None), ("b", 0, Some(1))]);
         registry
@@ -1278,14 +1278,14 @@ mod tests {
         let request = AccountClaimRequest::new(&pool, "s", "m1", TTL).prefer("b");
         let chosen = registry.claim_account(&request, NOW).unwrap().unwrap();
         assert_eq!(chosen.account.account, "b");
-        // Claiming again for the same Session replaces its claim rather than adding one.
+        // Claiming again for the same Run replaces its claim rather than adding one.
         let again = registry
             .claim_account(&request, NOW + 1.0)
             .unwrap()
             .unwrap();
         assert_eq!(again.account.account, "b");
         assert_eq!(again.live_claims(NOW).count(), 1);
-        // Full for another Session, so the preference gives way.
+        // Full for another Run, so the preference gives way.
         let other = AccountClaimRequest::new(&pool, "s", "m2", TTL).prefer("b");
         assert_eq!(
             registry
@@ -1298,7 +1298,7 @@ mod tests {
         );
     }
 
-    fn claims_are_released_on_session_end_and_lapse_with_a_dark_station(store: &dyn Store) {
+    fn claims_are_released_on_run_end_and_lapse_with_a_dark_station(store: &dyn Store) {
         let registry = store.handle();
         let pool = pool(PoolStrategy::Headroom, &[("only", 0, Some(1))]);
         assert!(claim(registry.as_ref(), &pool, "dark", "m1", NOW).is_some());

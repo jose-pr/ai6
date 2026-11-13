@@ -19,7 +19,7 @@ use crate::directorates::registry::backend::*;
 
 use super::{Cable, CableDraft, CableError, CableRecipient, CableScope, CableState, CableTarget};
 
-/// Maximum number of Agent Sessions one broadcast may reach unless the `cables` record says
+/// Maximum number of Agent Runs one broadcast may reach unless the `cables` record says
 /// otherwise.
 pub const MAX_CABLE_FANOUT: usize = 100;
 const DEFAULT_SENDER_RATE: f64 = 2.0;
@@ -185,20 +185,20 @@ pub struct CablePrincipal {
     operation: String,
     theater: Option<String>,
     station: String,
-    session_id: Option<String>,
+    run_id: Option<String>,
     mission_id: Option<String>,
     on_behalf_of: Option<String>,
     peer: Option<String>,
 }
 
 impl CablePrincipal {
-    /// Constructs a validated principal from trusted Session binding data.
+    /// Constructs a validated principal from trusted Run binding data.
     pub fn try_new(
         agent: String,
         operation: String,
         theater: Option<String>,
         station: String,
-        session_id: Option<String>,
+        run_id: Option<String>,
         mission_id: Option<String>,
     ) -> Result<Self, CableError> {
         super::validate_text("Cable principal agent", Some(&agent), 256, true)?;
@@ -207,8 +207,8 @@ impl CablePrincipal {
         if let Some(value) = theater.as_deref() {
             super::validate_text("Cable principal theater", Some(value), 256, true)?;
         }
-        if let Some(value) = session_id.as_deref() {
-            super::validate_text("Cable principal session_id", Some(value), 512, true)?;
+        if let Some(value) = run_id.as_deref() {
+            super::validate_text("Cable principal run_id", Some(value), 512, true)?;
         }
         if let Some(value) = mission_id.as_deref() {
             super::validate_text("Cable principal mission_id", Some(value), 512, true)?;
@@ -218,7 +218,7 @@ impl CablePrincipal {
             operation,
             theater,
             station,
-            session_id,
+            run_id,
             mission_id,
             on_behalf_of: None,
             peer: None,
@@ -227,7 +227,7 @@ impl CablePrincipal {
 
     /// Binds the person an assistant acts for. Its Cables carry the person, reach only
     /// Agents of the principal's Operation other than itself, and replies to them reach only
-    /// the sending Session.
+    /// the sending Run.
     ///
     /// # Errors
     ///
@@ -245,7 +245,7 @@ impl CablePrincipal {
     }
 
     /// Binds the proven key of the Liaison peer this principal sends for: its Cables carry it,
-    /// and a reply to one goes back to the sending Session as it was stamped, wherever it runs.
+    /// and a reply to one goes back to the sending Run as it was stamped, wherever it runs.
     ///
     /// # Errors
     ///
@@ -281,9 +281,9 @@ impl CablePrincipal {
         &self.station
     }
 
-    /// Returns the provider-issued Session identity, when bound.
-    pub fn session_id(&self) -> Option<&str> {
-        self.session_id.as_deref()
+    /// Returns the provider-issued Run identity, when bound.
+    pub fn run_id(&self) -> Option<&str> {
+        self.run_id.as_deref()
     }
 
     /// Returns the AI6 Mission identity, when bound.
@@ -292,7 +292,7 @@ impl CablePrincipal {
     }
 }
 
-/// A configured Agent identity, optionally attached to a live managed Session.
+/// A configured Agent identity, optionally attached to a live managed Run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct CableEndpoint {
@@ -300,7 +300,7 @@ pub struct CableEndpoint {
     operation: String,
     theater: Option<String>,
     station: String,
-    session_id: Option<String>,
+    run_id: Option<String>,
     mission_id: Option<String>,
     conversation_only: bool,
 }
@@ -326,17 +326,17 @@ impl CableEndpoint {
         operation: String,
         theater: Option<String>,
         station: String,
-        session_id: Option<String>,
+        run_id: Option<String>,
         mission_id: Option<String>,
     ) -> Result<Self, CableError> {
         let principal =
-            CablePrincipal::try_new(agent, operation, theater, station, session_id, mission_id)?;
+            CablePrincipal::try_new(agent, operation, theater, station, run_id, mission_id)?;
         Ok(Self {
             agent: principal.agent,
             operation: principal.operation,
             theater: principal.theater,
             station: principal.station,
-            session_id: principal.session_id,
+            run_id: principal.run_id,
             mission_id: principal.mission_id,
             conversation_only: false,
         })
@@ -362,9 +362,9 @@ impl CableEndpoint {
         &self.station
     }
 
-    /// Returns the live provider Session identity, or `None` for offline delivery.
-    pub fn session_id(&self) -> Option<&str> {
-        self.session_id.as_deref()
+    /// Returns the live provider Run identity, or `None` for offline delivery.
+    pub fn run_id(&self) -> Option<&str> {
+        self.run_id.as_deref()
     }
 
     /// Returns the active AI6 Mission identity, when present.
@@ -618,8 +618,8 @@ pub struct CableAuditRecord {
     pub station: String,
     /// Bound Mission identity.
     pub mission_id: Option<String>,
-    /// Bound provider Session identity.
-    pub session_id: Option<String>,
+    /// Bound provider Run identity.
+    pub run_id: Option<String>,
     /// Requested target scope.
     pub target_scope: CableScope,
     /// Requested target name, when present.
@@ -654,8 +654,8 @@ pub struct CableCrossing {
 pub struct CableHeldRecipient {
     /// Resolved Agent identity.
     pub agent: String,
-    /// Provider Session the Cable was addressed to, if one was active at send time.
-    pub session_id: Option<String>,
+    /// Provider Run the Cable was addressed to, if one was active at send time.
+    pub run_id: Option<String>,
 }
 
 /// Metadata for a held Cable visible to an Agent with a matching release grant.
@@ -695,11 +695,11 @@ pub struct CableSendRequest {
     ttl: Option<f64>,
     conversation_id: Option<String>,
     reply_to: Option<String>,
-    /// For a reply to a Cable sent for a person: only the Session that sent it.
-    to_session: Option<String>,
+    /// For a reply to a Cable sent for a person: only the Run that sent it.
+    to_run: Option<String>,
     /// Narrows a compartment Cable to one Operation it covers.
     operation: Option<String>,
-    /// The provider Session the thread is bound to.
+    /// The provider Run the thread is bound to.
     affinity: Option<String>,
 }
 
@@ -713,7 +713,7 @@ impl fmt::Debug for CableSendRequest {
             .field("ttl", &self.ttl)
             .field("conversation_id", &self.conversation_id)
             .field("reply_to", &self.reply_to)
-            .field("to_session", &self.to_session)
+            .field("to_run", &self.to_run)
             .finish()
     }
 }
@@ -734,8 +734,8 @@ pub struct CableDelivery {
     pub from_station: String,
     /// AI6 Mission identity, when present.
     pub mission_id: Option<String>,
-    /// Provider Session identity, when present.
-    pub session_id: Option<String>,
+    /// Provider Run identity, when present.
+    pub run_id: Option<String>,
     /// Explicit audience from the accepted Cable.
     pub target: CableTarget,
     /// Message body; treat as untrusted input.
@@ -771,7 +771,7 @@ impl fmt::Debug for CableDelivery {
             .field("from_theater", &self.from_theater)
             .field("from_station", &self.from_station)
             .field("mission_id", &self.mission_id)
-            .field("session_id", &self.session_id)
+            .field("run_id", &self.run_id)
             .field("target", &self.target)
             .field("body", &"[redacted]")
             .field("conversation_id", &self.conversation_id)
@@ -795,17 +795,17 @@ impl CableSendRequest {
             ttl: None,
             conversation_id: None,
             reply_to: None,
-            to_session: None,
+            to_run: None,
             operation: None,
             affinity: None,
         }
     }
 
-    /// Binds the Cable to the provider Session its thread is with: only that Session reads it,
-    /// or, once that Session has ended, the next Session of the Agent opened after it ended.
+    /// Binds the Cable to the provider Run its thread is with: only that Run reads it,
+    /// or, once that Run has ended, the next Run of the Agent opened after it ended.
     #[must_use]
-    pub fn with_affinity(mut self, session: impl Into<String>) -> Self {
-        self.affinity = Some(session.into());
+    pub fn with_affinity(mut self, run: impl Into<String>) -> Self {
+        self.affinity = Some(run.into());
         self
     }
 
@@ -960,11 +960,11 @@ impl CableRelay {
         self
     }
 
-    /// Sets who a Cable waits for when its addressee has no live Session: `residents` names, for an
-    /// `agent` or `operation` target, an endpoint with no Session for each Agent that Session
+    /// Sets who a Cable waits for when its addressee has no live Run: `residents` names, for an
+    /// `agent` or `operation` target, an endpoint with no Run for each Agent that Run
     /// would be of (the Agent in each Operation it serves, or the Operation's coordinating
-    /// Agents). Such a Cable is delivered to the Agent's next Session, in its brief. Without it,
-    /// a Cable to an Agent with no live Session is refused.
+    /// Agents). Such a Cable is delivered to the Agent's next Run, in its brief. Without it,
+    /// a Cable to an Agent with no live Run is refused.
     #[must_use]
     pub fn with_residents(
         mut self,
@@ -1227,7 +1227,7 @@ impl CableRelay {
         Ok(())
     }
 
-    /// Publishes one trusted, currently managed Agent Session.
+    /// Publishes one trusted, currently managed Agent Run.
     pub fn register_endpoint(&self, endpoint: CableEndpoint) -> Result<(), CableRelayError> {
         let key = endpoint_key(&endpoint);
         self.live_endpoints
@@ -1237,7 +1237,7 @@ impl CableRelay {
         Ok(())
     }
 
-    /// Removes one managed Session without changing the configured Agent directory.
+    /// Removes one managed Run without changing the configured Agent directory.
     pub fn unregister_endpoint(&self, endpoint: &CableEndpoint) -> Result<(), CableRelayError> {
         self.live_endpoints
             .lock()
@@ -1275,7 +1275,7 @@ impl CableRelay {
         visible.sort_by(|left, right| {
             left.agent
                 .cmp(&right.agent)
-                .then_with(|| left.session_id.cmp(&right.session_id))
+                .then_with(|| left.run_id.cmp(&right.run_id))
         });
         Ok(visible)
     }
@@ -1298,7 +1298,7 @@ impl CableRelay {
         };
         let mut peers = Vec::new();
         for endpoint in self.all_endpoints()? {
-            if endpoint.conversation_only || endpoint.session_id == principal.session_id {
+            if endpoint.conversation_only || endpoint.run_id == principal.run_id {
                 continue;
             }
             let resource = endpoint_resource(&endpoint);
@@ -1335,7 +1335,7 @@ impl CableRelay {
     /// As [`inbox`](Self::inbox), but only for what is newly queued, and `permit` is asked once,
     /// before the first of it is delivered: when it says no, nothing is delivered and what waits
     /// stays queued. What was delivered before is not returned again. A brief takes the Cables
-    /// that waited for its Agent's next Session this way.
+    /// that waited for its Agent's next Run this way.
     pub fn deliver_new(
         &self,
         principal: &CablePrincipal,
@@ -1345,11 +1345,11 @@ impl CableRelay {
         self.read_inbox(principal, None, limit, Some(permit))
     }
 
-    /// Delivers what is newly queued for a Session that is between turns, so that it can be woken
+    /// Delivers what is newly queued for a Run that is between turns, so that it can be woken
     /// by it: at most `wakes_per_hour` wakes an hour for the Agent, counted across Stations and
     /// against the Agent's Cable quota, none when it is `0`. Grants and compartments are asked
     /// again, as for any delivery; a wake the quota refuses leaves the Cables queued, for the
-    /// Session's own `read_cables`.
+    /// Run's own `read_cables`.
     pub fn wake(
         &self,
         principal: &CablePrincipal,
@@ -1409,7 +1409,7 @@ impl CableRelay {
             .registry
             .cable_inbox(
                 &principal.agent,
-                principal.session_id.as_deref(),
+                principal.run_id.as_deref(),
                 if operation.is_some() {
                     self.registry.limits().cables.page.or_max()
                 } else {
@@ -1485,17 +1485,17 @@ impl CableRelay {
                 {
                     continue;
                 }
-                // A peer's Cable to the Agent as a whole belongs, once taken, to the Session that
-                // took it: its thread follows that Session.
-                let taken_by = (cable.peer().is_some() && recipient.session_id().is_none())
-                    .then_some(principal.session_id.as_deref())
+                // A peer's Cable to the Agent as a whole belongs, once taken, to the Run that
+                // took it: its thread follows that Run.
+                let taken_by = (cable.peer().is_some() && recipient.run_id().is_none())
+                    .then_some(principal.run_id.as_deref())
                     .flatten();
                 let Some(updated) = self
                     .registry
                     .update_cable_delivery(
                         cable.id(),
                         recipient.agent(),
-                        recipient.session_id(),
+                        recipient.run_id(),
                         state,
                         taken_by,
                         Some(now),
@@ -1572,7 +1572,7 @@ impl CableRelay {
                 .filter(|recipient| recipient.state() == CableState::Held)
                 .map(|recipient| CableHeldRecipient {
                     agent: recipient.agent().to_owned(),
-                    session_id: recipient.session_id().map(str::to_owned),
+                    run_id: recipient.run_id().map(str::to_owned),
                 })
                 .collect::<Vec<_>>();
             if !recipients.is_empty() {
@@ -1642,8 +1642,8 @@ impl CableRelay {
             let endpoint = endpoints.iter().find(|endpoint| {
                 endpoint.agent == recipient.agent()
                     && recipient
-                        .session_id()
-                        .is_none_or(|session| endpoint.session_id.as_deref() == Some(session))
+                        .run_id()
+                        .is_none_or(|run| endpoint.run_id.as_deref() == Some(run))
             });
             let receive_target =
                 endpoint.and_then(|endpoint| receiver_target_for_endpoint(&cable, endpoint).ok());
@@ -1656,7 +1656,7 @@ impl CableRelay {
                 operation: endpoint.operation.clone(),
                 theater: endpoint.theater.clone(),
                 station: endpoint.station.clone(),
-                session_id: endpoint.session_id.clone(),
+                run_id: endpoint.run_id.clone(),
                 mission_id: endpoint.mission_id.clone(),
                 on_behalf_of: None,
                 peer: None,
@@ -1706,7 +1706,7 @@ impl CableRelay {
         Ok(result)
     }
 
-    /// Acknowledges a delivered Cable addressed to the calling managed Session.
+    /// Acknowledges a delivered Cable addressed to the calling managed Run.
     pub fn acknowledge(
         &self,
         principal: &CablePrincipal,
@@ -1763,7 +1763,7 @@ impl CableRelay {
             .map_err(|_| CableRelayError::RegistryUnavailable)?
             .ok_or(CableRelayError::Unavailable)?;
         if cable.sender_agent() != principal.agent
-            || cable.session_id() != principal.session_id.as_deref()
+            || cable.run_id() != principal.run_id.as_deref()
         {
             return Err(CableRelayError::Unavailable);
         }
@@ -1835,14 +1835,14 @@ impl CableRelay {
         // its reply goes back to that conversation alone, not to the Agent's others. So does a
         // reply to a Liaison peer's Cable, to the thread that sent it.
         if original.on_behalf_of().is_some() || original.peer().is_some() {
-            request.to_session = Some(
+            request.to_run = Some(
                 original
-                    .session_id()
+                    .run_id()
                     .ok_or(CableRelayError::Unavailable)?
                     .to_owned(),
             );
         } else if original.target().scope() == CableScope::Compartment {
-            request.to_session = original.session_id().map(str::to_owned);
+            request.to_run = original.run_id().map(str::to_owned);
         }
         self.send(principal, request)
     }
@@ -1858,7 +1858,7 @@ impl CableRelay {
             .update_cable_delivery(
                 cable.id(),
                 recipient.agent(),
-                recipient.session_id(),
+                recipient.run_id(),
                 state,
                 None,
                 Some(now),
@@ -1866,31 +1866,31 @@ impl CableRelay {
             .map_err(|_| CableRelayError::Unavailable)
     }
 
-    /// Whether `principal`'s Session may read `cable` as its thread binds it: the bound Session
-    /// itself, or, once that one has ended, a Session of the Agent opened after it ended. A bound
-    /// Session the Registry does not know as ended keeps it.
+    /// Whether `principal`'s Run may read `cable` as its thread binds it: the bound Run
+    /// itself, or, once that one has ended, a Run of the Agent opened after it ended. A bound
+    /// Run the Registry does not know as ended keeps it.
     fn bound_to(&self, cable: &Cable, principal: &CablePrincipal) -> bool {
         let Some(bound) = cable.affinity() else {
             return true;
         };
-        let Some(session) = principal.session_id.as_deref() else {
+        let Some(run) = principal.run_id.as_deref() else {
             return false;
         };
-        if session == bound {
+        if run == bound {
             return true;
         }
-        let Ok(records) = self.registry.sessions() else {
+        let Ok(records) = self.registry.runs() else {
             return false;
         };
         let of = |provider: &str| {
             records
                 .iter()
-                .find(|record| record.provider_session_id.as_deref() == Some(provider))
+                .find(|record| record.provider_id.as_deref() == Some(provider))
         };
         let ended = of(bound)
             .filter(|record| record.status.is_closed())
             .and_then(|record| record.closed_at);
-        let opened = of(session).and_then(|record| record.opened_at);
+        let opened = of(run).and_then(|record| record.opened_at);
         matches!((ended, opened), (Some(ended), Some(opened)) if opened > ended)
     }
 
@@ -1966,8 +1966,8 @@ impl CableRelay {
             .read()
             .map_err(|_| CableRelayError::RegistryUnavailable)?;
         let mut candidates = self.candidates(&request.target)?;
-        // An Agent with no live Session, or an Operation with none of its Agents live, is
-        // reached by the Cable waiting for its next Session, whichever work that is for.
+        // An Agent with no live Run, or an Operation with none of its Agents live, is
+        // reached by the Cable waiting for its next Run, whichever work that is for.
         if let Some(residents) = &self.residents {
             let waits = match request.target.scope() {
                 CableScope::Agent => !candidates
@@ -1999,7 +1999,7 @@ impl CableRelay {
                 operation: principal.operation.clone(),
                 theater: None,
                 station: LIAISON_STATION.to_owned(),
-                session_id: None,
+                run_id: None,
                 mission_id: None,
                 conversation_only: false,
             });
@@ -2009,7 +2009,7 @@ impl CableRelay {
         if let Some(original) = self.peer_original(&request)
             && !candidates.iter().any(|endpoint| {
                 endpoint.agent == original.sender_agent()
-                    && endpoint.session_id.as_deref() == original.session_id()
+                    && endpoint.run_id.as_deref() == original.run_id()
             })
         {
             candidates.push(CableEndpoint {
@@ -2017,7 +2017,7 @@ impl CableRelay {
                 operation: original.sender_operation().to_owned(),
                 theater: None,
                 station: original.sender_station().to_owned(),
-                session_id: original.session_id().map(str::to_owned),
+                run_id: original.run_id().map(str::to_owned),
                 mission_id: None,
                 conversation_only: true,
             });
@@ -2025,15 +2025,15 @@ impl CableRelay {
         if request.target.scope() == CableScope::Compartment {
             let replying_to = self.compartment_reply_of(principal, &request);
             candidates = match replying_to {
-                // A reply goes to the Session that opened the conversation, wherever it works.
+                // A reply goes to the Run that opened the conversation, wherever it works.
                 Some(original) => self
                     .all_endpoints()?
                     .into_iter()
                     .filter(|endpoint| {
                         endpoint.agent == original.sender_agent()
                             && endpoint.operation == original.sender_operation()
-                            && (original.session_id().is_none()
-                                || endpoint.session_id.as_deref() == original.session_id())
+                            && (original.run_id().is_none()
+                                || endpoint.run_id.as_deref() == original.run_id())
                     })
                     .collect(),
                 None => candidates,
@@ -2048,8 +2048,8 @@ impl CableRelay {
                 endpoint.operation == principal.operation && endpoint.agent != principal.agent
             });
         }
-        if let Some(session) = request.to_session.as_deref() {
-            candidates.retain(|endpoint| endpoint.session_id.as_deref() == Some(session));
+        if let Some(run) = request.to_run.as_deref() {
+            candidates.retain(|endpoint| endpoint.run_id.as_deref() == Some(run));
         } else {
             // An assistant's conversations, each a different person's, hear only replies.
             candidates.retain(|endpoint| !endpoint.conversation_only);
@@ -2194,8 +2194,8 @@ impl CableRelay {
             .policy
             .read()
             .map_err(|_| CableRelayError::RegistryUnavailable)?;
-        // Only the watch is told, whichever of the Operation's Sessions are live: the Cable
-        // waits for its Session between turns or its next one.
+        // Only the watch is told, whichever of the Operation's Runs are live: the Cable
+        // waits for its Run between turns or its next one.
         let mut recipients = Vec::new();
         if self.allows(&policy, agent, CableAction::Receive, &target) {
             let state = match policy.inbound_mode(agent) {
@@ -2252,8 +2252,8 @@ impl CableRelay {
         if let Some(mission) = principal.mission_id.as_deref() {
             draft = draft.with_mission(mission);
         }
-        if let Some(session) = principal.session_id.as_deref() {
-            draft = draft.with_session(session);
+        if let Some(run) = principal.run_id.as_deref() {
+            draft = draft.with_run(run);
         }
         if let Some(conversation) = request.conversation_id.as_deref() {
             draft = draft.with_conversation(conversation);
@@ -2267,8 +2267,8 @@ impl CableRelay {
         if let Some(peer) = principal.peer.as_deref() {
             draft = draft.with_peer(peer);
         }
-        if let Some(session) = request.affinity.as_deref() {
-            draft = draft.with_affinity(session);
+        if let Some(run) = request.affinity.as_deref() {
+            draft = draft.with_affinity(run);
         }
         Ok(draft)
     }
@@ -2315,7 +2315,7 @@ impl CableRelay {
         candidates.sort_by(|left, right| {
             left.agent
                 .cmp(&right.agent)
-                .then_with(|| left.session_id.cmp(&right.session_id))
+                .then_with(|| left.run_id.cmp(&right.run_id))
         });
         Ok(candidates)
     }
@@ -2413,10 +2413,10 @@ impl CableRelay {
         let mut seen = BTreeSet::new();
         let mut crossings: BTreeMap<String, CableCrossing> = BTreeMap::new();
         for endpoint in candidates {
-            // A recipient with no Session would be read by any Session of that Agent, in an
+            // A recipient with no Run would be read by any Run of that Agent, in an
             // Operation the compartment may not cover.
             if in_compartment
-                && (endpoint.session_id.is_none() || endpoint.session_id == sender.session_id)
+                && (endpoint.run_id.is_none() || endpoint.run_id == sender.run_id)
             {
                 continue;
             }
@@ -2479,7 +2479,7 @@ impl CableRelay {
             {
                 continue;
             }
-            let identity = (endpoint.agent.clone(), endpoint.session_id.clone());
+            let identity = (endpoint.agent.clone(), endpoint.run_id.clone());
             if !seen.insert(identity) {
                 continue;
             }
@@ -2503,7 +2503,7 @@ impl CableRelay {
                 CableInboundMode::Refuse => CableState::Refused,
             };
             selected.push(
-                CableRecipient::try_new(endpoint.agent, endpoint.session_id, state)
+                CableRecipient::try_new(endpoint.agent, endpoint.run_id, state)
                     .map_err(|_| CableRelayError::InvalidRequest)?,
             );
         }
@@ -2559,7 +2559,7 @@ impl CableRelay {
             theater: principal.theater.clone(),
             station: principal.station.clone(),
             mission_id: principal.mission_id.clone(),
-            session_id: principal.session_id.clone(),
+            run_id: principal.run_id.clone(),
             target_scope: target.scope(),
             target_name: target.name().map(str::to_owned),
             decision,
@@ -2576,11 +2576,11 @@ fn recipient_for<'a>(cable: &'a Cable, principal: &CablePrincipal) -> Option<&'a
     cable.recipients().iter().find(|recipient| {
         recipient.agent() == principal.agent
             && recipient
-                .session_id()
-                .is_none_or(|session| Some(session) == principal.session_id.as_deref())
+                .run_id()
+                .is_none_or(|run| Some(run) == principal.run_id.as_deref())
             && recipient
                 .taken_by()
-                .is_none_or(|session| Some(session) == principal.session_id.as_deref())
+                .is_none_or(|run| Some(run) == principal.run_id.as_deref())
     })
 }
 
@@ -2624,7 +2624,7 @@ fn delivery_view(cable: &Cable, recipient: &CableRecipient) -> CableDelivery {
         from_theater: cable.sender_theater().map(str::to_owned),
         from_station: cable.sender_station().to_owned(),
         mission_id: cable.mission_id().map(str::to_owned),
-        session_id: cable.session_id().map(str::to_owned),
+        run_id: cable.run_id().map(str::to_owned),
         target: cable.target().clone(),
         body: cable.body().to_owned(),
         conversation_id: cable.conversation_id().map(str::to_owned),
@@ -2662,7 +2662,7 @@ fn endpoint_key(endpoint: &CableEndpoint) -> EndpointKey {
     (
         endpoint.agent.clone(),
         endpoint.station.clone(),
-        endpoint.session_id.clone(),
+        endpoint.run_id.clone(),
         endpoint.mission_id.clone(),
     )
 }
@@ -2711,28 +2711,28 @@ mod tests {
             operation.into(),
             Some("theater-a".into()),
             "station-a".into(),
-            Some(format!("session-{agent}")),
+            Some(format!("run-{agent}")),
             Some("mission-a".into()),
         )
         .unwrap()
     }
 
-    fn endpoint(agent: &str, operation: &str, session: Option<&str>) -> CableEndpoint {
-        endpoint_at(agent, operation, "station-a", session)
+    fn endpoint(agent: &str, operation: &str, run: Option<&str>) -> CableEndpoint {
+        endpoint_at(agent, operation, "station-a", run)
     }
 
     fn endpoint_at(
         agent: &str,
         operation: &str,
         station: &str,
-        session: Option<&str>,
+        run: Option<&str>,
     ) -> CableEndpoint {
         CableEndpoint::try_new(
             agent.into(),
             operation.into(),
             Some("theater-a".into()),
             station.into(),
-            session.map(str::to_owned),
+            run.map(str::to_owned),
             None,
         )
         .unwrap()
@@ -2773,10 +2773,10 @@ mod tests {
             }
         };
         let endpoints = vec![
-            endpoint("008", "SOUTH", Some("session-008")),
-            endpoint("009", "FORTITUDE", Some("session-009")),
-            endpoint("010", "ZEPPELIN", Some("session-010")),
-            endpoint("011", "OTHER", Some("session-011")),
+            endpoint("008", "SOUTH", Some("run-008")),
+            endpoint("009", "FORTITUDE", Some("run-009")),
+            endpoint("010", "ZEPPELIN", Some("run-010")),
+            endpoint("011", "OTHER", Some("run-011")),
         ];
         let fortitude = target(CableScope::Operation, Some("FORTITUDE"));
         let registry: Arc<dyn RegistryBackend> = Arc::new(FileRegistry::open(root.path()));
@@ -2849,7 +2849,7 @@ mod tests {
         let service = relay(
             Arc::new(FileRegistry::open(root.path())),
             policy,
-            vec![endpoint("008", "operation-a", Some("session-008"))],
+            vec![endpoint("008", "operation-a", Some("run-008"))],
         );
         let sender = principal("007", "operation-a");
         let target = target(CableScope::Agent, Some("008"));
@@ -2893,14 +2893,14 @@ mod tests {
             Arc::new(FileRegistry::open(root.path())),
             policy,
             vec![
-                endpoint("008", "operation-a", Some("session-008")),
-                endpoint("009", "operation-b", Some("session-009")),
+                endpoint("008", "operation-a", Some("run-008")),
+                endpoint("009", "operation-b", Some("run-009")),
             ],
         )
         .with_audit_sink(move |record| audit_records.lock().unwrap().push(record.clone()))
         .with_durable_audit(|_| Ok(()));
         // Two conversations of the same assistant Agent, for two people.
-        for (session, operation) in [
+        for (run, operation) in [
             ("assistant-a", "operation-a"),
             ("assistant-b", "operation-a"),
         ] {
@@ -2911,7 +2911,7 @@ mod tests {
                         operation.into(),
                         None,
                         "station-a".into(),
-                        Some(session.into()),
+                        Some(run.into()),
                         None,
                     )
                     .unwrap()
@@ -2919,13 +2919,13 @@ mod tests {
                 )
                 .unwrap();
         }
-        let assistant = |session: &str, person: &str| {
+        let assistant = |run: &str, person: &str| {
             CablePrincipal::try_new(
                 "moneypenny".into(),
                 "operation-a".into(),
                 None,
                 "station-a".into(),
-                Some(session.into()),
+                Some(run.into()),
                 None,
             )
             .unwrap()
@@ -2973,7 +2973,7 @@ mod tests {
             "operation-a".into(),
             None,
             "station-a".into(),
-            Some("session-008".into()),
+            Some("run-008".into()),
             None,
         )
         .unwrap();
@@ -2986,13 +2986,13 @@ mod tests {
         let reply = service
             .reply(&agent, sent.id(), "Done".into(), "r1".into())
             .unwrap();
-        let sessions: Vec<_> = reply
+        let runs: Vec<_> = reply
             .recipients()
             .iter()
-            .map(|recipient| recipient.session_id())
+            .map(|recipient| recipient.run_id())
             .collect();
         assert_eq!(
-            sessions,
+            runs,
             [Some("assistant-a")],
             "the other person's conversation is not told"
         );
@@ -3036,8 +3036,8 @@ mod tests {
             Arc::new(FileRegistry::open(root)),
             policy,
             vec![
-                endpoint("008", "operation-a", Some("session-008")),
-                endpoint("010", "operation-a", Some("session-010")),
+                endpoint("008", "operation-a", Some("run-008")),
+                endpoint("010", "operation-a", Some("run-010")),
             ],
         )
         .with_limits(100, 0.001, sender_burst, 100.0, 1_000)
@@ -3047,7 +3047,7 @@ mod tests {
         if let Some(audit) = audit {
             service = service.with_durable_audit(audit);
         }
-        for session in ["assistant-a", "assistant-b"] {
+        for run in ["assistant-a", "assistant-b"] {
             service
                 .register_endpoint(
                     CableEndpoint::try_new(
@@ -3055,7 +3055,7 @@ mod tests {
                         "operation-a".into(),
                         None,
                         "station-a".into(),
-                        Some(session.into()),
+                        Some(run.into()),
                         None,
                     )
                     .unwrap()
@@ -3066,13 +3066,13 @@ mod tests {
         (service, records)
     }
 
-    fn for_person(session: &str, person: &str) -> CablePrincipal {
+    fn for_person(run: &str, person: &str) -> CablePrincipal {
         CablePrincipal::try_new(
             "moneypenny".into(),
             "operation-a".into(),
             None,
             "station-a".into(),
-            Some(session.into()),
+            Some(run.into()),
             None,
         )
         .unwrap()
@@ -3086,7 +3086,7 @@ mod tests {
             "operation-a".into(),
             None,
             "station-a".into(),
-            Some("session-008".into()),
+            Some("run-008".into()),
             None,
         )
         .unwrap()
@@ -3138,18 +3138,18 @@ mod tests {
                 .iter()
                 .all(|peer| peer.agent() != "moneypenny")
         );
-        for session in ["assistant-a", "assistant-b"] {
-            let person = if session == "assistant-a" {
+        for run in ["assistant-a", "assistant-b"] {
+            let person = if run == "assistant-a" {
                 "person-a"
             } else {
                 "person-b"
             };
             assert!(
                 service
-                    .inbox(&for_person(session, person), 10)
+                    .inbox(&for_person(run, person), 10)
                     .unwrap()
                     .is_empty(),
-                "{session}"
+                "{run}"
             );
         }
         service
@@ -3246,7 +3246,7 @@ mod tests {
                 BTreeMap::new(),
             )
             .unwrap(),
-            vec![endpoint("008", "operation-a", Some("session-008"))],
+            vec![endpoint("008", "operation-a", Some("run-008"))],
         );
         let sender = |operation: &str| {
             CablePrincipal::try_new(
@@ -3254,7 +3254,7 @@ mod tests {
                 operation.into(),
                 None,
                 "station-a".into(),
-                Some(format!("session-{operation}")),
+                Some(format!("run-{operation}")),
                 None,
             )
             .unwrap()
@@ -3298,7 +3298,7 @@ mod tests {
                 "008",
                 "operation-b",
                 "station-b",
-                Some("session-008"),
+                Some("run-008"),
             )],
         );
         assert_eq!(
@@ -3325,7 +3325,7 @@ mod tests {
                 "008",
                 "operation-b",
                 "station-b",
-                Some("session-008"),
+                Some("run-008"),
             )],
         );
         let sent = allowed
@@ -3334,7 +3334,7 @@ mod tests {
                 request(cross_agent, "allowed"),
             )
             .unwrap();
-        assert_eq!(sent.recipients()[0].session_id(), Some("session-008"));
+        assert_eq!(sent.recipients()[0].run_id(), Some("run-008"));
     }
 
     #[test]
@@ -3357,11 +3357,11 @@ mod tests {
             Arc::new(FileRegistry::open(root.path())),
             policy,
             vec![
-                endpoint("007", "operation-a", Some("session-007")),
-                endpoint("008", "operation-a", Some("session-008")),
-                endpoint("008", "operation-a", Some("session-008")),
+                endpoint("007", "operation-a", Some("run-007")),
+                endpoint("008", "operation-a", Some("run-008")),
+                endpoint("008", "operation-a", Some("run-008")),
                 endpoint("009", "operation-a", None),
-                endpoint("010", "operation-b", Some("session-010")),
+                endpoint("010", "operation-b", Some("run-010")),
             ],
         )
         .with_audit_sink(move |record| audit_records.lock().unwrap().push(record.clone()));
@@ -3401,7 +3401,7 @@ mod tests {
         let service = relay(
             registry.clone(),
             policy,
-            vec![endpoint("008", "operation-a", Some("session-008"))],
+            vec![endpoint("008", "operation-a", Some("run-008"))],
         );
         let sender = principal("007", "operation-a");
         let before = service
@@ -3444,7 +3444,7 @@ mod tests {
         let service = relay(
             Arc::new(FileRegistry::open(root.path())),
             policy,
-            vec![endpoint("008", "operation-a", Some("session-008"))],
+            vec![endpoint("008", "operation-a", Some("run-008"))],
         );
         let sender = principal("007", "operation-a");
         let approver = principal("009", "operation-a");
@@ -3487,7 +3487,7 @@ mod tests {
                 BTreeMap::from([("008".into(), CableInboundMode::Hold)]),
             )
             .unwrap(),
-            vec![endpoint("008", "operation-a", Some("session-008"))],
+            vec![endpoint("008", "operation-a", Some("run-008"))],
         );
         let cable = service
             .send(
@@ -3542,9 +3542,9 @@ mod tests {
             Arc::new(FileRegistry::open(root.path())),
             policy,
             vec![
-                endpoint("008", "operation-a", Some("session-008")),
-                endpoint("009", "operation-b", Some("session-009")),
-                endpoint_at("010", "operation-c", "station-b", Some("session-010")),
+                endpoint("008", "operation-a", Some("run-008")),
+                endpoint("009", "operation-b", Some("run-009")),
+                endpoint_at("010", "operation-c", "station-b", Some("run-010")),
             ],
         );
         let peers = service.discover(&principal("007", "operation-a")).unwrap();
@@ -3589,14 +3589,14 @@ mod tests {
             policy,
             || {
                 vec![
-                    endpoint("007", "operation-a", Some("session-007")),
-                    endpoint("008", "operation-b", Some("session-008")),
+                    endpoint("007", "operation-a", Some("run-007")),
+                    endpoint("008", "operation-b", Some("run-008")),
                     CableEndpoint::try_new(
                         "009".into(),
                         "operation-c".into(),
                         Some("theater-b".into()),
                         "station-a".into(),
-                        Some("session-009".into()),
+                        Some("run-009".into()),
                         None,
                     )
                     .unwrap(),
@@ -3605,7 +3605,7 @@ mod tests {
                         "operation-d".into(),
                         Some("theater-b".into()),
                         "station-a".into(),
-                        Some("session-010".into()),
+                        Some("run-010".into()),
                         None,
                     )
                     .unwrap(),
@@ -3676,8 +3676,8 @@ mod tests {
             Arc::new(FileRegistry::open(root.path())),
             policy,
             vec![
-                endpoint("007", "operation-a", Some("session-007")),
-                endpoint("008", "operation-a", Some("session-008")),
+                endpoint("007", "operation-a", Some("run-007")),
+                endpoint("008", "operation-a", Some("run-008")),
             ],
         );
         let sender = principal("007", "operation-a");
@@ -3726,7 +3726,7 @@ mod tests {
             Arc::new(FileRegistry::open(root.path())),
             CablePolicy::try_new(vec![sender_grant.clone(), receiver_grant], BTreeMap::new())
                 .unwrap(),
-            vec![endpoint("008", "operation-a", Some("session-008"))],
+            vec![endpoint("008", "operation-a", Some("run-008"))],
         );
         let sent = service
             .send(
@@ -3809,7 +3809,7 @@ name = \"station-a\"
         let service = relay(
             Arc::new(FileRegistry::open(root.path())),
             config.policy().unwrap(),
-            vec![endpoint("008", "operation-a", Some("session-008"))],
+            vec![endpoint("008", "operation-a", Some("run-008"))],
         )
         .with_message_limits(config.message_limits())
         .unwrap();
@@ -3860,7 +3860,7 @@ max_ttl = \"none\"",
         CablePolicy::try_new(grants, BTreeMap::new()).unwrap()
     }
 
-    /// The Agents as Session-less endpoints, which is where a waiting Cable is addressed.
+    /// The Agents as Run-less endpoints, which is where a waiting Cable is addressed.
     fn residents(agents: &[&str]) -> impl Fn(&CableTarget) -> Vec<CableEndpoint> + use<> {
         let agents: Vec<String> = agents.iter().map(|agent| (*agent).to_owned()).collect();
         move |target| {
@@ -3882,7 +3882,7 @@ max_ttl = \"none\"",
             .state()
     }
 
-    fn sessionless(agent: &str, operation: &str) -> CablePrincipal {
+    fn runless(agent: &str, operation: &str) -> CablePrincipal {
         CablePrincipal::try_new(
             agent.into(),
             operation.into(),
@@ -3895,7 +3895,7 @@ max_ttl = \"none\"",
     }
 
     #[test]
-    fn a_cable_to_an_agent_with_no_session_waits_and_is_delivered_once_in_its_brief() {
+    fn a_cable_to_an_agent_with_no_run_waits_and_is_delivered_once_in_its_brief() {
         let root = tempfile::tempdir().unwrap();
         let registry: Arc<dyn RegistryBackend> = Arc::new(FileRegistry::open(root.path()));
         let sender = principal("007", "operation-a");
@@ -3916,7 +3916,7 @@ max_ttl = \"none\"",
         let second = service
             .send(&sender, request(to.clone(), "second"))
             .unwrap();
-        assert_eq!(first.recipients()[0].session_id(), None);
+        assert_eq!(first.recipients()[0].run_id(), None);
         assert_eq!(delivery_state(&service, first.id()), CableState::Queued);
         assert!(
             service
@@ -3928,7 +3928,7 @@ max_ttl = \"none\"",
             "an Agent nobody names is still refused"
         );
 
-        let brief = sessionless("008", "operation-a");
+        let brief = runless("008", "operation-a");
         let delivered = service.deliver_new(&brief, 10, &mut || true).unwrap();
         assert_eq!(
             delivered
@@ -3994,19 +3994,19 @@ max_ttl = \"none\"",
         assert_eq!(sent.recipients().len(), 1);
         assert_eq!(sent.recipients()[0].agent(), "00");
         let delivered = service
-            .deliver_new(&sessionless("00", "operation-a"), 10, &mut || true)
+            .deliver_new(&runless("00", "operation-a"), 10, &mut || true)
             .unwrap();
         assert_eq!(delivered.len(), 1);
     }
 
     #[test]
-    fn wakes_are_counted_and_a_refused_wake_leaves_the_cable_for_the_sessions_own_read() {
+    fn wakes_are_counted_and_a_refused_wake_leaves_the_cable_for_the_runs_own_read() {
         let root = tempfile::tempdir().unwrap();
         let registry: Arc<dyn RegistryBackend> = Arc::new(FileRegistry::open(root.path()));
         let service = relay(
             registry,
             station_policy(&["008"]),
-            vec![endpoint("008", "operation-a", Some("session-008"))],
+            vec![endpoint("008", "operation-a", Some("run-008"))],
         );
         let sender = principal("007", "operation-a");
         let idle = principal("008", "operation-a");
@@ -4034,7 +4034,7 @@ max_ttl = \"none\"",
         assert_eq!(
             service.inbox(&idle, 10).unwrap().len(),
             3,
-            "the Session's own read takes it, and the two before it"
+            "the Run's own read takes it, and the two before it"
         );
         assert!(
             service.wake(&idle, 10, 2).unwrap().is_empty(),
@@ -4052,7 +4052,7 @@ max_ttl = \"none\"",
         let service = relay(
             Arc::new(FileRegistry::open(root.path())),
             station_policy(&["008"]),
-            vec![endpoint("008", "operation-a", Some("session-008"))],
+            vec![endpoint("008", "operation-a", Some("run-008"))],
         );
         let sent = service
             .send(

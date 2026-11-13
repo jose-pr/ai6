@@ -6,7 +6,7 @@
 //!
 //! A [`SafeHouseProvider`] turns an Operation's source (a Git checkout, a plain
 //! directory, ...) into an isolated working directory for one Mission and hands back a
-//! [`SafeHouseSession`] the caller owns. The provider runs where the Agent's Session
+//! [`SafeHouseRun`] the caller owns. The provider runs where the Agent's Run
 //! runs, so a Station loads it; the headquarters never does. Slot order is the ABI:
 //! append, never reorder.
 //!
@@ -154,7 +154,7 @@ pub struct SafeHouseInfo {
     pub branch: Option<String>,
     /// The revision the work started from, when the provider has revisions.
     pub base: Option<String>,
-    /// Whether [`SafeHouseSession::changes`] can answer; `false` means cover is not checkable.
+    /// Whether [`SafeHouseRun::changes`] can answer; `false` means cover is not checkable.
     pub supports_history: bool,
     /// Whether `path` is a separate directory made for this Mission.
     pub isolated: bool,
@@ -239,12 +239,12 @@ impl SafeHouseExports {
 #[guatiao::kind(name = "ai6_safehouse")]
 pub trait SafeHouseProvider: Send + Sync {
     /// Opens the safe house described by `spec` (a [`SafeHouseSpec`] as a value).
-    fn open(&self, spec: &Value) -> Result<Object<dyn SafeHouseSession>, ProviderError>;
+    fn open(&self, spec: &Value) -> Result<Object<dyn SafeHouseRun>, ProviderError>;
 }
 
 /// One Mission's safe house. Every slot takes `&self`.
-#[guatiao::kind(object, name = "ai6_safehouse_session")]
-pub trait SafeHouseSession: Send + Sync {
+#[guatiao::kind(object, name = "ai6_safehouse_run")]
+pub trait SafeHouseRun: Send + Sync {
     /// Answers a [`SafeHouseInfo`] as a value.
     fn info(&self) -> Result<Value, ProviderError>;
     /// Answers a [`ChangeLog`] as a value: the changes since the base, newest first.
@@ -300,7 +300,7 @@ mod tests {
     #[test]
     fn floor_hashes_are_pinned() {
         assert_eq!(SafeHouseProviderVtable::FLOOR_HASH, 3612232285);
-        assert_eq!(SafeHouseSessionVtable::FLOOR_HASH, 1018608612);
+        assert_eq!(SafeHouseRunVtable::FLOOR_HASH, 1018608612);
     }
 
     fn spec() -> SafeHouseSpec {

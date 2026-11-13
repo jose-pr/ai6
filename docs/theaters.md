@@ -1,8 +1,8 @@
 # Theaters
 
-A **Theater** is where a Session actually works: the host or environment whose processes
+A **Theater** is where a Run actually works: the host or environment whose processes
 and files the agent harness uses. A Station is the node that places and supervises the
-Session; the Theater is the place it works. They are separate on purpose, the way a
+Run; the Theater is the place it works. They are separate on purpose, the way a
 Kubernetes node is separate from the container runtime it drives.
 
 A Station reaches a Theater through a **transport**: the way in. `local` is the Station's own
@@ -35,16 +35,16 @@ workdir = "/srv/work"
 | `harnesses` | Harnesses installed on the Theater (`"claude"`, `"codex"`). Another host without a runner needs one here before a harness runs on it, in the [detached wrapper](#the-detached-wrapper). |
 | `workdir` | Where a Mission works on this Theater when its Operation names no path there. |
 | `runner` | The [field runner](#the-field-runner) that supervises harnesses on the Theater: `{}` for every default, or `command`, `state_dir`, `plugin_paths` and `terminal`. |
-| `requires` | What the Theater must have before Sessions run there: `os`, `harnesses`, `tools`, `disk_mb`. See [Fitting a Theater out](#fitting-a-theater-out). |
+| `requires` | What the Theater must have before Runs run there: `os`, `harnesses`, `tools`, `disk_mb`. See [Fitting a Theater out](#fitting-a-theater-out). |
 | `provision` | How `ai6 theater provision` installs what it lacks: `runner`, `plugins`, `install`, `install_timeout_secs`. |
-| `cables` | Whether a Session here must reach its [Cable endpoint](agents.md#cables): `"required"` (default) rules out field mode where the harness would have no way to it; `"optional"` starts such a Session without Cables, reported as `weakened`. |
+| `cables` | Whether a Run here must reach its [Cable endpoint](agents.md#cables): `"required"` (default) rules out field mode where the harness would have no way to it; `"optional"` starts such a Run without Cables, reported as `weakened`. |
 
 A Station's own host is always reachable as the Theater `local` without any configuration;
 declaring `[theater.local]` only adds labels, facts or a runner to it.
 
 ## Fitting a Theater out
 
-Q Branch fits Theaters out. A Theater says what Sessions need there and how to install what
+Q Branch fits Theaters out. A Theater says what Runs need there and how to install what
 is missing, and the Station checks it before it sends work there:
 
 ```toml
@@ -92,7 +92,7 @@ The probe also reports **ambient credentials**: credentials already on the Theat
 did not lease (a `~/.git-credentials` store, a git credential helper, an SSH agent or
 private key, a GitHub CLI, Claude Code or Codex login, a provider key in the login
 environment). It names where they are, never their values, and each is a weakening the
-Station publishes and Outer Office shows: a Session there can use them whatever its own leases
+Station publishes and Outer Office shows: a Run there can use them whatever its own leases
 allow. Removing them is the operator's choice; AI6 does not refuse the Theater.
 
 **Provisioning.** `ai6 theater provision THEATER` fits a Theater out over its own transport,
@@ -114,7 +114,7 @@ Theater's transport provider and `--config` for another bootstrap file.
 
 `runner.command` must be a path for the runner to be installed (`~/` is the transport's
 default directory, the login user's home over SSH). Provisioning carries no secret: harness
-and forge credentials reach a Session as leases, never as files on the Theater.
+and forge credentials reach a Run as leases, never as files on the Theater.
 
 **On a round.** A [Head of Station](stations.md#head-of-station) round runs the same steps
 through its `provision_theater { theater, apply }` tool: `apply = false` is `--check`, and
@@ -211,7 +211,7 @@ out with the missing capability named. Placement previews show the mode of each 
 In remote-hands mode the Station starts the harness in a scratch directory under its state
 directory (`remote-hands/<mission>`, not removed), switches off the harness's own shell and
 file tools (Claude Code's `--disallowedTools`; Codex's `features.shell_tool = false`, and a
-read-only sandbox that asks nothing, which refuses its patches), and gives it four tools on a per-Session authenticated MCP endpoint, bound to the
+read-only sandbox that asks nothing, which refuses its patches), and gives it four tools on a per-Run authenticated MCP endpoint, bound to the
 Mission:
 
 | Tool | Does |
@@ -254,7 +254,7 @@ install = { git = "dnf install -y git" }
 - An Operation binds to the template by its ID (`theater = "scratch"`). When the Mission first
   starts, the Station has the provider make `scratch-<mission>`, reaches it through the
   transport the provider names, fits it out as `requires` and `provision` say (the same
-  steps as `ai6 theater provision`; a failed step fails the start), and runs the Session
+  steps as `ai6 theater provision`; a failed step fails the start), and runs the Run
   there. The new Theater inherits the template's other keys; without a `workdir` of its own
   it works in the Operation's `path`. A Mission that is blocked, parked or started again
   comes back to the same Theater.
@@ -303,13 +303,13 @@ runner = { command = "/opt/ai6/bin/ai6", plugin_paths = ["/opt/ai6/lib"] }
 | `initialize_timeout_ms` | 20000: how long the runner may take to answer `initialize`. |
 | `request_timeout_ms` | 30000: how long it may take to answer any other request. |
 
-A Station starts the runner when none answers, then starts each Session's harness on it. A
+A Station starts the runner when none answers, then starts each Run's harness on it. A
 Station that is shut down, killed or fenced out leaves the harness running, and its Mission
-stays Working. When the Station starts again it re-attaches to the same runner Session and
+stays Working. When the Station starts again it re-attaches to the same runner Run and
 receives every event it missed, in order, from the last one it acknowledged (the last
-event it took may come twice). A Station that loses the Session's lease lets go the same
+event it took may come twice). A Station that loses the Run's lease lets go the same
 way. When a Station goes dark for good, another Station that reaches the same runner (a
-Theater with the same ID and a `runner`) adopts the Session and re-attaches in the same way
+Theater with the same ID and a `runner`) adopts the Run and re-attaches in the same way
 ([Station loss](missions.md#station-loss-adoption)). A Mission parked at a provider limit
 resumes in a new harness instead, as before.
 
@@ -319,7 +319,7 @@ to it directly. On another host it opens `ai6 runner connect` there on a termina
 Theater's transport and speaks the Agent Client Protocol (ACP) over it, and runs `ai6 runner
 serve --detach` when no runner answers; a link that drops costs only time, since the runner
 keeps every event and the Station attaches again with `session/load`, which replays what it
-missed. A second Station's connection to a Session takes it over from the first. The
+missed. A second Station's connection to a Run takes it over from the first. The
 Theater's `runner` settings `connect_timeout_ms`, `initialize_timeout_ms` and
 `request_timeout_ms` bound the connection steps.
 
@@ -331,13 +331,13 @@ directory on its own host, over standard input on another (`--settings -`). `ai6
 runs by as `settings.json` in its state directory, where `ai6 runner connect` reads it.
 
 A runner out of reach for longer than the Operation's `lost_after_secs` is probed once more
-and, if it is gone, its Session is lost and the Mission tried again
+and, if it is gone, its Run is lost and the Mission tried again
 ([Runner loss](missions.md#runner-loss-the-station-lives)).
-The harness's Cable tools go through a relay the runner gives each Session on the Theater's
+The harness's Cable tools go through a relay the runner gives each Run on the Theater's
 loopback, with its own URL and token. The runner carries each request over the connection of
-the Station attached to the Session, and that Station answers from its own Cable endpoint for
-the Session: the endpoint's bearer never leaves the Station, and the Theater needs no
-`forward`. A Station that re-attaches, or adopts the Session, answers from then on; while none
+the Station attached to the Run, and that Station answers from its own Cable endpoint for
+the Run: the endpoint's bearer never leaves the Station, and the Theater needs no
+`forward`. A Station that re-attaches, or adopts the Run, answers from then on; while none
 is attached the relay answers `503`, saying so. The `[runner]` keys `cable_request_bytes`,
 `cable_connect_timeout` and `cable_streams` bound it
 ([Station runtime limits](configuration.md#station-runtime-limits)).
@@ -345,9 +345,9 @@ is attached the relay answers `503`, saying so. The `[runner]` keys `cable_reque
 Run one by hand with `ai6 runner serve [--state-dir PATH] [--plugin-path PATH]...` (or
 `--detach` to start it in the background); `ai6 runner connect` relays standard input
 and output to it over ACP. Stopping the runner stops the harnesses it supervises, and a runner that restarts
-ends the Sessions it lost with a `lost` event saying why, which their Station takes as the
-Session lost. Its events are in
-`sessions/<key>/events.jsonl`; ended Sessions are removed a week after they started, the
+ends the Runs it lost with a `lost` event saying why, which their Station takes as the
+Run lost. Its events are in
+`runs/<key>/events.jsonl`; ended Runs are removed a week after they started, the
 next time a runner starts.
 
 The Station's watchdog sees a runner's harness only through its events: the checks that
@@ -357,11 +357,11 @@ read terminal output (a blocked prompt, repeated output) do not apply to it.
 
 A host where nothing can be installed still runs a harness if it has one: a POSIX Theater
 with `run`, `files` and a declared harness, and no runner (an `ssh` Theater, typically). The
-Station starts the harness over the transport in a session of its own (`setsid`, or `nohup`
+Station starts the harness over the transport in a run of its own (`setsid`, or `nohup`
 where there is none), so the link that started it can drop without ending it:
 
 - Its files are in `~/.ai6/detached/<mission>-<id>/` on the Theater (the login user's home
-  over SSH; readable only by that user): `env` (a FIFO the Session's environment passes
+  over SSH; readable only by that user): `env` (a FIFO the Run's environment passes
   through once, so no value is on a command line or on disk; removed after it is read), `in`
   (a FIFO it reads), `out` (everything it writes), `pid` and, once it ends, `exit`. The
   directory stays after the Mission for inspection.
@@ -370,13 +370,13 @@ where there is none), so the link that started it can drop without ending it:
   reconnects, the Station reads on from where it stopped, so nothing is lost. A link down,
   or a harness quiet, for the Operation's `lost_after_secs` gets one probe over the
   transport; a Theater that cannot be reached, or a harness whose process is gone with no
-  `exit` recorded, loses the Session
+  `exit` recorded, loses the Run
   ([Runner loss](missions.md#runner-loss-the-station-lives)).
 - The harness reaches the Station's Cable endpoint through a reverse forward on a loopback
   port of the Theater, which the transport re-opens on the same port after a reconnect. A
   transport without `forward` leaves it no way there, so placement rules the wrapper out
   unless the Theater says `cables = "optional"`.
-- The harness gets the host's login environment plus the Session's, and no terminal: it is
+- The harness gets the host's login environment plus the Run's, and no terminal: it is
   for harnesses that speak a protocol on standard input and output, as the `claude` and
   `codex` handlers do.
 
@@ -386,18 +386,18 @@ runner keeps the work going while no Station is attached.
 
 ## Overlays on a Theater
 
-The [overlays](agents.md#overlays) a Session is issued go where it runs. A Station copies each one from
+The [overlays](agents.md#overlays) a Run is issued go where it runs. A Station copies each one from
 its store to `.ai6/overlays/trees/<digest>/` under the transport's default directory, the login
 user's home over SSH, file by file through the transport, and it appears there only when whole. Every
 later start hashes that copy against what the store holds and reuses it, so nothing is staged on a
-Theater by hand and a helper in an overlay's `bin/` is on the Session's `PATH` there with no other
+Theater by hand and a helper in an overlay's `bin/` is on the Run's `PATH` there with no other
 step. A copy with other bytes, a missing or an added file, or a link in it refuses the start, naming
 the directory; remove it and the next start places it again.
 
 Beside the trees, under `.ai6/overlays/`: `state/<overlay>/`, `envs/<digest>/` for its dependencies,
-`tools/<digest>/` for a pinned `dotagents`, and `sessions/<Mission>/` for what one Mission keeps, removed
+`tools/<digest>/` for a pinned `dotagents`, and `runs/<Mission>/` for what one Mission keeps, removed
 when it ends. Each directory of an overlay's is read-only (`chmod a-w`) outside its preparation. An
-Agent's `PATH` is what its Session's commands look on; with none, the Station asks the Theater for its
+Agent's `PATH` is what its Run's commands look on; with none, the Station asks the Theater for its
 login `PATH`, so the overlay's `bin/` goes before it rather than in place of it.
 
 - **What a Theater must have.** A POSIX shell, `find`, and one of `sha256sum`, `shasum`, `sha256` or
@@ -422,11 +422,11 @@ A Station publishes the Theaters it reaches at each check-in: ID, access (`local
 `egress` (never a proxy URL), `harnesses`, `requires` with the last probe's report, and why a
 Theater is unreachable. The SSH user, port, key path and `provision` settings stay on the
 Station. `GET /v1/stations` and Outer Office's Stations view list them with their last
-resources sample (`resources`, with `sampled_at`) and the Sessions running there
-(`sessions`); a Theater whose requirements are unmet or unchecked shows a tool icon, and its
+resources sample (`resources`, with `sampled_at`) and the Runs running there
+(`runs`); a Theater whose requirements are unmet or unchecked shows a tool icon, and its
 tooltip says what is missing.
 
-A Session records the Station that supervises it, the Theater it works on and the mode
+A Run records the Station that supervises it, the Theater it works on and the mode
 (`station_id`, `theater_id`, `mode`); Outer Office shows them on the Mission detail.
 
 An Operation's `theater` binds it to one Theater by ID. See

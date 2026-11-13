@@ -27,15 +27,15 @@ const scorecardJudgments = <(String, String)>[
 /// One attempt behind a number.
 @immutable
 class ScorecardAttempt {
-  const ScorecardAttempt({required this.missionId, required this.sessionId});
+  const ScorecardAttempt({required this.missionId, required this.runId});
 
   final String missionId;
-  final String sessionId;
+  final String runId;
 
   factory ScorecardAttempt.fromJson(Map<String, dynamic> json) =>
       ScorecardAttempt(
         missionId: json['mission_id'] as String,
-        sessionId: json['session_id'] as String,
+        runId: json['run_id'] as String,
       );
 }
 
@@ -292,7 +292,7 @@ class _ScorecardSectionState extends State<ScorecardSection> {
         title: Text('Scorecard · ${widget.operation}'),
         subtitle: Text(
           card == null
-              ? (_error ?? 'Reading the Sessions…')
+              ? (_error ?? 'Reading the Runs…')
               : 'Over ${card.window}. Done, failed, blown, stalled and disputed '
                     'are the Agent\'s own; the rest are shown, not held against it.',
         ),

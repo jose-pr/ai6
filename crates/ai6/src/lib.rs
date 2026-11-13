@@ -68,7 +68,7 @@ pub use directorates::m::harness::{
     HarnessPolicy, PROJECT_DIRECTORIES, PROJECT_FILES, ProjectDecision, ProjectManifest,
     ProjectSettings,
 };
-pub use directorates::m::identity::{AccessTokenRecord, InvalidIdentity, MissionId, SessionId};
+pub use directorates::m::identity::{AccessTokenRecord, InvalidIdentity, MissionId, RunId};
 pub use directorates::m::issues::{SourcePage, source_pages};
 pub use directorates::m::placement::{
     AgentFacts, DEFAULT_MAX_CPU_PERCENT, DEFAULT_MIN_FREE_MEMORY_MB, ExecutionMode,
@@ -149,12 +149,12 @@ pub use directorates::q::provision::{
 };
 pub use directorates::q::safehouse::{
     Change, ChangeLog, CheckpointFile, CheckpointSpec, SafeHouseCheckpoint, SafeHouseClone,
-    SafeHouseExports, SafeHouseInfo, SafeHouseProvider, SafeHouseReport, SafeHouseSession,
+    SafeHouseExports, SafeHouseInfo, SafeHouseProvider, SafeHouseReport, SafeHouseRun,
     SafeHouseSpec,
 };
 pub use directorates::q::terminal::{
     AgentTerminal, DEFAULT_PIPE, DEFAULT_TERMINAL, ExitInfo, HarnessStdio, READ_TIMED_OUT, Spec,
-    Terminal, TerminalBridge, TerminalOffer, TerminalRefusal, TerminalSession, choose_terminal,
+    Terminal, TerminalBridge, TerminalOffer, TerminalRefusal, TerminalRun, choose_terminal,
 };
 pub use directorates::q::transport::{
     Capabilities, DEFAULT_MAX_OUTPUT, DEFAULT_READ_LIMIT, DirEntry, DirListing, FileData, Forward,
@@ -169,7 +169,7 @@ pub use directorates::q::{
     Loadout, LoadoutCatalog, McpServer, QError, QErrorKind, SandboxError, SandboxProfile,
     SandboxRequest, SecretBroker, SecretDefinition, SecretError, SecretFields, SecretInstance,
     SecretKeeper, SecretLease, SecretLeaseRequest, SecretProvider, SecretSource, SecretValue,
-    SessionEnv, claude_mcp_config,
+    RunEnv, claude_mcp_config,
 };
 pub use directorates::registry::accounts::{
     AccountCandidate, AccountClaim, AccountClaimRequest, AccountProfile, AccountRef, AccountState,
@@ -190,7 +190,7 @@ pub use directorates::registry::assistant_log::{
 pub use directorates::registry::backend::{
     AccessTokenStore, AccountStore, AgentRecordStore, AgentRoleStore, ApprovalStore,
     AssistantLogStore, AuditStore, BriefStore, CableStore, ClearanceStore, Limited, LogbookStore,
-    QuarantineStore, RegistryBackend, SealedStore, SessionContextStore, SessionStore, SleeperStore,
+    QuarantineStore, RegistryBackend, SealedStore, RunContextStore, RunStore, SleeperStore,
     SourceStore, StationStore, TimelineStore, UsageStore, VettingStore,
 };
 pub use directorates::registry::bona_fides::{
@@ -205,14 +205,14 @@ pub use directorates::registry::cables::{
 };
 pub use directorates::registry::clearance::{ClearanceGrant, GrantReads};
 pub use directorates::registry::contexts::{
-    ContextOwner, ContextSource, EVENTS_FORMAT as CONTEXT_EVENTS_FORMAT, SessionContext,
+    ContextOwner, ContextSource, EVENTS_FORMAT as CONTEXT_EVENTS_FORMAT, RunContext,
 };
 pub use directorates::registry::holds::{AUTOMATIC as AUTOMATIC_HOLD, HoldStore, RosterHold};
 pub use directorates::registry::limits::{
     AccountLimits, AgentLimits, AgentRoleLimits, ApiKeyLimits, ApprovalLimits, AssistantLogLimits,
     AuditLimits, BriefLimits, CableLimits, ClearanceLimits, ContextLimits, FileLimits, HeldLimits,
     HoldLimits, LogbookLimits, MemoryLimits, PrincipalLimits, ProposalLimits, QuarantineLimits,
-    RegistryLimits, SessionLimits, SleeperLimits, SourceLimits, StationLimits, TimelineLimits,
+    RegistryLimits, RunLimits, SleeperLimits, SourceLimits, StationLimits, TimelineLimits,
     TokenLimits, UsageLimits,
 };
 pub use directorates::registry::logbook::{
@@ -227,9 +227,9 @@ pub use directorates::registry::mission_ids::{
 };
 pub use directorates::registry::principals::{PrincipalRecord, PrincipalStore};
 pub use directorates::registry::quarantine::Quarantine;
-pub use directorates::registry::sessions::{
-    Evidence, FinalReport, MissionVerdict, NewSession, OutcomeVerdict, ProbeResult, SessionError,
-    SessionLaunch, SessionRecord, SessionResult, SessionStatus, SessionUpdate,
+pub use directorates::registry::runs::{
+    Evidence, FinalReport, MissionVerdict, NewRun, OutcomeVerdict, ProbeResult, RunError,
+    RunLaunch, RunRecord, RunResult, RunStatus, RunUpdate,
 };
 pub use directorates::registry::sleepers::{
     Cron, CronError, Fire, SLEEPER_BRIEF_SOURCE, Sleeper, SleeperAuthorization, SleeperMark,
@@ -253,8 +253,8 @@ pub use directorates::registry::tracker::{
 pub use directorates::registry::vetting::{Clearance, HeldBrief};
 pub use directorates::section_00::agent::{
     AgentHandler, AgentResume, AgentStart, AssistantMode, AssistantNetwork, McpServerRef,
-    ModelInfo, ModelListing, OverlaySkill, READ_CLEARANCE, SessionOverlays, SessionRecordFile,
-    SessionRecordQuery, clearance_reads_only, clearance_runs_commands,
+    ModelInfo, ModelListing, OverlaySkill, READ_CLEARANCE, RunOverlays, RunRecordFile,
+    RunRecordQuery, clearance_reads_only, clearance_runs_commands,
 };
 pub use directorates::section_00::assistant::{
     ASSISTANT_CABLE_MCP_ENV_PREFIX, ASSISTANT_CABLE_MCP_SERVER, ASSISTANT_CABLE_MCP_TOKEN_ENV,

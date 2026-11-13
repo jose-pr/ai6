@@ -1,5 +1,5 @@
 //! The runner's ACP server: a Station connects over the loopback port, authenticates with the
-//! runner's token, and drives the Sessions the runner supervises as it would any ACP agent,
+//! runner's token, and drives the Runs the runner supervises as it would any ACP agent,
 //! with the spooled events replayed to whoever attaches.
 
 use std::net::{Shutdown, TcpStream};
@@ -24,7 +24,7 @@ use coqui_acp_provider::{AgentMessage, CANCELLED_EVENT};
 /// The `_meta` key of `session/load`: replay what follows this sequence number.
 const AFTER_KEY: &str = "dev.coqui.ai6/after";
 
-/// What one connection holds of one Session: its feeder, and the prompts it waits on.
+/// What one connection holds of one Run: its feeder, and the prompts it waits on.
 pub(super) struct Binding {
     key: String,
     /// The `session/new` launch, until the first prompt starts the harness.
@@ -157,7 +157,7 @@ pub(super) fn serve_connection(
     }
 }
 
-/// Lets `binding` go: the connection no longer holds its Session, unless another took it.
+/// Lets `binding` go: the connection no longer holds its Run, unless another took it.
 fn unbind(connection: &Connection, binding: &Arc<Binding>) {
     binding.release();
     {
@@ -253,7 +253,7 @@ fn dispatch(
     }
     let runner = &connection.runner;
     Some(match method {
-        "_ai6/session_status" => (|| {
+        "_ai6/run_status" => (|| {
             let key = key_of(params)?;
             let hosted = runner.hosted(key).ok_or_else(|| not_found(key))?;
             serde_json::to_value(hosted.report())
@@ -264,7 +264,7 @@ fn dispatch(
             let key = launch
                 .key
                 .clone()
-                .ok_or_else(|| Error::invalid_params().data("the launch names no Session key"))?;
+                .ok_or_else(|| Error::invalid_params().data("the launch names no Run key"))?;
             let cwd = params
                 .get("cwd")
                 .and_then(Value::as_str)
@@ -294,7 +294,7 @@ fn dispatch(
             let key = meta
                 .key
                 .clone()
-                .ok_or_else(|| Error::invalid_params().data("the launch names no Session key"))?;
+                .ok_or_else(|| Error::invalid_params().data("the launch names no Run key"))?;
             let cwd = params
                 .get("cwd")
                 .and_then(Value::as_str)
@@ -399,7 +399,7 @@ fn authenticate(connection: &Connection, params: &Value) -> Result<Value, Error>
     }
 }
 
-/// Makes `binding` the connection's Session; a connection that held another Session for the
+/// Makes `binding` the connection's Run; a connection that held another Run for the
 /// same key is told and closed, so the newer one wins.
 fn bind(connection: &Arc<Connection>, binding: Arc<Binding>) {
     let superseded =
@@ -414,7 +414,7 @@ fn bind(connection: &Arc<Connection>, binding: Arc<Binding>) {
                 "sessionId": old.key,
                 "event": {
                     "kind": super::DETACHED_EVENT,
-                    "text": "another connection took this Session over",
+                    "text": "another connection took this Run over",
                     "data": null, "limit": null, "usage": null, "tools": [],
                 },
             }),
@@ -466,7 +466,7 @@ fn prompt(connection: &Arc<Connection>, params: &Value, responder: Responder<Val
             let Some((launch, cwd)) = lock_of(&binding.launch).take() else {
                 return fail(
                     responder,
-                    Error::internal_error().data("the Session is already starting"),
+                    Error::internal_error().data("the Run is already starting"),
                 );
             };
             let Some(spec) = launch.handler.clone() else {
@@ -523,7 +523,7 @@ fn handle_notification(connection: &Arc<Connection>, message: &UntypedMessage) {
             if let Some(seq) = params.get("seq").and_then(Value::as_u64)
                 && let Err(error) = lock_of(&hosted.spool).acknowledge(seq)
             {
-                eprintln!("ai6 runner: Session {key:?} cursor not written: {error}");
+                eprintln!("ai6 runner: Run {key:?} cursor not written: {error}");
             }
         }
         "session/cancel" => {
@@ -551,7 +551,7 @@ fn answer(binding: &Binding, reply: impl Fn(Responder<Value>) -> Result<(), Erro
     }
 }
 
-/// Sends `binding`'s connection the Session's start marker and every spooled event after
+/// Sends `binding`'s connection the Run's start marker and every spooled event after
 /// `after`, then follows the spool live until the connection is superseded or closes.
 fn feed(connection: &Arc<Connection>, binding: &Arc<Binding>, hosted: &Arc<Hosted>, after: u64) {
     let limits = connection.runner.inner.limits.clone();
@@ -565,13 +565,13 @@ fn feed(connection: &Arc<Connection>, binding: &Arc<Binding>, hosted: &Arc<Hoste
                 }
             };
             let provider = |hosted: &Hosted| {
-                lock_of(&hosted.session_id)
+                lock_of(&hosted.run_id)
                     .as_ref()
                     .map(ToString::to_string)
             };
             send(json!({
                 "sessionId": binding.key,
-                "providerSessionId": provider(&hosted),
+                "providerId": provider(&hosted),
                 "event": null,
                 "terminal": hosted.terminal,
                 "handler": hosted.handler,
@@ -599,7 +599,7 @@ fn feed(connection: &Arc<Connection>, binding: &Arc<Binding>, hosted: &Arc<Hoste
                     let text = entry.event.text.clone();
                     send(json!({
                         "sessionId": binding.key,
-                        "providerSessionId": provider(&hosted),
+                        "providerId": provider(&hosted),
                         "seq": entry.seq,
                         "replay": entry.seq <= replay_until && after < replay_until,
                         "event": entry.event,

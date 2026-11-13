@@ -23,8 +23,8 @@ fn spec(source: &Path, state: &Path) -> SafeHouseSpec {
     }
 }
 
-fn describe(session: &ai6::guatiao::library::Object<dyn ai6::SafeHouseSession>) -> SafeHouseInfo {
-    SafeHouseInfo::from_value(&session.info().unwrap()).unwrap()
+fn describe(run: &ai6::guatiao::library::Object<dyn ai6::SafeHouseRun>) -> SafeHouseInfo {
+    SafeHouseInfo::from_value(&run.info().unwrap()).unwrap()
 }
 
 #[test]
@@ -37,8 +37,8 @@ fn a_mission_works_in_a_copy_and_reports_no_history() {
     let state = root.path().join("state");
 
     let spec = spec(&source, &state);
-    let session = Copier::default().open(&spec.to_value().unwrap()).unwrap();
-    let info = describe(&session);
+    let run = Copier::default().open(&spec.to_value().unwrap()).unwrap();
+    let info = describe(&run);
     assert!(info.isolated && !info.supports_history);
     assert!(info.branch.is_none() && info.base.is_none());
     let copy = Path::new(&info.path);
@@ -58,13 +58,13 @@ fn a_mission_works_in_a_copy_and_reports_no_history() {
     fs::write(copy.join("a.txt"), "changed\n").unwrap();
     assert_eq!(fs::read_to_string(source.join("a.txt")).unwrap(), "a\n");
     assert!(
-        ChangeLog::from_value(&session.changes().unwrap())
+        ChangeLog::from_value(&run.changes().unwrap())
             .unwrap()
             .changes
             .is_empty()
     );
 
-    let report = SafeHouseReport::from_value(&session.finish().unwrap()).unwrap();
+    let report = SafeHouseReport::from_value(&run.finish().unwrap()).unwrap();
     assert!(report.kept && report.changes.is_empty());
     let reopened = Copier::default()
         .open(
@@ -94,10 +94,10 @@ fn working_in_place_never_copies_and_a_copy_is_not_made_twice() {
         isolate: false,
         ..spec(&source, &state)
     };
-    let session = Copier::default()
+    let run = Copier::default()
         .open(&in_place.to_value().unwrap())
         .unwrap();
-    assert!(!describe(&session).isolated);
+    assert!(!describe(&run).isolated);
     assert!(!state.exists());
 
     let isolated = spec(&source, &state);
@@ -130,26 +130,26 @@ fn discard_removes_a_copy_and_never_the_source() {
     fs::write(source.join("a.txt"), "a\n").unwrap();
     let state = root.path().join("state");
 
-    let session = Copier::default()
+    let run = Copier::default()
         .open(&spec(&source, &state).to_value().unwrap())
         .unwrap();
-    let copy = describe(&session).path;
+    let copy = describe(&run).path;
     assert!(
-        session.exports().is_err(),
+        run.exports().is_err(),
         "a copy cannot tell what is exported"
     );
-    session.discard().unwrap();
+    run.discard().unwrap();
     assert!(!Path::new(&copy).exists());
-    session.discard().unwrap();
+    run.discard().unwrap();
 
     let in_place = SafeHouseSpec {
         isolate: false,
         ..spec(&source, &state)
     };
-    let session = Copier::default()
+    let run = Copier::default()
         .open(&in_place.to_value().unwrap())
         .unwrap();
-    assert!(session.discard().is_err());
+    assert!(run.discard().is_err());
     assert!(source.join("a.txt").exists());
 }
 
@@ -195,8 +195,8 @@ fn the_configured_width_bounds_the_directory_name() {
         name_chars: 4,
         ..CopyConfig::default()
     });
-    let session = copier.open(&spec.to_value().unwrap()).unwrap();
-    let info = describe(&session);
+    let run = copier.open(&spec.to_value().unwrap()).unwrap();
+    let info = describe(&run);
     let name = Path::new(&info.path).file_name().unwrap().to_string_lossy();
     assert!(
         name.starts_with("miss-") && !name.starts_with("missi"),

@@ -588,7 +588,7 @@ if ($mode -eq 'print-system') {
     exit 0
 }
 
-# Only for this run; the same names may belong to the session that called this script.
+# Only for this run; the same names may belong to the run that called this script.
 $changed = 'RUSTUP_HOME', 'CARGO_HOME', 'RUSTUP_INIT_SKIP_PATH_CHECK', 'FLUTTER_ROOT', 'PUB_CACHE', 'FLUTTER_WINDOWING', 'FLUTTER_GIT_URL'
 $saved = @{}
 foreach ($name in $changed) { $saved[$name] = [Environment]::GetEnvironmentVariable($name) }

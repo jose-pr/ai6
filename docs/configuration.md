@@ -93,7 +93,7 @@ password = { provider = "file", key = "db-password" }   # default: the provider'
 headquarters_lease = 60               # seconds; also sets the SQL connections' timeouts
 sqlite_busy_timeout = 30              # seconds a SQLite connection waits for a lock
 
-[registry.limits.sessions]            # what the Registry keeps and accepts: Limits below
+[registry.limits.runs]            # what the Registry keeps and accepts: Limits below
 records = 100000
 
 [unex]                                # where Universal Exports is, and how it runs
@@ -199,7 +199,7 @@ a whole number; `null`, or the string `"none"` in TOML, which has no
 null, takes the bound away. A number of seconds may be fractional. Only nonsense is refused:
 a negative number, or a word other than `none`. A value looser than its default (larger, or
 no bound) is a weakening, reported like an inline secret:
-`registry.limits.sessions.records none is looser than the default 100000`.
+`registry.limits.runs.records none is looser than the default 100000`.
 
 ```toml
 [provider]
@@ -208,7 +208,7 @@ loadout_bytes = 2097152               # a larger loadout document; reported as a
 [registry]
 sqlite_busy_timeout = 10              # tighter than the default 30
 
-[registry.limits.sessions]
+[registry.limits.runs]
 records = 50000
 
 [registry.limits.audit]
@@ -375,13 +375,13 @@ it.
 | `text_bytes` | 512 | **Longest signer, approval, model or reason.** Bytes of a grant's signer, approval, model and reason. |
 <!-- schema:registry.limits.clearance:end -->
 
-`[registry.limits.contexts]`: each Session's harness context.
+`[registry.limits.contexts]`: each Run's harness context.
 
 <!-- schema:registry.limits.contexts:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `context_bytes` | 8 MiB | **Largest Session context.** Bytes of one Session's context kept; a longer one keeps its newest part and says how large it was. |
-| `records` | 2,000 | **Session contexts kept.** Session contexts kept; the oldest filed go first. |
+| `context_bytes` | 8 MiB | **Largest Run context.** Bytes of one Run's context kept; a longer one keeps its newest part and says how large it was. |
+| `records` | 2,000 | **Run contexts kept.** Run contexts kept; the oldest filed go first. |
 <!-- schema:registry.limits.contexts:end -->
 
 `[registry.limits.files]`: how long the file Registry waits. The SQL Registry ignores it.
@@ -469,32 +469,32 @@ global one.
 | `name_bytes` | 256 | **Longest title or name.** Bytes of a Report's kind and title, and of each name on it: filer, links, compartments. |
 | `links` | 64 | **Links on a Report.** Links on one Report. |
 | `page` | 1,000 | **Reports in one list.** Reports one list returns. |
-| `per_session` | 20 | **Reports per Session in the window.** Reports one Agent Session may file in the window. |
+| `per_run` | 20 | **Reports per Run in the window.** Reports one Agent Run may file in the window. |
 | `per_operation` | 200 | **Agent Reports per scope in the window.** Reports Agents together may file against one scope in the window. |
 | `window` | 3,600 | **Rate window.** Seconds the two counts above look back over. |
 | `keep_closed` | none | **Keep a closed Report for.** Seconds a closed Report is kept; `null` keeps it for good. |
 <!-- schema:registry.limits.reports:end -->
 
-`[registry.limits.sessions]`
+`[registry.limits.runs]`
 
-<!-- schema:registry.limits.sessions:begin -->
+<!-- schema:registry.limits.runs:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `record_bytes` | 64 KiB | **Largest Session record.** Bytes of one Session record. |
-| `records` | 100,000 | Session records. |
-| `id_bytes` | 128 | **Longest Session ID.** Bytes of a Session ID. |
-| `exposures` | 32 | **Exposures per Session.** Exposures recorded per Session. |
+| `record_bytes` | 64 KiB | **Largest Run record.** Bytes of one Run record. |
+| `records` | 100,000 | Run records. |
+| `id_bytes` | 128 | **Longest Run ID.** Bytes of a Run ID. |
+| `exposures` | 32 | **Exposures per Run.** Exposures recorded per Run. |
 | `exposure_source_bytes` | 128 | **Longest exposure source.** Bytes of an exposure's source. |
-| `recent_events` | 20 | **Recent event lines per Session.** Recent event lines kept per Session. |
-| `recent_event_chars` | 300 | **Longest recent event line.** Characters kept of each recent event line and of a lost Session's reason. |
-| `exposure_sources` | 32 | **Sources of exposure per brief.** Sources of exposure one Session's brief records; the rest are not kept. |
+| `recent_events` | 20 | **Recent event lines per Run.** Recent event lines kept per Run. |
+| `recent_event_chars` | 300 | **Longest recent event line.** Characters kept of each recent event line and of a lost Run's reason. |
+| `exposure_sources` | 32 | **Sources of exposure per brief.** Sources of exposure one Run's brief records; the rest are not kept. |
 | `final_report_bytes` | 64 KiB | **Longest final report.** Bytes kept of an Agent's final message for its Mission's outcome; a longer one is cut and says so. |
 | `verdict_note_bytes` | 4 KiB | **Longest verdict note.** Bytes of the note a person gives with a verdict on a Mission's outcome. |
 | `amendment_bytes` | 8 KiB | **Longest redispatch amendment.** Bytes of what a redispatch adds to the next attempt's task. |
 | `deliverables` | 32 | **Deliverables per attempt.** Deliverables kept on one attempt. |
 | `evidence_entries` | 64 | **Probe findings per attempt.** Probe findings kept on one attempt; the oldest go first. |
 | `evidence_detail_chars` | 300 | **Longest probe finding.** Characters kept of a probe finding's detail. |
-<!-- schema:registry.limits.sessions:end -->
+<!-- schema:registry.limits.runs:end -->
 
 `[registry.limits.sleepers]`
 
@@ -550,7 +550,7 @@ global one.
 | `record_bytes` | 8 KiB | **Largest event.** Bytes of one event. |
 | `id_bytes` | 128 | **Longest event ID.** Bytes of an event's ID. |
 | `name_bytes` | 64 | **Longest kind, action or detail key.** Bytes of an event's kind, action and detail keys. |
-| `text_bytes` | 256 | **Longest event text.** Bytes of an event's Operation, Station, Mission, Session, actor and detail values. |
+| `text_bytes` | 256 | **Longest event text.** Bytes of an event's Operation, Station, Mission, Run, actor and detail values. |
 | `detail_entries` | 8 | **Details per event.** Detail entries per event. |
 <!-- schema:registry.limits.timeline:end -->
 
@@ -578,7 +578,7 @@ global one.
 | --- | --- | --- |
 | `records` | 1,024 | **Watch records.** Watch records the Registry keeps. |
 | `record_bytes` | 1 MiB | **Largest watch record.** Bytes of one watch's record. |
-| `logbook` | 100 | **Logbook entries per watch.** Logbook entries kept per watch, and handed to a fresh Session; past it the oldest go. |
+| `logbook` | 100 | **Logbook entries per watch.** Logbook entries kept per watch, and handed to a fresh Run; past it the oldest go. |
 | `entry_bytes` | 2 KiB | **Longest logbook entry.** Bytes of one logbook entry's text, or of a control's note; a longer entry is cut. |
 | `seen` | 1,024 | **Events remembered per watch.** Events a watch remembers being told of, so it is not told twice; past it the oldest go. |
 | `controls` | 32 | **Controls waiting per watch.** Controls waiting for a watch's Station; past it a control is refused. |
@@ -650,16 +650,16 @@ text_bytes = 128                      # the longest text filter a page link may 
 max_width = 3840                      # the widest hero picture fetched, in pixels; a site on slow links sets 1920
 
 [oo.refresh]                          # seconds between a page's asks; 0 turns that refresh off
-sessions = 3                          # what the page shown displays from the board of Sessions, Stations and Missions
+runs = 3                          # what the page shown displays from the board of Runs, Stations and Missions
 overview = 10                         # the overview's recent activity
 timeline = 10                         # an Operation's timeline
 pools = 15                            # the account pools
-slow = 15                             # what the bell and search need and the page does not show: Sessions, Stations, held briefs, green ink requests, Mission proposals; 0 reads them with every refresh
+slow = 15                             # what the bell and search need and the page does not show: Runs, Stations, held briefs, green ink requests, Mission proposals; 0 reads them with every refresh
 profile = 60                          # who the person is and what they may do; 0 reads it only at sign-in and when the operator menu opens
 hidden = 60                           # everything, while the tab or window cannot be seen; 0 reads nothing until it can
-silent_intervals = 3                  # a Station silent for this many `sessions` intervals shows as silent
+silent_intervals = 3                  # a Station silent for this many `runs` intervals shows as silent
 renew_before = 600                    # how long before the access token ends the app renews it, and before the sign-in ends says so; 0 does neither
-renew_retry = 30                      # how soon a failed renewal is tried again when `sessions` is 0; else at `sessions`
+renew_retry = 30                      # how soon a failed renewal is tried again when `runs` is 0; else at `runs`
 
 [oo.controls]                         # following a Mission control until the Station reports
 wait = 10                             # seconds; 0 returns once the control is queued
@@ -672,7 +672,7 @@ audit = 100                           # records in the audit log
 summary = 5                           # recent activity, and Operations and Stations, a summary lists
 search = 24                           # results the top bar's search lists at once
 
-[oo.terminal]                         # the live Session terminal
+[oo.terminal]                         # the live Run terminal
 scrollback_lines = 10000
 connect_timeout = 10                  # seconds the socket may take to open
 retry_delay = 1                       # seconds before the first reconnect; each next one doubles
@@ -738,16 +738,16 @@ build; the values above are their defaults, which a test holds them to.
 <!-- schema:oo.refresh:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `sessions` | 3 | **The page shown.** What the page shown displays from the board of Sessions, Stations and Missions. |
+| `runs` | 3 | **The page shown.** What the page shown displays from the board of Runs, Stations and Missions. |
 | `overview` | 10 | **The overview.** The overview's recent activity. |
 | `timeline` | 10 | **A timeline.** An Operation's timeline. |
 | `pools` | 15 | The account pools. |
-| `slow` | 15 | **The bell and the search.** What the bell and the search need and the page shown does not display: Sessions, Stations, held briefs, green ink requests and Mission proposals; `0` reads them with every refresh. |
+| `slow` | 15 | **The bell and the search.** What the bell and the search need and the page shown does not display: Runs, Stations, held briefs, green ink requests and Mission proposals; `0` reads them with every refresh. |
 | `profile` | 60 | **Who the person is.** Who the person is and what they may do; `0` reads it only at sign-in and when the operator menu opens. |
 | `hidden` | 60 | **While nothing can be seen.** Everything, while the tab or window cannot be seen; `0` reads nothing until it can. |
-| `silent_intervals` | 3 | **Intervals before a Station is silent.** A Station that has not checked in for this many `sessions` intervals shows as silent. |
+| `silent_intervals` | 3 | **Intervals before a Station is silent.** A Station that has not checked in for this many `runs` intervals shows as silent. |
 | `renew_before` | 600 | **Renew a sign-in before it ends.** How long before the access token ends the app renews it, and before the sign-in itself ends the person is told; `0` does neither, and the sign-in ends with the token. A shorter lifetime than this is renewed halfway through. |
-| `renew_retry` | 30 | **Retry a failed renewal after.** How soon a failed renewal is tried again when `sessions` is off; else it is tried again at `sessions`. |
+| `renew_retry` | 30 | **Retry a failed renewal after.** How soon a failed renewal is tried again when `runs` is off; else it is tried again at `runs`. |
 <!-- schema:oo.refresh:end -->
 
 `[oo.controls]`: following a Mission control until the Station reports.
@@ -771,7 +771,7 @@ build; the values above are their defaults, which a test holds them to.
 | `search` | 24 | **Search results listed.** Results the top bar's search lists at once. |
 <!-- schema:oo.pages:end -->
 
-`[oo.terminal]`: the live Session terminal.
+`[oo.terminal]`: the live Run terminal.
 
 <!-- schema:oo.terminal:begin -->
 | Key | Default | Meaning |
@@ -912,7 +912,7 @@ no-op is stored at once.
 | `watch` | `watches` | no | no | live | Roster page (Watches), route `/v1/user/roster/watches` | `[watch.<scope>]`: [watches](watches.md), keyed `m`, `operation:<codename>` or `station:<id>` |
 
 A Station polls its provider every `[provider] poll` seconds. A family that applies live
-reaches requests, the scheduler and new Sessions at once; running Sessions keep what they
+reaches requests, the scheduler and new Runs at once; running Runs keep what they
 started with. A changed family that applies at restart is logged and listed at check-in in
 `config.needs_restart` by name. A revision that fails its checks is refused once: logged,
 audited as `config.refused`, and reported at check-in.
@@ -924,12 +924,12 @@ tables configure providers.
 <!-- schema:record.station:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `max_concurrent_missions` | 4 | **Sessions at once.** Agent Sessions it runs at once. |
-| `stall_timeout` | 300 | **Stall a silent Session after.** Seconds without provider or terminal activity before a Session stalls. |
-| `loop_timeout` | 300 | **Stall a repeating Session after.** Seconds without novel terminal output before repeated output stalls a Session. |
+| `max_concurrent_missions` | 4 | **Runs at once.** Agent Runs it runs at once. |
+| `stall_timeout` | 300 | **Stall a silent Run after.** Seconds without provider or terminal activity before a Run stalls. |
+| `loop_timeout` | 300 | **Stall a repeating Run after.** Seconds without novel terminal output before repeated output stalls a Run. |
 | `loop_min_lines` | 50 | **Repeated lines before a loop counts.** Repeated terminal lines required before loop detection applies. |
-| `blocked_after` | 10 | **Mark a Session blocked after.** Quiet seconds before a prompt-shaped terminal tail marks a Session blocked. |
-| `max_runtime` | none | **Longest a Session runs.** Longest a Session runs, in seconds. |
+| `blocked_after` | 10 | **Mark a Run blocked after.** Quiet seconds before a prompt-shaped terminal tail marks a Run blocked. |
+| `max_runtime` | none | **Longest a Run runs.** Longest a Run runs, in seconds. |
 | `history` | 4,096 | **Lines remembered for loop detection.** Distinct terminal lines kept for repeated-output detection. |
 | `normalize_digits` | `false` | **Ignore digits when comparing lines.** Whether digit runs are normalized when comparing terminal lines for loops. |
 | `roles` | both | **What this Station does.** `control` (elects Headquarters) and `execution` (runs assigned Missions). |
@@ -992,7 +992,7 @@ and only a zero where nothing could pass is refused.
 
 ```toml
 [gateway]
-sessions = 32                         # live Sessions, instead of 16
+runs = 32                         # live Runs, instead of 16
 frame_bytes = "none"                  # no bound on a frame (a weakening)
 
 [controls]
@@ -1004,16 +1004,16 @@ pending_per_station = 8
 <!-- schema:record.unex.gateway:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `sessions` | 16 | **Live Sessions.** Live provider Sessions. |
-| `board_sessions` | 2,000 | **Sessions on the Mission board.** Sessions the Mission board lists from the Registry's records, the most recently updated ones; a Session still live is always listed. |
-| `clients_per_session` | 12 | **Browser connections per Session.** Simultaneous browser connections to one provider Session. |
-| `scrollback_events` | 64 | **Frames kept for a late client.** Value frames kept per provider Session for a client that joins late. |
+| `runs` | 16 | **Live Runs.** Live provider Runs. |
+| `board_runs` | 2,000 | **Runs on the Mission board.** Runs the Mission board lists from the Registry's records, the most recently updated ones; a Run still live is always listed. |
+| `clients_per_run` | 12 | **Browser connections per Run.** Simultaneous browser connections to one provider Run. |
+| `scrollback_events` | 64 | **Frames kept for a late client.** Value frames kept per provider Run for a client that joins late. |
 | `frame_bytes` | 256 KiB | **Largest frame.** Bytes of one WebSocket or ingress frame. A Station is told at registration how much terminal output that leaves room for, and splits longer output to fit. |
 | `input_frames_per_second` | 40 | **Browser input frames a second.** Browser input frames accepted per connection per second. |
 | `input_queue` | 64 | **Queue to the Stations.** Capacity of the queue between the gateway and its Stations, at least 1. |
-| `fanout` | 8 | **Queue per Session viewer.** Capacity of each per-Session viewer queue, at least 1. |
-| `buffer_budget_bytes` | 512 MiB | **All the gateway's buffers.** Bytes the gateway may hold in buffers across every Session and connection; the configuration is refused when its limits could exceed it. |
-| `client_slots` | 100,000 | **Browser connection slots.** Browser connections the gateway keeps slots for; the configuration is refused when its Sessions times connections per Session could exceed it. |
+| `fanout` | 8 | **Queue per Run viewer.** Capacity of each per-Run viewer queue, at least 1. |
+| `buffer_budget_bytes` | 512 MiB | **All the gateway's buffers.** Bytes the gateway may hold in buffers across every Run and connection; the configuration is refused when its limits could exceed it. |
+| `client_slots` | 100,000 | **Browser connection slots.** Browser connections the gateway keeps slots for; the configuration is refused when its Runs times connections per Run could exceed it. |
 | `attach_token_ttl` | 300 | **An attach token lasts.** Seconds an attach token lives, more than 0. |
 | `write_lease_ttl` | 30 | **A terminal write lease lasts.** Seconds a terminal write lease lives, more than 0. |
 | `station_token_min_bytes` | 32 | **Shortest Station token.** Characters the Station token holds at least; a smaller value is looser. |
@@ -1136,12 +1136,12 @@ provider applied before it was a key; the provider's API header lists them with 
 <!-- schema:record.station.scheduler:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `event_queue` | 256 | **Events queued per Session.** Events of one Session queued for its event pump; past it the oldest is dropped. |
+| `event_queue` | 256 | **Events queued per Run.** Events of one Run queued for its event pump; past it the oldest is dropped. |
 | `interval` | 0.5 | **Between scheduler rounds.** Seconds between scheduler rounds. |
 | `retry_backoff` | 5 | **Retry a failed Mission start after.** Seconds before a Mission whose start failed is tried again; each further failure in a row doubles the wait, up to `retry_backoff_max`. `0` retries on the next round. |
 | `retry_backoff_max` | 600 | **Longest wait between start retries.** Seconds the wait between tries of a Mission start grows to, at most. |
 | `check_in` | 15 | **Between check-ins with the Registry.** Seconds between the Station's check-ins with the Registry. |
-| `lease` | 180 | **A Mission lease lasts.** Seconds a lease on a Mission's brief or Session lasts unless the Station renews it at a check-in. A Station whose check-ins can take longer than this loses its Missions to recovery. |
+| `lease` | 180 | **A Mission lease lasts.** Seconds a lease on a Mission's brief or Run lasts unless the Station renews it at a check-in. A Station whose check-ins can take longer than this loses its Missions to recovery. |
 | `intake_attempts` | 3 | **Tries to place a brief.** Times a brief is placed before it is filed as failed. |
 | `role_catalog_bytes` | 512 KiB | **Largest role catalog and placement policies.** Bytes of the Agent role catalog and of the placement policies a check-in carries; past it, each is left out. |
 | `provider_catalog_bytes` | 512 KiB | **Largest provider catalog.** Bytes of the provider catalog (each loaded provider with its configuration's schema and form) a check-in carries; past it, the schemas and forms are left out. |
@@ -1155,12 +1155,12 @@ provider applied before it was a key; the provider's API header lists them with 
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `request_timeout` | 2 | **Longest request to Universal Exports.** Seconds one request to Universal Exports may take. |
-| `queue` | 64 | **Events waiting to publish.** Events waiting for Universal Exports; past it output gives way, oldest first, and a Session's latest state is kept. |
+| `queue` | 64 | **Events waiting to publish.** Events waiting for Universal Exports; past it output gives way, oldest first, and a Run's latest state is kept. |
 | `terminal_bytes` | 192 KiB | **Terminal output in one frame.** Bytes of terminal output in one published frame. Longer output goes as several, and what Universal Exports states at registration lowers it. With room for its header, the default is the gateway's default `frame_bytes`. |
-| `pre_bind_terminal_bytes` | 1 MiB | **Terminal output kept before a Mission binds.** Bytes of terminal output kept for a Session not yet bound to its Mission; past it the oldest goes. |
+| `pre_bind_terminal_bytes` | 1 MiB | **Terminal output kept before a Mission binds.** Bytes of terminal output kept for a Run not yet bound to its Mission; past it the oldest goes. |
 | `publish_retry_delay` | 0.5 | **Retry a failed publication after.** Seconds before a failed publication is tried again; each try doubles it, up to `retry_max_delay`. |
 | `retry_max_delay` | 30 | **Longest pause between tries.** The longest pause between tries, of a publication or of an input or control poll. |
-| `refresh_every` | 15 | **Register live Sessions again every.** Seconds between registering every live Session again, which is how a gateway restarted during a quiet spell learns of them. |
+| `refresh_every` | 15 | **Register live Runs again every.** Seconds between registering every live Run again, which is how a gateway restarted during a quiet spell learns of them. |
 | `input_retry_delay` | 0.1 | **Retry a failed input or control poll after.** Seconds before a failed input or control poll is tried again; each try doubles it, up to `retry_max_delay`. |
 | `control_wait` | 1 | **Control poll held open.** Seconds Universal Exports holds a control poll open; kept under `request_timeout`. |
 | `input_wait` | 20 | **Input poll held open.** Seconds Universal Exports holds an input poll open; a keystroke ends it at once, so a long wait costs no delay. The gateway's `max_poll_wait` bounds it. |
@@ -1203,11 +1203,11 @@ provider applied before it was a key; the provider's API header lists them with 
 <!-- schema:record.station.recovery:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `first_reattach_delay` | 5 | **First re-attach try after.** Seconds before the first try to re-attach to a Session; each failed try doubles it. |
+| `first_reattach_delay` | 5 | **First re-attach try after.** Seconds before the first try to re-attach to a Run; each failed try doubles it. |
 | `max_reattach_delay` | 60 | **Longest wait between re-attach tries.** The longest wait between tries, in seconds. |
 | `give_up_tries` | 10 | **Tries to give a lease up.** Tries at a Registry step a concurrent renewal can refuse, when the Station gives a lease up. |
-| `notes_every` | 15 | **Write a Session's recent events every.** Seconds between writes of a Session's recent events to its record. |
-| `probe_timeout` | 30 | **Longest look at a Theater.** Seconds the look at whether a Session's Theater still answers may take. |
+| `notes_every` | 15 | **Write a Run's recent events every.** Seconds between writes of a Run's recent events to its record. |
+| `probe_timeout` | 30 | **Longest look at a Theater.** Seconds the look at whether a Run's Theater still answers may take. |
 <!-- schema:record.station.recovery:end -->
 
 `[vetting]`
@@ -1249,7 +1249,7 @@ provider applied before it was a key; the provider's API header lists them with 
 <!-- schema:record.station.accounts:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `reset_grace` | 15 | **Wait past a reported reset.** Seconds past a reported reset before a Session parked on a limit resumes. |
+| `reset_grace` | 15 | **Wait past a reported reset.** Seconds past a reported reset before a Run parked on a limit resumes. |
 | `unknown_use_permille` | 500 | **Use assumed when none is reported.** Thousandths used an account whose provider reported nothing counts as, 0 to 1,000. |
 | `claim_ttl` | 60 | **A claim on an account lasts.** Seconds a claim on an account lasts unless the Station renews it at check-in. |
 | `limit_horizon` | 691,200 (8 days) | **Longest a limited account stays out.** The longest a limited account is kept out, in seconds, whatever reset time its provider reports. |
@@ -1258,7 +1258,7 @@ provider applied before it was a key; the provider's API header lists them with 
 | `model_probes` | 4 | **Model listings at once.** Accounts and routes a look at the models asks at once; `null` asks every one at once, and 0 asks none, so a look changes nothing. |
 | `model_probe_timeout` | 20 | **Longest model listing.** Seconds a look waits for one account's or route's model listing; one that takes longer keeps the list it had before, or is unknown. |
 | `renew_every` | 600 | **Between login renewal rounds.** Seconds between the Headquarters Station's rounds over the logins kept in the Registry; 0 runs none. |
-| `renew_within` | 3,600 | **Renew a login this long before it ends.** Seconds before a login's known end at which a round renews it: well before its harness's own threshold, so a Session's harness has no reason to. |
+| `renew_within` | 3,600 | **Renew a login this long before it ends.** Seconds before a login's known end at which a round renews it: well before its harness's own threshold, so a Run's harness has no reason to. |
 | `renew_after` | 518,400 (6 days) | **Renew a login of unknown end after.** Seconds since a login was last renewed at which a round renews it, where its end cannot be read. |
 | `renew_timeout` | 120 | **Longest login renewal.** Seconds a login's renewal command may take; never past its lease. |
 | `renew_lease` | 300 | **A login's renewal lease lasts.** Seconds a Station holds a login's renewal lease; another may take it after that. |
@@ -1291,7 +1291,7 @@ provider applied before it was a key; the provider's API header lists them with 
 
 `[overlays]`: reading the [overlays](agents.md#overlays) loadouts and Operations issue, as `ai6
 overlay pin` reads them, whether one without a pin is issued, and delivering and preparing them for
-a Session. `unpinned = true` is a weakening, named each time such an overlay is issued.
+a Run. `unpinned = true` is a weakening, named each time such an overlay is issued.
 
 <!-- schema:record.station.overlays:begin -->
 | Key | Default | Meaning |
@@ -1302,7 +1302,7 @@ a Session. `unpinned = true` is a weakening, named each time such an overlay is 
 | `bytes` | 64 MiB | **Largest overlay.** Bytes of one overlay's files together. |
 | `file_bytes` | 16 MiB | **Largest overlay file.** Bytes of one file of an overlay. |
 | `unpinned` | `false` | **Issue overlays without a pin.** Issue an overlay whose `[overlay.<name>]` has no pin, reporting it as `unpinned` each time; without this such an overlay is refused. A weakening. |
-| `context_bytes` | 24 KiB | **Largest overlay context.** Bytes of the rules, routing and context a Session's overlays add to its initial context together. Past it the Session is refused, naming this setting, rather than its text cut. |
+| `context_bytes` | 24 KiB | **Largest overlay context.** Bytes of the rules, routing and context a Run's overlays add to its initial context together. Past it the Run is refused, naming this setting, rather than its text cut. |
 | `fetch_timeout` | 300 | **Longest overlay fetch.** Seconds a fetch of one overlay's Git source may take. |
 | `deps_timeout` | 600 | **Longest dependency install.** Seconds installing one overlay's dependency file may take. |
 | `output_bytes` | 1 MiB | **Largest output of an overlay's step.** Bytes of each output stream kept from an overlay's setup, env script or package manager. |
@@ -1326,7 +1326,7 @@ a Session. `unpinned = true` is a weakening, named each time such an overlay is 
 <!-- schema:record.station.secrets:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `lease_ttl` | 3,600 | **A secret's lease lasts.** Seconds the leases of a Session's loadout and pool account secrets last. |
+| `lease_ttl` | 3,600 | **A secret's lease lasts.** Seconds the leases of a Run's loadout and pool account secrets last. |
 | `max_lease_ttl` | 3,600 | **Longest secret lease.** The longest lease, in seconds; a green ink secret's lease lasts as long as its approval, up to it. |
 | `min_matched_bytes` | 6 | **Shortest secret looked for.** Secrets shorter than this are not looked for in what an Agent writes outward: a short one would refuse ordinary words. Smaller is looser. |
 <!-- schema:record.station.secrets:end -->
@@ -1355,7 +1355,7 @@ a Session. `unpinned = true` is a weakening, named each time such an overlay is 
 | --- | --- | --- |
 | `poll` | 0.2 | **Read a detached harness's output every.** Seconds between reads of a detached harness's output. |
 | `script_timeout` | 30 | **Longest wrapper script.** Seconds one of the wrapper's scripts may take over the transport. |
-| `name_chars` | 64 | **Session name in the wrapper's files.** Characters of the Session's name in the wrapper's file names. |
+| `name_chars` | 64 | **Run name in the wrapper's files.** Characters of the Run's name in the wrapper's file names. |
 <!-- schema:record.station.detached:end -->
 
 `[runner]`: field runners, and the Station's side of them.
@@ -1366,18 +1366,18 @@ a Session. `unpinned = true` is a weakening, named each time such an overlay is 
 | `pump_poll` | 0.25 | **Check whether to stop after waiting.** Seconds a runner waits for a harness's next event before it checks whether to stop. |
 | `feed_poll` | 0.05 | **Look for spooled events every.** Seconds between a runner connection's looks for spooled events to send. |
 | `replay_batch` | 256 | **Spooled events taken at once.** Spooled events a runner connection takes from the spool at once. |
-| `keep_ended` | 604,800 (7 days) | **Keep an ended Session for.** Seconds an ended Session is kept by its runner. |
+| `keep_ended` | 604,800 (7 days) | **Keep an ended Run for.** Seconds an ended Run is kept by its runner. |
 | `cable_request_bytes` | 4 MiB | **Largest request through the Cable relay.** Bytes of one request through a runner's Cable relay. |
 | `cable_connect_timeout` | 10 | **The Station reaches its Cable endpoint within.** Seconds the Station may take to reach its own Cable endpoint for a request a runner relays. |
-| `cable_streams` | 64 | **Cable relay requests open at once.** Requests through a runner's Cable relay the Station answers at once for one Session; past it a request is refused until one ends. |
-| `read_wait` | 1 | **One read of a Session waits.** Seconds one read by the Station of a runner's Session waits for an event. |
+| `cable_streams` | 64 | **Cable relay requests open at once.** Requests through a runner's Cable relay the Station answers at once for one Run; past it a request is refused until one ends. |
+| `read_wait` | 1 | **One read of a Run waits.** Seconds one read by the Station of a runner's Run waits for an event. |
 | `connect_timeout` | 5 | **`ai6 runner connect` reaches the runner within.** Seconds `ai6 runner connect` may take to reach the runner's loopback port. |
 | `answer_wait` | 10 | **A runner answers its authentication within.** Seconds a runner that accepted `ai6 runner connect` has to answer its authentication. |
 | `start_wait` | 30 | **A started runner answers within.** Seconds a started runner has to answer. |
 | `start_margin` | 30 | **Extra time to start over a transport.** Seconds starting a runner over a transport may take past `start_wait`. |
 | `start_poll` | 0.05 | **Look at whether a started runner serves every.** Seconds between looks at whether a runner started on this host serves yet. |
 | `terminal_poll` | 0.2 | **One read of the connect terminal waits.** Seconds one read of `ai6 runner connect`'s terminal waits before it checks whether to stop or give up. |
-| `superseded_close_wait` | 0.2 | **Keep a superseded connection open for.** Seconds a connection another one took a Session from stays open, so the notice saying so is written before the socket closes under it. |
+| `superseded_close_wait` | 0.2 | **Keep a superseded connection open for.** Seconds a connection another one took a Run from stays open, so the notice saying so is written before the socket closes under it. |
 | `retry_pause` | 0.1 | **Shortest pause between tries at a runner.** Seconds at least between the Station's tries at a runner it cannot reach. |
 <!-- schema:record.station.runner:end -->
 
@@ -1406,7 +1406,7 @@ a Session. `unpinned = true` is a weakening, named each time such an overlay is 
 | `ephemeral_name_bytes` | 100 | **Longest ephemeral Theater name.** Bytes of an ephemeral Theater's name; a longer one is cut and given a digest. |
 <!-- schema:record.station.theaters:end -->
 
-`[theater_tools]`: the `theater_*` tools of a remote-hands Session.
+`[theater_tools]`: the `theater_*` tools of a remote-hands Run.
 
 <!-- schema:record.station.theater_tools:begin -->
 | Key | Default | Meaning |
@@ -1430,7 +1430,7 @@ a Session. `unpinned = true` is a weakening, named each time such an overlay is 
 <!-- schema:record.station.head_of_station:end -->
 
 The `cables` record takes `grants`, `inbound` and `channels`, and the relay's limits:
-`max_fanout` (Agent Sessions one broadcast may reach, default 100), `sender_rate` and
+`max_fanout` (Agent Runs one broadcast may reach, default 100), `sender_rate` and
 `sender_burst` (sends a second and burst per sending Agent, 2 and 20), `scope_rate` and
 `scope_burst` (per target scope, 10 and 50), `body_bytes` (UTF-8 bytes of a Cable's body,
 16 KiB; `"none"` takes the bound away), `max_ttl` (the longest lifetime a sender may ask for,
@@ -1513,7 +1513,7 @@ report; `unlocked_stale` when the desk starts.
 | `report_queue` | 256 | **Reports waiting to be sent.** Ordinary reports (her text, her tool calls) waiting to be sent; past it the newest are dropped. |
 | `report_attempts` | 3 | **Tries to send a report.** Times a report is sent before it counts as lost. |
 | `report_retry` | 0.2 | **Retry a report after.** Seconds between tries of a report that did not reach Universal Exports. |
-| `known` | 1,024 | **Conversations remembered for a resume.** Conversations whose provider Session the desk remembers for a resume. |
+| `known` | 1,024 | **Conversations remembered for a resume.** Conversations whose provider Run the desk remembers for a resume. |
 | `close_wait` | 10 | **Wait for a closing harness.** Seconds a message waits for the conversation's closing harness. |
 | `limit_fallback` | 1,800 | **Out for this long at a limit with no reset time.** Seconds a route or account stays out when a harness reports a limit with no reset time. |
 | `remove_retry` | 2 | **Retry removing a directory for.** Seconds removing a closed harness's directory is tried again. |
@@ -1650,7 +1650,7 @@ tables directly advances that row in the same transaction, or Stations do not se
 ### The Registry
 
 The Registry holds what Stations write as they run: check-ins, leases, the Headquarters
-term, Sessions, Cables, approvals and audit. It stays a store of its own: by default the
+term, Runs, Cables, approvals and audit. It stays a store of its own: by default the
 provider's database when that is SQL, so one PostgreSQL location configures a whole HA
 deployment, else `registry/` in the state directory. Configuration can live in a git
 checkout while the Registry lives in PostgreSQL.

@@ -4,8 +4,8 @@ AI6 has two independent shapes: the **work** (what is being done) and the
 **infrastructure** (where it runs). Neither contains the other.
 
 ```text
-Work            Operation ──► Mission ──► Session
-                (global)      (brief)     (one provider run, provider-issued Session ID)
+Work            Operation ──► Mission ──► Run
+                (global)      (brief)     (one provider run, provider ID)
                                              │ placed on
 Infrastructure  Station ──────────────────► Theater
                 (node running `ai6`)         (the host or environment the harness runs in)
@@ -15,19 +15,19 @@ Infrastructure  Station ──────────────────�
   cover, budget and a `station_labels` of Station labels. Stations serve Operations; no
   Station owns one.
 - A **Mission** is one brief under an Operation. Its **Mission ID** may group several
-  **Sessions**; a Session ID comes from the provider and survives a resume.
+  **Runs**; a Run ID comes from the provider and survives a resume.
 - A **Station** is a node running the `ai6` daemon, with the `control` role, the
   `execution` role, or both. Control Stations elect the **Headquarters Station (HQS)**,
   which holds M's authority through a lease. An execution-only Station is an
   *outstation*.
-- A **Theater** is where a Session actually works, reached through a **transport** (`local`,
+- A **Theater** is where a Run actually works, reached through a **transport** (`local`,
   `ssh`, or another provider that declares what it can do). A harness runs *on* the Theater
   in field mode, which today means the Station's own host in its terminal provider, or on the
   Station in remote-hands mode, acting on the Theater through the transport.
 
 For orientation only, the closest Kubernetes concepts are: Station ≈ node and kubelet,
 HQS ≈ elected control plane, Registry ≈ etcd, Operation ≈ namespace with a placement
-policy, Mission ≈ Job, Session ≈ a Pod's run, Theater ≈ the container runtime or sandbox
+policy, Mission ≈ Job, Run ≈ a Pod's run, Theater ≈ the container runtime or sandbox
 host, Universal Exports ≈ the API server's front, `ai6ctl` ≈ `kubectl`. These are not
 AI6 names.
 
@@ -49,8 +49,8 @@ AI6 names.
 
 **The Station** (`ai6` crate) runs the directorates' decisions. Its private loopback API
 serves provider discovery and the Mission lifecycle; the scheduler leases briefs from the
-Registry, selects an Agent, creates a safe house and starts a Session. Mission records
-persist, so a restarted Station reattaches to provider Sessions by their Session ID.
+Registry, selects an Agent, creates a safe house and starts a Run. Mission records
+persist, so a restarted Station reattaches to provider Runs by their Run ID.
 
 **Universal Exports** (`universal-exports` crate) is the only public entry point. It
 authenticates users (Authenticator and Directory providers, or a trusted reverse-proxy
@@ -59,7 +59,7 @@ write leases, fans out DipTels with bounded replay, and records metadata-only au
 Browsers and `ai6ctl` never connect to a Station or a provider.
 
 **DipTels** (`ai6-diptel` crate) are the wire contract between a Station, Universal
-Exports and Outer Office: Guatiao values for Session lifecycle, terminal bytes and
+Exports and Outer Office: Guatiao values for Run lifecycle, terminal bytes and
 geometry, used natively and from WebAssembly.
 
 **Outer Office** (`clients/outer-office`, short name OO) is the Flutter desktop and web
@@ -74,12 +74,12 @@ README has the details).
 ## How the directorates decouple
 
 1. **00 Section owns the harness boundary.** `AgentHandler`
-   (`ai6::directorates::section_00`) starts or resumes a provider Session, delivers initial
+   (`ai6::directorates::section_00`) starts or resumes a provider Run, delivers initial
    context, accepts later messages and decodes events. Claude and Codex handlers are
    Guatiao providers in `crates/providers/agents/`.
 2. **Q Branch owns gear.** Terminals (`ai6::directorates::q::terminal`, provider `pty`),
    validated loadouts, Mission-scoped secret leases, Claude MCP configuration,
-   bubblewrap argument translation and Theater provisioning. A Session's loadout secrets
+   bubblewrap argument translation and Theater provisioning. A Run's loadout secrets
    are leased when it starts and handed to the harness in its environment only. Secrets
    never enter a worktree, event log or terminal stream.
 3. **The Registry owns the shared record.** The file-backed Registry holds briefs,
@@ -94,7 +94,7 @@ README has the details).
 
 Frames are [guatiao](https://github.com/Boriken-Dev/guatiao) values declared once in
 `ai6-diptel`; no endpoint hand-rolls a codec. Attach is authorized per Operation,
-Mission, Session and mode (`read` or `write`) with a short-lived token; WebSockets are
+Mission, Run and mode (`read` or `write`) with a short-lived token; WebSockets are
 same-origin and TLS-only, and operator input counts as watchdog activity.
 
 ## Not implemented yet
@@ -104,20 +104,20 @@ same-origin and TLS-only, and operator input counts as watchdog activity.
   wrapper; otherwise it works in remote-hands mode.
 - Central placement: Stations sharing a Registry each lease the briefs they can run
   themselves; the Headquarters lease does not yet drive placement.
-- Of a loadout, only its secrets and `env` are applied when a Session starts; its sandbox profile
+- Of a loadout, only its secrets and `env` are applied when a Run starts; its sandbox profile
   and MCP servers are parsed and validated but not yet applied.
 
 ## Agent Cables
 
 Agent-to-agent messages are **Cables**; terminal output, guatiao wire frames and live
 stream events remain **DipTels**. The `ai6::directorates::registry::cables` relay stores durable Cable envelopes,
-resolves audiences and enforces explicit grants. The Rust AI6 daemon starts per-Session
+resolves audiences and enforces explicit grants. The Rust AI6 daemon starts per-Run
 MCP endpoints for managed Claude and Codex handlers when `cables-mcp` is enabled.
 
 A Cable has a relay-generated ID and timestamp, a sender principal supplied by M's trusted
-adapter from the managed Session, an explicit typed recipient, bounded plain-text body, idempotency key,
+adapter from the managed Run, an explicit typed recipient, bounded plain-text body, idempotency key,
 delivery state and TTL. It may carry the enclosing Mission ID, the provider-issued
-Session ID, and conversation/reply IDs for correlation. The Session ID is descriptive,
+Run ID, and conversation/reply IDs for correlation. The Run ID is descriptive,
 never proof of identity. Callers cannot choose their sender identity or attach files;
 file and resource access require separate authorization.
 
@@ -143,14 +143,14 @@ The lifecycle is `queued`, `delivered`, `held`, `refused`, `acked`, `expired` or
 `failed`. Retries preserve the Cable ID and are idempotent. The default TTL is 15 minutes
 and the maximum is 24 hours (the `cables` record's `default_ttl` and `max_ttl`); broadcast
 membership is snapshotted when accepted. A live
-recipient is bound to its current Session; a known offline Agent gets an Agent-level
-queued delivery that any of its Sessions may read before expiry. The relay uses shared
+recipient is bound to its current Run; a known offline Agent gets an Agent-level
+queued delivery that any of its Runs may read before expiry. The relay uses shared
 Registry token buckets by sender Agent and target scope: defaults are 2 sends/second with a
 burst of 20 per Agent, and 10 sends/second with a burst of 50 per scope. Identical retries
 reuse the original audience snapshot and do not consume another token. Bounded fan-out, a
 one-hop limit and body-size caps control storms and replay. M emits metadata-only audit
 callbacks for accepted/denied sends, retries, delivery, acknowledgement and release. Each record
-contains Agent, Operation, Station, Mission/Session IDs, target scope, decision and timestamp; it
+contains Agent, Operation, Station, Mission/Run IDs, target scope, decision and timestamp; it
 never contains the Cable body. The embedding site chooses its audit sink. Incoming text is
 untrusted and cannot grant tools, clearance, secrets or authority; each receiving agent's
 own permissions still apply.
@@ -160,8 +160,8 @@ held-Cable approvals, acknowledgements and replies. `list_held_cables` returns s
 target, recipient and expiry metadata but never a held message body. `release_cable` requires
 the same explicit scope grant, rechecks recipient receive grants and moves authorized
 recipients into their inboxes. Rust AI6's optional `cables-mcp` feature creates a separate
-loopback listener per managed Agent Session, answers its tools only once the provider-issued
-Session ID is bound, and closes the listener when the Session ends. Claude receives an
+loopback listener per managed Agent Run, answers its tools only once the provider-issued
+Run ID is bound, and closes the listener when the Run ends. Claude receives an
 environment-substituted `--mcp-config`; Codex app-server receives per-process config
 overrides. Both read bearer credentials from the launch environment, never from argv or
 persisted configuration. A harness under a field runner reaches it through the runner's
@@ -169,7 +169,7 @@ relay, which carries each request over the runner's connection to the Station; t
 wrapper's harness through a reverse forward ([Agents](agents.md#cables)).
 MCP is the agent-to-tool interface. [A2A](https://a2a-protocol.org/latest/) is the wire format of
 Cables at AI6's boundary, while AI6's relay remains authoritative for local identity and scope
-permissions. [Claude Code's cross-session messaging](https://code.claude.com/docs/en/cross-session-messaging)
+permissions. [Claude Code's cross-run messaging](https://code.claude.com/docs/en/cross-session-messaging)
 is a reference for delivered/held/refused outcomes and receiver-side controls, not an AI6
 transport dependency. See the [A2A coding-harness analysis](https://shashikantjagtap.net/a2a-for-coding-harnesses-the-protocol-most-teams-still-build-privately/)
 for the interoperability motivation.
@@ -187,10 +187,10 @@ objectives and deliverables, Cables are messages. No external identity gains AI6
 peer may do only what its principal may (`cable.send`, `cable.read`), and the relay's grants
 name it as `a2a:<peer>`. An A2A Task is the peer's Cable (its ID is the Cable ID) and its context
 the Cable conversation; neither is a **Mission ID** (a unit of work that can group multiple
-Sessions) or a provider-issued **Session ID** (one resumable agent run). Inbox
+Runs) or a provider-issued **Run ID** (one resumable agent run). Inbox
 delivery is by polling through `read_cables` at agent-selected checkpoints, and a Station
-also starts a turn with a Cable in a live Session that is waiting at a prompt, unless its Agent has
-`wake_on_cable = false`; a Cable to an Agent with no Session waits for the brief of its next
+also starts a turn with a Cable in a live Run that is waiting at a prompt, unless its Agent has
+`wake_on_cable = false`; a Cable to an Agent with no Run waits for the brief of its next
 ([Cables](agents.md#a-cable-that-finds-nobody-at-the-prompt)).
 
 ## Terminal handshakes
@@ -207,9 +207,9 @@ it from the stream so an attached viewer's emulator does not answer a second tim
 | [BloopAI/vibe-kanban](https://github.com/BloopAI/vibe-kanban) | A Kanban board where a card is an agent run; one git worktree per task so agents work in parallel without colliding; process state shown on the card |
 | [OrchestratorInc/agent-orchestrator](https://github.com/OrchestratorInc/agent-orchestrator) | Multi-agent task routing and lifecycle tracking on a shared board |
 | [tsl0922/ttyd](https://github.com/tsl0922/ttyd) | One terminal, many browser viewers over a thin WebSocket protocol rendered by xterm.js; per-client auth; read-only by default |
-| agent-tmux-web, webmux | tmux as the session layer under a web terminal, so SSH and browser attachments coexist |
+| agent-tmux-web, webmux | tmux as the run layer under a web terminal, so SSH and browser attachments coexist |
 | herdr | Many processes multiplexed into one view with their states visible at a glance |
-| [tmux](https://github.com/tmux/tmux), [systemd-run](https://www.freedesktop.org/software/systemd/man/latest/systemd-run.html) | Session persistence and detach; transient units with cgroup limits |
+| [tmux](https://github.com/tmux/tmux), [systemd-run](https://www.freedesktop.org/software/systemd/man/latest/systemd-run.html) | Run persistence and detach; transient units with cgroup limits |
 | [Model Context Protocol](https://modelcontextprotocol.io/) | The tool interface Q arms agents with |
 | [Boriken-Dev/guatiao](https://github.com/Boriken-Dev/guatiao) | Not prior art but a dependency: the provider ABI and the DipTel wire format |
 

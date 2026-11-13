@@ -398,7 +398,7 @@ class _MemoryPageState extends State<MemoryPage> {
                       'change she makes. You can correct or forget anything here.'
                 : 'What Agents and people keep for ${_shelf == MemoryShelf.global ? 'everyone' : _shelf.label}. '
                       'An Agent asks before it keeps anything, unless the Operation lets it '
-                      'write; an entry an exposed Session wrote is marked until a person edits it.',
+                      'write; an entry an exposed Run wrote is marked until a person edits it.',
           ),
           const SizedBox(height: 12),
           TextField(

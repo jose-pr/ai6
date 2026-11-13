@@ -37,7 +37,7 @@
     "attach_token_ttl": 300.0,
     "buffer_budget_bytes": 536870912,
     "client_slots": 100000,
-    "clients_per_session": 12,
+    "clients_per_run": 12,
     "compartment_audit": 60.0,
     "fanout": 8,
     "frame_bytes": null,
@@ -47,7 +47,7 @@
     "scrollback_events": 64,
     "session_idle": null,
     "session_max": null,
-    "sessions": 16,
+    "runs": 16,
     "station_token_min_bytes": 32,
     "write_lease_ttl": 30.0
   },

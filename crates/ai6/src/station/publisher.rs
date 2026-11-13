@@ -1,9 +1,9 @@
-//! Bounded, best-effort publication of AI6 Session events to Universal Exports.
+//! Bounded, best-effort publication of AI6 Run events to Universal Exports.
 //!
-//! A gateway that goes away costs a Session nothing: what it writes waits here, within `[publisher]
-//! queue`, and the worker tries again with growing pauses. Universal Exports holds its Sessions in
-//! memory, so when it answers again each live Session is registered again and its latest state
-//! sent. Output past the queue is dropped, oldest first, and the Session's sequence skips a number
+//! A gateway that goes away costs a Run nothing: what it writes waits here, within `[publisher]
+//! queue`, and the worker tries again with growing pauses. Universal Exports holds its Runs in
+//! memory, so when it answers again each live Run is registered again and its latest state
+//! sent. Output past the queue is dropped, oldest first, and the Run's sequence skips a number
 //! there, which tells the gateway and its viewers that something is missing.
 
 use std::collections::{BTreeMap, VecDeque};
@@ -18,12 +18,12 @@ use ureq::tls::TlsConfig;
 use url::{Host, Url};
 
 use crate::MissionId;
-use crate::directorates::m::identity::SessionId;
+use crate::directorates::m::identity::RunId;
 use crate::directorates::q::terminal::TerminalInputTarget;
 use crate::station::limits::PublisherLimits;
 use ai6_diptel::{
     ControlAction, ControlId, FrameReceiver, IncomingFrame, MAX_CONTROL_MESSAGE_BYTES,
-    MissionControl, MissionId as GatewayMissionId, OperationId, SessionId as GatewaySessionId,
+    MissionControl, MissionId as GatewayMissionId, OperationId, RunId as GatewayRunId,
     TerminalData, TerminalDirection, TerminalResize, control_frames, resize_frames,
     terminal_frames,
 };
@@ -153,43 +153,43 @@ enum Command {
     Register {
         operation_id: String,
         mission_id: String,
-        session_id: SessionId,
+        run_id: RunId,
         mission: Option<Box<MissionPublication>>,
     },
     Lifecycle {
-        session_id: SessionId,
+        run_id: RunId,
         state: &'static str,
         reason: Option<&'static str>,
     },
     Terminal {
-        session_id: SessionId,
+        run_id: RunId,
         bytes: Vec<u8>,
     },
-    /// A holder of the Session's telemetry has gone: once none is left and what came before this
-    /// is out, the Session is not registered again.
-    Forget { session_id: SessionId },
+    /// A holder of the Run's telemetry has gone: once none is left and what came before this
+    /// is out, the Run is not registered again.
+    Forget { run_id: RunId },
 }
 
 impl Command {
-    fn session_id(&self) -> &SessionId {
+    fn run_id(&self) -> &RunId {
         match self {
-            Self::Register { session_id, .. }
-            | Self::Lifecycle { session_id, .. }
-            | Self::Terminal { session_id, .. }
-            | Self::Forget { session_id } => session_id,
+            Self::Register { run_id, .. }
+            | Self::Lifecycle { run_id, .. }
+            | Self::Terminal { run_id, .. }
+            | Self::Forget { run_id } => run_id,
         }
     }
 }
 
-/// What waits for the publish worker. `lost` names the Sessions with output dropped since their
+/// What waits for the publish worker. `lost` names the Runs with output dropped since their
 /// last event went out.
 #[derive(Default)]
 struct Waiting {
     commands: VecDeque<Command>,
-    lost: BTreeMap<SessionId, u64>,
+    lost: BTreeMap<RunId, u64>,
 }
 
-/// The queue between a Station's Sessions and its publish worker. A Session never waits on it.
+/// The queue between a Station's Runs and its publish worker. A Run never waits on it.
 struct Outbox {
     limits: PublisherLimits,
     waiting: Mutex<Waiting>,
@@ -207,40 +207,40 @@ impl Outbox {
         }
     }
 
-    /// Queues `command`. Past `queue` commands, a lifecycle replaces its Session's earlier one and
+    /// Queues `command`. Past `queue` commands, a lifecycle replaces its Run's earlier one and
     /// output gives way oldest first; a registration or lifecycle always gets in, at most one per
-    /// Session stays waiting, so a Session's latest state is never what is dropped.
+    /// Run stays waiting, so a Run's latest state is never what is dropped.
     fn push(&self, command: Command) -> bool {
         let Ok(mut waiting) = self.waiting.lock() else {
             return false;
         };
         let room = self.limits.queue;
         match command {
-            Command::Terminal { session_id, bytes } => {
+            Command::Terminal { run_id, bytes } => {
                 let frame = self.limits.terminal_bytes;
-                // Consecutive reads of one Session travel as one frame.
+                // Consecutive reads of one Run travel as one frame.
                 if let Some(Command::Terminal {
-                    session_id: tail,
+                    run_id: tail,
                     bytes: held,
                 }) = waiting.commands.back_mut()
-                    && *tail == session_id
+                    && *tail == run_id
                     && frame.allows(held.len() + bytes.len())
                 {
                     held.extend_from_slice(&bytes);
                 } else if waiting.commands.len() < room || self.evict_output(&mut waiting) {
                     waiting
                         .commands
-                        .push_back(Command::Terminal { session_id, bytes });
+                        .push_back(Command::Terminal { run_id, bytes });
                 } else {
-                    self.note_lost(&mut waiting, session_id, bytes.len());
+                    self.note_lost(&mut waiting, run_id, bytes.len());
                 }
             }
             command => {
                 if waiting.commands.len() >= room {
-                    if let Command::Lifecycle { session_id, .. } = &command {
+                    if let Command::Lifecycle { run_id, .. } = &command {
                         let earlier = waiting.commands.iter().position(|queued| {
                             matches!(queued, Command::Lifecycle { .. })
-                                && queued.session_id() == session_id
+                                && queued.run_id() == run_id
                         });
                         if let Some(earlier) = earlier {
                             waiting.commands.remove(earlier);
@@ -266,25 +266,25 @@ impl Outbox {
         else {
             return false;
         };
-        if let Some(Command::Terminal { session_id, bytes }) = waiting.commands.remove(oldest) {
-            self.note_lost(waiting, session_id, bytes.len());
+        if let Some(Command::Terminal { run_id, bytes }) = waiting.commands.remove(oldest) {
+            self.note_lost(waiting, run_id, bytes.len());
         }
         true
     }
 
-    fn note_lost(&self, waiting: &mut Waiting, session_id: SessionId, bytes: usize) {
-        *waiting.lost.entry(session_id).or_default() += bytes as u64;
+    fn note_lost(&self, waiting: &mut Waiting, run_id: RunId, bytes: usize) {
+        *waiting.lost.entry(run_id).or_default() += bytes as u64;
         self.lost_bytes.fetch_add(bytes as u64, Ordering::Relaxed);
     }
 
     /// Records output dropped before it was queued.
-    fn lost(&self, session_id: SessionId, bytes: usize) {
+    fn lost(&self, run_id: RunId, bytes: usize) {
         if let Ok(mut waiting) = self.waiting.lock() {
-            self.note_lost(&mut waiting, session_id, bytes);
+            self.note_lost(&mut waiting, run_id, bytes);
         }
     }
 
-    /// The next command, and whether output of its Session was dropped; `None` after `wait` with
+    /// The next command, and whether output of its Run was dropped; `None` after `wait` with
     /// nothing.
     fn next(&self, wait: Duration) -> Option<(Command, bool)> {
         let mut waiting = self.waiting.lock().ok()?;
@@ -292,12 +292,12 @@ impl Outbox {
             waiting = self.ready.wait_timeout(waiting, wait).ok()?.0;
         }
         let command = waiting.commands.pop_front()?;
-        let lost = waiting.lost.remove(command.session_id()).is_some();
+        let lost = waiting.lost.remove(command.run_id()).is_some();
         Some((command, lost))
     }
 }
 
-/// One daemon-owned publisher thread, bounded so gateway outages cannot stall a Session.
+/// One daemon-owned publisher thread, bounded so gateway outages cannot stall a Run.
 pub(crate) struct Publisher {
     origin: Url,
     token: String,
@@ -310,7 +310,7 @@ pub(crate) struct Publisher {
     worker: Mutex<Option<JoinHandle<()>>>,
     input_worker: Mutex<Option<JoinHandle<()>>>,
     control_worker: Mutex<Option<JoinHandle<()>>>,
-    input_targets: Arc<Mutex<BTreeMap<SessionId, InputTargetRegistration>>>,
+    input_targets: Arc<Mutex<BTreeMap<RunId, InputTargetRegistration>>>,
 }
 
 /// One operator control taken from Universal Exports and the channel its outcome goes back on.
@@ -375,7 +375,7 @@ impl Publisher {
             running: running.clone(),
             healthy: healthy.clone(),
             error: error.clone(),
-            sessions: BTreeMap::new(),
+            runs: BTreeMap::new(),
             pause: limits.publish_retry_delay.0,
             away: false,
             next_refresh: Instant::now() + limits.refresh_every.0,
@@ -463,16 +463,16 @@ impl Publisher {
         Ok(receiver)
     }
 
-    pub(crate) fn session(
+    pub(crate) fn run(
         self: &Arc<Self>,
         operation_id: String,
         mission_id: MissionId,
-    ) -> Arc<SessionTelemetry> {
-        Arc::new(SessionTelemetry {
+    ) -> Arc<RunTelemetry> {
+        Arc::new(RunTelemetry {
             publisher: self.clone(),
             operation_id,
             mission_id,
-            state: Mutex::new(SessionTelemetryState::default()),
+            state: Mutex::new(RunTelemetryState::default()),
         })
     }
 
@@ -492,7 +492,7 @@ impl Publisher {
 
     fn register_input_target(
         &self,
-        session_id: SessionId,
+        run_id: RunId,
         operation_id: &str,
         mission_id: &str,
         target: &Arc<dyn TerminalInputTarget>,
@@ -502,7 +502,7 @@ impl Publisher {
             return;
         };
         targets.insert(
-            session_id,
+            run_id,
             InputTargetRegistration {
                 operation_id: operation_id.to_owned(),
                 mission_id: mission_id.to_owned(),
@@ -513,17 +513,17 @@ impl Publisher {
 
     fn unregister_input_target(
         &self,
-        session_id: &SessionId,
+        run_id: &RunId,
         target: &Arc<dyn TerminalInputTarget>,
     ) {
         let Ok(mut targets) = self.input_targets.lock() else {
             return;
         };
         if targets
-            .get(session_id)
+            .get(run_id)
             .is_some_and(|registration| Weak::ptr_eq(&registration.target, &Arc::downgrade(target)))
         {
-            targets.remove(session_id);
+            targets.remove(run_id);
         }
     }
 
@@ -712,17 +712,17 @@ fn report_control(link: &ControlLink, control_id: &ControlId, outcome: &ControlO
     }
 }
 
-/// Session-scoped bridge shared by a handler's terminal and lifecycle event pump.
-pub(crate) struct SessionTelemetry {
+/// Run-scoped bridge shared by a handler's terminal and lifecycle event pump.
+pub(crate) struct RunTelemetry {
     publisher: Arc<Publisher>,
     operation_id: String,
     mission_id: MissionId,
-    state: Mutex<SessionTelemetryState>,
+    state: Mutex<RunTelemetryState>,
 }
 
 #[derive(Default)]
-struct SessionTelemetryState {
-    session_id: Option<SessionId>,
+struct RunTelemetryState {
+    run_id: Option<RunId>,
     terminal_target: Option<Arc<dyn TerminalInputTarget>>,
     pending_terminal: VecDeque<Vec<u8>>,
     pending_terminal_bytes: usize,
@@ -751,29 +751,29 @@ pub(crate) struct MissionPublication {
     pub(crate) provenance: Option<crate::directorates::registry::bona_fides::Provenance>,
 }
 
-impl SessionTelemetry {
-    pub(crate) fn bind(&self, session_id: SessionId) {
+impl RunTelemetry {
+    pub(crate) fn bind(&self, run_id: RunId) {
         let Ok(mut state) = self.state.lock() else {
-            self.publisher.fail("Session telemetry lock failed");
+            self.publisher.fail("Run telemetry lock failed");
             return;
         };
-        if state.session_id.as_ref() == Some(&session_id) {
+        if state.run_id.as_ref() == Some(&run_id) {
             return;
         }
-        if state.session_id.is_some() {
-            self.publisher.fail("provider changed its Session ID");
+        if state.run_id.is_some() {
+            self.publisher.fail("provider changed its Run ID");
             return;
         }
         self.publisher.send(Command::Register {
             operation_id: self.operation_id.clone(),
             mission_id: self.mission_id.to_string(),
-            session_id: session_id.clone(),
+            run_id: run_id.clone(),
             mission: state.mission.clone().map(Box::new),
         });
-        state.session_id = Some(session_id.clone());
+        state.run_id = Some(run_id.clone());
         if let Some(target) = &state.terminal_target {
             self.publisher.register_input_target(
-                session_id.clone(),
+                run_id.clone(),
                 &self.operation_id,
                 self.mission_id.as_str(),
                 target,
@@ -782,13 +782,13 @@ impl SessionTelemetry {
         if state.pending_terminal_lost > 0 {
             self.publisher
                 .outbox
-                .lost(session_id.clone(), state.pending_terminal_lost);
+                .lost(run_id.clone(), state.pending_terminal_lost);
             state.pending_terminal_lost = 0;
         }
         state.pending_terminal_bytes = 0;
         while let Some(bytes) = state.pending_terminal.pop_front() {
             self.publisher.send(Command::Terminal {
-                session_id: session_id.clone(),
+                run_id: run_id.clone(),
                 bytes,
             });
         }
@@ -798,19 +798,19 @@ impl SessionTelemetry {
         if let Ok(mut state) = self.state.lock() {
             state.mission = Some(mission);
         } else {
-            self.publisher.fail("Session telemetry lock failed");
+            self.publisher.fail("Run telemetry lock failed");
         }
     }
 
     pub(crate) fn attach_terminal_target(&self, target: Arc<dyn TerminalInputTarget>) {
         let Ok(mut state) = self.state.lock() else {
-            self.publisher.fail("Session telemetry lock failed");
+            self.publisher.fail("Run telemetry lock failed");
             return;
         };
         state.terminal_target = Some(target.clone());
-        if let Some(session_id) = &state.session_id {
+        if let Some(run_id) = &state.run_id {
             self.publisher.register_input_target(
-                session_id.clone(),
+                run_id.clone(),
                 &self.operation_id,
                 self.mission_id.as_str(),
                 &target,
@@ -822,15 +822,15 @@ impl SessionTelemetry {
         self.publish_lifecycle_for(state, None);
     }
 
-    /// Publishes a state with the reason AI6 holds the Session in it, such as `green-ink`.
+    /// Publishes a state with the reason AI6 holds the Run in it, such as `green-ink`.
     pub(crate) fn publish_lifecycle_for(&self, state: &'static str, reason: Option<&'static str>) {
         let Ok(telemetry) = self.state.lock() else {
-            self.publisher.fail("Session telemetry lock failed");
+            self.publisher.fail("Run telemetry lock failed");
             return;
         };
-        if let Some(session_id) = &telemetry.session_id {
+        if let Some(run_id) = &telemetry.run_id {
             self.publisher.send(Command::Lifecycle {
-                session_id: session_id.clone(),
+                run_id: run_id.clone(),
                 state,
                 reason,
             });
@@ -842,19 +842,19 @@ impl SessionTelemetry {
             return;
         }
         let Ok(mut state) = self.state.lock() else {
-            self.publisher.fail("Session telemetry lock failed");
+            self.publisher.fail("Run telemetry lock failed");
             return;
         };
         let limits = &self.publisher.limits;
         for chunk in bytes.chunks(limits.terminal_bytes.or_max()) {
-            if let Some(session_id) = &state.session_id {
+            if let Some(run_id) = &state.run_id {
                 self.publisher.send(Command::Terminal {
-                    session_id: session_id.clone(),
+                    run_id: run_id.clone(),
                     bytes: chunk.to_vec(),
                 });
                 continue;
             }
-            // Before the Session has an ID, what it wrote last is kept.
+            // Before the Run has an ID, what it wrote last is kept.
             state.pending_terminal.push_back(chunk.to_vec());
             state.pending_terminal_bytes += chunk.len();
             while !limits
@@ -875,16 +875,16 @@ impl SessionTelemetry {
     }
 }
 
-impl Drop for SessionTelemetry {
+impl Drop for RunTelemetry {
     fn drop(&mut self) {
         let Ok(state) = self.state.get_mut() else {
             return;
         };
-        if let (Some(session_id), Some(target)) = (&state.session_id, &state.terminal_target) {
-            self.publisher.unregister_input_target(session_id, target);
+        if let (Some(run_id), Some(target)) = (&state.run_id, &state.terminal_target) {
+            self.publisher.unregister_input_target(run_id, target);
         }
-        if let Some(session_id) = state.session_id.take() {
-            self.publisher.send(Command::Forget { session_id });
+        if let Some(run_id) = state.run_id.take() {
+            self.publisher.send(Command::Forget { run_id });
         }
     }
 }
@@ -934,7 +934,7 @@ fn receive_inputs(
     agent: ureq::Agent,
     limits: &PublisherLimits,
     running: Arc<AtomicBool>,
-    targets: Arc<Mutex<BTreeMap<SessionId, InputTargetRegistration>>>,
+    targets: Arc<Mutex<BTreeMap<RunId, InputTargetRegistration>>>,
 ) {
     let Ok(mut endpoint) = origin.join("v1/station/inputs/next") else {
         return;
@@ -987,8 +987,8 @@ fn receive_inputs(
             retry.pause(&running);
             continue;
         };
-        if let Some((session_id, _sequence, event)) = decode_input_frame(&frame) {
-            dispatch_input(&targets, &operation_id, &mission_id, &session_id, event);
+        if let Some((run_id, _sequence, event)) = decode_input_frame(&frame) {
+            dispatch_input(&targets, &operation_id, &mission_id, &run_id, event);
         }
     }
 }
@@ -998,16 +998,16 @@ enum TerminalInput {
     Resize { rows: u16, columns: u16 },
 }
 
-fn decode_input_frame(frame: &[u8]) -> Option<(SessionId, u64, TerminalInput)> {
-    let template_session = GatewaySessionId::new("input-schema").ok()?;
+fn decode_input_frame(frame: &[u8]) -> Option<(RunId, u64, TerminalInput)> {
+    let template_run = GatewayRunId::new("input-schema").ok()?;
     let terminal_template = TerminalData::new(
-        template_session.clone(),
+        template_run.clone(),
         1,
         TerminalDirection::Input,
         Vec::new(),
     )
     .ok()?;
-    let resize_template = TerminalResize::new(template_session, 1, 80, 24).ok()?;
+    let resize_template = TerminalResize::new(template_run, 1, 80, 24).ok()?;
     let (terminal_schema, _) = terminal_frames(&terminal_template).ok()?;
     let (resize_schema, _) = resize_frames(&resize_template).ok()?;
     let mut receiver = FrameReceiver::new();
@@ -1018,13 +1018,13 @@ fn decode_input_frame(frame: &[u8]) -> Option<(SessionId, u64, TerminalInput)> {
             if data.direction() == TerminalDirection::Input && data.sequence() > 0 =>
         {
             Some((
-                SessionId::try_new(data.session_id().as_str()).ok()?,
+                RunId::try_new(data.run_id().as_str()).ok()?,
                 data.sequence(),
                 TerminalInput::Write(data.bytes().to_vec()),
             ))
         }
         IncomingFrame::Resize(resize) if resize.sequence() > 0 => Some((
-            SessionId::try_new(resize.session_id().as_str()).ok()?,
+            RunId::try_new(resize.run_id().as_str()).ok()?,
             resize.sequence(),
             TerminalInput::Resize {
                 rows: resize.rows(),
@@ -1041,10 +1041,10 @@ fn decode_input_frame(frame: &[u8]) -> Option<(SessionId, u64, TerminalInput)> {
 }
 
 fn dispatch_input(
-    targets: &Arc<Mutex<BTreeMap<SessionId, InputTargetRegistration>>>,
+    targets: &Arc<Mutex<BTreeMap<RunId, InputTargetRegistration>>>,
     operation_id: &OperationId,
     mission_id: &GatewayMissionId,
-    session_id: &SessionId,
+    run_id: &RunId,
     input: TerminalInput,
 ) {
     let target = {
@@ -1052,7 +1052,7 @@ fn dispatch_input(
             return;
         };
         targets.retain(|_, registration| registration.target.strong_count() > 0);
-        let Some(registration) = targets.get_mut(session_id) else {
+        let Some(registration) = targets.get_mut(run_id) else {
             return;
         };
         if registration.operation_id != operation_id.as_str()
@@ -1073,11 +1073,11 @@ fn dispatch_input(
     };
     if result.is_err()
         && let Ok(mut targets) = targets.lock()
-        && targets.get(session_id).is_some_and(|registration| {
+        && targets.get(run_id).is_some_and(|registration| {
             Weak::ptr_eq(&registration.target, &Arc::downgrade(&target))
         })
     {
-        targets.remove(session_id);
+        targets.remove(run_id);
     }
 }
 
@@ -1090,21 +1090,21 @@ enum Failure {
     Refused(&'static str),
 }
 
-/// What the worker knows of one Session.
+/// What the worker knows of one Run.
 struct Published {
     operation_id: String,
     mission_id: String,
     mission: Option<Box<MissionPublication>>,
     /// The sequence of the next event, 0 until a gateway has named one.
     next_sequence: u64,
-    /// Whether the gateway is believed to hold the Session.
+    /// Whether the gateway is believed to hold the Run.
     registered: bool,
     /// The latest state and whether the gateway is yet to hear it.
     lifecycle: Option<(&'static str, Option<&'static str>)>,
     lifecycle_due: bool,
     /// Output was dropped: the next event's sequence skips a number.
     hole: bool,
-    /// How many telemetries hold it; a resume can take a Session over before the old one lets go.
+    /// How many telemetries hold it; a resume can take a Run over before the old one lets go.
     holders: usize,
     /// The most output one event may carry, as the gateway last said or showed.
     terminal_bytes: Option<usize>,
@@ -1118,7 +1118,7 @@ struct Worker {
     running: Arc<AtomicBool>,
     healthy: Arc<AtomicBool>,
     error: Arc<Mutex<Option<&'static str>>>,
-    sessions: BTreeMap<SessionId, Published>,
+    runs: BTreeMap<RunId, Published>,
     /// The pause before the next try.
     pause: Duration,
     /// Whether the last try found the gateway away.
@@ -1135,8 +1135,8 @@ impl Worker {
             if let Some((command, lost)) = self.outbox.next(Duration::from_millis(100)) {
                 self.take_in(&command);
                 self.sent = 0;
-                if lost && let Some(session) = self.sessions.get_mut(command.session_id()) {
-                    session.hole = true;
+                if lost && let Some(run) = self.runs.get_mut(command.run_id()) {
+                    run.hole = true;
                 }
                 self.publish(&command);
             }
@@ -1152,12 +1152,12 @@ impl Worker {
             Command::Register {
                 operation_id,
                 mission_id,
-                session_id,
+                run_id,
                 mission,
             } => {
-                let session =
-                    self.sessions
-                        .entry(session_id.clone())
+                let run =
+                    self.runs
+                        .entry(run_id.clone())
                         .or_insert_with(|| Published {
                             operation_id: operation_id.clone(),
                             mission_id: mission_id.clone(),
@@ -1170,26 +1170,26 @@ impl Worker {
                             holders: 0,
                             terminal_bytes: None,
                         });
-                session.holders += 1;
-                session.mission.clone_from(mission);
-                session.registered = false;
+                run.holders += 1;
+                run.mission.clone_from(mission);
+                run.registered = false;
             }
             Command::Lifecycle {
-                session_id,
+                run_id,
                 state,
                 reason,
             } => {
-                if let Some(session) = self.sessions.get_mut(session_id) {
-                    session.lifecycle = Some((*state, *reason));
-                    session.lifecycle_due = true;
+                if let Some(run) = self.runs.get_mut(run_id) {
+                    run.lifecycle = Some((*state, *reason));
+                    run.lifecycle_due = true;
                 }
             }
             Command::Terminal { .. } => {}
-            Command::Forget { session_id } => {
-                if let Some(session) = self.sessions.get_mut(session_id) {
-                    session.holders = session.holders.saturating_sub(1);
-                    if session.holders == 0 {
-                        self.sessions.remove(session_id);
+            Command::Forget { run_id } => {
+                if let Some(run) = self.runs.get_mut(run_id) {
+                    run.holders = run.holders.saturating_sub(1);
+                    if run.holders == 0 {
+                        self.runs.remove(run_id);
                     }
                 }
             }
@@ -1207,9 +1207,9 @@ impl Worker {
                 Err(Failure::Refused(reason)) => {
                     self.answered();
                     self.report(reason);
-                    if let Command::Terminal { session_id, bytes } = command {
+                    if let Command::Terminal { run_id, bytes } = command {
                         self.outbox
-                            .lost(session_id.clone(), bytes.len().saturating_sub(self.sent));
+                            .lost(run_id.clone(), bytes.len().saturating_sub(self.sent));
                     }
                     return;
                 }
@@ -1224,114 +1224,114 @@ impl Worker {
 
     fn attempt(&mut self, command: &Command) -> Result<(), Failure> {
         match command {
-            Command::Register { session_id, .. } | Command::Lifecycle { session_id, .. } => {
-                self.bring_up_to_date(session_id)
+            Command::Register { run_id, .. } | Command::Lifecycle { run_id, .. } => {
+                self.bring_up_to_date(run_id)
             }
-            Command::Terminal { session_id, bytes } => {
-                self.bring_up_to_date(session_id)?;
-                self.post_output(session_id, bytes)
+            Command::Terminal { run_id, bytes } => {
+                self.bring_up_to_date(run_id)?;
+                self.post_output(run_id, bytes)
             }
             Command::Forget { .. } => Ok(()),
         }
     }
 
-    /// Registers the Session if the gateway may not hold it, and sends the state it has not heard.
-    fn bring_up_to_date(&mut self, session_id: &SessionId) -> Result<(), Failure> {
-        let Some(session) = self.sessions.get(session_id) else {
-            return Err(Failure::Refused("Session was not registered"));
+    /// Registers the Run if the gateway may not hold it, and sends the state it has not heard.
+    fn bring_up_to_date(&mut self, run_id: &RunId) -> Result<(), Failure> {
+        let Some(run) = self.runs.get(run_id) else {
+            return Err(Failure::Refused("Run was not registered"));
         };
-        if !session.registered {
-            self.register(session_id, true)?;
+        if !run.registered {
+            self.register(run_id, true)?;
         }
-        let Some(session) = self.sessions.get(session_id) else {
-            return Err(Failure::Refused("Session was not registered"));
+        let Some(run) = self.runs.get(run_id) else {
+            return Err(Failure::Refused("Run was not registered"));
         };
-        if let (true, Some((state, reason))) = (session.lifecycle_due, session.lifecycle) {
-            self.post_lifecycle(session_id, state, reason)?;
-            if let Some(session) = self.sessions.get_mut(session_id) {
-                session.lifecycle_due = false;
+        if let (true, Some((state, reason))) = (run.lifecycle_due, run.lifecycle) {
+            self.post_lifecycle(run_id, state, reason)?;
+            if let Some(run) = self.runs.get_mut(run_id) {
+                run.lifecycle_due = false;
             }
         }
         Ok(())
     }
 
-    /// Registers the Session, with its Mission's brief when `brief`. A gateway naming an earlier
-    /// sequence than the worker's own has forgotten the Session: the worker's sequence goes on, so
+    /// Registers the Run, with its Mission's brief when `brief`. A gateway naming an earlier
+    /// sequence than the worker's own has forgotten the Run: the worker's sequence goes on, so
     /// a viewer's cursor stays good, and the gateway is told its state and brief again.
-    fn register(&mut self, session_id: &SessionId, brief: bool) -> Result<(), Failure> {
-        let session = self
-            .sessions
-            .get(session_id)
-            .ok_or(Failure::Refused("Session was not registered"))?;
+    fn register(&mut self, run_id: &RunId, brief: bool) -> Result<(), Failure> {
+        let run = self
+            .runs
+            .get(run_id)
+            .ok_or(Failure::Refused("Run was not registered"))?;
         let (next, stated) = register(
             &self.agent,
             &self.config,
-            &session.operation_id,
-            &session.mission_id,
-            session_id,
-            brief.then_some(session.mission.as_deref()).flatten(),
+            &run.operation_id,
+            &run.mission_id,
+            run_id,
+            brief.then_some(run.mission.as_deref()).flatten(),
         )?;
-        let session = self
-            .sessions
-            .get_mut(session_id)
-            .ok_or(Failure::Refused("Session was not registered"))?;
-        let forgotten = next < session.next_sequence;
-        session.terminal_bytes = stated;
-        session.next_sequence = session.next_sequence.max(next);
-        session.registered = true;
+        let run = self
+            .runs
+            .get_mut(run_id)
+            .ok_or(Failure::Refused("Run was not registered"))?;
+        let forgotten = next < run.next_sequence;
+        run.terminal_bytes = stated;
+        run.next_sequence = run.next_sequence.max(next);
+        run.registered = true;
         if forgotten {
-            session.lifecycle_due = session.lifecycle.is_some();
+            run.lifecycle_due = run.lifecycle.is_some();
             if !brief {
-                self.register(session_id, true)?;
+                self.register(run_id, true)?;
             }
         }
         Ok(())
     }
 
-    /// The sequence of the Session's next event, past any hole.
-    fn sequence(&mut self, session_id: &SessionId) -> Result<u64, Failure> {
-        let session = self
-            .sessions
-            .get_mut(session_id)
-            .ok_or(Failure::Refused("Session was not registered"))?;
-        if session.hole {
-            session.next_sequence = session
+    /// The sequence of the Run's next event, past any hole.
+    fn sequence(&mut self, run_id: &RunId) -> Result<u64, Failure> {
+        let run = self
+            .runs
+            .get_mut(run_id)
+            .ok_or(Failure::Refused("Run was not registered"))?;
+        if run.hole {
+            run.next_sequence = run
                 .next_sequence
                 .checked_add(1)
-                .ok_or(Failure::Refused("Session event sequence is exhausted"))?;
-            session.hole = false;
+                .ok_or(Failure::Refused("Run event sequence is exhausted"))?;
+            run.hole = false;
         }
-        Ok(session.next_sequence)
+        Ok(run.next_sequence)
     }
 
     /// Moves past `sequence` once the gateway holds it.
-    fn advance(&mut self, session_id: &SessionId, sequence: u64) -> Result<(), Failure> {
-        let session = self
-            .sessions
-            .get_mut(session_id)
-            .ok_or(Failure::Refused("Session was not registered"))?;
-        session.next_sequence = sequence
+    fn advance(&mut self, run_id: &RunId, sequence: u64) -> Result<(), Failure> {
+        let run = self
+            .runs
+            .get_mut(run_id)
+            .ok_or(Failure::Refused("Run was not registered"))?;
+        run.next_sequence = sequence
             .checked_add(1)
-            .ok_or(Failure::Refused("Session event sequence is exhausted"))?;
+            .ok_or(Failure::Refused("Run event sequence is exhausted"))?;
         Ok(())
     }
 
     fn post_lifecycle(
         &mut self,
-        session_id: &SessionId,
+        run_id: &RunId,
         state: &'static str,
         reason: Option<&'static str>,
     ) -> Result<(), Failure> {
-        let sequence = self.sequence(session_id)?;
+        let sequence = self.sequence(run_id)?;
         let (operation_id, mission_id) = self
-            .sessions
-            .get(session_id)
-            .map(|session| (session.operation_id.clone(), session.mission_id.clone()))
-            .ok_or(Failure::Refused("Session was not registered"))?;
+            .runs
+            .get(run_id)
+            .map(|run| (run.operation_id.clone(), run.mission_id.clone()))
+            .ok_or(Failure::Refused("Run was not registered"))?;
         let sent = publish_lifecycle(
             &self.agent,
             &self.config,
-            session_id,
+            run_id,
             sequence,
             Lifecycle {
                 operation_id: &operation_id,
@@ -1340,22 +1340,22 @@ impl Worker {
                 reason,
             },
         );
-        self.settle(session_id, sequence, sent)
+        self.settle(run_id, sequence, sent)
     }
 
     /// Sends what is left of `bytes`, within what this Station and the gateway allow in one event.
-    fn post_output(&mut self, session_id: &SessionId, bytes: &[u8]) -> Result<(), Failure> {
+    fn post_output(&mut self, run_id: &RunId, bytes: &[u8]) -> Result<(), Failure> {
         while self.sent < bytes.len() {
             let stated = self
-                .sessions
-                .get(session_id)
-                .and_then(|session| session.terminal_bytes)
+                .runs
+                .get(run_id)
+                .and_then(|run| run.terminal_bytes)
                 .unwrap_or(usize::MAX);
             let most = stated.min(self.config.limits.terminal_bytes.or_max());
             let left = &bytes[self.sent..];
             let chunk = &left[..left.len().min(most.max(1))];
-            let sequence = self.sequence(session_id)?;
-            let sent = publish_terminal(&self.agent, &self.config, session_id, sequence, chunk);
+            let sequence = self.sequence(run_id)?;
+            let sent = publish_terminal(&self.agent, &self.config, run_id, sequence, chunk);
             if matches!(sent, Err(Publish::TooLarge)) {
                 // Its limit came down since it last said, or it says one it does not keep.
                 if chunk.len() == 1 {
@@ -1363,63 +1363,63 @@ impl Worker {
                         "gateway refused terminal output as too large",
                     ));
                 }
-                if let Some(session) = self.sessions.get_mut(session_id) {
-                    session.terminal_bytes = Some(chunk.len() / 2);
+                if let Some(run) = self.runs.get_mut(run_id) {
+                    run.terminal_bytes = Some(chunk.len() / 2);
                 }
                 continue;
             }
-            self.settle(session_id, sequence, sent)?;
+            self.settle(run_id, sequence, sent)?;
             self.sent += chunk.len();
         }
         Ok(())
     }
 
-    /// What the gateway's answer to `sequence` means: a Session it does not hold is registered
+    /// What the gateway's answer to `sequence` means: a Run it does not hold is registered
     /// again, and one past `sequence` already has this event, from a try whose answer was lost.
     fn settle(
         &mut self,
-        session_id: &SessionId,
+        run_id: &RunId,
         sequence: u64,
         sent: Result<(), Publish>,
     ) -> Result<(), Failure> {
         match sent {
-            Ok(()) => self.advance(session_id, sequence),
+            Ok(()) => self.advance(run_id, sequence),
             Err(Publish::Failed(failure)) => Err(failure),
             Err(Publish::TooLarge) => {
                 Err(Failure::Refused("gateway refused an event as too large"))
             }
             Err(Publish::Unknown) => {
-                for session in self.sessions.values_mut() {
-                    session.registered = false;
+                for run in self.runs.values_mut() {
+                    run.registered = false;
                 }
-                Err(Failure::Away("gateway no longer holds the Session"))
+                Err(Failure::Away("gateway no longer holds the Run"))
             }
             Err(Publish::Conflict) => {
-                self.register(session_id, false)?;
-                let next = self.sessions.get(session_id).map(|held| held.next_sequence);
+                self.register(run_id, false)?;
+                let next = self.runs.get(run_id).map(|held| held.next_sequence);
                 if next.is_some_and(|next| next > sequence) {
                     Ok(())
                 } else {
                     Err(Failure::Refused(
-                        "gateway refused a Session event's sequence",
+                        "gateway refused a Run event's sequence",
                     ))
                 }
             }
         }
     }
 
-    /// Registers every Session again, which restores what a gateway restarted since the last
-    /// event forgot; nothing else would tell an idle Session's Station it had restarted.
+    /// Registers every Run again, which restores what a gateway restarted since the last
+    /// event forgot; nothing else would tell an idle Run's Station it had restarted.
     fn refresh(&mut self) {
         self.next_refresh = Instant::now() + self.config.limits.refresh_every.0;
-        let sessions: Vec<SessionId> = self.sessions.keys().cloned().collect();
-        for session_id in sessions {
-            let refreshed = match self.sessions.get(&session_id) {
-                Some(session) if session.registered => self.register(&session_id, false),
-                Some(_) => self.register(&session_id, true),
+        let runs: Vec<RunId> = self.runs.keys().cloned().collect();
+        for run_id in runs {
+            let refreshed = match self.runs.get(&run_id) {
+                Some(run) if run.registered => self.register(&run_id, false),
+                Some(_) => self.register(&run_id, true),
                 None => Ok(()),
             }
-            .and_then(|()| self.bring_up_to_date(&session_id));
+            .and_then(|()| self.bring_up_to_date(&run_id));
             match refreshed {
                 Ok(()) => self.answered(),
                 Err(Failure::Refused(reason)) => self.report(reason),
@@ -1442,8 +1442,8 @@ impl Worker {
     fn answered(&mut self) {
         if self.away {
             self.away = false;
-            for session in self.sessions.values_mut() {
-                session.registered = false;
+            for run in self.runs.values_mut() {
+                run.registered = false;
             }
             self.next_refresh = Instant::now();
         }
@@ -1473,7 +1473,7 @@ impl Worker {
 struct Registration<'a> {
     operation_id: &'a str,
     mission_id: &'a str,
-    session_id: &'a str,
+    run_id: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     mission: Option<&'a MissionPublication>,
 }
@@ -1481,7 +1481,7 @@ struct Registration<'a> {
 #[derive(Deserialize)]
 struct RegistrationResponse {
     next_sequence: u64,
-    /// The most terminal output the gateway takes in one event of this Session.
+    /// The most terminal output the gateway takes in one event of this Run.
     terminal_bytes: Option<u64>,
 }
 
@@ -1509,12 +1509,12 @@ fn register(
     config: &Config,
     operation_id: &str,
     mission_id: &str,
-    session_id: &SessionId,
+    run_id: &RunId,
     mission: Option<&MissionPublication>,
 ) -> Result<(u64, Option<usize>), Failure> {
     let url = config
         .origin
-        .join("v1/station/sessions")
+        .join("v1/station/runs")
         .map_err(|_| Failure::Refused("invalid registration endpoint"))?;
     let mut response = agent
         .post(url.as_str())
@@ -1522,18 +1522,18 @@ fn register(
         .send_json(Registration {
             operation_id,
             mission_id,
-            session_id: session_id.as_str(),
+            run_id: run_id.as_str(),
             mission,
         })
         .map_err(|error| {
             failure_of(
                 &error,
                 "registration request failed",
-                "gateway rejected Session registration",
+                "gateway rejected Run registration",
             )
         })?;
     if response.status() != 201 {
-        return Err(Failure::Away("gateway rejected Session registration"));
+        return Err(Failure::Away("gateway rejected Run registration"));
     }
     let registration: RegistrationResponse = response
         .body_mut()
@@ -1553,7 +1553,7 @@ fn register(
 /// Why one event's request did not land.
 #[derive(Debug)]
 enum Publish {
-    /// The gateway does not hold the Session.
+    /// The gateway does not hold the Run.
     Unknown,
     /// The gateway holds a sequence at or past this one.
     Conflict,
@@ -1585,11 +1585,11 @@ fn published(
 fn publish_lifecycle(
     agent: &ureq::Agent,
     config: &Config,
-    session_id: &SessionId,
+    run_id: &RunId,
     sequence: u64,
     lifecycle: Lifecycle<'_>,
 ) -> Result<(), Publish> {
-    let url = session_endpoint(&config.origin, session_id, "lifecycle", sequence)?;
+    let url = run_endpoint(&config.origin, run_id, "lifecycle", sequence)?;
     published(
         agent
             .post(url.as_str())
@@ -1603,11 +1603,11 @@ fn publish_lifecycle(
 fn publish_terminal(
     agent: &ureq::Agent,
     config: &Config,
-    session_id: &SessionId,
+    run_id: &RunId,
     sequence: u64,
     bytes: &[u8],
 ) -> Result<(), Publish> {
-    let url = session_endpoint(&config.origin, session_id, "terminal", sequence)?;
+    let url = run_endpoint(&config.origin, run_id, "terminal", sequence)?;
     published(
         agent
             .post(url.as_str())
@@ -1619,18 +1619,18 @@ fn publish_terminal(
     )
 }
 
-fn session_endpoint(
+fn run_endpoint(
     origin: &Url,
-    session_id: &SessionId,
+    run_id: &RunId,
     kind: &str,
     sequence: u64,
 ) -> Result<Url, Publish> {
-    let invalid = || Publish::Failed(Failure::Refused("invalid Session endpoint"));
-    let mut url = origin.join("v1/station/sessions/").map_err(|_| invalid())?;
+    let invalid = || Publish::Failed(Failure::Refused("invalid Run endpoint"));
+    let mut url = origin.join("v1/station/runs/").map_err(|_| invalid())?;
     let mut segments = url.path_segments_mut().map_err(|_| invalid())?;
     segments
         .pop_if_empty()
-        .push(session_id.as_str())
+        .push(run_id.as_str())
         .push(kind)
         .push(&sequence.to_string());
     drop(segments);
@@ -1641,7 +1641,7 @@ fn session_endpoint(
 mod tests {
     use super::*;
     use crate::directorates::q::terminal::{
-        ExitInfo, READ_TIMED_OUT, Spec, Terminal, TerminalBridge, TerminalSession,
+        ExitInfo, READ_TIMED_OUT, Spec, Terminal, TerminalBridge, TerminalRun,
     };
     use guatiao::ToValue;
     use guatiao::library::{Object, ProviderError};
@@ -1661,14 +1661,14 @@ mod tests {
         fn spawn(
             &self,
             _spec: &guatiao::Value,
-        ) -> Result<Object<dyn TerminalSession>, ProviderError> {
-            Ok(RecordingTerminalSession(self.0.clone()).into_object())
+        ) -> Result<Object<dyn TerminalRun>, ProviderError> {
+            Ok(RecordingTerminalRun(self.0.clone()).into_object())
         }
     }
 
-    struct RecordingTerminalSession(mpsc::Sender<RecordedInput>);
+    struct RecordingTerminalRun(mpsc::Sender<RecordedInput>);
 
-    impl TerminalSession for RecordingTerminalSession {
+    impl TerminalRun for RecordingTerminalRun {
         fn pid(&self) -> i64 {
             18
         }
@@ -1710,14 +1710,14 @@ mod tests {
         fn spawn(
             &self,
             _spec: &guatiao::Value,
-        ) -> Result<Object<dyn TerminalSession>, ProviderError> {
-            Ok(RawOutputSession(Mutex::new(false)).into_object())
+        ) -> Result<Object<dyn TerminalRun>, ProviderError> {
+            Ok(RawOutputRun(Mutex::new(false)).into_object())
         }
     }
 
-    struct RawOutputSession(Mutex<bool>);
+    struct RawOutputRun(Mutex<bool>);
 
-    impl TerminalSession for RawOutputSession {
+    impl TerminalRun for RawOutputRun {
         fn pid(&self) -> i64 {
             17
         }
@@ -1803,7 +1803,7 @@ mod tests {
                     "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                 } else {
                     outbound_count += 1;
-                    let response = if path == "/v1/station/sessions" {
+                    let response = if path == "/v1/station/runs" {
                         "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: 20\r\nConnection: close\r\n\r\n{\"next_sequence\":41}"
                     } else {
                         "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
@@ -1823,9 +1823,9 @@ mod tests {
         (format!("http://{address}"), receiver, worker)
     }
 
-    /// One Session as a gateway holds it.
+    /// One Run as a gateway holds it.
     #[derive(Default)]
-    struct HeldSession {
+    struct HeldRun {
         last_sequence: u64,
         brief: bool,
         lifecycle: Option<(String, Option<String>)>,
@@ -1834,11 +1834,11 @@ mod tests {
     }
 
     /// Answers a Station as Universal Exports does, on one port: registration is idempotent and
-    /// names the next sequence, an unknown Session is 404, a sequence not past the last is 409. It
+    /// names the next sequence, an unknown Run is 404, a sequence not past the last is 409. It
     /// holds everything in memory, so it comes back with nothing, as a restarted gateway does.
     struct Restartable {
         port: u16,
-        sessions: Arc<Mutex<BTreeMap<String, HeldSession>>>,
+        runs: Arc<Mutex<BTreeMap<String, HeldRun>>>,
         /// Refuses a terminal body longer than this with 413 and states it at registration.
         stated: Arc<Mutex<Option<usize>>>,
         serving: Option<(Arc<AtomicBool>, JoinHandle<()>)>,
@@ -1861,7 +1861,7 @@ mod tests {
             let port = listener.local_addr().unwrap().port();
             let mut gateway = Self {
                 port,
-                sessions: Arc::default(),
+                runs: Arc::default(),
                 stated: Arc::default(),
                 serving: None,
             };
@@ -1876,14 +1876,14 @@ mod tests {
         fn serve(&mut self, listener: TcpListener) {
             listener.set_nonblocking(true).unwrap();
             let stop = Arc::new(AtomicBool::new(false));
-            let (stopping, sessions, stated) =
-                (stop.clone(), self.sessions.clone(), self.stated.clone());
+            let (stopping, runs, stated) =
+                (stop.clone(), self.runs.clone(), self.stated.clone());
             let serving = thread::spawn(move || {
                 while !stopping.load(Ordering::Acquire) {
                     match listener.accept() {
                         Ok((stream, _)) => {
-                            let (sessions, stated) = (sessions.clone(), stated.clone());
-                            thread::spawn(move || Self::answer(stream, &sessions, &stated));
+                            let (runs, stated) = (runs.clone(), stated.clone());
+                            thread::spawn(move || Self::answer(stream, &runs, &stated));
                         }
                         Err(_) => thread::sleep(Duration::from_millis(5)),
                     }
@@ -1894,7 +1894,7 @@ mod tests {
 
         fn answer(
             stream: std::net::TcpStream,
-            sessions: &Mutex<BTreeMap<String, HeldSession>>,
+            runs: &Mutex<BTreeMap<String, HeldRun>>,
             stated: &Mutex<Option<usize>>,
         ) {
             stream.set_nonblocking(false).unwrap();
@@ -1924,21 +1924,21 @@ mod tests {
             }
             let path = request.split_whitespace().nth(1).unwrap_or("").to_owned();
             let parts: Vec<&str> = path.split('/').collect();
-            let (status, answer) = if path == "/v1/station/sessions" {
+            let (status, answer) = if path == "/v1/station/runs" {
                 let registration: serde_json::Value = serde_json::from_slice(&body).unwrap();
-                let id = registration["session_id"].as_str().unwrap().to_owned();
-                let mut sessions = sessions.lock().unwrap();
-                let held = sessions.entry(id).or_default();
+                let id = registration["run_id"].as_str().unwrap().to_owned();
+                let mut runs = runs.lock().unwrap();
+                let held = runs.entry(id).or_default();
                 held.brief |= registration.get("mission").is_some();
                 let mut answer = serde_json::json!({"next_sequence": held.last_sequence + 1});
                 if let Some(stated) = *stated.lock().unwrap() {
                     answer["terminal_bytes"] = stated.into();
                 }
                 ("201 Created", answer.to_string())
-            } else if path.starts_with("/v1/station/sessions/") && parts.len() == 7 {
+            } else if path.starts_with("/v1/station/runs/") && parts.len() == 7 {
                 let sequence: u64 = parts[6].parse().unwrap();
-                let mut sessions = sessions.lock().unwrap();
-                match sessions.get_mut(parts[4]) {
+                let mut runs = runs.lock().unwrap();
+                match runs.get_mut(parts[4]) {
                     None => ("404 Not Found", String::new()),
                     Some(held) if sequence <= held.last_sequence => ("409 Conflict", String::new()),
                     Some(_)
@@ -1980,7 +1980,7 @@ mod tests {
             let (stop, serving) = self.serving.take().unwrap();
             stop.store(true, Ordering::Release);
             serving.join().unwrap();
-            self.sessions.lock().unwrap().clear();
+            self.runs.lock().unwrap().clear();
         }
 
         /// Listens on the same port again, holding nothing.
@@ -1999,36 +1999,36 @@ mod tests {
             self.serve(listener);
         }
 
-        fn lifecycle(&self, session: &str) -> Option<(String, Option<String>)> {
-            self.sessions
+        fn lifecycle(&self, run: &str) -> Option<(String, Option<String>)> {
+            self.runs
                 .lock()
                 .unwrap()
-                .get(session)?
+                .get(run)?
                 .lifecycle
                 .clone()
         }
 
-        fn output(&self, session: &str) -> Vec<u8> {
-            self.sessions
+        fn output(&self, run: &str) -> Vec<u8> {
+            self.runs
                 .lock()
                 .unwrap()
-                .get(session)
+                .get(run)
                 .map_or_else(Vec::new, |held| held.output.clone())
         }
 
-        fn sequences(&self, session: &str) -> Vec<u64> {
-            self.sessions
+        fn sequences(&self, run: &str) -> Vec<u64> {
+            self.runs
                 .lock()
                 .unwrap()
-                .get(session)
+                .get(run)
                 .map_or_else(Vec::new, |held| held.sequences.clone())
         }
 
-        fn has_brief(&self, session: &str) -> bool {
-            self.sessions
+        fn has_brief(&self, run: &str) -> bool {
+            self.runs
                 .lock()
                 .unwrap()
-                .get(session)
+                .get(run)
                 .is_some_and(|held| held.brief)
         }
     }
@@ -2061,8 +2061,8 @@ mod tests {
         }
     }
 
-    fn telemetry_of(publisher: &Arc<Publisher>, mission: &str) -> Arc<SessionTelemetry> {
-        let telemetry = publisher.session(
+    fn telemetry_of(publisher: &Arc<Publisher>, mission: &str) -> Arc<RunTelemetry> {
+        let telemetry = publisher.run(
             "operation-a".to_owned(),
             MissionId::try_new(mission).unwrap(),
         );
@@ -2081,12 +2081,12 @@ mod tests {
         .unwrap();
         let telemetry = telemetry_of(&publisher, "mission-a");
         telemetry.publish_terminal(b"before ");
-        telemetry.bind(SessionId::try_new("session-a").unwrap());
+        telemetry.bind(RunId::try_new("run-a").unwrap());
         telemetry.publish_lifecycle("working");
         until("the first state arrives", || {
-            gateway.lifecycle("session-a").is_some()
+            gateway.lifecycle("run-a").is_some()
         });
-        let last_seen = *gateway.sequences("session-a").last().unwrap();
+        let last_seen = *gateway.sequences("run-a").last().unwrap();
 
         gateway.go_away();
         telemetry.publish_terminal(b"while away");
@@ -2096,18 +2096,18 @@ mod tests {
         });
 
         gateway.come_back();
-        until("the gateway shows the Session as it is now", || {
-            gateway.lifecycle("session-a")
+        until("the gateway shows the Run as it is now", || {
+            gateway.lifecycle("run-a")
                 == Some(("blocked".to_owned(), Some("green-ink".to_owned())))
         });
         until("what was held while it was away arrives", || {
-            gateway.output("session-a") == b"while away"
+            gateway.output("run-a") == b"while away"
         });
         assert!(
-            gateway.has_brief("session-a"),
+            gateway.has_brief("run-a"),
             "the Mission's brief is sent again"
         );
-        let sequences = gateway.sequences("session-a");
+        let sequences = gateway.sequences("run-a");
         assert!(
             sequences[0] > last_seen,
             "a viewer's cursor stays good across the restart: {sequences:?} after {last_seen}"
@@ -2117,7 +2117,7 @@ mod tests {
         });
         telemetry.publish_terminal(b" and after");
         until("publishing goes on", || {
-            gateway.output("session-a") == b"while away and after"
+            gateway.output("run-a") == b"while away and after"
         });
     }
 
@@ -2159,11 +2159,11 @@ mod tests {
         let refused = Publisher::start(Config::try_new(&gateway.origin, "t").unwrap()).unwrap();
         let _controls = refused.receive_controls("hq").unwrap();
         refused
-            .session(
+            .run(
                 "operation-a".to_owned(),
                 MissionId::try_new("mission-a").unwrap(),
             )
-            .bind(SessionId::try_new("session-a").unwrap());
+            .bind(RunId::try_new("run-a").unwrap());
         assert_eq!(
             gateway.paths.recv_timeout(Duration::from_secs(2)).ok(),
             None,
@@ -2176,13 +2176,13 @@ mod tests {
         let reached = Publisher::start(config.with_ca_certificates(&gateway.ca)).unwrap();
         let _controls = reached.receive_controls("hq").unwrap();
         reached
-            .session(
+            .run(
                 "operation-a".to_owned(),
                 MissionId::try_new("mission-a").unwrap(),
             )
-            .bind(SessionId::try_new("session-a").unwrap());
+            .bind(RunId::try_new("run-a").unwrap());
         let mut links: Vec<&str> = vec![
-            "/v1/station/sessions",
+            "/v1/station/runs",
             "/v1/station/inputs/next",
             "/v1/station/controls/next",
         ];
@@ -2219,7 +2219,7 @@ mod tests {
         let (origin, requests, gateway) = gateway();
         let config = Config::try_new(&origin, "test-token").unwrap();
         let publisher = Publisher::start(config).unwrap();
-        let telemetry = publisher.session(
+        let telemetry = publisher.run(
             "operation-a".to_owned(),
             MissionId::try_new("mission-a").unwrap(),
         );
@@ -2254,11 +2254,11 @@ mod tests {
         }
         .to_value()
         .unwrap();
-        let session = terminal.spawn(&spec).unwrap();
+        let run = terminal.spawn(&spec).unwrap();
         let mut output = [0; 8];
-        assert_eq!(session.read(&mut output, 100).unwrap(), 3);
+        assert_eq!(run.read(&mut output, 100).unwrap(), 3);
         assert_eq!(&output[..3], &[0, 255, 10]);
-        telemetry.bind(SessionId::try_new("session/a").unwrap());
+        telemetry.bind(RunId::try_new("run/a").unwrap());
         telemetry.publish_lifecycle("working");
 
         let registration = requests.recv_timeout(Duration::from_secs(60)).unwrap();
@@ -2266,14 +2266,14 @@ mod tests {
         let lifecycle = requests.recv_timeout(Duration::from_secs(60)).unwrap();
         gateway.join().unwrap();
 
-        assert_eq!(registration.path, "/v1/station/sessions");
+        assert_eq!(registration.path, "/v1/station/runs");
         assert!(registration.headers.contains("Bearer test-token"));
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&registration.body).unwrap(),
             serde_json::json!({
                 "operation_id": "operation-a",
                 "mission_id": "mission-a",
-                "session_id": "session/a",
+                "run_id": "run/a",
                 "mission": {
                     "prompt": "Inspect this change",
                     "agent_id": "analyst",
@@ -2292,12 +2292,12 @@ mod tests {
         );
         assert_eq!(
             terminal.path,
-            "/v1/station/sessions/session%2Fa/terminal/41"
+            "/v1/station/runs/run%2Fa/terminal/41"
         );
         assert_eq!(terminal.body, [0, 255, 10]);
         assert_eq!(
             lifecycle.path,
-            "/v1/station/sessions/session%2Fa/lifecycle/42"
+            "/v1/station/runs/run%2Fa/lifecycle/42"
         );
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&lifecycle.body).unwrap(),
@@ -2314,7 +2314,7 @@ mod tests {
     fn a_private_commands_output_reaches_the_handler_and_no_gateway() {
         let (origin, requests, gateway) = gateway();
         let publisher = Publisher::start(Config::try_new(&origin, "test-token").unwrap()).unwrap();
-        let telemetry = publisher.session(
+        let telemetry = publisher.run(
             "operation-a".to_owned(),
             MissionId::try_new("mission-a").unwrap(),
         );
@@ -2340,33 +2340,33 @@ mod tests {
             3,
             "the handler reads it"
         );
-        // The Session's own output goes out, so the gateway has seen all it will once this comes.
-        let session = terminal.spawn(&spec).unwrap();
-        assert_eq!(session.read(&mut output, 100).unwrap(), 3);
-        telemetry.bind(SessionId::try_new("session-a").unwrap());
+        // The Run's own output goes out, so the gateway has seen all it will once this comes.
+        let run = terminal.spawn(&spec).unwrap();
+        assert_eq!(run.read(&mut output, 100).unwrap(), 3);
+        telemetry.bind(RunId::try_new("run-a").unwrap());
         telemetry.publish_lifecycle("working");
 
         let registration = requests.recv_timeout(Duration::from_secs(60)).unwrap();
-        assert_eq!(registration.path, "/v1/station/sessions");
+        assert_eq!(registration.path, "/v1/station/runs");
         let terminal_frame = requests.recv_timeout(Duration::from_secs(60)).unwrap();
         assert_eq!(
             terminal_frame.path,
-            "/v1/station/sessions/session-a/terminal/41"
+            "/v1/station/runs/run-a/terminal/41"
         );
         let lifecycle = requests.recv_timeout(Duration::from_secs(60)).unwrap();
         assert_eq!(
-            lifecycle.path, "/v1/station/sessions/session-a/lifecycle/42",
-            "one read's output, the Session's, and no other frame came before this"
+            lifecycle.path, "/v1/station/runs/run-a/lifecycle/42",
+            "one read's output, the Run's, and no other frame came before this"
         );
         gateway.join().unwrap();
     }
 
     #[test]
     fn authenticated_gateway_input_reaches_the_bound_provider_terminal() {
-        let session_id = GatewaySessionId::new("session-input").unwrap();
+        let run_id = GatewayRunId::new("run-input").unwrap();
         let (_, terminal_frame) = terminal_frames(
             &TerminalData::new(
-                session_id.clone(),
+                run_id.clone(),
                 1,
                 TerminalDirection::Input,
                 vec![0, 255, 10],
@@ -2375,7 +2375,7 @@ mod tests {
         )
         .unwrap();
         let (_, resize_frame) =
-            resize_frames(&TerminalResize::new(session_id, 2, 120, 40).unwrap()).unwrap();
+            resize_frames(&TerminalResize::new(run_id, 2, 120, 40).unwrap()).unwrap();
         let frames = [
             (terminal_frame.clone(), "operation-other"),
             (terminal_frame, "operation-a"),
@@ -2405,7 +2405,7 @@ mod tests {
                     headers.push_str(&line);
                 }
                 let path = request_line.split_whitespace().nth(1).unwrap_or_default();
-                if path == "/v1/station/sessions" {
+                if path == "/v1/station/runs" {
                     let body_length = headers
                         .lines()
                         .find_map(|line| {
@@ -2443,7 +2443,7 @@ mod tests {
 
         let config = Config::try_new(&format!("http://{address}"), "test-token").unwrap();
         let publisher = Publisher::start(config).unwrap();
-        let telemetry = publisher.session(
+        let telemetry = publisher.run(
             "operation-a".to_owned(),
             MissionId::try_new("mission-a").unwrap(),
         );
@@ -2463,8 +2463,8 @@ mod tests {
         }
         .to_value()
         .unwrap();
-        let _session = terminal.spawn(&spec).unwrap();
-        telemetry.bind(SessionId::try_new("session-input").unwrap());
+        let _run = terminal.spawn(&spec).unwrap();
+        telemetry.bind(RunId::try_new("run-input").unwrap());
 
         assert_eq!(
             inputs.recv_timeout(Duration::from_secs(60)).unwrap(),
@@ -2623,12 +2623,12 @@ mod tests {
         telemetry.publish_terminal(b"67890");
         assert!(publisher.health().healthy, "nothing fatal in that");
         assert_eq!(publisher.health().lost_terminal_bytes, 5);
-        telemetry.bind(SessionId::try_new("session-a").unwrap());
+        telemetry.bind(RunId::try_new("run-a").unwrap());
         until("the newest output goes out", || {
-            gateway.output("session-a") == b"67890"
+            gateway.output("run-a") == b"67890"
         });
         assert_eq!(
-            gateway.sequences("session-a"),
+            gateway.sequences("run-a"),
             [2],
             "the number the lost output would have had is skipped"
         );
@@ -2649,10 +2649,10 @@ mod tests {
         )
         .unwrap();
         let telemetry = telemetry_of(&publisher, "mission-a");
-        telemetry.bind(SessionId::try_new("session-a").unwrap());
+        telemetry.bind(RunId::try_new("run-a").unwrap());
         telemetry.publish_lifecycle("working");
         until("the first state arrives", || {
-            gateway.lifecycle("session-a").is_some()
+            gateway.lifecycle("run-a").is_some()
         });
         gateway.go_away();
         // The worker holds what it took first; what follows passes through a queue of three.
@@ -2671,13 +2671,13 @@ mod tests {
         gateway.come_back();
         until("the latest state and output arrive", || {
             gateway
-                .lifecycle("session-a")
+                .lifecycle("run-a")
                 .map(|state| state.0)
                 .as_deref()
                 == Some("working")
-                && gateway.output("session-a").ends_with(b"eeee")
+                && gateway.output("run-a").ends_with(b"eeee")
         });
-        let sequences = gateway.sequences("session-a");
+        let sequences = gateway.sequences("run-a");
         assert!(
             sequences.windows(2).any(|pair| pair[1] > pair[0] + 1),
             "the dropped output leaves a hole: {sequences:?}"
@@ -2686,7 +2686,7 @@ mod tests {
     }
 
     #[test]
-    fn a_gateway_restarted_while_a_session_was_idle_learns_of_it_unasked() {
+    fn a_gateway_restarted_while_a_run_was_idle_learns_of_it_unasked() {
         let mut gateway = Restartable::start();
         let publisher = Publisher::start(
             Config::try_new(&gateway.origin(), "t")
@@ -2695,25 +2695,25 @@ mod tests {
         )
         .unwrap();
         let telemetry = telemetry_of(&publisher, "mission-a");
-        telemetry.bind(SessionId::try_new("session-a").unwrap());
+        telemetry.bind(RunId::try_new("run-a").unwrap());
         telemetry.publish_lifecycle_for("blocked", Some("green-ink"));
         until("the state arrives", || {
-            gateway.lifecycle("session-a").is_some()
+            gateway.lifecycle("run-a").is_some()
         });
         gateway.go_away();
         gateway.come_back();
         until(
-            "the gateway shows the Session again, with no new event",
+            "the gateway shows the Run again, with no new event",
             || {
-                gateway.lifecycle("session-a")
+                gateway.lifecycle("run-a")
                     == Some(("blocked".to_owned(), Some("green-ink".to_owned())))
-                    && gateway.has_brief("session-a")
+                    && gateway.has_brief("run-a")
             },
         );
     }
 
     #[test]
-    fn a_session_that_ended_is_not_registered_again() {
+    fn a_run_that_ended_is_not_registered_again() {
         let mut gateway = Restartable::start();
         let publisher = Publisher::start(
             Config::try_new(&gateway.origin(), "t")
@@ -2722,24 +2722,24 @@ mod tests {
         )
         .unwrap();
         let telemetry = telemetry_of(&publisher, "mission-a");
-        telemetry.bind(SessionId::try_new("session-a").unwrap());
+        telemetry.bind(RunId::try_new("run-a").unwrap());
         telemetry.publish_lifecycle("done");
         until("the last state arrives", || {
-            gateway.lifecycle("session-a").is_some()
+            gateway.lifecycle("run-a").is_some()
         });
         drop(telemetry);
         let other = telemetry_of(&publisher, "mission-b");
-        other.bind(SessionId::try_new("session-b").unwrap());
+        other.bind(RunId::try_new("run-b").unwrap());
         other.publish_lifecycle("working");
         until("what came after the end arrives", || {
-            gateway.lifecycle("session-b").is_some()
+            gateway.lifecycle("run-b").is_some()
         });
         gateway.go_away();
         gateway.come_back();
-        until("the live Session is back", || {
-            gateway.lifecycle("session-b").is_some()
+        until("the live Run is back", || {
+            gateway.lifecycle("run-b").is_some()
         });
-        assert_eq!(gateway.lifecycle("session-a"), None);
+        assert_eq!(gateway.lifecycle("run-a"), None);
     }
 
     #[test]
@@ -2753,13 +2753,13 @@ mod tests {
         )
         .unwrap();
         let telemetry = telemetry_of(&publisher, "mission-a");
-        telemetry.bind(SessionId::try_new("session-a").unwrap());
+        telemetry.bind(RunId::try_new("run-a").unwrap());
         let burst: Vec<u8> = (0..4500_u32).map(|at| (at % 251) as u8).collect();
         telemetry.publish_terminal(&burst);
         until("the whole burst arrives", || {
-            gateway.output("session-a") == burst
+            gateway.output("run-a") == burst
         });
-        assert_eq!(gateway.sequences("session-a"), [1, 2, 3, 4, 5]);
+        assert_eq!(gateway.sequences("run-a"), [1, 2, 3, 4, 5]);
         let health = publisher.health();
         assert!(health.healthy, "{:?}", health.error);
         assert_eq!(health.lost_terminal_bytes, 0);
@@ -2775,15 +2775,15 @@ mod tests {
         )
         .unwrap();
         let telemetry = telemetry_of(&publisher, "mission-a");
-        telemetry.bind(SessionId::try_new("session-a").unwrap());
+        telemetry.bind(RunId::try_new("run-a").unwrap());
         telemetry.publish_lifecycle("working");
-        until("the Session is registered", || {
-            gateway.lifecycle("session-a").is_some()
+        until("the Run is registered", || {
+            gateway.lifecycle("run-a").is_some()
         });
         *gateway.stated.lock().unwrap() = Some(100);
         telemetry.publish_terminal(&[7; 950]);
         until("the output arrives", || {
-            gateway.output("session-a") == [7; 950]
+            gateway.output("run-a") == [7; 950]
         });
         assert_eq!(publisher.health().lost_terminal_bytes, 0);
     }
@@ -2799,14 +2799,14 @@ mod tests {
         )
         .unwrap();
         let telemetry = telemetry_of(&publisher, "mission-a");
-        telemetry.bind(SessionId::try_new("session-a").unwrap());
+        telemetry.bind(RunId::try_new("run-a").unwrap());
         telemetry.publish_terminal(b"nothing fits");
         until("the output is written off", || {
             publisher.health().lost_terminal_bytes == 12
         });
         telemetry.publish_lifecycle("working");
         until("what follows still goes out", || {
-            gateway.lifecycle("session-a").is_some()
+            gateway.lifecycle("run-a").is_some()
         });
     }
 

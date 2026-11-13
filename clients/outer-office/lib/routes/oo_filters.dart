@@ -12,7 +12,7 @@ const _labels = {
   'sort': 'Sorted by',
   'order': 'Order',
   'mission_id': 'Mission',
-  'session_id': 'Session',
+  'run_id': 'Run',
   'theater_id': 'Theater',
   'role': 'Role',
   'request_id': 'Request',
@@ -77,7 +77,7 @@ class OoFilterBar extends StatelessWidget {
   }
 }
 
-/// The sort and order of a Missions or Sessions route, as a menu.
+/// The sort and order of a Missions or Runs route, as a menu.
 class OoSortMenu extends StatelessWidget {
   const OoSortMenu({
     required this.route,
@@ -98,7 +98,7 @@ class OoSortMenu extends StatelessWidget {
     'state': 'State',
     'operation': 'Operation',
     'mission': 'Mission',
-    'session': 'Session',
+    'run': 'Run',
   };
 
   @override

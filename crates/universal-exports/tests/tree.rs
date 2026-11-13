@@ -10,7 +10,7 @@ use ai6::{
     Attempt, Authenticator, Directory, FileProvider, FileRegistry, Lookup, Person, Verdict,
     access_from_toml, guatiao::library::ProviderError,
 };
-use ai6_diptel::{LifecycleEvent, MissionId, OperationId, SessionId, SessionState};
+use ai6_diptel::{LifecycleEvent, MissionId, OperationId, RunId, RunState};
 use tokio::sync::oneshot;
 use universal_exports::{AccessProviders, Gateway, GatewayConfig, GatewayLimits};
 
@@ -112,13 +112,13 @@ async fn serve() -> (String, oneshot::Sender<()>, tempfile::TempDir) {
             OperationId::new(operation).unwrap(),
             MissionId::new(mission).unwrap(),
         );
-        let session = SessionId::new(format!("session-{mission}")).unwrap();
+        let run = RunId::new(format!("run-{mission}")).unwrap();
         gateway
-            .register_session(
+            .register_run(
                 STATION_TOKEN,
                 operation.clone(),
                 mission.clone(),
-                session.clone(),
+                run.clone(),
             )
             .await
             .unwrap();
@@ -128,8 +128,8 @@ async fn serve() -> (String, oneshot::Sender<()>, tempfile::TempDir) {
                 LifecycleEvent {
                     operation_id: operation,
                     mission_id: mission,
-                    session_id: session,
-                    state: SessionState::Working,
+                    run_id: run,
+                    state: RunState::Working,
                     reason: None,
                     sequence: 1,
                 },

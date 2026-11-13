@@ -15,7 +15,7 @@ over Operation access; the gateway enforces the scoped grants M issues.** See th
 
 | Feature | Adds | Default |
 | --- | --- | --- |
-| (none) | Authenticated Station channel, Operation/Mission/Session binding, bounded replay/fanout, write leases, HTTPS origin checks and loopback serving. | Yes |
+| (none) | Authenticated Station channel, Operation/Mission/Run binding, bounded replay/fanout, write leases, HTTPS origin checks and loopback serving. | Yes |
 | `cli` | The `universal-exports` service command. | No |
 
 Terminal bytes remain binary and are redacted from debug output.
@@ -118,12 +118,12 @@ record; authorization still comes from the access policy.
 | --- | --- |
 | `GatewayConfig`, `GatewayLimits` | HTTPS origin, Station credential, TTLs and bounded resource policy. |
 | `Gateway` | M registration, typed lifecycle/terminal publication, board snapshots, shared access-token issue/verify/revoke, raw guatiao ingress, browser attach and input queue. |
-| `AttachGrant`, `AttachMode` | Station/Mission/Session-scoped read or write authorization. |
+| `AttachGrant`, `AttachMode` | Station/Mission/Run-scoped read or write authorization. |
 | `Attachment`, `AgentInput` | Bounded viewer replay/live stream and queued terminal input or resize. |
 | `GatewayError` | Refusals for auth, scope, bounds, malformed frames and backpressure. |
 | `ControlStatus` | One operator control (cancel, retry, resume, interrupt) and what the Station did with it. |
 | `TimelinePage`, `TimelineItem` | One page of an Operation's correlated, metadata-only activity timeline. |
-| `Gateway::router` | Axum routes for the Station channel, attach token exchange and WebSocket sessions. |
+| `Gateway::router` | Axum routes for the Station channel, attach token exchange and WebSocket runs. |
 | `Gateway::serve_loopback(port, shutdown)` | Loopback listener with caller-owned graceful shutdown; then flushes Moneypenny's conversation log. |
 
 ### HTTP routes
@@ -133,22 +133,22 @@ All `/v1/station/` paths require the Station bearer credential.
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/health` | Return `204 No Content` while the gateway is serving. |
-| `GET` | `/v1/board` | Return Sessions for Operations permitted by the user's `mission.read` policy. |
+| `GET` | `/v1/board` | Return Runs for Operations permitted by the user's `mission.read` policy. |
 | `GET` | `/v1/stations` | Return authorized Station health, hosted Operations, the Theaters each Station reaches (with the transport's capabilities and the Theater's declared facts), and the current Headquarters Station. |
 | `GET` | `/v1/user/operations/{operation_id}/placement-preview` | Require `mission.read`; return where a Mission for the Operation would run (Station, Theater, Agent, best first) and a reason for every place ruled out. Optional `agent`, `role`, `stations` and `tags` narrow it. |
-| `GET` | `/v1/missions` | Group registered provider Sessions by Mission and apply `mission.read` to each Operation; Missions queued, waiting, retrying or failed before a start are listed with `pending`. |
+| `GET` | `/v1/missions` | Group registered provider Runs by Mission and apply `mission.read` to each Operation; Missions queued, waiting, retrying or failed before a start are listed with `pending`. |
 | `GET` | `/v1/operations/{operation_id}/missions/{mission_id}` | Return one authorized Mission and its AI6-published brief and sanitized launch manifest. |
 | `GET` | `/v1/auth/session` | Validate the bearer access token against the shared Registry and return its person and expiry. |
 | `POST` | `/v1/station/access-tokens` | Issue a person-bound access token after M authenticates the user; the raw token is returned once. Body: `{"person_id":"…","ttl_seconds":600}`. |
 | `DELETE` | `/v1/station/access-tokens/{token_id}` | Revoke a token across gateway replicas sharing the Registry. |
-| `POST` | `/v1/station/sessions` | Register an Operation, Mission ID and provider Session ID, optionally with the authoritative Mission brief and sanitized launch manifest; returns `{"next_sequence": N}`. |
-| `POST` | `/v1/station/sessions/{session_id}/lifecycle/{sequence}` | Publish JSON lifecycle state; the gateway encodes the guatiao event. |
-| `POST` | `/v1/station/sessions/{session_id}/terminal/{sequence}` | Publish raw terminal bytes; the gateway encodes the guatiao event. |
-| `POST` | `/v1/station/sessions/{session_id}/events/{sequence}` | Ingest one guatiao frame. Schema/close frames use cursor `0`; values use a positive event sequence. |
+| `POST` | `/v1/station/runs` | Register an Operation, Mission ID and provider ID, optionally with the authoritative Mission brief and sanitized launch manifest; returns `{"next_sequence": N}`. |
+| `POST` | `/v1/station/runs/{run_id}/lifecycle/{sequence}` | Publish JSON lifecycle state; the gateway encodes the guatiao event. |
+| `POST` | `/v1/station/runs/{run_id}/terminal/{sequence}` | Publish raw terminal bytes; the gateway encodes the guatiao event. |
+| `POST` | `/v1/station/runs/{run_id}/events/{sequence}` | Ingest one guatiao frame. Schema/close frames use cursor `0`; values use a positive event sequence. |
 | `POST` | `/v1/station/attach-grants` | Issue a read or write token within M's Station grant. |
 | `GET` | `/v1/auth/methods` | Say what `/v1/auth/login` accepts here, with no token: `{"methods": [...]}`, `password` for a name and a secret, `proxy` for an identity the reverse proxy asserts. |
 | `POST` | `/v1/auth/login` | Resolve the trusted proxy identity, or verify credentials with the configured Authenticator; returns one user access token with `expires_at` and `ends_at` (when renewing it stops, `null` with no bound). |
-| `POST` | `/v1/auth/logout` | Revoke the presented user token across gateways sharing the Registry, and the session cookie sent from the public origin. A token or cookie of a browser's sign-in ends that whole sign-in. |
+| `POST` | `/v1/auth/logout` | Revoke the presented user token across gateways sharing the Registry, and the run cookie sent from the public origin. A token or cookie of a browser's sign-in ends that whole sign-in. |
 | `POST` | `/v1/auth/resume` | Take the `ai6_session` cookie a browser's login got and return a new access token, as login does, within the same sign-in's `session_max`. `403` from another origin; `401` when refused. See `[gateway] session_cookie`. |
 | `POST` | `/v1/auth/renew` | Move the presented token's expiry on by `[gateway] access_token_ttl`, up to `session_max` after it was issued; the token's value does not change. `200 {token_id, expires_at, ends_at}`, no secret; `401` when it is not active or the person has left the directory. |
 | `GET` | `/v1/user/attention?operation_id=<id>` | Return what needs the person, as one list for the Overview page and Moneypenny: each item current, historical or unverified, with its entity link, the scope checked and when, and the sources that could not be read. |
@@ -165,18 +165,18 @@ All `/v1/station/` paths require the Station bearer credential.
 | `POST` | `/v1/user/operations/{operation_id}/missions/{mission_id}/verify` | Require `mission.verify`; decide a verifying Mission: `done`, `redispatch` (its next attempt) or `failed`, with a reason. |
 | `GET`, `POST` | `/v1/user/operations/{operation_id}/class-authorizations` | Require `approval.class`; list, or grant as the caller, standing approvals of a kind of step on a target glob for named Agents or roles. |
 | `DELETE` | `/v1/user/operations/{operation_id}/class-authorizations/{id}` | Require `approval.class`; revoke one. |
-| `POST` | `/v1/user/operations/{operation_id}/missions/{mission_id}/actions` | Require `mission.control`; audit and queue a cancel, retry, resume or interrupt for the Station holding the Mission. Body: `{"action":"retry","agent":"008","idempotency_key":"…"}` (`agent` only with `retry`, `message` only with `resume`, optional `session_id`). Returns `202` and a `ControlStatus`, or `200` and the first one for a repeated key. |
+| `POST` | `/v1/user/operations/{operation_id}/missions/{mission_id}/actions` | Require `mission.control`; audit and queue a cancel, retry, resume or interrupt for the Station holding the Mission. Body: `{"action":"retry","agent":"008","idempotency_key":"…"}` (`agent` only with `retry`, `message` only with `resume`, optional `run_id`). Returns `202` and a `ControlStatus`, or `200` and the first one for a repeated key. |
 | `GET` | `/v1/user/operations/{operation_id}/missions/{mission_id}/actions/{control_id}` | Require `mission.read`; return the control's status: `queued`, `delivered`, `applied`, `rejected` or `expired`, with the Mission state and reason the Station reported. |
 | `GET` | `/v1/user/audit?operation_id=<id>&limit=<n>` | Return up to 500 newest metadata-only audit records authorized by `audit.read` for each Operation. |
-| `GET` | `/v1/user/operations/{operation_id}/timeline?cursor=<c>&mission=<id>&limit=<n>` | Require `audit.read`; return one newest-first page (default 50, at most 200) of the Operation's lifecycle transitions, control outcomes, Cables sent, Sleeper authorizations and audit records, correlated by Station, Mission and Session, with `next_cursor` for the older page. |
-| `GET` | `/v1/user/operations/{operation_id}/pools` | Require `pool.read`; return the pool accounts the Operation may draw from, with the Sessions using each, quota windows, limited-until and tokens today; never a credential. |
+| `GET` | `/v1/user/operations/{operation_id}/timeline?cursor=<c>&mission=<id>&limit=<n>` | Require `audit.read`; return one newest-first page (default 50, at most 200) of the Operation's lifecycle transitions, control outcomes, Cables sent, Sleeper authorizations and audit records, correlated by Station, Mission and Run, with `next_cursor` for the older page. |
+| `GET` | `/v1/user/operations/{operation_id}/pools` | Require `pool.read`; return the pool accounts the Operation may draw from, with the Runs using each, quota windows, limited-until and tokens today; never a credential. |
 | `POST` | `/v1/user/operations/{operation_id}/pools/{pool}/{account}/clear-limit` | Require `pool.manage`; lift an account's provider limit, audited. |
 | `GET` | `/v1/user/roster/{kind}` | Require `roster.read` on `config:roster`; list the roster's `operations`, `agents`, `roles`, `covers` or `assistant` (Moneypenny's settings, one record keyed `assistant`) with the revision and whether it takes edits. |
 | `PUT`, `DELETE` | `/v1/user/roster/{kind}/{key}` | Require `roster.manage` on `config:roster`; store (a JSON object) or remove one record through the roster source. The whole roster is checked first: `422` with the reason when it would not be acceptable, `409` for a read-only source. An accepted `assistant` record answers with the settings it loosens (`weakened`). Accepted and refused edits are audited. |
 | `GET` | `/v1/user/operations/{operation_id}/agent-roles` | Require `agent.read`; return the Headquarters Station role catalog merged with this Operation's validated overrides. Each role has `operation_override` to identify whether it replaces the Station definition. |
 | `PUT` | `/v1/user/operations/{operation_id}/agent-roles/{role_id}` | Require `agent.configure`; validate and store a role purpose and policy in the shared Registry. |
 | `DELETE` | `/v1/user/operations/{operation_id}/agent-roles/{role_id}` | Require `agent.configure`; remove the Operation override, fall back to the Station definition and record a metadata-only audit event. |
-| `POST` | `/v1/user/attach-grants` | Issue a Session attach token only when `session.read` or `session.input` is allowed at that Station. |
+| `POST` | `/v1/user/attach-grants` | Issue a Run attach token only when `run.read` or `run.input` is allowed at that Station. |
 | `POST` | `/v1/user/operations/{operation_id}/missions` | Require `mission.create` for the Operation and atomically enqueue the bounded title and explicit brief in the shared Registry. |
 | `GET` | `/v1/user/operations/{operation_id}/mission-proposals` | Require `mission.create`; list bounded pending Agent proposals for review in that Operation, each with its `vetting` once M has vetted it. |
 | `POST` | `/v1/user/operations/{operation_id}/mission-proposals/{proposal_id}/approve` | Require `mission.create`; record the approving operator and promote the proposal into scheduler-visible intake, cleared of every vetting finding but `malformed`. |
@@ -189,7 +189,7 @@ All `/v1/station/` paths require the Station bearer credential.
 | `GET` | `/v1/station/controls/next?station=<id>&wait_ms=<n>` | Wait up to `wait_ms` (default 1000, at most 25000) for the next control queued for that Station; `200` with one DipTel control value frame (channel 4) or `204`. |
 | `POST` | `/v1/station/controls/{control_id}/result` | Report a taken control's outcome: `{"station":"…","outcome":"applied"\|"rejected","state":"…","reason":"…"}`; `403` from another Station, `409` once finished. |
 | `POST` | `/v1/attach` | Exchange a token in the request body for a one-connection cookie. |
-| `GET` | `/v1/socket/{session_id}?after={sequence}` | Replay and stream events for one provider Session. |
+| `GET` | `/v1/socket/{run_id}?after={sequence}` | Replay and stream events for one provider Run. |
 
 `Gateway::with_access` injects identity and authorization providers. Configure
 `--directory` and `--proxy-user-header` to accept identity from the existing
@@ -214,15 +214,15 @@ never logged or persisted. `/v1/auth/logout`
 revokes that token in the shared Registry. The Registry stores only a domain-separated
 SHA-256 digest, person ID, issue/expiry times, and revocation time. Token secrets are
 returned only once. `/v1/board` and `/v1/missions` apply `mission.read` per Operation;
-user attach grants apply `session.read` or `session.input` to the exact registered Operation and
-Session tuple. A missing policy rule denies access. Provider calls run on Tokio's
+user attach grants apply `run.read` or `run.input` to the exact registered Operation and
+Run tuple. A missing policy rule denies access. Provider calls run on Tokio's
 blocking pool. `Gateway::with_registry` enables M-issued access tokens but leaves
 user login and authorization endpoints unavailable. The `universal-exports` command accepts
 provider IDs and an access-policy path to enable user access; it uses the Registry
 `ai6.cfg` names: a directory, `sqlite:PATH` or a `postgres://` URL
 (`ai6::directorates::registry::backend::open_with`).
 
-A control goes to the Station holding the Mission's latest Session record, else the one
+A control goes to the Station holding the Mission's latest Run record, else the one
 holding its brief's lease, else the Headquarters Station, passing over Stations gone dark;
 with none, the request is refused with `503` and `Retry-After`. The Station decides
 whether the Mission can take it. Controls live in gateway memory: at most 1,024 are kept
@@ -242,17 +242,17 @@ The gateway refuses request bodies and websocket frames above the configured
 limit. Its configured history, fanout, input queue and per-viewer socket buffers
 cannot exceed a combined budget (`[gateway] buffer_budget_bytes`, 512 MiB).
 
-`GET /v1/board` returns sorted `BoardSession` records. `GET /v1/missions` returns
-sorted `BoardMission` records with their registered Sessions and published Mission
+`GET /v1/board` returns sorted `BoardRun` records. `GET /v1/missions` returns
+sorted `BoardMission` records with their registered Runs and published Mission
 briefs; `GET /v1/operations/{operation_id}/missions/{mission_id}` returns one authorized
 Mission. All require a user bearer and filter by `mission.read` for each Operation.
 `GET /v1/stations` derives Station check-ins and hosted Operations from the shared I
 Registry; stale Stations remain visible as offline after 45 seconds, and the Headquarters
 marker follows only an unexpired elected lease. Host and process metadata are omitted.
 The brief includes the exact prompt and launch metadata, but only environment variable
-names; secret values and initial context are never sent to the gateway. Newly registered Sessions
+names; secret values and initial context are never sent to the gateway. Newly registered Runs
 have a null state and sequence zero until M publishes their first lifecycle event.
-Queued Missions without a registered Session are not included; creation requires
+Queued Missions without a registered Run are not included; creation requires
 `mission.create` on the Operation and returns only the queued Mission ID. These endpoints do
 not expose terminal data or credentials. Put the public gateway behind the deployment's HTTPS reverse proxy;
 it must remove client-supplied `X-Forwarded-Proto` and set it to `https`.

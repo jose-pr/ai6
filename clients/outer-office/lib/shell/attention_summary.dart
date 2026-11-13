@@ -67,7 +67,7 @@ class AttentionEntry {
 
   final String id;
 
-  /// `blocked_session`, `green_ink`, `held_brief`, `mission_proposal`, `station_dark` or
+  /// `blocked_run`, `green_ink`, `held_brief`, `mission_proposal`, `station_dark` or
   /// `config_refused`.
   final String kind;
   final AttentionCondition condition;

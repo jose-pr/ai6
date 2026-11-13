@@ -75,7 +75,7 @@ MissionBoard board(
   );
   board.accessToken = 'token';
   board.loading = false;
-  board.userSession = UserSessionSummary(
+  board.userRun = UserRunSummary(
     personId: 'p-1',
     name: 'p-1',
     displayName: null,

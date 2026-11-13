@@ -1,9 +1,9 @@
 //! What the Station learns of the models each account and route may use.
 //!
-//! Each look asks a handler, with the credentials a Session on that account or route would get,
+//! Each look asks a handler, with the credentials a Run on that account or route would get,
 //! to list its models ([`AgentHandler::models`]): no model turn is spent and no pool account is
 //! claimed. A handler that cannot list says so, and the answer stays "unknown"; nothing is
-//! guessed. The credentials come from the same leases a Session's do and are revoked as soon as
+//! guessed. The credentials come from the same leases a Run's do and are revoked as soon as
 //! the question is over; none is ever part of an answer. The board is rebuilt every
 //! `[accounts] models_every` seconds and reported at check-in under `models`; it only informs a
 //! person, and makes no route or pool.
@@ -326,7 +326,7 @@ fn route_source(agent: &Agent, route: &AgentRoute) -> String {
     )
 }
 
-/// Runs `question` with the environment a Session on `account` would start with, its credential
+/// Runs `question` with the environment a Run on `account` would start with, its credential
 /// leased for the question alone and revoked after it. No account is claimed.
 pub(super) fn with_account<T>(
     state: &DaemonState,

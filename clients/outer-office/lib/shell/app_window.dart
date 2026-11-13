@@ -4,7 +4,7 @@
 import 'package:flutter/src/widgets/_window.dart';
 import 'package:material_ui/material_ui.dart';
 
-/// A native desktop window the app opened, such as a Session's or Moneypenny's.
+/// A native desktop window the app opened, such as a Run's or Moneypenny's.
 abstract interface class AppWindow {
   /// Closes the window; closing it twice does nothing.
   void close();

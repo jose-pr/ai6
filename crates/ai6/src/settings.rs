@@ -1,6 +1,6 @@
 //! Every setting a person writes, read from the one declaration on its struct.
 //!
-//! A section is named by a dotted path: `provider`, `registry.limits.sessions` and `oo.chat` are
+//! A section is named by a dotted path: `provider`, `registry.limits.runs` and `oo.chat` are
 //! sections of `ai6.cfg`, and `record.station.scheduler` or `record.operation.issues` are parts
 //! of a record kind. `ai6 config schema [SECTION]` prints one, and [`reference`](mod@reference) writes the tables
 //! of the narrative docs and what Outer Office reads from the same schemas.
@@ -140,7 +140,7 @@ mod tests {
     #[test]
     fn a_section_is_found_by_its_path_and_lists_with_its_title() {
         assert!(schema("provider").unwrap()["properties"]["poll"].is_object());
-        assert!(schema("registry.limits.sessions").unwrap()["properties"]["records"].is_object());
+        assert!(schema("registry.limits.runs").unwrap()["properties"]["records"].is_object());
         assert!(schema("record.station").unwrap()["properties"]["scheduler"].is_object());
         assert!(schema("record.station.scheduler").unwrap()["properties"]["check_in"].is_object());
         assert!(schema("record.unex.gateway").unwrap()["properties"]["frame_bytes"].is_object());

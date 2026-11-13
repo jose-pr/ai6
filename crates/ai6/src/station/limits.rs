@@ -32,7 +32,7 @@ pub struct StationLimits {
     pub sources: SourceLimits,
     /// `[transports]`: how often Theaters are looked over.
     pub transports: TransportLimits,
-    /// `[recovery]`: re-attaching to Sessions after a restart.
+    /// `[recovery]`: re-attaching to Runs after a restart.
     pub recovery: RecoveryLimits,
     /// `[vetting]`: vetting briefs and Mission proposals.
     pub vetting: VettingLimits,
@@ -64,7 +64,7 @@ pub struct StationLimits {
     pub audit: AuditLimits,
     /// `[theaters]`: ephemeral Theaters.
     pub theaters: TheaterLimits,
-    /// `[theater_tools]`: the `theater_*` tools of remote-hands Sessions.
+    /// `[theater_tools]`: the `theater_*` tools of remote-hands Runs.
     pub theater_tools: TheaterToolLimits,
     /// `[head_of_station]`: the Head of Station's rounds.
     pub head_of_station: HeadOfStationLimits,
@@ -134,8 +134,8 @@ impl StationLimits {
 #[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
 #[map(deny_unknown_fields)]
 pub struct SchedulerLimits {
-    /// Events of one Session queued for its event pump; past it the oldest is dropped.
-    #[schema(title = "Events queued per Session")]
+    /// Events of one Run queued for its event pump; past it the oldest is dropped.
+    #[schema(title = "Events queued per Run")]
     #[map(default = SchedulerLimits::default().event_queue)]
     pub event_queue: Limit,
     /// Seconds between scheduler rounds.
@@ -155,7 +155,7 @@ pub struct SchedulerLimits {
     #[schema(title = "Between check-ins with the Registry")]
     #[map(default = SchedulerLimits::default().check_in)]
     pub check_in: Seconds,
-    /// Seconds a lease on a Mission's brief or Session lasts unless the Station renews it at a
+    /// Seconds a lease on a Mission's brief or Run lasts unless the Station renews it at a
     /// check-in. A Station whose check-ins can take longer than this loses its Missions to
     /// recovery.
     #[schema(title = "A Mission lease lasts")]
@@ -216,7 +216,7 @@ pub struct PublisherLimits {
     #[schema(title = "Longest request to Universal Exports")]
     #[map(default = PublisherLimits::default().request_timeout)]
     pub request_timeout: Seconds,
-    /// Events waiting for Universal Exports; past it output gives way, oldest first, and a Session's
+    /// Events waiting for Universal Exports; past it output gives way, oldest first, and a Run's
     /// latest state is kept.
     #[schema(title = "Events waiting to publish")]
     #[map(default = PublisherLimits::default().queue)]
@@ -227,7 +227,7 @@ pub struct PublisherLimits {
     #[schema(title = "Terminal output in one frame", format = "bytes")]
     #[map(default = PublisherLimits::default().terminal_bytes)]
     pub terminal_bytes: Limit,
-    /// Bytes of terminal output kept for a Session not yet bound to its Mission; past it the oldest
+    /// Bytes of terminal output kept for a Run not yet bound to its Mission; past it the oldest
     /// goes.
     #[schema(
         title = "Terminal output kept before a Mission binds",
@@ -244,9 +244,9 @@ pub struct PublisherLimits {
     #[schema(title = "Longest pause between tries")]
     #[map(default = PublisherLimits::default().retry_max_delay)]
     pub retry_max_delay: Seconds,
-    /// Seconds between registering every live Session again, which is how a gateway restarted during
+    /// Seconds between registering every live Run again, which is how a gateway restarted during
     /// a quiet spell learns of them.
-    #[schema(title = "Register live Sessions again every")]
+    #[schema(title = "Register live Runs again every")]
     #[map(default = PublisherLimits::default().refresh_every)]
     pub refresh_every: Seconds,
     /// Seconds before a failed input or control poll is tried again; each try doubles it, up to
@@ -408,7 +408,7 @@ impl Default for TransportLimits {
 #[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
 #[map(deny_unknown_fields)]
 pub struct RecoveryLimits {
-    /// Seconds before the first try to re-attach to a Session; each failed try doubles it.
+    /// Seconds before the first try to re-attach to a Run; each failed try doubles it.
     #[schema(title = "First re-attach try after")]
     #[map(default = RecoveryLimits::default().first_reattach_delay)]
     pub first_reattach_delay: Seconds,
@@ -420,11 +420,11 @@ pub struct RecoveryLimits {
     #[schema(title = "Tries to give a lease up")]
     #[map(default = RecoveryLimits::default().give_up_tries)]
     pub give_up_tries: u32,
-    /// Seconds between writes of a Session's recent events to its record.
-    #[schema(title = "Write a Session's recent events every")]
+    /// Seconds between writes of a Run's recent events to its record.
+    #[schema(title = "Write a Run's recent events every")]
     #[map(default = RecoveryLimits::default().notes_every)]
     pub notes_every: Seconds,
-    /// Seconds the look at whether a Session's Theater still answers may take.
+    /// Seconds the look at whether a Run's Theater still answers may take.
     #[schema(title = "Longest look at a Theater")]
     #[map(default = RecoveryLimits::default().probe_timeout)]
     pub probe_timeout: Seconds,
@@ -580,7 +580,7 @@ impl Default for ReviewLimits {
 #[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
 #[map(deny_unknown_fields)]
 pub struct AccountLimits {
-    /// Seconds past a reported reset before a Session parked on a limit resumes.
+    /// Seconds past a reported reset before a Run parked on a limit resumes.
     #[schema(title = "Wait past a reported reset")]
     #[map(default = AccountLimits::default().reset_grace)]
     pub reset_grace: Seconds,
@@ -622,7 +622,7 @@ pub struct AccountLimits {
     #[map(default = AccountLimits::default().renew_every)]
     pub renew_every: Seconds,
     /// Seconds before a login's known end at which a round renews it: well before its harness's
-    /// own threshold, so a Session's harness has no reason to.
+    /// own threshold, so a Run's harness has no reason to.
     #[schema(title = "Renew a login this long before it ends")]
     #[map(default = AccountLimits::default().renew_within)]
     pub renew_within: Seconds,
@@ -772,8 +772,8 @@ pub struct OverlayLimits {
     #[schema(title = "Issue overlays without a pin")]
     #[map(default)]
     pub unpinned: bool,
-    /// Bytes of the rules, routing and context a Session's overlays add to its initial context
-    /// together. Past it the Session is refused, naming this setting, rather than its text cut.
+    /// Bytes of the rules, routing and context a Run's overlays add to its initial context
+    /// together. Past it the Run is refused, naming this setting, rather than its text cut.
     #[schema(title = "Largest overlay context", format = "bytes")]
     #[map(default = OverlayLimits::default().context_bytes)]
     pub context_bytes: Limit,
@@ -909,7 +909,7 @@ impl Default for ProvisionLimits {
 #[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
 #[map(deny_unknown_fields)]
 pub struct SecretLimits {
-    /// Seconds the leases of a Session's loadout and pool account secrets last.
+    /// Seconds the leases of a Run's loadout and pool account secrets last.
     #[schema(title = "A secret's lease lasts")]
     #[map(default = SecretLimits::default().lease_ttl)]
     pub lease_ttl: Seconds,
@@ -992,8 +992,8 @@ pub struct DetachedLimits {
     #[schema(title = "Longest wrapper script")]
     #[map(default = DetachedLimits::default().script_timeout)]
     pub script_timeout: Seconds,
-    /// Characters of the Session's name in the wrapper's file names.
-    #[schema(title = "Session name in the wrapper's files")]
+    /// Characters of the Run's name in the wrapper's file names.
+    #[schema(title = "Run name in the wrapper's files")]
     #[map(default = DetachedLimits::default().name_chars)]
     pub name_chars: Limit,
 }
@@ -1026,8 +1026,8 @@ pub struct RunnerLimits {
     #[schema(title = "Spooled events taken at once")]
     #[map(default = RunnerLimits::default().replay_batch)]
     pub replay_batch: usize,
-    /// Seconds an ended Session is kept by its runner.
-    #[schema(title = "Keep an ended Session for")]
+    /// Seconds an ended Run is kept by its runner.
+    #[schema(title = "Keep an ended Run for")]
     #[map(default = RunnerLimits::default().keep_ended)]
     pub keep_ended: Seconds,
     /// Bytes of one request through a runner's Cable relay.
@@ -1039,13 +1039,13 @@ pub struct RunnerLimits {
     #[schema(title = "The Station reaches its Cable endpoint within")]
     #[map(default = RunnerLimits::default().cable_connect_timeout)]
     pub cable_connect_timeout: Seconds,
-    /// Requests through a runner's Cable relay the Station answers at once for one Session;
+    /// Requests through a runner's Cable relay the Station answers at once for one Run;
     /// past it a request is refused until one ends.
     #[schema(title = "Cable relay requests open at once")]
     #[map(default = RunnerLimits::default().cable_streams)]
     pub cable_streams: Limit,
-    /// Seconds one read by the Station of a runner's Session waits for an event.
-    #[schema(title = "One read of a Session waits")]
+    /// Seconds one read by the Station of a runner's Run waits for an event.
+    #[schema(title = "One read of a Run waits")]
     #[map(default = RunnerLimits::default().read_wait)]
     pub read_wait: Seconds,
     /// Seconds `ai6 runner connect` may take to reach the runner's loopback port.
@@ -1073,7 +1073,7 @@ pub struct RunnerLimits {
     #[schema(title = "One read of the connect terminal waits")]
     #[map(default = RunnerLimits::default().terminal_poll)]
     pub terminal_poll: Seconds,
-    /// Seconds a connection another one took a Session from stays open, so the notice saying so is
+    /// Seconds a connection another one took a Run from stays open, so the notice saying so is
     /// written before the socket closes under it.
     #[schema(title = "Keep a superseded connection open for")]
     #[map(default = RunnerLimits::default().superseded_close_wait)]

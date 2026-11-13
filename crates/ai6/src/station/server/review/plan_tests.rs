@@ -77,21 +77,21 @@ fn mission(state: &DaemonState, id: &str) -> Option<Mission> {
     state.missions.lock().unwrap().get(id).cloned()
 }
 
-/// Rounds until the Mission, its Session ended done, is verifying; then a person's confirmation as
+/// Rounds until the Mission, its Run ended done, is verifying; then a person's confirmation as
 /// the gateway records it, and rounds until the Station has settled it done.
 async fn done(state: &DaemonState, id: &str) {
     until(state, "verifying", |state| {
         mission(state, id).is_some_and(|mission| mission.state == MissionState::Verifying)
             && state
                 .intake
-                .latest_session(id)
+                .latest_run(id)
                 .unwrap()
                 .and_then(|record| record.result)
                 .is_some_and(|result| result.state == "verifying")
     })
     .await;
-    let confirmed = crate::directorates::registry::sessions::MissionVerdict::new(
-        crate::directorates::registry::sessions::OutcomeVerdict::Confirmed,
+    let confirmed = crate::directorates::registry::runs::MissionVerdict::new(
+        crate::directorates::registry::runs::OutcomeVerdict::Confirmed,
         "person-test",
         state.clock.now() as f64,
         Some("checked".to_owned()),
@@ -171,9 +171,9 @@ async fn a_plan_is_reviewed_before_the_agent_gets_its_tools_and_then_it_works() 
         .cloned()
         .unwrap();
     assert_eq!(
-        Some(&resumed.session_id),
-        mission(&state, "rv-plan").unwrap().session_ids.first(),
-        "the same Session, as its stream reported it"
+        Some(&resumed.run_id),
+        mission(&state, "rv-plan").unwrap().run_ids.first(),
+        "the same Run, as its stream reported it"
     );
     assert!(resumed.message.unwrap().contains("passed"));
     assert_eq!(
@@ -220,7 +220,7 @@ async fn a_plan_sent_back_is_redone_still_holding_only_what_reads() {
 }
 
 #[tokio::test]
-async fn a_handler_that_cannot_hold_a_session_to_reading_never_starts_it() {
+async fn a_handler_that_cannot_hold_a_run_to_reading_never_starts_it() {
     let root = tempfile::tempdir().unwrap();
     let state = station(root.path(), &agents("mock-agent", "pass"), PLAN_GATE);
     submit(&state, "rv-plan-refused");
@@ -238,7 +238,7 @@ async fn a_handler_that_cannot_hold_a_session_to_reading_never_starts_it() {
     }
     let mission = mission(&state, "rv-plan-refused").unwrap();
     assert_eq!(mission.state, MissionState::Queued, "it never started");
-    assert!(mission.session_ids.is_empty());
+    assert!(mission.run_ids.is_empty());
     state
         .stopping
         .store(true, std::sync::atomic::Ordering::Release);
@@ -255,7 +255,7 @@ async fn the_submitted_plan_is_what_the_panel_reads() {
         .insert("rv-plan-tool".to_owned());
     submit(&state, "rv-plan-tool");
     until(&state, "running", |state| {
-        mission(state, "rv-plan-tool").is_some_and(|mission| !mission.session_ids.is_empty())
+        mission(state, "rv-plan-tool").is_some_and(|mission| !mission.run_ids.is_empty())
     })
     .await;
     // What the submit_plan tool does with what the Agent sends.

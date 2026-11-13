@@ -135,17 +135,17 @@ struct MirrorArgs {
 }
 
 impl CableTools {
-    /// Who is calling, as the Cable endpoint bound the Session.
+    /// Who is calling, as the Cable endpoint bound the Run.
     fn issue_caller(&self) -> Result<Caller, String> {
         let principal = self.principal().map_err(str::to_owned)?;
-        let (Some(mission), Some(session)) = (principal.mission_id(), principal.session_id())
+        let (Some(mission), Some(run)) = (principal.mission_id(), principal.run_id())
         else {
-            return Err("issues need a bound provider Session".to_owned());
+            return Err("issues need a bound provider Run".to_owned());
         };
         Ok(Caller {
             operation: principal.operation().to_owned(),
             mission: mission.to_owned(),
-            session: session.to_owned(),
+            run: run.to_owned(),
             agent: principal.agent().to_owned(),
             exposure: self.exposure.clone(),
         })
@@ -157,7 +157,7 @@ impl CableTools {
         F: FnOnce(&IssueDesk, &Caller) -> Result<serde_json::Value, String> + Send + 'static,
     {
         let Some(desk) = self.issue_desk.get().cloned() else {
-            return "Issue tools are unavailable to this Session".to_owned();
+            return "Issue tools are unavailable to this Run".to_owned();
         };
         let caller = match self.issue_caller() {
             Ok(caller) => caller,
@@ -185,7 +185,7 @@ impl CableTools {
 
     /// One linked issue, with the replies stored for it.
     #[tool(
-        description = "Read one linked issue: its title and the recent comments from people allowed to answer for it, each fenced as untrusted data written by others. Reading marks your Session exposed."
+        description = "Read one linked issue: its title and the recent comments from people allowed to answer for it, each fenced as untrusted data written by others. Reading marks your Run exposed."
     )]
     async fn issue_read(&self, Parameters(args): Parameters<IssueArgs>) -> String {
         self.with_issues(move |desk, caller| desk.read(caller, &args.issue))

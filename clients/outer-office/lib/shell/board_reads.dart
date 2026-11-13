@@ -13,13 +13,13 @@ enum BoardRead {
   attention,
 }
 
-/// What a page shows from the board and how current it must be: [live] at `[refresh] sessions`,
+/// What a page shows from the board and how current it must be: [live] at `[refresh] runs`,
 /// [background] at `[refresh] slow`. A read in neither is not repeated for that page.
 ///
 /// Pages with their own reads (Green Ink, Briefings, Agents, Roster, Pools, Timeline, Audit,
 /// Access) show nothing live from the board.
 ({Set<BoardRead> live, Set<BoardRead> background}) readsOf(OoPage page) {
-  // The bell and the search are on every page: they name Sessions, Stations, held briefs, green
+  // The bell and the search are on every page: they name Runs, Stations, held briefs, green
   // ink and proposals, so these stay read, slowly.
   const bell = {
     BoardRead.board,
@@ -43,7 +43,7 @@ enum BoardRead {
       const <BoardRead>{},
     ),
     OoPage.operations ||
-    OoPage.sessions => (const {BoardRead.board}, const <BoardRead>{}),
+    OoPage.runs => (const {BoardRead.board}, const <BoardRead>{}),
     OoPage.stations => (const {BoardRead.stations}, const {BoardRead.missions}),
     _ => (const <BoardRead>{}, const <BoardRead>{}),
   };
@@ -54,7 +54,7 @@ enum BoardRead {
 class BoardCadence {
   BoardCadence({required this.every, required this.settings});
 
-  /// The base interval, `[refresh] sessions`.
+  /// The base interval, `[refresh] runs`.
   final Duration every;
   final RefreshSettings settings;
 

@@ -2,8 +2,8 @@
 //! waits with the Watchdog paused, and the decision goes back to the Agent.
 //!
 //! Decisions are made elsewhere (Universal Exports writes them to the Registry), so the
-//! scheduler looks for them: a decision reaches a live Session as a message, or resumes a
-//! Session that ended its turn while it waited. A request nobody decides expires as refused; a
+//! scheduler looks for them: a decision reaches a live Run as a message, or resumes a
+//! Run that ended its turn while it waited. A request nobody decides expires as refused; a
 //! person may re-arm it, and the Mission waits for it again.
 
 use std::sync::Arc;
@@ -14,7 +14,7 @@ use serde::Serialize;
 use tokio::time::Instant;
 
 use super::{
-    DaemonState, ResumeMission, publish_lifecycle, queue_event, resume_mission, sync_session_record,
+    DaemonState, ResumeMission, publish_lifecycle, queue_event, resume_mission, sync_run_record,
 };
 use crate::directorates::m::approvals::{ActionScope, GREEN_INK_REASON, Requirement};
 use crate::directorates::m::mission::{Mission, MissionState};
@@ -25,7 +25,7 @@ use crate::directorates::registry::approvals::{
 };
 use crate::directorates::registry::store::AuditRecord;
 use crate::directorates::registry::timeline::TimelineEvent;
-use crate::{MissionId, SessionId};
+use crate::{MissionId, RunId};
 use coqui_acp_provider::{AgentEvent, AgentMessage, AgentSession};
 
 /// The event kind that reports a request waiting for green ink, and its decision.
@@ -38,14 +38,14 @@ const TIMELINE_KIND: &str = "green_ink";
 pub(super) struct Asked {
     pub(super) operation: String,
     pub(super) mission: String,
-    pub(super) session: String,
+    pub(super) run: String,
     pub(super) agent: String,
     pub(super) kind: String,
     pub(super) target: String,
     pub(super) reason: String,
     pub(super) links: Vec<ApprovalLink>,
     pub(super) idempotency_key: String,
-    /// Whether the Session's exposure keeps it from class authorisations.
+    /// Whether the Run's exposure keeps it from class authorisations.
     pub(super) exposed: bool,
 }
 
@@ -63,7 +63,7 @@ pub(super) struct Answer {
     message: Option<String>,
 }
 
-/// A Session's way to ask its Station for green ink.
+/// A Run's way to ask its Station for green ink.
 #[derive(Clone)]
 pub(super) struct Desk {
     state: DaemonState,
@@ -156,7 +156,7 @@ impl Desk {
         let request = ApprovalRequest::try_new(
             &asked.operation,
             MissionId::try_new(&asked.mission).map_err(|e| e.to_string())?,
-            SessionId::try_new(&asked.session).map_err(|e| e.to_string())?,
+            RunId::try_new(&asked.run).map_err(|e| e.to_string())?,
             &asked.agent,
             scope,
             asked.reason,
@@ -354,13 +354,13 @@ fn hold(state: &DaemonState, mission_id: &str) {
         .lock()
         .ok()
         .is_some_and(|mut missions| missions.block_for(mission_id, GREEN_INK_REASON).is_ok());
-    if let Ok(sessions) = state.sessions.lock()
-        && let Some(operation) = sessions.get(mission_id)
+    if let Ok(runs) = state.runs.lock()
+        && let Some(operation) = runs.get(mission_id)
     {
         operation.watchdog.pause();
     }
     if blocked {
-        sync_session_record(state, mission_id);
+        sync_run_record(state, mission_id);
         publish_lifecycle(state, mission_id, MissionState::Blocked);
     }
 }
@@ -371,12 +371,12 @@ fn waits(mission: &Mission) -> bool {
         && mission.blocked_reason.as_deref() == Some(GREEN_INK_REASON)
 }
 
-/// Ends a Session whose turn completed while its Mission waits for green ink, keeping the
+/// Ends a Run whose turn completed while its Mission waits for green ink, keeping the
 /// Mission blocked so the decision resumes it. `false` when the Mission does not wait.
 pub(super) fn end_turn_waiting(
     state: &DaemonState,
     mission_id: &str,
-    session: &Arc<std::sync::Mutex<guatiao::library::Object<dyn AgentSession>>>,
+    run: &Arc<std::sync::Mutex<guatiao::library::Object<dyn AgentSession>>>,
 ) -> bool {
     let Some(mission) = state
         .missions
@@ -411,27 +411,27 @@ pub(super) fn end_turn_waiting(
     if !(waits(&mission) && pending) && !asked {
         return false;
     }
-    let operation = state.sessions.lock().ok().and_then(|mut sessions| {
-        sessions
+    let operation = state.runs.lock().ok().and_then(|mut runs| {
+        runs
             .get(mission_id)
-            .is_some_and(|operation| Arc::ptr_eq(&operation.session, session))
-            .then(|| sessions.remove(mission_id))
+            .is_some_and(|operation| Arc::ptr_eq(&operation.run, run))
+            .then(|| runs.remove(mission_id))
             .flatten()
             .inspect(|operation| operation.gate.close())
     });
     if let Some(operation) = operation
-        && let Ok(session) = operation.session.lock()
+        && let Ok(run) = operation.run.lock()
     {
-        let _ = session.close();
+        let _ = run.close();
     }
-    sync_session_record(state, mission_id);
+    sync_run_record(state, mission_id);
     true
 }
 
-/// A Mission's live Session and the gate writes to it go through.
-type LiveSession = (
+/// A Mission's live Run and the gate writes to it go through.
+type LiveRun = (
     Arc<std::sync::Mutex<guatiao::library::Object<dyn AgentSession>>>,
-    super::SessionGate,
+    super::RunGate,
 );
 
 /// Tells Agents the decisions on their requests and lets their Missions go on once nothing
@@ -483,26 +483,26 @@ pub(super) async fn deliver_decisions(state: &DaemonState) {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        let live = state.sessions.lock().ok().and_then(|sessions| {
-            sessions
+        let live = state.runs.lock().ok().and_then(|runs| {
+            runs
                 .get(mission_id)
-                .map(|operation| (operation.session.clone(), operation.gate.clone()))
+                .map(|operation| (operation.run.clone(), operation.gate.clone()))
         });
         for request in &rearmed {
             take_up_rearmed(state, &mission, request, live.as_ref(), now).await;
         }
         match live {
-            Some((session, gate)) => {
+            Some((run, gate)) => {
                 for approval in &untold {
                     let message = AgentMessage {
                         text: decision_text(approval, now),
                     };
-                    let session = session.clone();
+                    let run = run.clone();
                     let gate = gate.clone();
                     let sent = tokio::task::spawn_blocking(move || {
-                        gate.lock(&session)
+                        gate.lock(&run)
                             .ok()
-                            .is_some_and(|session| session.send_message(message).is_ok())
+                            .is_some_and(|run| run.send_message(message).is_ok())
                     })
                     .await
                     .unwrap_or(false);
@@ -523,24 +523,24 @@ pub(super) async fn deliver_decisions(state: &DaemonState) {
 }
 
 /// Takes up a request a person re-armed: a working Mission waits for it as for a new request, and
-/// a live Session is told, having heard the request expired. A Mission no Session of which hears
+/// a live Run is told, having heard the request expired. A Mission no Run of which hears
 /// it is told with the decision.
 async fn take_up_rearmed(
     state: &DaemonState,
     mission: &Mission,
     request: &ApprovalRequest,
-    live: Option<&LiveSession>,
+    live: Option<&LiveRun>,
     now: f64,
 ) {
-    if let Some((session, gate)) = live {
+    if let Some((run, gate)) = live {
         let message = AgentMessage {
             text: rearmed_text(request),
         };
-        let (session, gate) = (session.clone(), gate.clone());
+        let (run, gate) = (run.clone(), gate.clone());
         let sent = tokio::task::spawn_blocking(move || {
-            gate.lock(&session)
+            gate.lock(&run)
                 .ok()
-                .is_some_and(|session| session.send_message(message).is_ok())
+                .is_some_and(|run| run.send_message(message).is_ok())
         })
         .await
         .unwrap_or(false);
@@ -593,25 +593,25 @@ fn rearmed_text(request: &ApprovalRequest) -> String {
     )
 }
 
-/// Moves a Mission whose live Session no longer waits back to work.
+/// Moves a Mission whose live Run no longer waits back to work.
 fn release(state: &DaemonState, mission_id: &str) {
     let working = state.missions.lock().ok().is_some_and(|mut missions| {
         missions
             .transition(mission_id, MissionState::Working)
             .is_ok()
     });
-    if let Ok(sessions) = state.sessions.lock()
-        && let Some(operation) = sessions.get(mission_id)
+    if let Ok(runs) = state.runs.lock()
+        && let Some(operation) = runs.get(mission_id)
     {
         operation.watchdog.resume();
     }
     if working {
-        sync_session_record(state, mission_id);
+        sync_run_record(state, mission_id);
         publish_lifecycle(state, mission_id, MissionState::Working);
     }
 }
 
-/// Resumes a Session that ended its turn while it waited, with the decisions as its message.
+/// Resumes a Run that ended its turn while it waited, with the decisions as its message.
 async fn resume_with(state: &DaemonState, mission_id: &str, untold: &[Approval], now: f64) {
     let waiting = state
         .retry_after
@@ -779,7 +779,7 @@ fn record_event(state: &DaemonState, request: &ApprovalRequest, action: &str, ac
     )
     .station(state.station_id.clone())
     .mission(request.mission.to_string())
-    .session(request.session.to_string())
+    .run(request.run.to_string())
     .actor(actor)
     .detail("request", request.id.clone())
     .detail("step", request.scope.kind.clone())
@@ -839,8 +839,8 @@ mod tests {
     use super::*;
     use crate::directorates::registry::approvals::{ClassAuthorization, Ruling};
 
-    /// 007 runs on the recording mock, which reports its Session blocked at once and then stays
-    /// quiet; its Watchdog stalls a quiet Session after 5 seconds, long enough for a
+    /// 007 runs on the recording mock, which reports its Run blocked at once and then stays
+    /// quiet; its Watchdog stalls a quiet Run after 5 seconds, long enough for a
     /// loaded Windows runner to make the MCP tool call before it.
     const AGENTS: &str = "[agent.007]\nhandler = \"mock-recorder\"\nclearance = \"field\"\n\
                           [agent.007.limits]\nstall_timeout = 5\n\
@@ -889,7 +889,7 @@ mod tests {
             StreamableHttpClientTransport,
             streamable_http_client::StreamableHttpClientTransportConfig,
         };
-        let environment = state.sessions.lock().unwrap()[mission_id]
+        let environment = state.runs.lock().unwrap()[mission_id]
             .environment
             .clone();
         let transport = StreamableHttpClientTransport::from_config(
@@ -946,7 +946,7 @@ mod tests {
 
     /// What the mock was told, waiting for it: a message reaches the harness on the ACP
     /// connection's thread, after `send_message` has returned.
-    /// Whether a Session is told `words` about `request_id` within the time a message may take.
+    /// Whether a Run is told `words` about `request_id` within the time a message may take.
     async fn is_told(request_id: &str, words: &str) -> bool {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
@@ -963,7 +963,7 @@ mod tests {
         }
     }
 
-    /// Stops a test's mock Session however the test ends: a Session waiting for green ink has its
+    /// Stops a test's mock Run however the test ends: a Run waiting for green ink has its
     /// Watchdog paused, and its event pump would keep the test's runtime from closing.
     struct StopAtEnd(DaemonState);
 
@@ -985,7 +985,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_session_asks_waits_past_the_watchdog_and_resumes_working_once_approved() {
+    async fn a_run_asks_waits_past_the_watchdog_and_resumes_working_once_approved() {
         let root = tempfile::tempdir().unwrap();
         let (state, mission_id) = station(root.path(), "approve");
         start_mission_by_id(&state, &mission_id).await;
@@ -999,7 +999,7 @@ mod tests {
         let waiting = mission(&state, &mission_id);
         assert_eq!(waiting.state, MissionState::Blocked);
         assert_eq!(waiting.blocked_reason.as_deref(), Some(GREEN_INK_REASON));
-        let watchdog = state.sessions.lock().unwrap()[&mission_id].watchdog.clone();
+        let watchdog = state.runs.lock().unwrap()[&mission_id].watchdog.clone();
         assert!(watchdog.is_paused());
 
         // More than the stall timeout passes: waiting for a person is not a stall.
@@ -1008,7 +1008,7 @@ mod tests {
         let pending = state.intake.pending_approvals("G", now(&state)).unwrap();
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].agent, "007");
-        assert_eq!(pending[0].session.as_str(), "provider-session-remote");
+        assert_eq!(pending[0].run.as_str(), "provider-id-remote");
 
         // What Universal Exports writes when an operator signs.
         state
@@ -1023,7 +1023,7 @@ mod tests {
 
         let told = told_about(&request_id).await;
         assert_eq!(told.len(), 1, "{told:?}");
-        assert_eq!(told[0].0, "provider-session-remote");
+        assert_eq!(told[0].0, "provider-id-remote");
         assert!(
             told[0].1.contains("approved by operator-m"),
             "{}",
@@ -1102,10 +1102,10 @@ mod tests {
             serde_json::from_str(&call_tool(&state, &mission_id, push_main("push-2")).await)
                 .unwrap();
         let request_id = answer["request_id"].as_str().unwrap().to_owned();
-        let session = state.sessions.lock().unwrap()[&mission_id].session.clone();
+        let run = state.runs.lock().unwrap()[&mission_id].run.clone();
 
-        assert!(end_turn_waiting(&state, &mission_id, &session));
-        assert!(!state.sessions.lock().unwrap().contains_key(&mission_id));
+        assert!(end_turn_waiting(&state, &mission_id, &run));
+        assert!(!state.runs.lock().unwrap().contains_key(&mission_id));
         assert_eq!(mission(&state, &mission_id).state, MissionState::Blocked);
         deliver_decisions(&state).await;
         let resumed_for = |mission_id: &str| {
@@ -1135,7 +1135,7 @@ mod tests {
             .unwrap();
         deliver_decisions(&state).await;
         let message = resumed_for(&mission_id)
-            .expect("the decision resumes the Session")
+            .expect("the decision resumes the Run")
             .message
             .unwrap_or_default();
         assert!(
@@ -1147,7 +1147,7 @@ mod tests {
     }
 
     /// What Claude Code's `PreToolUse` hook gets for a Bash call, answered as `ai6 green-ink
-    /// gate` answers it, through the Session's own Cable endpoint.
+    /// gate` answers it, through the Run's own Cable endpoint.
     async fn hook(
         environment: &std::collections::BTreeMap<String, String>,
         cwd: &FsPath,
@@ -1155,7 +1155,7 @@ mod tests {
     ) -> Option<serde_json::Value> {
         use crate::directorates::section_00::gate::{GateClient, pre_tool_use};
         let input = serde_json::json!({
-            "session_id": "claude-session",
+            "run_id": "claude-run",
             "transcript_path": "/tmp/transcript.jsonl",
             "cwd": cwd,
             "permission_mode": "default",
@@ -1175,7 +1175,7 @@ mod tests {
     #[tokio::test]
     async fn the_gate_holds_a_protected_push_until_green_ink_covers_it() {
         let root = tempfile::tempdir().unwrap();
-        // A quiet Session must not stall while a loaded runner makes the gate's calls.
+        // A quiet Run must not stall while a loaded runner makes the gate's calls.
         let agents = "[agent.007]\nhandler = \"mock-recorder\"\nclearance = \"field\"\n\
                       [agent.007.limits]\nstall_timeout = 300\n";
         let state = test_state(root.path(), "", agents);
@@ -1194,7 +1194,7 @@ mod tests {
             .unwrap();
         start_mission_by_id(&state, &mission_id).await;
         wait_for_state(&state, &mission_id, MissionState::Blocked).await;
-        let environment = state.sessions.lock().unwrap()[&mission_id]
+        let environment = state.runs.lock().unwrap()[&mission_id]
             .environment
             .clone();
         // The hook runs in the Agent's checkout: a repository on `main` with a Mission branch.
@@ -1316,14 +1316,14 @@ mod tests {
     }
 
     /// Runs one turn of a fake external ACP agent that asks leave to run `command`, with the
-    /// gate as its decider, and answers the events the Session produced and the option the
+    /// gate as its decider, and answers the events the Run produced and the option the
     /// agent was answered with.
     async fn external_turn(
         environment: &std::collections::BTreeMap<String, String>,
         cwd: &FsPath,
         command: &'static str,
     ) -> (Vec<AgentEvent>, String) {
-        use crate::directorates::section_00::acp::{AcpOptions, AcpSession, GateDecider};
+        use crate::directorates::section_00::acp::{AcpOptions, AcpRun, GateDecider};
         use coqui_acp_provider::AgentSession as _;
         let outcome = Arc::new(std::sync::Mutex::new(None));
         let channel = crate::station::acp::testing::command_agent(command, outcome.clone());
@@ -1334,11 +1334,11 @@ mod tests {
             ..AcpOptions::default()
         };
         tokio::task::spawn_blocking(move || {
-            let session = AcpSession::connect(channel, options, None).unwrap();
+            let run = AcpRun::connect(channel, options, None).unwrap();
             let mut events = Vec::new();
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
             while std::time::Instant::now() < deadline {
-                if let Some(event) = session.next_event(100).unwrap() {
+                if let Some(event) = run.next_event(100).unwrap() {
                     let done = event.kind == "completed";
                     events.push(event);
                     if done {
@@ -1379,7 +1379,7 @@ mod tests {
             .unwrap();
         start_mission_by_id(&state, &mission_id).await;
         wait_for_state(&state, &mission_id, MissionState::Blocked).await;
-        let environment = state.sessions.lock().unwrap()[&mission_id]
+        let environment = state.runs.lock().unwrap()[&mission_id]
             .environment
             .clone();
         let checkout = tempfile::tempdir().unwrap();
@@ -1409,7 +1409,7 @@ mod tests {
         }
         let cwd = checkout.path();
 
-        // A protected push is refused, and the refusal is in the Session's events.
+        // A protected push is refused, and the refusal is in the Run's events.
         let (events, chosen) = external_turn(&environment, cwd, "git push origin main").await;
         assert_eq!(chosen, "no");
         let refusal = events
@@ -1492,7 +1492,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_rearmed_request_holds_the_mission_and_its_decision_reaches_the_session() {
+    async fn a_rearmed_request_holds_the_mission_and_its_decision_reaches_the_run() {
         let root = tempfile::tempdir().unwrap();
         let (state, mission_id) = patient_station(root.path(), "rearm");
         let _stop = StopAtEnd(state.clone());
@@ -1501,7 +1501,7 @@ mod tests {
         let request = ApprovalRequest::try_new(
             "G",
             MissionId::try_new(&mission_id).unwrap(),
-            SessionId::try_new("provider-session-remote").unwrap(),
+            RunId::try_new("provider-id-remote").unwrap(),
             "007",
             ActionScope::try_new("push", "origin:refs/heads/main").unwrap(),
             "the release is green",
@@ -1539,7 +1539,7 @@ mod tests {
         assert_eq!(waiting.blocked_reason.as_deref(), Some(GREEN_INK_REASON));
         assert!(
             is_told(&request.id, "re-armed by operator-m").await,
-            "the Session hears it waits again"
+            "the Run hears it waits again"
         );
         assert!(
             state.intake.pending_approvals("G", at).unwrap()[0]
@@ -1581,7 +1581,7 @@ mod tests {
         let request = ApprovalRequest::try_new(
             "G",
             MissionId::try_new(&mission_id).unwrap(),
-            SessionId::try_new("provider-session-remote").unwrap(),
+            RunId::try_new("provider-id-remote").unwrap(),
             "007",
             ActionScope::try_new("push", "origin:refs/heads/main").unwrap(),
             "a reason only the operator reads",
@@ -1618,7 +1618,7 @@ mod tests {
         Asked {
             operation: "G".to_owned(),
             mission: mission_id.to_owned(),
-            session: "provider-session-direct".to_owned(),
+            run: "provider-id-direct".to_owned(),
             agent: agent.to_owned(),
             kind: kind.to_owned(),
             target: target.to_owned(),
@@ -1630,7 +1630,7 @@ mod tests {
     }
 
     #[test]
-    fn a_class_authorisation_approves_at_once_unless_the_session_is_exposed() {
+    fn a_class_authorisation_approves_at_once_unless_the_run_is_exposed() {
         let root = tempfile::tempdir().unwrap();
         let (state, mission_id) = station(root.path(), "class");
         let class = ClassAuthorization::new(

@@ -1,5 +1,5 @@
 //! The PostgreSQL side of a SQL Registry or roster: what a `postgres://` location asks for,
-//! TLS, the session's timeouts, and a client whose connection runs on a runtime of its own.
+//! TLS, the run's timeouts, and a client whose connection runs on a runtime of its own.
 //!
 //! Callers wait on the client with [`block_on`], a parking executor that never enters a
 //! Tokio runtime, so a Registry call works on any thread, an async worker included, and
@@ -91,7 +91,7 @@ pub(crate) fn parse(url: &str, options: &SqlOptions) -> io::Result<Location> {
     })
 }
 
-/// The `SET` statements a new session runs: the server-side timeouts the location's own
+/// The `SET` statements a new run runs: the server-side timeouts the location's own
 /// `options` does not set.
 fn session_settings(location: &Location, options: &SqlOptions) -> String {
     [
@@ -241,7 +241,7 @@ fn failed_in_the_network(failure: &tokio_postgres::Error) -> bool {
     network
 }
 
-/// Runs `sql` on its own session at `url`; for tests that make and drop schemas.
+/// Runs `sql` on its own run at `url`; for tests that make and drop schemas.
 #[cfg(test)]
 pub(crate) fn admin(url: &str, sql: &str) -> io::Result<()> {
     let connection = Connection::open(url, &SqlOptions::default())?;
@@ -697,7 +697,7 @@ mod tests {
             .unwrap()
             .check_in("station-b", Default::default())
             .unwrap();
-        assert!(SqlRegistry::open(&bare).is_err(), "no password, no session");
+        assert!(SqlRegistry::open(&bare).is_err(), "no password, no run");
     }
 
     /// `url` without its `sslrootcert` and `sslmode`, with `extra` parameters added.

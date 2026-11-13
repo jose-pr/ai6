@@ -1,4 +1,4 @@
-//! A Cable reaches an Agent that is between turns or has no Session: a Session waiting at a
+//! A Cable reaches an Agent that is between turns or has no Run: a Run waiting at a
 //! prompt takes a turn on it, and an Agent with none has it in the brief of its next. With
 //! stand-in harnesses, which answer over the Cable tools as a model would.
 #![cfg_attr(
@@ -31,7 +31,7 @@ use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentSta
 /// What the Station handed the stand-in at each start or resume: the Mission and its brief's
 /// context.
 pub(super) static STARTS: Mutex<Vec<(String, Vec<String>)>> = Mutex::new(Vec::new());
-/// Each message a stand-in Session was sent, with its provider Session ID.
+/// Each message a stand-in Run was sent, with its provider ID.
 static MESSAGES: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
 
 /// A harness that waits at a prompt, as one does between turns. Sent a message, it answers the
@@ -50,11 +50,11 @@ impl AgentHandler for MockWakeHandler {
             request.mission_id.to_string(),
             request.initial_context.clone(),
         ));
-        let session_id =
-            SessionId::try_new(format!("wake-{}", request.mission_id)).map_err(|error| {
+        let run_id =
+            RunId::try_new(format!("wake-{}", request.mission_id)).map_err(|error| {
                 ProviderError::new(guatiao::Status::GUATIAO_ERR_INTERNAL, &error.to_string())
             })?;
-        Ok(WakeSession::waiting(session_id, request.environment, terminal).into_object())
+        Ok(WakeRun::waiting(run_id, request.environment, terminal).into_object())
     }
 
     fn resume(
@@ -66,7 +66,7 @@ impl AgentHandler for MockWakeHandler {
             request.mission_id.to_string(),
             request.initial_context.clone(),
         ));
-        Ok(WakeSession::waiting(request.session_id, request.environment, terminal).into_object())
+        Ok(WakeRun::waiting(request.run_id, request.environment, terminal).into_object())
     }
 }
 
@@ -81,21 +81,21 @@ fn event(kind: &str, text: Option<String>) -> AgentEvent {
     }
 }
 
-struct WakeSession {
-    session_id: SessionId,
+struct WakeRun {
+    run_id: RunId,
     environment: BTreeMap<String, String>,
     events: Arc<Mutex<VecDeque<AgentEvent>>>,
     _terminal: Object<dyn AgentTerminal>,
 }
 
-impl WakeSession {
+impl WakeRun {
     fn waiting(
-        session_id: SessionId,
+        run_id: RunId,
         environment: BTreeMap<String, String>,
         terminal: Object<dyn AgentTerminal>,
     ) -> Self {
         Self {
-            session_id,
+            run_id,
             environment,
             events: Arc::new(Mutex::new(VecDeque::from([event("blocked", None)]))),
             _terminal: terminal,
@@ -103,16 +103,16 @@ impl WakeSession {
     }
 }
 
-impl AgentSession for WakeSession {
+impl AgentSession for WakeRun {
     fn session_id(&self) -> Result<Option<String>, ProviderError> {
-        Ok(Some(self.session_id.to_string()))
+        Ok(Some(self.run_id.to_string()))
     }
 
     fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {
         MESSAGES
             .lock()
             .unwrap()
-            .push((self.session_id.to_string(), message.text.clone()));
+            .push((self.run_id.to_string(), message.text.clone()));
         let (Some(body), Some(url), Some(token)) = (
             self.environment.get("MOCK_ANSWER").cloned(),
             self.environment
@@ -124,13 +124,13 @@ impl AgentSession for WakeSession {
         ) else {
             return Ok(());
         };
-        let (events, session) = (self.events.clone(), self.session_id.to_string());
+        let (events, run) = (self.events.clone(), self.run_id.to_string());
         std::thread::spawn(move || {
             let said = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .map(|runtime| {
-                    runtime.block_on(answer(&url, &token, &message.text, &body, &session))
+                    runtime.block_on(answer(&url, &token, &message.text, &body, &run))
                 })
                 .unwrap_or_else(|error| format!("answer failed: {error}"));
             let mut events = events.lock().unwrap();
@@ -163,7 +163,7 @@ impl AgentSession for WakeSession {
 }
 
 /// Replies, over the Cable tools, to each Cable `message` carries.
-async fn answer(url: &str, token: &str, message: &str, body: &str, session: &str) -> String {
+async fn answer(url: &str, token: &str, message: &str, body: &str, run: &str) -> String {
     use rmcp::ServiceExt as _;
     use rmcp::model::CallToolRequestParams;
     use rmcp::transport::StreamableHttpClientTransport;
@@ -186,7 +186,7 @@ async fn answer(url: &str, token: &str, message: &str, body: &str, session: &str
         let arguments = serde_json::json!({
             "cable_id": id,
             "body": body,
-            "idempotency_key": format!("{session}-{id}"),
+            "idempotency_key": format!("{run}-{id}"),
         });
         let reply = client
             .call_tool(
@@ -204,7 +204,7 @@ const AGENTS: &str = "[agent.007]\nhandler = \"mock-wake\"\n";
 
 /// A Station with Operation `G`, Agents 007 and 008 on `mock-wake` (`more` is added to 008's
 /// settings), Missions `TAG-1` (007) and `TAG-3` (008), and a relay that lets the two exchange
-/// Cables, with each Agent's Cables waiting for it while it has no Session. Each test has its own
+/// Cables, with each Agent's Cables waiting for it while it has no Run. Each test has its own
 /// `tag`: the stand-in's records are shared by the tests of one process.
 fn wake_station(root: &Path, tag: &str, more: &str) -> DaemonState {
     let mut state = test_state(
@@ -248,10 +248,10 @@ fn policy(without: &[&str], station: &str) -> CablePolicy {
 
 /// Gives the Station the relay of this module's Stations.
 pub(super) fn open_cables(state: &mut DaemonState) {
-    let (roster, missions, sessions, station_id) = (
+    let (roster, missions, runs, station_id) = (
         state.roster.clone(),
         state.missions.clone(),
-        state.sessions.clone(),
+        state.runs.clone(),
         state.station_id.clone(),
     );
     let (resident_roster, resident_site) = (state.roster.clone(), state.station_id.clone());
@@ -259,7 +259,7 @@ pub(super) fn open_cables(state: &mut DaemonState) {
         CableRelay::new(
             state.intake.clone(),
             policy(&[], &state.station_id),
-            move || cable_endpoints(&roster, &missions, &sessions, &station_id),
+            move || cable_endpoints(&roster, &missions, &runs, &station_id),
             BTreeMap::new(),
         )
         .with_residents(move |target| cable_residents(&resident_roster, &resident_site, target))
@@ -285,16 +285,16 @@ async fn start(state: &DaemonState, mission_id: &str, answer: Option<&str>) {
     .unwrap_or_else(|error| panic!("{mission_id} did not start: {:?}", error.1.0.error));
 }
 
-/// Waits for the Session of `mission_id` to be waiting at a prompt, as an endpoint Cables reach.
+/// Waits for the Run of `mission_id` to be waiting at a prompt, as an endpoint Cables reach.
 async fn idle(state: &DaemonState, mission_id: &str) {
     wait_for_state(state, mission_id, MissionState::Blocked).await;
-    until("the Session is a Cable endpoint", || {
+    until("the Run is a Cable endpoint", || {
         state
-            .sessions
+            .runs
             .lock()
             .unwrap()
             .get(mission_id)
-            .is_some_and(|operation| operation.session_id.is_some())
+            .is_some_and(|operation| operation.run_id.is_some())
     })
     .await;
 }
@@ -314,13 +314,13 @@ async fn until(what: &str, mut done: impl FnMut() -> bool) {
     assert!(reached.is_ok(), "never happened: {what}");
 }
 
-fn principal(agent: &str, session: Option<&str>) -> CablePrincipal {
+fn principal(agent: &str, run: Option<&str>) -> CablePrincipal {
     CablePrincipal::try_new(
         agent.to_owned(),
         "G".to_owned(),
         None,
         "test".to_owned(),
-        session.map(str::to_owned),
+        run.map(str::to_owned),
         None,
     )
     .unwrap()
@@ -346,12 +346,12 @@ fn delivery(state: &DaemonState, cable: &str) -> CableState {
     state.intake.get_cable(cable).unwrap().unwrap().recipients()[0].state()
 }
 
-fn messages_to(session: &str) -> Vec<String> {
+fn messages_to(run: &str) -> Vec<String> {
     MESSAGES
         .lock()
         .unwrap()
         .iter()
-        .filter(|(to, _)| to == session)
+        .filter(|(to, _)| to == run)
         .map(|(_, text)| text.clone())
         .collect()
 }
@@ -384,7 +384,7 @@ fn nothing_was_made(state: &DaemonState, missions: usize) {
 
 #[cfg(feature = "cables-mcp")]
 #[tokio::test(flavor = "multi_thread")]
-async fn an_idle_session_takes_a_turn_on_a_cable_and_answers_it() {
+async fn an_idle_run_takes_a_turn_on_a_cable_and_answers_it() {
     let root = tempfile::tempdir().unwrap();
     let state = wake_station(root.path(), "idle", "");
     let missions = missions_held(&state);
@@ -398,7 +398,7 @@ async fn an_idle_session_takes_a_turn_on_a_cable_and_answers_it() {
     let cable = send(&state, &sender, "008", "ping from 007");
     cable_wakes::wake_idle(&state).await;
 
-    until("the Session is told of the Cable", || {
+    until("the Run is told of the Cable", || {
         !messages_to("wake-idle-3").is_empty()
     })
     .await;
@@ -424,7 +424,7 @@ async fn an_idle_session_takes_a_turn_on_a_cable_and_answers_it() {
     wait_for_state(&state, "idle-3", MissionState::Blocked).await;
     assert!(
         messages_to("wake-idle-1").is_empty(),
-        "the sender's own Session heard nothing"
+        "the sender's own Run heard nothing"
     );
     nothing_was_made(&state, missions);
 }
@@ -456,7 +456,7 @@ async fn an_agent_that_opts_out_is_not_woken_and_reads_the_cable_itself() {
 
 #[cfg(feature = "cables-mcp")]
 #[tokio::test(flavor = "multi_thread")]
-async fn the_wake_quota_stops_a_storm_and_the_cables_wait_for_the_sessions_own_read() {
+async fn the_wake_quota_stops_a_storm_and_the_cables_wait_for_the_runs_own_read() {
     let root = tempfile::tempdir().unwrap();
     let state = wake_station(root.path(), "storm", "wakes_per_hour = 1\n");
     let missions = missions_held(&state);
@@ -534,7 +534,7 @@ async fn a_grant_revoked_before_the_wake_stops_the_delivery() {
 
 #[cfg(feature = "cables-mcp")]
 #[tokio::test(flavor = "multi_thread")]
-async fn a_cable_to_an_agent_with_no_session_is_in_the_brief_of_its_next() {
+async fn a_cable_to_an_agent_with_no_run_is_in_the_brief_of_its_next() {
     let root = tempfile::tempdir().unwrap();
     let state = wake_station(root.path(), "brief", "");
     let missions = missions_held(&state);
@@ -568,7 +568,7 @@ async fn a_cable_to_an_agent_with_no_session_is_in_the_brief_of_its_next() {
     settle().await;
     assert!(
         messages_to("wake-brief-3").is_empty(),
-        "what the brief carried does not wake the Session again"
+        "what the brief carried does not wake the Run again"
     );
     nothing_was_made(&state, missions);
 }

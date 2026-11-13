@@ -22,7 +22,7 @@ pub(in super::super) struct StationState {
     at: i64,
     /// Missions it may run at once; 0 for a Station without the execution role.
     capacity: usize,
-    /// Its Missions that are not over, with their Sessions.
+    /// Its Missions that are not over, with their Runs.
     missions: Vec<LiveMission>,
     /// Free and total space where its state and safe houses are.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -43,8 +43,8 @@ struct LiveMission {
     agent: Option<String>,
     role: Option<String>,
     state: String,
-    /// Whether a Session of it runs on this Station now.
-    session: bool,
+    /// Whether a Run of it runs on this Station now.
+    run: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -58,7 +58,7 @@ struct Disk {
 struct TheaterState {
     #[serde(flatten)]
     summary: TheaterSummary,
-    /// Why placement would not run a Session there now, if it would not.
+    /// Why placement would not run a Run there now, if it would not.
     #[serde(skip_serializing_if = "Option::is_none")]
     unfit: Option<String>,
 }
@@ -100,10 +100,10 @@ pub(super) fn limits(state: &DaemonState) -> Limits {
 /// from `spawn_blocking`.
 pub(in super::super) fn station_state(state: &DaemonState) -> StationState {
     let now = SystemTime::now();
-    let sessions = state
-        .sessions
+    let runs = state
+        .runs
         .lock()
-        .map(|sessions| sessions.keys().cloned().collect::<Vec<_>>())
+        .map(|runs| runs.keys().cloned().collect::<Vec<_>>())
         .unwrap_or_default();
     let missions = state
         .missions
@@ -113,7 +113,7 @@ pub(in super::super) fn station_state(state: &DaemonState) -> StationState {
         .into_iter()
         .filter(|mission| !safe_houses::is_over(state, mission))
         .map(|mission| LiveMission {
-            session: sessions.contains(&mission.mission_id.to_string()),
+            run: runs.contains(&mission.mission_id.to_string()),
             mission: mission.mission_id.to_string(),
             operation: mission.operation_id,
             agent: mission.agent_id,

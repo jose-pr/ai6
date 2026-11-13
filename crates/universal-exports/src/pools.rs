@@ -37,7 +37,7 @@ pub struct BoardWindow {
     pub observed_at: f64,
 }
 
-/// One Session using an account.
+/// One Run using an account.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BoardClaim {
@@ -81,21 +81,21 @@ pub struct BoardAccount {
     pub kind: String,
     /// Its priority.
     pub priority: i64,
-    /// The most Sessions that may use it at once.
+    /// The most Runs that may use it at once.
     pub max_concurrent: Option<usize>,
     /// Labels configured for it.
     pub labels: BTreeMap<String, String>,
-    /// This Operation's Sessions using it now.
+    /// This Operation's Runs using it now.
     pub active: Vec<BoardClaim>,
-    /// How many Sessions of other Operations use it now: who they are is theirs to see.
-    pub other_sessions: usize,
+    /// How many Runs of other Operations use it now: who they are is theirs to see.
+    pub other_runs: usize,
     /// The quota windows last reported.
     pub windows: Vec<BoardWindow>,
     /// Until when its provider refuses work, as Unix seconds, while it does.
     pub limited_until: Option<f64>,
-    /// When a Session last took it, as Unix seconds.
+    /// When a Run last took it, as Unix seconds.
     pub last_used: Option<f64>,
-    /// Tokens its Sessions used today (UTC).
+    /// Tokens its Runs used today (UTC).
     pub tokens_today: u64,
     /// Its login, when one is kept sealed in the Registry.
     pub login: Option<BoardLogin>,
@@ -139,7 +139,7 @@ fn board_account(state: AccountState, operation: &str, now: f64) -> Option<Board
                 since: claim.since,
             })
             .collect(),
-        other_sessions: others.len(),
+        other_runs: others.len(),
         windows: state
             .windows
             .iter()
@@ -270,7 +270,7 @@ mod tests {
         role = "pool-managers"
     "#;
 
-    /// Declares `team/alpha` (two Sessions at once) for G and `team/beta` for L only.
+    /// Declares `team/alpha` (two Runs at once) for G and `team/beta` for L only.
     fn declare(served: &Served) -> AccountPool {
         let pool = AccountPool::new("team", "claude")
             .account(
@@ -429,8 +429,8 @@ mod tests {
         assert_eq!(alpha["active"][0]["mission_id"], "mission-g");
         assert_eq!(alpha["active"][0]["station_id"], "worker");
         assert_eq!(
-            alpha["other_sessions"], 1,
-            "another Operation's Session is only counted"
+            alpha["other_runs"], 1,
+            "another Operation's Run is only counted"
         );
         assert_eq!(alpha["windows"][0]["used_permille"], 640);
         assert_eq!(alpha["windows"][0]["observed_at"], now);
@@ -457,7 +457,7 @@ mod tests {
                 "limited_until",
                 "login",
                 "max_concurrent",
-                "other_sessions",
+                "other_runs",
                 "pool",
                 "priority",
                 "tokens_today",

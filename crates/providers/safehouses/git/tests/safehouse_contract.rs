@@ -52,8 +52,8 @@ fn a_clone_is_saved_to_its_shared_branch_through_the_kind() {
         }),
         ..spec(&bare, &root.path().join("state"))
     };
-    let session = Git::default().open(&spec.to_value().unwrap()).unwrap();
-    let info = SafeHouseInfo::from_value(&session.info().unwrap()).unwrap();
+    let run = Git::default().open(&spec.to_value().unwrap()).unwrap();
+    let info = SafeHouseInfo::from_value(&run.info().unwrap()).unwrap();
     // The provider reports the canonical path: a Windows short name or macOS /var is resolved.
     assert_eq!(
         fs::canonicalize(&info.path).unwrap(),
@@ -62,7 +62,7 @@ fn a_clone_is_saved_to_its_shared_branch_through_the_kind() {
     assert_eq!(info.branch.as_deref(), Some("main"));
     fs::write(target.join("notes.md"), "notes\n").unwrap();
     let saved = SafeHouseCheckpoint::from_value(
-        &session
+        &run
             .checkpoint(
                 &CheckpointSpec {
                     remote: "origin".to_owned(),
@@ -90,7 +90,7 @@ fn a_clone_is_saved_to_its_shared_branch_through_the_kind() {
         .output()
         .unwrap();
     assert_eq!(String::from_utf8_lossy(&shown.stdout), "notes\n");
-    session.discard().unwrap();
+    run.discard().unwrap();
     assert!(!target.exists());
 }
 
@@ -107,8 +107,8 @@ fn a_mission_works_in_a_worktree_and_its_commits_are_reported_through_the_kind()
     git(&repo, &["commit", "--quiet", "-m", "seed"]);
 
     let spec = spec(&repo, &root.path().join("state"));
-    let session = Git::default().open(&spec.to_value().unwrap()).unwrap();
-    let info = SafeHouseInfo::from_value(&session.info().unwrap()).unwrap();
+    let run = Git::default().open(&spec.to_value().unwrap()).unwrap();
+    let info = SafeHouseInfo::from_value(&run.info().unwrap()).unwrap();
     assert!(info.isolated && info.supports_history);
     assert_eq!(
         info.branch.as_deref(),
@@ -117,7 +117,7 @@ fn a_mission_works_in_a_worktree_and_its_commits_are_reported_through_the_kind()
     let house = Path::new(&info.path);
     assert!(house.join("seed.txt").exists());
     assert!(
-        ChangeLog::from_value(&session.changes().unwrap())
+        ChangeLog::from_value(&run.changes().unwrap())
             .unwrap()
             .changes
             .is_empty()
@@ -126,11 +126,11 @@ fn a_mission_works_in_a_worktree_and_its_commits_are_reported_through_the_kind()
     fs::write(house.join("work.txt"), "work\n").unwrap();
     git(house, &["add", "work.txt"]);
     git(house, &["commit", "--quiet", "-m", "add work"]);
-    let log = ChangeLog::from_value(&session.changes().unwrap()).unwrap();
+    let log = ChangeLog::from_value(&run.changes().unwrap()).unwrap();
     assert_eq!(log.changes.len(), 1);
     assert_eq!(log.changes[0].message.trim(), "add work");
 
-    let report = SafeHouseReport::from_value(&session.finish().unwrap()).unwrap();
+    let report = SafeHouseReport::from_value(&run.finish().unwrap()).unwrap();
     assert!(report.kept);
     let reopened = Git::default()
         .open(
@@ -200,15 +200,15 @@ fn a_mission_change_is_read_through_the_kind_uncommitted_and_new_files_included_
     git(source.path(), &["commit", "-m", "base"]);
 
     let provider = Git::new(GitConfig::default());
-    let session = provider
+    let run = provider
         .open(&spec(source.path(), state.path()).to_value().unwrap())
         .unwrap();
-    let info = SafeHouseInfo::from_value(&session.info().unwrap()).unwrap();
+    let info = SafeHouseInfo::from_value(&run.info().unwrap()).unwrap();
     let house = Path::new(&info.path);
     git(house, &["config", "user.name", "Test"]);
     git(house, &["config", "user.email", "test@example.invalid"]);
 
-    let read = |bytes: u64| SafeHouseDiff::from_value(&session.diff(bytes).unwrap()).unwrap();
+    let read = |bytes: u64| SafeHouseDiff::from_value(&run.diff(bytes).unwrap()).unwrap();
     assert_eq!(read(4096).text, "", "nothing changed yet");
 
     fs::write(house.join("a.txt"), "one\ncommitted\n").unwrap();

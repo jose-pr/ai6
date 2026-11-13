@@ -1,19 +1,19 @@
 # Watches
 
-A **watch** is one standing Session that supervises an area: M's watch keeps the whole
+A **watch** is one standing Run that supervises an area: M's watch keeps the whole
 deployment, an Operation's watch (its 00 Agent in charge) keeps its Operation, and a Station's
 watch (its Chief of Station) keeps that Station. It runs on a loop: the Station wakes it with the
 events of its area, it takes one turn, and it waits for the next wake.
 
 **A watch is not a Mission.** It has no Mission record, brief, placement, attempt, verdict,
-scorecard credit or board card, and no Sleeper queues it. Its Session is recorded in the watch's
-own record in the Registry, which names its scope where a Mission's Session record names the
+scorecard credit or board card, and no Sleeper queues it. Its Run is recorded in the watch's
+own record in the Registry, which names its scope where a Mission's Run record names the
 Mission.
 
 The Operation's watch decides the Missions that wait in `verifying`
 ([Missions](missions.md#verifying)) and what the Operation's [Sources](#source-items) report; the
 Chief of Station taking over the [Head of Station](stations.md#head-of-station) rounds comes in a
-later release. This page describes the Session they all run in.
+later release. This page describes the Run they all run in.
 
 ## Scopes and where a watch runs
 
@@ -24,7 +24,7 @@ later release. This page describes the Session they all run in.
 | `station:<id>` | the Station's | that Station |
 
 A Station runs a watch only when the watch's Agent has a handler it can start. On each check-in
-it claims the watch, or renews its claim, in the Registry. The claim is a lease like a Session's:
+it claims the watch, or renews its claim, in the Registry. The claim is a lease like a Run's:
 a Station that goes dark stops renewing, and once the lease lapses another Station that may run
 the watch takes it over with a higher fencing token, so nothing the dark Station writes afterwards
 is accepted. A Station that finds another holds a watch it was running closes its harness there.
@@ -58,7 +58,7 @@ allow `00` as well, or the Agent cannot serve it.
 <!-- schema:record.watch:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `agent` | none | **Agent.** The Agent that keeps the watch, by codename: its handler, model, effort, route and pool account run the watch's Session. |
+| `agent` | none | **Agent.** The Agent that keeps the watch, by codename: its handler, model, effort, route and pool account run the watch's Run. |
 | `operation` | none | **Cables in Operation.** For M's or a Station's watch, the Operation its Cables are sent and received in, under that Operation's Cable grants; without one, no Cable wakes it. An Operation's watch is in its own Operation, which this may only repeat. |
 | `wake_every` | 3,600 | **Woken at least every.** Seconds after its last wake that the watch is woken with nothing else to tell it; `none` wakes it only on events. |
 | `max_turns_per_hour` | 30 | **Turns an hour.** Turns the watch takes in any hour, each wake one turn; past it, events wait for the hour to make room. |
@@ -70,18 +70,18 @@ allow `00` as well, or the Agent cannot serve it.
 
 The Registry bounds what a watch's record keeps in [`[registry.limits.watches]`](configuration.md).
 
-## One Session, resumed
+## One Run, resumed
 
-A watch keeps one provider Session. Its harness stays up between turns; each wake is sent to it
+A watch keeps one provider Run. Its harness stays up between turns; each wake is sent to it
 as a message. After a Station restarts, or another Station takes the watch over, the next wake
-resumes the recorded provider Session with the wake as its message.
+resumes the recorded provider Run with the wake as its message.
 
-When the handler cannot resume it (the resume is refused, or the resumed Session fails before it
-answers, as one whose transcript is gone does), the Station starts a fresh Session with the same
+When the handler cannot resume it (the resume is refused, or the resumed Run fails before it
+answers, as one whose transcript is gone does), the Station starts a fresh Run with the same
 wake and hands it the watch's **logbook**: the Station's record of the watch's earlier turns,
 what woke each and the start of what the watch said, oldest first. The logbook also records each
 start, resume, fresh start, takeover and quota. A different Agent named for the watch starts
-fresh as well, since another Agent's Session is not its own.
+fresh as well, since another Agent's Run is not its own.
 
 The harness runs on the Station's host, in a directory of its own under the Station's state
 directory (`watches/watch--<scope>`), with its Agent's environment and its route's pool account.

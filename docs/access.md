@@ -147,18 +147,18 @@ are `access.manage`, `access.read`, `account.manage`, `agent.configure`, `agent.
 `memory.write`, `mission.control`, `mission.create`, `mission.read`,
 `mission.control`, `mission.create`, `mission.read`, `mission.review`, `mission.verify`,
 `config.manage`, `config.read`, `plugin.manage`, `pool.manage`, `pool.read`,
-`roster.manage`, `roster.read`, `session.context`, `session.input`, `session.read`,
-`station.configure` and `station.read`. `session.context` reads what an agent was given and did
-in a Session ([Session context](missions.md#session-context)): on an Operation its Missions'
-Sessions, and with `audit.read` on `config:assistant` another person's conversations with
-Moneypenny ([her conversation log](assistant.md#her-conversation-log)); seeing a Session
-(`session.read`, `mission.read`) does not grant it. `roster.read` and `roster.manage` at `config:roster` list and edit the
+`roster.manage`, `roster.read`, `run.context`, `run.input`, `run.read`,
+`station.configure` and `station.read`. `run.context` reads what an agent was given and did
+in a Run ([Run context](missions.md#run-context)): on an Operation its Missions'
+Runs, and with `audit.read` on `config:assistant` another person's conversations with
+Moneypenny ([her conversation log](assistant.md#her-conversation-log)); seeing a Run
+(`run.read`, `mission.read`) does not grant it. `roster.read` and `roster.manage` at `config:roster` list and edit the
 roster's Operations, Agents, roles and covers ([Changing the configuration of running
 Stations](operations.md#changing-the-configuration-of-running-stations)); `audit.read` there
 shows those edits and the refused ones. `pool.read` shows the [account pools](agents.md#account-pools) an Operation
 may draw from, never a credential; `pool.manage` lifts an account's limit. `mission.control`
-(cancel, retry, resume and interrupt a Mission) is separate from `session.input`: typing into
-a Session does not grant stopping it. `approval.decide` signs or refuses an Agent's request
+(cancel, retry, resume and interrupt a Mission) is separate from `run.input`: typing into
+a Run does not grant stopping it. `approval.decide` signs or refuses an Agent's request
 for [green ink](missions.md#green-ink) and `approval.class` manages class authorisations;
 neither comes with `mission.create` or `mission.control`. `mission.review` decides over a
 Mission's [review](review.md) panel, with a reason, and lets a brief name a review policy, which
@@ -188,7 +188,7 @@ carry; more is an error, not a denial.
 
 ```toml
 [role.viewer]
-actions = ["mission.read", "session.read"]
+actions = ["mission.read", "run.read"]
 
 [role.memory-admin]
 actions = ["assistant.memory.admin"]
@@ -212,7 +212,7 @@ token, says what `POST /v1/auth/login` accepts here: `password` (a name and a se
 both; when the gateway does not answer it shows the form. A wrong password and an unknown
 account read the same, a `429` counts its `Retry-After` down and holds **Continue** until then,
 and a `403` asks an administrator to check `public_origin` and the proxy. The token stays in the
-tab's memory, and signing out revokes it; a reload or a new tab gets a new one from the session
+tab's memory, and signing out revokes it; a reload or a new tab gets a new one from the run
 cookie below.
 
 ### Staying signed in
@@ -330,8 +330,8 @@ so the page authenticator or an app's [hand-off](assistant.md#pages-she-publishe
 viewers. A front door's access log sees a hand-off's token in the query: it works once, for
 seconds, and is spent by the time the log is read.
 
-Two paths under `/v1/` are WebSockets, so the proxy must pass the upgrade: `/v1/socket/{session_id}`
-(a Session's terminal, subprotocol `ai6.guatiao`) and `/v1/user/moneypenny` (her chat). Neither
+Two paths under `/v1/` are WebSockets, so the proxy must pass the upgrade: `/v1/socket/{run_id}`
+(a Run's terminal, subprotocol `ai6.guatiao`) and `/v1/user/moneypenny` (her chat). Neither
 sends a ping, so the proxy's idle timeout closes a quiet one; give those two a long one. For
 every request under `/v1/` the proxy must:
 
@@ -349,7 +349,7 @@ The app fetches only from its own origin, so its page can carry this policy: `de
 script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:;
 connect-src 'self'; frame-ancestors 'none'; base-uri 'self'`. The engine compiles WebAssembly and
 sets inline styles, and a public `ai6.cfg`'s `[oo.assets] cdn` other than `none` needs those hosts added. Run
-`dart run tool/build_guatiao_wasm.dart` before the build, or Session terminals say the protocol
+`dart run tool/build_guatiao_wasm.dart` before the build, or Run terminals say the protocol
 could not be initialized. Serve `.wasm` as `application/wasm`.
 ## Roles, the chief and who may change them
 
@@ -358,9 +358,9 @@ The policy has four built-in role names and two places to write more.
 | Role | What it holds | Written |
 | --- | --- | --- |
 | `chief` | every action, including any added later; not stored and not editable | only through the chief list (`chief = [...]` in the `access` record, `[unex.access] chief` in `ai6.cfg`) |
-| `controller` | everything an `operator` does, plus `roster.manage`, `config.manage`, `agent.configure`, `station.configure`, `pool.manage`, `approval.class`, `mission.review`, `mission.verify`, `access.manage`, `account.manage`, `audit.read`, `access.read` and `session.context` | seeded; ordinary data you may edit or delete |
-| `operator` | the read actions (`mission.read`, `session.read`, `agent.read`, `roster.read`, `config.read`, `station.read`, `pool.read`, `cable.read`) and `mission.create`, `mission.control`, `session.input`, `cable.send`, `approval.decide`, `issue.link`, `issue.comment`, `issue.update`, `issue.create` | seeded |
-| `auditor` | the read actions, `audit.read`, `access.read`, `session.context` and `mission.verify` | seeded |
+| `controller` | everything an `operator` does, plus `roster.manage`, `config.manage`, `agent.configure`, `station.configure`, `pool.manage`, `approval.class`, `mission.review`, `mission.verify`, `access.manage`, `account.manage`, `audit.read`, `access.read` and `run.context` | seeded; ordinary data you may edit or delete |
+| `operator` | the read actions (`mission.read`, `run.read`, `agent.read`, `roster.read`, `config.read`, `station.read`, `pool.read`, `cable.read`) and `mission.create`, `mission.control`, `run.input`, `cable.send`, `approval.decide`, `issue.link`, `issue.comment`, `issue.update`, `issue.create` | seeded |
+| `auditor` | the read actions, `audit.read`, `access.read`, `run.context` and `mission.verify` | seeded |
 
 The first start of Universal Exports with user access and no `access` record writes the last
 three (audited `access.seeded`); a record that exists, even without roles, is never seeded

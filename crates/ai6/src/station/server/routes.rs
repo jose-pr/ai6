@@ -1,7 +1,7 @@
-//! Which of an Agent's routes a Session takes: what each route's standing is on this Station, the
+//! Which of an Agent's routes a Run takes: what each route's standing is on this Station, the
 //! one chosen by the Agent's `balance`, and where a resume may go.
 //!
-//! A route counts when its handler runs here, it can hold the Session's clearance, what it names
+//! A route counts when its handler runs here, it can hold the Run's clearance, what it names
 //! is configured, and its account source has room. The choice only reads: the claim that follows
 //! is one Registry write ([`accounts`](super::accounts)), so two Stations never both take the last
 //! place, and the one that loses tries again. A route with no pool gets an account of its own
@@ -31,13 +31,13 @@ pub(super) struct Place<'a> {
     /// Why a route's handler cannot run here; `None` when it can.
     pub(super) refuses: &'a dyn Fn(&AgentRoute) -> Option<String>,
     /// The clearance its handler must be able to hold; `None` when none is asked of it here (a
-    /// runner hosts the handler, or an assistant Session, which is restricted by its mode).
+    /// runner hosts the handler, or an assistant Run, which is restricted by its mode).
     pub(super) clearance: Option<&'a str>,
-    /// The Session is a review, which is issued no credential.
+    /// The Run is a review, which is issued no credential.
     pub(super) review: bool,
 }
 
-/// The route a Session runs on, and what is needed to run on it.
+/// The route a Run runs on, and what is needed to run on it.
 #[derive(Debug, Clone)]
 pub(super) struct OnRoute {
     /// The route, complete.
@@ -106,7 +106,7 @@ pub(super) fn is_implicit(pool: &str) -> bool {
     pool.starts_with(IMPLICIT_PREFIX)
 }
 
-/// A route's own account again, from what a Session record names, for a harness that already runs
+/// A route's own account again, from what a Run record names, for a harness that already runs
 /// on it.
 pub(super) fn implicit_pool_named(pool: &str, handler: &str) -> AccountPool {
     AccountPool::new(pool, handler)
@@ -143,7 +143,7 @@ fn standing_of(
     }
     let catalog = state.station.credentials.catalog();
     if let Some(catalog) = catalog {
-        catalog.check_session_env(&route.env, Limit::UNBOUNDED)?;
+        catalog.check_run_env(&route.env, Limit::UNBOUNDED)?;
     }
     for name in &route.secrets {
         match catalog {
@@ -229,7 +229,7 @@ pub(super) fn survey(
     survey
 }
 
-/// Why no route of `agent` can take a Session, for the Mission's or the conversation's record.
+/// Why no route of `agent` can take a Run, for the Mission's or the conversation's record.
 fn none_open(agent: &Agent, survey: &Survey) -> String {
     format!(
         "no route of Agent {:?} has room: {}",
@@ -246,7 +246,7 @@ fn pick(state: &DaemonState, agent: &Agent, survey: &Survey) -> Option<OnRoute> 
     Some(survey.open[chosen].0.clone())
 }
 
-/// The route a new Session of the routed `agent` takes at `place`.
+/// The route a new Run of the routed `agent` takes at `place`.
 ///
 /// # Errors
 ///
@@ -262,7 +262,7 @@ pub(super) fn choose(
 }
 
 /// The route a conversation of the routed `agent` runs on at `place`: `earlier`, the route it last
-/// ran on, while that has room, which is the one way to keep its provider Session; else the one
+/// ran on, while that has room, which is the one way to keep its provider Run; else the one
 /// `balance` picks. Whether it stayed.
 ///
 /// # Errors
@@ -294,8 +294,8 @@ pub(super) fn hold(state: &DaemonState, operation: Option<&str>, agent: &Agent) 
     found.open.is_empty().then(|| none_open(agent, &found))
 }
 
-/// What a limited Session of the routed `agent` may do next: whether any route has room, and
-/// whether one of `handler` has an account a provider Session can move to.
+/// What a limited Run of the routed `agent` may do next: whether any route has room, and
+/// whether one of `handler` has an account a provider Run can move to.
 pub(super) fn room_after_limit(
     state: &DaemonState,
     operation: Option<&str>,
@@ -313,16 +313,16 @@ pub(super) fn room_after_limit(
         .open
         .iter()
         .filter(|(on, _)| on.route.handler == handler)
-        .any(|(on, _)| accounts::route_carries_session(state, operation, agent, &on.route));
+        .any(|(on, _)| accounts::route_carries_run(state, operation, agent, &on.route));
     (!found.open.is_empty(), carrying)
 }
 
-/// Where a resume of `agent`'s Session on `earlier` goes.
+/// Where a resume of `agent`'s Run on `earlier` goes.
 #[derive(Debug, Clone)]
 pub(super) enum ResumeOn {
     /// The route it ran on has room, or it holds its place there.
     Stay(OnRoute),
-    /// Another route of the same handler, whose account the provider Session can move to.
+    /// Another route of the same handler, whose account the provider Run can move to.
     Move(OnRoute),
     /// No route it can move to has room, but another has: a new attempt, saying why.
     NewAttempt(String),
@@ -330,10 +330,10 @@ pub(super) enum ResumeOn {
     Wait(String),
 }
 
-/// Applies the resume rule: a Session stays on its route, since its history belongs to the harness
+/// Applies the resume rule: a Run stays on its route, since its history belongs to the harness
 /// and the source; without room it moves only to a route of the same handler whose accounts carry
 /// that history; otherwise another route means a new attempt. `carried` says whether the account
-/// the Session last held is of a kind that carries it.
+/// the Run last held is of a kind that carries it.
 pub(super) fn for_resume(
     state: &DaemonState,
     operation: Option<&str>,
@@ -349,7 +349,7 @@ pub(super) fn for_resume(
     if carried
         && let Some((on, _)) = found.open.iter().find(|(on, _)| {
             on.route.handler == earlier.handler
-                && accounts::route_carries_session(state, operation, agent, &on.route)
+                && accounts::route_carries_run(state, operation, agent, &on.route)
         })
     {
         return ResumeOn::Move(on.clone());

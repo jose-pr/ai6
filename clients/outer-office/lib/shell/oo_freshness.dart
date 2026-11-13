@@ -27,7 +27,7 @@ enum OoFreshness {
 /// The kinds of data the board reads, each with its own [OoFreshness].
 enum BoardSource {
   stations('Stations'),
-  board('Sessions'),
+  board('Runs'),
   missions('Missions'),
   heldBriefs('Held briefs'),
   greenInk('Green ink requests'),

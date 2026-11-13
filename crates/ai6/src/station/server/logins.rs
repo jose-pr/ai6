@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 
 use crate::directorates::q::logins::{
-    CommandRenewer, LoginNotice, NoticeKind, SessionLogin, Synced, assign_renewals, login_accounts,
+    CommandRenewer, LoginNotice, NoticeKind, RunLogin, Synced, assign_renewals, login_accounts,
     run_leases, sealed_name,
 };
 use crate::directorates::q::sealing::{SEALING_KEY_FILE, SealingKey, Vault};
@@ -30,7 +30,7 @@ const TIMELINE_KIND: &str = "account";
 pub(crate) struct LoginDesk {
     vault: Option<Arc<Vault>>,
     /// Every home this Station wrote a login to, by path.
-    homes: Arc<Mutex<BTreeMap<PathBuf, SessionLogin>>>,
+    homes: Arc<Mutex<BTreeMap<PathBuf, RunLogin>>>,
     /// What each home last failed with, so a failure that lasts is logged once.
     failed: Arc<Mutex<BTreeMap<PathBuf, String>>>,
     /// When this Station last ran the Headquarters round.
@@ -112,7 +112,7 @@ pub(super) fn recover(state: &DaemonState) {
             continue;
         };
         for home in inside.flatten().filter(|home| home.path().is_dir()) {
-            if let Some(login) = SessionLogin::recall(&home.path())
+            if let Some(login) = RunLogin::recall(&home.path())
                 && login.home == home.path()
             {
                 homes.insert(home.path(), login);
@@ -124,7 +124,7 @@ pub(super) fn recover(state: &DaemonState) {
 }
 
 /// Writes `account`'s login under the Mission's home and points the harness at it. A home it
-/// already has, from an earlier Session of the Mission, is brought up to date first, so whatever
+/// already has, from an earlier Run of the Mission, is brought up to date first, so whatever
 /// its last harness renewed goes back and a resume takes the current login.
 pub(super) fn hand_over(
     state: &DaemonState,
@@ -169,7 +169,7 @@ pub(super) fn hand_over(
             }
             login
         }
-        None => SessionLogin::materialize(vault, &reference, account.login_files(), &home)
+        None => RunLogin::materialize(vault, &reference, account.login_files(), &home)
             .map_err(|error| format!("account {name}'s login could not be written: {error}"))?,
     };
     let mut login = login;
@@ -226,12 +226,12 @@ pub(super) fn tend(state: &DaemonState) {
     }
 }
 
-fn report_sync(state: &DaemonState, login: &SessionLogin, synced: &Synced) {
+fn report_sync(state: &DaemonState, login: &RunLogin, synced: &Synced) {
     let account = &login.account;
     match synced {
         Synced::Unchanged => {}
         Synced::Rewritten(revision) => {
-            eprintln!("ai6: account {account}'s login reached a Session at revision {revision}");
+            eprintln!("ai6: account {account}'s login reached a Run at revision {revision}");
         }
         Synced::Renewed(revision) => {
             eprintln!("ai6: a harness renewed account {account}'s login: revision {revision}");
@@ -239,7 +239,7 @@ fn report_sync(state: &DaemonState, login: &SessionLogin, synced: &Synced) {
         }
         Synced::Restored(revision, reason) => {
             eprintln!(
-                "ai6: account {account}'s login in a Session's home was not kept ({reason}); it \
+                "ai6: account {account}'s login in a Run's home was not kept ({reason}); it \
                  holds revision {revision} again"
             );
             audit(state, "pool.login.restored", account);
@@ -340,7 +340,7 @@ pub(super) fn end_renewals(state: &DaemonState) {
         .store(false, Ordering::Release);
 }
 
-/// A line for a Session that failed while the login it started with was renewed from under it: a
+/// A line for a Run that failed while the login it started with was renewed from under it: a
 /// harness may hold its token in memory and be refused, and a resume takes the current login.
 pub(super) fn stale_note(state: &DaemonState, mission_id: &str) -> Option<String> {
     let homes = lock(&state.station.credentials.accounts.logins.homes);
@@ -356,7 +356,7 @@ pub(super) fn stale_note(state: &DaemonState, mission_id: &str) -> Option<String
     let started = login.started;
     (login.revision > started).then(|| {
         format!(
-            "account {account}'s login was renewed while this Session ran (revision {started} to \
+            "account {account}'s login was renewed while this Run ran (revision {started} to \
              {}); a harness that keeps its token in memory may have been refused, and a resume \
              takes the current one",
             login.revision

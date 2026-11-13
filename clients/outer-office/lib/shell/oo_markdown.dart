@@ -20,7 +20,7 @@ class DocLink {
 }
 
 /// Text in a document that Universal Exports resolved for the reader: an issue key, or a
-/// Mission, Operation or Session ID the reader may open.
+/// Mission, Operation or Run ID the reader may open.
 class DocReference {
   const DocReference({
     required this.text,

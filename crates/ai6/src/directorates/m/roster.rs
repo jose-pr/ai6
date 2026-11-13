@@ -37,7 +37,7 @@ use crate::directorates::medical::exposure::{ExposureDefinition, ExposurePolicy}
 use crate::directorates::medical::quarantine::{QuarantineDefinition, QuarantinePolicy};
 use crate::directorates::medical::usage::{Budget, BudgetDefinition, utc_day};
 use crate::directorates::medical::watchdog::WatchdogOverrides;
-use crate::directorates::q::{PoolStrategy, SessionEnv};
+use crate::directorates::q::{PoolStrategy, RunEnv};
 use crate::directorates::registry::clearance::ClearanceGrant;
 use crate::directorates::registry::sleepers::Sleeper;
 use crate::directorates::registry::store::validate_station_id;
@@ -121,11 +121,11 @@ pub struct Agent {
     pub env: BTreeMap<String, String>,
     /// Watchdog limits layered over the daemon settings.
     pub limits: WatchdogOverrides,
-    /// Spending limits for this Agent's Sessions, layered over its Operation's.
+    /// Spending limits for this Agent's Runs, layered over its Operation's.
     pub budget: Budget,
     /// Optional concurrent operation limit.
     pub max_concurrent: Option<usize>,
-    /// The one account pool this Agent's Sessions draw from, when it is pinned to one.
+    /// The one account pool this Agent's Runs draw from, when it is pinned to one.
     pub pool: Option<String>,
     /// The UTC date (`YYYY-MM-DD`) its model reaches end of life; from that day the Agent
     /// goes to desk duty or retires, as `on_retire` says.
@@ -134,17 +134,17 @@ pub struct Agent {
     pub on_retire: OnRetire,
     /// Days before `retire_on` that the Station warns of it; `0` does not warn.
     pub retire_warning_days: u32,
-    /// Whether a Cable to a Session of it that is between turns starts a turn with the Cable as
+    /// Whether a Cable to a Run of it that is between turns starts a turn with the Cable as
     /// its input; when not, the Cable waits for the Agent's own `read_cables`.
     pub wake_on_cable: bool,
-    /// How many Cables may wake its Sessions in an hour, counted across Stations; `0` wakes none.
+    /// How many Cables may wake its Runs in an hour, counted across Stations; `0` wakes none.
     pub wakes_per_hour: u32,
 }
 
 /// Days before an Agent's `retire_on` date that the Station warns of it, by default.
 pub const DEFAULT_RETIRE_WARNING_DAYS: u32 = 14;
 
-/// The Cables that may wake an Agent's Sessions in an hour, by default.
+/// The Cables that may wake an Agent's Runs in an hour, by default.
 pub const DEFAULT_WAKES_PER_HOUR: u32 = 60;
 
 /// One way an Agent reaches its model: a handler, the name this source knows the model by, and an
@@ -174,13 +174,13 @@ pub struct AgentRoute {
     /// The account pool this route draws from; the Agent's when empty.
     #[schema(title = "Account pool")]
     pub pool: Option<String>,
-    /// Values this route's Sessions get in their environment, over the Agent's, such as where the
+    /// Values this route's Runs get in their environment, over the Agent's, such as where the
     /// source is. Anyone who reads the roster reads them: no credential here.
     #[schema(title = "Environment", advanced)]
     #[map(default)]
-    pub env: SessionEnv,
-    /// The loadout secrets (`[secret.<name>]`) this route's Sessions reach their model with,
-    /// leased per Session whatever the Session has read.
+    pub env: RunEnv,
+    /// The loadout secrets (`[secret.<name>]`) this route's Runs reach their model with,
+    /// leased per Run whatever the Run has read.
     #[schema(title = "Secrets", advanced)]
     #[map(default)]
     pub secrets: Vec<String>,
@@ -199,7 +199,7 @@ impl AgentRoute {
         }
     }
 
-    /// This route under the name a Session record, a timeline and a conversation know it by.
+    /// This route under the name a Run record, a timeline and a conversation know it by.
     pub fn reference(&self) -> RouteRef {
         RouteRef {
             handler: self.handler.clone(),
@@ -378,7 +378,7 @@ impl Agent {
             .any(|route| handlers.contains(&route.handler))
     }
 
-    /// This Agent as a Session on `route` works: `route` from [`Agent::route_list`] in place of
+    /// This Agent as a Run on `route` works: `route` from [`Agent::route_list`] in place of
     /// its own handler, model, effort, settings and pool, and `route`'s `env` over its own.
     #[must_use]
     pub fn on_route(&self, route: &AgentRoute) -> Self {
@@ -533,7 +533,7 @@ pub struct AgentRole {
     /// Which review policy applies to this role's Missions at each gate, before the Operation's.
     #[serde(default, skip_serializing_if = "review_choice_is_empty")]
     pub review: ReviewChoice,
-    /// Whether a Session of this role that ends done with no green ink request decided in that
+    /// Whether a Run of this role that ends done with no green ink request decided in that
     /// attempt is held for a person's verdict instead of being `done`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub require_approval_before_done: bool,
@@ -645,22 +645,22 @@ pub struct Operation {
     pub cover_identity: Option<CoverIdentity>,
     /// Response when a commit violates the cover policy.
     pub on_blown: String,
-    /// Response when a provider usage limit stops a Session.
+    /// Response when a provider usage limit stops a Run.
     pub on_limit: OnLimit,
     /// Seconds to park when a limit reports no reset time.
     pub limit_fallback_secs: u64,
-    /// Response when a Session is lost: with its Station when no other Station can adopt it,
+    /// Response when a Run is lost: with its Station when no other Station can adopt it,
     /// or when its runner or wrapped harness stays out of reach past `lost_after_secs`.
     pub on_lost: OnLost,
     /// Whether Missions go to the least-loaded place (`spread`, the default) or fill the
     /// busiest place that still has room (`pack`).
     pub placement: PlacementStrategy,
-    /// Seconds a Session's runner, or its wrapped harness, may stay out of reach before its
-    /// Station probes it once more and, if it is still gone, marks the Session lost.
+    /// Seconds a Run's runner, or its wrapped harness, may stay out of reach before its
+    /// Station probes it once more and, if it is still gone, marks the Run lost.
     pub lost_after_secs: u64,
     /// Spending limits for this Operation's Missions; none is set unless configured.
     pub budget: Budget,
-    /// What a Session may do once it has read untrusted input; strict unless configured.
+    /// What a Run may do once it has read untrusted input; strict unless configured.
     pub exposure: ExposurePolicy,
     /// When an Agent working here is quarantined.
     pub quarantine: QuarantinePolicy,
@@ -684,7 +684,7 @@ pub struct Operation {
     /// The account pools its Missions may draw from; `None` (the default) is every pool
     /// whose own `operations` admit the Operation.
     pub pools: Option<Vec<String>>,
-    /// The overlays its Missions' Sessions get after their Agent's loadout's, by
+    /// The overlays its Missions' Runs get after their Agent's loadout's, by
     /// `[overlay.<name>]` name: it only adds to what the loadout issues.
     pub overlays: Vec<String>,
     /// Whether a harness may load the settings its working directory carries; `ignore`
@@ -721,7 +721,7 @@ pub struct Workspace {
     /// later attempt on another Station starts from its work. `None` (the default) pushes
     /// nothing.
     pub checkpoint_remote: Option<String>,
-    /// Seconds between checkpoints while a Session runs.
+    /// Seconds between checkpoints while a Run runs.
     pub checkpoint_secs: u64,
 }
 
@@ -744,7 +744,7 @@ impl Default for Workspace {
     }
 }
 
-/// What happens to a Mission whose Session is lost with its Station (`on_lost`).
+/// What happens to a Mission whose Run is lost with its Station (`on_lost`).
 #[non_exhaustive]
 #[derive(
     Debug,
@@ -2036,7 +2036,7 @@ pub(crate) struct OperationDefinition {
     /// this Operation.
     #[schema(title = "Account pools", section = "roster", advanced)]
     pools: Option<Vec<String>>,
-    /// The overlays its Missions' Sessions get after their Agent's loadout's, each an
+    /// The overlays its Missions' Runs get after their Agent's loadout's, each an
     /// `[overlay.<name>]`. They add to what the loadout issues and never take any of it away.
     #[schema(title = "Overlays", section = "roster", advanced)]
     #[map(default)]
@@ -2063,11 +2063,11 @@ pub(crate) struct OperationDefinition {
     /// How many of its Missions may run at once. Leave it empty for no limit of its own.
     #[schema(title = "Missions at once", section = "limits", advanced)]
     max_concurrent: Option<usize>,
-    /// What happens when a provider's usage limit stops a Session.
+    /// What happens when a provider's usage limit stops a Run.
     #[schema(title = "When a usage limit is hit", section = "limits", advanced)]
     #[map(default)]
     on_limit: OnLimit,
-    /// How long a Session waits when a provider reports a limit but no reset time.
+    /// How long a Run waits when a provider reports a limit but no reset time.
     #[schema(
         title = "Wait when no reset time is given",
         section = "limits",
@@ -2076,11 +2076,11 @@ pub(crate) struct OperationDefinition {
     )]
     #[map(default = OperationDefinition::default().limit_fallback_secs)]
     limit_fallback_secs: u64,
-    /// What happens when a Session is lost with its Station.
-    #[schema(title = "When a Session is lost", section = "limits", advanced)]
+    /// What happens when a Run is lost with its Station.
+    #[schema(title = "When a Run is lost", section = "limits", advanced)]
     #[map(default)]
     on_lost: OnLost,
-    /// How long a Session's runner may stay out of reach before its Station gives it up as lost.
+    /// How long a Run's runner may stay out of reach before its Station gives it up as lost.
     #[schema(title = "Lost after", section = "limits", format = "seconds", advanced)]
     #[map(default = OperationDefinition::default().lost_after_secs)]
     lost_after_secs: u64,
@@ -2090,7 +2090,7 @@ pub(crate) struct OperationDefinition {
     #[form(form)]
     budget: BudgetDefinition,
 
-    /// What a Session may do once it has read outside text.
+    /// What a Run may do once it has read outside text.
     #[schema(title = "After reading outside text", section = "safety", advanced)]
     #[map(default)]
     #[form(form)]
@@ -2502,7 +2502,7 @@ impl Operation {
     section(
         id = "harness",
         label = "Harness and model",
-        help = "What runs this Agent's Sessions."
+        help = "What runs this Agent's Runs."
     ),
     section(id = "duties", label = "Duties"),
     section(id = "limits", label = "Limits and spending"),
@@ -2528,7 +2528,7 @@ pub(crate) struct AgentDefinition {
     )]
     extends: Option<String>,
 
-    /// The harness that runs its Sessions, from those the Stations report.
+    /// The harness that runs its Runs, from those the Stations report.
     #[schema(
         title = "Handler",
         section = "harness",
@@ -2592,30 +2592,30 @@ pub(crate) struct AgentDefinition {
     #[schema(title = "Standing instructions", section = "duties", advanced)]
     #[form(widget = "textarea")]
     context: Option<String>,
-    /// Environment variables its Sessions get. Keep secrets out of here: a loadout hands them
+    /// Environment variables its Runs get. Keep secrets out of here: a loadout hands them
     /// out.
     #[schema(title = "Environment", section = "duties", advanced)]
     #[map(default)]
     env: BTreeMap<String, String>,
 
-    /// How many Sessions it may run at once. Leave it empty for no limit of its own.
-    #[schema(title = "Sessions at once", section = "limits", advanced)]
+    /// How many Runs it may run at once. Leave it empty for no limit of its own.
+    #[schema(title = "Runs at once", section = "limits", advanced)]
     max_concurrent: Option<usize>,
-    /// The one account pool its Sessions draw from, when it is tied to one.
+    /// The one account pool its Runs draw from, when it is tied to one.
     #[schema(title = "Account pool", section = "limits", advanced)]
     pool: Option<String>,
-    /// When its Sessions count as stuck.
+    /// When its Runs count as stuck.
     #[schema(title = "Watchdog", section = "limits", advanced)]
     #[map(default)]
     #[form(form)]
     limits: WatchdogOverrides,
-    /// What its Sessions may spend, on top of its Operation's budget.
+    /// What its Runs may spend, on top of its Operation's budget.
     #[schema(title = "Budget", section = "limits", advanced)]
     #[map(default)]
     #[form(form)]
     budget: BudgetDefinition,
 
-    /// Whether a Cable to a Session of it that is between turns starts a turn with the Cable as
+    /// Whether a Cable to a Run of it that is between turns starts a turn with the Cable as
     /// its input. When not, the Cable waits for the Agent's own read.
     #[schema(
         title = "Wake on a Cable",
@@ -2624,7 +2624,7 @@ pub(crate) struct AgentDefinition {
         default = Some(true)
     )]
     wake_on_cable: Option<bool>,
-    /// How many Cables may wake its Sessions in an hour; 0 wakes none.
+    /// How many Cables may wake its Runs in an hour; 0 wakes none.
     #[schema(
         title = "Wakes per hour",
         section = "cables",
@@ -2674,13 +2674,13 @@ pub(crate) struct AgentRoleDefinition {
     #[map(default)]
     #[form(form)]
     review: ReviewChoice,
-    /// Whether a Session of this role that ends done with no green ink request decided in that
+    /// Whether a Run of this role that ends done with no green ink request decided in that
     /// attempt is held for a person's verdict instead of being done.
     #[schema(title = "Require a decision before done", advanced)]
     #[map(default)]
     require_approval_before_done: bool,
     /// What every Mission of this role is to deliver, each a kind or `kind:target`: `branch`,
-    /// `commit_on:BRANCH`, `comment:TEXT`, `artifact:URL`, `approval` or `file:PATH`. A Session
+    /// `commit_on:BRANCH`, `comment:TEXT`, `artifact:URL`, `approval` or `file:PATH`. A Run
     /// that ends done leaves its Mission to be verified against them.
     #[schema(title = "Deliverables", advanced)]
     #[map(default)]
@@ -3020,7 +3020,7 @@ fn validate_routes(agent: &Agent) -> Result<(), RosterError> {
             ))
         })?;
     }
-    // A Session record, a conversation and a route's own account know a route by these names.
+    // A Run record, a conversation and a route's own account know a route by these names.
     let mut named = BTreeSet::new();
     for route in agent.route_list() {
         let reference = route.reference();
@@ -3255,7 +3255,7 @@ effort = "low"
         assert_eq!(on_gateway.pool.as_deref(), Some("litellm-team"));
         assert_eq!(
             on_gateway.env["ANTHROPIC_BASE_URL"], "https://llm.example",
-            "the route's env reaches the Session"
+            "the route's env reaches the Run"
         );
         assert!(!on_gateway.is_routed());
         assert_eq!(
@@ -3840,7 +3840,7 @@ sources = {{ jira = \"GUA\" }}\n",
     }
 
     #[test]
-    fn a_lost_session_is_retried_and_checkpoints_push_nothing_unless_configured() {
+    fn a_lost_run_is_retried_and_checkpoints_push_nothing_unless_configured() {
         let directory = TestDirectory::new();
         directory.write(
             "operations.toml",
@@ -3884,15 +3884,15 @@ sources = {{ jira = \"GUA\" }}\n",
         );
         directory.write(
             "agents.toml",
-            "[agent.base.budget]\nsession_tokens = 1000\n[agent.child]\nextends = \"base\"\n[agent.child.budget]\nwarn_at = 0.5\n",
+            "[agent.base.budget]\nrun_tokens = 1000\n[agent.child]\nextends = \"base\"\n[agent.child.budget]\nwarn_at = 0.5\n",
         );
         let roster = Roster::load(&directory.0).unwrap();
         assert!(!roster.operation("A").unwrap().budget.is_limited());
         let strict = roster.operation("B").unwrap().budget;
         assert_eq!(strict.mission_cost_micro_usd, Some(3_000_000));
-        assert!(strict.session_tokens.is_some());
+        assert!(strict.run_tokens.is_some());
         let child = roster.agent(None, "child").unwrap().budget;
-        assert_eq!(child.session_tokens, Some(1000));
+        assert_eq!(child.run_tokens, Some(1000));
         assert_eq!(child.warn_at_permille, Some(500));
     }
 
@@ -3912,8 +3912,8 @@ sources = {{ jira = \"GUA\" }}\n",
             ),
             (
                 "agents.toml",
-                "[agent.007.budget]\nsession_tokens = 1.5\n",
-                "session_tokens",
+                "[agent.007.budget]\nrun_tokens = 1.5\n",
+                "run_tokens",
             ),
             (
                 "agents.toml",

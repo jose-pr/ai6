@@ -26,7 +26,7 @@ use std::sync::Mutex;
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Status, ToValue, Value};
 use ai6::{
-    Capabilities, ForwardSpec, ReadSpec, RunSpec, Spec, TerminalSession, Transport,
+    Capabilities, ForwardSpec, ReadSpec, RunSpec, Spec, TerminalRun, Transport,
     TransportForward, WriteSpec,
 };
 use tokio::runtime::{Builder, Runtime};
@@ -166,7 +166,7 @@ impl Transport for Ssh {
         value(&capabilities)
     }
 
-    fn open_terminal(&self, spec: &Value) -> Result<Object<dyn TerminalSession>, ProviderError> {
+    fn open_terminal(&self, spec: &Value) -> Result<Object<dyn TerminalRun>, ProviderError> {
         let spec = spec_of::<Spec>(spec)?;
         let terminal = self
             .runtime()

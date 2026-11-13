@@ -9,7 +9,7 @@
 //! A Station or Theater short of memory or CPU ([`ResourceLimits`]) is ruled out like any
 //! other. Each remaining (Station, Theater) gets a load score from 0 (idle) to 4, the sum of
 //! four shares that each run 0 to 1: Missions held against capacity, CPU busy, memory in
-//! use, and the Station's Sessions on that Theater against capacity. A figure that was not
+//! use, and the Station's Runs on that Theater against capacity. A figure that was not
 //! reported adds nothing. [`PlacementStrategy::Spread`] puts the lowest score first,
 //! [`PlacementStrategy::Pack`] the highest. Equal scores keep the order without scores: the
 //! least-loaded Station first (the deciding Station wins a tie, then Station ID), the `local`
@@ -321,13 +321,13 @@ pub struct StationFacts {
     pub healthy: bool,
     /// Seconds since the last check-in.
     pub silent_for: u64,
-    /// Station roles; `execution` is needed to run Sessions.
+    /// Station roles; `execution` is needed to run Runs.
     pub roles: Vec<String>,
     /// Mission capacity it reported.
     pub capacity: usize,
     /// Missions already leased to it.
     pub load: usize,
-    /// Sessions it reported running, including those no brief lease accounts for.
+    /// Runs it reported running, including those no brief lease accounts for.
     #[serde(default)]
     pub running: usize,
     /// Its labels.
@@ -347,7 +347,7 @@ pub struct StationFacts {
 }
 
 impl StationFacts {
-    /// How many Missions it holds: its leases or its running Sessions, whichever is more.
+    /// How many Missions it holds: its leases or its running Runs, whichever is more.
     pub fn occupied(&self) -> usize {
         self.load.max(self.running)
     }
@@ -465,7 +465,7 @@ impl ExecutionMode {
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlacementChoice {
-    /// The Station that would supervise the Session.
+    /// The Station that would supervise the Run.
     pub station: String,
     /// The Theater the harness would work on.
     pub theater: String,
@@ -598,7 +598,7 @@ pub fn place(
             };
             let score = load_score(station, theater);
             for (agent, handlers) in &usable {
-                // Which route runs is the Station's to choose when it starts the Session; here
+                // Which route runs is the Station's to choose when it starts the Run; here
                 // it is enough that one of them can.
                 let mut reasons = Vec::new();
                 let fits =
@@ -644,13 +644,13 @@ pub fn place(
 }
 
 /// How loaded running on `theater` through `station` is, 0 (idle) to 4: Missions held
-/// against capacity, CPU busy, memory in use, and the Station's Sessions on the Theater
+/// against capacity, CPU busy, memory in use, and the Station's Runs on the Theater
 /// against capacity, each 0 to 1. A Theater on the Station's own host is judged by the
 /// Station's sample. A figure that was not reported adds nothing.
 fn load_score(station: &StationFacts, theater: &TheaterSummary) -> f64 {
     let capacity = station.capacity.max(1) as f64;
     let held = (station.occupied() as f64 / capacity).min(1.0);
-    let sessions = (theater.sessions as f64 / capacity).min(1.0);
+    let runs = (theater.runs as f64 / capacity).min(1.0);
     let resources = if theater.access == TheaterKind::Local {
         station.resources.as_ref().or(theater.resources.as_ref())
     } else {
@@ -661,7 +661,7 @@ fn load_score(station: &StationFacts, theater: &TheaterSummary) -> f64 {
         .and_then(Resources::memory_used)
         .unwrap_or_default();
     // Thousandths keep the score readable and equal loads equal.
-    ((held + cpu + memory + sessions) * 1000.0).round() / 1000.0
+    ((held + cpu + memory + runs) * 1000.0).round() / 1000.0
 }
 
 /// The posted Agents the Mission may use, best first. The others are rejected once,
@@ -755,7 +755,7 @@ fn station_rejection(
         .and_then(|resources| station.limits.rejection(resources))
 }
 
-/// How a Session would run on `theater`, or the reason it may not.
+/// How a Run would run on `theater`, or the reason it may not.
 fn theater_verdict(
     policy: &OperationPolicy,
     station: &StationFacts,
@@ -906,7 +906,7 @@ fn assumed_own_host() -> Capabilities {
     }
 }
 
-/// How a Session would run on `theater`, or the capability that is missing.
+/// How a Run would run on `theater`, or the capability that is missing.
 ///
 /// Field mode runs the harness on the Theater and needs a route to the provider's API. A
 /// runner there supervises it with its own providers, and carries its Cable requests to the
@@ -1639,7 +1639,7 @@ mod tests {
         assert_eq!(mode_of(&wrapper), Ok(ExecutionMode::Field));
 
         // Without `forward` its harness has no way to its Cable endpoint: field mode is ruled
-        // out, unless the Theater accepts Sessions without Cables.
+        // out, unless the Theater accepts Runs without Cables.
         let mut sealed = wrapper.clone();
         sealed.capabilities = Some(Capabilities {
             forward: false,
@@ -1937,7 +1937,7 @@ mod tests {
     }
 
     #[test]
-    fn a_theater_short_of_memory_is_rejected_and_its_sessions_count_against_it() {
+    fn a_theater_short_of_memory_is_rejected_and_its_runs_count_against_it() {
         let runs_there = |id: &str| {
             let mut theater = remote(
                 id,
@@ -1956,9 +1956,9 @@ mod tests {
             memory_available_mb: Some(200),
             ..Resources::default()
         });
-        // "busy" sorts before "free", so only its Session puts it second.
+        // "busy" sorts before "free", so only its Run puts it second.
         let mut busy = runs_there("busy");
-        busy.sessions = 1;
+        busy.runs = 1;
         let free = runs_there("free");
         let mut station = station("a", 0);
         station.theaters = vec![small, busy, free];
@@ -2001,7 +2001,7 @@ mod tests {
         assert_eq!(
             reasons(&placement, "quiet"),
             ["it is at capacity (2 of 2 Missions)"],
-            "Sessions it reported running fill it even without leases"
+            "Runs it reported running fill it even without leases"
         );
     }
 }

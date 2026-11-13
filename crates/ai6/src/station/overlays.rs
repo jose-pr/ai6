@@ -1,5 +1,5 @@
-//! Delivering overlays to a Session: the store a Station fetches them to, keyed by tree digest and
-//! verified at every start, and what a Session is given from it. Nothing an overlay holds is ever
+//! Delivering overlays to a Run: the store a Station fetches them to, keyed by tree digest and
+//! verified at every start, and what a Run is given from it. Nothing an overlay holds is ever
 //! in the safe house, so no commit can hold it.
 //!
 //! Every call here blocks on the filesystem or on a program; call it from `spawn_blocking`.
@@ -32,7 +32,7 @@ use crate::directorates::q::overlays::{
 };
 use crate::directorates::q::provision::RequiredProgram;
 use crate::directorates::q::transport::kit::{ProcessInput, run_process};
-use crate::directorates::section_00::agent::{OverlaySkill, SessionOverlays};
+use crate::directorates::section_00::agent::{OverlaySkill, RunOverlays};
 use crate::station::limits::OverlayLimits;
 
 mod site;
@@ -53,7 +53,7 @@ pub(crate) struct Reported {
     pub(crate) weakening: Weakening,
 }
 
-/// What a Session is issued, checked and stored, before anything is placed where it runs.
+/// What a Run is issued, checked and stored, before anything is placed where it runs.
 pub(crate) struct Prepared {
     install_order: Vec<String>,
     overlays: Vec<Ready>,
@@ -66,17 +66,17 @@ struct Ready {
     stored: Stored,
 }
 
-/// What a Session gets from its overlays.
+/// What a Run gets from its overlays.
 #[derive(Debug, Default)]
 pub(crate) struct Delivered {
-    /// The Session's environment with the overlays' applied.
+    /// The Run's environment with the overlays' applied.
     pub(crate) environment: BTreeMap<String, String>,
     /// What its commands get when its harness is elsewhere than they run (remote hands).
     pub(crate) theater_environment: Option<BTreeMap<String, String>>,
     /// The rules, routing and context, as one piece of the initial context.
     pub(crate) context: Option<String>,
     /// What the harness is handed.
-    pub(crate) overlays: SessionOverlays,
+    pub(crate) overlays: RunOverlays,
     /// The digests delivered, in composition order.
     pub(crate) digests: Vec<IssuedDigest>,
     /// What is reported each time they are issued.
@@ -305,14 +305,14 @@ impl Store {
     }
 
     /// A read-only directory laying out `skills` as a harness plugin, kept by the digest of what it
-    /// holds, so Sessions given the same skills share one.
+    /// holds, so Runs given the same skills share one.
     fn plugin(&self, skills: &[(String, PathBuf)]) -> Result<(Digest, PathBuf), String> {
         let mut files: BTreeMap<String, Vec<u8>> = BTreeMap::new();
         files.insert(
             ".claude-plugin/plugin.json".to_owned(),
             serde_json::json!({
                 "name": crate::directorates::m::assistant::SKILLS_PLUGIN,
-                "description": "The skills of the overlays AI6 issued to this Session",
+                "description": "The skills of the overlays AI6 issued to this Run",
             })
             .to_string()
             .into_bytes(),
@@ -668,7 +668,7 @@ impl Git {
     }
 }
 
-/// Makes `root` read-only for this user, the owner included, so a process of the Session cannot
+/// Makes `root` read-only for this user, the owner included, so a process of the Run cannot
 /// write it without first changing the permissions it was given.
 #[cfg(unix)]
 pub(crate) fn protect(root: &Path) -> io::Result<()> {
@@ -783,7 +783,7 @@ pub(crate) fn release(path: &Path) -> io::Result<()> {
     fs::remove_dir_all(path)
 }
 
-/// What a Station asks for one Session.
+/// What a Station asks for one Run.
 pub(crate) struct Request<'a> {
     /// The loadout's list.
     pub(crate) loadout: &'a [String],
@@ -800,7 +800,7 @@ pub(crate) struct Request<'a> {
 }
 
 /// What `request` issues, each overlay fetched and verified and every skill checked, or why it
-/// cannot be issued. `None` when there is nothing to issue: the Session is as it was.
+/// cannot be issued. `None` when there is nothing to issue: the Run is as it was.
 pub(crate) fn prepare(
     request: &Request<'_>,
     secret: SecretRead<'_>,
@@ -909,20 +909,20 @@ fn harness_id(handler: &str) -> &str {
     }
 }
 
-/// What a Session is, as far as delivery cares.
-pub(crate) struct SessionFacts<'a> {
-    /// The Session's environment before its overlays'.
+/// What a Run is, as far as delivery cares.
+pub(crate) struct RunFacts<'a> {
+    /// The Run's environment before its overlays'.
     pub(crate) environment: BTreeMap<String, String>,
     /// The handler provider.
     pub(crate) handler: &'a str,
     /// The directory it works in, which holds nothing of an overlay.
     pub(crate) working_directory: &'a str,
-    /// What names the Session where it keeps things of its own.
+    /// What names the Run where it keeps things of its own.
     pub(crate) key: &'a str,
 }
 
 /// A Mission's ID as a directory name.
-fn session_key(mission: &str) -> String {
+fn run_key(mission: &str) -> String {
     mission
         .chars()
         .map(|c| {
@@ -938,14 +938,14 @@ fn session_key(mission: &str) -> String {
 }
 
 /// Removes what a Mission kept where it ran. A Mission that had none leaves nothing to remove.
-pub(crate) fn forget_session(site: &Site, mission: &str) -> Result<(), String> {
-    site.remove(&site.path(&format!("sessions/{}", session_key(mission))))
+pub(crate) fn forget_run(site: &Site, mission: &str) -> Result<(), String> {
+    site.remove(&site.path(&format!("runs/{}", run_key(mission))))
 }
 
-/// Sets `name` in `environment` back to what `session` holds, or takes it out.
+/// Sets `name` in `environment` back to what `run` holds, or takes it out.
 fn restore(
     environment: &mut BTreeMap<String, String>,
-    session: &BTreeMap<String, String>,
+    run: &BTreeMap<String, String>,
     name: &str,
 ) {
     let found = environment
@@ -955,7 +955,7 @@ fn restore(
     let Some(key) = found else {
         return;
     };
-    match session
+    match run
         .iter()
         .find(|(key, _)| key.eq_ignore_ascii_case(name))
     {
@@ -980,12 +980,12 @@ impl Prepared {
             .collect()
     }
 
-    /// What a Session on `fit`'s site gets: its overlays' read-only copies there, what they need
+    /// What a Run on `fit`'s site gets: its overlays' read-only copies there, what they need
     /// prepared outside its sandbox, their environment applied, and their text.
     pub(crate) fn deliver(
         &self,
         fit: &Fit,
-        session: SessionFacts<'_>,
+        run: RunFacts<'_>,
         keeper: &Keeper,
     ) -> Result<Delivered, String> {
         let site = &fit.site;
@@ -1001,7 +1001,7 @@ impl Prepared {
                     &self.limits.settings(),
                 )
                 .map_err(|why| format!("overlay {:?}: {why}", ready.issued.identity))?;
-            check_outside(&root, session.working_directory)?;
+            check_outside(&root, run.working_directory)?;
             roots.insert(ready.issued.identity.clone(), root);
         }
         let mut weakenings = Vec::new();
@@ -1017,7 +1017,7 @@ impl Prepared {
         let empty = BTreeMap::new();
         let base = process_base(
             if fit.harness_here {
-                &session.environment
+                &run.environment
             } else {
                 &empty
             },
@@ -1033,44 +1033,44 @@ impl Prepared {
                 else {
                     continue;
                 };
-                let session = if fit.harness_here {
-                    &session.environment
+                let run = if fit.harness_here {
+                    &run.environment
                 } else {
                     &empty
                 };
                 packages.insert(
                     identity.clone(),
-                    self.prepare_one(ready, fit, &roots[identity], (session, &base), keeper)?,
+                    self.prepare_one(ready, fit, &roots[identity], (run, &base), keeper)?,
                 );
             }
         }
         let (harness_environment, theater_environment) = self.environment(
             fit,
-            &session,
+            &run,
             &os,
             &roots,
             &packages,
             &base,
             &mut weakenings,
         )?;
-        let context = self.context(&roots, session.handler, fit, &mut weakenings)?;
+        let context = self.context(&roots, run.handler, fit, &mut weakenings)?;
         let mut delivered = Delivered {
             environment: harness_environment,
             theater_environment,
             context,
-            overlays: SessionOverlays {
+            overlays: RunOverlays {
                 roots: if fit.harness_here {
                     roots.values().cloned().collect()
                 } else {
                     Vec::new()
                 },
-                ..SessionOverlays::default()
+                ..RunOverlays::default()
             },
             digests: self.digests(),
             weakenings,
         };
         let skills = self.skills(
-            session.handler,
+            run.handler,
             &roots,
             (&os, fit.harness_here),
             &mut delivered.weakenings,
@@ -1092,14 +1092,14 @@ impl Prepared {
             let (digest, here) = self.store.plugin(&native)?;
             let files = store_tree_files(&here, &self.limits.settings())?;
             let plugin = site.tree("plugins", &digest, &here, &files, &self.limits.settings())?;
-            check_outside(&plugin, session.working_directory)?;
+            check_outside(&plugin, run.working_directory)?;
             delivered.overlays.plugin_dir = Some(plugin);
         }
         delivered.overlays.skills = skills;
         Ok(delivered)
     }
 
-    /// The Session's environment with every overlay's applied in the order of application, and,
+    /// The Run's environment with every overlay's applied in the order of application, and,
     /// when its harness is elsewhere than its commands, what its commands get instead.
     #[allow(
         clippy::too_many_arguments,
@@ -1108,7 +1108,7 @@ impl Prepared {
     fn environment(
         &self,
         fit: &Fit,
-        session: &SessionFacts<'_>,
+        run: &RunFacts<'_>,
         os: &str,
         roots: &BTreeMap<String, String>,
         packages: &BTreeMap<String, BTreeMap<String, String>>,
@@ -1120,7 +1120,7 @@ impl Prepared {
         // What the overlays' environment starts from: a Theater's PATH when the Agent names none,
         // since a value here replaces the one there.
         let mut start = if fit.harness_here {
-            session.environment.clone()
+            run.environment.clone()
         } else {
             BTreeMap::new()
         };
@@ -1208,7 +1208,7 @@ impl Prepared {
             }
         }
         if fit.commands {
-            self.add_tools(fit, session, roots, &mut env)?;
+            self.add_tools(fit, run, roots, &mut env)?;
         }
         let environment: BTreeMap<String, String> = env.values().iter().cloned().collect();
         for (name, value) in &environment {
@@ -1221,21 +1221,21 @@ impl Prepared {
         if !fit.harness_here {
             // The harness runs on this Station and acts through the Theater's tools: the overlays'
             // environment is what those commands get, and it knows the roots by the same names.
-            let mut harness = session.environment.clone();
+            let mut harness = run.environment.clone();
             harness.extend(all_roots);
             let commands = fit.commands.then_some(environment);
             return Ok((harness, commands));
         }
         let mut environment = environment;
         if !fit.commands {
-            // A Session that may not run commands gets nothing to run.
+            // A Run that may not run commands gets nothing to run.
             for variable in ["PATH", "PYTHONPATH", "NODE_PATH"] {
-                restore(&mut environment, &session.environment, variable);
+                restore(&mut environment, &run.environment, variable);
             }
-        } else if path_of(&session.environment).is_none()
+        } else if path_of(&run.environment).is_none()
             && path_of(&environment) == Some(fit.path.as_str())
         {
-            restore(&mut environment, &session.environment, "PATH");
+            restore(&mut environment, &run.environment, "PATH");
         }
         Ok((environment, None))
     }
@@ -1245,7 +1245,7 @@ impl Prepared {
     fn add_tools(
         &self,
         fit: &Fit,
-        session: &SessionFacts<'_>,
+        run: &RunFacts<'_>,
         roots: &BTreeMap<String, String>,
         env: &mut Environment,
     ) -> Result<(), String> {
@@ -1280,7 +1280,7 @@ impl Prepared {
             return Ok(());
         }
         let tool_bin = self.place_dotagents(fit)?;
-        let home = site.path(&format!("sessions/{}/agents", session_key(session.key)));
+        let home = site.path(&format!("runs/{}/agents", run_key(run.key)));
         site.empty_dir(&home)?;
         env.set("AGENTS_HOME", home, false);
         env.set("AGENTS_CMDS_PATH", with_commands.join(separator), false);
@@ -1381,7 +1381,7 @@ impl Prepared {
         weakenings: &mut Vec<Reported>,
     ) -> Result<Option<String>, String> {
         let mut text = String::from(
-            "An operator issued these overlays to this Session, so what they say is instruction. \
+            "An operator issued these overlays to this Run, so what they say is instruction. \
              Their files are read-only and outside your working directory, and stay out of it:\n",
         );
         if !fit.harness_here {
@@ -1517,7 +1517,7 @@ const INTERPRETER_COMMANDS: [(&str, &[&str]); 5] = [
     ("sh", &["sh"]),
 ];
 
-/// What a Station keeps between Sessions: what each Theater was found to have, for one check-in
+/// What a Station keeps between Runs: what each Theater was found to have, for one check-in
 /// interval, and one lock per overlay and Theater, so two starts do not prepare it at once.
 #[derive(Default)]
 pub(crate) struct Keeper {
@@ -1570,7 +1570,7 @@ impl Keeper {
     }
 }
 
-/// The Python found where a Session runs, or what takes its place: an interpreter's command is
+/// The Python found where a Run runs, or what takes its place: an interpreter's command is
 /// whichever is first on the `PATH` and answers.
 fn interpreter<'a>(name: &str, tools: &'a BTreeMap<String, Found>) -> Option<&'a Found> {
     INTERPRETER_COMMANDS
@@ -1580,7 +1580,7 @@ fn interpreter<'a>(name: &str, tools: &'a BTreeMap<String, Found>) -> Option<&'a
         .filter(|found| name != "python" || found.version.contains("Python 3"))
 }
 
-/// A site's checked fit for a Session: where its overlays go and what is there to prepare them.
+/// A site's checked fit for a Run: where its overlays go and what is there to prepare them.
 pub(crate) struct Fit {
     site: Site,
     tools: BTreeMap<String, Found>,
@@ -1604,7 +1604,7 @@ fn holds_python_code(ready: &Ready) -> Option<&'static str> {
 }
 
 impl Prepared {
-    /// Whether `site` has what this Session's overlays need. A Session that may not run commands
+    /// Whether `site` has what this Run's overlays need. A Run that may not run commands
     /// gets only their text and needs nothing there. Looks at the site once per `every`.
     ///
     /// # Errors
@@ -1632,9 +1632,9 @@ impl Prepared {
         };
         let os = fit.site.os().to_owned();
         let empty = BTreeMap::new();
-        let session = if harness_here { environment } else { &empty };
+        let run = if harness_here { environment } else { &empty };
         for ready in &self.overlays {
-            let facts = self.plain_facts(ready, &os, session)?;
+            let facts = self.plain_facts(ready, &os, run)?;
             let applied = effective(&ready.issued.manifest, &facts)
                 .map_err(|refusal| format!("overlay {:?}: {refusal}", ready.issued.identity))?;
             if !applied.supported {
@@ -1654,7 +1654,7 @@ impl Prepared {
             .collect();
         wanted.insert("npm".to_owned());
         for ready in &self.overlays {
-            let facts = self.plain_facts(ready, &os, session)?;
+            let facts = self.plain_facts(ready, &os, run)?;
             let applied = effective(&ready.issued.manifest, &facts)
                 .map_err(|refusal| format!("overlay {:?}: {refusal}", ready.issued.identity))?;
             wanted.extend(applied.needs.commands);
@@ -1662,7 +1662,7 @@ impl Prepared {
         let names: Vec<&str> = wanted.iter().map(String::as_str).collect();
         fit.tools = keeper.tools(&fit.site, &fit.path, &names, every)?;
         for ready in &self.overlays {
-            self.check_needs(ready, &fit, &os, session)?;
+            self.check_needs(ready, &fit, &os, run)?;
         }
         if self.overlays.iter().any(|ready| {
             ready
@@ -1688,11 +1688,11 @@ impl Prepared {
         ready: &Ready,
         fit: &Fit,
         os: &str,
-        session: &BTreeMap<String, String>,
+        run: &BTreeMap<String, String>,
     ) -> Result<(), String> {
         let identity = &ready.issued.identity;
         let site = fit.site.name();
-        let mut facts = self.plain_facts(ready, os, session)?;
+        let mut facts = self.plain_facts(ready, os, run)?;
         facts.interpreters = Some(
             INTERPRETER_COMMANDS
                 .iter()
@@ -1759,14 +1759,14 @@ impl Prepared {
         &self,
         ready: &Ready,
         os: &str,
-        session: &BTreeMap<String, String>,
+        run: &BTreeMap<String, String>,
     ) -> Result<Facts, String> {
         let mut facts = Facts::new(os);
         facts.root = "/".to_owned();
         facts.identity = ready.issued.identity.clone();
         facts.state = Some("/".to_owned());
         facts.pinned = ready.issued.record.pin().is_some();
-        facts.base_env = session.clone();
+        facts.base_env = run.clone();
         facts.enforces_network = Some(false);
         facts.tree = self.tree_of(ready)?;
         facts.settings = self.limits.settings();
@@ -1781,24 +1781,24 @@ impl Prepared {
         ready: &Ready,
         fit: &Fit,
         root: &str,
-        (session, base): (&BTreeMap<String, String>, &BTreeMap<String, String>),
+        (run, base): (&BTreeMap<String, String>, &BTreeMap<String, String>),
         keeper: &Keeper,
     ) -> Result<BTreeMap<String, String>, String> {
         let identity = &ready.issued.identity;
         let digest = ready.stored.digest.to_string();
         let site = &fit.site;
-        let mut session = session.clone();
-        if path_of(&session).is_none() && !fit.path.is_empty() {
-            session.insert("PATH".to_owned(), fit.path.clone());
+        let mut run = run.clone();
+        if path_of(&run).is_none() && !fit.path.is_empty() {
+            run.insert("PATH".to_owned(), fit.path.clone());
         }
-        let session = &session;
+        let run = &run;
         let lock = keeper.lock(format!("{}/{identity}", site.key()));
         let _held = lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let state = site.path(&format!("state/{identity}"));
         let hex = hex_of(&ready.stored.digest);
-        let mut facts = self.plain_facts(ready, site.os(), session)?;
+        let mut facts = self.plain_facts(ready, site.os(), run)?;
         facts.root = root.to_owned();
         facts.state = Some(state.clone());
         facts.interpreters = Some(
@@ -1841,7 +1841,7 @@ impl Prepared {
             site.open_dir(&state)?;
             site.close_dir(&state)?;
         }
-        let environment = process_environment(&applied, session, base, (root, &state, identity));
+        let environment = process_environment(&applied, run, base, (root, &state, identity));
         let mut packages = BTreeMap::new();
         for step in &plan.steps {
             let dependency_of = |runtime: Runtime| {
@@ -2200,8 +2200,8 @@ fn interpreter_argv(
     Ok(argv)
 }
 
-/// The variables of a Session's environment an overlay's own process keeps: what a host needs to
-/// start one and where a package manager finds its index. No credential a Session is issued is here.
+/// The variables of a Run's environment an overlay's own process keeps: what a host needs to
+/// start one and where a package manager finds its index. No credential a Run is issued is here.
 const PROCESS_VARIABLES: [&str; 23] = [
     "PATH",
     "PATHEXT",
@@ -2228,9 +2228,9 @@ const PROCESS_VARIABLES: [&str; 23] = [
     "NODE_EXTRA_CA_CERTS",
 ];
 
-/// The base environment of an overlay's own processes, from a Session's.
-fn process_base(session: &BTreeMap<String, String>, path: &str) -> BTreeMap<String, String> {
-    let mut base: BTreeMap<String, String> = session
+/// The base environment of an overlay's own processes, from a Run's.
+fn process_base(run: &BTreeMap<String, String>, path: &str) -> BTreeMap<String, String> {
+    let mut base: BTreeMap<String, String> = run
         .iter()
         .filter(|(name, _)| {
             PROCESS_VARIABLES
@@ -2257,18 +2257,18 @@ fn process_base(session: &BTreeMap<String, String>, path: &str) -> BTreeMap<Stri
 /// overlay's own declarations and the `AOS_` variables.
 fn process_environment(
     applied: &coqui_aos::Effective,
-    session: &BTreeMap<String, String>,
+    run: &BTreeMap<String, String>,
     base: &BTreeMap<String, String>,
     (root, state, identity): (&str, &str, &str),
 ) -> BTreeMap<String, String> {
     let mut environment: BTreeMap<String, String> = base.clone();
-    // Substituted against the Session's, but only what this overlay itself declared is passed on.
+    // Substituted against the Run's, but only what this overlay itself declared is passed on.
     environment.extend(
         applied
             .env
             .values()
             .iter()
-            .filter(|(name, value)| session.get(name) != Some(value))
+            .filter(|(name, value)| run.get(name) != Some(value))
             .cloned(),
     );
     environment.insert("AOS_OVERLAY_ROOT".to_owned(), root.to_owned());
@@ -2277,7 +2277,7 @@ fn process_environment(
     environment
 }
 
-/// Weakenings that say something ran, which do not hold for a Session given only text.
+/// Weakenings that say something ran, which do not hold for a Run given only text.
 const RUN_WEAKENINGS: [&str; 7] = [
     "deps-network",
     "unlocked-dependencies",

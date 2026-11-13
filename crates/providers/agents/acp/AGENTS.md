@@ -29,9 +29,9 @@ pub struct AcpSettings {
     pub describe_options: usize,                // 64: options `models` keeps of the agent's answer
     pub describe_values: usize,                 // 1024: values per option
     pub describe_modes: usize,                  // 64: modes
-    pub describe_sessions: usize,               // 500: sessions, across pages
+    pub describe_runs: usize,               // 500: runs, across pages
     pub describe_text_bytes: usize,             // 4096: identifier and text bytes
-    pub describe_pages: usize,                  // 10: session list pages (coqui_acp DescribeLimits; any value)
+    pub describe_pages: usize,                  // 10: run list pages (coqui_acp DescribeLimits; any value)
 }
 pub struct AcpHandler;                           // AgentHandler provider id "acp"; stdio() = Json (pipe);
                                                  // program() = the settings' `command`, None without settings
@@ -41,27 +41,27 @@ pub struct AcpHandler;                           // AgentHandler provider id "ac
   `handler_settings` (`args`, `env`, `meta` or `unconfined_desk` without one are refused, as are an
   empty `command` and a `protocol` other than `v1`).
 - `start`/`resume` spawn `command args` through the given terminal with the settings' `env` under
-  the Session's environment, then `AcpSession::connect` (see `ai6::directorates::section_00::acp`).
-  The first prompt is `initial_context`, a read-only notice for answer-only/assistant Sessions,
+  the Run's environment, then `AcpRun::connect` (see `ai6::directorates::section_00::acp`).
+  The first prompt is `initial_context`, a read-only notice for answer-only/assistant Runs,
   and the task; `resume` uses `session/resume`, else `session/load`, else fails.
 - MCP servers: `AI6_CABLE_MCP_{URL,TOKEN}` and an assistant's `<prefix>_{URL,TOKEN}` become HTTP
   `mcpServers`; `AI6_THEATER_MCP_URL` (remote hands) is refused, so `AI6_THEATER_MCP_TIMEOUT_MS` is never used.
-- Permissions: `GateDecider` (green ink); restricted Sessions refuse all but reading and the tools
+- Permissions: `GateDecider` (green ink); restricted Runs refuse all but reading and the tools
   of their own MCP servers. A tool the agent runs without asking is out of reach of this: on Grok
   an agent profile takes those away (`docs/acp.md`).
 - Clearance: a Mission's `start` or `resume` at a clearance `ai6::clearance_runs_commands` denies
   (`desk`, anything else) fails with `GUATIAO_ERR_UNSUPPORTED`, before the agent starts, unless
-  `unconfined_desk` is set; answer-only and assistant Sessions are not refused. `weakenings` answers
+  `unconfined_desk` is set; answer-only and assistant Runs are not refused. `weakenings` answers
   one line when `unconfined_desk` is set, whatever the Agent's clearance.
 - `clearance_refusal` answers why a clearance `clearance_runs_commands` denies is refused, unless
-  `unconfined_desk` is set, so a route of this handler is passed over before a Session starts.
+  `unconfined_desk` is set, so a route of this handler is passed over before a Run starts.
 - A prompt whose error contains one of `limit_phrases`, without regard to case, ends as a limit
   event (`resets_at` and `window` unset), not `failed`. The error's text is its message and the
   agent's reason, from a string `data` or an object `data`'s `message` (Grok out of credits:
   `Internal error: API error (status 402 Payment Required): ...`). A lost connection is never a
   limit, whatever the agent last wrote.
 - `models(environment)` starts `command args` itself, with exactly the settings' `env` under
-  `environment`, asks what the agent offers before any Session (`coqui_acp`'s `describe`, bounded by
+  `environment`, asks what the agent offers before any Run (`coqui_acp`'s `describe`, bounded by
   the `describe_*` settings, under `initialize_timeout_ms` and `request_timeout_ms`), and ends it.
   The values of the option of category `model` are the listing; an agent that advertises no such
   answer, or offers no model option, is unknown with the reason.
@@ -87,7 +87,7 @@ Grok runs under this handler. A `harness-login` pool account with `files = [".gr
   token near its end.
 - A refused refresh removes `auth.json` and still exits 0, printing that it is not authenticated.
 - A running harness keeps its token in memory: a rewritten file is ignored on its next request, despite the
-  documented hot reload, and taken after a 401. So a Session rewritten in place goes on with its old access
+  documented hot reload, and taken after a 401. So a Run rewritten in place goes on with its old access
   token until that is refused.
 - Its guide gives 7-day tokens, 30 days where the server gives no end.
 - Unmeasured: whether the provider rotates the refresh token, and whether an old access token stays good

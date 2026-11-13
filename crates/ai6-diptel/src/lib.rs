@@ -49,7 +49,7 @@ pub struct MissionId(String);
 
 /// A provider-issued identifier for one resumable agent operation.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SessionId(String);
+pub struct RunId(String);
 
 macro_rules! identity {
     ($name:ident) => {
@@ -86,14 +86,14 @@ pub struct ControlId(String);
 
 identity!(OperationId);
 identity!(MissionId);
-identity!(SessionId);
+identity!(RunId);
 identity!(ControlId);
 
-/// The lifecycle state shown for an agent Session: the state of the Mission it serves.
+/// The lifecycle state shown for an agent Run: the state of the Mission it serves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum SessionState {
-    /// The Mission is queued for another attempt; this Session will not run again.
+pub enum RunState {
+    /// The Mission is queued for another attempt; this Run will not run again.
     Queued,
     /// The agent operation is running.
     Working,
@@ -120,7 +120,7 @@ pub enum SessionState {
     Abandoned,
 }
 
-impl SessionState {
+impl RunState {
     /// The wire spelling of the state.
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -157,11 +157,11 @@ impl SessionState {
     }
 }
 
-/// What an operator asks of a Mission or of its live Session.
+/// What an operator asks of a Mission or of its live Run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum ControlAction {
-    /// Stop the live Session, if any, and abandon the Mission; its safe house is finished
+    /// Stop the live Run, if any, and abandon the Mission; its safe house is finished
     /// with the work kept.
     Cancel,
     /// Queue a stalled or finished Mission again as a new attempt, optionally for another
@@ -169,7 +169,7 @@ pub enum ControlAction {
     Retry,
     /// Resume a parked, blocked or stalled Mission now, optionally with a message.
     Resume,
-    /// Stop the Session's current turn; the Mission stays, blocked, until resumed.
+    /// Stop the Run's current turn; the Mission stays, blocked, until resumed.
     Interrupt,
     /// End an entry in the Station's own queue: a Mission that waits to start, or to be resumed,
     /// is failed or abandoned there with a reason, whoever holds its claim.
@@ -224,14 +224,14 @@ impl core::error::Error for InvalidControl {}
 
 /// One operator control, as Universal Exports hands it to the Station holding the Mission.
 ///
-/// The Station is the authority: it checks the Mission, the Operation and its own Session
+/// The Station is the authority: it checks the Mission, the Operation and its own Run
 /// lease before acting, and reports the outcome back.
 #[derive(Clone, PartialEq, Eq)]
 pub struct MissionControl {
     control_id: ControlId,
     operation_id: OperationId,
     mission_id: MissionId,
-    session_id: Option<SessionId>,
+    run_id: Option<RunId>,
     action: ControlAction,
     agent: Option<String>,
     message: Option<String>,
@@ -243,7 +243,7 @@ impl fmt::Debug for MissionControl {
             .field("control_id", &self.control_id)
             .field("operation_id", &self.operation_id)
             .field("mission_id", &self.mission_id)
-            .field("session_id", &self.session_id)
+            .field("run_id", &self.run_id)
             .field("action", &self.action)
             .field("agent", &self.agent)
             .field(
@@ -258,7 +258,7 @@ impl fmt::Debug for MissionControl {
 }
 
 impl MissionControl {
-    /// A control with no Session, Agent or message.
+    /// A control with no Run, Agent or message.
     pub fn new(
         control_id: ControlId,
         operation_id: OperationId,
@@ -269,17 +269,17 @@ impl MissionControl {
             control_id,
             operation_id,
             mission_id,
-            session_id: None,
+            run_id: None,
             action,
             agent: None,
             message: None,
         }
     }
 
-    /// Names the provider Session the control expects to be the Mission's current one.
+    /// Names the provider Run the control expects to be the Mission's current one.
     #[must_use]
-    pub fn with_session(mut self, session_id: SessionId) -> Self {
-        self.session_id = Some(session_id);
+    pub fn with_run(mut self, run_id: RunId) -> Self {
+        self.run_id = Some(run_id);
         self
     }
 
@@ -328,9 +328,9 @@ impl MissionControl {
         &self.mission_id
     }
 
-    /// The provider Session expected to be the Mission's current one, when known.
-    pub fn session_id(&self) -> Option<&SessionId> {
-        self.session_id.as_ref()
+    /// The provider Run expected to be the Mission's current one, when known.
+    pub fn run_id(&self) -> Option<&RunId> {
+        self.run_id.as_ref()
     }
 
     /// What the operator asked for.
@@ -349,47 +349,47 @@ impl MissionControl {
     }
 }
 
-/// A session's identity and current board state.
+/// A run's identity and current board state.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionSnapshot {
+pub struct RunSnapshot {
     /// Project that owns this work.
     pub operation_id: OperationId,
-    /// Unit of work; a Mission can group multiple Sessions.
+    /// Unit of work; a Mission can group multiple Runs.
     pub mission_id: MissionId,
     /// Provider-issued resumable agent operation.
-    pub session_id: SessionId,
+    pub run_id: RunId,
     /// Current board state.
-    pub state: SessionState,
-    /// Monotonically increasing event cursor for this Session.
+    pub state: RunState,
+    /// Monotonically increasing event cursor for this Run.
     pub sequence: u64,
 }
 
-/// A lifecycle update for one agent Session.
+/// A lifecycle update for one agent Run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LifecycleEvent {
     /// Operation containing the Mission.
     pub operation_id: OperationId,
-    /// Unit of work that may group multiple Sessions.
+    /// Unit of work that may group multiple Runs.
     pub mission_id: MissionId,
     /// Provider-issued resumable operation identifier.
-    pub session_id: SessionId,
+    pub run_id: RunId,
     /// Updated board state.
-    pub state: SessionState,
-    /// Why AI6 holds the Session in this state, when it says: `green-ink` while a step waits
+    pub state: RunState,
+    /// Why AI6 holds the Run in this state, when it says: `green-ink` while a step waits
     /// for a person's approval, `budget` after a spending limit, `permission-denied` at the end
     /// of a Mission whose harness refused calls in its last turn. A lowercase name of at most
     /// [`MAX_REASON_BYTES`].
     pub reason: Option<String>,
-    /// Monotonically increasing event cursor for this Session.
+    /// Monotonically increasing event cursor for this Run.
     pub sequence: u64,
 }
 
-/// Terminal input or output associated with a provider Session.
+/// Terminal input or output associated with a provider Run.
 #[derive(Clone, PartialEq, Eq)]
 pub struct TerminalData {
     /// Provider-issued resumable operation identifier.
-    session_id: SessionId,
-    /// Monotonically increasing event cursor for this Session.
+    run_id: RunId,
+    /// Monotonically increasing event cursor for this Run.
     sequence: u64,
     /// Whether these bytes go to the viewer or to the agent's terminal.
     direction: TerminalDirection,
@@ -400,7 +400,7 @@ pub struct TerminalData {
 impl core::fmt::Debug for TerminalData {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("TerminalData")
-            .field("session_id", &self.session_id)
+            .field("run_id", &self.run_id)
             .field("sequence", &self.sequence)
             .field("direction", &self.direction)
             .field(
@@ -414,7 +414,7 @@ impl core::fmt::Debug for TerminalData {
 impl TerminalData {
     /// Creates a terminal event after enforcing the protocol frame bound.
     pub fn new(
-        session_id: SessionId,
+        run_id: RunId,
         sequence: u64,
         direction: TerminalDirection,
         bytes: Vec<u8>,
@@ -423,16 +423,16 @@ impl TerminalData {
             return Err(FrameTooLarge);
         }
         Ok(Self {
-            session_id,
+            run_id,
             sequence,
             direction,
             bytes,
         })
     }
 
-    /// The provider-issued Session ID.
-    pub fn session_id(&self) -> &SessionId {
-        &self.session_id
+    /// The provider ID.
+    pub fn run_id(&self) -> &RunId {
+        &self.run_id
     }
 
     /// The event sequence number.
@@ -470,38 +470,38 @@ impl TerminalDirection {
     }
 }
 
-/// Events of a Session that a viewer cannot have: those after `after` and before `before`.
+/// Events of a Run that a viewer cannot have: those after `after` and before `before`.
 ///
 /// The gateway says so on attach, when what it still holds starts later than the viewer's position
-/// or skips a sequence, and live, when a Session's next event skips one. It trimmed them from its
+/// or skips a sequence, and live, when a Run's next event skips one. It trimmed them from its
 /// history, lost them restarting, or the Station dropped them while the gateway was away. A viewer
 /// already at `before - 1` or past it has missed nothing, and ignores the frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalGap {
-    session_id: SessionId,
+    run_id: RunId,
     after: u64,
     before: u64,
 }
 
 impl TerminalGap {
     /// Creates a gap; at least one sequence must lie between `after` and `before`.
-    pub fn new(session_id: SessionId, after: u64, before: u64) -> Result<Self, InvalidGap> {
+    pub fn new(run_id: RunId, after: u64, before: u64) -> Result<Self, InvalidGap> {
         if after.checked_add(1).is_none_or(|next| next >= before) {
             return Err(InvalidGap);
         }
         Ok(Self {
-            session_id,
+            run_id,
             after,
             before,
         })
     }
 
-    /// The provider-issued Session ID.
-    pub fn session_id(&self) -> &SessionId {
-        &self.session_id
+    /// The provider ID.
+    pub fn run_id(&self) -> &RunId {
+        &self.run_id
     }
 
-    /// The last sequence before what is missing; 0 when it starts at the Session's beginning.
+    /// The last sequence before what is missing; 0 when it starts at the Run's beginning.
     pub const fn after(&self) -> u64 {
         self.after
     }
@@ -528,12 +528,12 @@ impl core::error::Error for InvalidGap {}
 /// Creates a guatiao schema announcement and value frame for a gap.
 pub fn gap_frames(gap: &TerminalGap) -> Result<(Vec<u8>, Vec<u8>), guatiao::value::ValueError> {
     let schema = SchemaBuilder::new()
-        .field(FieldBuilder::new("session_id", KindBuilder::string()).required())
+        .field(FieldBuilder::new("run_id", KindBuilder::string()).required())
         .field(FieldBuilder::new("after", KindBuilder::int()).required())
         .field(FieldBuilder::new("before", KindBuilder::int()).required())
         .finish()?;
     let mut value = Map::new();
-    value.set("session_id", gap.session_id.as_str());
+    value.set("run_id", gap.run_id.as_str());
     value.set("after", gap.after);
     value.set("before", gap.before);
     frames(GAP_CHANNEL, &schema, &value.into())
@@ -546,7 +546,7 @@ pub fn lifecycle_frames(
     let schema = SchemaBuilder::new()
         .field(FieldBuilder::new("operation_id", KindBuilder::string()).required())
         .field(FieldBuilder::new("mission_id", KindBuilder::string()).required())
-        .field(FieldBuilder::new("session_id", KindBuilder::string()).required())
+        .field(FieldBuilder::new("run_id", KindBuilder::string()).required())
         .field(FieldBuilder::new("state", KindBuilder::string()).required())
         .field(FieldBuilder::new("reason", KindBuilder::string()))
         .field(FieldBuilder::new("sequence", KindBuilder::int()).required())
@@ -554,7 +554,7 @@ pub fn lifecycle_frames(
     let mut value = Map::new();
     value.set("operation_id", event.operation_id.as_str());
     value.set("mission_id", event.mission_id.as_str());
-    value.set("session_id", event.session_id.as_str());
+    value.set("run_id", event.run_id.as_str());
     value.set("state", event.state.as_str());
     if let Some(reason) = &event.reason {
         value.set("reason", reason.as_str());
@@ -568,13 +568,13 @@ pub fn terminal_frames(
     event: &TerminalData,
 ) -> Result<(Vec<u8>, Vec<u8>), guatiao::value::ValueError> {
     let schema = SchemaBuilder::new()
-        .field(FieldBuilder::new("session_id", KindBuilder::string()).required())
+        .field(FieldBuilder::new("run_id", KindBuilder::string()).required())
         .field(FieldBuilder::new("sequence", KindBuilder::int()).required())
         .field(FieldBuilder::new("direction", KindBuilder::string()).required())
         .field(FieldBuilder::new("bytes", KindBuilder::bytes()).required())
         .finish()?;
     let mut value = Map::new();
-    value.set("session_id", event.session_id.as_str());
+    value.set("run_id", event.run_id.as_str());
     value.set("sequence", event.sequence);
     value.set("direction", event.direction.as_str());
     value.set(
@@ -589,13 +589,13 @@ pub fn resize_frames(
     event: &TerminalResize,
 ) -> Result<(Vec<u8>, Vec<u8>), guatiao::value::ValueError> {
     let schema = SchemaBuilder::new()
-        .field(FieldBuilder::new("session_id", KindBuilder::string()).required())
+        .field(FieldBuilder::new("run_id", KindBuilder::string()).required())
         .field(FieldBuilder::new("sequence", KindBuilder::int()).required())
         .field(FieldBuilder::new("columns", KindBuilder::int()).required())
         .field(FieldBuilder::new("rows", KindBuilder::int()).required())
         .finish()?;
     let mut value = Map::new();
-    value.set("session_id", event.session_id.as_str());
+    value.set("run_id", event.run_id.as_str());
     value.set("sequence", event.sequence);
     value.set("columns", u64::from(event.columns));
     value.set("rows", u64::from(event.rows));
@@ -610,7 +610,7 @@ pub fn control_frames(
         .field(FieldBuilder::new("control_id", KindBuilder::string()).required())
         .field(FieldBuilder::new("operation_id", KindBuilder::string()).required())
         .field(FieldBuilder::new("mission_id", KindBuilder::string()).required())
-        .field(FieldBuilder::new("session_id", KindBuilder::string()))
+        .field(FieldBuilder::new("run_id", KindBuilder::string()))
         .field(FieldBuilder::new("action", KindBuilder::string()).required())
         .field(FieldBuilder::new("agent", KindBuilder::string()))
         .field(FieldBuilder::new("message", KindBuilder::string()))
@@ -619,8 +619,8 @@ pub fn control_frames(
     value.set("control_id", control.control_id.as_str());
     value.set("operation_id", control.operation_id.as_str());
     value.set("mission_id", control.mission_id.as_str());
-    if let Some(session_id) = &control.session_id {
-        value.set("session_id", session_id.as_str());
+    if let Some(run_id) = &control.run_id {
+        value.set("run_id", run_id.as_str());
     }
     value.set("action", control.action.as_str());
     if let Some(agent) = &control.agent {
@@ -635,15 +635,15 @@ pub fn control_frames(
 /// One validated lifecycle, terminal or control frame received from a gateway.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IncomingFrame {
-    /// A Mission or provider Session changed lifecycle state.
+    /// A Mission or provider Run changed lifecycle state.
     Lifecycle(LifecycleEvent),
-    /// Terminal output or input bytes for one provider Session.
+    /// Terminal output or input bytes for one provider Run.
     Terminal(TerminalData),
     /// A terminal geometry change from an attached viewer.
     Resize(TerminalResize),
     /// An operator control for the Station holding a Mission.
     Control(MissionControl),
-    /// Events of a provider Session the viewer cannot have.
+    /// Events of a provider Run the viewer cannot have.
     Gap(TerminalGap),
     /// The remote side closed a channel.
     Closed(u64),
@@ -686,14 +686,14 @@ impl FrameReceiver {
             Received::Value { channel, value } if channel == LIFECYCLE_CHANNEL => {
                 let map = Map::try_from(value)
                     .map_err(|_| FrameDecodeError("lifecycle frame must be a map".into()))?;
-                let state = SessionState::parse(&text(&map, "state")?)
+                let state = RunState::parse(&text(&map, "state")?)
                     .ok_or_else(|| FrameDecodeError("unknown lifecycle state".into()))?;
                 let event = LifecycleEvent {
                     operation_id: OperationId::new(text(&map, "operation_id")?)
                         .map_err(|error| FrameDecodeError(error.to_string()))?,
                     mission_id: MissionId::new(text(&map, "mission_id")?)
                         .map_err(|error| FrameDecodeError(error.to_string()))?,
-                    session_id: SessionId::new(text(&map, "session_id")?)
+                    run_id: RunId::new(text(&map, "run_id")?)
                         .map_err(|error| FrameDecodeError(error.to_string()))?,
                     state,
                     reason: optional_text(&map, "reason")?
@@ -710,7 +710,7 @@ impl FrameReceiver {
             Received::Value { channel, value } if channel == TERMINAL_CHANNEL => {
                 let map = Map::try_from(value)
                     .map_err(|_| FrameDecodeError("terminal frame must be a map".into()))?;
-                let session_id = SessionId::new(text(&map, "session_id")?)
+                let run_id = RunId::new(text(&map, "run_id")?)
                     .map_err(|error| FrameDecodeError(error.to_string()))?;
                 let direction = match text(&map, "direction")?.as_str() {
                     "input" => TerminalDirection::Input,
@@ -724,7 +724,7 @@ impl FrameReceiver {
                     .ok_or_else(|| FrameDecodeError("terminal bytes have the wrong type".into()))?
                     .to_vec();
                 let data =
-                    TerminalData::new(session_id, number(&map, "sequence")?, direction, bytes)
+                    TerminalData::new(run_id, number(&map, "sequence")?, direction, bytes)
                         .map_err(|error| FrameDecodeError(error.to_string()))?;
                 Ok(Some(IncomingFrame::Terminal(data)))
             }
@@ -732,7 +732,7 @@ impl FrameReceiver {
                 let map = Map::try_from(value)
                     .map_err(|_| FrameDecodeError("resize frame must be a map".into()))?;
                 let event = TerminalResize::new(
-                    SessionId::new(text(&map, "session_id")?)
+                    RunId::new(text(&map, "run_id")?)
                         .map_err(|error| FrameDecodeError(error.to_string()))?,
                     number(&map, "sequence")?,
                     u16::try_from(number(&map, "columns")?)
@@ -752,7 +752,7 @@ impl FrameReceiver {
                 let map = Map::try_from(value)
                     .map_err(|_| FrameDecodeError("gap frame must be a map".into()))?;
                 let gap = TerminalGap::new(
-                    SessionId::new(text(&map, "session_id")?)
+                    RunId::new(text(&map, "run_id")?)
                         .map_err(|error| FrameDecodeError(error.to_string()))?,
                     number(&map, "after")?,
                     number(&map, "before")?,
@@ -809,8 +809,8 @@ fn decode_control(map: &Map) -> Result<MissionControl, FrameDecodeError> {
         MissionId::new(text(map, "mission_id")?).map_err(invalid)?,
         action,
     );
-    if let Some(session_id) = optional_text(map, "session_id")? {
-        control = control.with_session(SessionId::new(session_id).map_err(invalid)?);
+    if let Some(run_id) = optional_text(map, "run_id")? {
+        control = control.with_run(RunId::new(run_id).map_err(invalid)?);
     }
     let invalid_control = |error: InvalidControl| FrameDecodeError(error.to_string());
     if let Some(agent) = optional_text(map, "agent")? {
@@ -837,8 +837,8 @@ fn frames(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalResize {
     /// Provider-issued resumable operation identifier.
-    session_id: SessionId,
-    /// Monotonically increasing event cursor for this Session.
+    run_id: RunId,
+    /// Monotonically increasing event cursor for this Run.
     sequence: u64,
     /// Number of character columns, greater than zero.
     columns: u16,
@@ -849,7 +849,7 @@ pub struct TerminalResize {
 impl TerminalResize {
     /// Creates a resize request, rejecting zero-sized terminals.
     pub fn new(
-        session_id: SessionId,
+        run_id: RunId,
         sequence: u64,
         columns: u16,
         rows: u16,
@@ -858,16 +858,16 @@ impl TerminalResize {
             return Err(InvalidSize);
         }
         Ok(Self {
-            session_id,
+            run_id,
             sequence,
             columns,
             rows,
         })
     }
 
-    /// The provider-issued Session ID.
-    pub fn session_id(&self) -> &SessionId {
-        &self.session_id
+    /// The provider ID.
+    pub fn run_id(&self) -> &RunId {
+        &self.run_id
     }
 
     /// The event sequence number.
@@ -918,29 +918,29 @@ mod tests {
     use guatiao::TryAsRef;
 
     #[test]
-    fn mission_and_provider_session_are_separate_identities() {
-        let snapshot = SessionSnapshot {
+    fn mission_and_provider_id_are_separate_identities() {
+        let snapshot = RunSnapshot {
             operation_id: OperationId::new("ai6").unwrap(),
             mission_id: MissionId::new("mission-42").unwrap(),
-            session_id: SessionId::new("provider-session-abc").unwrap(),
-            state: SessionState::Working,
+            run_id: RunId::new("provider-id-abc").unwrap(),
+            state: RunState::Working,
             sequence: 1,
         };
         assert_eq!(snapshot.mission_id.as_str(), "mission-42");
-        assert_eq!(snapshot.session_id.as_str(), "provider-session-abc");
+        assert_eq!(snapshot.run_id.as_str(), "provider-id-abc");
     }
 
     #[test]
     fn identities_reject_controls_and_unbounded_values() {
         assert!(MissionId::new("mission\n42").is_err());
-        assert!(SessionId::new("x".repeat(MAX_ID_BYTES + 1)).is_err());
+        assert!(RunId::new("x".repeat(MAX_ID_BYTES + 1)).is_err());
     }
 
     #[test]
     fn terminal_data_preserves_binary_and_enforces_bound() {
-        let session = SessionId::new("provider-session").unwrap();
+        let run = RunId::new("provider-id").unwrap();
         let data = TerminalData::new(
-            session.clone(),
+            run.clone(),
             1,
             TerminalDirection::Output,
             vec![0xff, 0x00],
@@ -951,7 +951,7 @@ mod tests {
         assert!(!format!("{data:?}").contains("ff00"));
         assert!(
             TerminalData::new(
-                session,
+                run,
                 2,
                 TerminalDirection::Output,
                 vec![0; MAX_TERMINAL_BYTES + 1]
@@ -962,9 +962,9 @@ mod tests {
 
     #[test]
     fn resize_dimensions_must_be_nonzero() {
-        let session = SessionId::new("provider-session").unwrap();
-        assert!(TerminalResize::new(session.clone(), 1, 0, 24).is_err());
-        assert!(TerminalResize::new(session, 1, 80, 24).is_ok());
+        let run = RunId::new("provider-id").unwrap();
+        assert!(TerminalResize::new(run.clone(), 1, 0, 24).is_err());
+        assert!(TerminalResize::new(run, 1, 80, 24).is_ok());
     }
 
     #[test]
@@ -974,8 +974,8 @@ mod tests {
         let event = LifecycleEvent {
             operation_id: OperationId::new("station-a").unwrap(),
             mission_id: MissionId::new("mission-17").unwrap(),
-            session_id: SessionId::new("provider-run-3").unwrap(),
-            state: SessionState::Working,
+            run_id: RunId::new("provider-run-3").unwrap(),
+            state: RunState::Working,
             reason: None,
             sequence: 4,
         };
@@ -994,7 +994,7 @@ mod tests {
             "mission-17"
         );
         assert_eq!(
-            <&str>::try_from(map.required("session_id").unwrap()).unwrap(),
+            <&str>::try_from(map.required("run_id").unwrap()).unwrap(),
             "provider-run-3"
         );
     }
@@ -1004,7 +1004,7 @@ mod tests {
         use guatiao::value::wire::channel::{Received, Receiver};
 
         let event = TerminalData::new(
-            SessionId::new("provider-run-3").unwrap(),
+            RunId::new("provider-run-3").unwrap(),
             5,
             TerminalDirection::Output,
             vec![0xff, 0x00, 0x80],
@@ -1035,19 +1035,19 @@ mod tests {
         let event = LifecycleEvent {
             operation_id: OperationId::new("station-a").unwrap(),
             mission_id: MissionId::new("mission-17").unwrap(),
-            session_id: SessionId::new("provider-run-3").unwrap(),
-            state: SessionState::Blocked,
+            run_id: RunId::new("provider-run-3").unwrap(),
+            state: RunState::Blocked,
             reason: None,
             sequence: 9,
         };
         let terminal = TerminalData::new(
-            event.session_id.clone(),
+            event.run_id.clone(),
             10,
             TerminalDirection::Output,
             vec![0xff, 0x00, 0x80],
         )
         .unwrap();
-        let resize = TerminalResize::new(event.session_id.clone(), 11, 120, 40).unwrap();
+        let resize = TerminalResize::new(event.run_id.clone(), 11, 120, 40).unwrap();
         let (lifecycle_schema, lifecycle_value) = lifecycle_frames(&event).unwrap();
         let (terminal_schema, terminal_value) = terminal_frames(&terminal).unwrap();
         let (resize_schema, resize_value) = resize_frames(&resize).unwrap();
@@ -1071,12 +1071,12 @@ mod tests {
     }
 
     #[test]
-    fn a_parked_session_round_trips_through_the_receiver() {
+    fn a_parked_run_round_trips_through_the_receiver() {
         let event = LifecycleEvent {
             operation_id: OperationId::new("station-a").unwrap(),
             mission_id: MissionId::new("mission-17").unwrap(),
-            session_id: SessionId::new("provider-run-3").unwrap(),
-            state: SessionState::Parked,
+            run_id: RunId::new("provider-run-3").unwrap(),
+            state: RunState::Parked,
             reason: None,
             sequence: 4,
         };
@@ -1090,12 +1090,12 @@ mod tests {
     }
 
     #[test]
-    fn a_quarantined_session_round_trips_and_matches_its_wire_vector() {
+    fn a_quarantined_run_round_trips_and_matches_its_wire_vector() {
         let event = LifecycleEvent {
             operation_id: OperationId::new("station-a").unwrap(),
             mission_id: MissionId::new("mission-17").unwrap(),
-            session_id: SessionId::new("provider-run-3").unwrap(),
-            state: SessionState::Quarantined,
+            run_id: RunId::new("provider-run-3").unwrap(),
+            state: RunState::Quarantined,
             reason: None,
             sequence: 4,
         };
@@ -1118,12 +1118,12 @@ mod tests {
     }
 
     #[test]
-    fn a_session_waiting_for_green_ink_carries_its_reason_and_matches_its_wire_vector() {
+    fn a_run_waiting_for_green_ink_carries_its_reason_and_matches_its_wire_vector() {
         let event = LifecycleEvent {
             operation_id: OperationId::new("station-a").unwrap(),
             mission_id: MissionId::new("mission-17").unwrap(),
-            session_id: SessionId::new("provider-run-3").unwrap(),
-            state: SessionState::Blocked,
+            run_id: RunId::new("provider-run-3").unwrap(),
+            state: RunState::Blocked,
             reason: Some("green-ink".to_owned()),
             sequence: 4,
         };
@@ -1154,13 +1154,13 @@ mod tests {
     }
 
     fn sample_gap() -> TerminalGap {
-        TerminalGap::new(SessionId::new("provider-run-3").unwrap(), 0, 5).unwrap()
+        TerminalGap::new(RunId::new("provider-run-3").unwrap(), 0, 5).unwrap()
     }
 
     #[test]
     fn a_gap_decodes_as_it_was_made_and_needs_a_sequence_between_its_ends() {
         let gap = sample_gap();
-        assert_eq!(gap.session_id().as_str(), "provider-run-3");
+        assert_eq!(gap.run_id().as_str(), "provider-run-3");
         assert_eq!((gap.after(), gap.before()), (0, 5));
         let (schema, value) = gap_frames(&gap).unwrap();
         let mut receiver = FrameReceiver::new();
@@ -1169,15 +1169,15 @@ mod tests {
             receiver.accept(&value).unwrap(),
             Some(IncomingFrame::Gap(gap))
         );
-        let session = || SessionId::new("provider-run-3").unwrap();
+        let run = || RunId::new("provider-run-3").unwrap();
         for (after, before) in [(5, 6), (6, 5), (5, 5), (u64::MAX, u64::MAX)] {
             assert_eq!(
-                TerminalGap::new(session(), after, before),
+                TerminalGap::new(run(), after, before),
                 Err(InvalidGap),
                 "{after}..{before}"
             );
         }
-        assert!(TerminalGap::new(session(), 4, 6).is_ok());
+        assert!(TerminalGap::new(run(), 4, 6).is_ok());
     }
 
     fn sample_control() -> MissionControl {
@@ -1187,7 +1187,7 @@ mod tests {
             MissionId::new("mission-17").unwrap(),
             ControlAction::Retry,
         )
-        .with_session(SessionId::new("provider-run-3").unwrap())
+        .with_run(RunId::new("provider-run-3").unwrap())
         .with_agent("008")
         .unwrap()
     }
@@ -1235,21 +1235,21 @@ mod tests {
     }
 
     #[test]
-    fn every_session_state_round_trips_its_wire_spelling() {
+    fn every_run_state_round_trips_its_wire_spelling() {
         for state in [
-            SessionState::Queued,
-            SessionState::Working,
-            SessionState::Blocked,
-            SessionState::Stalled,
-            SessionState::Parked,
-            SessionState::Quarantined,
-            SessionState::Done,
-            SessionState::Failed,
-            SessionState::Abandoned,
+            RunState::Queued,
+            RunState::Working,
+            RunState::Blocked,
+            RunState::Stalled,
+            RunState::Parked,
+            RunState::Quarantined,
+            RunState::Done,
+            RunState::Failed,
+            RunState::Abandoned,
         ] {
-            assert_eq!(SessionState::parse(state.as_str()), Some(state));
+            assert_eq!(RunState::parse(state.as_str()), Some(state));
         }
-        assert_eq!(SessionState::parse("paused"), None);
+        assert_eq!(RunState::parse("paused"), None);
     }
 
     #[test]
@@ -1257,20 +1257,20 @@ mod tests {
         let event = LifecycleEvent {
             operation_id: OperationId::new("station-a").unwrap(),
             mission_id: MissionId::new("mission-17").unwrap(),
-            session_id: SessionId::new("provider-run-3").unwrap(),
-            state: SessionState::Working,
+            run_id: RunId::new("provider-run-3").unwrap(),
+            state: RunState::Working,
             reason: None,
             sequence: 4,
         };
         let terminal = TerminalData::new(
-            SessionId::new("provider-run-3").unwrap(),
+            RunId::new("provider-run-3").unwrap(),
             5,
             TerminalDirection::Output,
             vec![0xff, 0x00, 0x80],
         )
         .unwrap();
         let resize =
-            TerminalResize::new(SessionId::new("provider-run-3").unwrap(), 6, 120, 40).unwrap();
+            TerminalResize::new(RunId::new("provider-run-3").unwrap(), 6, 120, 40).unwrap();
         let lifecycle_frames = lifecycle_frames(&event).unwrap();
         let terminal_frames = terminal_frames(&terminal).unwrap();
         let resize_frames = resize_frames(&resize).unwrap();

@@ -1,12 +1,12 @@
 //! The scorecard: how each Agent, route and model has done in an Operation over a window.
 //!
-//! It is computed from the shared Session records and the usage ledger every time it is asked
+//! It is computed from the shared Run records and the usage ledger every time it is asked
 //! for; nothing is kept besides them. Each attempt gets one [`Judgment`] from [`judge`], and
 //! a judgment names whose doing the outcome was: only `done`, `failed`, `blown` and `stalled` are
 //! the Agent's own and are judged, and a person's verdict that a `done` does not hold up turns it
 //! into a failure. A provider limit, a lost Station, a hand-off to another Agent, a person's stop,
 //! an approval someone has not given yet and a spending limit are shown but not held against it.
-//! An attempt that never started (a failed checkout, a brief with no Agent) has no Session record
+//! An attempt that never started (a failed checkout, a brief with no Agent) has no Run record
 //! and so does not appear.
 //!
 //! Every number lists the attempts behind it, so a person can open the Missions and check.
@@ -20,8 +20,8 @@ use serde::Serialize;
 use crate::directorates::m::roster::RouteRef;
 use crate::directorates::m::stewardship::StewardshipPolicy;
 use crate::directorates::medical::usage::UsageTotals;
-use crate::directorates::registry::sessions::{
-    OutcomeVerdict, SessionRecord, SessionResult, SessionStatus, SessionStore,
+use crate::directorates::registry::runs::{
+    OutcomeVerdict, RunRecord, RunResult, RunStatus, RunStore,
 };
 use crate::directorates::registry::usage::UsageStore;
 
@@ -119,9 +119,9 @@ impl Judgment {
     }
 }
 
-/// The judgment on one attempt, from its Session record.
-pub fn judge(record: &SessionRecord) -> Judgment {
-    if record.status == SessionStatus::Lost {
+/// The judgment on one attempt, from its Run record.
+pub fn judge(record: &RunRecord) -> Judgment {
+    if record.status == RunStatus::Lost {
         return Judgment::Lost;
     }
     let verdict = record.verdict.as_ref().map(|verdict| verdict.verdict);
@@ -146,7 +146,7 @@ pub fn judge(record: &SessionRecord) -> Judgment {
         "failed" => Judgment::Failed,
         "blown" => Judgment::Blown,
         "stalled" => Judgment::Stalled,
-        "abandoned" if reason == Some(SessionResult::HANDED_OFF) => Judgment::HandedOff,
+        "abandoned" if reason == Some(RunResult::HANDED_OFF) => Judgment::HandedOff,
         "abandoned" | "quarantined" => Judgment::Withdrawn,
         _ if closed => Judgment::Unrecorded,
         "parked" => Judgment::Parked,
@@ -268,8 +268,8 @@ impl Default for ScorecardPolicy {
 pub struct AttemptRef {
     /// The Mission.
     pub mission_id: String,
-    /// AI6's Session ID of the attempt.
-    pub session_id: String,
+    /// AI6's Run ID of the attempt.
+    pub run_id: String,
     /// Which try at the Mission it was.
     pub attempt: u32,
 }
@@ -305,10 +305,10 @@ impl Standing {
             .map_or(0, |list| list.len() as u64)
     }
 
-    fn add(&mut self, record: &SessionRecord, judgment: Judgment, usage: Option<&UsageTotals>) {
+    fn add(&mut self, record: &RunRecord, judgment: Judgment, usage: Option<&UsageTotals>) {
         self.attempts.entry(judgment).or_default().push(AttemptRef {
             mission_id: record.mission_id.clone(),
-            session_id: record.session_id.clone(),
+            run_id: record.run_id.clone(),
             attempt: record.attempt,
         });
         let denied = record
@@ -397,12 +397,12 @@ pub struct Scorecard {
 
 type RouteKey = (String, Option<String>, Option<String>);
 
-/// The scorecard of `operation` at `now`, read from `registry`'s Session records and usage
+/// The scorecard of `operation` at `now`, read from `registry`'s Run records and usage
 /// ledger.
 ///
 /// # Errors
 ///
-/// Any error reading the Session records or the ledger.
+/// Any error reading the Run records or the ledger.
 pub fn from_registry<R>(
     registry: &R,
     operation: &str,
@@ -410,29 +410,29 @@ pub fn from_registry<R>(
     now: f64,
 ) -> std::io::Result<Scorecard>
 where
-    R: SessionStore + UsageStore + ?Sized,
+    R: RunStore + UsageStore + ?Sized,
 {
-    let sessions = registry.sessions()?;
-    let missions: std::collections::BTreeSet<&str> = sessions
+    let runs = registry.runs()?;
+    let missions: std::collections::BTreeSet<&str> = runs
         .iter()
-        .filter(|session| session.operation.as_deref() == Some(operation))
-        .map(|session| session.mission_id.as_str())
+        .filter(|run| run.operation.as_deref() == Some(operation))
+        .map(|run| run.mission_id.as_str())
         .collect();
     let mut usage = BTreeMap::new();
     for mission in missions {
         if let Some(ledger) = registry.mission_usage(Some(operation), mission)? {
-            usage.extend(ledger.sessions);
+            usage.extend(ledger.runs);
         }
     }
-    Ok(Scorecard::build(operation, &sessions, &usage, policy, now))
+    Ok(Scorecard::build(operation, &runs, &usage, policy, now))
 }
 
 impl Scorecard {
-    /// The scorecard of `operation` at `now` from its Sessions (other Operations' are
-    /// ignored); `usage` has each Session's totals by AI6 Session ID.
+    /// The scorecard of `operation` at `now` from its Runs (other Operations' are
+    /// ignored); `usage` has each Run's totals by AI6 Run ID.
     pub fn build(
         operation: &str,
-        records: &[SessionRecord],
+        records: &[RunRecord],
         usage: &BTreeMap<String, UsageTotals>,
         policy: &ScorecardPolicy,
         now: f64,
@@ -442,7 +442,7 @@ impl Scorecard {
             BTreeMap::new();
         let mut models: BTreeMap<Option<String>, Standing> = BTreeMap::new();
         let mut unattributed = 0;
-        let mut ordered: Vec<&SessionRecord> = records
+        let mut ordered: Vec<&RunRecord> = records
             .iter()
             .filter(|record| record.operation.as_deref() == Some(operation))
             .filter(|record| match from {
@@ -457,11 +457,11 @@ impl Scorecard {
             left.opened_at
                 .unwrap_or_default()
                 .total_cmp(&right.opened_at.unwrap_or_default())
-                .then_with(|| left.session_id.cmp(&right.session_id))
+                .then_with(|| left.run_id.cmp(&right.run_id))
         });
         for record in ordered {
             let judgment = judge(record);
-            let totals = usage.get(&record.session_id);
+            let totals = usage.get(&record.run_id);
             let launch = record.launch.as_ref();
             models
                 .entry(launch.and_then(|launch| launch.model.clone()))
@@ -527,7 +527,7 @@ impl Scorecard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::directorates::registry::sessions::SessionLaunch;
+    use crate::directorates::registry::runs::RunLaunch;
 
     fn attempt(
         id: &str,
@@ -535,28 +535,28 @@ mod tests {
         model: &str,
         state: &str,
         reason: Option<&str>,
-    ) -> SessionRecord {
-        SessionRecord {
-            session_id: format!("{id}.1"),
+    ) -> RunRecord {
+        RunRecord {
+            run_id: format!("{id}.1"),
             handle: None,
             mission_id: id.to_owned(),
             operation: Some("G".to_owned()),
-            provider_session_id: None,
+            provider_id: None,
             station: "s".to_owned(),
             theater: None,
             attempt: 1,
             predecessor: None,
             status: match state {
-                "done" | "failed" | "blown" | "abandoned" => SessionStatus::Ended,
-                "parked" => SessionStatus::Parked,
-                _ => SessionStatus::Active,
+                "done" | "failed" | "blown" | "abandoned" => RunStatus::Ended,
+                "parked" => RunStatus::Parked,
+                _ => RunStatus::Active,
             },
             parked_until: None,
             lease_expires: 0.0,
             fence: 1,
             exposure: Vec::new(),
             launch: Some(
-                SessionLaunch::new("claude", "pipe", "/w")
+                RunLaunch::new("claude", "pipe", "/w")
                     .with_model(Some(model.to_owned()), None)
                     .with_agent(Some(agent.to_owned())),
             ),
@@ -568,7 +568,7 @@ mod tests {
             opened_at: Some(1_000.0),
             closed_at: matches!(state, "done" | "failed" | "blown" | "abandoned")
                 .then_some(1_100.0),
-            result: Some(SessionResult::new(state).with_reason(reason.map(str::to_owned))),
+            result: Some(RunResult::new(state).with_reason(reason.map(str::to_owned))),
             window: None,
             verdict: None,
             deliverables: Vec::new(),
@@ -604,17 +604,17 @@ mod tests {
     }
 
     #[test]
-    fn a_lost_session_and_one_closed_without_an_outcome_are_not_the_agents() {
+    fn a_lost_run_and_one_closed_without_an_outcome_are_not_the_agents() {
         let mut lost = attempt("m", "007", "x", "working", None);
-        lost.status = SessionStatus::Lost;
+        lost.status = RunStatus::Lost;
         assert_eq!(judge(&lost), Judgment::Lost);
         let mut bare = attempt("m", "007", "x", "working", None);
         bare.result = None;
         assert_eq!(judge(&bare), Judgment::Running);
-        bare.status = SessionStatus::Ended;
+        bare.status = RunStatus::Ended;
         assert_eq!(judge(&bare), Judgment::Unrecorded);
         let mut ended_working = attempt("m", "007", "x", "working", None);
-        ended_working.status = SessionStatus::Ended;
+        ended_working.status = RunStatus::Ended;
         assert_eq!(judge(&ended_working), Judgment::Unrecorded);
     }
 
@@ -636,7 +636,7 @@ mod tests {
 
     #[test]
     fn a_verdict_changes_what_an_attempt_counts_as() {
-        use crate::directorates::registry::sessions::MissionVerdict;
+        use crate::directorates::registry::runs::MissionVerdict;
 
         let judged = |state: &str, verdict: Option<OutcomeVerdict>| {
             let mut record = attempt("m", "007", "x", state, None);
@@ -763,7 +763,7 @@ mod tests {
             standing.attempts[&Judgment::Failed],
             vec![AttemptRef {
                 mission_id: "m3".to_owned(),
-                session_id: "m3.1".to_owned(),
+                run_id: "m3.1".to_owned(),
                 attempt: 1
             }]
         );

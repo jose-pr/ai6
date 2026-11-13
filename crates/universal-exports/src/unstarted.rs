@@ -1,7 +1,7 @@
-//! Missions that have no Session yet: queued, waiting for a place, retrying a start that failed,
+//! Missions that have no Run yet: queued, waiting for a place, retrying a start that failed,
 //! or failed before a harness started.
 //!
-//! The board is built from Sessions, so a Mission nobody has started would be missing from it.
+//! The board is built from Runs, so a Mission nobody has started would be missing from it.
 //! Three records in the shared Registry say where such a Mission stands: a Station's check-in
 //! (its own queue, with each entry's wait, tries and next try, and the Missions that failed
 //! before starting), the briefs no Station has taken (with the reason placement last noted on
@@ -19,7 +19,7 @@ use crate::compartments::CompartmentAccess;
 use crate::tree::{OperationTree, operation_request};
 use crate::{ApiError, BoardMission, BoardQueueEntry, Gateway};
 
-/// Where a Mission with no Session stands, as the Registry last said.
+/// Where a Mission with no Run stands, as the Registry last said.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BoardPending {
@@ -68,7 +68,7 @@ fn pending_mission(
             operation_id: operation.to_owned(),
             mission_id: mission.to_owned(),
             handle: mission.to_owned(),
-            sessions: Vec::new(),
+            runs: Vec::new(),
             brief: None,
             usage: None,
             attempts: Vec::new(),
@@ -77,7 +77,7 @@ fn pending_mission(
     )
 }
 
-/// The Missions with no Session that `person` may read, by Operation and Mission UID, as the
+/// The Missions with no Run that `person` may read, by Operation and Mission UID, as the
 /// Registry has them now.
 pub(crate) async fn unstarted_missions(
     gateway: &Gateway,

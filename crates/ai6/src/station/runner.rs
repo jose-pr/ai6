@@ -1,28 +1,28 @@
 //! The field runner: `ai6 runner`, the AI6 binary's Theater mode.
 //!
-//! A runner supervises agent harnesses on the Theater they run on, so a Session outlives the
+//! A runner supervises agent harnesses on the Theater they run on, so a Run outlives the
 //! Station that started it. It loads the same AgentHandler and Terminal providers a Station
-//! does and has no scheduler, Registry or roster: a Station starts Sessions on it, reads their
+//! does and has no scheduler, Registry or roster: a Station starts Runs on it, reads their
 //! events and sends them messages over the Agent Client Protocol (ACP) on a loopback port. A
 //! connection authenticates with the `ai6-runner-token` method, the bearer token kept in the
 //! state directory. A Station that reaches the Theater through a transport opens `ai6 runner
 //! connect` on a terminal there, which authenticates for it and relays the stream.
 //!
 //! Every event a harness emits is written to disk with a sequence number before any Station
-//! can read it. A Station attaches to a Session by key with `session/load`, and the runner
+//! can read it. A Station attaches to a Run by key with `session/load`, and the runner
 //! replays the events after the one the Station last took, as `_ai6/event` notifications that
 //! carry their sequence number; the Station acknowledges what it took with `_ai6/ack`. A
 //! Station that comes back, or another one, loads again and replays what it missed; a newer
-//! connection to a Session closes the older. A runner that restarts has lost the harnesses it
-//! supervised; it ends their Sessions with a `lost` event, which a Station takes as the
-//! Session lost.
+//! connection to a Run closes the older. A runner that restarts has lost the harnesses it
+//! supervised; it ends their Runs with a `lost` event, which a Station takes as the
+//! Run lost.
 //!
-//! A Session the Station asks Cables for gets a Cable endpoint on the runner's loopback, which
+//! A Run the Station asks Cables for gets a Cable endpoint on the runner's loopback, which
 //! carries the harness's requests over the attached Station's connection (`cable`).
 //!
 //! The state directory holds `runner.json` (where the runner listens, while it runs),
 //! `token`, `runner.lock`, `settings.json` (the [`RunnerHandoff`] it runs by) and
-//! `sessions/<key>/` with `events.jsonl`, `cursor` and `session.json`.
+//! `runs/<key>/` with `events.jsonl`, `cursor` and `run.json`.
 
 mod cable;
 pub(crate) mod client;
@@ -42,11 +42,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use guatiao::library::Object;
 use serde::{Deserialize, Serialize};
 
-use crate::directorates::m::identity::SessionId;
+use crate::directorates::m::identity::RunId;
 use crate::directorates::q::terminal::{HarnessStdio, TerminalBridge};
 use crate::directorates::section_00::acp::HandlerSpec;
 use crate::directorates::section_00::acp::ends_turn;
-use crate::directorates::section_00::agent::{AgentResume, AgentStart, checked_session_id};
+use crate::directorates::section_00::agent::{AgentResume, AgentStart, checked_run_id};
 use crate::station::limits::{ApiLimits, RunnerLimits};
 use crate::station::plugins::Plugins;
 use coqui_acp_provider::{AgentEvent, AgentSession};
@@ -59,13 +59,13 @@ pub(crate) use cable::{CableTunnel, TOKEN_KEY as CABLE_TOKEN_KEY};
 const INFO_FILE: &str = "runner.json";
 const TOKEN_FILE: &str = "token";
 const LOCK_FILE: &str = "runner.lock";
-const SESSIONS_DIR: &str = "sessions";
-const SESSION_FILE: &str = "session.json";
+const RUNS_DIR: &str = "runs";
+const RUN_FILE: &str = "run.json";
 /// The file in the state directory holding the [`RunnerHandoff`] the runner serves by, which
 /// `ai6 runner connect` reads too.
 pub const SETTINGS_FILE: &str = "settings.json";
 
-/// The kind of the event that tells a connection another one took its Session over.
+/// The kind of the event that tells a connection another one took its Run over.
 pub(crate) const DETACHED_EVENT: &str = "detached";
 /// The exit status of `ai6 runner connect` when no runner answers it.
 pub const CONNECT_NOT_RUNNING: u8 = 3;
@@ -89,8 +89,8 @@ fn raw_terminal() {
 #[cfg(not(unix))]
 fn raw_terminal() {}
 
-/// The kind of the event a restarted runner ends a Session it lost with: the harness is gone,
-/// so the Station treats the Session as lost rather than failed.
+/// The kind of the event a restarted runner ends a Run it lost with: the harness is gone,
+/// so the Station treats the Run as lost rather than failed.
 pub(crate) const LOST_EVENT: &str = "lost";
 
 /// Where a runner listens and what it was built from, as `runner.json` records it.
@@ -253,7 +253,7 @@ impl RunnerConfig {
         self
     }
 
-    /// Pins the terminal provider harnesses run in, unless a Station names one per Session.
+    /// Pins the terminal provider harnesses run in, unless a Station names one per Run.
     #[must_use]
     pub fn with_terminal(mut self, terminal: impl Into<String>) -> Self {
         self.terminal = Some(terminal.into());
@@ -297,7 +297,7 @@ where
             "a runner listens on a loopback address only; a Station reaches it through the Theater's transport",
         ));
     }
-    fs::create_dir_all(config.state_dir.join(SESSIONS_DIR))?;
+    fs::create_dir_all(config.state_dir.join(RUNS_DIR))?;
     let lock = OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -320,7 +320,7 @@ where
             state_dir: config.state_dir.clone(),
             plugins,
             terminal: config.terminal,
-            sessions: Mutex::new(load_sessions(&config.state_dir, &limits)?),
+            runs: Mutex::new(load_runs(&config.state_dir, &limits)?),
             bindings: Mutex::new(BTreeMap::new()),
             streams: Mutex::new(BTreeMap::new()),
             limits,
@@ -374,8 +374,8 @@ where
         failed = &mut accepting => failed,
     };
     runner.inner.stopping.store(true, Ordering::Release);
-    let sessions: Vec<_> = lock_of(&runner.inner.sessions).values().cloned().collect();
-    for hosted in sessions {
+    let runs: Vec<_> = lock_of(&runner.inner.runs).values().cloned().collect();
+    for hosted in runs {
         hosted.close();
     }
     if RunnerInfo::read(&config.state_dir).is_ok_and(|current| current == info) {
@@ -385,7 +385,7 @@ where
 }
 
 /// Starts `program runner serve <arguments>` in the background, detached from the caller's
-/// terminal and session, and answers once it serves `state_dir`, looking every
+/// terminal and run, and answers once it serves `state_dir`, looking every
 /// `limits.start_poll` and giving up after `limits.start_wait`.
 ///
 /// Its output goes to `runner.log` in the state directory. On Windows it also inherits the
@@ -459,13 +459,13 @@ pub(crate) enum Launch {
     Resume(AgentResume),
 }
 
-/// A Session as a runner reports it.
+/// A Run as a runner reports it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct SessionReport {
+pub(crate) struct RunReport {
     pub(crate) key: String,
     pub(crate) handler: String,
     pub(crate) terminal: String,
-    pub(crate) session_id: Option<SessionId>,
+    pub(crate) run_id: Option<RunId>,
     /// The harness is gone; no event will follow the last one.
     pub(crate) ended: bool,
     /// The newest event's sequence number.
@@ -475,10 +475,10 @@ pub(crate) struct SessionReport {
 }
 
 #[derive(Serialize, Deserialize)]
-struct SessionFile {
+struct RunFile {
     handler: String,
     terminal: String,
-    session_id: Option<SessionId>,
+    run_id: Option<RunId>,
     ended: bool,
     created_at: u64,
 }
@@ -492,8 +492,8 @@ struct Inner {
     state_dir: PathBuf,
     plugins: Arc<Plugins>,
     terminal: Option<String>,
-    sessions: Mutex<BTreeMap<String, Arc<Hosted>>>,
-    /// The connection each Session is bound to.
+    runs: Mutex<BTreeMap<String, Arc<Hosted>>>,
+    /// The connection each Run is bound to.
     bindings: Mutex<BTreeMap<String, Arc<wire::Binding>>>,
     /// The connections being served, by the order they came in, closed when the runner stops.
     streams: Mutex<BTreeMap<u64, std::net::TcpStream>>,
@@ -505,7 +505,7 @@ struct Inner {
 /// A running harness, shared by its pump and the requests that reach it.
 type Harness = Arc<Mutex<Object<dyn AgentSession>>>;
 
-/// One Session the runner supervises, or supervised before it restarted.
+/// One Run the runner supervises, or supervised before it restarted.
 struct Hosted {
     key: String,
     dir: PathBuf,
@@ -517,12 +517,12 @@ struct Hosted {
     waiting: AtomicUsize,
     closing: AtomicBool,
     ended: AtomicBool,
-    session_id: Mutex<Option<SessionId>>,
+    run_id: Mutex<Option<RunId>>,
     spool: Mutex<spool::Spool>,
     cable: Mutex<Option<cable::CableProxy>>,
 }
 
-/// The way a Session's Cable relay reaches the Station: the connection bound to it now.
+/// The way a Run's Cable relay reaches the Station: the connection bound to it now.
 struct BoundStation {
     runner: std::sync::Weak<Inner>,
     key: String,
@@ -595,25 +595,25 @@ fn valid_key(key: &str) -> bool {
         && !key.starts_with('.')
 }
 
-/// The Sessions in the state directory. One that was live when its runner stopped ends now,
+/// The Runs in the state directory. One that was live when its runner stopped ends now,
 /// with an event saying why; ended ones older than `limits.keep_ended` are removed.
-fn load_sessions(
+fn load_runs(
     state_dir: &Path,
     limits: &RunnerLimits,
 ) -> io::Result<BTreeMap<String, Arc<Hosted>>> {
-    let mut sessions = BTreeMap::new();
+    let mut runs = BTreeMap::new();
     let now = unix_seconds();
-    for entry in fs::read_dir(state_dir.join(SESSIONS_DIR))? {
+    for entry in fs::read_dir(state_dir.join(RUNS_DIR))? {
         let entry = entry?;
         let key = entry.file_name().to_string_lossy().into_owned();
         let dir = entry.path();
         if !valid_key(&key) || !dir.is_dir() {
             continue;
         }
-        let Ok(file) = fs::read(dir.join(SESSION_FILE))
+        let Ok(file) = fs::read(dir.join(RUN_FILE))
             .map_err(io::Error::other)
             .and_then(|bytes| {
-                serde_json::from_slice::<SessionFile>(&bytes).map_err(io::Error::other)
+                serde_json::from_slice::<RunFile>(&bytes).map_err(io::Error::other)
             })
         else {
             continue;
@@ -634,20 +634,20 @@ fn load_sessions(
             waiting: AtomicUsize::new(0),
             closing: AtomicBool::new(false),
             ended: AtomicBool::new(true),
-            session_id: Mutex::new(file.session_id),
+            run_id: Mutex::new(file.run_id),
             spool: Mutex::new(spool::Spool::open(&dir)?),
             cable: Mutex::new(None),
         };
         if !file.ended {
             let _ = lock_of(&hosted.spool).append(event(
                 LOST_EVENT,
-                "the runner supervising this Session restarted, so its harness is gone",
+                "the runner supervising this Run restarted, so its harness is gone",
             ));
             hosted.persist();
         }
-        sessions.insert(key, Arc::new(hosted));
+        runs.insert(key, Arc::new(hosted));
     }
-    Ok(sessions)
+    Ok(runs)
 }
 
 fn event(kind: &str, text: &str) -> AgentEvent {
@@ -662,13 +662,13 @@ fn event(kind: &str, text: &str) -> AgentEvent {
 }
 
 impl Hosted {
-    fn report(&self) -> SessionReport {
+    fn report(&self) -> RunReport {
         let spool = lock_of(&self.spool);
-        SessionReport {
+        RunReport {
             key: self.key.clone(),
             handler: self.handler.clone(),
             terminal: self.terminal.clone(),
-            session_id: lock_of(&self.session_id).clone(),
+            run_id: lock_of(&self.run_id).clone(),
             ended: self.ended.load(Ordering::Acquire),
             last: spool.last(),
             cursor: spool.cursor(),
@@ -676,18 +676,18 @@ impl Hosted {
     }
 
     fn persist(&self) {
-        let file = SessionFile {
+        let file = RunFile {
             handler: self.handler.clone(),
             terminal: self.terminal.clone(),
-            session_id: lock_of(&self.session_id).clone(),
+            run_id: lock_of(&self.run_id).clone(),
             ended: self.ended.load(Ordering::Acquire),
             created_at: self.created_at,
         };
         if let Ok(bytes) = serde_json::to_vec_pretty(&file)
-            && let Err(error) = write_atomically(&self.dir.join(SESSION_FILE), &bytes)
+            && let Err(error) = write_atomically(&self.dir.join(RUN_FILE), &bytes)
         {
             eprintln!(
-                "ai6 runner: Session {:?} record not written: {error}",
+                "ai6 runner: Run {:?} record not written: {error}",
                 self.key
             );
         }
@@ -704,7 +704,7 @@ impl Hosted {
     ) -> Result<T, String> {
         let harness = self
             .harness()
-            .ok_or_else(|| "the Session's harness is no longer running".to_owned())?;
+            .ok_or_else(|| "the Run's harness is no longer running".to_owned())?;
         self.waiting.fetch_add(1, Ordering::AcqRel);
         let guard = harness.lock();
         self.waiting.fetch_sub(1, Ordering::AcqRel);
@@ -715,7 +715,7 @@ impl Hosted {
     fn append(&self, event: AgentEvent) {
         if let Err(error) = lock_of(&self.spool).append(event) {
             eprintln!(
-                "ai6 runner: Session {:?} event not spooled: {error}",
+                "ai6 runner: Run {:?} event not spooled: {error}",
                 self.key
             );
         }
@@ -727,7 +727,7 @@ impl Hosted {
         }
     }
 
-    /// Stops the harness, if it still runs, and ends the Session.
+    /// Stops the harness, if it still runs, and ends the Run.
     fn close(&self) {
         self.closing.store(true, Ordering::Release);
         if let Some(harness) = lock_of(&self.harness).take() {
@@ -742,7 +742,7 @@ impl Hosted {
         self.end();
     }
 
-    /// Moves the harness's events to the spool until it ends or the Session is closed.
+    /// Moves the harness's events to the spool until it ends or the Run is closed.
     fn pump(self: Arc<Self>, harness: Harness, poll_ms: i64) {
         loop {
             if self.closing.load(Ordering::Acquire) {
@@ -757,18 +757,18 @@ impl Hosted {
                     break;
                 };
                 let polled = guard.next_event(poll_ms);
-                match checked_session_id(guard.session_id().ok().flatten()) {
-                    Ok(session_id) => (polled, session_id),
+                match checked_run_id(guard.session_id().ok().flatten()) {
+                    Ok(run_id) => (polled, run_id),
                     Err(why) => {
                         self.append(event("failed", &why));
                         break;
                     }
                 }
             };
-            if let (_, Some(session_id)) = &result {
-                let mut known = lock_of(&self.session_id);
-                if known.as_ref() != Some(session_id) {
-                    *known = Some(session_id.clone());
+            if let (_, Some(run_id)) = &result {
+                let mut known = lock_of(&self.run_id);
+                if known.as_ref() != Some(run_id) {
+                    *known = Some(run_id.clone());
                     drop(known);
                     self.persist();
                 }
@@ -894,7 +894,7 @@ impl Inner {
 
 impl Runner {
     fn hosted(&self, key: &str) -> Option<Arc<Hosted>> {
-        lock_of(&self.inner.sessions).get(key).cloned()
+        lock_of(&self.inner.runs).get(key).cloned()
     }
 
     /// The terminal provider for a harness that talks over `stdio`: the Station's request or
@@ -907,9 +907,9 @@ impl Runner {
             .map_err(|refusal| format!("this runner cannot start the harness: {refusal}"))
     }
 
-    /// Starts or resumes the harness of Session `key` on `handler`, supervised from now on,
+    /// Starts or resumes the harness of Run `key` on `handler`, supervised from now on,
     /// with a Cable endpoint relayed to the attached Station when `cables` asks for one. The
-    /// Session exists, with its failure in its spool, even when the harness does not start.
+    /// Run exists, with its failure in its spool, even when the harness does not start.
     async fn launch(
         &self,
         key: &str,
@@ -922,7 +922,7 @@ impl Runner {
             return Err("the runner is stopping".to_owned());
         }
         if !valid_key(key) {
-            return Err("a Session key uses 1 to 128 letters, digits, '.', '_' or '-'".to_owned());
+            return Err("a Run key uses 1 to 128 letters, digits, '.', '_' or '-'".to_owned());
         }
         let settings = match &handler.config {
             serde_json::Value::Object(settings) => settings.clone(),
@@ -934,7 +934,7 @@ impl Runner {
             .handler_with(&handler.id, &settings)
             .map_err(|error| error.to_string())?;
         for line in built.weakenings().unwrap_or_default() {
-            eprintln!("ai6: Session {key:?} is weakened: {line}");
+            eprintln!("ai6: Run {key:?} is weakened: {line}");
         }
         let stdio = built.stdio().map_err(|error| {
             format!(
@@ -948,11 +948,11 @@ impl Runner {
             .plugins
             .terminal(&terminal, None)
             .map_err(|error| error.to_string())?;
-        let dir = self.inner.state_dir.join(SESSIONS_DIR).join(key);
+        let dir = self.inner.state_dir.join(RUNS_DIR).join(key);
         let hosted = {
-            let mut sessions = lock_of(&self.inner.sessions);
-            if sessions.contains_key(key) || dir.exists() {
-                return Err(format!("Session {key:?} exists"));
+            let mut runs = lock_of(&self.inner.runs);
+            if runs.contains_key(key) || dir.exists() {
+                return Err(format!("Run {key:?} exists"));
             }
             let spool = spool::Spool::open(&dir).map_err(|error| error.to_string())?;
             let hosted = Arc::new(Hosted {
@@ -965,11 +965,11 @@ impl Runner {
                 waiting: AtomicUsize::new(0),
                 closing: AtomicBool::new(false),
                 ended: AtomicBool::new(false),
-                session_id: Mutex::new(None),
+                run_id: Mutex::new(None),
                 spool: Mutex::new(spool),
                 cable: Mutex::new(None),
             });
-            sessions.insert(key.to_owned(), hosted.clone());
+            runs.insert(key.to_owned(), hosted.clone());
             hosted
         };
         hosted.persist();
@@ -1019,9 +1019,9 @@ impl Runner {
                 return Err(error.to_string());
             }
         };
-        match checked_session_id(harness.session_id().ok().flatten()) {
-            Ok(Some(session_id)) => {
-                *lock_of(&hosted.session_id) = Some(session_id);
+        match checked_run_id(harness.session_id().ok().flatten()) {
+            Ok(Some(run_id)) => {
+                *lock_of(&hosted.run_id) = Some(run_id);
                 hosted.persist();
             }
             Ok(None) => {}
@@ -1051,18 +1051,18 @@ impl Runner {
 mod tests {
     use super::*;
 
-    fn session_on_disk(state_dir: &Path, key: &str, ended: bool, created_at: u64) -> PathBuf {
-        let dir = state_dir.join(SESSIONS_DIR).join(key);
+    fn run_on_disk(state_dir: &Path, key: &str, ended: bool, created_at: u64) -> PathBuf {
+        let dir = state_dir.join(RUNS_DIR).join(key);
         let mut spool = spool::Spool::open(&dir).unwrap();
         spool.append(event("text", "working on it")).unwrap();
-        let file = SessionFile {
+        let file = RunFile {
             handler: "claude".to_owned(),
             terminal: "pty".to_owned(),
-            session_id: Some(SessionId::try_new("provider-1").unwrap()),
+            run_id: Some(RunId::try_new("provider-1").unwrap()),
             ended,
             created_at,
         };
-        fs::write(dir.join(SESSION_FILE), serde_json::to_vec(&file).unwrap()).unwrap();
+        fs::write(dir.join(RUN_FILE), serde_json::to_vec(&file).unwrap()).unwrap();
         dir
     }
 
@@ -1095,23 +1095,23 @@ mod tests {
     }
 
     #[test]
-    fn a_restarted_runner_ends_the_sessions_it_lost_and_keeps_their_events() {
+    fn a_restarted_runner_ends_the_runs_it_lost_and_keeps_their_events() {
         let state_dir = tempfile::tempdir().unwrap();
-        session_on_disk(state_dir.path(), "live", false, unix_seconds());
-        session_on_disk(state_dir.path(), "done", true, unix_seconds());
-        let old = session_on_disk(state_dir.path(), "old", true, 1);
+        run_on_disk(state_dir.path(), "live", false, unix_seconds());
+        run_on_disk(state_dir.path(), "done", true, unix_seconds());
+        let old = run_on_disk(state_dir.path(), "old", true, 1);
 
-        let sessions = load_sessions(state_dir.path(), &RunnerLimits::default()).unwrap();
+        let runs = load_runs(state_dir.path(), &RunnerLimits::default()).unwrap();
         assert_eq!(
-            sessions.keys().map(String::as_str).collect::<Vec<_>>(),
+            runs.keys().map(String::as_str).collect::<Vec<_>>(),
             ["done", "live"]
         );
-        assert!(!old.exists(), "a Session ended long ago is removed");
+        assert!(!old.exists(), "a Run ended long ago is removed");
 
-        let live = sessions["live"].report();
+        let live = runs["live"].report();
         assert!(live.ended);
         assert_eq!(live.last, 2);
-        let events = lock_of(&sessions["live"].spool).after(0, 10);
+        let events = lock_of(&runs["live"].spool).after(0, 10);
         assert_eq!(events[1].event.kind, LOST_EVENT);
         assert!(
             events[1]
@@ -1121,8 +1121,8 @@ mod tests {
                 .is_some_and(|text| text.contains("restarted"))
         );
         // Ended once is enough: loading again adds nothing.
-        drop(sessions);
-        let again = load_sessions(state_dir.path(), &RunnerLimits::default()).unwrap();
+        drop(runs);
+        let again = load_runs(state_dir.path(), &RunnerLimits::default()).unwrap();
         assert_eq!(again["live"].report().last, 2);
         assert_eq!(again["done"].report().last, 1);
     }
@@ -1133,7 +1133,7 @@ mod tests {
                 state_dir: state_dir.to_path_buf(),
                 plugins: Arc::new(crate::station::plugins::testing::terminal_choice(with_pipe)),
                 terminal: pinned.map(str::to_owned),
-                sessions: Mutex::new(BTreeMap::new()),
+                runs: Mutex::new(BTreeMap::new()),
                 bindings: Mutex::new(BTreeMap::new()),
                 streams: Mutex::new(BTreeMap::new()),
                 limits: RunnerLimits::default(),
@@ -1176,7 +1176,7 @@ mod tests {
     }
 
     /// A runner chooses the terminal as a Station does, from what the handler declares: the
-    /// mock handlers refuse to start, after the choice, and the Session records it.
+    /// mock handlers refuse to start, after the choice, and the Run records it.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_runner_gives_each_handler_a_terminal_that_suits_it() {
         let state_dir = tempfile::tempdir().unwrap();
@@ -1186,7 +1186,7 @@ mod tests {
         {
             let reason = start(&runner, key, handler).await.err().unwrap();
             assert!(reason.contains(crate::station::plugins::testing::REFUSED_START));
-            let recorded = lock_of(&runner.inner.sessions)[key].report().terminal;
+            let recorded = lock_of(&runner.inner.runs)[key].report().terminal;
             assert_eq!(recorded, terminal);
         }
 
@@ -1205,7 +1205,7 @@ mod tests {
     }
 
     #[test]
-    fn session_keys_cannot_leave_the_sessions_directory() {
+    fn run_keys_cannot_leave_the_runs_directory() {
         for key in ["mission-1", "a.b_c", "0f3a9c"] {
             assert!(valid_key(key), "{key}");
         }
@@ -1215,7 +1215,7 @@ mod tests {
     }
 
     use crate::directorates::section_00::acp::{
-        AcpOptions, AcpSession, Authenticate, Exchange, LAUNCH_META_KEY, LaunchMeta,
+        AcpOptions, AcpRun, Authenticate, Exchange, LAUNCH_META_KEY, LaunchMeta,
         RUNNER_TOKEN_METHOD, UNBOUNDED_LINE_BYTES,
     };
     use coqui_acp::lines::{IoLines, over_io};
@@ -1320,11 +1320,11 @@ mod tests {
         }
     }
 
-    fn events_until(session: &AcpSession, wanted: usize) -> Vec<coqui_acp_provider::AgentEvent> {
+    fn events_until(run: &AcpRun, wanted: usize) -> Vec<coqui_acp_provider::AgentEvent> {
         let deadline = std::time::Instant::now() + Duration::from_secs(20);
         let mut seen = Vec::new();
         while seen.len() < wanted && std::time::Instant::now() < deadline {
-            if let Some(event) = session.next_event(100).unwrap() {
+            if let Some(event) = run.next_event(100).unwrap() {
                 seen.push(event);
             }
         }
@@ -1341,7 +1341,7 @@ mod tests {
     use coqui_acp_provider::AgentMessage;
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_session_runs_over_acp_and_a_dropped_connection_replays_the_spool_once() {
+    async fn a_run_runs_over_acp_and_a_dropped_connection_replays_the_spool_once() {
         let serving = Serving::start().await;
         let (options, attach_first, attach_second, transport, t2, t3) = (
             serving.options("k1"),
@@ -1352,24 +1352,24 @@ mod tests {
             serving.transport(),
         );
         tokio::task::spawn_blocking(move || {
-            let session = AcpSession::connect(transport, options, None).unwrap();
-            assert_eq!(texts(&events_until(&session, 1)), ["hello work"]);
+            let run = AcpRun::connect(transport, options, None).unwrap();
+            assert_eq!(texts(&events_until(&run, 1)), ["hello work"]);
             assert_eq!(
-                session.session_id().unwrap().unwrap().as_str(),
-                "stream-session-1"
+                run.session_id().unwrap().unwrap().as_str(),
+                "stream-run-1"
             );
-            session
+            run
                 .send_message(AgentMessage {
                     text: "a".to_owned(),
                 })
                 .unwrap();
-            assert_eq!(texts(&events_until(&session, 1)), ["echo:a"]);
+            assert_eq!(texts(&events_until(&run, 1)), ["echo:a"]);
             // The connection drops in the middle of the turn.
-            drop(session);
+            drop(run);
 
-            // Another connection takes the Session by key from what it had taken (1 event):
-            // the spool replays what followed, once, and the Session goes on live.
-            let again = AcpSession::connect(t2, attach_first, None).unwrap();
+            // Another connection takes the Run by key from what it had taken (1 event):
+            // the spool replays what followed, once, and the Run goes on live.
+            let again = AcpRun::connect(t2, attach_first, None).unwrap();
             assert_eq!(texts(&events_until(&again, 1)), ["echo:a"]);
             again
                 .send_message(AgentMessage {
@@ -1381,7 +1381,7 @@ mod tests {
             drop(again);
 
             // Asked from the end, nothing is replayed.
-            let last = AcpSession::connect(t3, attach_second, None).unwrap();
+            let last = AcpRun::connect(t3, attach_second, None).unwrap();
             assert!(last.next_event(300).unwrap().is_none());
             last.send_message(AgentMessage {
                 text: "finish".to_owned(),
@@ -1397,14 +1397,14 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_wrong_token_is_refused_before_any_session() {
+    async fn a_wrong_token_is_refused_before_any_run() {
         let serving = Serving::start().await;
         let (mut options, transport) = (serving.options("k2"), serving.transport());
         options.authenticate = Some(serving.authenticate("wrong"));
         let (refused, probe) = (serving.transport(), serving.token());
         let outcome = tokio::task::spawn_blocking(move || {
-            let error = AcpSession::connect(transport, options, None).err().unwrap();
-            // Without authenticating at all, a session request is refused too.
+            let error = AcpRun::connect(transport, options, None).err().unwrap();
+            // Without authenticating at all, a run request is refused too.
             let mut bare = AcpOptions {
                 cwd: ".".to_owned(),
                 prompt: Some("work".to_owned()),
@@ -1417,7 +1417,7 @@ mod tests {
                     .with_key("k2")
                     .to_value(),
             );
-            let bare_error = AcpSession::connect(refused, bare, None).err().unwrap();
+            let bare_error = AcpRun::connect(refused, bare, None).err().unwrap();
             (error.to_string(), bare_error.to_string(), probe)
         })
         .await
@@ -1429,8 +1429,8 @@ mod tests {
         );
         assert!(!outcome.1.is_empty());
         assert!(
-            lock_of(&serving_runner_sessions(&serving)).is_empty(),
-            "no Session was made"
+            lock_of(&serving_runner_runs(&serving)).is_empty(),
+            "no Run was made"
         );
         serving.stop().await;
     }
@@ -1453,9 +1453,9 @@ mod tests {
         serving.stop().await;
     }
 
-    fn serving_runner_sessions(serving: &Serving) -> Mutex<Vec<String>> {
-        // Sessions live on disk: a Session made would have a directory.
-        let dir = serving.dir.path().join(SESSIONS_DIR);
+    fn serving_runner_runs(serving: &Serving) -> Mutex<Vec<String>> {
+        // Runs live on disk: a Run made would have a directory.
+        let dir = serving.dir.path().join(RUNS_DIR);
         Mutex::new(
             fs::read_dir(dir)
                 .map(|entries| {
@@ -1478,10 +1478,10 @@ mod tests {
             serving.transport(),
         );
         tokio::task::spawn_blocking(move || {
-            let older = AcpSession::connect(first, options, None).unwrap();
+            let older = AcpRun::connect(first, options, None).unwrap();
             assert_eq!(texts(&events_until(&older, 1)), ["hello work"]);
-            let newer = AcpSession::connect(second, attach, None).unwrap();
-            // The newer one gets the Session (and what the older took, replayed from its cursor).
+            let newer = AcpRun::connect(second, attach, None).unwrap();
+            // The newer one gets the Run (and what the older took, replayed from its cursor).
             newer
                 .send_message(AgentMessage {
                     text: "x".to_owned(),
@@ -1520,9 +1520,9 @@ mod tests {
             serving.transport(),
         );
         tokio::task::spawn_blocking(move || {
-            let older = AcpSession::connect(first, options, None).unwrap();
+            let older = AcpRun::connect(first, options, None).unwrap();
             assert_eq!(texts(&events_until(&older, 1)), ["hello work"]);
-            let _newer = AcpSession::connect(second, attach, None).unwrap();
+            let _newer = AcpRun::connect(second, attach, None).unwrap();
             assert_eq!(events_until(&older, 1)[0].kind, "detached");
             let told = std::time::Instant::now();
             let deadline = told + Duration::from_secs(20);
@@ -1594,13 +1594,13 @@ mod tests {
         .await;
         assert_eq!(second.unwrap_err().kind(), io::ErrorKind::AddrInUse);
 
-        // With the right token the runner answers, and says it has no such Session.
+        // With the right token the runner answers, and says it has no such Run.
         let (transport, auth) = (serving.transport(), serving.authenticate(&serving.token()));
         let answered = tokio::task::spawn_blocking(move || {
             Exchange::new().authenticate(auth).run(
                 transport,
                 vec![(
-                    "_ai6/session_status".to_owned(),
+                    "_ai6/run_status".to_owned(),
                     serde_json::json!({"key": "none"}),
                 )],
             )
@@ -1617,7 +1617,7 @@ mod tests {
             Exchange::new().authenticate(auth).run(
                 transport,
                 vec![(
-                    "_ai6/session_status".to_owned(),
+                    "_ai6/run_status".to_owned(),
                     serde_json::json!({"key": "none"}),
                 )],
             )

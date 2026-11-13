@@ -75,7 +75,7 @@ pub enum ConfigRecord {
     /// An overlay loadouts and Operations issue, its source and pin: the keys of an
     /// `[overlay.<name>]` table.
     Overlay,
-    /// How a loadout secret reaches a Session, never its value: a `[secret.<name>]` table.
+    /// How a loadout secret reaches a Run, never its value: a `[secret.<name>]` table.
     Secret,
     /// A configured secret provider, its settings shared by the secrets that name it: a
     /// `[secret_provider.<name>]` table.
@@ -535,24 +535,24 @@ impl Settings {
 )]
 #[map(deny_unknown_fields)]
 pub struct StationRuntime {
-    /// Agent Sessions it runs at once. Default: 4.
-    #[schema(title = "Sessions at once")]
+    /// Agent Runs it runs at once. Default: 4.
+    #[schema(title = "Runs at once")]
     pub max_concurrent_missions: Option<usize>,
-    /// Seconds without provider or terminal activity before a Session stalls. Default: 300.
-    #[schema(title = "Stall a silent Session after", format = "seconds")]
+    /// Seconds without provider or terminal activity before a Run stalls. Default: 300.
+    #[schema(title = "Stall a silent Run after", format = "seconds")]
     pub stall_timeout: Option<f64>,
-    /// Seconds without novel terminal output before repeated output stalls a Session.
+    /// Seconds without novel terminal output before repeated output stalls a Run.
     /// Default: 300.
-    #[schema(title = "Stall a repeating Session after", format = "seconds")]
+    #[schema(title = "Stall a repeating Run after", format = "seconds")]
     pub loop_timeout: Option<f64>,
     /// Repeated terminal lines required before loop detection applies. Default: 50.
     #[schema(title = "Repeated lines before a loop counts")]
     pub loop_min_lines: Option<usize>,
-    /// Quiet seconds before a prompt-shaped terminal tail marks a Session blocked. Default: 10.
-    #[schema(title = "Mark a Session blocked after", format = "seconds")]
+    /// Quiet seconds before a prompt-shaped terminal tail marks a Run blocked. Default: 10.
+    #[schema(title = "Mark a Run blocked after", format = "seconds")]
     pub blocked_after: Option<f64>,
-    /// Longest a Session runs, in seconds. Default: none.
-    #[schema(title = "Longest a Session runs", format = "seconds")]
+    /// Longest a Run runs, in seconds. Default: none.
+    #[schema(title = "Longest a Run runs", format = "seconds")]
     pub max_runtime: Option<f64>,
     /// Distinct terminal lines kept for repeated-output detection. Default: 4096.
     #[schema(title = "Lines remembered for loop detection")]
@@ -598,8 +598,8 @@ pub struct StationRuntime {
     #[schema(title = "Looking over Theaters")]
     #[map(default)]
     pub transports: limits::TransportLimits,
-    /// `[recovery]`: re-attaching to Sessions after a restart.
-    #[schema(title = "Re-attaching to Sessions")]
+    /// `[recovery]`: re-attaching to Runs after a restart.
+    #[schema(title = "Re-attaching to Runs")]
     #[map(default)]
     pub recovery: limits::RecoveryLimits,
     /// `[vetting]`: vetting briefs and Mission proposals.
@@ -662,7 +662,7 @@ pub struct StationRuntime {
     #[schema(title = "Ephemeral Theaters")]
     #[map(default)]
     pub theaters: limits::TheaterLimits,
-    /// `[theater_tools]`: the `theater_*` tools of remote-hands Sessions.
+    /// `[theater_tools]`: the `theater_*` tools of remote-hands Runs.
     #[schema(title = "Remote-hands tools")]
     #[map(default)]
     pub theater_tools: limits::TheaterToolLimits,
@@ -908,7 +908,7 @@ pub struct UnexRecord {
     #[schema(title = "Deepest provider configuration")]
     #[map(default = UnexRecord::default_provider_config_depth())]
     pub provider_config_depth: crate::bounds::Limit,
-    /// `[gateway]`: live Sessions, connections and frames.
+    /// `[gateway]`: live Runs, connections and frames.
     #[schema(title = "The gateway")]
     #[map(default)]
     pub gateway: super::unex_limits::UnexGatewayLimits,

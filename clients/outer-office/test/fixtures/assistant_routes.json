@@ -23,10 +23,10 @@
     },
     {"json": {"page": "missions", "text": "café ☕"}, "uri": "app:/missions?text=caf%C3%A9%20%E2%98%95"},
     {
-      "json": {"page": "sessions", "state": "working", "sort": "state", "order": "asc", "session_id": "s-1"},
-      "uri": "app:/sessions?state=working&sort=state&order=asc&session_id=s-1"
+      "json": {"page": "runs", "state": "working", "sort": "state", "order": "asc", "run_id": "s-1"},
+      "uri": "app:/runs?state=working&sort=state&order=asc&run_id=s-1"
     },
-    {"json": {"page": "sessions", "sort": "session", "order": "desc"}, "uri": "app:/sessions?sort=session&order=desc"},
+    {"json": {"page": "runs", "sort": "run", "order": "desc"}, "uri": "app:/runs?sort=run&order=desc"},
     {"json": {"page": "missions", "sort": "operation"}, "uri": "app:/missions?sort=operation"},
     {
       "json": {"page": "stations", "station_id": "worker", "tab": "theaters", "theater_id": "local"},
@@ -69,7 +69,7 @@
     {"json": {"page": "pages"}, "uri": "app:/pages"},
     {"json": {"page": "pages", "page_id": "page-0f3a"}, "uri": "app:/pages?page_id=page-0f3a"},
     {"json": {"page": "missions", "reviews": "show"}, "uri": "app:/missions?reviews=show"},
-    {"json": {"page": "sessions", "text": "retry"}, "uri": "app:/sessions?text=retry"},
+    {"json": {"page": "runs", "text": "retry"}, "uri": "app:/runs?text=retry"},
     {
       "json": {"page": "agents", "handler": ["claude", "codex"], "text": "ana", "sort": "handler", "order": "desc"},
       "uri": "app:/agents?handler=claude,codex&text=ana&sort=handler&order=desc"
@@ -96,11 +96,11 @@
     {"json": {"page": "missions", "state": []}, "reason": "state lists 1 to 10 distinct board states"},
     {"json": {"page": "missions", "state": ["failed", "failed"]}, "reason": "state lists 1 to 10 distinct board states"},
     {"json": {"page": "missions", "state": ["lost"]}, "reason": "lost is not a board state"},
-    {"json": {"page": "sessions", "state": ["working"]}, "reason": "state is a string"},
-    {"json": {"page": "sessions", "state": "lost"}, "reason": "state is one of queued, working, blocked, stalled, parked, quarantined, verifying, done, failed, abandoned"},
+    {"json": {"page": "runs", "state": ["working"]}, "reason": "state is a string"},
+    {"json": {"page": "runs", "state": "lost"}, "reason": "state is one of queued, working, blocked, stalled, parked, quarantined, verifying, done, failed, abandoned"},
     {"json": {"page": "missions", "sort": "priority"}, "reason": "sort is one of updated, created, state, operation, mission"},
-    {"json": {"page": "missions", "sort": "session"}, "reason": "sort is one of updated, created, state, operation, mission"},
-    {"json": {"page": "sessions", "sort": "agent"}, "reason": "sort is one of updated, created, state, operation, mission, session"},
+    {"json": {"page": "missions", "sort": "run"}, "reason": "sort is one of updated, created, state, operation, mission"},
+    {"json": {"page": "runs", "sort": "agent"}, "reason": "sort is one of updated, created, state, operation, mission, run"},
     {"json": {"page": "missions", "text": "a\u200bb"}, "reason": "text is 1 to 128 bytes without control or invisible characters"},
     {"json": {"page": "missions", "text": "line\nbreak"}, "reason": "text is 1 to 128 bytes without control or invisible characters"},
     {"json": {"page": "missions", "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, "reason": "text is 1 to 128 bytes without control or invisible characters"},
@@ -142,11 +142,11 @@
         "operation_id": "G",
         "mission_id": "m-retried",
         "handle": "G-7",
-        "sessions": [
+        "runs": [
           {
             "operation_id": "G",
             "mission_id": "m-retried",
-            "session_id": "s-1",
+            "run_id": "s-1",
             "state": "failed",
             "reason": null,
             "sequence": 9,
@@ -158,7 +158,7 @@
           {
             "operation_id": "G",
             "mission_id": "m-retried",
-            "session_id": "s-2",
+            "run_id": "s-2",
             "state": "working",
             "reason": null,
             "sequence": 12,
@@ -189,11 +189,11 @@
       {
         "operation_id": "G",
         "mission_id": "m-quiet",
-        "sessions": [
+        "runs": [
           {
             "operation_id": "G",
             "mission_id": "m-quiet",
-            "session_id": "s-3",
+            "run_id": "s-3",
             "state": null,
             "reason": null,
             "sequence": 0,
@@ -210,11 +210,11 @@
       {
         "operation_id": "Q",
         "mission_id": "m-done",
-        "sessions": [
+        "runs": [
           {
             "operation_id": "Q",
             "mission_id": "m-done",
-            "session_id": "s-4",
+            "run_id": "s-4",
             "state": "done",
             "reason": null,
             "sequence": 5,
@@ -245,11 +245,11 @@
       {
         "operation_id": "G",
         "mission_id": "m-finished",
-        "sessions": [
+        "runs": [
           {
             "operation_id": "G",
             "mission_id": "m-finished",
-            "session_id": "s-5",
+            "run_id": "s-5",
             "state": "blocked",
             "reason": null,
             "sequence": 4,
@@ -261,7 +261,7 @@
           {
             "operation_id": "G",
             "mission_id": "m-finished",
-            "session_id": "s-6",
+            "run_id": "s-6",
             "state": "done",
             "reason": null,
             "sequence": 7,
@@ -278,11 +278,11 @@
       {
         "operation_id": "G",
         "mission_id": "m-long-first",
-        "sessions": [
+        "runs": [
           {
             "operation_id": "G",
             "mission_id": "m-long-first",
-            "session_id": "s-7",
+            "run_id": "s-7",
             "state": "failed",
             "reason": null,
             "sequence": 40,
@@ -294,7 +294,7 @@
           {
             "operation_id": "G",
             "mission_id": "m-long-first",
-            "session_id": "s-8",
+            "run_id": "s-8",
             "state": "working",
             "reason": null,
             "sequence": 2,
@@ -311,11 +311,11 @@
       {
         "operation_id": "G",
         "mission_id": "m-no-time",
-        "sessions": [
+        "runs": [
           {
             "operation_id": "G",
             "mission_id": "m-no-time",
-            "session_id": "s-9",
+            "run_id": "s-9",
             "state": "parked",
             "reason": null,
             "sequence": 50,
@@ -327,7 +327,7 @@
           {
             "operation_id": "G",
             "mission_id": "m-no-time",
-            "session_id": "s-10",
+            "run_id": "s-10",
             "state": "quarantined",
             "reason": null,
             "sequence": 1,
@@ -344,11 +344,11 @@
       {
         "operation_id": "G",
         "mission_id": "m-tie",
-        "sessions": [
+        "runs": [
           {
             "operation_id": "G",
             "mission_id": "m-tie",
-            "session_id": "s-11",
+            "run_id": "s-11",
             "state": "stalled",
             "reason": null,
             "sequence": 3,
@@ -360,7 +360,7 @@
           {
             "operation_id": "G",
             "mission_id": "m-tie",
-            "session_id": "s-12",
+            "run_id": "s-12",
             "state": "abandoned",
             "reason": null,
             "sequence": 8,
@@ -378,11 +378,11 @@
         "operation_id": "R",
         "mission_id": "m-review",
         "handle": "R-1",
-        "sessions": [
+        "runs": [
           {
             "operation_id": "R",
             "mission_id": "m-review",
-            "session_id": "s-r1",
+            "run_id": "s-r1",
             "state": "done",
             "reason": null,
             "sequence": 3,

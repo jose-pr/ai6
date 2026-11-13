@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use guatiao::{FromValue, Schema, ToValue};
 use guatiao_intake::Form;
 
-use crate::directorates::q::SessionEnv;
+use crate::directorates::q::RunEnv;
 
 /// How a Station reaches a Theater: one of the groups below.
 #[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
@@ -101,7 +101,7 @@ pub(crate) enum AgentModeForm {
     RemoteHands,
 }
 
-/// Whether a Session on a Theater must reach its Cable endpoint.
+/// Whether a Run on a Theater must reach its Cable endpoint.
 #[derive(Debug, Clone, Copy, Default, ToValue, FromValue, Schema)]
 pub(crate) enum CableReachForm {
     /// A way to the endpoint is part of what the Theater must offer.
@@ -109,7 +109,7 @@ pub(crate) enum CableReachForm {
     #[map(rename = "required")]
     #[schema(label = "Required")]
     Required,
-    /// A Session with no way to its endpoint starts without one, a reported weakening.
+    /// A Run with no way to its endpoint starts without one, a reported weakening.
     #[map(rename = "optional")]
     #[schema(label = "Optional: a reported weakening")]
     Optional,
@@ -143,7 +143,7 @@ pub(crate) struct RunnerForm {
     request_timeout_ms: Option<u64>,
 }
 
-/// What a Theater must have before Sessions run there.
+/// What a Theater must have before Runs run there.
 #[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
 #[map(deny_unknown_fields)]
 pub(crate) struct RequiresForm {
@@ -154,7 +154,7 @@ pub(crate) struct RequiresForm {
     #[schema(title = "Harnesses")]
     #[map(default)]
     harnesses: Vec<String>,
-    /// Other programs Sessions use there, as `git` or `cargo>=1.89`.
+    /// Other programs Runs use there, as `git` or `cargo>=1.89`.
     #[schema(title = "Tools")]
     #[map(default)]
     tools: Vec<String>,
@@ -209,13 +209,13 @@ pub(crate) struct TheaterForm {
     /// The runner that supervises harnesses on the Theater.
     #[schema(title = "Runner", advanced)]
     runner: Option<RunnerForm>,
-    /// What the Theater must have before Sessions run there.
+    /// What the Theater must have before Runs run there.
     #[schema(title = "Requirements", advanced)]
     requires: Option<RequiresForm>,
     /// How to install what the Theater lacks.
     #[schema(title = "Provisioning", advanced)]
     provision: Option<ProvisionForm>,
-    /// Whether a Session here must reach its Cable endpoint.
+    /// Whether a Run here must reach its Cable endpoint.
     #[schema(title = "Cable endpoint", advanced)]
     #[map(default)]
     cables: CableReachForm,
@@ -225,25 +225,25 @@ pub(crate) struct TheaterForm {
 #[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
 #[map(deny_unknown_fields)]
 pub(crate) struct LoadoutForm {
-    /// The sandbox profile its Sessions run in.
+    /// The sandbox profile its Runs run in.
     #[schema(title = "Sandbox", format = "record:sandboxes")]
     sandbox: Option<String>,
-    /// The MCP servers its Sessions get.
+    /// The MCP servers its Runs get.
     #[schema(title = "MCP servers", format = "record:mcps")]
     #[map(default)]
     mcp: Vec<String>,
-    /// The overlays its Sessions are issued.
+    /// The overlays its Runs are issued.
     #[schema(title = "Overlays", format = "record:overlays")]
     #[map(default)]
     overlays: Vec<String>,
-    /// The secrets its Sessions may be leased.
+    /// The secrets its Runs may be leased.
     #[schema(title = "Secrets", format = "record:secrets")]
     #[map(default)]
     secrets: Vec<String>,
-    /// Values its Sessions get in their environment; no secret.
+    /// Values its Runs get in their environment; no secret.
     #[schema(title = "Environment", advanced)]
     #[map(default)]
-    env: SessionEnv,
+    env: RunEnv,
 }
 
 /// A sandbox profile: the keys of a `[sandbox.<name>]` table.
@@ -254,15 +254,15 @@ pub(crate) struct SandboxForm {
     #[schema(title = "Backend")]
     #[map(default = "bubblewrap".to_owned())]
     backend: String,
-    /// Directories the Session may read and write.
+    /// Directories the Run may read and write.
     #[schema(title = "Read and write")]
     #[map(default)]
     read_write: Vec<String>,
-    /// Directories the Session may only read.
+    /// Directories the Run may only read.
     #[schema(title = "Read only")]
     #[map(default)]
     read_only: Vec<String>,
-    /// Hosts the Session may reach.
+    /// Hosts the Run may reach.
     #[schema(title = "Network")]
     #[map(default)]
     network: Vec<String>,
@@ -275,7 +275,7 @@ pub(crate) struct McpForm {
     /// The program and its arguments.
     #[schema(title = "Command")]
     command: Vec<String>,
-    /// Tools of the server the Session may not call.
+    /// Tools of the server the Run may not call.
     #[schema(title = "Tools denied")]
     #[map(default)]
     deny: Vec<String>,
@@ -300,7 +300,7 @@ pub(crate) struct OverlayForm {
     secrets: Vec<String>,
 }
 
-/// How a loadout secret reaches a Session, never its value: the keys of a `[secret.<name>]` table.
+/// How a loadout secret reaches a Run, never its value: the keys of a `[secret.<name>]` table.
 /// The provider's own further fields are kept as stored and edited as configuration.
 #[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
 #[map(deny_unknown_fields)]
@@ -414,7 +414,7 @@ pub(crate) struct AccountForm {
     #[schema(title = "Priority")]
     #[map(default)]
     priority: i64,
-    /// Sessions that may use it at once.
+    /// Runs that may use it at once.
     #[schema(title = "Most at once")]
     max_concurrent: Option<u64>,
     /// Labels a route or Operation may ask for.
@@ -614,9 +614,9 @@ pub(crate) struct TlsForm {
     /// Whether a pinned peer may present a chain. Default: no.
     #[schema(title = "Allow a chain from a pinned peer")]
     allow_chain_when_pinned: Option<bool>,
-    /// Whether TLS sessions may be resumed, which skips the certificate checks for a peer that
-    /// held a session. Default: no.
-    #[schema(title = "Allow session resumption")]
+    /// Whether TLS runs may be resumed, which skips the certificate checks for a peer that
+    /// held a run. Default: no.
+    #[schema(title = "Allow run resumption")]
     allow_resumption: Option<bool>,
     /// Whether a TLS 1.2 connection must use the extended master secret. Default: yes.
     #[schema(title = "Require the extended master secret")]

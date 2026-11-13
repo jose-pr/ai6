@@ -63,7 +63,7 @@ impl CableTools {
         F: FnOnce(&DecisionDesk) -> Result<String, String> + Send + 'static,
     {
         let Some(desk) = self.decision_desk.get().cloned() else {
-            return "Mission decisions are unavailable to this Session".to_owned();
+            return "Mission decisions are unavailable to this Run".to_owned();
         };
         match tokio::task::spawn_blocking(move || work(&desk)).await {
             Ok(Ok(answer)) => answer,

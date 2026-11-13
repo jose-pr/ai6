@@ -1,6 +1,6 @@
 use ai6_diptel::{
-    ControlAction, ControlId, LifecycleEvent, MissionControl, MissionId, OperationId, SessionId,
-    SessionState, TerminalData, TerminalDirection, TerminalGap, TerminalResize, control_frames,
+    ControlAction, ControlId, LifecycleEvent, MissionControl, MissionId, OperationId, RunId,
+    RunState, TerminalData, TerminalDirection, TerminalGap, TerminalResize, control_frames,
     gap_frames, lifecycle_frames, resize_frames, terminal_frames,
 };
 
@@ -8,34 +8,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let lifecycle = LifecycleEvent {
         operation_id: OperationId::new("station-a")?,
         mission_id: MissionId::new("mission-17")?,
-        session_id: SessionId::new("provider-run-3")?,
-        state: SessionState::Working,
+        run_id: RunId::new("provider-run-3")?,
+        state: RunState::Working,
         reason: None,
         sequence: 4,
     };
     let terminal = TerminalData::new(
-        SessionId::new("provider-run-3")?,
+        RunId::new("provider-run-3")?,
         5,
         TerminalDirection::Output,
         vec![0xff, 0x00, 0x80],
     )?;
-    let resize = TerminalResize::new(SessionId::new("provider-run-3")?, 6, 120, 40)?;
+    let resize = TerminalResize::new(RunId::new("provider-run-3")?, 6, 120, 40)?;
     let control = MissionControl::new(
         ControlId::new("control-1")?,
         OperationId::new("station-a")?,
         MissionId::new("mission-17")?,
         ControlAction::Retry,
     )
-    .with_session(SessionId::new("provider-run-3")?)
+    .with_run(RunId::new("provider-run-3")?)
     .with_agent("008")?;
-    let gap = TerminalGap::new(SessionId::new("provider-run-3")?, 0, 5)?;
+    let gap = TerminalGap::new(RunId::new("provider-run-3")?, 0, 5)?;
 
     let quarantined = LifecycleEvent {
-        state: SessionState::Quarantined,
+        state: RunState::Quarantined,
         ..lifecycle.clone()
     };
     let green_ink = LifecycleEvent {
-        state: SessionState::Blocked,
+        state: RunState::Blocked,
         reason: Some("green-ink".to_owned()),
         ..lifecycle.clone()
     };

@@ -88,19 +88,19 @@ class DemoAssistantChannel implements AssistantChannel {
         _entry('tools', 'mcp__moneypenny__board'),
         _entry(
           'moneypenny',
-          'Three things: Session **preview-session-008** of mission-007 is blocked '
+          'Three things: Run **preview-run-008** of mission-007 is blocked '
               'on green ink, a brief for Operation G is held for review, and '
               '**station-remote-02** is dark. Its Missions wait for placement; I can '
               'raise station-control-01\'s capacity so they run there.',
         ),
-        _entry('navigation', 'The blocked Sessions of Operation G', {
+        _entry('navigation', 'The blocked Runs of Operation G', {
           'id': 'demo-nav-blocked',
           'route': {
-            'page': 'sessions',
+            'page': 'runs',
             'operation_id': 'G',
             'state': 'blocked',
           },
-          'label': 'The blocked Sessions of Operation G',
+          'label': 'The blocked Runs of Operation G',
         }),
         _entry('proposal', '', {
           'id': 'demo-proposal',
@@ -129,7 +129,7 @@ class DemoAssistantChannel implements AssistantChannel {
         _entry(
           'moneypenny',
           'Operation G has one Mission on the board, mission-007, on its second '
-              'attempt at station-control-01; one of its Sessions is working and one '
+              'attempt at station-control-01; one of its Runs is working and one '
               'is blocked. Operation L\'s mission-021 is done.',
         ),
         _entry('view', '', {
@@ -149,11 +149,11 @@ class DemoAssistantChannel implements AssistantChannel {
               {
                 'kind': 'chart',
                 'chart': 'bar',
-                'title': 'Sessions by state',
-                'y_label': 'Sessions',
+                'title': 'Runs by state',
+                'y_label': 'Runs',
                 'series': [
                   {
-                    'name': 'Sessions',
+                    'name': 'Runs',
                     'points': [
                       {'x': 'working', 'y': 1},
                       {'x': 'blocked', 'y': 1},
@@ -200,7 +200,7 @@ class DemoAssistantChannel implements AssistantChannel {
   }
 
   /// Operation G as the sample's second view: its attempts as a schedule, where it runs as a
-  /// graph, Missions by state and Sessions by Station as charts, and a drawing.
+  /// graph, Missions by state and Runs by Station as charts, and a drawing.
   static const Map<String, Object?> _operationG = {
     'version': 1,
     'title': 'Operation G',
@@ -281,10 +281,10 @@ class DemoAssistantChannel implements AssistantChannel {
       {
         'kind': 'chart',
         'chart': 'pie',
-        'title': 'Sessions by Station',
+        'title': 'Runs by Station',
         'series': [
           {
-            'name': 'Sessions',
+            'name': 'Runs',
             'points': [
               {'x': 'station-control-01', 'y': 2},
               {'x': 'station-remote-02', 'y': 1},

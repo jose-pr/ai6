@@ -32,7 +32,7 @@ them in `[providers.git]`.
 - **Re-attach** (`reopen = Some(report)` with `isolate = true`): the report must be `kept`,
   name an existing worktree registered with `source`, whose checked-out branch equals
   `report.branch`, and whose `report.base` is a commit that is an ancestor of `HEAD`.
-- **In place** (`isolate = false`): the session works in `source`. The base is the commit
+- **In place** (`isolate = false`): the run works in `source`. The base is the commit
   checked out now, or `report.base` when re-attaching (verified as an ancestor of `HEAD`).
   There is no branch.
 - **From a checkpoint** (`checkpoint = Some(saved)` with `isolate = true` and no `reopen`):
@@ -68,21 +68,21 @@ them in `[providers.git]`.
   `max_bytes`, are killed once the working tree and git directory hold more (measured every
   `measure_every_ms` and when the command ends); either way what the clone made is removed.
 
-## Session behaviour
+## Run behaviour
 
 - `info()`: path, branch, base, `supports_history = true`, and `isolated`.
 - `changes()`: commits in `<base>..HEAD`, newest first, with full ID, `Name <email>` author
   and committer, and full message.
 - `finish()`: an isolated worktree with no commits and a clean status is removed together
   with its branch (`kept = false`); otherwise it is kept and the report lists
-  `"<short id> <subject>"` per commit. An in-place session is never removed
+  `"<short id> <subject>"` per commit. An in-place run is never removed
   (`kept = true`). A path that has disappeared reports `kept = false`.
 - `checkpoint(CheckpointSpec)`: builds a tree of the worktree including uncommitted and
   untracked (not ignored) files in a private index, commits it on top of `HEAD` with
   `spec.message` (author and committer `spec.author_*` when both are set, else Git's
   configured identity), and `git push --force <remote> <commit>:refs/heads/<branch>`. With
   nothing uncommitted the commit is `HEAD` itself. The worktree, its index and `HEAD` are
-  untouched. Answers the remote, branch, commit and base. An in-place session has no branch
+  untouched. Answers the remote, branch, commit and base. An in-place run has no branch
   and is refused.
 - `checkpoint(CheckpointSpec { branch: Some(b), fallback, .. })`, meant for a clone: commits
   everything in the working directory itself but paths with a name starting with `.` (`git add
@@ -123,7 +123,7 @@ them in `[providers.git]`.
 - `discard()`: `git worktree remove --force --force` and `git branch -D` of the Mission's
   branch, whatever they hold; what is already gone is skipped. A clone's directory is
   removed, read-only object files included, and so is its separate git directory. An in-place
-  session is refused.
+  run is refused.
 - `finish()` on a clone: removed when clean and every commit is on an `origin` branch, else
   kept and its unpushed commits listed.
 

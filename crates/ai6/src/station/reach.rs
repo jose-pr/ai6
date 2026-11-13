@@ -2,7 +2,7 @@
 //!
 //! A runner or a wrapped harness that stops answering is given a grace period (an Operation's
 //! `lost_after_secs`). Once it has been out of reach for all of it, the Station probes it once
-//! more through the Theater's transport; if that fails too, the Session is lost and the
+//! more through the Theater's transport; if that fails too, the Run is lost and the
 //! reason is kept here for the Station to act on.
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -51,7 +51,7 @@ impl ReachWatch {
     }
 
     /// Notes that the harness did not answer. Once it has been out of reach for the whole
-    /// grace, `probe` runs: its error is why the Session is lost, and success starts the
+    /// grace, `probe` runs: its error is why the Run is lost, and success starts the
     /// grace over. Answers whether this was the first miss since it last answered.
     pub(crate) fn missed(&self, probe: impl FnOnce() -> Result<(), String>) -> bool {
         let now = Instant::now();
@@ -73,12 +73,12 @@ impl ReachWatch {
         false
     }
 
-    /// Gives the Session up as lost, keeping the first reason given.
+    /// Gives the Run up as lost, keeping the first reason given.
     pub(crate) fn lose(&self, reason: impl Into<String>) {
         lock(&self.0.lost).get_or_insert_with(|| reason.into());
     }
 
-    /// Why the Session was given up, once it was.
+    /// Why the Run was given up, once it was.
     pub(crate) fn lost(&self) -> Option<String> {
         lock(&self.0.lost).clone()
     }

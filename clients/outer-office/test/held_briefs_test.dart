@@ -46,7 +46,7 @@ Map<String, Object?> proposal(String id, Map<String, Object?>? vetting) => {
   'operation_id': 'G',
   'parent_mission_id': 'mission-007',
   'proposer_agent_id': '007',
-  'proposer_session_id': 'provider-session-007',
+  'proposer_run_id': 'provider-id-007',
   'brief': {'title': 'Proposal $id', 'body': 'Do $id.'},
   'created_at': 1_798_000_000.0,
   'vetting': ?vetting,

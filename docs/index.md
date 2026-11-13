@@ -3,7 +3,7 @@
 AI6 is a self-hosted control plane for coding agents. You register **Operations**
 (projects and their policy), hand it **Missions** (briefs), and its **Stations** (nodes
 running the `ai6` daemon) post an Agent to each Mission and run it as a provider
-**Session** of Claude Code or Codex, in an isolated Git worktree, under a watchdog.
+**Run** of Claude Code or Codex, in an isolated Git worktree, under a watchdog.
 Operators follow and steer the work through **Universal Exports**, the authenticated
 public API, from the **Outer Office** desktop and web app or the `ai6ctl` command.
 

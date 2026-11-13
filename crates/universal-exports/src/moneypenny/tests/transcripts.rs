@@ -127,7 +127,7 @@ async fn a_pooled_turn_is_logged_with_its_pool_and_account_and_no_token_reaches_
         station_id: "hq".to_owned(),
         conversation_id: conversation.clone(),
         job_id: None,
-        session_id: Some("provider-pooled".to_owned()),
+        run_id: Some("provider-pooled".to_owned()),
         events: vec![text, AssistantEvent::new(EVENT_COMPLETED, None)],
     };
     let posted = reqwest::Client::new()
@@ -158,7 +158,7 @@ async fn a_pooled_turn_is_logged_with_its_pool_and_account_and_no_token_reaches_
     assert_eq!(answer.text, "Two are busy.");
     let turn = answer.turn.as_ref().unwrap();
     assert_eq!(turn.station.as_deref(), Some("hq"));
-    assert_eq!(turn.session.as_deref(), Some("provider-pooled"));
+    assert_eq!(turn.run.as_deref(), Some("provider-pooled"));
     assert_eq!(turn.agent.as_deref(), Some("moneypenny"));
     assert_eq!(
         turn.route.as_ref().and_then(|route| route.pool.as_deref()),
@@ -179,7 +179,7 @@ async fn a_pooled_turn_is_logged_with_its_pool_and_account_and_no_token_reaches_
 }
 
 #[tokio::test]
-async fn a_conversation_comes_back_after_a_restart_and_resumes_its_session() {
+async fn a_conversation_comes_back_after_a_restart_and_resumes_its_run() {
     let served = served(AssistantConfig::default()).await;
     let (mut app, ready) = open(&served, &served.operator).await;
     let conversation = ready["conversation"].as_str().unwrap().to_owned();
@@ -227,7 +227,7 @@ async fn a_conversation_comes_back_after_a_restart_and_resumes_its_session() {
     assert_ne!(theirs["conversation"], conversation.as_str());
     assert_eq!(theirs["entries"].as_array().unwrap().len(), 0);
 
-    // Its next message resumes the provider Session on the Station that ran it.
+    // Its next message resumes the provider Run on the Station that ran it.
     say(&mut app, "And now?", None).await;
     let client = reqwest::Client::new();
     let next = loop {
@@ -244,7 +244,7 @@ async fn a_conversation_comes_back_after_a_restart_and_resumes_its_session() {
         }
     };
     assert_eq!(next.conversation_id, conversation);
-    assert_eq!(next.session_id.as_deref(), Some("provider-assistant-1"));
+    assert_eq!(next.run_id.as_deref(), Some("provider-assistant-1"));
     server.abort();
 }
 
@@ -261,13 +261,13 @@ async fn read_as(served: &Served, token: &str, path: &str) -> (StatusCode, Value
 }
 
 #[tokio::test]
-async fn a_missions_session_context_needs_session_context_on_its_operation_and_is_audited() {
+async fn a_missions_run_context_needs_run_context_on_its_operation_and_is_audited() {
     let served = served(AssistantConfig::default()).await;
     let content = "{\"type\":\"user\"}\n{\"type\":\"assistant\"}\n";
     served
         .registry
-        .file_session_context(&ai6::SessionContext::new(
-            "session-g",
+        .file_run_context(&ai6::RunContext::new(
+            "run-g",
             ai6::ContextOwner::Mission {
                 operation: "G".to_owned(),
                 mission: "mission-g".to_owned(),
@@ -280,14 +280,14 @@ async fn a_missions_session_context_needs_session_context_on_its_operation_and_i
             content,
         ))
         .unwrap();
-    let path = "/v1/user/operations/G/sessions/session-g/context";
+    let path = "/v1/user/operations/G/runs/run-g/context";
     let (status, context) = read_as(&served, &served.operator, path).await;
     assert_eq!(status, StatusCode::OK, "{context}");
     assert_eq!(context["format"], "claude-code-jsonl");
     assert_eq!(context["source"], "harness");
     assert_eq!(context["content"], content);
     assert_eq!(context["bytes"], content.len());
-    let read = audits(&served, "session.context.read");
+    let read = audits(&served, "run.context.read");
     assert_eq!(read.len(), 1);
     assert_eq!(
         (
@@ -295,25 +295,25 @@ async fn a_missions_session_context_needs_session_context_on_its_operation_and_i
             read[0].operation.as_str(),
             read[0].target.as_str()
         ),
-        ("operator-007", "G", "session-g")
+        ("operator-007", "G", "run-g")
     );
     assert_eq!(read[0].resource.as_deref(), Some("mission:mission-g"));
 
     // Who may read the Mission may not read its context without the action.
     let (status, _) = read_as(&served, &served.viewer, path).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    // Asked through another Operation, or for a Session with none, there is nothing.
-    let other = "/v1/user/operations/H/sessions/session-g/context";
+    // Asked through another Operation, or for a Run with none, there is nothing.
+    let other = "/v1/user/operations/H/runs/run-g/context";
     assert_eq!(
         read_as(&served, &served.admin, other).await.0,
         StatusCode::NOT_FOUND
     );
-    let none = "/v1/user/operations/G/sessions/none/context";
+    let none = "/v1/user/operations/G/runs/none/context";
     assert_eq!(
         read_as(&served, &served.operator, none).await.0,
         StatusCode::NOT_FOUND
     );
-    assert_eq!(audits(&served, "session.context.read").len(), 1);
+    assert_eq!(audits(&served, "run.context.read").len(), 1);
 }
 
 #[tokio::test]
@@ -334,7 +334,7 @@ async fn a_person_reads_their_own_log_and_another_s_only_with_both_actions_on_th
     logged(&served, &conversation, |rows| !rows.is_empty()).await;
     served
         .registry
-        .file_session_context(&ai6::SessionContext::new(
+        .file_run_context(&ai6::RunContext::new(
             "provider-assistant-1",
             ai6::ContextOwner::Conversation {
                 conversation: conversation.clone(),
@@ -392,7 +392,7 @@ async fn a_person_reads_their_own_log_and_another_s_only_with_both_actions_on_th
     );
     assert!(audits(&served, "assistant.log.read").is_empty());
 
-    // With audit.read and session.context on config:assistant, it is read and audited.
+    // With audit.read and run.context on config:assistant, it is read and audited.
     let (status, read) = read_as(&served, &served.admin, &log).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(read["entries"], own["entries"]);

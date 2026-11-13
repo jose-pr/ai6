@@ -1,6 +1,6 @@
-//! Starts and resumes the Sessions this Station supervises itself over ACP: each handler is
-//! served by an in-process [`AcpFacade`], and the Station holds the [`AcpSession`] that drives
-//! it, so every Session, local or remote, is controlled through one protocol.
+//! Starts and resumes the Runs this Station supervises itself over ACP: each handler is
+//! served by an in-process [`AcpFacade`], and the Station holds the [`AcpRun`] that drives
+//! it, so every Run, local or remote, is controlled through one protocol.
 
 use std::sync::{Arc, Mutex};
 
@@ -9,7 +9,7 @@ use guatiao::library::{Object, ProviderError};
 
 use crate::directorates::q::terminal::AgentTerminal;
 use crate::directorates::section_00::acp::{
-    AcpFacade, AcpOptions, AcpSession, LAUNCH_META_KEY, LaunchMeta, ResumeMeta, UNBOUNDED_MS,
+    AcpFacade, AcpOptions, AcpRun, LAUNCH_META_KEY, LaunchMeta, ResumeMeta, UNBOUNDED_MS,
     duplex,
 };
 use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
@@ -47,7 +47,7 @@ fn options(cwd: String, restricted: bool) -> AcpOptions {
     }
 }
 
-/// Starts `request` on `handler` and answers the Session driving it.
+/// Starts `request` on `handler` and answers the Run driving it.
 pub(crate) fn start(
     handler: Box<dyn AgentHandler>,
     terminal: Object<dyn AgentTerminal>,
@@ -65,10 +65,10 @@ pub(crate) fn start(
         LAUNCH_META_KEY.to_owned(),
         LaunchMeta::from_start(&request).to_value(),
     );
-    AcpSession::connect(client_end, options, None).map(AcpSession::into_handle)
+    AcpRun::connect(client_end, options, None).map(AcpRun::into_handle)
 }
 
-/// Resumes `request` on `handler` and answers the Session driving it.
+/// Resumes `request` on `handler` and answers the Run driving it.
 pub(crate) fn resume(
     handler: Box<dyn AgentHandler>,
     terminal: Object<dyn AgentTerminal>,
@@ -81,21 +81,21 @@ pub(crate) fn resume(
         request.working_directory.clone(),
         request.answer_only || request.assistant.is_some(),
     );
-    options.resume = Some(request.session_id.to_string());
+    options.resume = Some(request.run_id.to_string());
     options.meta.insert(
         LAUNCH_META_KEY.to_owned(),
         ResumeMeta::from_resume(&request).to_value(),
     );
-    AcpSession::connect(client_end, options, None).map(AcpSession::into_handle)
+    AcpRun::connect(client_end, options, None).map(AcpRun::into_handle)
 }
 
-/// Operator typing for a Session whose harness speaks JSON on plain pipes: raw terminal bytes
+/// Operator typing for a Run whose harness speaks JSON on plain pipes: raw terminal bytes
 /// would corrupt its stream, so typed text becomes messages instead, one per line, and
 /// Ctrl-C interrupts. Anything else a terminal sends (escape sequences, other control bytes)
 /// is refused with a reason.
 #[cfg(feature = "publisher")]
 pub(crate) struct MessageInput {
-    session: Arc<Mutex<Object<dyn AgentSession>>>,
+    run: Arc<Mutex<Object<dyn AgentSession>>>,
     line: Mutex<Vec<u8>>,
     /// Runs before an interrupt reaches the harness, which may answer it at once.
     before_interrupt: Box<dyn Fn() + Send + Sync>,
@@ -104,11 +104,11 @@ pub(crate) struct MessageInput {
 #[cfg(feature = "publisher")]
 impl MessageInput {
     pub(crate) fn new(
-        session: Arc<Mutex<Object<dyn AgentSession>>>,
+        run: Arc<Mutex<Object<dyn AgentSession>>>,
         before_interrupt: Box<dyn Fn() + Send + Sync>,
     ) -> Self {
         Self {
-            session,
+            run,
             line: Mutex::new(Vec::new()),
             before_interrupt,
         }
@@ -127,8 +127,8 @@ impl crate::directorates::q::terminal::TerminalInputTarget for MessageInput {
                         continue;
                     }
                     let text = String::from_utf8(std::mem::take(&mut *line))
-                        .map_err(|_| "this Session takes typed text, not raw bytes")?;
-                    self.session
+                        .map_err(|_| "this Run takes typed text, not raw bytes")?;
+                    self.run
                         .lock()
                         .map_err(|_| FAILED)?
                         .send_message(coqui_acp_provider::AgentMessage { text })
@@ -137,7 +137,7 @@ impl crate::directorates::q::terminal::TerminalInputTarget for MessageInput {
                 0x03 => {
                     line.clear();
                     (self.before_interrupt)();
-                    self.session
+                    self.run
                         .lock()
                         .map_err(|_| FAILED)?
                         .interrupt()
@@ -148,7 +148,7 @@ impl crate::directorates::q::terminal::TerminalInputTarget for MessageInput {
                 _ => {
                     line.clear();
                     return Err(
-                        "this Session takes typed text messages; raw terminal input is not accepted",
+                        "this Run takes typed text messages; raw terminal input is not accepted",
                     );
                 }
             }
@@ -277,9 +277,9 @@ mod tests {
     #[test]
     fn operator_typing_for_a_json_harness_becomes_messages_and_never_raw_bytes() {
         let recorder = Arc::new(Recorder::default());
-        let session: Object<dyn AgentSession> = Recording(recorder.clone()).into_object();
+        let run: Object<dyn AgentSession> = Recording(recorder.clone()).into_object();
         let held = Arc::new(AtomicUsize::new(0));
-        let input = MessageInput::new(Arc::new(Mutex::new(session)), {
+        let input = MessageInput::new(Arc::new(Mutex::new(run)), {
             let held = held.clone();
             Box::new(move || {
                 held.fetch_add(1, Ordering::SeqCst);

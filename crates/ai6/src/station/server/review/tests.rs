@@ -91,21 +91,21 @@ fn mission(state: &DaemonState, id: &str) -> Option<Mission> {
     state.missions.lock().unwrap().get(id).cloned()
 }
 
-/// Rounds until the Mission, its Session ended done, is verifying; then a person's confirmation as
+/// Rounds until the Mission, its Run ended done, is verifying; then a person's confirmation as
 /// the gateway records it, and rounds until the Station has settled it done.
 async fn done(state: &DaemonState, id: &str) {
     until(state, "verifying", |state| {
         mission(state, id).is_some_and(|mission| mission.state == MissionState::Verifying)
             && state
                 .intake
-                .latest_session(id)
+                .latest_run(id)
                 .unwrap()
                 .and_then(|record| record.result)
                 .is_some_and(|result| result.state == "verifying")
     })
     .await;
-    let confirmed = crate::directorates::registry::sessions::MissionVerdict::new(
-        crate::directorates::registry::sessions::OutcomeVerdict::Confirmed,
+    let confirmed = crate::directorates::registry::runs::MissionVerdict::new(
+        crate::directorates::registry::runs::OutcomeVerdict::Confirmed,
         "person-test",
         state.clock.now() as f64,
         Some("checked".to_owned()),
@@ -285,7 +285,7 @@ async fn a_reviewer_runs_answer_only_and_sees_the_goals_and_the_output_fenced() 
 }
 
 #[tokio::test]
-async fn a_redo_goes_back_on_the_authors_session_with_the_reasons_then_passes() {
+async fn a_redo_goes_back_on_the_authors_run_with_the_reasons_then_passes() {
     let root = tempfile::tempdir().unwrap();
     let reviews = "[review.one]\npanel = [{ agent = \"r1\" }]\nredo_limit = 1\n";
     let state = station(
@@ -314,13 +314,13 @@ async fn a_redo_goes_back_on_the_authors_session_with_the_reasons_then_passes() 
         .find(|resume| resume.mission_id.as_str() == "rv-redo")
         .cloned()
         .expect("the author was resumed");
-    let reported = mission(&state, "rv-redo").unwrap().session_ids;
+    let reported = mission(&state, "rv-redo").unwrap().run_ids;
     assert_eq!(
         reported.len(),
         1,
-        "one Session, the one its stream reported"
+        "one Run, the one its stream reported"
     );
-    assert_eq!(resumed.session_id, reported[0]);
+    assert_eq!(resumed.run_id, reported[0]);
     let message = resumed.message.expect("the reasons");
     assert!(message.contains("the goals are not met"), "{message}");
     assert!(
@@ -731,7 +731,7 @@ async fn a_restart_mid_review_carries_on_from_the_record_and_counts_no_vote_twic
     let settings = "[operation.G.review]\noutput = \"three\"\n";
     let state = station(root.path(), reviews, settings, &roster);
     submit(&state, "rv-restart", "the goals");
-    // r1 has voted, r2's harness never named a Session, r3's named one and hangs. The book is
+    // r1 has voted, r2's harness never named a Run, r3's named one and hangs. The book is
     // written on each change, under the lock, so what is read there with the check is what a
     // Station that died then leaves.
     let before = std::cell::RefCell::new(Vec::new());
@@ -748,7 +748,7 @@ async fn a_restart_mid_review_carries_on_from_the_record_and_counts_no_vote_twic
             == 2
             && turns.iter().any(|turn| {
                 is_panel_mission(turn)
-                    && !turn.session_ids.is_empty()
+                    && !turn.run_ids.is_empty()
                     && turn.state == MissionState::Working
             });
         if reached {

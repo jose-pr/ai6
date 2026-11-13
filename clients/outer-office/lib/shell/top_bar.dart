@@ -16,7 +16,7 @@ import 'attention_summary.dart';
 import 'oo_freshness.dart';
 import 'oo_shell.dart';
 
-/// One thing that needs the person: a blocked Session, a green ink request or Mission
+/// One thing that needs the person: a blocked Run, a green ink request or Mission
 /// proposal waiting for a decision, a held brief, a dark Station or a Station's refused
 /// configuration, as the gateway's attention summary lists it, with whether it still holds,
 /// what was checked and when.
@@ -82,7 +82,7 @@ String? attentionStatus(OoAttention item) => switch (item.condition) {
 OoIconName _iconOf(String kind) => switch (kind) {
   'green_ink' => OoIconName.greenInk,
   'held_brief' || 'mission_proposal' => OoIconName.briefings,
-  'blocked_session' => OoIconName.interrupt,
+  'blocked_run' => OoIconName.interrupt,
   _ => OoIconName.stations,
 };
 
@@ -238,7 +238,7 @@ class AttentionBell extends StatelessWidget {
   }
 }
 
-/// Search across what the board holds: Operations, Missions, Sessions and Stations, each
+/// Search across what the board holds: Operations, Missions, Runs and Stations, each
 /// opening its page; it says it covers what loaded, not everything. A field when [expanded],
 /// else a button opening the same view. Ctrl+K (⌘K on macOS) opens it from anywhere, unless
 /// the key would type a character into a text field.
@@ -258,10 +258,10 @@ class OoSearch extends StatefulWidget {
   final ValueChanged<OoRoute> onOpen;
   final bool expanded;
 
-  static const hint = 'Search operations, missions, sessions, stations…';
+  static const hint = 'Search operations, missions, runs, stations…';
 
   /// What the search covers, for the button that stands in for its field.
-  static const tooltip = 'Search Operations, Missions, Sessions and Stations';
+  static const tooltip = 'Search Operations, Missions, Runs and Stations';
 
   @override
   State<OoSearch> createState() => _OoSearchState();
@@ -304,7 +304,7 @@ class _OoSearchState extends State<OoSearch> {
   /// Everything searchable, as (icon, title, detail, route).
   List<(OoIconName, String, String, OoRoute)> _entries() => [
     for (final operation
-        in widget.board.userSession?.operations ??
+        in widget.board.userRun?.operations ??
             const <UserOperationAccess>[])
       (
         OoIconName.operations,
@@ -328,15 +328,15 @@ class _OoSearchState extends State<OoSearch> {
           'mission_id': mission.missionId,
         }),
       ),
-    for (final session in widget.board.sessions)
+    for (final run in widget.board.runs)
       (
-        OoIconName.sessions,
-        'Session ${session.sessionId}',
-        'Mission ${widget.board.handleOf(session.operationId, session.missionId)} · '
-            '${session.state ?? 'working'}',
-        _route(OoPage.sessions, {
-          'operation_id': session.operationId,
-          'session_id': session.sessionId,
+        OoIconName.runs,
+        'Run ${run.runId}',
+        'Mission ${widget.board.handleOf(run.operationId, run.missionId)} · '
+            '${run.state ?? 'working'}',
+        _route(OoPage.runs, {
+          'operation_id': run.operationId,
+          'run_id': run.runId,
         }),
       ),
     for (final station in widget.board.stationBoard.stations)
@@ -455,22 +455,22 @@ class _OoSearchState extends State<OoSearch> {
 /// permissions, theme and sign-out.
 class UserChip extends StatelessWidget {
   const UserChip({
-    required this.session,
+    required this.run,
     required this.onPressed,
     this.compact = false,
     super.key,
   });
 
-  final UserSessionSummary? session;
+  final UserRunSummary? run;
   final VoidCallback onPressed;
   final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final tokens = OoTokens.of(context);
-    final name = _name(session);
+    final name = _name(run);
     final initials = ooInitials(name);
-    final group = session?.groups.firstOrNull;
+    final group = run?.groups.firstOrNull;
     final avatar = Container(
       width: 36,
       height: 36,
@@ -553,11 +553,11 @@ class UserChip extends StatelessWidget {
   }
 }
 
-String? _name(UserSessionSummary? session) {
-  final displayName = session?.displayName?.trim();
+String? _name(UserRunSummary? run) {
+  final displayName = run?.displayName?.trim();
   final name = displayName?.isNotEmpty == true
       ? displayName
-      : session?.name.trim();
+      : run?.name.trim();
   return name == null || name.isEmpty ? null : name;
 }
 

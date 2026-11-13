@@ -2,7 +2,7 @@
 //! it, for troubleshooting and audit, and so a conversation outlives a gateway restart.
 //!
 //! One record per entry: who said it or what it records, its text as sent, its data, and for
-//! what a Station's harness reported, the turn that ran it (Station, provider Session, Agent,
+//! what a Station's harness reported, the turn that ran it (Station, provider Run, Agent,
 //! route, pool account, model, tokens). Universal Exports keeps no secret in an entry: tool
 //! tokens are never part of one. Retention is the gateway's: [`AssistantLogStore::prune_assistant_log`]
 //! drops entries by age and keeps the newest that fit a size.
@@ -29,13 +29,13 @@ pub struct AssistantTurn {
     /// The Station that ran the harness.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub station: Option<String>,
-    /// The provider Session of the harness.
+    /// The provider Run of the harness.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session: Option<String>,
+    pub run: Option<String>,
     /// The roster Agent that is Moneypenny.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
-    /// The route the Session ran on, when her Agent has routes.
+    /// The route the Run ran on, when her Agent has routes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub route: Option<RouteRef>,
     /// The pool account the harness held.
@@ -462,7 +462,7 @@ mod tests {
     fn turn() -> AssistantTurn {
         AssistantTurn {
             station: Some("hq".into()),
-            session: Some("provider-1".into()),
+            run: Some("provider-1".into()),
             agent: Some("moneypenny".into()),
             route: Some(RouteRef::new(
                 "claude",

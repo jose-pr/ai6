@@ -1,4 +1,4 @@
-//! Provider-neutral agent harness and Session contracts.
+//! Provider-neutral agent harness and Run contracts.
 
 #[cfg(feature = "acp")]
 pub mod acp;

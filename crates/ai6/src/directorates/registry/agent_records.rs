@@ -1,10 +1,10 @@
 //! Agent records: each Agent's track record in each Operation.
 //!
-//! A Station adds an outcome when one of its Missions finishes, stalls or loses its Session,
+//! A Station adds an outcome when one of its Missions finishes, stalls or loses its Run,
 //! and when an incident is charged to the Agent: a quarantine, a budget stop or a refused green
 //! ink request. Per Operation a record holds counts, the time of each kind's latest outcome,
 //! counts by the clearance the Agent worked at, and the models that occupied the codename with
-//! what each did; the Missions, Sessions and audit records stay the detail. Promotion and the
+//! what each did; the Missions, Runs and audit records stay the detail. Promotion and the
 //! operator choosing a backup read them.
 //!
 //! Each report carries a key naming the event (a Mission attempt and its outcome, a
@@ -41,13 +41,13 @@ pub enum AgentOutcome {
     Blown,
     /// A Mission was withdrawn.
     Abandoned,
-    /// The Watchdog stopped a Session that made no progress or looped.
+    /// The Watchdog stopped a Run that made no progress or looped.
     Stalled,
-    /// A Session was lost with its Station or runner: the infrastructure failed, not the Agent.
+    /// A Run was lost with its Station or runner: the infrastructure failed, not the Agent.
     Lost,
     /// Medical or an operator quarantined the Agent.
     Quarantined,
-    /// A budget limit stopped one of its Sessions.
+    /// A budget limit stopped one of its Runs.
     BudgetStop,
     /// A person refused a step it asked green ink for.
     GreenInkRejected,
@@ -90,7 +90,7 @@ impl AgentOutcome {
     }
 
     /// Whether it is an incident: a blown cover, a stall, a quarantine, a budget stop or a
-    /// refused green ink request. A failure, an abandoned Mission or a lost Session is not.
+    /// refused green ink request. A failure, an abandoned Mission or a lost Run is not.
     pub fn is_incident(self) -> bool {
         !matches!(
             self,
@@ -98,8 +98,8 @@ impl AgentOutcome {
         )
     }
 
-    /// Whether it is the outcome of a Session the Agent ran, so it names the model it ran.
-    pub fn is_session_outcome(self) -> bool {
+    /// Whether it is the outcome of a Run the Agent ran, so it names the model it ran.
+    pub fn is_run_outcome(self) -> bool {
         matches!(
             self,
             Self::Done | Self::Failed | Self::Blown | Self::Abandoned | Self::Stalled | Self::Lost
@@ -120,9 +120,9 @@ pub struct AgentTally {
     pub blown: u64,
     /// Missions abandoned.
     pub abandoned: u64,
-    /// Sessions stopped as stalled or looping.
+    /// Runs stopped as stalled or looping.
     pub stalled: u64,
-    /// Sessions lost with their Station or runner.
+    /// Runs lost with their Station or runner.
     pub lost: u64,
     /// Quarantines.
     pub quarantined: u64,
@@ -164,7 +164,7 @@ impl AgentTally {
     }
 
     /// Failed and blown Missions as a share of the Missions that ended done, failed or blown;
-    /// `None` before any did. Lost Sessions do not count.
+    /// `None` before any did. Lost Runs do not count.
     pub fn failure_rate(&self) -> Option<f64> {
         let failures = self.failed + self.blown;
         let ended = self.done + failures;
@@ -194,13 +194,13 @@ impl AgentTally {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModelTenure {
-    /// The model its Sessions were launched with; `None` is the handler's default.
+    /// The model its Runs were launched with; `None` is the handler's default.
     pub model: Option<String>,
     /// The first outcome counted with it, as Unix seconds.
     pub from: f64,
     /// The first outcome counted with the next model; `None` while it is current.
     pub to: Option<f64>,
-    /// The outcomes of its Sessions.
+    /// The outcomes of its Runs.
     #[serde(default)]
     pub tally: AgentTally,
 }
@@ -217,12 +217,12 @@ pub struct OperationRecord {
     /// When its latest Mission there ended done, failed, blown or abandoned, as Unix seconds.
     pub last_mission_at: Option<f64>,
     /// The models that occupied the codename there, oldest first; a new one starts with the
-    /// first Session outcome counted with another model.
+    /// first Run outcome counted with another model.
     pub model_history: Vec<ModelTenure>,
 }
 
 impl OperationRecord {
-    /// What the Sessions of `model` did here while it is the current occupant; an empty tally
+    /// What the Runs of `model` did here while it is the current occupant; an empty tally
     /// when another model occupies the codename now.
     pub fn tally_of_model(&self, model: Option<&str>) -> AgentTally {
         self.model_history
@@ -341,7 +341,7 @@ impl AgentRecord {
                     .map_or(report.at, |at| at.max(report.at)),
             );
         }
-        if report.outcome.is_session_outcome() {
+        if report.outcome.is_run_outcome() {
             record
                 .note_model(report.model.clone(), report.at, limits.model_history)
                 .tally
@@ -369,7 +369,7 @@ pub struct AgentOutcomeReport {
     pub key: String,
     /// The clearance the Agent worked at, when known.
     pub clearance: Option<String>,
-    /// The model the Session was launched with; `None` is the handler's default.
+    /// The model the Run was launched with; `None` is the handler's default.
     pub model: Option<String>,
     /// When, as Unix seconds.
     pub at: f64,
@@ -615,7 +615,7 @@ mod tests {
         assert_eq!(
             tally.failure_rate(),
             Some(0.0),
-            "a lost Session is no failure"
+            "a lost Run is no failure"
         );
 
         // Another Operation's work stays in its own record.

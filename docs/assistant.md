@@ -24,15 +24,15 @@ context = "The operators here prefer short answers."
 Each message the person sends goes from the app to Universal Exports, which hands it to a
 Station: the one already running the conversation, else the Headquarters Station, else any
 healthy Station. A Station that has no such Agent, no such handler, a quarantine on it, or
-four assistant Sessions running or starting already (`[assistant.desk] live`) refuses, and the
+four assistant Runs running or starting already (`[assistant.desk] live`) refuses, and the
 next one is asked. A
 Station takes each conversation's messages in order and different conversations' at the same
 time, so one whose repositories are slow to clone holds up no one else. The Station keeps
 one harness per conversation, so a follow-up reaches it at once; after ten idle minutes
 (`[assistant.desk] idle`) it
-closes, and the next message resumes the same provider Session. A harness that exits or
+closes, and the next message resumes the same provider Run. A harness that exits or
 fails is closed at once and the conversation shows why, with the harness's exit status and
-its last words; so is one that writes nothing for ten minutes while answering. A Session that
+its last words; so is one that writes nothing for ten minutes while answering. A Run that
 cannot be resumed is noted in the Station's log, and the conversation starts afresh with a
 recap.
 
@@ -100,7 +100,7 @@ key = "/etc/ai6/litellm.key"
   notice, and the next message takes the next route. The same holds for a message that joined a
   turn already being answered.
 - **Her conversation stays on its route while it can.** Universal Exports keeps the route beside the
-  provider Session and sends both with each message. A Session resumes only on its own route, even
+  provider Run and sends both with each message. A Run resumes only on its own route, even
   if another comes first in order. Otherwise she starts afresh with the conversation's recap, and
   the person is told what she moved from and to.
 - **A route's handler missing on a Station** rules that route out there. With no route left the
@@ -111,20 +111,20 @@ key = "/etc/ai6/litellm.key"
   the turn has done nothing.
 - **Her environment** keeps only what reaches the model; a route's `env` and `secrets` are that by
   definition, whatever their names. She is given no loadout secret. For the `acp` handler the
-  Session's environment wins over `handler_settings.env`, so an Agent `env` setting `HOME` hides a
+  Run's environment wins over `handler_settings.env`, so an Agent `env` setting `HOME` hides a
   route's own.
 - A `config-dir` account for the `claude` handler does not work for her: her harness has a
   configuration directory of its own, and the sandbox denies it the Agent's.
 
-An assistant Session is not a Mission: it has no Operation, and never appears on the board;
+An assistant Run is not a Mission: it has no Operation, and never appears on the board;
 it reaches Agents only through [Cables](#cables), for the person. It works in a directory of
 its own, the same one each time its conversation's harness starts on that Station, because
-Claude Code resumes a Session only from the directory that recorded it; the directory is
+Claude Code resumes a Run only from the directory that recorded it; the directory is
 removed when the harness closes. With [personal repositories](#her-workspace) the
 directory is her workspace. A
 harness that starts afresh is given her instructions and a recap of the conversation; a
 resumed one only her instructions, which Claude Code uses once the prompt it recorded with
-the Session is gone (after compaction). Of its Agent's environment it keeps only what reaches the model, as a
+the Run is gone (after compaction). Of its Agent's environment it keeps only what reaches the model, as a
 [Chief of Staff review](agents.md#chief-of-staff) does.
 
 Her harness's program (`claude`, `codex`) is found on the `PATH` of that environment, not the
@@ -155,7 +155,7 @@ model its code-mode JavaScript tools (`functions.exec`, `functions.wait`) and of
 tools only through them, which this check refuses, so with that release she starts on Codex
 only [with scripts](#her-scripts-on-codex), where those two tools are admitted inside Codex's
 sandbox as a reported weakening. Either harness that calls a tool outside what her mode
-allows is ended at once ([restricted Sessions](agents.md#chief-of-staff)).
+allows is ended at once ([restricted Runs](agents.md#chief-of-staff)).
 
 The mode is built from parts (MCP servers, interpreters, skills, network policy, the
 directories she may write, a context file), and Claude Code gets exactly the built-in tools
@@ -176,7 +176,7 @@ off too: a link committed to one of her repositories is checked out as a plain f
 its target, and the Station never reads, writes or removes anything in her workspace through
 a symbolic link, a junction or another reparse point. Her
 standing context goes in with `--append-system-prompt-file`, from a file beside, not inside,
-her workspace. Every assistant Session runs with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, so Claude
+her workspace. Every assistant Run runs with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, so Claude
 Code keeps no memory of its own beside hers. Codex gets the same standing context as
 developer instructions, read from that file; it writes in her workspace only through her
 [scripts](#her-scripts-on-codex), so without them she is told she has no file tools.
@@ -217,11 +217,11 @@ says so. When the person signs out, her tools stop working.
 | --- | --- |
 | `compartments` | The compartments you may read: what each grants, what it covers and who is read in, leaving out what you may not see |
 | `attention` | What needs your attention, the answer the Overview page gives: each item current, historical (a refusal a later revision replaced) or unverified, with its link, the scope checked and when, and what could not be checked or is not visible to you |
-| `board` | Stations (health, running and capacity, resources, Theaters, the Headquarters Station) and every visible Session |
-| `missions`, `mission` | Missions with their Sessions, attempts, brief and usage; `mission` also the issues it is linked to and what it posted |
+| `board` | Stations (health, running and capacity, resources, Theaters, the Headquarters Station) and every visible Run |
+| `missions`, `mission` | Missions with their Runs, attempts, brief and usage; `mission` also the issues it is linked to and what it posted |
 | `source_item`, `source_items` | An Operation's tracker items as they are now: one with its state, labels, assignees, latest comments (each author's role and date) and the Missions linked to it; or the items its sources find, by title |
 | `timeline` | An Operation's activity |
-| `pools` | Account pools: Sessions, quota windows, tokens today |
+| `pools` | Account pools: Runs, quota windows, tokens today |
 | `held_briefs`, `mission_proposals`, `issue_proposals` | Work waiting for a person |
 | `green_ink`, `class_authorizations` | Irreversible steps waiting for green ink, standing approvals |
 | `roster` | Operations, Agents, roles, covers and her own `[assistant]` settings |
@@ -281,7 +281,7 @@ a proposal, a view ("Made by Moneypenny"), a link to a page in Outer Office and 
 published. If the person lacks that permission, there is no proposal at
 all: she is told she cannot. A proposal whose text holds a character that renders as nothing
 (a direction control, a zero-width or tag character) is refused, and the app shows any such
-character in a request as `<U+XXXX>`, so what is confirmed is what is seen. Only the person, in the app session the proposal was made in,
+character in a request as `<U+XXXX>`, so what is confirmed is what is seen. Only the person, in the app run the proposal was made in,
 can confirm it, within an hour; she has no way to. A confirmed proposal is first recorded in
 the audit log (`moneypenny.confirmed`: who, which conversation and proposal, which request),
 then sent through the same route as the app's own request, with its usual checks and its own
@@ -412,7 +412,7 @@ a scan on the file Registry) only finds the candidates.
 
 What she keeps of you needs nobody's confirmation, and you see it happen: the conversation shows
 the summary and the diff as it is written. Her conversation is never exposed, but once she has
-read an entry an [exposed Session wrote](memories.md#a-memory-can-carry-an-attack), whatever she
+read an entry an [exposed Run wrote](memories.md#a-memory-can-carry-an-attack), whatever she
 writes in that conversation carries its mark. A change is refused when the entry has moved on from the
 revision she read (another conversation's change, or your own edit), so nothing written meanwhile
 is lost: she reads it again and makes the change from what it holds now.
@@ -518,7 +518,7 @@ a script in bounds is where the sandbox lets it read, write and connect, not whi
 Each conversation keeps its own: its own temporary directory, and its own Claude Code
 configuration directory, so one person's transcripts and any stored login never sit where
 another's scripts could reach. Her login must be a token (`CLAUDE_CODE_OAUTH_TOKEN` or an API
-key in the Agent's environment): a shared login directory is not carried into her Sessions.
+key in the Agent's environment): a shared login directory is not carried into her Runs.
 Claude Code's own managed settings on the Station still apply to her harness and merge with
 these limits; a Station that has them as files logs it each time her harness starts, since an
 `allowManagedHooksOnly` there would drop the hook that keeps her web fetches to their hosts.
@@ -693,8 +693,8 @@ when:
   `metadata`, `license` and `compatibility`, or it injects a command (`` !`command` ``, or a
   block opened with `` ```! ``), unless `skills_allow_tools = true`. `allowed-tools` grants
   tools without asking for the turn that loads the skill, `hooks` registers commands for the
-  rest of the Session, an injected command runs before she reads the skill, and `model`,
-  `effort` or `context` change her Session, so none of these loads by default.
+  rest of the Run, an injected command runs before she reads the skill, and `model`,
+  `effort` or `context` change her Run, so none of these loads by default.
 
 `skills_unpinned` and `skills_allow_tools` are weakenings, logged and reported at check-in as
 `allow_elevated` is, and so is a SHA-1 pin. The skill directories must be readable wherever
@@ -816,7 +816,7 @@ and your permission is checked again, the confirmation is audited (`moneypenny.c
 and the Station holding it sends it if it hears within the answer timeout (a minute by
 default); otherwise the proposal fails and nothing is sent. Cancel, or leave it for an hour,
 and nothing is sent. A held Cable lives in that Station's memory, apart from her harness: it waits its
-hour whether or not her session there stays open, and goes on waiting when she starts again. A Station
+hour whether or not her run there stays open, and goes on waiting when she starts again. A Station
 restart drops it, and confirming it then fails and says why. A body with a character that renders as
 nothing is refused before it can become a proposal. With 32 Cables already held, or 32
 proposals waiting, she is told so and the new one is refused; nothing waiting for you is
@@ -829,10 +829,10 @@ Exports (`moneypenny.cable.sent`, you as actor, the conversation and the Cable).
 
 ## What she reads, and what that gives up
 
-Exposure is for [a Mission's Session](medical.md#exposure), an Agent doing work. A conversation
+Exposure is for [a Mission's Run](medical.md#exposure), an Agent doing work. A conversation
 with Moneypenny carries no such mark: nothing she reads sets one, and nothing she does is
 restricted or framed because of what she read. Her tool results still reach her inside
-`<ai6-data>`, which tells her they are data, and a Cable from her does not mark the Session that
+`<ai6-data>`, which tells her they are data, and a Cable from her does not mark the Run that
 reads it.
 
 What this gives up, plainly:
@@ -867,7 +867,7 @@ A view is data in a strict, versioned schema that the app renders with its own w
 | `key_values` | A list of names and values |
 | `chart` | A bar (side by side or `stacked`), line or pie chart of up to eight series; a pie is one series of up to twelve slices, none below 0 |
 | `schedule` | Bars over time, one row each from `start` to `end` (RFC 3339 times or numbers), coloured by state, each optionally opening an app page (a route link) |
-| `graph` | Nodes (Operations, Stations, Theaters, Missions, Sessions, Agents) and the edges between them, in layers or as a tree; a node may open an app page |
+| `graph` | Nodes (Operations, Stations, Theaters, Missions, Runs, Agents) and the edges between them, in layers or as a tree; a node may open an app page |
 | `svg` | A drawing in SVG, with a title |
 | `card` | A Mission, Station or Theater, opening its page |
 | `timeline` | Dated events |
@@ -893,9 +893,9 @@ theme's colours (`currentColor` is the text colour), at most 480 pixels high; it
 nothing.
 
 Her `missions` tool filters exactly as the Missions page does (both are held to one shared
-set of cases): by Operation; by a Mission's state, that of the Session updated last (a Session that
-reported none is working); then by the Station or Agent of any of its Sessions and by text in the
-Operation, Mission, Session IDs or brief, in any case.
+set of cases): by Operation; by a Mission's state, that of the Run updated last (a Run that
+reported none is working); then by the Station or Agent of any of its Runs and by text in the
+Operation, Mission, Run IDs or brief, in any case.
 
 The bounds are settings, `[assistant.views]` in the global `agents.toml` (the `views` table of
 the `assistant` record), each at least 1; Universal Exports reads them when it starts:
@@ -1167,7 +1167,7 @@ condition is listed.
 
 **Pop out** on the web opens a browser window at the app's own address with `?oo_window=chat`,
 from the click, so the browser does not take it for a pop-up nobody asked for. The window is a
-second copy of the app that shows only her chat. It signs in with the session cookie the
+second copy of the app that shows only her chat. It signs in with the run cookie the
 browser already holds, so no token travels between the two pages, and the page it came from says
 "Moneypenny is in her own window" with **Bring back**.
 
@@ -1221,7 +1221,7 @@ arrives: what the person wrote, her text, the tools she named, her views, propos
 change of their status), navigation and page cards, notices and errors. Beside them the log keeps
 what the app never shows: each tool call she made, with its arguments (`tool_call`), and the size,
 status and time of its answer (`tool_result`). Each entry that came from her harness or her tools
-names the turn that ran it: the Station, the provider Session, the Agent, the route (with its
+names the turn that ran it: the Station, the provider Run, the Agent, the route (with its
 pool), the pool account the harness held, the model, and the tokens the harness reported. A
 failed turn that leaves nothing in either service's journal is in the log, with where it ran.
 
@@ -1236,20 +1236,20 @@ on unix) waits up to 10 seconds (`log_flush_timeout`; `none` waits for all of it
 still queued, and logs how many entries were left if it gives up.
 
 A conversation the gateway no longer holds is rebuilt from the log when its person opens it:
-what the app shows, within the usual bounds, and the Station, provider Session and route of its
+what the app shows, within the usual bounds, and the Station, provider Run and route of its
 last turn, so the next message resumes there. A proposal that was still waiting shows as expired.
 
-Each Session of hers also has its [context](missions.md#session-context): her harness's own
-record of the Session, filed by the Station after each turn and when the harness closes.
+Each Run of hers also has its [context](missions.md#run-context): her harness's own
+record of the Run, filed by the Station after each turn and when the harness closes.
 
 - `GET /v1/user/assistant/conversations` lists the person's own conversations in the log
   (`{"conversations": [{conversation, person, first_at, last_at, entries, bytes}]}`, newest
   first); `?person=ID` lists another person's and `?everyone=true` everyone's.
 - `GET /v1/user/assistant/conversations/{id}/log` answers `{conversation, person, entries}`.
 - `GET /v1/user/assistant/conversations/{id}/context` answers `{conversation, person, contexts}`,
-  each context as [the Session context route](missions.md#session-context) gives it.
+  each context as [the Run context route](missions.md#run-context) gives it.
 
-A person reads their own freely. Another person's needs `audit.read` and `session.context` on
+A person reads their own freely. Another person's needs `audit.read` and `run.context` on
 `config:assistant`, and each read is audited before anything is read (`assistant.log.list`,
 `assistant.log.read`, `assistant.context.read`, resource `config:assistant`, target the person
 and the conversation). Without them another person's conversation answers `404`, as one that is
@@ -1276,10 +1276,10 @@ person's or everyone's for someone who holds both actions.
 | How long an answer may go without word from its Station | 10 minutes, then it is given up | `[assistant.gateway] answer_deadline` |
 | Conversations' size | 1 MiB per conversation, 4 MiB per person (oldest views go first); the app is sent the newest 100 entries | `[assistant.gateway]` `conversation_bytes`, `person_bytes`, `ready_entries` |
 | Her conversation log | 90 days and 1 GiB in all, trimmed every hour; 1 MiB an entry | `[assistant.gateway]` `log_age`, `log_bytes`, `log_prune_every`; `[registry.limits.assistant_log] entry_bytes` |
-| Her Sessions' contexts | 8 MiB each, its newest part kept; 2,000 kept | `[registry.limits.contexts]` `context_bytes`, `records` |
+| Her Runs' contexts | 8 MiB each, its newest part kept; 2,000 kept | `[registry.limits.contexts]` `context_bytes`, `records` |
 | Her memory | 256 KiB an entry, 1,024 entries and 8 MiB a person, 8 prior versions, 50 entries a search | `[registry.limits.memories]` ([Configuration](configuration.md#limits)) |
 | Her memory's summaries in a new harness | 8 KiB, and no more than the job's context leaves | `[assistant.gateway] memory_context_bytes` |
-| Assistant Sessions on one Station | 4 running or starting; closed after 10 idle minutes | `[assistant.desk]` `live`, `idle` |
+| Assistant Runs on one Station | 4 running or starting; closed after 10 idle minutes | `[assistant.desk]` `live`, `idle` |
 | A clone of one of her repositories | 120 seconds and 512 MiB, then given up and removed | `[assistant.desk]` `clone_timeout`, `clone_bytes` |
 | What one save of her work commits | 16 MiB; past it nothing is saved and she is told | `[assistant.desk] save_bytes` |
 | Personal repositories | none: no workspace | `[assistant] personal_repo` in the global `agents.toml`, or the `assistant` record of a SQL roster |

@@ -217,7 +217,7 @@ fn files() -> Vec<String> {
 }
 
 backend_tests!(
-    a_named_station_opens_and_a_session_home_holds_the_login,
+    a_named_station_opens_and_a_run_home_holds_the_login,
     a_harness_renewal_goes_back_and_reaches_the_other_station,
     an_older_renewed_copy_never_replaces_a_newer_one,
     a_station_that_died_with_a_renewed_copy_writes_it_when_it_returns,
@@ -225,7 +225,7 @@ backend_tests!(
     a_harness_that_was_refused_does_not_replace_the_login_and_its_home_is_put_back,
     a_blanked_login_does_not_replace_the_one_in_the_registry,
     a_file_past_the_limit_or_a_link_is_no_login,
-    the_round_renews_one_near_its_end_with_sessions_running_and_neither_is_signed_out,
+    the_round_renews_one_near_its_end_with_runs_running_and_neither_is_signed_out,
     one_lease_holder_however_many_stations_ask,
     a_login_of_unknown_end_is_renewed_by_its_age,
     a_named_station_renews_when_headquarters_is_not_named,
@@ -237,7 +237,7 @@ backend_tests!(
     a_planted_login_appears_in_no_row_notice_error_or_debug,
 );
 
-fn a_named_station_opens_and_a_session_home_holds_the_login(store: &dyn Store) {
+fn a_named_station_opens_and_a_run_home_holds_the_login(store: &dyn Store) {
     let registry = store.handle();
     let (a, c) = (station(&registry, "a"), station(&registry, "c"));
     let root = tempfile::tempdir().unwrap();
@@ -247,7 +247,7 @@ fn a_named_station_opens_and_a_session_home_holds_the_login(store: &dyn Store) {
     assert_eq!(state.expires_at, Some(NOW + 86_400.0));
     assert_eq!(state.renewed_at, Some(NOW));
     let home = root.path().join("home");
-    let login = SessionLogin::materialize(&a, &reference(), &files(), &home).unwrap();
+    let login = RunLogin::materialize(&a, &reference(), &files(), &home).unwrap();
     assert_eq!(login.revision, 1);
     assert_eq!(refresh_in_home(&home), PLANTED);
     #[cfg(unix)]
@@ -258,7 +258,7 @@ fn a_named_station_opens_and_a_session_home_holds_the_login(store: &dyn Store) {
         assert_eq!(mode(&home.join(".fake")), 0o700);
     }
     let elsewhere = root.path().join("elsewhere");
-    let refused = SessionLogin::materialize(&c, &reference(), &files(), &elsewhere).unwrap_err();
+    let refused = RunLogin::materialize(&c, &reference(), &files(), &elsewhere).unwrap_err();
     assert!(
         refused.to_string().contains("not sealed to this Station"),
         "{refused}"
@@ -267,7 +267,7 @@ fn a_named_station_opens_and_a_session_home_holds_the_login(store: &dyn Store) {
     login.remove().unwrap();
     assert!(!home.exists());
     assert!(
-        SessionLogin::recall(&home).is_none(),
+        RunLogin::recall(&home).is_none(),
         "nothing is left beside it"
     );
 }
@@ -279,12 +279,12 @@ fn a_harness_renewal_goes_back_and_reaches_the_other_station(store: &dyn Store) 
     let provider = Provider::new();
     add(&a, root.path(), NOW + 100.0, &["a", "b"]);
     let (home_a, home_b) = (root.path().join("a"), root.path().join("b"));
-    let mut session_a = SessionLogin::materialize(&a, &reference(), &files(), &home_a).unwrap();
-    let mut session_b = SessionLogin::materialize(&b, &reference(), &files(), &home_b).unwrap();
+    let mut run_a = RunLogin::materialize(&a, &reference(), &files(), &home_a).unwrap();
+    let mut run_b = RunLogin::materialize(&b, &reference(), &files(), &home_b).unwrap();
 
     assert!(provider.refresh_in(&home_a));
     assert_eq!(
-        session_a
+        run_a
             .sync(&a, revision(registry.as_ref()), NOW + 1.0)
             .unwrap(),
         Synced::Renewed(2)
@@ -295,21 +295,21 @@ fn a_harness_renewal_goes_back_and_reaches_the_other_station(store: &dyn Store) 
     assert_eq!(state.expires_at, home_login(&home_a)["expires_at"].as_f64());
 
     assert_eq!(
-        session_b
+        run_b
             .sync(&b, revision(registry.as_ref()), NOW + 2.0)
             .unwrap(),
         Synced::Rewritten(2),
-        "the next poll rewrites the other Station's Session"
+        "the next poll rewrites the other Station's Run"
     );
     assert_eq!(refresh_in_home(&home_b), provider.valid());
     assert_eq!(
-        session_b
+        run_b
             .sync(&b, revision(registry.as_ref()), NOW + 3.0)
             .unwrap(),
         Synced::Unchanged,
         "the rewrite is not taken for a renewal"
     );
-    // The other Session's next refresh works, with the token the first one's rotation left.
+    // The other Run's next refresh works, with the token the first one's rotation left.
     assert!(provider.refresh_in(&home_b));
     assert_eq!(provider.refused(), 0);
 }
@@ -320,8 +320,8 @@ fn an_older_renewed_copy_never_replaces_a_newer_one(store: &dyn Store) {
     let root = tempfile::tempdir().unwrap();
     add(&a, root.path(), NOW + 100.0, &["a", "b"]);
     let (home_a, home_b) = (root.path().join("a"), root.path().join("b"));
-    let mut session_a = SessionLogin::materialize(&a, &reference(), &files(), &home_a).unwrap();
-    let mut session_b = SessionLogin::materialize(&b, &reference(), &files(), &home_b).unwrap();
+    let mut run_a = RunLogin::materialize(&a, &reference(), &files(), &home_a).unwrap();
+    let mut run_b = RunLogin::materialize(&b, &reference(), &files(), &home_b).unwrap();
     // Both renew from revision 1; A ends far later and reaches the Registry first.
     std::fs::write(
         home_a.join(FILE),
@@ -334,10 +334,10 @@ fn an_older_renewed_copy_never_replaces_a_newer_one(store: &dyn Store) {
     )
     .unwrap();
     assert_eq!(
-        session_a.sync(&a, Some(1), NOW).unwrap(),
+        run_a.sync(&a, Some(1), NOW).unwrap(),
         Synced::Renewed(2)
     );
-    let synced = session_b.sync(&b, Some(2), NOW).unwrap();
+    let synced = run_b.sync(&b, Some(2), NOW).unwrap();
     assert!(matches!(synced, Synced::Restored(2, _)), "{synced:?}");
     assert_eq!(refresh_in_home(&home_b), "refresh-a");
     // With no way to tell, the one that reached the Registry first stands.
@@ -352,10 +352,10 @@ fn an_older_renewed_copy_never_replaces_a_newer_one(store: &dyn Store) {
     )
     .unwrap();
     assert_eq!(
-        session_a.sync(&a, Some(2), NOW).unwrap(),
+        run_a.sync(&a, Some(2), NOW).unwrap(),
         Synced::Renewed(3)
     );
-    let synced = session_b.sync(&b, Some(3), NOW).unwrap();
+    let synced = run_b.sync(&b, Some(3), NOW).unwrap();
     assert!(matches!(synced, Synced::Restored(3, _)), "{synced:?}");
     assert_eq!(refresh_in_home(&home_b), "r2");
 }
@@ -367,12 +367,12 @@ fn a_station_that_died_with_a_renewed_copy_writes_it_when_it_returns(store: &dyn
     let provider = Provider::new();
     add(&a, root.path(), NOW + 100.0, &["a"]);
     let home = root.path().join("home");
-    drop(SessionLogin::materialize(&a, &reference(), &files(), &home).unwrap());
+    drop(RunLogin::materialize(&a, &reference(), &files(), &home).unwrap());
     // The harness renews while its Station is down: only the home holds the live token.
     assert!(provider.refresh_in(&home));
     assert_eq!(revision(registry.as_ref()), Some(1));
 
-    let mut recalled = SessionLogin::recall(&home).expect("kept beside the home");
+    let mut recalled = RunLogin::recall(&home).expect("kept beside the home");
     assert_eq!(
         recalled.sync(&a, Some(1), NOW + 5.0).unwrap(),
         Synced::Renewed(2)
@@ -392,7 +392,7 @@ fn a_station_that_died_with_a_copy_made_stale_loses_it(store: &dyn Store) {
     let root = tempfile::tempdir().unwrap();
     add(&a, root.path(), NOW + 100.0, &["a", "b"]);
     let home = root.path().join("home");
-    drop(SessionLogin::materialize(&a, &reference(), &files(), &home).unwrap());
+    drop(RunLogin::materialize(&a, &reference(), &files(), &home).unwrap());
     std::fs::write(
         home.join(FILE),
         login_text("dead-a", "refresh-a", NOW + 5_000.0),
@@ -400,18 +400,18 @@ fn a_station_that_died_with_a_copy_made_stale_loses_it(store: &dyn Store) {
     .unwrap();
     // Meanwhile B renews to a later end.
     let home_b = root.path().join("b");
-    let mut session_b = SessionLogin::materialize(&b, &reference(), &files(), &home_b).unwrap();
+    let mut run_b = RunLogin::materialize(&b, &reference(), &files(), &home_b).unwrap();
     std::fs::write(
         home_b.join(FILE),
         login_text("new-b", "refresh-b", NOW + 9_000.0),
     )
     .unwrap();
     assert_eq!(
-        session_b.sync(&b, Some(1), NOW).unwrap(),
+        run_b.sync(&b, Some(1), NOW).unwrap(),
         Synced::Renewed(2)
     );
 
-    let mut recalled = SessionLogin::recall(&home).unwrap();
+    let mut recalled = RunLogin::recall(&home).unwrap();
     let synced = recalled.sync(&a, Some(2), NOW + 1.0).unwrap();
     assert!(matches!(synced, Synced::Restored(2, _)), "{synced:?}");
     assert_eq!(refresh_in_home(&home), "refresh-b");
@@ -427,14 +427,14 @@ fn a_harness_that_was_refused_does_not_replace_the_login_and_its_home_is_put_bac
     let provider = Provider::new();
     add(&a, root.path(), NOW + 100.0, &["a"]);
     let home = root.path().join("home");
-    let mut session = SessionLogin::materialize(&a, &reference(), &files(), &home).unwrap();
+    let mut run = RunLogin::materialize(&a, &reference(), &files(), &home).unwrap();
     provider.rotate_elsewhere();
     assert!(!provider.refresh_in(&home), "refused");
     assert!(
         !home.join(FILE).exists(),
         "a refused harness removes its file"
     );
-    let synced = session.sync(&a, Some(1), NOW + 1.0).unwrap();
+    let synced = run.sync(&a, Some(1), NOW + 1.0).unwrap();
     assert!(matches!(synced, Synced::Restored(1, _)), "{synced:?}");
     assert_eq!(revision(registry.as_ref()), Some(1));
     assert_eq!(refresh_in_home(&home), PLANTED);
@@ -462,13 +462,13 @@ fn a_blanked_login_does_not_replace_the_one_in_the_registry(store: &dyn Store) {
     )
     .unwrap();
     let home = root.path().join("home");
-    let mut session = SessionLogin::materialize(&a, &reference(), &files(), &home).unwrap();
+    let mut run = RunLogin::materialize(&a, &reference(), &files(), &home).unwrap();
     std::fs::write(
         home.join(FILE),
         r#"{"claudeAiOauth":{"accessToken":"","refreshToken":"","scopes":["x"],"new":1}}"#,
     )
     .unwrap();
-    let synced = session.sync(&a, Some(1), NOW + 1.0).unwrap();
+    let synced = run.sync(&a, Some(1), NOW + 1.0).unwrap();
     assert!(
         matches!(synced, Synced::Restored(1, "its harness blanked its login")),
         "{synced:?}"
@@ -481,7 +481,7 @@ fn a_blanked_login_does_not_replace_the_one_in_the_registry(store: &dyn Store) {
     )
     .unwrap();
     assert_eq!(
-        session.sync(&a, Some(1), NOW + 2.0).unwrap(),
+        run.sync(&a, Some(1), NOW + 2.0).unwrap(),
         Synced::Renewed(2)
     );
 }
@@ -492,14 +492,14 @@ fn a_file_past_the_limit_or_a_link_is_no_login(store: &dyn Store) {
     let root = tempfile::tempdir().unwrap();
     add(&a, root.path(), NOW + 100.0, &["a"]);
     let home = root.path().join("home");
-    let mut session = SessionLogin::materialize(&a, &reference(), &files(), &home).unwrap();
+    let mut run = RunLogin::materialize(&a, &reference(), &files(), &home).unwrap();
     let largest = registry.limits().accounts.sealed_bytes.get().unwrap();
     std::fs::write(home.join(FILE), vec![b'x'; largest as usize + 1]).unwrap();
-    let synced = session.sync(&a, Some(1), NOW + 1.0).unwrap();
+    let synced = run.sync(&a, Some(1), NOW + 1.0).unwrap();
     assert!(matches!(synced, Synced::Restored(1, _)), "{synced:?}");
     assert_eq!(refresh_in_home(&home), PLANTED);
 
-    // What a Session points its login file at is not sealed for other Stations.
+    // What a Run points its login file at is not sealed for other Stations.
     let elsewhere = root.path().join("elsewhere");
     std::fs::write(
         &elsewhere,
@@ -513,7 +513,7 @@ fn a_file_past_the_limit_or_a_link_is_no_login(store: &dyn Store) {
     #[cfg(windows)]
     let linked = std::os::windows::fs::symlink_file(&elsewhere, home.join(FILE)).is_ok();
     if linked {
-        let synced = session.sync(&a, Some(1), NOW + 2.0).unwrap();
+        let synced = run.sync(&a, Some(1), NOW + 2.0).unwrap();
         assert!(matches!(synced, Synced::Restored(1, _)), "{synced:?}");
         assert_eq!(revision(registry.as_ref()), Some(1));
         // The home's copy replaces the link itself, and what it pointed at stays as it was.
@@ -532,7 +532,7 @@ fn a_file_past_the_limit_or_a_link_is_no_login(store: &dyn Store) {
     }
 }
 
-fn the_round_renews_one_near_its_end_with_sessions_running_and_neither_is_signed_out(
+fn the_round_renews_one_near_its_end_with_runs_running_and_neither_is_signed_out(
     store: &dyn Store,
 ) {
     let registry = store.handle();
@@ -545,8 +545,8 @@ fn the_round_renews_one_near_its_end_with_sessions_running_and_neither_is_signed
     let live = ["a".to_owned(), "b".to_owned()];
     add(&a, root.path(), NOW + 7_200.0, &["a", "b"]);
     let (home_a, home_b) = (root.path().join("a"), root.path().join("b"));
-    let mut session_a = SessionLogin::materialize(&a, &reference(), &files(), &home_a).unwrap();
-    let mut session_b = SessionLogin::materialize(&b, &reference(), &files(), &home_b).unwrap();
+    let mut run_a = RunLogin::materialize(&a, &reference(), &files(), &home_a).unwrap();
+    let mut run_b = RunLogin::materialize(&b, &reference(), &files(), &home_b).unwrap();
 
     // Far from its end: nothing to do.
     let notices = assign_renewals(registry.as_ref(), &logins, "a", &live, &limits, NOW).unwrap();
@@ -579,25 +579,25 @@ fn the_round_renews_one_near_its_end_with_sessions_running_and_neither_is_signed
     assert_eq!(state.revision, 2);
     assert!(state.expires_at.unwrap() > near + limits.renew_within.0.as_secs_f64());
 
-    // Both Sessions take it in their next poll, and neither is signed out.
+    // Both Runs take it in their next poll, and neither is signed out.
     let held = revision(registry.as_ref());
     assert_eq!(
-        session_a.sync(&a, held, near + 1.0).unwrap(),
+        run_a.sync(&a, held, near + 1.0).unwrap(),
         Synced::Rewritten(2)
     );
     assert_eq!(
-        session_b.sync(&b, held, near + 1.0).unwrap(),
+        run_b.sync(&b, held, near + 1.0).unwrap(),
         Synced::Rewritten(2)
     );
     assert_eq!(refresh_in_home(&home_a), provider.valid());
     assert_eq!(refresh_in_home(&home_b), provider.valid());
     assert!(provider.refresh_in(&home_a));
     assert_eq!(
-        session_a.sync(&a, held, near + 2.0).unwrap(),
+        run_a.sync(&a, held, near + 2.0).unwrap(),
         Synced::Renewed(3)
     );
     assert_eq!(
-        session_b
+        run_b
             .sync(&b, revision(registry.as_ref()), near + 2.0)
             .unwrap(),
         Synced::Rewritten(3)
@@ -810,17 +810,17 @@ fn the_round_backs_off_and_then_marks_one_that_will_not_renew(store: &dyn Store)
     );
     assert!(
         !state.usable_by("a"),
-        "its Sessions go to the next account or route"
+        "its Runs go to the next account or route"
     );
 
     // Marked: the round leaves it alone, until a good copy reaches the Registry.
     assert!(round(at + 10_000.0).is_empty());
     assert_eq!(renewer.runs.load(Ordering::SeqCst), 3);
     let home = root.path().join("home");
-    let mut session = SessionLogin::materialize(&a, &reference(), &files(), &home).unwrap();
+    let mut run = RunLogin::materialize(&a, &reference(), &files(), &home).unwrap();
     std::fs::write(home.join(FILE), login_text("x", "new", at + 90_000.0)).unwrap();
     assert_eq!(
-        session.sync(&a, Some(1), at + 10_001.0).unwrap(),
+        run.sync(&a, Some(1), at + 10_001.0).unwrap(),
         Synced::Renewed(2)
     );
     let state = login_of(registry.as_ref());
@@ -997,7 +997,7 @@ fn a_planted_login_appears_in_no_row_notice_error_or_debug(store: &dyn Store) {
     let scratch = root.path().join("scratch");
     add(&a, root.path(), NOW + 100.0, &["a", "b"]);
     let home = root.path().join("home");
-    let mut session = SessionLogin::materialize(&a, &reference(), &files(), &home).unwrap();
+    let mut run = RunLogin::materialize(&a, &reference(), &files(), &home).unwrap();
     assert_eq!(refresh_in_home(&home), PLANTED, "it is there to be found");
 
     let mut seen = Vec::new();
@@ -1009,15 +1009,15 @@ fn a_planted_login_appears_in_no_row_notice_error_or_debug(store: &dyn Store) {
     seen.push(format!("{notices:?}"));
     seen.push(format!(
         "{:?}",
-        session.sync(&a, revision(registry.as_ref()), NOW)
+        run.sync(&a, revision(registry.as_ref()), NOW)
     ));
-    seen.push(format!("{session:?} {a:?} {account:?}"));
+    seen.push(format!("{run:?} {a:?} {account:?}"));
     seen.push(format!(
         "{:?}",
         LoginFiles::read(&home, &files(), crate::bounds::Limit::UNBOUNDED).unwrap()
     ));
     seen.push(c.open(&sealed_name(&reference())).unwrap_err().to_string());
-    let refused = SessionLogin::materialize(&c, &reference(), &files(), &root.path().join("c"));
+    let refused = RunLogin::materialize(&c, &reference(), &files(), &root.path().join("c"));
     seen.push(format!("{refused:?}"));
     provider.rotate_elsewhere();
     let refusing = Rotating::new(&provider);

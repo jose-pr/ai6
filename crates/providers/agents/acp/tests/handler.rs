@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use ai6::MissionId;
-use ai6::directorates::m::identity::SessionId;
+use ai6::directorates::m::identity::RunId;
 use ai6::directorates::q::terminal::{AgentTerminal, TerminalBridge};
 use ai6::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart, AssistantMode};
 use ai6::directorates::section_00::assistant::{ASSISTANT_MCP_TOKEN_ENV, ASSISTANT_MCP_URL_ENV};
@@ -77,11 +77,11 @@ fn start(environment: BTreeMap<String, String>) -> AgentStart {
     }
 }
 
-fn until(session: &Object<dyn AgentSession>, kinds: &[&str]) -> Vec<AgentEvent> {
+fn until(run: &Object<dyn AgentSession>, kinds: &[&str]) -> Vec<AgentEvent> {
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut seen = Vec::new();
     while Instant::now() < deadline {
-        if let Some(event) = session.next_event(100).unwrap() {
+        if let Some(event) = run.next_event(100).unwrap() {
             let stop = kinds.contains(&event.kind.as_str());
             seen.push(event);
             if stop {
@@ -102,35 +102,35 @@ fn text(events: &[AgentEvent]) -> String {
 }
 
 fn run(vars: &[(&str, &str)], extra: &str) -> (Object<dyn AgentSession>, Vec<AgentEvent>) {
-    let session = handler(extra)
+    let run = handler(extra)
         .start(start(environment(vars)), terminal())
         .expect("the agent starts");
-    let events = until(&session, &["completed", "failed"]);
-    (session, events)
+    let events = until(&run, &["completed", "failed"]);
+    (run, events)
 }
 
 #[test]
-fn the_sessions_environment_and_the_settings_reach_the_agent() {
-    let (session, events) = run(
-        &[("FAKE_ECHO_ENV", "WHO"), ("WHO", "from the session")],
+fn the_runs_environment_and_the_settings_reach_the_agent() {
+    let (run, events) = run(
+        &[("FAKE_ECHO_ENV", "WHO"), ("WHO", "from the run")],
         "env = { WHO = \"from the settings\", UNUSED = \"x\" }\n",
     );
     let said = text(&events);
     assert!(
-        said.contains("env:from the session"),
-        "the Session wins: {said}"
+        said.contains("env:from the run"),
+        "the Run wins: {said}"
     );
     assert!(
         said.contains("You are 007") && said.contains("Find the leak"),
         "{said}"
     );
     assert_eq!(events.last().unwrap().kind, "completed");
-    assert_eq!(session.session_id().unwrap().unwrap().as_str(), "fake-1");
-    session.close().unwrap();
+    assert_eq!(run.session_id().unwrap().unwrap().as_str(), "fake-1");
+    run.close().unwrap();
 }
 
 #[test]
-fn settings_alone_supply_what_the_session_leaves_out() {
+fn settings_alone_supply_what_the_run_leaves_out() {
     let (_, events) = run(
         &[("FAKE_ECHO_ENV", "ONLY_SETTINGS")],
         "env = { ONLY_SETTINGS = \"configured\" }\n",
@@ -149,7 +149,7 @@ fn a_reported_cost_becomes_usage() {
 }
 
 #[test]
-fn a_refusal_and_an_error_fail_the_session() {
+fn a_refusal_and_an_error_fail_the_run() {
     let (_, events) = run(&[("FAKE_STOP", "refusal")], "");
     assert_eq!(events.last().unwrap().kind, "failed");
     let (_, events) = run(&[("FAKE_ERROR", "1")], "");
@@ -165,33 +165,33 @@ fn a_refusal_and_an_error_fail_the_session() {
 
 #[test]
 fn an_interrupted_turn_completes_and_one_the_agent_cancels_by_itself_is_cancelled() {
-    let session = handler("")
+    let run = handler("")
         .start(start(environment(&[("FAKE_HOLD", "1")])), terminal())
         .expect("the agent starts");
-    session.interrupt().unwrap();
-    until(&session, &["completed"]);
+    run.interrupt().unwrap();
+    until(&run, &["completed"]);
 
-    let session = handler("")
+    let run = handler("")
         .start(
             start(environment(&[("FAKE_STOP", "cancelled")])),
             terminal(),
         )
         .expect("the agent starts");
-    until(&session, &["cancelled"]);
+    until(&run, &["cancelled"]);
 }
 
 /// What the Grok CLI answers a prompt with when its account is out of credits.
 const OUT_OF_CREDITS: &str = r#"{"message": "API error (status 402 Payment Required): personal-team-blocked:spending-limit: You have run out of credits ...", "http_status": 402}"#;
 
 #[test]
-fn grok_out_of_credits_stops_the_session_as_limited_by_the_default_words() {
-    let session = handler("")
+fn grok_out_of_credits_stops_the_run_as_limited_by_the_default_words() {
+    let run = handler("")
         .start(
             start(environment(&[("FAKE_ERROR_DATA", OUT_OF_CREDITS)])),
             terminal(),
         )
         .expect("the agent starts");
-    let events = until(&session, &["completed", "failed", "limit"]);
+    let events = until(&run, &["completed", "failed", "limit"]);
     let last = events.last().unwrap();
     assert_eq!(last.kind, "limit", "{events:?}");
     assert!(
@@ -217,7 +217,7 @@ fn an_agent_that_dies_saying_it_is_limited_has_failed_not_reached_a_limit() {
 }
 
 #[test]
-fn the_models_are_what_the_agent_offers_before_any_session() {
+fn the_models_are_what_the_agent_offers_before_any_run() {
     let listed = handler("")
         .models(environment(&[("FAKE_OPTIONS", "1")]))
         .unwrap();
@@ -280,22 +280,22 @@ fn a_permission_request_is_judged_by_the_gate() {
 }
 
 #[test]
-fn an_answer_only_session_refuses_an_edit_and_ends_when_one_runs_unasked() {
+fn an_answer_only_run_refuses_an_edit_and_ends_when_one_runs_unasked() {
     let mut request = start(environment(&[("FAKE_ASK", "edit")]));
     request.answer_only = true;
-    let session = handler("").start(request, terminal()).unwrap();
-    let events = until(&session, &["completed", "failed"]);
+    let run = handler("").start(request, terminal()).unwrap();
+    let events = until(&run, &["completed", "failed"]);
     assert!(text(&events).contains("asked:no"), "{events:?}");
     let mut request = start(environment(&[("FAKE_UNASKED", "edit")]));
     request.answer_only = true;
-    let session = handler("").start(request, terminal()).unwrap();
-    let events = until(&session, &["completed", "failed"]);
+    let run = handler("").start(request, terminal()).unwrap();
+    let events = until(&run, &["completed", "failed"]);
     let last = events.last().unwrap();
     assert_eq!(last.kind, "failed");
     assert!(last.text.as_deref().unwrap().contains("without leave"));
 }
 
-/// What an assistant Session's agent is told when it asks with this kind and input, as the Grok
+/// What an assistant Run's agent is told when it asks with this kind and input, as the Grok
 /// CLI words them.
 fn assistant_asks(kind: &str, input: &str) -> String {
     let mut request = start(environment(&[
@@ -305,14 +305,14 @@ fn assistant_asks(kind: &str, input: &str) -> String {
         (ASSISTANT_MCP_TOKEN_ENV, "token"),
     ]));
     request.assistant = Some(AssistantMode::moneypenny());
-    let session = handler("")
+    let run = handler("")
         .start(request, terminal())
         .expect("the agent starts");
-    text(&until(&session, &["completed", "failed"]))
+    text(&until(&run, &["completed", "failed"]))
 }
 
 #[test]
-fn an_assistant_session_lets_the_agent_have_reading_and_its_own_mcp_tools_alone() {
+fn an_assistant_run_lets_the_agent_have_reading_and_its_own_mcp_tools_alone() {
     let her_tool = r#"{"variant": "UseTool", "tool_name": "moneypenny__board", "tool_input": {}}"#;
     assert!(assistant_asks("other", her_tool).contains("asked:yes"));
     assert!(assistant_asks("read", "{}").contains("asked:yes"));
@@ -327,7 +327,7 @@ fn an_assistant_session_lets_the_agent_have_reading_and_its_own_mcp_tools_alone(
 }
 
 #[test]
-fn an_agent_without_http_mcp_refuses_a_session_with_cable_tools() {
+fn an_agent_without_http_mcp_refuses_a_run_with_cable_tools() {
     let error = handler("")
         .start(
             start(environment(&[
@@ -361,11 +361,11 @@ fn a_slow_initialize_is_a_setting_not_a_hang() {
 }
 
 #[test]
-fn a_session_resumes_when_the_agent_can() {
+fn a_run_resumes_when_the_agent_can() {
     let request = AgentResume {
         clearance: "field".to_owned(),
         mission_id: MissionId::try_new("mission-acp").unwrap(),
-        session_id: SessionId::try_new("fake-1").unwrap(),
+        run_id: RunId::try_new("fake-1").unwrap(),
         message: Some("carry on".to_owned()),
         working_directory: std::env::temp_dir().to_string_lossy().into_owned(),
         environment: environment(&[("FAKE_RESUME", "1")]),
@@ -379,14 +379,14 @@ fn a_session_resumes_when_the_agent_can() {
         initial_context: Vec::new(),
         overlays: Default::default(),
     };
-    let session = handler("").resume(request, terminal()).unwrap();
-    let events = until(&session, &["completed", "failed"]);
+    let run = handler("").resume(request, terminal()).unwrap();
+    let events = until(&run, &["completed", "failed"]);
     assert!(text(&events).contains("prompt:carry on"), "{events:?}");
     // An agent that cannot resume or load says so.
     let request = AgentResume {
         clearance: "field".to_owned(),
         mission_id: MissionId::try_new("mission-acp").unwrap(),
-        session_id: SessionId::try_new("fake-1").unwrap(),
+        run_id: RunId::try_new("fake-1").unwrap(),
         message: None,
         working_directory: std::env::temp_dir().to_string_lossy().into_owned(),
         environment: environment(&[]),
@@ -410,13 +410,13 @@ fn a_session_resumes_when_the_agent_can() {
     );
 }
 
-/// What starting and resuming a Session at `clearance` answers, the refusal's text on failure.
+/// What starting and resuming a Run at `clearance` answers, the refusal's text on failure.
 fn launched(clearance: &str, extra: &str) -> [Result<(), String>; 2] {
     let mut started = start(environment(&[]));
     started.clearance = clearance.to_owned();
     let resumed = AgentResume {
         mission_id: MissionId::try_new("mission-acp").unwrap(),
-        session_id: SessionId::try_new("fake-1").unwrap(),
+        run_id: RunId::try_new("fake-1").unwrap(),
         message: Some("carry on".to_owned()),
         working_directory: std::env::temp_dir().to_string_lossy().into_owned(),
         clearance: clearance.to_owned(),
@@ -433,18 +433,18 @@ fn launched(clearance: &str, extra: &str) -> [Result<(), String>; 2] {
     };
     let handler = handler(extra);
     [
-        handler.start(started, terminal()).map(|session| {
-            let _ = session.close();
+        handler.start(started, terminal()).map(|run| {
+            let _ = run.close();
         }),
-        handler.resume(resumed, terminal()).map(|session| {
-            let _ = session.close();
+        handler.resume(resumed, terminal()).map(|run| {
+            let _ = run.close();
         }),
     ]
     .map(|result| result.map_err(|error| error.to_string()))
 }
 
 #[test]
-fn a_session_at_desk_or_an_unknown_clearance_is_refused_at_start_and_resume() {
+fn a_run_at_desk_or_an_unknown_clearance_is_refused_at_start_and_resume() {
     for clearance in ["desk", "developer", ""] {
         for answer in launched(clearance, "") {
             let refused = answer.expect_err(clearance);
@@ -462,7 +462,7 @@ fn a_session_at_desk_or_an_unknown_clearance_is_refused_at_start_and_resume() {
 }
 
 #[test]
-fn a_desk_session_starts_only_on_a_setting_reported_as_a_weakening() {
+fn a_desk_run_starts_only_on_a_setting_reported_as_a_weakening() {
     for answer in launched("desk", "unconfined_desk = true\n") {
         assert_eq!(answer, Ok(()));
     }
@@ -475,7 +475,7 @@ fn a_desk_session_starts_only_on_a_setting_reported_as_a_weakening() {
 }
 
 #[test]
-fn answer_only_and_assistant_sessions_are_not_refused_at_desk() {
+fn answer_only_and_assistant_runs_are_not_refused_at_desk() {
     let mut request = start(environment(&[]));
     request.clearance = "desk".to_owned();
     request.answer_only = true;
@@ -524,10 +524,10 @@ fn an_overlays_skill_reaches_the_agent_as_a_routing_line() {
         path: "/store/tools/skills/review".to_owned(),
         native: true,
     });
-    let session = handler("")
+    let run = handler("")
         .start(request, terminal())
         .expect("the agent starts");
-    let said = text(&until(&session, &["completed", "failed"]));
+    let said = text(&until(&run, &["completed", "failed"]));
     assert!(said.contains("You are 007"), "{said}");
     assert!(said.contains("Skill `review` (overlay `tools`)"), "{said}");
     assert!(

@@ -863,7 +863,7 @@ mod tests {
         let provider = SqlProvider::open(location).unwrap();
         let key = ConfigRecord::SINGLETON_KEY;
         let first = json!({"role": {"viewer": {"actions": ["mission.read"]}}});
-        let second = json!({"role": {"viewer": {"actions": ["mission.read", "session.read"]}}});
+        let second = json!({"role": {"viewer": {"actions": ["mission.read", "run.read"]}}});
         let access = ConfigRecord::Access;
         provider.put_if(access, &GLOBAL, key, None, &first).unwrap();
         let stale = provider

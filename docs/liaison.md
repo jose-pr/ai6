@@ -22,7 +22,7 @@ message, to one Agent, and it is delivered, not placed or scheduled.
 | `CancelTask` | Withdraws the Cable while nobody has had it; after that, `TaskNotCancelableError` |
 | A Cable to `a2a:<peer>` or `a2a:<peer>/<addressee>` | An A2A `SendMessage` to that peer (with `metadata.addressee` when one is named); its answer comes back as a reply Cable |
 
-Neither a Task ID nor a context ID is ever a Mission ID or a Session ID. A Task is one message and
+Neither a Task ID nor a context ID is ever a Mission ID or a Run ID. A Task is one message and
 its replies; the next message in a conversation is a new Task in the same context. Only text
 parts are carried (`ContentTypeNotSupportedError` otherwise), and push notifications are not
 offered.
@@ -81,12 +81,12 @@ arrives. The card it reads lists them as skills, those its principal may send to
 names one in `metadata.addressee`; a peer with a single addressee may leave it out, and a message
 in a known context goes where that context went.
 
-## Threads stay with their Session
+## Threads stay with their Run
 
-A context is bound to the Agent's Session that took its first message: the relay records which
-Session took a peer's Cable, and a follow-up in the context reaches that Session only. Once that
-Session has ended, the follow-up goes to the Agent's next Session, one opened after it ended,
-never to another Session of the Agent that was already open. Until a Session is free to take it,
+A context is bound to the Agent's Run that took its first message: the relay records which
+Run took a peer's Cable, and a follow-up in the context reaches that Run only. Once that
+Run has ended, the follow-up goes to the Agent's next Run, one opened after it ended,
+never to another Run of the Agent that was already open. Until a Run is free to take it,
 it waits as any Cable does, until its lifetime ends.
 
 ## Reaching Liaison
@@ -114,7 +114,7 @@ An Agent sends to a peer with `send_cable`, scope `agent`, target `a2a:<peer>`, 
 `a2a:<peer>/<addressee>` to name one of the peer's own addressees. Liaison carries it on the link
 the peer holds open to the gateway, else by dialing the peer's `url` (`wss://` with the public
 roots, or `ws://` on loopback), proving the peer's `id`. The peer's answer, a message or a task
-followed to its end, comes back to the sending Session as a reply Cable from `a2a:<peer>`. When
+followed to its end, comes back to the sending Run as a reply Cable from `a2a:<peer>`. When
 the peer refuses or fails, the reply says so; when it cannot be reached, the Cable waits for it,
 tried again every `poll`, until it expires. A peer cannot address another peer. A grant naming
 `a2a:<peer>` covers `a2a:<peer>/<addressee>` as well.
@@ -134,5 +134,5 @@ tried again every `poll`, until it expires. A peer cannot address another peer. 
 
 Files, data parts and push notifications are not carried. A peer's addressee must be listed in
 the gateway's configuration; a peer cannot discover Agents beyond its card. A thread bound to a
-Session wakes that Session between turns as any Cable does; once the Session has ended, it waits
-for the Agent's next Session to read it, and is not put in a brief.
+Run wakes that Run between turns as any Cable does; once the Run has ended, it waits
+for the Agent's next Run to read it, and is not put in a brief.

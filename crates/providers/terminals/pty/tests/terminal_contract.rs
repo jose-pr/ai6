@@ -3,7 +3,7 @@ use std::io::{BufRead, Write};
 use std::time::{Duration, Instant};
 
 use ai6::directorates::q::terminal::{
-    ExitInfo, JsonLines, STREAM_COLS, Spec, StreamLine, Terminal, TerminalSession,
+    ExitInfo, JsonLines, STREAM_COLS, Spec, StreamLine, Terminal, TerminalRun,
 };
 use ai6::guatiao::{FromValue, ToValue, library::Object};
 use ai6_terminal_pty::{Pty, PtyConfig};
@@ -18,18 +18,18 @@ fn spec(argv: Vec<String>) -> Spec {
     }
 }
 
-fn start(argv: Vec<String>) -> Object<dyn TerminalSession> {
+fn start(argv: Vec<String>) -> Object<dyn TerminalRun> {
     Pty::default()
         .spawn(&spec(argv).to_value().unwrap())
         .unwrap()
 }
 
-fn read_until(session: &Object<dyn TerminalSession>, marker: &[u8]) -> Vec<u8> {
+fn read_until(run: &Object<dyn TerminalRun>, marker: &[u8]) -> Vec<u8> {
     let deadline = Instant::now() + Duration::from_secs(60);
     let mut output = Vec::new();
     let mut buffer = [0; 1024];
     while !output.windows(marker.len()).any(|window| window == marker) {
-        let count = session.read(&mut buffer, 100).unwrap();
+        let count = run.read(&mut buffer, 100).unwrap();
         if count > 0 {
             output.extend_from_slice(&buffer[..count as usize]);
         }
@@ -42,17 +42,17 @@ fn read_until(session: &Object<dyn TerminalSession>, marker: &[u8]) -> Vec<u8> {
     output
 }
 
-fn wait_for_exit(session: &Object<dyn TerminalSession>) -> ExitInfo {
+fn wait_for_exit(run: &Object<dyn TerminalRun>) -> ExitInfo {
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
-        let value = session.exit_status(0).unwrap();
+        let value = run.exit_status(0).unwrap();
         let status = ExitInfo::from_value(&value).unwrap();
         if !status.running {
             return status;
         }
         assert!(Instant::now() < deadline, "PTY child did not exit");
         let mut byte = [0];
-        let _ = session.read(&mut byte, 20).unwrap();
+        let _ = run.read(&mut byte, 20).unwrap();
     }
 }
 
@@ -72,10 +72,10 @@ fn a_pty_child_emits_output_and_reports_exit() {
         "printf AI6_PTY_READY".to_owned(),
     ];
 
-    let session = start(argv);
-    let output = read_until(&session, b"AI6_PTY_READY");
+    let run = start(argv);
+    let output = read_until(&run, b"AI6_PTY_READY");
     assert!(output.windows(13).any(|window| window == b"AI6_PTY_READY"));
-    let status = wait_for_exit(&session);
+    let status = wait_for_exit(&run);
     assert_eq!(status.code, Some(0));
     assert_eq!(status.signal, None);
 }
@@ -126,7 +126,7 @@ fn a_child_waiting_for_its_input_answers_without_help() {
         "pty_child".to_owned(),
         "--nocapture".to_owned(),
     ];
-    let session = Pty::default()
+    let run = Pty::default()
         .spawn(
             &Spec {
                 argv: argv.to_vec(),
@@ -139,7 +139,7 @@ fn a_child_waiting_for_its_input_answers_without_help() {
             .unwrap(),
         )
         .unwrap();
-    session
+    run
         .write(format!("{}\n", "i".repeat(INPUT)).as_bytes())
         .unwrap();
 
@@ -154,7 +154,7 @@ fn a_child_waiting_for_its_input_answers_without_help() {
             "the child never answered; it wrote {:?}",
             String::from_utf8_lossy(&raw[..raw.len().min(400)])
         );
-        let count = session.read(&mut buffer, 100).unwrap();
+        let count = run.read(&mut buffer, 100).unwrap();
         if count > 0 {
             raw.extend_from_slice(&buffer[..count as usize]);
             lines.push(&buffer[..count as usize]);
@@ -178,26 +178,26 @@ fn a_child_waiting_for_its_input_answers_without_help() {
         !raw.windows(4).any(|window| window == b"\x1b[6n"),
         "the query was answered and removed"
     );
-    assert_eq!(wait_for_exit(&session).code, Some(0));
+    assert_eq!(wait_for_exit(&run).code, Some(0));
 }
 
 /// Input written to the program does not come back in its output.
 #[cfg(unix)]
 #[test]
 fn written_input_is_not_echoed() {
-    let session = start(vec![
+    let run = start(vec![
         "sh".to_owned(),
         "-c".to_owned(),
         "IFS= read -r line; printf 'AI6_READ_%s.' \"${#line}\"".to_owned(),
     ]);
-    session.write(b"AI6_SECRET_INPUT\n").unwrap();
-    let output = read_until(&session, b"AI6_READ_16.");
+    run.write(b"AI6_SECRET_INPUT\n").unwrap();
+    let output = read_until(&run, b"AI6_READ_16.");
     assert!(
         !output.windows(10).any(|window| window == b"AI6_SECRET"),
         "the input was echoed: {}",
         String::from_utf8_lossy(&output)
     );
-    assert_eq!(wait_for_exit(&session).code, Some(0));
+    assert_eq!(wait_for_exit(&run).code, Some(0));
 }
 
 /// A ^C written to the terminal interrupts its program, which is how the Claude Code handler
@@ -205,23 +205,23 @@ fn written_input_is_not_echoed() {
 #[cfg(unix)]
 #[test]
 fn a_written_ctrl_c_interrupts_the_program() {
-    let session = start(vec![
+    let run = start(vec![
         "sh".to_owned(),
         "-c".to_owned(),
         "exec sleep 30".to_owned(),
     ]);
-    session.write(&[3]).unwrap();
-    let status = wait_for_exit(&session);
+    run.write(&[3]).unwrap();
+    let status = wait_for_exit(&run);
     assert!(status.signal.is_some(), "it exited with {status:?}");
 }
 
-/// Reads until the session reports the end of its output; fails if that takes 10 seconds.
-fn read_to_end(session: &Object<dyn TerminalSession>) -> Vec<u8> {
+/// Reads until the run reports the end of its output; fails if that takes 10 seconds.
+fn read_to_end(run: &Object<dyn TerminalRun>) -> Vec<u8> {
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut output = Vec::new();
     let mut buffer = [0; 1024];
     loop {
-        let count = session.read(&mut buffer, 100).unwrap();
+        let count = run.read(&mut buffer, 100).unwrap();
         if count == 0 {
             return output;
         }
@@ -263,7 +263,7 @@ fn a_child_that_exits_early_ends_its_output() {
         "pty_exit_child".to_owned(),
         "--nocapture".to_owned(),
     ];
-    let session = Pty::default()
+    let run = Pty::default()
         .spawn(
             &Spec {
                 env: Some(env),
@@ -274,16 +274,16 @@ fn a_child_that_exits_early_ends_its_output() {
             .unwrap(),
         )
         .unwrap();
-    let output = read_to_end(&session);
+    let output = read_to_end(&run);
     assert!(
         output.windows(13).any(|window| window == b"AI6_PTY_FATAL"),
         "the last line is read before the end: {}",
         String::from_utf8_lossy(&output)
     );
-    let status = ExitInfo::from_value(&session.exit_status(0).unwrap()).unwrap();
+    let status = ExitInfo::from_value(&run.exit_status(0).unwrap()).unwrap();
     assert_eq!(status.code, Some(3));
     let mut byte = [0];
-    assert_eq!(session.read(&mut byte, 100).unwrap(), 0, "the end is final");
+    assert_eq!(run.read(&mut byte, 100).unwrap(), 0, "the end is final");
 }
 
 /// A process the child left running keeps a Unix terminal open after the child has exited,
@@ -291,14 +291,14 @@ fn a_child_that_exits_early_ends_its_output() {
 #[cfg(unix)]
 #[test]
 fn a_child_that_exits_leaving_a_process_behind_ends_its_output() {
-    let session = start(vec![
+    let run = start(vec![
         "sh".to_owned(),
         "-c".to_owned(),
         "sleep 30 & printf AI6_PTY_LEFT; exit 4".to_owned(),
     ]);
-    let output = read_to_end(&session);
+    let output = read_to_end(&run);
     assert!(output.windows(12).any(|window| window == b"AI6_PTY_LEFT"));
-    let status = ExitInfo::from_value(&session.exit_status(0).unwrap()).unwrap();
+    let status = ExitInfo::from_value(&run.exit_status(0).unwrap()).unwrap();
     assert_eq!(status.code, Some(4));
 }
 
@@ -314,11 +314,11 @@ fn kill_returns_once_the_child_has_exited() {
     ];
     #[cfg(unix)]
     let argv = vec!["sh".to_owned(), "-c".to_owned(), "exec sleep 30".to_owned()];
-    let session = start(argv);
+    let run = start(argv);
     let mut byte = [0];
-    let _ = session.read(&mut byte, 500).unwrap();
-    session.kill().unwrap();
-    let status = ExitInfo::from_value(&session.exit_status(0).unwrap()).unwrap();
+    let _ = run.read(&mut byte, 500).unwrap();
+    run.kill().unwrap();
+    let status = ExitInfo::from_value(&run.exit_status(0).unwrap()).unwrap();
     assert!(!status.running, "kill returned before the child exited");
 }
 
@@ -333,12 +333,12 @@ fn kill_ends_a_running_pty_process() {
     #[cfg(unix)]
     let argv = vec!["sh".to_owned(), "-c".to_owned(), "exec sleep 30".to_owned()];
 
-    let session = start(argv);
-    session.resize(40, 120).unwrap();
-    let value = session.exit_status(0).unwrap();
+    let run = start(argv);
+    run.resize(40, 120).unwrap();
+    let value = run.exit_status(0).unwrap();
     assert!(ExitInfo::from_value(&value).unwrap().running);
-    session.kill().unwrap();
-    assert!(!wait_for_exit(&session).running);
+    run.kill().unwrap();
+    assert!(!wait_for_exit(&run).running);
 }
 
 /// A grandchild: appends a byte to the file `AI6_PTY_BEAT` names every 20 ms, for at most 30 s.
@@ -359,7 +359,7 @@ fn pty_grandchild() {
     }
 }
 
-/// A child that starts [`pty_grandchild`] outside its own session and process group
+/// A child that starts [`pty_grandchild`] outside its own run and process group
 /// (`setsid`), or on Windows detached in a process group of its own, says so, and waits for it.
 #[test]
 fn pty_detacher() {
@@ -400,7 +400,7 @@ fn detach(command: &mut std::process::Command) {
     command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
 }
 
-/// `kill` ends a grandchild that left the program's session and process group.
+/// `kill` ends a grandchild that left the program's run and process group.
 #[test]
 fn kill_ends_a_grandchild_that_left_the_process_group() {
     let dir = std::env::current_exe()
@@ -427,7 +427,7 @@ fn kill_ends_a_grandchild_that_left_the_process_group() {
         "pty_detacher".to_owned(),
         "--nocapture".to_owned(),
     ];
-    let session = Pty::default()
+    let run = Pty::default()
         .spawn(
             &Spec {
                 env: Some(env),
@@ -437,14 +437,14 @@ fn kill_ends_a_grandchild_that_left_the_process_group() {
             .unwrap(),
         )
         .unwrap();
-    read_until(&session, b"AI6_PTY_SPAWNED");
+    read_until(&run, b"AI6_PTY_SPAWNED");
     let size = || std::fs::metadata(&beat).map_or(0, |meta| meta.len());
     let deadline = Instant::now() + Duration::from_secs(20);
     while size() < 3 {
         assert!(Instant::now() < deadline, "the grandchild never beat");
         std::thread::sleep(Duration::from_millis(20));
     }
-    session.kill().unwrap();
+    run.kill().unwrap();
     std::thread::sleep(Duration::from_millis(300));
     let after_kill = size();
     std::thread::sleep(Duration::from_millis(500));
@@ -474,7 +474,7 @@ fn the_configured_chunk_and_waits_are_observed() {
         ..PtyConfig::default()
     })
     .unwrap();
-    let session = pty
+    let run = pty
         .spawn(
             &Spec {
                 env: Some(env),
@@ -485,7 +485,7 @@ fn the_configured_chunk_and_waits_are_observed() {
             .unwrap(),
         )
         .unwrap();
-    let output = read_to_end(&session);
+    let output = read_to_end(&run);
     assert!(
         output.windows(13).any(|window| window == b"AI6_PTY_FATAL"),
         "{}",

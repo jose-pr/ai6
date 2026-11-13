@@ -33,7 +33,7 @@ Map<String, Object?> _held(OoConfig config) {
     'chat.retry_max_delay': chat.retryMaxDelay,
     'routes.text_bytes': config.routeLimits.textBytes,
     'art.max_width': config.art.maxWidth,
-    'refresh.sessions': refresh.sessions,
+    'refresh.runs': refresh.runs,
     'refresh.overview': refresh.overview,
     'refresh.timeline': refresh.timeline,
     'refresh.pools': refresh.pools,
@@ -113,7 +113,7 @@ void main() {
       ('[oo.chat]\nwidth = "$planted"\n', 'oo.chat.width'),
       ('[oo.chat]\nwidth = 0\n', 'oo.chat.width'),
       ('[oo.chat]\ntransition_ms = 1.5\n', 'oo.chat.transition_ms'),
-      ('[oo.refresh]\nsessions = -1\n', 'oo.refresh.sessions'),
+      ('[oo.refresh]\nruns = -1\n', 'oo.refresh.runs'),
       ('[oo.refresh]\nrenew_retry = 0\n', 'oo.refresh.renew_retry'),
       ('[oo.refresh]\nsilent_intervals = 0\n', 'oo.refresh.silent_intervals'),
       ('[oo.controls]\npoll = 0\n', 'oo.controls.poll'),
@@ -142,10 +142,10 @@ void main() {
     }
     test('what the schema allows reads, 0 where 0 means something', () {
       final read = OoConfig.parse(
-        '[oo.refresh]\nsessions = 0\n[oo.limits]\nreason_chars = 0\n'
+        '[oo.refresh]\nruns = 0\n[oo.limits]\nreason_chars = 0\n'
         '[oo.controls]\nwait = 0\n[oo.chat]\ntransition_ms = 0\n',
       );
-      expect(read.limits.refresh.sessions, isNull);
+      expect(read.limits.refresh.runs, isNull);
       expect(read.limits.inputs.reasonChars, 0);
       expect(read.limits.controls.wait, Duration.zero);
       expect(read.chat.transitionMs, 0);

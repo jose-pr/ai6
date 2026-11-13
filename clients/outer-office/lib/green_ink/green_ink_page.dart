@@ -21,7 +21,7 @@ class GreenInkRequestSummary {
     required this.id,
     required this.operationId,
     required this.missionId,
-    required this.sessionId,
+    required this.runId,
     required this.agent,
     required this.kind,
     required this.target,
@@ -34,7 +34,7 @@ class GreenInkRequestSummary {
   final String id;
   final String operationId;
   final String missionId;
-  final String sessionId;
+  final String runId;
   final String agent;
 
   /// `push`, `merge`, `release`, `delete`, `clearance` or a kind the Operation adds.
@@ -57,7 +57,7 @@ class GreenInkRequestSummary {
       id: json['id'] as String,
       operationId: json['operation'] as String,
       missionId: json['mission'] as String,
-      sessionId: json['session'] as String,
+      runId: json['run'] as String,
       agent: json['agent'] as String,
       kind: scope['kind'] as String,
       target: scope['target'] as String,

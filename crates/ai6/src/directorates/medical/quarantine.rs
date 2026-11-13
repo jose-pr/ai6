@@ -19,13 +19,13 @@ pub const DEFAULT_BUDGET_STOPS: u32 = 2;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IncidentKind {
-    /// The Watchdog found no activity and stopped the Session.
+    /// The Watchdog found no activity and stopped the Run.
     Stall,
-    /// The Watchdog found repeated output and stopped the Session.
+    /// The Watchdog found repeated output and stopped the Run.
     Loop,
     /// The Agent's commits violated the Operation's cover policy.
     Blown,
-    /// A budget limit stopped the Session.
+    /// A budget limit stopped the Run.
     Budget,
 }
 

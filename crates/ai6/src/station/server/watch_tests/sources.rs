@@ -178,7 +178,7 @@ async fn a_source_item_reaches_the_watch_as_a_cable_and_waits_for_its_decision()
     );
     assert_eq!(reports(&state, tag).len(), 1);
     assert_no_mission(&state, tag);
-    assert!(state.intake.sessions().unwrap().is_empty());
+    assert!(state.intake.runs().unwrap().is_empty());
 
     // Polled unchanged, it is not told again.
     let again = poll(&state, tag, &source);
@@ -312,10 +312,10 @@ fn assert_no_watch_mission(state: &DaemonState) {
     assert!(
         state
             .intake
-            .sessions()
+            .runs()
             .unwrap()
             .iter()
-            .all(|session| !session.mission_id.starts_with("watch--")),
-        "no Session record of a watch"
+            .all(|run| !run.mission_id.starts_with("watch--")),
+        "no Run record of a watch"
     );
 }

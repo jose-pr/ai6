@@ -46,7 +46,7 @@ MissionBoard signedIn(FakeChannel channel) {
   );
   board.accessToken = 'user-token';
   board.loading = false;
-  board.userSession = const UserSessionSummary(
+  board.userRun = const UserRunSummary(
     personId: 'ana',
     moneypenny: true,
     name: 'ana',
@@ -121,11 +121,11 @@ void main() {
       hasLength(12),
     );
     await tester.tap(
-      find.descendant(of: drawer, matching: find.text('Sessions')),
+      find.descendant(of: drawer, matching: find.text('Runs')),
     );
     await tester.pumpAndSettle();
     expect(find.byType(DataTable), findsNothing);
-    expect(find.text('preview-session-007'), findsOneWidget);
+    expect(find.text('preview-run-007'), findsOneWidget);
     expect(find.text('Operation G'), findsNWidgets(2));
     expect(find.text('Mission mission-007'), findsNWidgets(2));
   });
@@ -156,7 +156,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).last, 'remote');
     await tester.pumpAndSettle();
-    expect(find.text('Session preview-session-007'), findsNothing);
+    expect(find.text('Run preview-run-007'), findsNothing);
     await tester.tap(find.text('Station station-remote-02'));
     await tester.pumpAndSettle();
     // It opens that Station, not just the page of Stations.

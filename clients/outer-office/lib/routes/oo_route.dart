@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart' show immutable, listEquals;
 import '../held/held_briefs_page.dart' show isInvisible;
 import '../shell/oo_shell.dart' show OoPage;
 
-/// The states of a Mission or Session on the board, in the board's order.
+/// The states of a Mission or Run on the board, in the board's order.
 const boardStates = [
   'queued',
   'working',
@@ -37,7 +37,7 @@ class OoRouteLimits {
 }
 
 const _missionSorts = ['updated', 'created', 'state', 'operation', 'mission'];
-const _sessionSorts = [..._missionSorts, 'session'];
+const _runSorts = [..._missionSorts, 'run'];
 const _orders = ['asc', 'desc'];
 
 /// The columns each table page sorts by; a table's column ids are these.
@@ -84,14 +84,14 @@ const _fields = <OoPage, List<_Field>>{
     _Field('compartment', _Kind.identifier),
     _Field('reviews', _Kind.oneOf, ['show']),
   ],
-  OoPage.sessions: [
+  OoPage.runs: [
     _Field('operation_id', _Kind.identifier),
     _Field('state', _Kind.oneOf, boardStates),
     _Field('station_id', _Kind.identifier),
     _Field('agent', _Kind.identifier),
-    _Field('sort', _Kind.oneOf, _sessionSorts),
+    _Field('sort', _Kind.oneOf, _runSorts),
     _Field('order', _Kind.oneOf, _orders),
-    _Field('session_id', _Kind.identifier),
+    _Field('run_id', _Kind.identifier),
     _Field('text', _Kind.text),
   ],
   OoPage.stations: [
@@ -233,7 +233,7 @@ class OoRoute {
     _ => null,
   };
 
-  /// The board states this route filters by: a Missions list, a Sessions state, or none.
+  /// The board states this route filters by: a Missions list, a Runs state, or none.
   List<String> get states => switch (_values['state']) {
     final String state => [state],
     final List<String> states => states,

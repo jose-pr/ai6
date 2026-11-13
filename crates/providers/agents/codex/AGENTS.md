@@ -23,7 +23,7 @@ milliseconds and `_secs` seconds.
 | `json_line_bytes` | 67108864 | Bytes of one line of the app server's output held before what there is is handed over |
 | `csi_bytes` | 64 | Bytes of one terminal control sequence before it is dropped, in the app server's output and in the tool check's commands |
 | `context_file_bytes` | 1048576 | Bytes an assistant's context file may hold |
-| `tail_lines` | 8 | Non-JSON lines a failed Session quotes |
+| `tail_lines` | 8 | Non-JSON lines a failed Run quotes |
 | `tail_line_bytes` | 512 | Bytes of each of those lines |
 | `close_wait_ms` | 2000 | How long `close` waits for the app server to have exited |
 | `exit_wait_ms` | 1000 | How long the end of the output waits for the exit status |
@@ -42,10 +42,10 @@ A Station sets them in `[providers.codex]` of its `station` record.
 
 `CodexHandler` and `CodexConfig` implement `ai6::directorates::section_00::agent::AgentHandler`. The config
 selects the Codex executable. It starts Codex in app-server mode using the AI6-supplied
-terminal. The AI6 Session ID is Codex's resumable thread ID; the handler passes it to
-`thread/resume`. The separate Codex session-tree ID is not used as the resume handle.
+terminal. The AI6 Run ID is Codex's resumable thread ID; the handler passes it to
+`thread/resume`. The separate Codex run-tree ID is not used as the resume handle.
 The handler sends the Mission working directory and verifies the returned thread ID
-before accepting the resumed Session. A missing or different thread ID closes the
+before accepting the resumed Run. A missing or different thread ID closes the
 app-server process and fails resume.
 A usage limit is emitted as an event of kind `limit` (`ai6::LIMIT_EVENT`) with
 `AgentEvent::limit` set, instead of `completed` or `failed`. It is recognised from an
@@ -59,13 +59,13 @@ Every `account/rateLimits/updated` notification also sets `AgentEvent::report` t
 `Bucket` per window present (`primary`, `secondary`): its id named as above, else
 by its position; used thousandths of 1000 from `usedPercent` (times ten, clamped to 0-1000); a fixed
 window of `windowDurationMins` ending at `resetsAt`; exhausted at 100 percent. `usage(environment)` reads
-the account with no thread and no turn through `coqui_acp_codex::CodexSession::read_account_usage`
+the account with no thread and no turn through `coqui_acp_codex::CodexRun::read_account_usage`
 (an app server started for the read and ended after it).
-A `thread/tokenUsage/updated` notification carries the report's `spend`, summed over the session's requests, from
+A `thread/tokenUsage/updated` notification carries the report's `spend`, summed over the run's requests, from
 `params.tokenUsage.last` (the latest model request; the thread total survives a resume, so it
 is not used): `inputTokens` minus `cachedInputTokens` as input, the cached ones as cache reads,
-`outputTokens` as output, added to the session's running spend. Codex reports no cost, so `cost_micro_usd` is
-unset and Codex Sessions are limited by tokens only. An `item/started` notification for a web
+`outputTokens` as output, added to the run's running spend. Codex reports no cost, so `cost_micro_usd` is
+unset and Codex Runs are limited by tokens only. An `item/started` notification for a web
 search (`WebSearch`) or an MCP or dynamic tool call (the tool's name) sets
 `AgentEvent::tools`. These shapes follow the app-server protocol schema, not a live account.
 The end of the app server's output is the terminal's end-of-file, or its exit while the
@@ -85,7 +85,7 @@ a loopback stand-in for the model): under approval `never` the call fails with "
 requires approval, but approval policy is never", and under `untrusted` it sends
 `mcpServer/elicitation/request`, which this handler does not answer. With it the call completes
 under both.
-When AI6 supplies `AI6_THEATER_MCP_URL` and `AI6_THEATER_MCP_TOKEN` the Session is in
+When AI6 supplies `AI6_THEATER_MCP_URL` and `AI6_THEATER_MCP_TOKEN` the Run is in
 remote-hands mode: its work is on a remote Theater, reached only through the Theater tools.
 App-server then also receives overrides for an `ai6-theater` server, its tools approved the
 same way, `tool_timeout_sec` set to the Station's `AI6_THEATER_MCP_TIMEOUT_MS` in seconds, rounded up
@@ -109,7 +109,7 @@ are declined without asking it, and also printed on standard error and queued as
 kind `declined`: a request whose line was `rebuilt` (`StreamLine::Json::rebuilt`: rejoined
 from a line the terminal broke, or with a control other than SGR removed from inside it),
 and one whose `itemId` names no earlier `item/started` commandExecution item with the same
-`command` (so a subcommand approval sharing a parent item is declined). A Session without a
+`command` (so a subcommand approval sharing a parent item is declined). A Run without a
 Cable endpoint cannot ask for green ink, so it has no gate and everything is accepted, as with
 the Claude handler. `item/fileChange/requestApproval` (params `threadId`, `turnId`, `itemId`,
 `startedAtMs`, `reason`, `grantRoot`; the paths are on the `item/started` fileChange item it
@@ -139,7 +139,7 @@ only. `true` leaves trust to the user's own configuration. The key is the workin
 directory as AI6 passes it as `cwd`; should Codex key the project by another spelling of the
 path (its repository root, a canonical form), that project has no entry at all in the
 replaced table: it gets Codex's default for an unlisted project, never a trust the user
-granted it. That the default is untrusted for an app-server session is not confirmed from
+granted it. That the default is untrusted for an app-server run is not confirmed from
 the Codex documentation. Not exercised against a live Codex.
 When `AgentStart::answer_only` (or `AgentResume::answer_only`) is `true`, which AI6 sets for
 a Chief of Staff review, app-server receives `-c mcp_servers={}`, `-c` for
@@ -147,7 +147,7 @@ a Chief of Staff review, app-server receives `-c mcp_servers={}`, `-c` for
 `agents.enabled=false`, `features.apps=false`, `skills.max_context_tokens=1` and
 `tools.experimental_request_user_input={enabled=false}` (which removes `request_user_input`
 and `request_user_input_async`; no feature does), and the untrusted-project override and none
-of AI6's servers; the Session has no gate, and `thread/start` and `thread/resume` carry
+of AI6's servers; the Run has no gate, and `thread/start` and `thread/resume` carry
 `sandbox = "read-only"`, `approvalPolicy = "never"` and `config = {"web_search":
 "disabled"}`. An assistant (`AgentStart::assistant`) gets the same, with `mcp_servers`
 holding exactly its servers, each with `default_tools_approval_mode="approve"` (under approval
@@ -226,7 +226,7 @@ app-server protocol source (`ThreadStartParams`: `sandbox`, `approvalPolicy`, `c
 
 A Mission's thread at `desk`, or a clearance that is not one of the three
 (`ai6::clearance_runs_commands`; `AgentStart::clearance`, `AgentResume::clearance`), an empty one
-included, gets what a field Session gets (the AI6 servers its environment names, approved the same
+included, gets what a field Run gets (the AI6 servers its environment names, approved the same
 way, and the project override `project_settings` decides) and `-c` for `features.shell_tool=false`,
 `web_search="disabled"`, `features.multi_agent=false`, `agents.enabled=false`, `features.apps=false`,
 `skills.max_context_tokens=1` and `tools.experimental_request_user_input={enabled=false}`;
@@ -242,14 +242,14 @@ loses the command tools though its history still lists them (same measurement), 
 directory, a `grantRoot`, a `rebuilt` line and an item not started are declined. In remote-hands mode the
 thread stays read-only with approval `never`, so `apply_patch` is refused without asking, and `-c
 mcp_servers.ai6-theater.disabled_tools=["theater_run","theater_write"]` takes those two out of `exec`
-(same measurement). `field` and `00` get a field Session as above, with no tool check.
+(same measurement). `field` and `00` get a field Run as above, with no tool check.
 
 An overlay's skill (`AgentStart::overlays`) is a routing line naming its `SKILL.md`, after
 `initial_context` in the developer instructions: Codex 0.164.0 lists the skills of `CODEX_HOME/skills`,
 the project's own skill directories and what it ships, took no other root through
 `skills.config`, `skills.paths`, `skills.roots`, `skills.extra_roots` or `skills/list`'s
 `perCwdExtraUserRoots` (measured with `codex debug prompt-input` and the app server, no model), and
-`CODEX_HOME` is shared by every Session of the Agent. A `field` thread reads the file with its command
+`CODEX_HOME` is shared by every Run of the Agent. A `field` thread reads the file with its command
 tools; a `desk` thread has no tool that reads a file, so there the line names what it cannot open.
 
 A restricted thread that uses a tool anyway is killed, ends with a `failed` event naming
@@ -275,7 +275,7 @@ pub const KEPT_FEATURES: [&str; 5] = ["secret_auth_storage", "enable_request_com
 while the app server still sends the tools of the model's catalog entry (0.164.0); with it
 kept, `prompt-input` matched the app server's request in every case compared.
 
-Through the terminal AI6 supplies, out of the Session's sight (`AgentTerminal::spawn_private`: the
+Through the terminal AI6 supplies, out of the Run's sight (`AgentTerminal::spawn_private`: the
 listing holds each MCP server's environment values, and no viewer reads any of it), with the app
 server's `-c` settings, environment and working directory, the handler runs `codex --version`, then `codex features list` and adds
 `-c features.<name>=false` for every enabled feature not in `KEPT_FEATURES` (with scripts,
@@ -330,7 +330,7 @@ scripts also finds its server missing; one with scripts is offered exactly
 and passes when it has `files`. A server whose name collides with one of the user's is merged with it: with a stdio
 server of that name Codex refuses its configuration and the check fails.
 
-`program()` answers `executable`, which the Station looks up on the Session's own `PATH` before it
+`program()` answers `executable`, which the Station looks up on the Run's own `PATH` before it
 starts it. `stdio()` answers `HarnessStdio::Json`, so the Station starts the app server in a terminal
 provider without a terminal (`pipe`), where its stream arrives as written, and refuses one
 that gives it a terminal.

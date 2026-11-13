@@ -1,4 +1,4 @@
-//! A Session's events on disk, one JSON line each with its sequence number.
+//! A Run's events on disk, one JSON line each with its sequence number.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
@@ -11,14 +11,14 @@ use coqui_acp_provider::AgentEvent;
 const EVENTS_FILE: &str = "events.jsonl";
 const CURSOR_FILE: &str = "cursor";
 
-/// One spooled event and its place in the Session's sequence, which starts at 1.
+/// One spooled event and its place in the Run's sequence, which starts at 1.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Spooled {
     pub(crate) seq: u64,
     pub(crate) event: AgentEvent,
 }
 
-/// The events of one Session: kept in memory for readers and appended to `events.jsonl`
+/// The events of one Run: kept in memory for readers and appended to `events.jsonl`
 /// before anyone can read them.
 pub(super) struct Spool {
     dir: PathBuf,

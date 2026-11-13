@@ -111,14 +111,14 @@ void main() {
         'Role case-officer',
         '/agents?tab=roles&operation_id=G&role=case-officer',
       ),
-      ('/sessions', 'G', '/operations?operation_id=G'),
+      ('/runs', 'G', '/operations?operation_id=G'),
       (
-        '/sessions',
+        '/runs',
         'mission-021',
         '/missions?operation_id=L&mission_id=mission-021',
       ),
       (
-        '/sessions',
+        '/runs',
         'station-remote-02',
         '/stations?station_id=station-remote-02',
       ),
@@ -134,8 +134,8 @@ void main() {
       ),
       (
         '/timeline',
-        'Session preview-session-008',
-        '/sessions?operation_id=G&session_id=preview-session-008',
+        'Run preview-run-008',
+        '/runs?operation_id=G&run_id=preview-run-008',
       ),
       ('/audit', 'Operation G', '/operations?operation_id=G'),
       (
@@ -208,7 +208,7 @@ void main() {
       ('Operations', '/operations'),
       ('Stations', '/stations'),
       ('Missions', '/missions?state=${activeMissionStates.join('%2C')}'),
-      ('Sessions waiting', '/sessions?state=blocked'),
+      ('Runs waiting', '/runs?state=blocked'),
     ]) {
       testWidgets(label, (tester) async {
         final reported = await demoAt(tester, '/overview');
@@ -230,12 +230,12 @@ void main() {
     await tester.tap(
       find.descendant(
         of: find.byType(OverviewPage),
-        matching: find.text('Sessions waiting'),
+        matching: find.text('Runs waiting'),
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('preview-session-008'), findsOneWidget);
-    expect(find.text('preview-session-007'), findsNothing);
+    expect(find.text('preview-run-008'), findsOneWidget);
+    expect(find.text('preview-run-007'), findsNothing);
   });
 
   group('how a link behaves', () {
@@ -358,29 +358,29 @@ void main() {
 
     int all(String path, int code) => path == '/v1/user/profile' ? 200 : code;
 
-    testWidgets('Sessions refused', (tester) async {
-      await at(tester, '/sessions', (path) => all(path, 403));
-      expect(find.text('Your account may not read Sessions.'), findsOneWidget);
-      expect(find.text('No Sessions yet'), findsNothing);
+    testWidgets('Runs refused', (tester) async {
+      await at(tester, '/runs', (path) => all(path, 403));
+      expect(find.text('Your account may not read Runs.'), findsOneWidget);
+      expect(find.text('No Runs yet'), findsNothing);
     });
 
-    testWidgets('Sessions failed', (tester) async {
-      await at(tester, '/sessions', (path) => all(path, 500));
-      expect(find.text('Sessions could not be read.'), findsOneWidget);
+    testWidgets('Runs failed', (tester) async {
+      await at(tester, '/runs', (path) => all(path, 500));
+      expect(find.text('Runs could not be read.'), findsOneWidget);
       expect(find.text('Try again'), findsOneWidget);
-      expect(find.text('No Sessions yet'), findsNothing);
+      expect(find.text('No Runs yet'), findsNothing);
     });
 
-    testWidgets('Sessions read and empty', (tester) async {
-      await at(tester, '/sessions', (_) => 200);
-      expect(find.text('No Sessions yet'), findsOneWidget);
+    testWidgets('Runs read and empty', (tester) async {
+      await at(tester, '/runs', (_) => 200);
+      expect(find.text('No Runs yet'), findsOneWidget);
     });
 
     testWidgets('Missions refused says so, with no connection banner', (
       tester,
     ) async {
       await at(tester, '/missions', (path) => all(path, 403));
-      expect(find.text('Your account may not read Sessions.'), findsOneWidget);
+      expect(find.text('Your account may not read Runs.'), findsOneWidget);
       expect(find.textContaining('Could not reach'), findsNothing);
     });
 
@@ -415,7 +415,7 @@ void main() {
       );
       board.accessToken = 't';
       board.loading = false;
-      board.userSession = UserSessionSummary(
+      board.userRun = UserRunSummary(
         personId: 'ana',
         name: 'ana',
         displayName: null,
@@ -468,8 +468,8 @@ void main() {
       expect(find.text('New Mission in G'), findsNothing);
     });
 
-    testWidgets('Sessions links on to Missions', (tester) async {
-      await open(tester, empty(), '/sessions');
+    testWidgets('Runs links on to Missions', (tester) async {
+      await open(tester, empty(), '/runs');
       expect(find.byType(OoEmptyState), findsOneWidget);
       await tester.tap(find.text('Go to Missions'));
       await tester.pumpAndSettle();

@@ -697,7 +697,7 @@ class _IssueProposalsPanelState extends State<IssueProposalsPanel> {
               ),
             if (proposal.exposure.isNotEmpty)
               Text(
-                'Its Session read outside text: ${proposal.exposure.join(', ')}',
+                'Its Run read outside text: ${proposal.exposure.join(', ')}',
                 style: text.bodySmall?.copyWith(color: tokens.warning),
               ),
             Tooltip(

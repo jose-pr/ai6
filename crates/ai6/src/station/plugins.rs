@@ -269,7 +269,7 @@ impl Plugins {
     /// Scans each directory or library path for AI6 handlers, access providers, terminals,
     /// transports, safe houses or sources under the default policy (`report`, no pins).
     ///
-    /// The registry stays mapped for the daemon lifetime because instances and sessions
+    /// The registry stays mapped for the daemon lifetime because instances and runs
     /// may call code from the loaded libraries after construction.
     pub fn scan(paths: &[PathBuf]) -> Self {
         Self::scan_with(paths, &PluginPolicy::default())
@@ -1545,7 +1545,7 @@ mod tests {
             &self,
             _spec: &Value,
         ) -> Result<
-            guatiao::library::Object<dyn crate::directorates::q::terminal::TerminalSession>,
+            guatiao::library::Object<dyn crate::directorates::q::terminal::TerminalRun>,
             guatiao::library::ProviderError,
         > {
             Err(guatiao::library::ProviderError::new(
@@ -2691,7 +2691,7 @@ pub(crate) mod testing {
 
     use super::Plugins;
     use crate::directorates::q::terminal::{
-        AgentTerminal, HarnessStdio, Terminal, TerminalSession,
+        AgentTerminal, HarnessStdio, Terminal, TerminalRun,
     };
     use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
     use coqui_acp_provider::AgentSession;
@@ -2711,7 +2711,7 @@ pub(crate) mod testing {
         fn spawn(
             &self,
             _spec: &guatiao::Value,
-        ) -> Result<Object<dyn TerminalSession>, ProviderError> {
+        ) -> Result<Object<dyn TerminalRun>, ProviderError> {
             Err(refused())
         }
     }
@@ -2724,7 +2724,7 @@ pub(crate) mod testing {
         fn spawn(
             &self,
             _spec: &guatiao::Value,
-        ) -> Result<Object<dyn TerminalSession>, ProviderError> {
+        ) -> Result<Object<dyn TerminalRun>, ProviderError> {
             Err(refused())
         }
 
@@ -2781,14 +2781,14 @@ pub(crate) mod testing {
         }
     }
 
-    /// A handler whose Session says `hello`, answers each message with `echo:MESSAGE` and
+    /// A handler whose Run says `hello`, answers each message with `echo:MESSAGE` and
     /// completes when told `finish`.
     #[derive(Default, Provider)]
     #[provider(AgentHandler, id = "stream-agent", name = "Mock streaming handler", crate = crate::guatiao)]
     pub(crate) struct MockStreamHandler;
 
-    pub(crate) struct StreamSession {
-        id: crate::SessionId,
+    pub(crate) struct StreamRun {
+        id: crate::RunId,
         events: std::sync::Mutex<std::collections::VecDeque<coqui_acp_provider::AgentEvent>>,
     }
 
@@ -2803,10 +2803,10 @@ pub(crate) mod testing {
         }
     }
 
-    impl StreamSession {
+    impl StreamRun {
         fn new(id: &str, first: String) -> Self {
             Self {
-                id: crate::SessionId::try_new(id).unwrap(),
+                id: crate::RunId::try_new(id).unwrap(),
                 events: std::sync::Mutex::new(std::collections::VecDeque::from([said(
                     "text", first,
                 )])),
@@ -2821,7 +2821,7 @@ pub(crate) mod testing {
             _terminal: Object<dyn AgentTerminal>,
         ) -> Result<Object<dyn AgentSession>, ProviderError> {
             Ok(
-                StreamSession::new("stream-session-1", format!("hello {}", request.prompt))
+                StreamRun::new("stream-run-1", format!("hello {}", request.prompt))
                     .into_object(),
             )
         }
@@ -2831,7 +2831,7 @@ pub(crate) mod testing {
             request: AgentResume,
             _terminal: Object<dyn AgentTerminal>,
         ) -> Result<Object<dyn AgentSession>, ProviderError> {
-            Ok(StreamSession::new(request.session_id.as_str(), "resumed".to_owned()).into_object())
+            Ok(StreamRun::new(request.run_id.as_str(), "resumed".to_owned()).into_object())
         }
 
         fn stdio(&self) -> Result<HarnessStdio, ProviderError> {
@@ -2839,7 +2839,7 @@ pub(crate) mod testing {
         }
     }
 
-    impl AgentSession for StreamSession {
+    impl AgentSession for StreamRun {
         fn session_id(&self) -> Result<Option<String>, ProviderError> {
             Ok(Some(self.id.to_string()))
         }

@@ -1,16 +1,16 @@
-//! Harness logins kept sealed in the Registry: a login's files, what a Session's home does with
+//! Harness logins kept sealed in the Registry: a login's files, what a Run's home does with
 //! them, and the renewal round.
 //!
 //! Harnesses do their own refreshing, so AI6 keeps no provider's token endpoint. A login is a set
-//! of files sealed together as one value. A Session gets a copy in a home of its own; when its
+//! of files sealed together as one value. A Run gets a copy in a home of its own; when its
 //! harness renews it, the new copy goes back under a revision check, and when another Station's
-//! does, the Session's files are rewritten in place. A renewal round renews a login before it ends
+//! does, the Run's files are rewritten in place. A renewal round renews a login before it ends
 //! by running that CLI's own command in a throwaway home.
 //!
 //! What a harness writes is not trusted to be a login: one whose refresh was refused deletes its
 //! file (Grok 1.0.70) or blanks its tokens (Claude Code 2.1.318), and a command's exit status does
 //! not show it (Grok exits 0). So only the files decide, a copy that lost anything a login had or
-//! ends earlier never replaces the one in the Registry, and the Session's files are put back.
+//! ends earlier never replaces the one in the Registry, and the Run's files are put back.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -56,7 +56,7 @@ impl Drop for LoginFiles {
 
 impl LoginFiles {
     /// Reads `files` from `home`; a file that is not there is left out, and so is one reached
-    /// through a link or larger than `largest`, since a Session's commands can put anything in
+    /// through a link or larger than `largest`, since a Run's commands can put anything in
     /// its home and what is read here is sealed for other Stations. Nothing else is read.
     ///
     /// # Errors
@@ -209,7 +209,7 @@ impl LoginFiles {
 }
 
 /// Whether no part of `file` under `home` is a link, so what is read or written there is the home's
-/// own and not whatever a Session pointed it at.
+/// own and not whatever a Run pointed it at.
 fn plain_path(home: &Path, file: &Path) -> bool {
     let mut path = home.to_path_buf();
     for part in file.components() {
@@ -478,12 +478,12 @@ fn note_revision(
 /// restarts can still tell what its harness renewed while it was down.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SessionLogin {
+pub struct RunLogin {
     /// The account.
     pub account: AccountRef,
     /// The files, relative to the home.
     pub files: Vec<String>,
-    /// The Session's home.
+    /// The Run's home.
     pub home: PathBuf,
     /// The revision the home's copy was last at.
     pub revision: u64,
@@ -506,7 +506,7 @@ pub enum Synced {
     Restored(u64, &'static str),
 }
 
-impl SessionLogin {
+impl RunLogin {
     /// Writes `account`'s current login under `home`.
     ///
     /// # Errors
@@ -975,7 +975,7 @@ fn renew_once(
                 Ok(Outcome::Renewed)
             }
             Err(VaultError::Conflict { .. }) => {
-                // A Session's harness renewed it meanwhile: the Registry's copy may be the only one
+                // A Run's harness renewed it meanwhile: the Registry's copy may be the only one
                 // that still works. Keep whichever plainly ends later.
                 let held = vault.open(&name)?;
                 let current = LoginFiles::from_value(&held.value).ok_or(VaultError::Unreadable)?;
@@ -1060,7 +1060,7 @@ fn settle(
             kind: NoticeKind::NeedsPerson,
             text: format!(
                 "account {reference}'s login needs a person: {failures} renewals failed in a row; \
-                 the last: {reason}. Its Sessions go to the next account or route"
+                 the last: {reason}. Its Runs go to the next account or route"
             ),
         },
         (_, Some(reason)) => LoginNotice {

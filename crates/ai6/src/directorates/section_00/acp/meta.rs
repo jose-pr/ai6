@@ -5,9 +5,9 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fmt;
 
-use crate::directorates::m::identity::{MissionId, SessionId};
+use crate::directorates::m::identity::{MissionId, RunId};
 use crate::directorates::section_00::agent::{
-    AgentResume, AgentStart, AssistantMode, SessionOverlays,
+    AgentResume, AgentStart, AssistantMode, RunOverlays,
 };
 
 /// The handler provider a field runner starts, by id and Guatiao configuration.
@@ -60,22 +60,22 @@ pub struct LaunchMeta {
     /// Whether it may connect the MCP servers its working directory names.
     #[serde(default)]
     pub project_mcp: bool,
-    /// Whether the Session only reads and answers.
+    /// Whether the Run only reads and answers.
     #[serde(default)]
     pub answer_only: bool,
     /// The assistant mode.
     #[serde(default)]
     pub assistant: Option<AssistantMode>,
-    /// What the Session's overlays hand the harness.
+    /// What the Run's overlays hand the harness.
     #[serde(default)]
-    pub overlays: SessionOverlays,
+    pub overlays: RunOverlays,
     /// The handler a field runner starts; absent where the façade serves one handler.
     #[serde(default)]
     pub handler: Option<HandlerSpec>,
     /// The terminal provider the Station pinned.
     #[serde(default)]
     pub terminal: Option<String>,
-    /// The name the Station gave the Session on a field runner; it is the ACP session ID there.
+    /// The name the Station gave the Run on a field runner; it is the ACP run ID there.
     #[serde(default)]
     pub key: Option<String>,
     /// Whether a field runner gives the harness a Cable endpoint, relayed to the Station over
@@ -122,7 +122,7 @@ impl LaunchMeta {
         self
     }
 
-    /// Names the Session on a field runner.
+    /// Names the Run on a field runner.
     #[must_use]
     pub fn with_key(mut self, key: impl Into<String>) -> Self {
         self.key = Some(key.into());
@@ -180,17 +180,17 @@ impl fmt::Debug for LaunchMeta {
 }
 
 /// Every [`AgentResume`] field ACP has no home for; the working directory is `cwd` and the
-/// provider Session ID is the ACP session ID.
+/// provider ID is the ACP run ID.
 ///
 /// A `message` here is submitted by the handler as it resumes; a client that sends it as
 /// `session/prompt` instead leaves it `None`. `environment` is never shown by `Debug`.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ResumeMeta {
-    /// The Mission the Session is working on.
+    /// The Mission the Run is working on.
     pub mission_id: MissionId,
-    /// The provider-issued Session ID to resume.
-    pub session_id: SessionId,
+    /// The provider ID to resume.
+    pub run_id: RunId,
     /// A message to submit after resuming.
     pub message: Option<String>,
     /// The clearance the Agent works at now; absent counts as `desk`.
@@ -210,7 +210,7 @@ pub struct ResumeMeta {
     /// Whether it may connect the MCP servers its working directory names.
     #[serde(default)]
     pub project_mcp: bool,
-    /// Whether the Session only reads and answers.
+    /// Whether the Run only reads and answers.
     #[serde(default)]
     pub answer_only: bool,
     /// The assistant mode.
@@ -219,16 +219,16 @@ pub struct ResumeMeta {
     /// The standing part of the start-up context.
     #[serde(default)]
     pub initial_context: Vec<String>,
-    /// What the Session's overlays hand the harness.
+    /// What the Run's overlays hand the harness.
     #[serde(default)]
-    pub overlays: SessionOverlays,
+    pub overlays: RunOverlays,
     /// The handler a field runner starts.
     #[serde(default)]
     pub handler: Option<HandlerSpec>,
     /// The terminal provider the Station pinned.
     #[serde(default)]
     pub terminal: Option<String>,
-    /// The name the Station gave the Session on a field runner.
+    /// The name the Station gave the Run on a field runner.
     #[serde(default)]
     pub key: Option<String>,
     /// Whether a field runner gives the harness a Cable endpoint, relayed to the Station over
@@ -242,7 +242,7 @@ impl ResumeMeta {
     pub fn from_resume(resume: &AgentResume) -> Self {
         Self {
             mission_id: resume.mission_id.clone(),
-            session_id: resume.session_id.clone(),
+            run_id: resume.run_id.clone(),
             message: resume.message.clone(),
             clearance: resume.clearance.clone(),
             environment: resume.environment.clone(),
@@ -276,7 +276,7 @@ impl ResumeMeta {
         self
     }
 
-    /// Names the Session on a field runner.
+    /// Names the Run on a field runner.
     #[must_use]
     pub fn with_key(mut self, key: impl Into<String>) -> Self {
         self.key = Some(key.into());
@@ -294,7 +294,7 @@ impl ResumeMeta {
     pub fn into_resume(self, working_directory: String) -> AgentResume {
         AgentResume {
             mission_id: self.mission_id,
-            session_id: self.session_id,
+            run_id: self.run_id,
             message: self.message,
             working_directory,
             clearance: self.clearance,
@@ -321,7 +321,7 @@ impl fmt::Debug for ResumeMeta {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ResumeMeta")
             .field("mission_id", &self.mission_id)
-            .field("session_id", &self.session_id)
+            .field("run_id", &self.run_id)
             .field("clearance", &self.clearance)
             .field("environment", &self.environment.keys().collect::<Vec<_>>())
             .field("model", &self.model)

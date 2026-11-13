@@ -65,7 +65,7 @@ MissionBoard _board(List<http.Request> asked) {
   );
   board.accessToken = 'token';
   board.loading = false;
-  board.userSession = UserSessionSummary.fromJson(
+  board.userRun = UserRunSummary.fromJson(
     jsonDecode(userProfileResponse(actions: ['mission.read', 'audit.read']))
         as Map<String, dynamic>,
   );

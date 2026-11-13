@@ -139,7 +139,7 @@ pub(super) struct Step {
     pub route: RouteRef,
     /// What is told if no route can take the message.
     pub held: Vec<AssistantEvent>,
-    pub session_id: Option<String>,
+    pub run_id: Option<String>,
     pub walk: Walk,
 }
 
@@ -156,13 +156,13 @@ impl Step {
             mut failed,
             route,
             held,
-            session_id,
+            run_id,
             walk,
             ..
         } = self;
         let conversation = job.conversation_id.clone();
-        // A provider Session belongs to the source it ran on.
-        job.session_id = None;
+        // A provider Run belongs to the source it ran on.
+        job.run_id = None;
         job.route = Some(route.clone());
         failed.push((route.clone(), "it reported a limit".to_owned()));
         let lead = format!(
@@ -203,12 +203,12 @@ impl Step {
                     events
                 };
                 desk.outbox.send(AssistantReport {
-                    route: session_id.as_ref().map(|_| route),
+                    route: run_id.as_ref().map(|_| route),
                     run: None,
                     station_id: desk.state.station_id.clone(),
                     conversation_id: conversation,
                     job_id: None,
-                    session_id,
+                    run_id,
                     events,
                 });
                 drop(walk);

@@ -1,4 +1,4 @@
-//! Moneypenny on a Station: the assistant Sessions of Universal Exports conversations.
+//! Moneypenny on a Station: the assistant Runs of Universal Exports conversations.
 //!
 //! Universal Exports queues an [`AssistantJob`] for a Station each time a person writes to
 //! Moneypenny. The desk keeps one harness per conversation, started with the roster's
@@ -7,15 +7,15 @@
 //! Exports' endpoint, reached with the job's token. A running harness takes the next message
 //! as it is; one idle for `[assistant.desk] idle` is closed, and the next message resumes its
 //! provider
-//! Session. What the harness says is reported back as [`AssistantReport`]s. A harness that
+//! Run. What the harness says is reported back as [`AssistantReport`]s. A harness that
 //! fails or exits is reported `failed`, with its handler's reason, and closed at once, which
 //! frees its slot; so is one that writes nothing for that long while answering. A resume that
-//! fails, when asked or before the resumed harness confirms its Session, goes to the
+//! fails, when asked or before the resumed harness confirms its Run, goes to the
 //! Station's log and the conversation starts afresh with its recap. A route that reports a
 //! limit before the turn showed text or called a tool hands the same message to the next route
 //! with room ([`relay`]); after either, the turn ends and the next message takes another route.
 //!
-//! An assistant Session is not a Mission: it has no Operation, and is never on the board. A
+//! An assistant Run is not a Mission: it has no Operation, and is never on the board. A
 //! job that grants the person Cable actions in some Operations gives the harness a further
 //! MCP server, this Station's Cable endpoint for the conversation
 //! ([`super::cables_mcp::AssistantEndpoint`]), which holds every Cable she sends until the
@@ -24,7 +24,7 @@
 //! waits its hour whether or not one runs.
 //! It works in a directory of its own, named for its conversation inside
 //! one the desk made readable by the Station's user only: the same directory each time the
-//! conversation's harness starts, because Claude Code finds a Session to resume only from the
+//! conversation's harness starts, because Claude Code finds a Run to resume only from the
 //! directory it was recorded in. The directory goes when the harness closes. A job that names
 //! a workspace fills it with the person's repositories and saves her work after each answer
 //! ([`workspace`]); one that gives skills has them installed there from this Station's own
@@ -58,14 +58,14 @@ use super::routes::{self, OnRoute};
 use super::{DaemonState, credentials, medical, station_terminal, unix_now, vetting};
 use crate::bounds::TimeLimit;
 use crate::directorates::m::assistant::{AssistantDeskLimits, AssistantLimits, AssistantSettings};
-use crate::directorates::m::identity::{MissionId, SessionId};
+use crate::directorates::m::identity::{MissionId, RunId};
 use crate::directorates::m::roster::{Agent, RouteRef};
 use crate::directorates::medical::usage::UsageTracker;
 use crate::directorates::q::terminal::TerminalBridge;
 use crate::directorates::registry::contexts::ContextOwner;
 use crate::directorates::section_00::agent::{
-    AgentHandler, AgentResume, AgentStart, AssistantMode, SessionRecordFile, SessionRecordQuery,
-    checked_session_id,
+    AgentHandler, AgentResume, AgentStart, AssistantMode, RunRecordFile, RunRecordQuery,
+    checked_run_id,
 };
 use crate::directorates::section_00::assistant::{
     ASSISTANT_MCP_PATH, ASSISTANT_MCP_TOKEN_ENV, ASSISTANT_MCP_URL_ENV, AssistantEvent,
@@ -108,7 +108,7 @@ fn roster_tables(state: &DaemonState) -> Tables {
 // A read lock serves the pump while it waits on the harness's output: an exclusive one, taken
 // again the moment it is let go, keeps a message or a Stop waiting for as long as the harness
 // is silent. Only replacing the harness takes the write lock.
-type SharedSession = Arc<RwLock<Object<dyn AgentSession>>>;
+type SharedRun = Arc<RwLock<Object<dyn AgentSession>>>;
 
 /// What became of a report the desk's link sent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -174,7 +174,7 @@ fn only(report: &AssistantReport, kind: &str) -> Option<AssistantReport> {
         .collect();
     (!events.is_empty()).then(|| AssistantReport {
         events,
-        session_id: None,
+        run_id: None,
         ..report.clone()
     })
 }
@@ -387,10 +387,10 @@ impl CableGate for ExportsGate {
     }
 }
 
-/// A running harness: its Session, flags, token expiry, what it started under
+/// A running harness: its Run, flags, token expiry, what it started under
 /// ([`Desk::started_under`]), and its workspace.
 type Running = (
-    SharedSession,
+    SharedRun,
     Arc<Flags>,
     f64,
     String,
@@ -411,7 +411,7 @@ pub(super) trait Harness: Send + Sync {
         settings: &HandlerSettings,
         request: AgentStart,
     ) -> Result<Object<dyn AgentSession>, String>;
-    /// Resumes a provider Session with `handler` and its `settings`.
+    /// Resumes a provider Run with `handler` and its `settings`.
     fn resume(
         &self,
         handler: &str,
@@ -435,13 +435,13 @@ pub(super) trait Harness: Send + Sync {
         let _ = handler;
         Some("this Station's harness takes no image".to_owned())
     }
-    /// Where `handler`'s harness keeps its record of the Session `query` names, if it says.
+    /// Where `handler`'s harness keeps its record of the Run `query` names, if it says.
     fn record(
         &self,
         handler: &str,
         settings: &HandlerSettings,
-        query: SessionRecordQuery,
-    ) -> Option<SessionRecordFile> {
+        query: RunRecordQuery,
+    ) -> Option<RunRecordFile> {
         let _ = (handler, settings, query);
         None
     }
@@ -457,10 +457,10 @@ type Launch = (
     String,
 );
 
-/// Logs which handler and terminal provider an assistant harness got; `session` is the
-/// `assistant--<conversation digest>` its Session is started under.
-fn log_start(session: &MissionId, how: &str, handler: &str, terminal: &str) {
-    let conversation = session.as_str().trim_start_matches("assistant--");
+/// Logs which handler and terminal provider an assistant harness got; `run` is the
+/// `assistant--<conversation digest>` its Run is started under.
+fn log_start(run: &MissionId, how: &str, handler: &str, terminal: &str) {
+    let conversation = run.as_str().trim_start_matches("assistant--");
     super::log_harness_start(
         &format!("assistant conversation {conversation}"),
         how,
@@ -502,10 +502,10 @@ impl Harness for StationHarness {
         request: AgentStart,
     ) -> Result<Object<dyn AgentSession>, String> {
         let (launch, terminal, provider) = self.handler(handler, settings)?;
-        let session = request.mission_id.clone();
+        let run = request.mission_id.clone();
         let started = crate::station::acp::start(launch, terminal, request)
             .map_err(|error| error.to_string())?;
-        log_start(&session, "started", handler, &provider);
+        log_start(&run, "started", handler, &provider);
         Ok(started)
     }
 
@@ -516,10 +516,10 @@ impl Harness for StationHarness {
         request: AgentResume,
     ) -> Result<Object<dyn AgentSession>, String> {
         let (launch, terminal, provider) = self.handler(handler, settings)?;
-        let session = request.mission_id.clone();
+        let run = request.mission_id.clone();
         let resumed = crate::station::acp::resume(launch, terminal, request)
             .map_err(|error| error.to_string())?;
-        log_start(&session, "resumed", handler, &provider);
+        log_start(&run, "resumed", handler, &provider);
         Ok(resumed)
     }
 
@@ -546,10 +546,10 @@ impl Harness for StationHarness {
         &self,
         handler: &str,
         settings: &HandlerSettings,
-        query: SessionRecordQuery,
-    ) -> Option<SessionRecordFile> {
+        query: RunRecordQuery,
+    ) -> Option<RunRecordFile> {
         let handler = self.0.plugins.handler_with(handler, settings).ok()?;
-        handler.session_record(query).ok().flatten()
+        handler.run_record(query).ok().flatten()
     }
 
     fn images(&self, handler: &str) -> Option<String> {
@@ -584,7 +584,7 @@ struct Flags {
 }
 
 struct Live {
-    session: SharedSession,
+    run: SharedRun,
     token_expires_at: f64,
     flags: Arc<Flags>,
     /// What the running harness started under ([`Desk::started_under`]): a later job under
@@ -607,30 +607,30 @@ const BESIDE_MISSIONS: &str = "this Station also runs Missions on its own host, 
      Theater, or one without the `execution` role, or set assistant.allow_beside_local_missions to \
      accept that";
 
-/// The provider Session each conversation last ran, and on which route, by conversation.
+/// The provider Run each conversation last ran, and on which route, by conversation.
 type Known = Arc<Mutex<BTreeMap<String, (String, Option<RouteRef>)>>>;
 
 /// Frees what was issued to a harness unless it comes to run, when its pump frees it instead.
 struct Issued {
     state: DaemonState,
-    session: String,
+    run: String,
     running: bool,
 }
 
 impl Drop for Issued {
     fn drop(&mut self) {
         if !self.running {
-            credentials::release(&self.state, &self.session);
+            credentials::release(&self.state, &self.run);
         }
     }
 }
 
 /// The name a conversation's harness, its claims and its leases go under.
-fn session_name(conversation: &str) -> String {
+fn run_name(conversation: &str) -> String {
     format!("assistant--{}", conversation_digest(conversation))
 }
 
-/// The assistant Sessions of one Station.
+/// The assistant Runs of one Station.
 pub(super) struct Desk {
     state: DaemonState,
     harness: Arc<dyn Harness>,
@@ -855,7 +855,7 @@ impl Desk {
             Ok(text) => AssistantEvent::new(EVENT_ACCEPTED, text),
             Err(reason) => AssistantEvent::new(EVENT_REJECTED, Some(reason)),
         };
-        let session_id = self.known_session(&job.conversation_id);
+        let run_id = self.known_run(&job.conversation_id);
         let route = self.known_route(&job.conversation_id);
         let refused = self
             .outbox
@@ -866,7 +866,7 @@ impl Desk {
                     station_id: self.state.station_id.clone(),
                     conversation_id: job.conversation_id.clone(),
                     job_id: Some(job.job_id),
-                    session_id,
+                    run_id,
                     events: vec![event],
                 },
                 message,
@@ -906,7 +906,7 @@ impl Desk {
             // A message that comes while the turn's message moves to another route follows it.
             self.wait_moved(&job.conversation_id).await;
             let running = self.running(&job.conversation_id);
-            if let Some((session, flags, expires, started_under, workspace)) = running {
+            if let Some((run, flags, expires, started_under, workspace)) = running {
                 if expires > unix_now() + desk.token_margin.0.as_secs_f64()
                     && started_under == started
                 {
@@ -935,9 +935,9 @@ impl Desk {
                                 workspace.begin_turn();
                             }
                         }
-                        session
+                        run
                             .read()
-                            .map_err(|_| "assistant Session lock failed".to_owned())?
+                            .map_err(|_| "assistant Run lock failed".to_owned())?
                             .send_message(AgentMessage { text })
                             .map_err(|error| error.to_string())
                     })
@@ -1107,7 +1107,7 @@ impl Desk {
                 .live
                 .allows(live.len() + self.starting.load(Ordering::Acquire) + 1)
             {
-                return Err("this Station runs as many assistant Sessions as it may".to_owned());
+                return Err("this Station runs as many assistant Runs as it may".to_owned());
             }
             self.starting.fetch_add(1, Ordering::AcqRel);
             Starting(&self.starting)
@@ -1181,14 +1181,14 @@ impl Desk {
             }
         };
         // As a Chief of Staff review, the harness keeps only what reaches its model.
-        let mut environment = vetting::review_environment(&credentials::session_environment(
+        let mut environment = vetting::review_environment(&credentials::run_environment(
             &state, &agent.id, &agent.env,
         ));
         // What a route sets is how it reaches its model, whatever its name.
         if let Some(on) = &on {
             environment.extend(on.route.env.values().clone());
         }
-        let session_key = session_name(&job.conversation_id);
+        let run_key = run_name(&job.conversation_id);
         // Before her own directories below: an account's variables make way for no one else's.
         let site = Site {
             resuming: false,
@@ -1197,7 +1197,7 @@ impl Desk {
         if let Err(reason) = credentials::issue_for_assistant(
             &state,
             Holder {
-                id: &session_key,
+                id: &run_key,
                 operation: None,
             },
             &agent,
@@ -1210,7 +1210,7 @@ impl Desk {
         }
         let mut issued = Issued {
             state: state.clone(),
-            session: session_key.clone(),
+            run: run_key.clone(),
             running: false,
         };
         environment.insert(ASSISTANT_MCP_URL_ENV.to_owned(), self.mcp_url.clone());
@@ -1265,14 +1265,14 @@ impl Desk {
             }
         };
         let unavailable = self.arm(&mut mode, job, &reach, &handler, &environment);
-        let mission_id = MissionId::try_new(session_key.clone())
-            .map_err(|_| "the conversation cannot name a Session".to_owned())?;
-        // A provider Session belongs to the source it ran on.
+        let mission_id = MissionId::try_new(run_key.clone())
+            .map_err(|_| "the conversation cannot name a Run".to_owned())?;
+        // A provider Run belongs to the source it ran on.
         let previous = same_route
             .then(|| {
-                job.session_id
+                job.run_id
                     .clone()
-                    .or_else(|| self.known_session(&job.conversation_id))
+                    .or_else(|| self.known_run(&job.conversation_id))
             })
             .flatten();
         let mut initial_context: Vec<String> = Some(agent.context.clone())
@@ -1308,10 +1308,10 @@ impl Desk {
             overlays: Default::default(),
         };
         let resume = previous
-            .and_then(|previous| SessionId::try_new(previous).ok())
-            .map(|session_id| AgentResume {
+            .and_then(|previous| RunId::try_new(previous).ok())
+            .map(|run_id| AgentResume {
                 mission_id,
-                session_id,
+                run_id,
                 message: Some(message.clone()),
                 working_directory: area.clone(),
                 clearance: "desk".to_owned(),
@@ -1338,14 +1338,14 @@ impl Desk {
             let Some(resume) = resume else {
                 return harness
                     .start(&handler, &handler_settings, start)
-                    .map(|session| (session, None));
+                    .map(|run| (run, None));
             };
-            let resumed = resume.session_id.as_str().to_owned();
+            let resumed = resume.run_id.as_str().to_owned();
             match harness.resume(&handler, &handler_settings, resume) {
-                // A resumed harness can still fail before it confirms the Session (Claude Code
+                // A resumed harness can still fail before it confirms the Run (Claude Code
                 // reads the message first): the pump then starts afresh with `start`.
-                Ok(session) => Ok((
-                    session,
+                Ok(run) => Ok((
+                    run,
                     Some(Fallback {
                         harness,
                         handler,
@@ -1354,19 +1354,19 @@ impl Desk {
                         resumed,
                     }),
                 )),
-                // A provider Session that cannot be resumed (its transcript gone) starts afresh.
+                // A provider Run that cannot be resumed (its transcript gone) starts afresh.
                 Err(error) => {
                     report_resume_failure(&conversation, &resumed, &error);
                     harness
                         .start(&handler, &handler_settings, start)
-                        .map(|session| (session, None))
+                        .map(|run| (run, None))
                 }
             }
         })
         .await
         .map_err(|error| error.to_string())
         .and_then(|started| started);
-        let (session, fallback) = match started {
+        let (run, fallback) = match started {
             Ok(started) => started,
             Err(error) => {
                 remove_area(&area, retry);
@@ -1374,14 +1374,14 @@ impl Desk {
                 return Err(format!("the assistant harness did not start: {error}"));
             }
         };
-        let session = Arc::new(RwLock::new(session));
+        let run = Arc::new(RwLock::new(run));
         self.live
             .lock()
             .map_err(|_| "assistant lock failed")?
             .insert(
                 job.conversation_id.clone(),
                 Live {
-                    session: session.clone(),
+                    run: run.clone(),
                     token_expires_at: job.token_expires_at,
                     flags: flags.clone(),
                     started: self.started_under(job, &reach),
@@ -1394,14 +1394,14 @@ impl Desk {
             #[cfg(feature = "cables-mcp")]
             left_held: self.left_held.clone(),
             state: state.clone(),
-            session_name: session_key,
+            run_name: run_key,
             route: on.map(|on| on.route.reference()),
             usage: UsageTracker::default(),
             unreported_tokens: std::cell::Cell::new(0),
             model: agent.model.clone(),
             conversation_id: job.conversation_id.clone(),
             station_id: state.station_id.clone(),
-            session,
+            run,
             flags,
             area,
             idle: desk.idle,
@@ -1432,7 +1432,7 @@ impl Desk {
 
     /// The route a job of the routed `agent` runs on, and `agent` as it works there; `agent` as it
     /// is for one handler. Whether it stays on `earlier`, the route the conversation last ran on,
-    /// and so can resume its provider Session. A route counts when its handler can be started
+    /// and so can resume its provider Run. A route counts when its handler can be started
     /// here and its source has room.
     ///
     /// # Errors
@@ -1618,7 +1618,7 @@ impl Desk {
                 station_id: station.clone(),
                 conversation_id: conversation.clone(),
                 job_id: None,
-                session_id: None,
+                run_id: None,
                 events: vec![event],
             });
         });
@@ -1629,7 +1629,7 @@ impl Desk {
                 agent: agent.to_owned(),
                 station: self.state.station_id.clone(),
                 conversation: job.conversation_id.clone(),
-                session: format!("assistant-{}", conversation_digest(&job.conversation_id)),
+                run: format!("assistant-{}", conversation_digest(&job.conversation_id)),
                 person,
             },
             job.cables.clone(),
@@ -1727,7 +1727,7 @@ impl Desk {
         let entry = live.get(conversation)?;
         entry.flags.alive.load(Ordering::Acquire).then(|| {
             (
-                entry.session.clone(),
+                entry.run.clone(),
                 entry.flags.clone(),
                 entry.token_expires_at,
                 entry.started.clone(),
@@ -1836,7 +1836,7 @@ impl Desk {
         if self.moves.interrupt(conversation) {
             return Ok(());
         }
-        let Some((session, flags, _, _, _)) = self.running(conversation) else {
+        let Some((run, flags, _, _, _)) = self.running(conversation) else {
             return Ok(());
         };
         if !flags.busy.load(Ordering::Acquire) {
@@ -1844,9 +1844,9 @@ impl Desk {
         }
         flags.interrupting.store(true, Ordering::Release);
         let interrupted = tokio::task::spawn_blocking(move || {
-            session
+            run
                 .read()
-                .map_err(|_| "assistant Session lock failed".to_owned())?
+                .map_err(|_| "assistant Run lock failed".to_owned())?
                 .interrupt()
                 .map_err(|error| error.to_string())
         })
@@ -1916,12 +1916,12 @@ impl Desk {
         }
     }
 
-    fn known_session(&self, conversation: &str) -> Option<String> {
+    fn known_run(&self, conversation: &str) -> Option<String> {
         self.known
             .lock()
             .ok()?
             .get(conversation)
-            .map(|(session, _)| session.clone())
+            .map(|(run, _)| run.clone())
     }
 
     fn known_route(&self, conversation: &str) -> Option<RouteRef> {
@@ -1964,7 +1964,7 @@ struct Pump {
     left_held: LeftHeld,
     state: DaemonState,
     /// What its account claim and leases go under.
-    session_name: String,
+    run_name: String,
     /// The route it runs on, when its Agent has routes.
     route: Option<RouteRef>,
     /// What the running harness has reported so far.
@@ -1975,7 +1975,7 @@ struct Pump {
     model: Option<String>,
     conversation_id: String,
     station_id: String,
-    session: SharedSession,
+    run: SharedRun,
     flags: Arc<Flags>,
     area: String,
     /// How long it may wait for a message, or write nothing while answering.
@@ -1987,7 +1987,7 @@ struct Pump {
     known: Known,
     stopping: Arc<AtomicBool>,
     /// For a resumed harness, how to start afresh should it fail before confirming the
-    /// provider Session.
+    /// provider Run.
     fallback: Option<Fallback>,
     /// The conversation's workspace, whose turn ends with each `completed` and at close.
     workspace: Option<SharedWorkspace>,
@@ -2004,7 +2004,7 @@ struct Pump {
     touched: bool,
     /// Set when a limit sends the turn's message to another route.
     moving: Option<relay::Step>,
-    /// How the harness was launched, for its handler to say where it keeps the Session.
+    /// How the harness was launched, for its handler to say where it keeps the Run.
     launched: Launched,
     /// The events it reported, the context of a harness that keeps no record of its own.
     tape: super::contexts::EventTape,
@@ -2024,13 +2024,13 @@ struct Fallback {
     handler: String,
     settings: HandlerSettings,
     start: AgentStart,
-    /// The provider Session the harness was asked to resume.
+    /// The provider Run the harness was asked to resume.
     resumed: String,
 }
 
 impl Pump {
     fn run(mut self) {
-        let mut session_id = None;
+        let mut run_id = None;
         let mut heard = Instant::now();
         let reason = loop {
             if self.flags.stop.load(Ordering::Acquire) {
@@ -2039,10 +2039,10 @@ impl Pump {
             if self.stopping.load(Ordering::Acquire) {
                 break Some("the Station is stopping".to_owned());
             }
-            let read = match self.session.read() {
-                Ok(session) => {
-                    let reported = if session_id.is_none() {
-                        checked_session_id(session.session_id().ok().flatten())
+            let read = match self.run.read() {
+                Ok(run) => {
+                    let reported = if run_id.is_none() {
+                        checked_run_id(run.session_id().ok().flatten())
                     } else {
                         Ok(None)
                     };
@@ -2050,17 +2050,17 @@ impl Pump {
                         Ok(reported) => {
                             if let Some(id) = reported {
                                 self.remember(id.as_str());
-                                session_id = Some(id);
+                                run_id = Some(id);
                             }
-                            session.next_event(READ_SLICE_MS)
+                            run.next_event(READ_SLICE_MS)
                         }
-                        // A Session whose ID cannot be recorded could not be resumed: it fails.
+                        // A Run whose ID cannot be recorded could not be resumed: it fails.
                         Err(why) => Ok(Some(AgentEvent::new("failed", Some(why)))),
                     }
                 }
-                Err(_) => break Some("assistant Session lock failed".to_owned()),
+                Err(_) => break Some("assistant Run lock failed".to_owned()),
             };
-            // A resumed harness that fails before confirming its Session never had it.
+            // A resumed harness that fails before confirming its Run never had it.
             let failure = match &read {
                 Ok(Some(event)) if event.kind == "failed" => {
                     Some(event.text.clone().unwrap_or_default())
@@ -2069,7 +2069,7 @@ impl Pump {
                 _ => None,
             };
             if let Some(failure) = failure
-                && session_id.is_none()
+                && run_id.is_none()
                 && let Some(fallback) = self.fallback.take()
             {
                 match self.start_afresh(fallback, &failure) {
@@ -2127,7 +2127,7 @@ impl Pump {
                         // The work is saved before the turn is reported over, so the next
                         // message's turn starts from it.
                         events.extend(self.end_turn(false));
-                        self.file_context(session_id.as_ref());
+                        self.file_context(run_id.as_ref());
                         self.touched = false;
                         self.flags.busy.store(false, Ordering::Release);
                         if let Ok(mut last) = self.flags.last_active.lock() {
@@ -2157,14 +2157,14 @@ impl Pump {
                         shown
                     }));
                     if event.kind == LIMIT_EVENT
-                        && let Some(mut step) = self.plan_move(session_id.as_ref())
+                        && let Some(mut step) = self.plan_move(run_id.as_ref())
                     {
                         // Told only if no route can take the message.
                         step.held = events.split_off(prepared.min(events.len()));
                         self.moving = Some(step);
                     }
                     if !events.is_empty() {
-                        self.send(session_id.as_ref(), events);
+                        self.send(run_id.as_ref(), events);
                     }
                     if ended {
                         break Some("the harness stopped".to_owned());
@@ -2186,7 +2186,7 @@ impl Pump {
                             self.idle
                         );
                         self.send(
-                            session_id.as_ref(),
+                            run_id.as_ref(),
                             vec![AssistantEvent::new(EVENT_FAILED, Some(reason))],
                         );
                         break Some("the harness stopped answering".to_owned());
@@ -2194,7 +2194,7 @@ impl Pump {
                 }
                 Err(error) => {
                     self.send(
-                        session_id.as_ref(),
+                        run_id.as_ref(),
                         vec![AssistantEvent::new(EVENT_FAILED, Some(error.to_string()))],
                     );
                     break Some("the harness failed".to_owned());
@@ -2202,25 +2202,25 @@ impl Pump {
             }
         };
         self.flags.alive.store(false, Ordering::Release);
-        if let Ok(session) = self.session.read() {
-            let _ = session.close();
+        if let Ok(run) = self.run.read() {
+            let _ = run.close();
         }
         // Before it leaves `live`: the next harness of this conversation claims under this name.
-        credentials::release(&self.state, &self.session_name);
+        credentials::release(&self.state, &self.run_name);
         // What the closed harness left is saved before its directory goes, and later commits
         // go to clones of their own.
         let saved = self.end_turn(true);
         if !saved.is_empty() {
-            self.send(session_id.as_ref(), saved);
+            self.send(run_id.as_ref(), saved);
         }
         // Before its directory goes: the harness may keep its record there.
-        self.file_context(session_id.as_ref());
+        self.file_context(run_id.as_ref());
         remove_area(&self.area, self.remove_retry);
         // Before it leaves `live`: a message waiting for this harness to go then finds this report.
         // A conversation whose message moves on is not closed.
         if self.moving.is_none() {
             self.send(
-                session_id.as_ref(),
+                run_id.as_ref(),
                 vec![AssistantEvent::new(EVENT_CLOSED, reason)],
             );
         }
@@ -2249,7 +2249,7 @@ impl Pump {
     /// Takes the turn's message from the harness that met a limit to send it to the next route,
     /// when the turn showed the person nothing, called no tool, and no Stop or close is asked:
     /// then no tool acted and no part of an answer was seen. `None` leaves the limit as it is.
-    fn plan_move(&self, session_id: Option<&SessionId>) -> Option<relay::Step> {
+    fn plan_move(&self, run_id: Option<&RunId>) -> Option<relay::Step> {
         let route = self.route.clone()?;
         if self.touched
             || self.flags.stop.load(Ordering::Acquire)
@@ -2278,7 +2278,7 @@ impl Pump {
             failed: self.tried.clone(),
             route,
             held: Vec::new(),
-            session_id: session_id.map(|id| id.as_str().to_owned()),
+            run_id: run_id.map(|id| id.as_str().to_owned()),
             walk,
         })
     }
@@ -2289,20 +2289,20 @@ impl Pump {
     fn count(&mut self, event: &AgentEvent) -> Option<String> {
         accounts::observe_quota(
             &self.state,
-            &self.session_name,
+            &self.run_name,
             crate::directorates::medical::usage::buckets_of(event),
         );
         if let Some(reported) = crate::directorates::medical::usage::spend_of(event) {
             let delta = self.usage.observe(reported);
             self.unreported_tokens
                 .set(self.unreported_tokens.get().saturating_add(delta.tokens()));
-            accounts::record_usage(&self.state, &self.session_name, delta.tokens());
+            accounts::record_usage(&self.state, &self.run_name, delta.tokens());
         }
         if event.kind != LIMIT_EVENT {
             return None;
         }
         let holder = Holder {
-            id: &self.session_name,
+            id: &self.run_name,
             operation: None,
         };
         let fallback = self.outbox.desk().limit_fallback.0.as_secs();
@@ -2328,39 +2328,39 @@ impl Pump {
     /// says why neither runs, for the conversation.
     fn start_afresh(&mut self, fallback: Fallback, failure: &str) -> Result<(), String> {
         report_resume_failure(&self.conversation_id, &fallback.resumed, failure);
-        let mut session = self
-            .session
+        let mut run = self
+            .run
             .write()
-            .map_err(|_| "assistant Session lock failed".to_owned())?;
-        let _ = session.close();
+            .map_err(|_| "assistant Run lock failed".to_owned())?;
+        let _ = run.close();
         match fallback
             .harness
             .start(&fallback.handler, &fallback.settings, fallback.start)
         {
             Ok(started) => {
-                *session = started;
+                *run = started;
                 self.usage = UsageTracker::default();
                 Ok(())
             }
             Err(error) => Err(format!(
-                "resuming the conversation's Session failed ({failure}), and starting afresh \
+                "resuming the conversation's Run failed ({failure}), and starting afresh \
                  failed too: {error}"
             )),
         }
     }
 
-    /// Files the context of provider Session `session_id` as it stands: the harness's record
+    /// Files the context of provider Run `run_id` as it stands: the harness's record
     /// where its handler names one, else the events this harness reported.
-    fn file_context(&self, session_id: Option<&SessionId>) {
-        let Some(session_id) = session_id else {
+    fn file_context(&self, run_id: Option<&RunId>) {
+        let Some(run_id) = run_id else {
             return;
         };
         let launched = &self.launched;
         let record = launched.harness.record(
             &launched.handler,
             &launched.settings,
-            SessionRecordQuery {
-                session_id: session_id.as_str().to_owned(),
+            RunRecordQuery {
+                run_id: run_id.as_str().to_owned(),
                 working_directory: self.area.clone(),
                 environment: launched.environment.clone(),
             },
@@ -2370,7 +2370,7 @@ impl Pump {
             ContextOwner::Conversation {
                 conversation: self.conversation_id.clone(),
             },
-            session_id.as_str(),
+            run_id.as_str(),
             &launched.handler,
             record,
             &self.tape,
@@ -2450,7 +2450,7 @@ impl Pump {
             .unwrap_or_default()
     }
 
-    fn remember(&self, session_id: &str) {
+    fn remember(&self, run_id: &str) {
         if let Ok(mut known) = self.known.lock() {
             let room = self.outbox.desk().known;
             if !known.contains_key(&self.conversation_id) {
@@ -2466,24 +2466,24 @@ impl Pump {
             }
             known.insert(
                 self.conversation_id.clone(),
-                (session_id.to_owned(), self.route.clone()),
+                (run_id.to_owned(), self.route.clone()),
             );
         }
     }
 
-    fn send(&self, session_id: Option<&SessionId>, events: Vec<AssistantEvent>) {
+    fn send(&self, run_id: Option<&RunId>, events: Vec<AssistantEvent>) {
         let run = AssistantRun {
-            account: accounts::held(&self.state, &self.session_name),
+            account: accounts::held(&self.state, &self.run_name),
             model: self.model.clone(),
             tokens: Some(self.unreported_tokens.take()).filter(|tokens| *tokens > 0),
         };
         self.outbox.send(AssistantReport {
-            route: session_id.and(self.route.clone()),
+            route: run_id.and(self.route.clone()),
             run: (run != AssistantRun::default()).then_some(run),
             station_id: self.station_id.clone(),
             conversation_id: self.conversation_id.clone(),
             job_id: None,
-            session_id: session_id.map(|id| id.as_str().to_owned()),
+            run_id: run_id.map(|id| id.as_str().to_owned()),
             events,
         });
     }
@@ -2521,11 +2521,11 @@ fn translate(event: &AgentEvent) -> Option<AssistantEvent> {
     Some(translated)
 }
 
-/// Logs that the conversation's provider Session `resumed` could not be resumed and that its
+/// Logs that the conversation's provider Run `resumed` could not be resumed and that its
 /// harness starts afresh with the conversation's recap.
 fn report_resume_failure(conversation: &str, resumed: &str, error: &str) {
     eprintln!(
-        "ai6: assistant conversation {}: resuming provider Session {resumed} failed, so it \
+        "ai6: assistant conversation {}: resuming provider Run {resumed} failed, so it \
          starts afresh with its recap: {error}",
         conversation_digest(conversation)
     );
@@ -3207,7 +3207,7 @@ mod tests {
         /// A read of [`Script::ReadsLong`] ran out with no output.
         read_ran_out: bool,
         /// What the desk asked of the harness's record.
-        records: Vec<SessionRecordQuery>,
+        records: Vec<RunRecordQuery>,
     }
 
     /// What a scripted harness does with a message.
@@ -3230,7 +3230,7 @@ mod tests {
         Works,
         /// Writes a note and a memory in `personal/`, then answers and completes.
         Writes,
-        /// Calls a file tool (see [`ScriptedSession::answer`]), writes a memory, then answers
+        /// Calls a file tool (see [`ScriptedRun::answer`]), writes a memory, then answers
         /// and completes.
         Reads,
         /// Writes `personal/calc.py`, runs it with `Bash`, which writes `personal/out.txt`,
@@ -3340,7 +3340,7 @@ mod tests {
     const CALC: &str = "open('personal/out.txt', 'w').write(f'{6 * 7}\\n')\n";
 
     /// A harness that does what `script` says with every message; a resumed one does what
-    /// `resumed` says, and one that dies when resumed never confirms its Session. Its scripts
+    /// `resumed` says, and one that dies when resumed never confirms its Run. Its scripts
     /// run in a sandbox unless `no_sandbox` says why not, and it loads skills unless
     /// `no_skills` says why not.
     struct Scripted {
@@ -3351,12 +3351,12 @@ mod tests {
         no_sandbox: Arc<Mutex<Option<String>>>,
         no_skills: Arc<Mutex<Option<String>>>,
         no_images: Arc<Mutex<Option<String>>>,
-        /// Where the harness says it keeps its record of a Session; `None`, it keeps none.
-        record: Arc<Mutex<Option<SessionRecordFile>>>,
+        /// Where the harness says it keeps its record of a Run; `None`, it keeps none.
+        record: Arc<Mutex<Option<RunRecordFile>>>,
     }
 
-    struct ScriptedSession {
-        session_id: Option<SessionId>,
+    struct ScriptedRun {
+        run_id: Option<RunId>,
         events: Mutex<VecDeque<AgentEvent>>,
         asked: Arc<Mutex<Asked>>,
         script: Script,
@@ -3365,7 +3365,7 @@ mod tests {
     }
 
     /// The `failed` text a dying scripted harness reports.
-    const DIED: &str = "Claude Code exited with code 1 before completing the Session; its last \
+    const DIED: &str = "Claude Code exited with code 1 before completing the Run; its last \
                         output:\nError: the stored login has expired";
 
     fn event(kind: &str, text: Option<&str>) -> AgentEvent {
@@ -3379,7 +3379,7 @@ mod tests {
         }
     }
 
-    impl ScriptedSession {
+    impl ScriptedRun {
         fn answer(&self, message: &str) {
             let mut events = self.events.lock().unwrap();
             match self.script {
@@ -3463,9 +3463,9 @@ mod tests {
         }
     }
 
-    impl AgentSession for ScriptedSession {
+    impl AgentSession for ScriptedRun {
         fn session_id(&self) -> Result<Option<String>, ProviderError> {
-            Ok(self.session_id.clone().map(String::from))
+            Ok(self.run_id.clone().map(String::from))
         }
 
         fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {
@@ -3526,15 +3526,15 @@ mod tests {
             let message = request.prompt.clone();
             let dir = PathBuf::from(&request.working_directory);
             self.asked.lock().unwrap().starts.push(request);
-            let session = ScriptedSession {
-                session_id: Some(SessionId::try_new("provider-assistant-1").unwrap()),
+            let run = ScriptedRun {
+                run_id: Some(RunId::try_new("provider-assistant-1").unwrap()),
                 events: Mutex::default(),
                 asked: self.asked.clone(),
                 script: self.script,
                 dir,
             };
-            session.answer(&message);
-            Ok(session.into_object())
+            run.answer(&message);
+            Ok(run.into_object())
         }
 
         fn resume(
@@ -3544,21 +3544,21 @@ mod tests {
             request: AgentResume,
         ) -> Result<Object<dyn AgentSession>, String> {
             if !self.resumable {
-                return Err("no such provider Session".to_owned());
+                return Err("no such provider Run".to_owned());
             }
             let message = request.message.clone().unwrap_or_default();
-            let session_id = request.session_id.clone();
+            let run_id = request.run_id.clone();
             let dir = PathBuf::from(&request.working_directory);
             self.asked.lock().unwrap().resumes.push(request);
-            let session = ScriptedSession {
-                session_id: (self.resumed != Script::Dies).then_some(session_id),
+            let run = ScriptedRun {
+                run_id: (self.resumed != Script::Dies).then_some(run_id),
                 events: Mutex::default(),
                 asked: self.asked.clone(),
                 script: self.resumed,
                 dir,
             };
-            session.answer(&message);
-            Ok(session.into_object())
+            run.answer(&message);
+            Ok(run.into_object())
         }
 
         fn scripts(
@@ -3581,8 +3581,8 @@ mod tests {
             &self,
             _handler: &str,
             _settings: &HandlerSettings,
-            query: SessionRecordQuery,
-        ) -> Option<SessionRecordFile> {
+            query: RunRecordQuery,
+        ) -> Option<RunRecordFile> {
             self.asked.lock().unwrap().records.push(query);
             self.record.lock().unwrap().clone()
         }
@@ -3605,8 +3605,8 @@ mod tests {
         no_skills: Arc<Mutex<Option<String>>>,
         /// Why the harness cannot be shown images; `None`, it can.
         no_images: Arc<Mutex<Option<String>>>,
-        /// Where the harness keeps its record of a Session; `None`, it keeps none.
-        record: Arc<Mutex<Option<SessionRecordFile>>>,
+        /// Where the harness keeps its record of a Run; `None`, it keeps none.
+        record: Arc<Mutex<Option<RunRecordFile>>>,
         _root: tempfile::TempDir,
     }
 
@@ -3861,7 +3861,7 @@ mod tests {
             recap: Some("Earlier in this conversation: hello.".to_owned()),
             mcp_token: "conversation-token-".repeat(3),
             token_expires_at: unix_now() + 3_600.0,
-            session_id: None,
+            run_id: None,
             close: false,
             interrupt: false,
             person_id: None,
@@ -3974,7 +3974,7 @@ env = { ANTHROPIC_BASE_URL = "https://llm.example", ANTHROPIC_SMALL_FAST_MODEL =
         Resume(String, HandlerSettings, AgentResume),
     }
 
-    /// A harness with several handlers: its provider Session ID comes only once a turn runs, as a
+    /// A harness with several handlers: its provider ID comes only once a turn runs, as a
     /// real stream reports it, a handler in `limited` stops at a limit in Grok's words, and one in
     /// `logged_out` does not start.
     #[derive(Clone, Default)]
@@ -3996,15 +3996,15 @@ env = { ANTHROPIC_BASE_URL = "https://llm.example", ANTHROPIC_SMALL_FAST_MODEL =
         interrupts: Arc<AtomicUsize>,
     }
 
-    struct RoutedSession {
-        id: SessionId,
+    struct RoutedRun {
+        id: RunId,
         handler: String,
         events: Mutex<VecDeque<AgentEvent>>,
         sent: Arc<Mutex<Vec<(String, String)>>>,
         interrupts: Arc<AtomicUsize>,
     }
 
-    impl AgentSession for RoutedSession {
+    impl AgentSession for RoutedRun {
         fn session_id(&self) -> Result<Option<String>, ProviderError> {
             Ok(Some(self.id.to_string()))
         }
@@ -4040,7 +4040,7 @@ env = { ANTHROPIC_BASE_URL = "https://llm.example", ANTHROPIC_SMALL_FAST_MODEL =
     }
 
     impl RoutedHarness {
-        fn session(&self, handler: &str, id: String) -> Object<dyn AgentSession> {
+        fn run(&self, handler: &str, id: String) -> Object<dyn AgentSession> {
             let mut events = VecDeque::new();
             if self
                 .limited
@@ -4057,8 +4057,8 @@ env = { ANTHROPIC_BASE_URL = "https://llm.example", ANTHROPIC_SMALL_FAST_MODEL =
                 events.push_back(event(EVENT_TEXT, Some("an answer")));
                 events.push_back(event("completed", Some("an answer")));
             }
-            RoutedSession {
-                id: SessionId::try_new(id).unwrap(),
+            RoutedRun {
+                id: RunId::try_new(id).unwrap(),
                 handler: handler.to_owned(),
                 events: Mutex::new(events),
                 sent: self.sent.clone(),
@@ -4105,7 +4105,7 @@ env = { ANTHROPIC_BASE_URL = "https://llm.example", ANTHROPIC_SMALL_FAST_MODEL =
                 request,
             ));
             let started = self.started.fetch_add(1, Ordering::SeqCst);
-            Ok(self.session(handler, format!("provider-{handler}-{started}")))
+            Ok(self.run(handler, format!("provider-{handler}-{started}")))
         }
 
         fn resume(
@@ -4114,13 +4114,13 @@ env = { ANTHROPIC_BASE_URL = "https://llm.example", ANTHROPIC_SMALL_FAST_MODEL =
             settings: &HandlerSettings,
             request: AgentResume,
         ) -> Result<Object<dyn AgentSession>, String> {
-            let id = request.session_id.as_str().to_owned();
+            let id = request.run_id.as_str().to_owned();
             self.asked.lock().unwrap().push(RoutedAsk::Resume(
                 handler.to_owned(),
                 settings.clone(),
                 request,
             ));
-            Ok(self.session(handler, id))
+            Ok(self.run(handler, id))
         }
     }
 
@@ -4289,7 +4289,7 @@ priority = 1
         assert_eq!(settings["command"], "grok", "the route's own settings");
         assert!(!start.environment.contains_key("ANTHROPIC_BASE_URL"));
         let RoutedAsk::Start(handler, settings, start) = asked[1].clone() else {
-            panic!("a provider Session of another source is not resumed");
+            panic!("a provider Run of another source is not resumed");
         };
         assert_eq!(handler, "mock-claude");
         assert!(settings.is_empty());
@@ -4335,7 +4335,7 @@ priority = 1
                 Some("gemini-free".to_owned()),
                 None
             )),
-            "Universal Exports learns the new route with the new Session"
+            "Universal Exports learns the new route with the new Run"
         );
         let marked = fixture
             .state
@@ -4520,7 +4520,7 @@ priority = 1
             station_id: "hq".to_owned(),
             conversation_id: "c".to_owned(),
             job_id: None,
-            session_id: None,
+            run_id: None,
             events: vec![AssistantEvent::new(kind, None)],
         };
         outbox.hold("c");
@@ -4578,7 +4578,7 @@ priority = 1
                 .all(|row| row
                     .active
                     .iter()
-                    .all(|claim| claim.mission != session_name("c-out-both"))),
+                    .all(|claim| claim.mission != run_name("c-out-both"))),
             "a harness that did not start holds nothing"
         );
     }
@@ -4587,7 +4587,7 @@ priority = 1
     async fn her_conversation_resumes_on_the_same_route_with_its_settings() {
         let fixture = routed_fixture(HER_ROUTES, LITELLM, &["mock-grok", "mock-claude"]);
         let resume = AssistantJob {
-            session_id: Some("provider-earlier".to_owned()),
+            run_id: Some("provider-earlier".to_owned()),
             route: Some(RouteRef::new(
                 "mock-claude",
                 Some("gemini-free".to_owned()),
@@ -4604,11 +4604,11 @@ priority = 1
         .await;
         let asked = fixture.harness.asked.lock().unwrap().clone();
         let RoutedAsk::Resume(handler, settings, resume) = &asked[0] else {
-            panic!("the Session it ran resumes, though another route comes first in order");
+            panic!("the Run it ran resumes, though another route comes first in order");
         };
         assert_eq!(handler, "mock-claude");
         assert!(settings.is_empty(), "this route's, not the first's");
-        assert_eq!(resume.session_id.as_str(), "provider-earlier");
+        assert_eq!(resume.run_id.as_str(), "provider-earlier");
         assert_eq!(
             resume.environment["ANTHROPIC_AUTH_TOKEN"],
             "fake-litellm-0451"
@@ -4789,7 +4789,7 @@ secret = "gateway-key"
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("provider-assistant-1.jsonl");
         std::fs::write(&path, "{\"type\":\"user\"}\n{\"type\":\"assistant\"}\n").unwrap();
-        *fixture.record.lock().unwrap() = Some(SessionRecordFile {
+        *fixture.record.lock().unwrap() = Some(RunRecordFile {
             path: path.to_string_lossy().into_owned(),
             format: "claude-code-jsonl".to_owned(),
         });
@@ -4800,7 +4800,7 @@ secret = "gateway-key"
         until(|| kinds(&fixture, "c-ctx").contains(&EVENT_COMPLETED.to_owned())).await;
         let registry = fixture.desk.state.intake.clone();
         let context = registry
-            .session_context("provider-assistant-1")
+            .run_context("provider-assistant-1")
             .unwrap()
             .expect("filed at the turn's end");
         assert_eq!(context.conversation(), Some("c-ctx"));
@@ -4810,7 +4810,7 @@ secret = "gateway-key"
         assert!(context.content.contains("\"assistant\""));
         assert_eq!(context.cut_from, None);
         let asked = fixture.asked.lock().unwrap().records[0].clone();
-        assert_eq!(asked.session_id, "provider-assistant-1");
+        assert_eq!(asked.run_id, "provider-assistant-1");
         assert!(asked.environment.contains_key("CLAUDE_CONFIG_DIR"));
 
         // A record past the cap keeps its newest lines and says how large it was.
@@ -4822,13 +4822,13 @@ secret = "gateway-key"
         fixture.desk.handle(job("c-ctx", "And now?")).await;
         until(|| {
             registry
-                .session_context("provider-assistant-1")
+                .run_context("provider-assistant-1")
                 .unwrap()
                 .is_some_and(|context| context.cut_from.is_some())
         })
         .await;
         let cut = registry
-            .session_context("provider-assistant-1")
+            .run_context("provider-assistant-1")
             .unwrap()
             .unwrap();
         assert_eq!(cut.cut_from, Some(long.len() as u64));
@@ -4849,7 +4849,7 @@ secret = "gateway-key"
             .desk
             .state
             .intake
-            .session_context("provider-assistant-1")
+            .run_context("provider-assistant-1")
             .unwrap()
             .expect("filed at the turn's end");
         assert_eq!(context.source, ContextSource::Events);
@@ -4942,14 +4942,14 @@ secret = "gateway-key"
             assert_eq!(asked.starts.len(), 1, "the running harness took it");
             assert_eq!(asked.messages, ["And now?"]);
         }
-        let session_ids = fixture
+        let run_ids = fixture
             .reports
             .lock()
             .unwrap()
             .iter()
             .filter(|report| report.job_id.is_none())
-            .all(|report| report.session_id.as_deref() == Some("provider-assistant-1"));
-        assert!(session_ids);
+            .all(|report| report.run_id.as_deref() == Some("provider-assistant-1"));
+        assert!(run_ids);
         fixture.desk.close_all();
         until(|| kinds(&fixture, "c-1").contains(&EVENT_CLOSED.to_owned())).await;
         until(|| !area.exists()).await;
@@ -5020,7 +5020,7 @@ secret = "gateway-key"
     }
 
     #[tokio::test]
-    async fn an_idle_harness_closes_and_the_next_message_resumes_its_provider_session() {
+    async fn an_idle_harness_closes_and_the_next_message_resumes_its_provider_id() {
         let fixture = fixture(true, Duration::from_millis(50));
         fixture.desk.handle(job("c-2", "first")).await;
         until(|| kinds(&fixture, "c-2").contains(&EVENT_CLOSED.to_owned())).await;
@@ -5038,12 +5038,12 @@ secret = "gateway-key"
         assert_eq!(asked.starts.len(), 1);
         assert_eq!(asked.resumes.len(), 1);
         let resume = &asked.resumes[0];
-        assert_eq!(resume.session_id.as_str(), "provider-assistant-1");
+        assert_eq!(resume.run_id.as_str(), "provider-assistant-1");
         assert_eq!(resume.message.as_deref(), Some("second"));
         assert_eq!(resume.assistant, Some(AssistantMode::moneypenny()));
         assert_eq!(
             resume.working_directory, asked.starts[0].working_directory,
-            "Claude Code resumes a Session only from the directory that recorded it"
+            "Claude Code resumes a Run only from the directory that recorded it"
         );
         assert_eq!(
             resume.initial_context,
@@ -5137,13 +5137,13 @@ secret = "gateway-key"
             .agent(None, "moneypenny")
             .unwrap()
             .handler_settings;
-        let session = StationHarness(state)
+        let run = StationHarness(state)
             .resume(
                 "mock-denied",
                 &settings,
                 AgentResume {
                     mission_id: MissionId::try_new("assistant--a").unwrap(),
-                    session_id: SessionId::try_new("provider-session").unwrap(),
+                    run_id: RunId::try_new("provider-id").unwrap(),
                     message: None,
                     working_directory: root.path().to_string_lossy().into_owned(),
                     clearance: "desk".to_owned(),
@@ -5163,7 +5163,7 @@ secret = "gateway-key"
         let deadline = Instant::now() + Duration::from_secs(30);
         let told = loop {
             assert!(Instant::now() < deadline, "the handler said nothing");
-            if let Some(event) = session.next_event(100).unwrap() {
+            if let Some(event) = run.next_event(100).unwrap() {
                 break event;
             }
         };
@@ -5172,10 +5172,10 @@ secret = "gateway-key"
     }
 
     #[tokio::test]
-    async fn a_session_that_cannot_resume_starts_afresh_and_bad_jobs_are_rejected() {
+    async fn a_run_that_cannot_resume_starts_afresh_and_bad_jobs_are_rejected() {
         let fixture = fixture(false, IDLE);
         let mut resumed = job("c-3", "hello again");
-        resumed.session_id = Some("gone".to_owned());
+        resumed.run_id = Some("gone".to_owned());
         fixture.desk.handle(resumed).await;
         until(|| kinds(&fixture, "c-3").contains(&EVENT_COMPLETED.to_owned())).await;
         assert_eq!(fixture.asked.lock().unwrap().starts.len(), 1);
@@ -5414,7 +5414,7 @@ event_bytes = 7
                 station_id: "hq".to_owned(),
                 conversation_id: "c-late".to_owned(),
                 job_id: job.map(str::to_owned),
-                session_id: None,
+                run_id: None,
                 events: vec![AssistantEvent::new(kind, None)],
             };
             let (answered, mut told) = tokio::sync::oneshot::channel();
@@ -5564,7 +5564,7 @@ event_bytes = 7
             station_id: "test".to_owned(),
             conversation_id: conversation.to_owned(),
             job_id: None,
-            session_id: None,
+            run_id: None,
             events: kinds
                 .iter()
                 .map(|kind| AssistantEvent::new(kind, None))
@@ -5793,13 +5793,13 @@ event_bytes = 7
         fixture.desk.close_all();
     }
 
-    /// Claude Code reads the message before it says whether the Session it was asked to
+    /// Claude Code reads the message before it says whether the Run it was asked to
     /// resume exists, so a resume can fail after the harness started.
     #[tokio::test]
-    async fn a_resumed_harness_that_fails_before_confirming_its_session_starts_afresh() {
+    async fn a_resumed_harness_that_fails_before_confirming_its_run_starts_afresh() {
         let fixture = scripted(true, IDLE, Script::Answers, Script::Dies);
         let mut resumed = job("c-gone", "hello again");
-        resumed.session_id = Some("gone".to_owned());
+        resumed.run_id = Some("gone".to_owned());
         fixture.desk.handle(resumed).await;
         until(|| kinds(&fixture, "c-gone").contains(&EVENT_COMPLETED.to_owned())).await;
         assert!(
@@ -5851,7 +5851,7 @@ event_bytes = 7
                             "G".to_owned(),
                             None,
                             "test".to_owned(),
-                            Some("session-8".to_owned()),
+                            Some("run-8".to_owned()),
                             Some("mission-1".to_owned()),
                         )
                         .unwrap(),

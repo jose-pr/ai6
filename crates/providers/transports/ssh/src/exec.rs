@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use ai6::guatiao::Status;
 use ai6::guatiao::library::ProviderError;
-use ai6::{ExitInfo, Output, READ_TIMED_OUT, RunSpec, Spec, TerminalSession};
+use ai6::{ExitInfo, Output, READ_TIMED_OUT, RunSpec, Spec, TerminalRun};
 use russh::client::Msg;
 use russh::{ChannelMsg, ChannelReadHalf, ChannelWriteHalf, Sig};
 use tokio::runtime::Handle;
@@ -246,7 +246,7 @@ fn finish(ending: &Ending, code: Option<i64>, signal: Option<i64>) {
     ending.changed.notify_all();
 }
 
-impl TerminalSession for Terminal {
+impl TerminalRun for Terminal {
     fn pid(&self) -> i64 {
         // The host does not tell an SSH client the process ID.
         -1

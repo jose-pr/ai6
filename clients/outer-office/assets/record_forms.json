@@ -191,7 +191,7 @@
             "type": "string"
           },
           "title": "Overlays",
-          "description": "The overlays its Missions' Sessions get after their Agent's loadout's, each an `[overlay.<name>]`. They add to what the loadout issues and never take any of it away.",
+          "description": "The overlays its Missions' Runs get after their Agent's loadout's, each an `[overlay.<name>]`. They add to what the loadout issues and never take any of it away.",
           "x-section": "roster",
           "x-advanced": true,
           "default": []
@@ -278,7 +278,7 @@
             "backup": "Hand over to the next qualified Agent"
           },
           "title": "When a usage limit is hit",
-          "description": "What happens when a provider's usage limit stops a Session.",
+          "description": "What happens when a provider's usage limit stops a Run.",
           "x-section": "limits",
           "x-advanced": true,
           "default": "rotate"
@@ -289,7 +289,7 @@
           "maximum": 18446744073709551615,
           "format": "seconds",
           "title": "Wait when no reset time is given",
-          "description": "How long a Session waits when a provider reports a limit but no reset time.",
+          "description": "How long a Run waits when a provider reports a limit but no reset time.",
           "x-section": "limits",
           "x-advanced": true,
           "default": 1800
@@ -304,8 +304,8 @@
             "retry": "Try again on another Station, with a hand-off",
             "fail": "File the Mission as failed"
           },
-          "title": "When a Session is lost",
-          "description": "What happens when a Session is lost with its Station.",
+          "title": "When a Run is lost",
+          "description": "What happens when a Run is lost with its Station.",
           "x-section": "limits",
           "x-advanced": true,
           "default": "retry"
@@ -316,7 +316,7 @@
           "maximum": 18446744073709551615,
           "format": "seconds",
           "title": "Lost after",
-          "description": "How long a Session's runner may stay out of reach before its Station gives it up as lost.",
+          "description": "How long a Run's runner may stay out of reach before its Station gives it up as lost.",
           "x-section": "limits",
           "x-advanced": true,
           "default": 45
@@ -344,15 +344,15 @@
               "title": "Starting point",
               "description": "A starting point the values below are laid over. Measuring only sets no limit."
             },
-            "session_tokens": {
+            "run_tokens": {
               "type": [
                 "integer",
                 "null"
               ],
               "minimum": 0,
               "maximum": 18446744073709551615,
-              "title": "Tokens per Session",
-              "description": "The tokens one Session may use. Leave it empty for no limit."
+              "title": "Tokens per Run",
+              "description": "The tokens one Run may use. Leave it empty for no limit."
             },
             "mission_tokens": {
               "type": [
@@ -362,7 +362,7 @@
               "minimum": 0,
               "maximum": 18446744073709551615,
               "title": "Tokens per Mission",
-              "description": "The tokens all of a Mission's Sessions may use. Leave it empty for no limit."
+              "description": "The tokens all of a Mission's Runs may use. Leave it empty for no limit."
             },
             "mission_cost_usd": {
               "type": [
@@ -370,7 +370,7 @@
                 "null"
               ],
               "title": "Dollars per Mission",
-              "description": "The dollars all of a Mission's Sessions may spend. Leave it empty for no limit."
+              "description": "The dollars all of a Mission's Runs may spend. Leave it empty for no limit."
             },
             "operation_cost_usd_per_day": {
               "type": [
@@ -442,7 +442,7 @@
                 }
               },
               "title": "Restrictions",
-              "description": "What applies to a Session once it has read outside text."
+              "description": "What applies to a Run once it has read outside text."
             },
             "tools": {
               "type": [
@@ -458,7 +458,7 @@
           },
           "additionalProperties": false,
           "title": "After reading outside text",
-          "description": "What a Session may do once it has read outside text.",
+          "description": "What a Run may do once it has read outside text.",
           "x-section": "safety",
           "x-advanced": true,
           "default": {}
@@ -843,7 +843,7 @@
                 "off": "Agents cannot ask"
               },
               "title": "Creating issues",
-              "description": "`propose`: a person approves each creation, or a class authorisation `issue-create` one from an unexposed Session with no findings; `direct`: the Agent creates at once; `off`: Agents cannot ask.",
+              "description": "`propose`: a person approves each creation, or a class authorisation `issue-create` one from an unexposed Run with no findings; `direct`: the Agent creates at once; `off`: Agents cannot ask.",
               "default": "propose"
             },
             "max_created": {
@@ -1162,15 +1162,15 @@
                       "description": "Reviews of Mission proposals in an hour; 0 is no limit.",
                       "default": 20
                     },
-                    "max_proposal_reviews_per_session_per_hour": {
+                    "max_proposal_reviews_per_run_per_hour": {
                       "type": [
                         "integer",
                         "null"
                       ],
                       "minimum": 0,
                       "maximum": 4294967295,
-                      "title": "Proposal reviews an hour for one Session",
-                      "description": "Reviews of one Session's proposals in an hour; 0 is no limit.",
+                      "title": "Proposal reviews an hour for one Run",
+                      "description": "Reviews of one Run's proposals in an hour; 0 is no limit.",
                       "default": 5
                     }
                   },
@@ -1732,8 +1732,8 @@
               },
               "resume": {
                 "type": "boolean",
-                "title": "Resume the last attempt's Session",
-                "description": "Each window's attempt resumes the last attempt's provider Session when its handler can and that attempt did not fail, else starts a new one, as it does when the resume is refused. Needs `standing`.",
+                "title": "Resume the last attempt's Run",
+                "description": "Each window's attempt resumes the last attempt's provider Run when its handler can and that attempt did not fail, else starts a new one, as it does when the resume is refused. Needs `standing`.",
                 "default": false
               }
             },
@@ -1936,7 +1936,7 @@
           ],
           "format": "provider:ai6_agent_handler",
           "title": "Handler",
-          "description": "The harness that runs its Sessions, from those the Stations report.",
+          "description": "The harness that runs its Runs, from those the Stations report.",
           "x-section": "harness"
         },
         "model": {
@@ -2022,7 +2022,7 @@
                   "type": "string"
                 },
                 "title": "Environment",
-                "description": "Values this route's Sessions get in their environment, over the Agent's, such as where the source is. Anyone who reads the roster reads them: no credential here.",
+                "description": "Values this route's Runs get in their environment, over the Agent's, such as where the source is. Anyone who reads the roster reads them: no credential here.",
                 "x-advanced": true,
                 "default": {}
               },
@@ -2032,7 +2032,7 @@
                   "type": "string"
                 },
                 "title": "Secrets",
-                "description": "The loadout secrets (`[secret.<name>]`) this route's Sessions reach their model with, leased per Session whatever the Session has read.",
+                "description": "The loadout secrets (`[secret.<name>]`) this route's Runs reach their model with, leased per Run whatever the Run has read.",
                 "x-advanced": true,
                 "default": []
               },
@@ -2156,7 +2156,7 @@
             "type": "string"
           },
           "title": "Environment",
-          "description": "Environment variables its Sessions get. Keep secrets out of here: a loadout hands them out.",
+          "description": "Environment variables its Runs get. Keep secrets out of here: a loadout hands them out.",
           "x-section": "duties",
           "x-advanced": true,
           "default": {}
@@ -2168,8 +2168,8 @@
           ],
           "minimum": 0,
           "maximum": 18446744073709551615,
-          "title": "Sessions at once",
-          "description": "How many Sessions it may run at once. Leave it empty for no limit of its own.",
+          "title": "Runs at once",
+          "description": "How many Runs it may run at once. Leave it empty for no limit of its own.",
           "x-section": "limits",
           "x-advanced": true
         },
@@ -2179,7 +2179,7 @@
             "null"
           ],
           "title": "Account pool",
-          "description": "The one account pool its Sessions draw from, when it is tied to one.",
+          "description": "The one account pool its Runs draw from, when it is tied to one.",
           "x-section": "limits",
           "x-advanced": true
         },
@@ -2194,7 +2194,7 @@
               "minimum": 0,
               "format": "seconds",
               "title": "Stalled after",
-              "description": "How long a Session may stay quiet before it counts as stalled."
+              "description": "How long a Run may stay quiet before it counts as stalled."
             },
             "loop_timeout": {
               "type": [
@@ -2204,7 +2204,7 @@
               "minimum": 0,
               "format": "seconds",
               "title": "Looping after",
-              "description": "How long a Session repeating itself may go on before it counts as looping."
+              "description": "How long a Run repeating itself may go on before it counts as looping."
             },
             "loop_min_lines": {
               "type": [
@@ -2224,7 +2224,7 @@
               "minimum": 0,
               "format": "seconds",
               "title": "Blocked after",
-              "description": "How long a Session showing a prompt may wait before it counts as blocked."
+              "description": "How long a Run showing a prompt may wait before it counts as blocked."
             },
             "max_runtime": {
               "type": [
@@ -2234,7 +2234,7 @@
               "minimum": 0,
               "format": "seconds",
               "title": "Longest run",
-              "description": "The longest a Session may run. Leave it empty for no limit of its own."
+              "description": "The longest a Run may run. Leave it empty for no limit of its own."
             },
             "history": {
               "type": [
@@ -2257,7 +2257,7 @@
           },
           "additionalProperties": false,
           "title": "Watchdog",
-          "description": "When its Sessions count as stuck.",
+          "description": "When its Runs count as stuck.",
           "x-section": "limits",
           "x-advanced": true,
           "default": {}
@@ -2285,15 +2285,15 @@
               "title": "Starting point",
               "description": "A starting point the values below are laid over. Measuring only sets no limit."
             },
-            "session_tokens": {
+            "run_tokens": {
               "type": [
                 "integer",
                 "null"
               ],
               "minimum": 0,
               "maximum": 18446744073709551615,
-              "title": "Tokens per Session",
-              "description": "The tokens one Session may use. Leave it empty for no limit."
+              "title": "Tokens per Run",
+              "description": "The tokens one Run may use. Leave it empty for no limit."
             },
             "mission_tokens": {
               "type": [
@@ -2303,7 +2303,7 @@
               "minimum": 0,
               "maximum": 18446744073709551615,
               "title": "Tokens per Mission",
-              "description": "The tokens all of a Mission's Sessions may use. Leave it empty for no limit."
+              "description": "The tokens all of a Mission's Runs may use. Leave it empty for no limit."
             },
             "mission_cost_usd": {
               "type": [
@@ -2311,7 +2311,7 @@
                 "null"
               ],
               "title": "Dollars per Mission",
-              "description": "The dollars all of a Mission's Sessions may spend. Leave it empty for no limit."
+              "description": "The dollars all of a Mission's Runs may spend. Leave it empty for no limit."
             },
             "operation_cost_usd_per_day": {
               "type": [
@@ -2332,7 +2332,7 @@
           },
           "additionalProperties": false,
           "title": "Budget",
-          "description": "What its Sessions may spend, on top of its Operation's budget.",
+          "description": "What its Runs may spend, on top of its Operation's budget.",
           "x-section": "limits",
           "x-advanced": true,
           "default": {}
@@ -2343,7 +2343,7 @@
             "null"
           ],
           "title": "Wake on a Cable",
-          "description": "Whether a Cable to a Session of it that is between turns starts a turn with the Cable as its input. When not, the Cable waits for the Agent's own read.",
+          "description": "Whether a Cable to a Run of it that is between turns starts a turn with the Cable as its input. When not, the Cable waits for the Agent's own read.",
           "x-section": "cables",
           "x-advanced": true,
           "default": true
@@ -2356,7 +2356,7 @@
           "minimum": 0,
           "maximum": 4294967295,
           "title": "Wakes per hour",
-          "description": "How many Cables may wake its Sessions in an hour; 0 wakes none.",
+          "description": "How many Cables may wake its Runs in an hour; 0 wakes none.",
           "x-section": "cables",
           "x-advanced": true,
           "default": 60
@@ -2420,7 +2420,7 @@
         {
           "id": "harness",
           "title": "Harness and model",
-          "description": "What runs this Agent's Sessions."
+          "description": "What runs this Agent's Runs."
         },
         {
           "id": "duties",
@@ -2525,7 +2525,7 @@
         "require_approval_before_done": {
           "type": "boolean",
           "title": "Require a decision before done",
-          "description": "Whether a Session of this role that ends done with no green ink request decided in that attempt is held for a person's verdict instead of being done.",
+          "description": "Whether a Run of this role that ends done with no green ink request decided in that attempt is held for a person's verdict instead of being done.",
           "x-advanced": true,
           "default": false
         },
@@ -2535,7 +2535,7 @@
             "type": "string"
           },
           "title": "Deliverables",
-          "description": "What every Mission of this role is to deliver, each a kind or `kind:target`: `branch`, `commit_on:BRANCH`, `comment:TEXT`, `artifact:URL`, `approval` or `file:PATH`. A Session that ends done leaves its Mission to be verified against them.",
+          "description": "What every Mission of this role is to deliver, each a kind or `kind:target`: `branch`, `commit_on:BRANCH`, `comment:TEXT`, `artifact:URL`, `approval` or `file:PATH`. A Run that ends done leaves its Mission to be verified against them.",
           "x-advanced": true,
           "default": []
         }
@@ -3760,7 +3760,7 @@
                 }
               ],
               "title": "Conversations remembered for a resume",
-              "description": "Conversations whose provider Session the desk remembers for a resume.",
+              "description": "Conversations whose provider Run the desk remembers for a resume.",
               "default": 1024
             },
             "close_wait": {
@@ -5344,7 +5344,7 @@
             }
           ],
           "title": "Clearance floor",
-          "description": "The clearance a Session needs for the compartment to apply to it."
+          "description": "The clearance a Run needs for the compartment to apply to it."
         },
         "limits": {
           "type": "object",
@@ -5646,7 +5646,7 @@
         "agent": {
           "type": "string",
           "title": "Agent",
-          "description": "The Agent that keeps the watch, by codename: its handler, model, effort, route and pool account run the watch's Session."
+          "description": "The Agent that keeps the watch, by codename: its handler, model, effort, route and pool account run the watch's Run."
         },
         "operation": {
           "type": [
@@ -6082,7 +6082,7 @@
                 "type": "string"
               },
               "title": "Tools",
-              "description": "Other programs Sessions use there, as `git` or `cargo>=1.89`.",
+              "description": "Other programs Runs use there, as `git` or `cargo>=1.89`.",
               "default": []
             },
             "disk_mb": {
@@ -6098,7 +6098,7 @@
           },
           "additionalProperties": false,
           "title": "Requirements",
-          "description": "What the Theater must have before Sessions run there.",
+          "description": "What the Theater must have before Runs run there.",
           "x-advanced": true
         },
         "provision": {
@@ -6160,7 +6160,7 @@
             "optional": "Optional: a reported weakening"
           },
           "title": "Cable endpoint",
-          "description": "Whether a Session here must reach its Cable endpoint.",
+          "description": "Whether a Run here must reach its Cable endpoint.",
           "x-advanced": true,
           "default": "required"
         }
@@ -6188,7 +6188,7 @@
           ],
           "format": "record:sandboxes",
           "title": "Sandbox",
-          "description": "The sandbox profile its Sessions run in."
+          "description": "The sandbox profile its Runs run in."
         },
         "mcp": {
           "type": "array",
@@ -6197,7 +6197,7 @@
           },
           "format": "record:mcps",
           "title": "MCP servers",
-          "description": "The MCP servers its Sessions get.",
+          "description": "The MCP servers its Runs get.",
           "default": []
         },
         "overlays": {
@@ -6207,7 +6207,7 @@
           },
           "format": "record:overlays",
           "title": "Overlays",
-          "description": "The overlays its Sessions are issued.",
+          "description": "The overlays its Runs are issued.",
           "default": []
         },
         "secrets": {
@@ -6217,7 +6217,7 @@
           },
           "format": "record:secrets",
           "title": "Secrets",
-          "description": "The secrets its Sessions may be leased.",
+          "description": "The secrets its Runs may be leased.",
           "default": []
         },
         "env": {
@@ -6226,7 +6226,7 @@
             "type": "string"
           },
           "title": "Environment",
-          "description": "Values its Sessions get in their environment; no secret.",
+          "description": "Values its Runs get in their environment; no secret.",
           "x-advanced": true,
           "default": {}
         }
@@ -6256,7 +6256,7 @@
             "type": "string"
           },
           "title": "Read and write",
-          "description": "Directories the Session may read and write.",
+          "description": "Directories the Run may read and write.",
           "default": []
         },
         "read_only": {
@@ -6265,7 +6265,7 @@
             "type": "string"
           },
           "title": "Read only",
-          "description": "Directories the Session may only read.",
+          "description": "Directories the Run may only read.",
           "default": []
         },
         "network": {
@@ -6274,7 +6274,7 @@
             "type": "string"
           },
           "title": "Network",
-          "description": "Hosts the Session may reach.",
+          "description": "Hosts the Run may reach.",
           "default": []
         }
       },
@@ -6305,7 +6305,7 @@
             "type": "string"
           },
           "title": "Tools denied",
-          "description": "Tools of the server the Session may not call.",
+          "description": "Tools of the server the Run may not call.",
           "default": []
         }
       },
@@ -6593,7 +6593,7 @@
                 "minimum": 0,
                 "maximum": 18446744073709551615,
                 "title": "Most at once",
-                "description": "Sessions that may use it at once."
+                "description": "Runs that may use it at once."
               },
               "labels": {
                 "type": "object",
@@ -6902,7 +6902,7 @@
         "gateway": {
           "type": "object",
           "properties": {
-            "sessions": {
+            "runs": {
               "anyOf": [
                 {
                   "type": "integer",
@@ -6918,11 +6918,11 @@
                   }
                 }
               ],
-              "title": "Live Sessions",
-              "description": "Live provider Sessions.",
+              "title": "Live Runs",
+              "description": "Live provider Runs.",
               "default": 16
             },
-            "board_sessions": {
+            "board_runs": {
               "anyOf": [
                 {
                   "type": "integer",
@@ -6938,11 +6938,11 @@
                   }
                 }
               ],
-              "title": "Sessions on the Mission board",
-              "description": "Sessions the Mission board lists from the Registry's records, the most recently updated ones; a Session still live is always listed.",
+              "title": "Runs on the Mission board",
+              "description": "Runs the Mission board lists from the Registry's records, the most recently updated ones; a Run still live is always listed.",
               "default": 2000
             },
-            "clients_per_session": {
+            "clients_per_run": {
               "anyOf": [
                 {
                   "type": "integer",
@@ -6958,8 +6958,8 @@
                   }
                 }
               ],
-              "title": "Browser connections per Session",
-              "description": "Simultaneous browser connections to one provider Session.",
+              "title": "Browser connections per Run",
+              "description": "Simultaneous browser connections to one provider Run.",
               "default": 12
             },
             "scrollback_events": {
@@ -6979,7 +6979,7 @@
                 }
               ],
               "title": "Frames kept for a late client",
-              "description": "Value frames kept per provider Session for a client that joins late.",
+              "description": "Value frames kept per provider Run for a client that joins late.",
               "default": 64
             },
             "frame_bytes": {
@@ -7035,8 +7035,8 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 18446744073709551615,
-              "title": "Queue per Session viewer",
-              "description": "Capacity of each per-Session viewer queue, at least 1.",
+              "title": "Queue per Run viewer",
+              "description": "Capacity of each per-Run viewer queue, at least 1.",
               "default": 8
             },
             "buffer_budget_bytes": {
@@ -7057,7 +7057,7 @@
               ],
               "format": "bytes",
               "title": "All the gateway's buffers",
-              "description": "Bytes the gateway may hold in buffers across every Session and connection; the configuration is refused when its limits could exceed it.",
+              "description": "Bytes the gateway may hold in buffers across every Run and connection; the configuration is refused when its limits could exceed it.",
               "default": 536870912
             },
             "client_slots": {
@@ -7077,7 +7077,7 @@
                 }
               ],
               "title": "Browser connection slots",
-              "description": "Browser connections the gateway keeps slots for; the configuration is refused when its Sessions times connections per Session could exceed it.",
+              "description": "Browser connections the gateway keeps slots for; the configuration is refused when its Runs times connections per Run could exceed it.",
               "default": 100000
             },
             "attach_token_ttl": {
@@ -7238,11 +7238,11 @@
           },
           "additionalProperties": false,
           "title": "The gateway",
-          "description": "`[gateway]`: live Sessions, connections and frames.",
+          "description": "`[gateway]`: live Runs, connections and frames.",
           "default": {
-            "sessions": 16,
-            "board_sessions": 2000,
-            "clients_per_session": 12,
+            "runs": 16,
+            "board_runs": 2000,
+            "clients_per_run": 12,
             "scrollback_events": 64,
             "frame_bytes": 262144,
             "input_frames_per_second": 40,
@@ -7849,8 +7849,8 @@
           ],
           "minimum": 0,
           "maximum": 18446744073709551615,
-          "title": "Sessions at once",
-          "description": "Agent Sessions it runs at once. Default: 4."
+          "title": "Runs at once",
+          "description": "Agent Runs it runs at once. Default: 4."
         },
         "stall_timeout": {
           "type": [
@@ -7858,8 +7858,8 @@
             "null"
           ],
           "format": "seconds",
-          "title": "Stall a silent Session after",
-          "description": "Seconds without provider or terminal activity before a Session stalls. Default: 300."
+          "title": "Stall a silent Run after",
+          "description": "Seconds without provider or terminal activity before a Run stalls. Default: 300."
         },
         "loop_timeout": {
           "type": [
@@ -7867,8 +7867,8 @@
             "null"
           ],
           "format": "seconds",
-          "title": "Stall a repeating Session after",
-          "description": "Seconds without novel terminal output before repeated output stalls a Session. Default: 300."
+          "title": "Stall a repeating Run after",
+          "description": "Seconds without novel terminal output before repeated output stalls a Run. Default: 300."
         },
         "loop_min_lines": {
           "type": [
@@ -7886,8 +7886,8 @@
             "null"
           ],
           "format": "seconds",
-          "title": "Mark a Session blocked after",
-          "description": "Quiet seconds before a prompt-shaped terminal tail marks a Session blocked. Default: 10."
+          "title": "Mark a Run blocked after",
+          "description": "Quiet seconds before a prompt-shaped terminal tail marks a Run blocked. Default: 10."
         },
         "max_runtime": {
           "type": [
@@ -7895,8 +7895,8 @@
             "null"
           ],
           "format": "seconds",
-          "title": "Longest a Session runs",
-          "description": "Longest a Session runs, in seconds. Default: none."
+          "title": "Longest a Run runs",
+          "description": "Longest a Run runs, in seconds. Default: none."
         },
         "history": {
           "type": [
@@ -7993,8 +7993,8 @@
                   }
                 }
               ],
-              "title": "Events queued per Session",
-              "description": "Events of one Session queued for its event pump; past it the oldest is dropped.",
+              "title": "Events queued per Run",
+              "description": "Events of one Run queued for its event pump; past it the oldest is dropped.",
               "default": 256
             },
             "interval": {
@@ -8034,7 +8034,7 @@
               "minimum": 0,
               "format": "seconds",
               "title": "A Mission lease lasts",
-              "description": "Seconds a lease on a Mission's brief or Session lasts unless the Station renews it at a check-in. A Station whose check-ins can take longer than this loses its Missions to recovery.",
+              "description": "Seconds a lease on a Mission's brief or Run lasts unless the Station renews it at a check-in. A Station whose check-ins can take longer than this loses its Missions to recovery.",
               "default": 180.0
             },
             "intake_attempts": {
@@ -8149,7 +8149,7 @@
               "minimum": 0,
               "maximum": 18446744073709551615,
               "title": "Events waiting to publish",
-              "description": "Events waiting for Universal Exports; past it output gives way, oldest first, and a Session's latest state is kept.",
+              "description": "Events waiting for Universal Exports; past it output gives way, oldest first, and a Run's latest state is kept.",
               "default": 64
             },
             "terminal_bytes": {
@@ -8191,7 +8191,7 @@
               ],
               "format": "bytes",
               "title": "Terminal output kept before a Mission binds",
-              "description": "Bytes of terminal output kept for a Session not yet bound to its Mission; past it the oldest goes.",
+              "description": "Bytes of terminal output kept for a Run not yet bound to its Mission; past it the oldest goes.",
               "default": 1048576
             },
             "publish_retry_delay": {
@@ -8214,8 +8214,8 @@
               "type": "number",
               "minimum": 0,
               "format": "seconds",
-              "title": "Register live Sessions again every",
-              "description": "Seconds between registering every live Session again, which is how a gateway restarted during a quiet spell learns of them.",
+              "title": "Register live Runs again every",
+              "description": "Seconds between registering every live Run again, which is how a gateway restarted during a quiet spell learns of them.",
               "default": 15.0
             },
             "input_retry_delay": {
@@ -8510,7 +8510,7 @@
               "minimum": 0,
               "format": "seconds",
               "title": "First re-attach try after",
-              "description": "Seconds before the first try to re-attach to a Session; each failed try doubles it.",
+              "description": "Seconds before the first try to re-attach to a Run; each failed try doubles it.",
               "default": 5.0
             },
             "max_reattach_delay": {
@@ -8533,8 +8533,8 @@
               "type": "number",
               "minimum": 0,
               "format": "seconds",
-              "title": "Write a Session's recent events every",
-              "description": "Seconds between writes of a Session's recent events to its record.",
+              "title": "Write a Run's recent events every",
+              "description": "Seconds between writes of a Run's recent events to its record.",
               "default": 15.0
             },
             "probe_timeout": {
@@ -8542,13 +8542,13 @@
               "minimum": 0,
               "format": "seconds",
               "title": "Longest look at a Theater",
-              "description": "Seconds the look at whether a Session's Theater still answers may take.",
+              "description": "Seconds the look at whether a Run's Theater still answers may take.",
               "default": 30.0
             }
           },
           "additionalProperties": false,
-          "title": "Re-attaching to Sessions",
-          "description": "`[recovery]`: re-attaching to Sessions after a restart.",
+          "title": "Re-attaching to Runs",
+          "description": "`[recovery]`: re-attaching to Runs after a restart.",
           "default": {
             "first_reattach_delay": 5.0,
             "max_reattach_delay": 60.0,
@@ -8953,7 +8953,7 @@
               "minimum": 0,
               "format": "seconds",
               "title": "Wait past a reported reset",
-              "description": "Seconds past a reported reset before a Session parked on a limit resumes.",
+              "description": "Seconds past a reported reset before a Run parked on a limit resumes.",
               "default": 15.0
             },
             "unknown_use_permille": {
@@ -9051,7 +9051,7 @@
               "minimum": 0,
               "format": "seconds",
               "title": "Renew a login this long before it ends",
-              "description": "Seconds before a login's known end at which a round renews it: well before its harness's own threshold, so a Session's harness has no reason to.",
+              "description": "Seconds before a login's known end at which a round renews it: well before its harness's own threshold, so a Run's harness has no reason to.",
               "default": 3600.0
             },
             "renew_after": {
@@ -9426,7 +9426,7 @@
               ],
               "format": "bytes",
               "title": "Largest overlay context",
-              "description": "Bytes of the rules, routing and context a Session's overlays add to its initial context together. Past it the Session is refused, naming this setting, rather than its text cut.",
+              "description": "Bytes of the rules, routing and context a Run's overlays add to its initial context together. Past it the Run is refused, naming this setting, rather than its text cut.",
               "default": 24576
             },
             "fetch_timeout": {
@@ -9578,7 +9578,7 @@
               "minimum": 0,
               "format": "seconds",
               "title": "A secret's lease lasts",
-              "description": "Seconds the leases of a Session's loadout and pool account secrets last.",
+              "description": "Seconds the leases of a Run's loadout and pool account secrets last.",
               "default": 3600.0
             },
             "max_lease_ttl": {
@@ -9730,8 +9730,8 @@
                   }
                 }
               ],
-              "title": "Session name in the wrapper's files",
-              "description": "Characters of the Session's name in the wrapper's file names.",
+              "title": "Run name in the wrapper's files",
+              "description": "Characters of the Run's name in the wrapper's file names.",
               "default": 64
             }
           },
@@ -9775,8 +9775,8 @@
               "type": "number",
               "minimum": 0,
               "format": "seconds",
-              "title": "Keep an ended Session for",
-              "description": "Seconds an ended Session is kept by its runner.",
+              "title": "Keep an ended Run for",
+              "description": "Seconds an ended Run is kept by its runner.",
               "default": 604800.0
             },
             "cable_request_bytes": {
@@ -9825,15 +9825,15 @@
                 }
               ],
               "title": "Cable relay requests open at once",
-              "description": "Requests through a runner's Cable relay the Station answers at once for one Session; past it a request is refused until one ends.",
+              "description": "Requests through a runner's Cable relay the Station answers at once for one Run; past it a request is refused until one ends.",
               "default": 64
             },
             "read_wait": {
               "type": "number",
               "minimum": 0,
               "format": "seconds",
-              "title": "One read of a Session waits",
-              "description": "Seconds one read by the Station of a runner's Session waits for an event.",
+              "title": "One read of a Run waits",
+              "description": "Seconds one read by the Station of a runner's Run waits for an event.",
               "default": 1.0
             },
             "connect_timeout": {
@@ -9889,7 +9889,7 @@
               "minimum": 0,
               "format": "seconds",
               "title": "Keep a superseded connection open for",
-              "description": "Seconds a connection another one took a Session from stays open, so the notice saying so is written before the socket closes under it.",
+              "description": "Seconds a connection another one took a Run from stays open, so the notice saying so is written before the socket closes under it.",
               "default": 0.2
             },
             "retry_pause": {
@@ -10126,7 +10126,7 @@
           },
           "additionalProperties": false,
           "title": "Remote-hands tools",
-          "description": "`[theater_tools]`: the `theater_*` tools of remote-hands Sessions.",
+          "description": "`[theater_tools]`: the `theater_*` tools of remote-hands Runs.",
           "default": {
             "output_bytes": 262144,
             "read_bytes": 262144,
@@ -10525,8 +10525,8 @@
             "boolean",
             "null"
           ],
-          "title": "Allow session resumption",
-          "description": "Whether TLS sessions may be resumed, which skips the certificate checks for a peer that held a session. Default: no."
+          "title": "Allow run resumption",
+          "description": "Whether TLS runs may be resumed, which skips the certificate checks for a peer that held a run. Default: no."
         },
         "require_ems": {
           "type": [

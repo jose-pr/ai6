@@ -97,7 +97,7 @@ fn full_example(record: ConfigRecord) -> Value {
                 "lost_after_secs": 90,
                 "budget": {
                     "preset": "strict",
-                    "session_tokens": 10,
+                    "run_tokens": 10,
                     "mission_tokens": 20,
                     "mission_cost_usd": 1.5,
                     "operation_cost_usd_per_day": 3,
@@ -126,7 +126,7 @@ fn full_example(record: ConfigRecord) -> Value {
                     "review": "off",
                     "rate_hold_hours": 2,
                     "max_proposal_reviews_per_hour": 4,
-                    "max_proposal_reviews_per_session_per_hour": 2
+                    "max_proposal_reviews_per_run_per_hour": 2
                 },
                 "harness": {"project_settings": "ignore"},
                 "promotion": {
@@ -205,7 +205,7 @@ fn full_example(record: ConfigRecord) -> Value {
                 "history": 20,
                 "normalize_digits": true
             },
-            "budget": {"session_tokens": 10},
+            "budget": {"run_tokens": 10},
             "retire_on": "2030-01-01",
             "on_retire": "retired",
             "retire_warning_days": 3,
@@ -784,8 +784,8 @@ fn a_provider_format_names_the_kind_its_library_declares() {
 #[test]
 fn a_refusal_names_a_nested_key_and_not_its_value() {
     let refused =
-        from_json::<AgentDefinition>(&json!({"budget": {"session_tokens": "plenty"}})).unwrap_err();
-    assert!(refused.contains("budget.session_tokens"), "{refused}");
+        from_json::<AgentDefinition>(&json!({"budget": {"run_tokens": "plenty"}})).unwrap_err();
+    assert!(refused.contains("budget.run_tokens"), "{refused}");
     assert!(!refused.contains("plenty"), "{refused}");
 }
 
@@ -978,8 +978,8 @@ fn what_a_record_writes_reads_back_as_itself() {
 fn a_refused_setting_names_its_key_and_never_its_value() {
     for (document, key) in [
         (
-            serde_json::json!({"gateway": {"sessions": "hunter2"}}),
-            "gateway.sessions",
+            serde_json::json!({"gateway": {"runs": "hunter2"}}),
+            "gateway.runs",
         ),
         (serde_json::json!({"gateway": {"hunter2": 1}}), "hunter2"),
         (serde_json::json!({"directory": ["hunter2"]}), "directory"),

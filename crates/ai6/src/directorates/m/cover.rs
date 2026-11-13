@@ -61,7 +61,7 @@ pub enum Disclosure {
     Hidden,
     /// The work may say AI helped, but not which model or Agent.
     Assisted,
-    /// The Agent, its model and provider Sessions may be named.
+    /// The Agent, its model and provider Runs may be named.
     Full,
 }
 
@@ -327,7 +327,7 @@ impl Default for Covers {
                 suggest: String::new(),
                 model: false,
                 footer: String::new(),
-                forbidden: forbidden(&[r"claude\.ai/code/session"]),
+                forbidden: forbidden(&[r"claude\.ai/code/run"]),
                 announce: false,
             },
         );
@@ -342,7 +342,7 @@ impl Default for Covers {
                 suggest: "Assisted-by: AI".to_owned(),
                 model: false,
                 footer: String::new(),
-                forbidden: forbidden(&[r"claude\.ai/code/session"]),
+                forbidden: forbidden(&[r"claude\.ai/code/run"]),
                 announce: false,
             },
         );
@@ -554,7 +554,7 @@ fn is_attribution_trailer(key: &str) -> bool {
     matches!(
         key.to_ascii_lowercase().as_str(),
         "co-authored-by" | "generated-by" | "assisted-by" | "ai-assisted" | "written-by"
-    ) || key.to_ascii_lowercase().ends_with("-session")
+    ) || key.to_ascii_lowercase().ends_with("-run")
 }
 
 fn announcement_regex() -> &'static Regex {

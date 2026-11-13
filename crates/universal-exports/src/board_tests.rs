@@ -1,15 +1,15 @@
-//! The Mission board is built from the Registry's Session records, so a gateway that has just
-//! started lists the Sessions that ended or wait to be checked, with live frames laid over them.
+//! The Mission board is built from the Registry's Run records, so a gateway that has just
+//! started lists the Runs that ended or wait to be checked, with live frames laid over them.
 
 use std::time::Duration;
 
 use ai6::directorates::registry::backend::*;
-use ai6::{NewSession, SessionResult, SessionStatus, SessionUpdate};
-use ai6_diptel::{LifecycleEvent, SessionState};
+use ai6::{NewRun, RunResult, RunStatus, RunUpdate};
+use ai6_diptel::{LifecycleEvent, RunState};
 use serde_json::Value;
 
 use crate::controls::tests::{STATION_TOKEN, restarted, restarted_with, served};
-use crate::{MissionId, OperationId, SessionId};
+use crate::{MissionId, OperationId, RunId};
 
 async fn get(base: &str, token: &str, path: &str) -> reqwest::Response {
     reqwest::Client::new()
@@ -20,30 +20,30 @@ async fn get(base: &str, token: &str, path: &str) -> reqwest::Response {
         .unwrap()
 }
 
-/// Records a Session of `mission` in `operation` held by `worker`, in `state`, closed when
+/// Records a Run of `mission` in `operation` held by `worker`, in `state`, closed when
 /// `status` says so.
 fn record(
     registry: &impl RegistryBackend,
     mission: &str,
     operation: &str,
     state: &str,
-    status: SessionStatus,
+    status: RunStatus,
 ) {
     let opened = registry
-        .open_session(
-            NewSession::new(format!("record-{mission}"), mission, "worker")
+        .open_run(
+            NewRun::new(format!("record-{mission}"), mission, "worker")
                 .with_operation(operation)
-                .with_provider_session(format!("session-{mission}")),
+                .with_provider_id(format!("run-{mission}")),
             Duration::from_secs(60),
         )
         .unwrap();
     registry
-        .update_session(
-            &opened.session_id,
+        .update_run(
+            &opened.run_id,
             "worker",
             opened.fence,
-            SessionUpdate::default()
-                .result(SessionResult::new(state))
+            RunUpdate::default()
+                .result(RunResult::new(state))
                 .status(status),
         )
         .unwrap();
@@ -55,34 +55,34 @@ fn states<'a>(missions: &'a Value, mission: &str) -> Vec<&'a str> {
         .unwrap()
         .iter()
         .filter(|entry| entry["mission_id"] == mission)
-        .flat_map(|entry| entry["sessions"].as_array().unwrap())
-        .map(|session| session["state"].as_str().unwrap_or("none"))
+        .flat_map(|entry| entry["runs"].as_array().unwrap())
+        .map(|run| run["state"].as_str().unwrap_or("none"))
         .collect()
 }
 
 #[tokio::test]
-async fn a_restarted_gateway_lists_ended_verifying_and_live_sessions_from_the_registry() {
+async fn a_restarted_gateway_lists_ended_verifying_and_live_runs_from_the_registry() {
     let served = served().await;
     record(
         &served.registry,
         "m-ended",
         "G",
         "done",
-        SessionStatus::Ended,
+        RunStatus::Ended,
     );
     record(
         &served.registry,
         "m-verifying",
         "G",
         "verifying",
-        SessionStatus::Active,
+        RunStatus::Active,
     );
     record(
         &served.registry,
         "m-other",
         "L",
         "done",
-        SessionStatus::Ended,
+        RunStatus::Ended,
     );
     let again = restarted(&served).await;
 
@@ -99,10 +99,10 @@ async fn a_restarted_gateway_lists_ended_verifying_and_live_sessions_from_the_re
         .unwrap()
         .iter()
         .find(|entry| entry["mission_id"] == "m-ended")
-        .unwrap()["sessions"][0];
+        .unwrap()["runs"][0];
     assert_eq!(ended["station_id"], "worker");
-    assert_eq!(ended["session_id"], "session-m-ended");
-    // Another Operation's Session is not the viewer's to see, recorded or not.
+    assert_eq!(ended["run_id"], "run-m-ended");
+    // Another Operation's Run is not the viewer's to see, recorded or not.
     assert!(states(&missions, "m-other").is_empty());
     assert!(states(&missions, "mission-l").is_empty());
 
@@ -122,7 +122,7 @@ async fn a_restarted_gateway_lists_ended_verifying_and_live_sessions_from_the_re
     .await;
     assert_eq!(detail.status(), 200);
     let detail: Value = detail.json().await.unwrap();
-    assert_eq!(detail["sessions"][0]["state"], "done");
+    assert_eq!(detail["runs"][0]["state"], "done");
     let hidden = get(
         &again.base,
         &served.viewer,
@@ -140,32 +140,32 @@ async fn live_frames_win_over_a_record_unless_it_has_closed() {
         "m-verifying",
         "G",
         "verifying",
-        SessionStatus::Active,
+        RunStatus::Active,
     );
     record(
         &served.registry,
         "m-ended",
         "G",
         "done",
-        SessionStatus::Ended,
+        RunStatus::Ended,
     );
     let again = restarted(&served).await;
-    for (mission, session) in [
-        ("m-verifying", "session-m-verifying"),
-        ("m-ended", "session-m-ended"),
+    for (mission, run) in [
+        ("m-verifying", "run-m-verifying"),
+        ("m-ended", "run-m-ended"),
     ] {
-        let (operation, mission, session) = (
+        let (operation, mission, run) = (
             OperationId::new("G").unwrap(),
             MissionId::new(mission).unwrap(),
-            SessionId::new(session).unwrap(),
+            RunId::new(run).unwrap(),
         );
         again
             .gateway
-            .register_session(
+            .register_run(
                 STATION_TOKEN,
                 operation.clone(),
                 mission.clone(),
-                session.clone(),
+                run.clone(),
             )
             .await
             .unwrap();
@@ -176,8 +176,8 @@ async fn live_frames_win_over_a_record_unless_it_has_closed() {
                 LifecycleEvent {
                     operation_id: operation,
                     mission_id: mission,
-                    session_id: session,
-                    state: SessionState::Working,
+                    run_id: run,
+                    state: RunState::Working,
                     reason: None,
                     sequence: 4,
                 },
@@ -186,19 +186,19 @@ async fn live_frames_win_over_a_record_unless_it_has_closed() {
             .unwrap();
     }
 
-    let board = again.gateway.board_sessions().await;
-    let find = |session: &str| {
+    let board = again.gateway.board_runs().await;
+    let find = |run: &str| {
         board
             .iter()
-            .find(|entry| entry.session_id == session)
+            .find(|entry| entry.run_id == run)
             .unwrap()
     };
-    let live = find("session-m-verifying");
+    let live = find("run-m-verifying");
     assert_eq!(live.state.as_deref(), Some("working"));
     assert_eq!(live.sequence, 4);
     assert_eq!(live.station_id.as_deref(), Some("worker"));
-    assert_eq!(find("session-m-ended").state.as_deref(), Some("done"));
-    assert_eq!(board.len(), 3, "one entry per Session, however it is known");
+    assert_eq!(find("run-m-ended").state.as_deref(), Some("done"));
+    assert_eq!(board.len(), 3, "one entry per Run, however it is known");
 }
 
 #[tokio::test]
@@ -209,13 +209,13 @@ async fn the_board_keeps_the_most_recently_updated_records_within_its_bound() {
         "m-ended",
         "G",
         "done",
-        SessionStatus::Ended,
+        RunStatus::Ended,
     );
     let mut limits = ai6::UnexLimits::default();
-    limits.gateway.board_sessions = ai6::Limit::at(1);
+    limits.gateway.board_runs = ai6::Limit::at(1);
     let again = restarted_with(&served, limits).await;
 
-    assert_eq!(again.gateway.board_sessions().await.len(), 1);
+    assert_eq!(again.gateway.board_runs().await.len(), 1);
 }
 
 #[tokio::test]
@@ -226,7 +226,7 @@ async fn a_recorded_mission_is_not_also_listed_as_pending() {
         "m-ended",
         "G",
         "done",
-        SessionStatus::Ended,
+        RunStatus::Ended,
     );
     served
         .registry

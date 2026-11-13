@@ -12,29 +12,29 @@ use std::time::{Duration, Instant};
 
 use super::backend::RegistryBackend;
 use super::limits::RegistryLimits;
-use super::sessions::{NewSession, SessionError, SessionRecord, SessionUpdate};
+use super::runs::{NewRun, RunError, RunRecord, RunUpdate};
 use super::store::{Brief, FileRegistry, Lease};
 
 /// Names the PostgreSQL server the suite runs against: a `postgres://` URL whose user may
 /// create schemas in its database.
 pub(crate) const POSTGRES_URL_ENV: &str = "AI6_TEST_POSTGRES_URL";
 
-/// A Registry with the clock-explicit Session hooks the Session cases drive.
+/// A Registry with the clock-explicit Run hooks the Run cases drive.
 pub(crate) trait TestRegistry: RegistryBackend {
-    fn open_session_at(
+    fn open_run_at(
         &self,
-        new: NewSession,
+        new: NewRun,
         ttl: Duration,
         now: f64,
-    ) -> Result<SessionRecord, SessionError>;
+    ) -> Result<RunRecord, RunError>;
 
-    fn take_session_at(
+    fn take_run_at(
         &self,
         id: &str,
         station: &str,
         ttl: Duration,
         now: f64,
-    ) -> Result<SessionRecord, SessionError>;
+    ) -> Result<RunRecord, RunError>;
 
     fn write_fenced(
         &self,
@@ -43,41 +43,41 @@ pub(crate) trait TestRegistry: RegistryBackend {
         fence: u64,
         now: f64,
         renew: Option<Duration>,
-        update: SessionUpdate,
-    ) -> Result<SessionRecord, SessionError>;
+        update: RunUpdate,
+    ) -> Result<RunRecord, RunError>;
 
-    fn lose_session_at(
+    fn lose_run_at(
         &self,
         id: &str,
         reason: &str,
         now: f64,
-    ) -> Result<SessionRecord, SessionError>;
+    ) -> Result<RunRecord, RunError>;
 
     /// Puts `record` into the queue under `key` the way an integration with write access
     /// does: a file in `new/`, or a row, without going through the Registry's API.
     fn drop_brief(&self, key: &str, record: &str);
 }
 
-macro_rules! clocked_sessions {
+macro_rules! clocked_runs {
     ($registry:ty) => {
         impl TestRegistry for $registry {
-            fn open_session_at(
+            fn open_run_at(
                 &self,
-                new: NewSession,
+                new: NewRun,
                 ttl: Duration,
                 now: f64,
-            ) -> Result<SessionRecord, SessionError> {
-                <$registry>::open_session_at(self, new, ttl, now)
+            ) -> Result<RunRecord, RunError> {
+                <$registry>::open_run_at(self, new, ttl, now)
             }
 
-            fn take_session_at(
+            fn take_run_at(
                 &self,
                 id: &str,
                 station: &str,
                 ttl: Duration,
                 now: f64,
-            ) -> Result<SessionRecord, SessionError> {
-                <$registry>::take_session_at(self, id, station, ttl, now)
+            ) -> Result<RunRecord, RunError> {
+                <$registry>::take_run_at(self, id, station, ttl, now)
             }
 
             fn write_fenced(
@@ -87,18 +87,18 @@ macro_rules! clocked_sessions {
                 fence: u64,
                 now: f64,
                 renew: Option<Duration>,
-                update: SessionUpdate,
-            ) -> Result<SessionRecord, SessionError> {
+                update: RunUpdate,
+            ) -> Result<RunRecord, RunError> {
                 <$registry>::write_fenced(self, id, station, fence, now, renew, update)
             }
 
-            fn lose_session_at(
+            fn lose_run_at(
                 &self,
                 id: &str,
                 reason: &str,
                 now: f64,
-            ) -> Result<SessionRecord, SessionError> {
-                <$registry>::lose_session_at(self, id, reason, now)
+            ) -> Result<RunRecord, RunError> {
+                <$registry>::lose_run_at(self, id, reason, now)
             }
 
             fn drop_brief(&self, key: &str, record: &str) {
@@ -108,9 +108,9 @@ macro_rules! clocked_sessions {
     };
 }
 
-clocked_sessions!(FileRegistry);
+clocked_runs!(FileRegistry);
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
-clocked_sessions!(super::sql::SqlRegistry);
+clocked_runs!(super::sql::SqlRegistry);
 
 /// One test's Registry.
 pub(crate) trait Store {
@@ -213,7 +213,7 @@ impl PostgresStore {
         format!("{scheme}://{role}:{password}@{rest}")
     }
 
-    /// [`location`](Self::location) with more server settings for each session.
+    /// [`location`](Self::location) with more server settings for each run.
     pub(crate) fn location_with(&self, settings: &[(&str, &str)]) -> String {
         let separator = if self.server.contains('?') { '&' } else { '?' };
         let mut options = format!("-c%20search_path%3D{}", self.schema);

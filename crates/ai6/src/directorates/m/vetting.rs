@@ -31,8 +31,8 @@ pub const DEFAULT_MAX_PER_SOURCE_PER_HOUR: u32 = 10;
 pub const DEFAULT_RATE_HOLD_HOURS: u64 = 24;
 /// Proposal reviews queued per Operation in a rolling hour unless configured.
 pub const DEFAULT_MAX_PROPOSAL_REVIEWS_PER_HOUR: u32 = 20;
-/// Proposal reviews queued per proposing Session in a rolling hour unless configured.
-pub const DEFAULT_MAX_PROPOSAL_REVIEWS_PER_SESSION_PER_HOUR: u32 = 5;
+/// Proposal reviews queued per proposing Run in a rolling hour unless configured.
+pub const DEFAULT_MAX_PROPOSAL_REVIEWS_PER_RUN_PER_HOUR: u32 = 5;
 /// The role whose Agents review briefs the rules cannot judge.
 pub const CHIEF_OF_STAFF_ROLE: &str = "chief-of-staff";
 /// The Brief `source` of an Agent's Mission proposal.
@@ -276,8 +276,8 @@ pub struct VettingPolicy {
     /// Chief of Staff reviews of Mission proposals queued per rolling hour; `None` is no
     /// limit. Past it a proposal is held for an operator instead of reviewed.
     pub max_proposal_reviews_per_hour: Option<u32>,
-    /// The same, per proposing Session.
-    pub max_proposal_reviews_per_session_per_hour: Option<u32>,
+    /// The same, per proposing Run.
+    pub max_proposal_reviews_per_run_per_hour: Option<u32>,
 }
 
 impl Default for VettingPolicy {
@@ -295,8 +295,8 @@ impl Default for VettingPolicy {
             review: VettingScope::Untrusted,
             rate_hold_secs: Some(DEFAULT_RATE_HOLD_HOURS * 3_600),
             max_proposal_reviews_per_hour: Some(DEFAULT_MAX_PROPOSAL_REVIEWS_PER_HOUR),
-            max_proposal_reviews_per_session_per_hour: Some(
-                DEFAULT_MAX_PROPOSAL_REVIEWS_PER_SESSION_PER_HOUR,
+            max_proposal_reviews_per_run_per_hour: Some(
+                DEFAULT_MAX_PROPOSAL_REVIEWS_PER_RUN_PER_HOUR,
             ),
         }
     }
@@ -362,9 +362,9 @@ impl VettingPolicy {
                 DEFAULT_MAX_PROPOSAL_REVIEWS_PER_HOUR,
             ),
             (
-                "max_proposal_reviews_per_session_per_hour",
-                self.max_proposal_reviews_per_session_per_hour,
-                DEFAULT_MAX_PROPOSAL_REVIEWS_PER_SESSION_PER_HOUR,
+                "max_proposal_reviews_per_run_per_hour",
+                self.max_proposal_reviews_per_run_per_hour,
+                DEFAULT_MAX_PROPOSAL_REVIEWS_PER_RUN_PER_HOUR,
             ),
         ] {
             match value {
@@ -429,9 +429,9 @@ pub struct VettingDefinition {
     /// Reviews of Mission proposals in an hour; 0 is no limit.
     #[schema(title = "Proposal reviews an hour", default = VettingPolicy::default().max_proposal_reviews_per_hour)]
     max_proposal_reviews_per_hour: Option<u32>,
-    /// Reviews of one Session's proposals in an hour; 0 is no limit.
-    #[schema(title = "Proposal reviews an hour for one Session", default = VettingPolicy::default().max_proposal_reviews_per_session_per_hour)]
-    max_proposal_reviews_per_session_per_hour: Option<u32>,
+    /// Reviews of one Run's proposals in an hour; 0 is no limit.
+    #[schema(title = "Proposal reviews an hour for one Run", default = VettingPolicy::default().max_proposal_reviews_per_run_per_hour)]
+    max_proposal_reviews_per_run_per_hour: Option<u32>,
 }
 
 /// An Operation's `vetting` as written: a switch, or the settings themselves.
@@ -498,9 +498,9 @@ impl VettingDefinition {
                 self.max_proposal_reviews_per_hour,
                 defaults.max_proposal_reviews_per_hour,
             ),
-            max_proposal_reviews_per_session_per_hour: limit(
-                self.max_proposal_reviews_per_session_per_hour,
-                defaults.max_proposal_reviews_per_session_per_hour,
+            max_proposal_reviews_per_run_per_hour: limit(
+                self.max_proposal_reviews_per_run_per_hour,
+                defaults.max_proposal_reviews_per_run_per_hour,
             ),
         })
     }
@@ -755,7 +755,7 @@ pub fn review_target(brief: &Brief) -> Option<ReviewTarget> {
 /// The reviewed brief and the other work's titles are quoted between markers no line of
 /// theirs contains, as data the reviewer must not follow. The reviewer answers with one JSON
 /// object that [`read_review`] reads. The review brief carries the `brief:source` exposure,
-/// since its Session reads untrusted text, and a `review` provenance received by
+/// since its Run reads untrusted text, and a `review` provenance received by
 /// `received_by` at `received_at` (Unix seconds): a brief without it is not a review.
 pub fn review_brief(
     reviewed: &Brief,

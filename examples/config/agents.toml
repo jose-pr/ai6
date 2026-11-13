@@ -83,7 +83,7 @@ policy = "Follow the explicit technical brief; request authorization before chan
 
 # Any Agent Client Protocol agent can be an Agent's handler. This one runs the Claude adapter
 # (Node 22 or later; AI6 installs nothing, so the version is pinned here). `env` is added under
-# the Session's own environment; set CLAUDE_CODE_EXECUTABLE to the `claude` it should drive.
+# the Run's own environment; set CLAUDE_CODE_EXECUTABLE to the `claude` it should drive.
 # With no roles, no Mission is placed on it until you give it some.
 [agent.009]
 handler = "acp"

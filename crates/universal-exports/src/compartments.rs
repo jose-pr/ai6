@@ -813,7 +813,7 @@ pub(crate) async fn mission_products(
     product.map(Json).ok_or_else(ApiError::not_found)
 }
 
-/// Whether `session` of `operation` is in compartment `id`, for the list filter.
+/// Whether `run` of `operation` is in compartment `id`, for the list filter.
 pub(crate) fn in_compartment(
     compiled: &CompiledCompartments,
     id: &str,

@@ -1031,7 +1031,7 @@ pub(crate) mod testing {
     /// What `ai6 runner connect` leaves a Station holding: the runner's stream, behind the
     /// link a test can drop.
     #[cfg(unix)]
-    struct ConnectSession {
+    struct ConnectRun {
         writer: std::net::TcpStream,
         reader: std::sync::Mutex<std::io::BufReader<std::net::TcpStream>>,
         ready: std::sync::Mutex<Option<Vec<u8>>>,
@@ -1039,7 +1039,7 @@ pub(crate) mod testing {
     }
 
     #[cfg(unix)]
-    impl crate::directorates::q::terminal::TerminalSession for ConnectSession {
+    impl crate::directorates::q::terminal::TerminalRun for ConnectRun {
         fn pid(&self) -> i64 {
             0
         }
@@ -1117,10 +1117,10 @@ pub(crate) mod testing {
             &self,
             spec: &Value,
         ) -> Result<
-            guatiao::library::Object<dyn crate::directorates::q::terminal::TerminalSession>,
+            guatiao::library::Object<dyn crate::directorates::q::terminal::TerminalRun>,
             ProviderError,
         > {
-            use crate::directorates::q::terminal::TerminalSession as _;
+            use crate::directorates::q::terminal::TerminalRun as _;
             self.check()?;
             let spec =
                 crate::directorates::q::terminal::Spec::from_value(spec).map_err(internal)?;
@@ -1141,7 +1141,7 @@ pub(crate) mod testing {
                 &crate::station::limits::RunnerLimits::default(),
             )
             .map_err(internal)?;
-            Ok(ConnectSession {
+            Ok(ConnectRun {
                 writer: stream,
                 reader: std::sync::Mutex::new(reader),
                 ready: std::sync::Mutex::new(Some(

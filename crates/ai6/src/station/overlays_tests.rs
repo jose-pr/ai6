@@ -100,7 +100,7 @@ impl Case {
         )?;
         prepared.deliver(
             &fit,
-            SessionFacts {
+            RunFacts {
                 environment,
                 handler,
                 working_directory,
@@ -180,7 +180,7 @@ fn a_tampered_store_refuses_the_start_and_is_not_fetched_over() {
         .path()
         .join("overlays/trees")
         .join(hex_of(&pin_of(&dir)));
-    // As a Session with the Station's own OS user could, it takes the protection off first.
+    // As a Run with the Station's own OS user could, it takes the protection off first.
     open_tree(&stored);
     fs::write(stored.join("kb/a.md"), "planted\n").unwrap();
     let refusal = case.prepare(&["tools"], &[], &list).err().unwrap();
@@ -202,7 +202,7 @@ fn a_tampered_store_refuses_the_start_and_is_not_fetched_over() {
 }
 
 #[test]
-fn a_copy_in_the_store_refuses_what_a_session_tries_to_write_there() {
+fn a_copy_in_the_store_refuses_what_a_run_tries_to_write_there() {
     let case = Case::new();
     let source = tempfile::tempdir().unwrap();
     let dir = overlay_dir(
@@ -270,7 +270,7 @@ fn a_program_stays_executable_in_the_store_and_one_from_a_copy_with_no_modes_bec
 }
 
 #[test]
-fn a_session_gets_the_root_bin_on_path_and_a_desk_one_no_bin() {
+fn a_run_gets_the_root_bin_on_path_and_a_desk_one_no_bin() {
     let case = Case::new();
     let source = tempfile::tempdir().unwrap();
     let dir = overlay_dir(
@@ -305,7 +305,7 @@ fn a_session_gets_the_root_bin_on_path_and_a_desk_one_no_bin() {
         .unwrap();
     assert_eq!(
         desk.environment["PATH"], base,
-        "a desk Session gets no bin/"
+        "a desk Run gets no bin/"
     );
     assert_eq!(desk.environment["SHIP_TOOLS_OVERLAY_ROOT"], root);
     assert!(desk.context.unwrap().contains("ship-tools"));
@@ -755,8 +755,8 @@ fn path_with_python() -> Option<String> {
         .then_some(path)
 }
 
-/// What a Session's own process would print, run with exactly its environment.
-fn session_prints(environment: &BTreeMap<String, String>, program: &str, args: &[&str]) -> String {
+/// What a Run's own process would print, run with exactly its environment.
+fn run_prints(environment: &BTreeMap<String, String>, program: &str, args: &[&str]) -> String {
     let mut command = Command::new(program);
     command.args(args).env_clear().envs(environment);
     #[cfg(windows)]
@@ -811,7 +811,7 @@ fn on_this_host_python_imports_the_overlays_lib_and_setup_runs_once_per_digest()
     let delivered = case.deliver(&prepared, environment, true, "codex").unwrap();
     let python = delivered.environment["AGENTS_PYTHON"].clone();
     assert_eq!(
-        session_prints(
+        run_prints(
             &delivered.environment,
             &python,
             &["-c", "import shiphelp; print(shiphelp.VALUE)"]
@@ -823,7 +823,7 @@ fn on_this_host_python_imports_the_overlays_lib_and_setup_runs_once_per_digest()
     assert_eq!(phases().trim(), "install install");
     assert!(
         fs::write(Path::new(&state).join("planted"), "x").is_err(),
-        "the state directory is read-only to the Session"
+        "the state directory is read-only to the Run"
     );
     let again = case.deliver(&prepared, environment, true, "codex").unwrap();
     assert_eq!(phases().trim(), "install install", "{:?}", again.digests);
@@ -845,7 +845,7 @@ fn on_this_host_code_with_no_python_on_the_path_refuses_naming_what_is_missing()
         .unwrap();
     assert!(refusal.contains("python3 or python"), "{refusal}");
     assert!(refusal.contains("tools"), "{refusal}");
-    // Text goes anywhere, and a desk Session asks nothing of the host.
+    // Text goes anywhere, and a desk Run asks nothing of the host.
     let desk = case.deliver(&prepared, &[("PATH", nowhere.as_str())], false, "codex");
     assert!(desk.is_ok(), "{:?}", desk.err());
 }
@@ -918,7 +918,7 @@ fn commands_are_refused_without_the_setting_and_a_wrong_pin_refuses_with_it() {
     let site = Site::Here {
         dir: case.state.path().join("overlays"),
     };
-    forget_session(&site, "mission-1").unwrap();
+    forget_run(&site, "mission-1").unwrap();
     assert!(!Path::new(home).exists(), "removed with its Mission");
 }
 
@@ -971,7 +971,7 @@ fn in_a_container_a_helper_reaches_its_commands_and_code_with_no_python_waits() 
     let delivered = prepared
         .deliver(
             &fit,
-            SessionFacts {
+            RunFacts {
                 environment: environment.clone(),
                 handler: "codex",
                 working_directory: "/work",
@@ -1011,7 +1011,7 @@ fn in_a_container_a_helper_reaches_its_commands_and_code_with_no_python_waits() 
     let refusal = prepared
         .deliver(
             &fit,
-            SessionFacts {
+            RunFacts {
                 environment: environment.clone(),
                 handler: "codex",
                 working_directory: "/work",
@@ -1145,7 +1145,7 @@ fn an_overlay_without_a_body_still_delivers_context_md_unreported() {
     );
 }
 #[test]
-fn an_overlay_with_a_hook_refuses_the_session_naming_it() {
+fn an_overlay_with_a_hook_refuses_the_run_naming_it() {
     let case = Case::new();
     let source = tempfile::tempdir().unwrap();
     let dir = overlay_dir(

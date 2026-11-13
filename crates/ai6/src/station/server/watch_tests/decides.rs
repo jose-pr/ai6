@@ -16,7 +16,7 @@ use super::*;
 use crate::directorates::m::mission::MissionState;
 use crate::directorates::m::scorecard::{self, Judgment};
 use crate::directorates::registry::decisions::{self, VerifyingDecision};
-use crate::directorates::registry::sessions::{OutcomeVerdict, ProbeResult};
+use crate::directorates::registry::runs::{OutcomeVerdict, ProbeResult};
 use crate::directorates::section_00::gate::{CABLE_TOKEN_ENV, CABLE_URL_ENV};
 
 /// The Agents of the Operation's Missions: `ag` does the work and ends done at once, under a role
@@ -25,7 +25,7 @@ const WORKERS: &str = "[role.shipper]\npurpose = \"Ships\"\npolicy = \"Ship it.\
      deliverables = [\"branch:feature-x\"]\n\
      [agent.ag]\nhandler = \"mock-verdict\"\nmodel = \"clear\"\nroles = [\"shipper\"]\n";
 
-/// What each tool a stand-in watch called answered, `TOOL=>ANSWER`, by the watch's Session name.
+/// What each tool a stand-in watch called answered, `TOOL=>ANSWER`, by the watch's Run name.
 static SAID: Mutex<BTreeMap<String, Vec<String>>> = Mutex::new(BTreeMap::new());
 
 /// What the watch's tools answered, once at least `count` calls have: the decision is recorded
@@ -190,7 +190,7 @@ fn git(dir: &Path, args: &[&str]) {
 }
 
 /// The Operation's checkout with a pushed `main` on a bare `origin`, and `feature-x` pushed too
-/// when `with_branch`. Made once the Mission's Session is done: a Session started in a repository
+/// when `with_branch`. Made once the Mission's Run is done: a Run started in a repository
 /// would be given a safe house, which this Station's test providers do not include.
 fn remote(root: &Path, with_branch: bool) {
     let (bare, work) = (root.join("origin.git"), root.join("checkout"));
@@ -252,10 +252,10 @@ fn state_of(state: &DaemonState, mission: &str) -> MissionState {
         .unwrap()
 }
 
-fn attempt(state: &DaemonState, mission: &str, attempt: u32) -> crate::SessionRecord {
+fn attempt(state: &DaemonState, mission: &str, attempt: u32) -> crate::RunRecord {
     state
         .intake
-        .sessions()
+        .runs()
         .unwrap()
         .into_iter()
         .find(|record| record.mission_id == mission && record.attempt == attempt)
@@ -416,7 +416,7 @@ async fn a_mission_whose_branch_is_missing_is_redispatched_with_the_reason_and_i
     let second = attempt(&state, &mission, 2);
     assert_eq!(
         second.predecessor.as_deref(),
-        Some(first.session_id.as_str())
+        Some(first.run_id.as_str())
     );
     assert!(second.verdict.is_none());
     watches::close_all(&state).await;
@@ -651,7 +651,7 @@ async fn a_cable_to_the_operation_reaches_its_watch_and_creates_no_mission() {
     );
     assert_no_mission(&state, tag);
     assert_eq!(state.missions.lock().unwrap().list().len(), before);
-    assert!(state.intake.sessions().unwrap().is_empty());
+    assert!(state.intake.runs().unwrap().is_empty());
     watches::close_all(&state).await;
 }
 
@@ -668,7 +668,7 @@ async fn the_watch_has_the_decision_tools_and_proposes_missions_as_its_own() {
         Arc::new({
             let watch_key = watch_key.clone();
             move |text: &str, environment: &BTreeMap<String, String>| {
-                // The first turn starts the Session; the proposal waits for a bound one.
+                // The first turn starts the Run; the proposal waits for a bound one.
                 if !text.contains("second") {
                     return;
                 }

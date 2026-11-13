@@ -232,7 +232,7 @@ void main() {
         );
         expect(find.text('Vetting found: duplicate'), findsOneWidget);
         expect(
-          find.text('Its Session read outside text: issue:jira'),
+          find.text('Its Run read outside text: issue:jira'),
           findsOneWidget,
         );
         expect(find.text('Approve and create'), findsOneWidget);
@@ -363,7 +363,7 @@ void main() {
             {
               'operation_id': 'G',
               'mission_id': 'm1',
-              'session_id': 'session-1',
+              'run_id': 'run-1',
               'state': 'blocked',
               'reason': 'issue',
               'sequence': 1,

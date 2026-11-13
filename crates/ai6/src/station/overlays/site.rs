@@ -1,4 +1,4 @@
-//! Where a Session's overlays go: this Station's own host, or a Theater reached through its
+//! Where a Run's overlays go: this Station's own host, or a Theater reached through its
 //! transport. A Theater is reached with POSIX shell scripts and holds one copy of a tree per
 //! digest, which every start hashes again against what the Station's store holds.
 
@@ -94,7 +94,7 @@ mkdir -p "$1"
 chmod -R u+w "$1"
 "#;
 
-/// Makes a directory read-only for this user, for what a Session must not plant in it.
+/// Makes a directory read-only for this user, for what a Run must not plant in it.
 const CLOSE: &str = r#"[ -e "$1" ] || exit 0
 chmod -R a-w "$1"
 "#;
@@ -202,7 +202,7 @@ impl Finished {
     }
 }
 
-/// A program found where a Session runs.
+/// A program found where a Run runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Found {
     /// Its absolute path.
@@ -814,7 +814,7 @@ fn open_here(_path: &Path) -> std::io::Result<()> {
 #[cfg(unix)]
 fn run_here(step: &Step<'_>) -> Result<Finished, String> {
     let seconds = step.limit.map_or(0, |limit| limit.as_secs().max(1));
-    // By its path: the Session's PATH need not have it.
+    // By its path: the Run's PATH need not have it.
     let mut command = Command::new("/bin/sh");
     command.args(
         shell_argv(IN_A_GROUP, &[&seconds.to_string()])

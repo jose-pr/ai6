@@ -8,9 +8,9 @@ import 'package:xterm2/xterm.dart';
 Stream<String> decodeTerminalOutput(Stream<List<int>> bytes) =>
     const Utf8Decoder(allowMalformed: true).bind(bytes);
 
-/// Renders one existing provider Session; it never starts or resumes a Session.
-class SessionTerminal extends StatefulWidget {
-  const SessionTerminal({
+/// Renders one existing provider Run; it never starts or resumes a Run.
+class RunTerminal extends StatefulWidget {
+  const RunTerminal({
     required this.output,
     this.onInput,
     this.onResize,
@@ -26,10 +26,10 @@ class SessionTerminal extends StatefulWidget {
   final int maxLines;
 
   @override
-  State<SessionTerminal> createState() => _SessionTerminalState();
+  State<RunTerminal> createState() => _RunTerminalState();
 }
 
-class _SessionTerminalState extends State<SessionTerminal> {
+class _RunTerminalState extends State<RunTerminal> {
   late final Terminal _terminal;
   StreamSubscription<String>? _output;
   String? _streamNotice;
@@ -52,7 +52,7 @@ class _SessionTerminalState extends State<SessionTerminal> {
   }
 
   @override
-  void didUpdateWidget(SessionTerminal oldWidget) {
+  void didUpdateWidget(RunTerminal oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.output != widget.output) {
       unawaited(_output?.cancel());

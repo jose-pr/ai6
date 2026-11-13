@@ -331,7 +331,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(board.accessToken, isNull);
-    expect(board.userSession, isNull);
+    expect(board.userRun, isNull);
     final logout = api.sent('/v1/auth/logout')!;
     expect(logout.method, 'POST');
     expect(logout.headers['authorization'], 'Bearer user-token');

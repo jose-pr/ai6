@@ -39,7 +39,7 @@ comment; the rest of the crate denies it.
   read. `Merge` (`"merge"`): into the output stream, through the same pipe as standard output,
   in the order the program wrote them. `Drop` (`"drop"`): discarded.
 
-## Session behaviour
+## Run behaviour
 
 - **Start**: `argv[0]` with the rest as separate arguments, never through a shell. `env`, when
   given, is the whole environment; `cwd` the working directory. `rows` and `cols` are ignored.
@@ -51,10 +51,10 @@ comment; the rest of the crate denies it.
   `.bat` or `.cmd` file runs under the system's `cmd.exe` with its arguments quoted as the
   standard library quotes them (`%` expands nothing, `&` ends nothing); an argument holding CR
   or LF is refused for one.
-- **Parent**: the program is started on a thread that lasts as long as the session, so one that
+- **Parent**: the program is started on a thread that lasts as long as the run, so one that
   asks to be signalled when the thread that started it ends (Linux's `PR_SET_PDEATHSIG`, as the
   Grok CLI does) lives on when the caller's thread ends.
-- **Alone**: the child inherits only its standard streams. On Unix it leads a new session (so
+- **Alone**: the child inherits only its standard streams. On Unix it leads a new run (so
   also a new process group, with no controlling terminal), and every descriptor above
   standard error is marked close-on-exec before the program runs (`close_range` on Linux
   5.11 or later, else each descriptor below the soft `RLIMIT_NOFILE`, at most `swept_fds`, 65536). On
@@ -78,11 +78,11 @@ comment; the rest of the crate denies it.
   code is reported as the standard library's signed 32-bit value (`0xFFFFFFFF` is `-1`,
   `0xC000013A` is `-1073741510`), and `kill` makes it `1`.
 - **Kill** takes the whole process tree. On Unix every process of the child's process group
-  and, on Linux and Android, its session, and every process whose parent is in the tree
+  and, on Linux and Android, its run, and every process whose parent is in the tree
   (found from `/proc` on Linux and Android, from `ps` elsewhere, until a scan finds nothing
   new), is stopped with `SIGSTOP`, then all are killed with `SIGKILL`, so a process that left
   the group (`setsid`, `setpgid`) is killed too. A process reparented away from the tree (its
-  parent exited first) and outside the group and session is not found. On Windows the Job
+  parent exited first) and outside the group and run is not found. On Windows the Job
   Object (`KILL_ON_JOB_CLOSE`) is terminated. `kill` returns once the child has exited and, on
   Windows, the Job Object has no process left, or after `kill_wait_ms` (2 s). It is idempotent.
 - **Drop** kills a running program and waits for it.

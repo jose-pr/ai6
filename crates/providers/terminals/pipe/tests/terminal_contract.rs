@@ -3,7 +3,7 @@ use std::io::{BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use ai6::directorates::q::terminal::{ExitInfo, Spec, Terminal, TerminalSession};
+use ai6::directorates::q::terminal::{ExitInfo, Spec, Terminal, TerminalRun};
 use ai6::guatiao::{FromValue, ToValue, library::Object};
 use ai6_terminal_pipe::{Pipe, PipeConfig, StderrMode};
 
@@ -19,7 +19,7 @@ fn spec(argv: Vec<String>) -> Spec {
     }
 }
 
-fn start(argv: Vec<String>) -> Object<dyn TerminalSession> {
+fn start(argv: Vec<String>) -> Object<dyn TerminalRun> {
     Pipe::default()
         .spawn(&spec(argv).to_value().unwrap())
         .unwrap()
@@ -45,7 +45,7 @@ fn child_spec(name: &str, vars: &[(&str, String)]) -> Spec {
     }
 }
 
-fn start_child(pipe: Pipe, name: &str, vars: &[(&str, String)]) -> Object<dyn TerminalSession> {
+fn start_child(pipe: Pipe, name: &str, vars: &[(&str, String)]) -> Object<dyn TerminalRun> {
     pipe.spawn(&child_spec(name, vars).to_value().unwrap())
         .unwrap()
 }
@@ -56,12 +56,12 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
         .any(|window| window == needle)
 }
 
-fn read_until(session: &Object<dyn TerminalSession>, marker: &[u8]) -> Vec<u8> {
+fn read_until(run: &Object<dyn TerminalRun>, marker: &[u8]) -> Vec<u8> {
     let deadline = Instant::now() + Duration::from_secs(20);
     let mut output = Vec::new();
     let mut buffer = vec![0; 65536];
     while !contains(&output, marker) {
-        let count = session.read(&mut buffer, 100).unwrap();
+        let count = run.read(&mut buffer, 100).unwrap();
         if count > 0 {
             output.extend_from_slice(&buffer[..count as usize]);
         }
@@ -74,13 +74,13 @@ fn read_until(session: &Object<dyn TerminalSession>, marker: &[u8]) -> Vec<u8> {
     output
 }
 
-/// Reads until the session reports the end of its output; fails if that takes 10 seconds.
-fn read_to_end(session: &Object<dyn TerminalSession>) -> Vec<u8> {
+/// Reads until the run reports the end of its output; fails if that takes 10 seconds.
+fn read_to_end(run: &Object<dyn TerminalRun>) -> Vec<u8> {
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut output = Vec::new();
     let mut buffer = vec![0; 65536];
     loop {
-        let count = session.read(&mut buffer, 100).unwrap();
+        let count = run.read(&mut buffer, 100).unwrap();
         if count == 0 {
             return output;
         }
@@ -95,14 +95,14 @@ fn read_to_end(session: &Object<dyn TerminalSession>) -> Vec<u8> {
     }
 }
 
-fn exit_now(session: &Object<dyn TerminalSession>) -> ExitInfo {
-    ExitInfo::from_value(&session.exit_status(0).unwrap()).unwrap()
+fn exit_now(run: &Object<dyn TerminalRun>) -> ExitInfo {
+    ExitInfo::from_value(&run.exit_status(0).unwrap()).unwrap()
 }
 
-fn wait_for_exit(session: &Object<dyn TerminalSession>) -> ExitInfo {
+fn wait_for_exit(run: &Object<dyn TerminalRun>) -> ExitInfo {
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
-        let status = ExitInfo::from_value(&session.exit_status(100).unwrap()).unwrap();
+        let status = ExitInfo::from_value(&run.exit_status(100).unwrap()).unwrap();
         if !status.running {
             return status;
         }
@@ -146,15 +146,15 @@ fn pipe_child() {
 /// no control sequence. Standard error's last line follows the output.
 #[test]
 fn a_long_line_arrives_whole_and_the_output_is_exact() {
-    let session = start_child(
+    let run = start_child(
         Pipe::default(),
         "pipe_child",
         &[("AI6_PIPE_CHILD", "1".to_owned())],
     );
-    session
+    run
         .write(format!("{}\n", "i".repeat(INPUT)).as_bytes())
         .unwrap();
-    let output = read_to_end(&session);
+    let output = read_to_end(&run);
     let report = format!("{{\"read\":{INPUT},\"stdin_tty\":false,\"stdout_tty\":false}}\n");
     assert!(
         contains(&output, report.as_bytes()),
@@ -168,7 +168,7 @@ fn a_long_line_arrives_whole_and_the_output_is_exact() {
         output.ends_with(b"AI6_PIPE_STDERR\n"),
         "stderr's tail ends the output"
     );
-    assert_eq!(exit_now(&session).code, Some(0));
+    assert_eq!(exit_now(&run).code, Some(0));
 }
 
 /// The child of [`stderr_keeps_out_of_the_stream_and_only_its_tail_follows`]: a line on
@@ -236,9 +236,9 @@ fn dropped_stderr_is_not_in_the_output() {
         stderr: StderrMode::Drop,
         ..PipeConfig::default()
     });
-    let session = start_child(pipe, "pipe_child", &[("AI6_PIPE_CHILD", "1".to_owned())]);
-    session.write(b"short\n").unwrap();
-    let output = read_to_end(&session);
+    let run = start_child(pipe, "pipe_child", &[("AI6_PIPE_CHILD", "1".to_owned())]);
+    run.write(b"short\n").unwrap();
+    let output = read_to_end(&run);
     assert!(contains(&output, &payload()));
     assert!(!contains(&output, b"AI6_PIPE_STDERR"));
 }
@@ -277,20 +277,20 @@ fn pipe_exit_child() {
 
 #[test]
 fn a_child_that_exits_early_ends_its_output() {
-    let session = start_child(
+    let run = start_child(
         Pipe::default(),
         "pipe_exit_child",
         &[("AI6_PIPE_EXIT", "1".to_owned())],
     );
-    let output = read_to_end(&session);
+    let output = read_to_end(&run);
     assert!(
         contains(&output, b"AI6_PIPE_FATAL"),
         "the last line is read before the end: {}",
         String::from_utf8_lossy(&output)
     );
-    assert_eq!(exit_now(&session).code, Some(3));
+    assert_eq!(exit_now(&run).code, Some(3));
     let mut byte = [0];
-    assert_eq!(session.read(&mut byte, 100).unwrap(), 0, "the end is final");
+    assert_eq!(run.read(&mut byte, 100).unwrap(), 0, "the end is final");
 }
 
 #[test]
@@ -308,11 +308,11 @@ fn a_shell_command_runs_and_reports_its_exit() {
         "-c".to_owned(),
         "printf AI6_PIPE_READY; exit 5".to_owned(),
     ];
-    let session = start(argv);
-    session.resize(40, 120).unwrap();
-    let output = read_to_end(&session);
+    let run = start(argv);
+    run.resize(40, 120).unwrap();
+    let output = read_to_end(&run);
     assert!(contains(&output, b"AI6_PIPE_READY"));
-    let status = exit_now(&session);
+    let status = exit_now(&run);
     assert_eq!((status.code, status.signal), (Some(5), None));
 }
 
@@ -341,7 +341,7 @@ fn pipe_grandchild() {
 /// A child that starts [`pipe_grandchild`] with its own environment, which inherits the
 /// child's output, then says so; with `AI6_PIPE_PARENT=exit` it exits with code 4, otherwise
 /// it waits for the grandchild. With `AI6_PIPE_PARENT=detach` the grandchild leaves the child's
-/// session and process group (`setsid`), or on Windows starts detached in a process group of
+/// run and process group (`setsid`), or on Windows starts detached in a process group of
 /// its own.
 #[test]
 fn pipe_parent() {
@@ -393,7 +393,7 @@ fn kill_ends_a_grandchild() {
     kill_ends_a_grandchild_started("sleep");
 }
 
-/// `kill` also ends a grandchild that left the program's session and process group.
+/// `kill` also ends a grandchild that left the program's run and process group.
 #[test]
 fn kill_ends_a_grandchild_that_left_the_process_group() {
     kill_ends_a_grandchild_started("detach");
@@ -402,7 +402,7 @@ fn kill_ends_a_grandchild_that_left_the_process_group() {
 fn kill_ends_a_grandchild_started(mode: &str) {
     let dir = tempfile_dir(&format!("kill-{mode}"));
     let beat = dir.join("beat");
-    let session = start_child(
+    let run = start_child(
         Pipe::default(),
         "pipe_parent",
         &[
@@ -410,24 +410,24 @@ fn kill_ends_a_grandchild_started(mode: &str) {
             ("AI6_PIPE_BEAT", beat.to_string_lossy().into_owned()),
         ],
     );
-    read_until(&session, b"AI6_PIPE_SPAWNED");
+    read_until(&run, b"AI6_PIPE_SPAWNED");
     let deadline = Instant::now() + Duration::from_secs(20);
     while size(&beat) < 3 {
         assert!(Instant::now() < deadline, "the grandchild never beat");
         std::thread::sleep(Duration::from_millis(20));
     }
-    assert!(exit_now(&session).running);
-    session.kill().unwrap();
+    assert!(exit_now(&run).running);
+    run.kill().unwrap();
     assert!(
-        !exit_now(&session).running,
+        !exit_now(&run).running,
         "kill returned before the child exited"
     );
-    session.kill().unwrap();
+    run.kill().unwrap();
     std::thread::sleep(Duration::from_millis(300));
     let after_kill = size(&beat);
     std::thread::sleep(Duration::from_millis(500));
     assert_eq!(size(&beat), after_kill, "the grandchild still runs");
-    read_to_end(&session);
+    read_to_end(&run);
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -435,7 +435,7 @@ fn kill_ends_a_grandchild_started(mode: &str) {
 /// the output still ends.
 #[test]
 fn a_child_that_exits_leaving_a_process_behind_ends_its_output() {
-    let session = start_child(
+    let run = start_child(
         Pipe::default(),
         "pipe_parent",
         &[
@@ -443,16 +443,16 @@ fn a_child_that_exits_leaving_a_process_behind_ends_its_output() {
             ("AI6_PIPE_SLEEP", "1".to_owned()),
         ],
     );
-    let output = read_to_end(&session);
+    let output = read_to_end(&run);
     assert!(contains(&output, b"AI6_PIPE_SPAWNED"));
-    assert_eq!(wait_for_exit(&session).code, Some(4));
+    assert_eq!(wait_for_exit(&run).code, Some(4));
 }
 
 /// What the file whose handle [`the_child_inherits_nothing_but_its_pipes`] leaks holds.
 const LEAK_MARKER: &str = "AI6_PIPE_LEAKED_HANDLE";
 
 /// The child of [`the_child_inherits_nothing_but_its_pipes`]: reports whether the descriptor or
-/// handle number in `AI6_PIPE_LEAK` reads the leaked file, and whether it leads a session of
+/// handle number in `AI6_PIPE_LEAK` reads the leaked file, and whether it leads a run of
 /// its own (always `true` on Windows, which has none).
 #[test]
 fn pipe_leak_child() {
@@ -530,19 +530,19 @@ fn inheritable(path: &Path) -> (std::fs::File, String) {
 }
 
 /// The program inherits only its standard streams, not a descriptor or handle the Station left
-/// inheritable, and on Unix leads a session of its own.
+/// inheritable, and on Unix leads a run of its own.
 #[test]
 fn the_child_inherits_nothing_but_its_pipes() {
     let dir = tempfile_dir("leak");
     let path = dir.join("marker");
     std::fs::write(&path, LEAK_MARKER).unwrap();
     let (file, raw) = inheritable(&path);
-    let session = start_child(
+    let run = start_child(
         Pipe::default(),
         "pipe_leak_child",
         &[("AI6_PIPE_LEAK", raw)],
     );
-    let output = read_to_end(&session);
+    let output = read_to_end(&run);
     drop(file);
     let text = String::from_utf8_lossy(&output);
     assert!(text.contains("\"leaked\":false"), "{text}");
@@ -601,7 +601,7 @@ fn a_batch_file_gets_its_arguments_exactly() {
     env.insert("AI6_PIPE_ARGS".to_owned(), "1".to_owned());
     let mut argv = vec![script.to_string_lossy().into_owned()];
     argv.extend(args.iter().map(|arg| (*arg).to_owned()));
-    let session = Pipe::default()
+    let run = Pipe::default()
         .spawn(
             &Spec {
                 env: Some(env),
@@ -611,7 +611,7 @@ fn a_batch_file_gets_its_arguments_exactly() {
             .unwrap(),
         )
         .unwrap();
-    let output = String::from_utf8_lossy(&read_to_end(&session)).into_owned();
+    let output = String::from_utf8_lossy(&read_to_end(&run)).into_owned();
     let expected: Vec<String> = args.iter().map(|arg| (*arg).to_owned()).collect();
     assert!(
         output.contains(&format!("ARGS {}", serde_json_like(&expected))),
@@ -703,21 +703,21 @@ fn pipe_parent_death_child() {
 #[cfg(target_os = "linux")]
 #[test]
 fn a_program_that_asks_for_parent_death_outlives_the_thread_that_started_it() {
-    let session = std::thread::spawn(|| {
-        let session = start_child(
+    let run = std::thread::spawn(|| {
+        let run = start_child(
             Pipe::default(),
             "pipe_parent_death_child",
             &[("PIPE_PARENT_DEATH_CHILD", "1".to_owned())],
         );
-        read_until(&session, b"asked");
-        session
+        read_until(&run, b"asked");
+        run
     })
     .join()
     .unwrap();
     // The signal follows the end of the thread by however long the kernel takes: too short a
     // wait lets a broken terminal pass, never a sound one fail.
     std::thread::sleep(Duration::from_millis(500));
-    session.write(b"still there\n").unwrap();
-    read_until(&session, b"heard still there");
-    assert!(exit_now(&session).running);
+    run.write(b"still there\n").unwrap();
+    read_until(&run, b"heard still there");
+    assert!(exit_now(&run).running);
 }

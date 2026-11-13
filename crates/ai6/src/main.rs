@@ -55,7 +55,7 @@ enum Command {
         #[command(subcommand)]
         command: ConfigCommand,
     },
-    /// The field runner: supervise agent harnesses on this host so Sessions outlive their Station.
+    /// The field runner: supervise agent harnesses on this host so Runs outlive their Station.
     Runner {
         #[command(subcommand)]
         command: RunnerCommand,
@@ -106,7 +106,7 @@ enum ConfigCommand {
     /// Print one section's JSON Schema, as its declaration states it: titles, descriptions,
     /// defaults, units and bounds. With no section, list every section and its title.
     Schema {
-        /// A dotted path: `provider`, `registry.limits.sessions`, `oo.chat`, `record.station`,
+        /// A dotted path: `provider`, `registry.limits.runs`, `oo.chat`, `record.station`,
         /// `record.unex.gateway`, `record.operation.issues`.
         section: Option<String>,
     },
@@ -209,7 +209,7 @@ enum GreenInkCommand {
     /// Prints nothing otherwise. Asks the Station at --cable-url (else AI6_CABLE_MCP_URL) with
     /// AI6_CABLE_MCP_TOKEN; always exits 0.
     Gate {
-        /// The Session's Cable endpoint, as the handler saw it.
+        /// The Run's Cable endpoint, as the handler saw it.
         #[arg(long)]
         cable_url: Option<String>,
     },

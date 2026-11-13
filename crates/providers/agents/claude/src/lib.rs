@@ -10,14 +10,14 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use ai6::directorates::m::assistant::SKILLS_PLUGIN;
-use ai6::directorates::m::identity::SessionId;
+use ai6::directorates::m::identity::RunId;
 use ai6::directorates::q::terminal::{
     AgentTerminal, ExitInfo, JsonLines, READ_TIMED_OUT, STREAM_COLS, Spec, StreamLine,
-    TerminalSession, exit_code_text,
+    TerminalRun, exit_code_text,
 };
 use ai6::directorates::section_00::agent::{
-    AgentHandler, AgentResume, AgentStart, AssistantMode, ModelInfo, ModelListing, SessionOverlays,
-    SessionRecordFile, SessionRecordQuery, clearance_reads_only, clearance_runs_commands,
+    AgentHandler, AgentResume, AgentStart, AssistantMode, ModelInfo, ModelListing, RunOverlays,
+    RunRecordFile, RunRecordQuery, clearance_reads_only, clearance_runs_commands,
 };
 use ai6::directorates::section_00::assistant::{SCRIPT_ENVIRONMENT, credential_dir_var};
 use ai6::directorates::section_00::denied::DenyList;
@@ -42,20 +42,20 @@ pub struct ClaudeConfig {
     /// Executable visible to the AI6-owned terminal environment.
     #[map(default = String::from("claude"))]
     pub executable: String,
-    /// Bytes of one line of Claude Code's output the Session holds before handing over what it
+    /// Bytes of one line of Claude Code's output the Run holds before handing over what it
     /// has. Default 67108864 (64 MiB).
     #[map(default = 64 * 1024 * 1024)]
     pub json_line_bytes: u64,
     /// Bytes of one terminal control sequence before it is dropped. Default 64.
     #[map(default = 64)]
     pub csi_bytes: u64,
-    /// How many of the last non-JSON lines a failed Session quotes. Default 8.
+    /// How many of the last non-JSON lines a failed Run quotes. Default 8.
     #[map(default = 8)]
     pub tail_lines: u64,
-    /// Bytes of each of those lines a failed Session quotes. Default 512.
+    /// Bytes of each of those lines a failed Run quotes. Default 512.
     #[map(default = 512)]
     pub tail_line_bytes: u64,
-    /// Milliseconds a closing Session waits for Claude Code to have exited. Default 2000.
+    /// Milliseconds a closing Run waits for Claude Code to have exited. Default 2000.
     #[map(default = 2_000)]
     pub close_wait_ms: u64,
     /// Milliseconds the end of the output waits for Claude Code's exit status. Default 1000.
@@ -95,7 +95,7 @@ impl Default for ClaudeConfig {
 }
 
 /// What an Agent's `handler_settings` change about a Mission's tools, on top of [`FIELD_ALLOWED`]
-/// and [`FIELD_DENIED`] and, at `desk`, [`DESK_DENIED`]. Answer-only and assistant Sessions ignore
+/// and [`FIELD_DENIED`] and, at `desk`, [`DESK_DENIED`]. Answer-only and assistant Runs ignore
 /// them. Unknown keys are refused.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct ClaudeSettings {
@@ -127,18 +127,18 @@ impl ClaudeSettings {
 /// The `request_id` of the `initialize` request that lists models.
 const MODELS_REQUEST: &str = "ai6-models";
 
-/// The format of Claude Code's Session transcript.
+/// The format of Claude Code's Run transcript.
 pub const RECORD_FORMAT: &str = "claude-code-jsonl";
 
-/// Claude Code's transcript of the Session `query` names, when it is on this host.
-fn claude_record(query: &SessionRecordQuery) -> Option<SessionRecordFile> {
-    if !records::file_safe(&query.session_id) {
+/// Claude Code's transcript of the Run `query` names, when it is on this host.
+fn claude_record(query: &RunRecordQuery) -> Option<RunRecordFile> {
+    if !records::file_safe(&query.run_id) {
         return None;
     }
     let root = records::configured_dir(&query.environment, "CLAUDE_CONFIG_DIR", ".claude")?;
-    let name = format!("{}.jsonl", query.session_id);
+    let name = format!("{}.jsonl", query.run_id);
     let path = records::find_file(&root.join("projects"), 1, &|file| file == name)?;
-    Some(SessionRecordFile {
+    Some(RunRecordFile {
         path: path.to_string_lossy().into_owned(),
         format: RECORD_FORMAT.to_owned(),
     })
@@ -180,7 +180,7 @@ fn models_of(answer: &Value) -> ModelListing {
     )
 }
 
-/// Starts and resumes Claude Code streams for AI6 Agent Sessions.
+/// Starts and resumes Claude Code streams for AI6 Agent Runs.
 #[derive(Provider)]
 #[provider(
     AgentHandler,
@@ -241,13 +241,13 @@ impl AgentHandler for ClaudeHandler {
         Ok(None)
     }
 
-    /// Claude Code keeps each Session as `projects/<directory>/<session>.jsonl` under its
+    /// Claude Code keeps each Run as `projects/<directory>/<run>.jsonl` under its
     /// configuration directory (`CLAUDE_CONFIG_DIR`, else `~/.claude`), one JSON object per
     /// line.
-    fn session_record(
+    fn run_record(
         &self,
-        query: SessionRecordQuery,
-    ) -> Result<Option<SessionRecordFile>, ProviderError> {
+        query: RunRecordQuery,
+    ) -> Result<Option<RunRecordFile>, ProviderError> {
         Ok(claude_record(&query))
     }
 
@@ -288,13 +288,13 @@ impl AgentHandler for ClaudeHandler {
             .filter_map(|rule| {
                 if DESK_DENIED.contains(&rule_tool(rule)) {
                     Some(format!(
-                        "allowed_tools adds {rule} to what its desk Sessions may call"
+                        "allowed_tools adds {rule} to what its desk Runs may call"
                     ))
                 } else if FIELD_ALLOWED.contains(&rule.as_str()) {
                     None
                 } else {
                     Some(format!(
-                        "allowed_tools adds {rule} to what its field Sessions may call"
+                        "allowed_tools adds {rule} to what its field Runs may call"
                     ))
                 }
             })
@@ -377,7 +377,7 @@ impl AgentHandler for ClaudeHandler {
             request.assistant.as_ref(),
             &request.overlays,
         )?;
-        let session = spawn(
+        let run = spawn(
             terminal,
             argv,
             &request.working_directory,
@@ -387,7 +387,7 @@ impl AgentHandler for ClaudeHandler {
                 request.assistant.as_ref(),
             ),
         )?;
-        let operation = ClaudeSession::new(session, None)
+        let operation = ClaudeRun::new(run, None)
             .limited_by(&self.config)
             .restricted_to(restriction(request.answer_only, request.assistant.as_ref()));
         operation.send(&request.prompt)?;
@@ -399,7 +399,7 @@ impl AgentHandler for ClaudeHandler {
         request: AgentResume,
         terminal: Object<dyn AgentTerminal>,
     ) -> Result<Object<dyn ai6::AgentSession>, ProviderError> {
-        let expected_session_id = request.session_id.clone();
+        let expected_run_id = request.run_id.clone();
         let mut argv = vec![
             self.config.executable.clone(),
             "-p".to_string(),
@@ -410,10 +410,10 @@ impl AgentHandler for ClaudeHandler {
             "--verbose".to_string(),
             "--replay-user-messages".to_string(),
             "--resume".to_string(),
-            request.session_id.to_string(),
+            request.run_id.to_string(),
         ];
-        // Claude Code 2.1.310 reuses the system prompt it recorded with the Session
-        // (`--system-prompt-snapshot`, on by default) until the Session is compacted; after
+        // Claude Code 2.1.310 reuses the system prompt it recorded with the Run
+        // (`--system-prompt-snapshot`, on by default) until the Run is compacted; after
         // that, or with the snapshot off, it builds the prompt from this launch's flags.
         add_launch_options(
             &mut argv,
@@ -424,7 +424,7 @@ impl AgentHandler for ClaudeHandler {
             request.effort.as_deref(),
         );
         add_budget(&mut argv, request.max_cost_micro_usd);
-        // Flags, not the Session's record, decide the tools: Claude Code 2.1.316 resumed a Session
+        // Flags, not the Run's record, decide the tools: Claude Code 2.1.316 resumed a Run
         // started with `Bash` and without it on the flags of each launch, either way round.
         let mode = Mode {
             project_settings: request.project_settings,
@@ -442,7 +442,7 @@ impl AgentHandler for ClaudeHandler {
             request.assistant.as_ref(),
             &request.overlays,
         )?;
-        let session = spawn(
+        let run = spawn(
             terminal,
             argv,
             &request.working_directory,
@@ -452,11 +452,11 @@ impl AgentHandler for ClaudeHandler {
                 request.assistant.as_ref(),
             ),
         )?;
-        let operation = ClaudeSession::new(session, Some(expected_session_id))
+        let operation = ClaudeRun::new(run, Some(expected_run_id))
             .limited_by(&self.config)
             .restricted_to(restriction(request.answer_only, request.assistant.as_ref()));
         // With stream-json input Claude Code writes nothing, not even its stream's
-        // initialization, until it has read a message: the message goes first, and the Session
+        // initialization, until it has read a message: the message goes first, and the Run
         // it reports is checked as its events are read.
         if let Some(message) = request.message
             && let Err(error) = operation.send(&message)
@@ -500,7 +500,7 @@ const OWN_TOOLS: [&str; 8] = [
     "Grep",
 ];
 
-/// The built-in tools a Mission's Session is offered at `field` and `00` (`--tools`), and at `desk`
+/// The built-in tools a Mission's Run is offered at `field` and `00` (`--tools`), and at `desk`
 /// less [`DESK_DENIED`]. `dontAsk` does not stop a tool that
 /// needs no approval: without this list Claude Code 2.1.316 ran `Agent`, `CronCreate` and
 /// `SendMessage` under it, and fetched `docs.python.org` with `WebFetch`, its rules empty. By
@@ -522,7 +522,7 @@ const FIELD_TOOLS: [&str; 13] = [
     "TaskUpdate",
 ];
 
-/// A Mission Session's allow rules at `field` and `00`, besides its own MCP servers, and at `desk`
+/// A Mission Run's allow rules at `field` and `00`, besides its own MCP servers, and at `desk`
 /// less [`DESK_DENIED`]. `Edit(/**)` is rooted at the
 /// working directory for a rule given as a flag, and covers `Write` and `NotebookEdit`
 /// (code.claude.com/docs/en/permissions, "Read and Edit").
@@ -540,11 +540,11 @@ const FIELD_ALLOWED: [&str; 11] = [
     "TaskUpdate",
 ];
 
-/// What a field Session is denied by name, besides not being offered it: a deny rule beats any
+/// What a field Run is denied by name, besides not being offered it: a deny rule beats any
 /// allow rule the user's or a pinned project's settings hold.
 const FIELD_DENIED: [&str; 3] = ["WebFetch", "WebSearch", "Agent"];
 
-/// What a `desk` Session is denied besides [`FIELD_DENIED`]: anything that runs a command, and
+/// What a `desk` Run is denied besides [`FIELD_DENIED`]: anything that runs a command, and
 /// `theater_write`, which takes any path on the Theater where `Edit(/**)` stays in the working
 /// directory. A rule in `allowed_tools` lifts each, as a weakening.
 const DESK_DENIED: [&str; 4] = [
@@ -554,7 +554,7 @@ const DESK_DENIED: [&str; 4] = [
     "mcp__ai6-theater__theater_write",
 ];
 
-/// Every tool an answer-only Session is denied by name, besides `--tools=` turning the
+/// Every tool an answer-only Run is denied by name, besides `--tools=` turning the
 /// built-in ones off: Claude's own tools, its web and sub-agent tools, and any MCP tool.
 const ANSWER_ONLY_DENIED: &str = "Bash,PowerShell,Edit,Write,NotebookEdit,Read,Glob,Grep,\
                                   WebFetch,WebSearch,Task,Agent,TodoWrite,mcp__*";
@@ -578,8 +578,8 @@ const DISABLE_WEB_FETCH_ENV: &str = "CLAUDE_CODE_DISABLE_WEB_FETCH";
 const MCP_TOOL_TIMEOUT_ENV: &str = "MCP_TOOL_TIMEOUT";
 
 /// The harness's environment: `environment`, with the advisor turned off for a restricted
-/// (answer-only or assistant) Session, auto memory off for an assistant, and WebFetch off for
-/// an assistant whose network reaches no host. A Session with the Theater tools gets
+/// (answer-only or assistant) Run, auto memory off for an assistant, and WebFetch off for
+/// an assistant whose network reaches no host. A Run with the Theater tools gets
 /// [`MCP_TOOL_TIMEOUT_ENV`] set to the longest call, unless the Agent's own environment sets it.
 fn harness_environment(
     environment: &BTreeMap<String, String>,
@@ -606,7 +606,7 @@ fn harness_environment(
     environment
 }
 
-/// What a restricted (answer-only or assistant) Session may call: its MCP servers' tools, and
+/// What a restricted (answer-only or assistant) Run may call: its MCP servers' tools, and
 /// the built-in tools its mode offers ([`offered_tools`]).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Allowed {
@@ -614,7 +614,7 @@ struct Allowed {
     builtins: Vec<&'static str>,
 }
 
-/// What a restricted Session may call, `None` for a Session that is not restricted.
+/// What a restricted Run may call, `None` for a Run that is not restricted.
 fn restriction(answer_only: bool, assistant: Option<&AssistantMode>) -> Option<Allowed> {
     match assistant {
         Some(mode) => Some(Allowed {
@@ -655,7 +655,7 @@ fn offered_tools(mode: &AssistantMode) -> Vec<&'static str> {
 /// The built-in tool that loads a skill, offered to an assistant with skills.
 const SKILL_TOOL: &str = "Skill";
 
-/// What AI6 decided about the Session's settings.
+/// What AI6 decided about the Run's settings.
 #[derive(Clone, Copy)]
 struct Mode {
     project_settings: bool,
@@ -663,11 +663,11 @@ struct Mode {
     answer_only: bool,
     /// Whether the clearance allows a command tool ([`clearance_runs_commands`]).
     commands: bool,
-    /// Whether the Session is held to reading until its plan passes ([`clearance_reads_only`]).
+    /// Whether the Run is held to reading until its plan passes ([`clearance_reads_only`]).
     reads_only: bool,
 }
 
-/// Every built-in tool an assistant Session is denied by name, besides `--tools=` turning the
+/// Every built-in tool an assistant Run is denied by name, besides `--tools=` turning the
 /// built-in ones off. Unlike [`ANSWER_ONLY_DENIED`] it leaves MCP tools alone: the assistant's
 /// servers are how it works.
 const ASSISTANT_DENIED: &str = "Bash,PowerShell,Edit,Write,NotebookEdit,Read,Glob,Grep,\
@@ -701,7 +701,7 @@ fn add_settings(
     mode: Mode,
     settings: &ClaudeSettings,
     assistant: Option<&AssistantMode>,
-    overlays: &SessionOverlays,
+    overlays: &RunOverlays,
 ) -> Result<(), ProviderError> {
     if let Some(assistant) = assistant {
         add_assistant(argv, environment, working_directory, assistant)?;
@@ -724,7 +724,7 @@ fn add_settings(
 }
 
 /// Whether the launch has a native overlay skill to load: a plugin directory and a skill for it.
-fn loads_overlay_skills(overlays: &SessionOverlays) -> bool {
+fn loads_overlay_skills(overlays: &RunOverlays) -> bool {
     overlays.plugin_dir.is_some() && overlays.skills.iter().any(|skill| skill.native)
 }
 
@@ -732,7 +732,7 @@ fn loads_overlay_skills(overlays: &SessionOverlays) -> bool {
 /// allowed as `Skill(ai6:<name>)`, and the Station's plugin directory is `--plugin-dir`. Claude Code
 /// 2.1.318 listed and launched the plugin's skills with this under `dontAsk`, at `field` and `desk`,
 /// and with no `Skill` in `--tools` it answered `No such tool available`.
-fn add_overlay_skills(argv: &mut Vec<String>, overlays: &SessionOverlays) {
+fn add_overlay_skills(argv: &mut Vec<String>, overlays: &RunOverlays) {
     let Some(dir) = overlays
         .plugin_dir
         .as_ref()
@@ -761,13 +761,13 @@ fn add_overlay_skills(argv: &mut Vec<String>, overlays: &SessionOverlays) {
     argv.extend(["--plugin-dir".to_owned(), dir.clone()]);
 }
 
-/// The one `--settings` a Mission's Session gets: the green ink gate when it has a Station to ask,
+/// The one `--settings` a Mission's Run gets: the green ink gate when it has a Station to ask,
 /// and, with overlay skills, no skill's injected command: a skill Claude Code ships or the user's
 /// directory holds is not one the Station checked, and its command would run before the gate saw it.
 fn add_mission_settings(
     argv: &mut Vec<String>,
     environment: &BTreeMap<String, String>,
-    overlays: &SessionOverlays,
+    overlays: &RunOverlays,
 ) {
     let mut settings = gate_of(environment).unwrap_or_else(|| json!({}));
     if loads_overlay_skills(overlays) {
@@ -778,13 +778,13 @@ fn add_mission_settings(
     }
 }
 
-/// An assistant Session, built from its mode's parts: answer-only's restrictions
+/// An assistant Run, built from its mode's parts: answer-only's restrictions
 /// (`--restricted`, only the user's settings) with exactly the mode's MCP servers connected
 /// (`--strict-mcp-config`) and their tools allowed without a prompt (`--allowedTools
 /// mcp__<name>`), and only the built-in tools [`offered_tools`] names (`--tools`; none is
 /// `--tools=`), each other one denied by name.
 ///
-/// With any built-in tool the Session runs under `--permission-mode dontAsk`, which denies
+/// With any built-in tool the Run runs under `--permission-mode dontAsk`, which denies
 /// every call no rule allows (code.claude.com/docs/en/permissions):
 ///
 /// - `files`: the file tools, which `--restricted` confines to the working directory; reading
@@ -966,7 +966,7 @@ fn script_read_roots(os: &str) -> &'static [&'static str] {
         ],
         // Linux and WSL2. The two `/tmp` entries are the sandbox's own network relay sockets (a
         // script reaches its proxy only through them; measured with Claude Code 2.1.310), where
-        // they are when the Session has no `CLAUDE_CODE_TMPDIR` of its own: re-opened by name,
+        // they are when the Run has no `CLAUDE_CODE_TMPDIR` of its own: re-opened by name,
         // so the rest of `/tmp`, AI6's own IPC sockets among it, stays unreadable.
         "linux" => &[
             "/usr",
@@ -1081,7 +1081,7 @@ fn script_settings(
             .iter()
             .map(|dir| dir.to_string_lossy().into_owned()),
     );
-    // With a temporary directory of the Session's own, Claude Code 2.1.310 puts the sandbox's
+    // With a temporary directory of the Run's own, Claude Code 2.1.310 puts the sandbox's
     // network relay sockets there instead of `/tmp`: they are re-opened by name, since
     // re-opening the whole directory read-only covers the writable `$TMPDIR` under it and
     // `bwrap` then fails to start.
@@ -1196,7 +1196,7 @@ fn web_gate_settings(
     }))
 }
 
-/// The program a harness hook runs as AI6's gate: `AI6_GREEN_INK_GATE` from the Session
+/// The program a harness hook runs as AI6's gate: `AI6_GREEN_INK_GATE` from the Run
 /// environment (which only the Agent's roster can set) when not blank, else the executable
 /// hosting this handler (`ai6` on a Station or field runner).
 fn hook_program(environment: &BTreeMap<String, String>) -> Option<String> {
@@ -1269,11 +1269,11 @@ fn variable_name(name: &str) -> bool {
         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-/// A Session that only reads its prompt and answers: `--restricted` (Claude Code 2.1.248 or
+/// A Run that only reads its prompt and answers: `--restricted` (Claude Code 2.1.248 or
 /// later: no shell or code tools, no WebFetch, only managed settings and AI6's), no built-in
 /// tool at all (`--tools=`), the tools above denied by name, no MCP server (an empty strict
 /// MCP config) and only the user's settings file besides. An older Claude Code that does not
-/// know a flag refuses to start, which ends the Session without an answer.
+/// know a flag refuses to start, which ends the Run without an answer.
 fn add_answer_only(argv: &mut Vec<String>) {
     argv.extend([
         "--restricted".to_owned(),
@@ -1309,7 +1309,7 @@ fn rule_tool(rule: &str) -> &str {
     rule.split('(').next().unwrap_or(rule).trim()
 }
 
-/// A field Session's tools, each list closed by the next flag since all are variadic: under
+/// A field Run's tools, each list closed by the next flag since all are variadic: under
 /// `--permission-mode dontAsk` a call no rule allows is denied, with no prompt nobody is there to
 /// answer (code.claude.com/docs/en/permissions). In remote-hands mode, when the Station serves a
 /// Theater's tools, Claude's own shell and file tools are neither offered nor allowed and stay
@@ -1381,9 +1381,9 @@ fn add_field_tools(
     ]);
 }
 
-/// The tools of a Session held to reading until its plan passes: reading and searching, and AI6's
+/// The tools of a Run held to reading until its plan passes: reading and searching, and AI6's
 /// Cable server, whose only tool it then has is `submit_plan`. What could change anything is denied
-/// by name, and no setting adds to the list: `allowed_tools` is a field Session's. A resume at the
+/// by name, and no setting adds to the list: `allowed_tools` is a field Run's. A resume at the
 /// Mission's clearance builds the field list again, since each launch passes its own flags
 /// (`--resume` keeps the conversation, not the tools).
 fn add_read_only_tools(argv: &mut Vec<String>, environment: &BTreeMap<String, String>) {
@@ -1408,7 +1408,7 @@ fn add_read_only_tools(argv: &mut Vec<String>, environment: &BTreeMap<String, St
     ]);
 }
 
-/// What a Session held to reading is denied besides [`FIELD_DENIED`]: everything that writes or runs.
+/// What a Run held to reading is denied besides [`FIELD_DENIED`]: everything that writes or runs.
 const READ_ONLY_DENIED: [&str; 12] = [
     "Edit",
     "Write",
@@ -1465,7 +1465,7 @@ fn gate_settings(program: &str, cable_url: &str) -> Value {
     })
 }
 
-/// The green ink gate when the Session has a Station to ask (its Cable endpoint). The gate is the
+/// The green ink gate when the Run has a Station to ask (its Cable endpoint). The gate is the
 /// `ai6` program hosting this handler, or the one `AI6_GREEN_INK_GATE` names.
 fn gate_of(environment: &BTreeMap<String, String>) -> Option<Value> {
     let cable_url = environment
@@ -1537,17 +1537,17 @@ fn decode_report(value: &Value) -> Option<UsageReport> {
     Some(report)
 }
 
-struct ClaudeSession {
-    terminal: Object<dyn TerminalSession>,
+struct ClaudeRun {
+    terminal: Object<dyn TerminalRun>,
     output: Mutex<JsonLines>,
-    /// The provider Session ID, once Claude has reported it.
-    session_id: Mutex<Option<SessionId>>,
-    expected_session_id: Option<SessionId>,
+    /// The provider ID, once Claude has reported it.
+    run_id: Mutex<Option<RunId>>,
+    expected_run_id: Option<RunId>,
     eof: AtomicBool,
     eof_reported: AtomicBool,
-    /// For a restricted (answer-only or assistant) Session, what it may call.
+    /// For a restricted (answer-only or assistant) Run, what it may call.
     restricted: Option<Allowed>,
-    /// Set once a restricted Session called a tool it may not, and was ended: nothing it
+    /// Set once a restricted Run called a tool it may not, and was ended: nothing it
     /// wrote after that is read.
     tripped: AtomicBool,
     /// The last lines Claude wrote that were not JSON: its own diagnostics, which say why it
@@ -1567,13 +1567,13 @@ struct ClaudeSession {
     exit_wait_ms: i64,
 }
 
-impl ClaudeSession {
-    fn new(terminal: Object<dyn TerminalSession>, expected_session_id: Option<SessionId>) -> Self {
+impl ClaudeRun {
+    fn new(terminal: Object<dyn TerminalRun>, expected_run_id: Option<RunId>) -> Self {
         Self {
             terminal,
             output: Mutex::new(JsonLines::new(&Default::default())),
-            session_id: Mutex::new(None),
-            expected_session_id,
+            run_id: Mutex::new(None),
+            expected_run_id,
             eof: AtomicBool::new(false),
             eof_reported: AtomicBool::new(false),
             restricted: None,
@@ -1610,7 +1610,7 @@ impl ClaudeSession {
             .filter(|exit| !exit.running)
     }
 
-    /// Why the Session ended without completing: the exit status and the last lines Claude
+    /// Why the Run ended without completing: the exit status and the last lines Claude
     /// wrote outside its stream.
     fn exit_reason(&self) -> String {
         let how = match self.exited(self.exit_wait_ms) {
@@ -1624,7 +1624,7 @@ impl ClaudeSession {
             Some(_) => "exited".to_owned(),
             None => "closed its terminal".to_owned(),
         };
-        let mut reason = format!("Claude Code {how} before completing the Session");
+        let mut reason = format!("Claude Code {how} before completing the Run");
         if let Ok(tail) = self.tail.lock()
             && !tail.is_empty()
         {
@@ -1647,13 +1647,13 @@ impl ClaudeSession {
         }
     }
 
-    /// Restricts the Session to what `allowed` names: calling any other tool ends it.
+    /// Restricts the Run to what `allowed` names: calling any other tool ends it.
     fn restricted_to(mut self, allowed: Option<Allowed>) -> Self {
         self.restricted = allowed;
         self
     }
 
-    /// The `failed` event that ends a restricted Session whose `seen` event calls a tool outside
+    /// The `failed` event that ends a restricted Run whose `seen` event calls a tool outside
     /// its servers (`mcp__<server>__<tool>`) and the built-in tools its mode offers, after
     /// closing it; `None` when it calls none. The flags it was started with are meant to make
     /// this impossible; this backs them up. Which paths, commands and hosts a built-in tool may
@@ -1681,7 +1681,7 @@ impl ClaudeSession {
             return None;
         }
         let reason = format!(
-            "the restricted Claude Code Session called {}, which it may not use; the Session \
+            "the restricted Claude Code Run called {}, which it may not use; the Run \
              was ended",
             forbidden.join(", ")
         );
@@ -1771,18 +1771,18 @@ impl ClaudeSession {
             }
         };
         if let Some(id) = value.get("session_id").and_then(Value::as_str) {
-            let session_id = SessionId::try_from(id.to_string())
+            let run_id = RunId::try_from(id.to_string())
                 .map_err(|error| refuse(Status::GUATIAO_ERR_BAD_VALUE, error))?;
             let different = self
-                .expected_session_id
+                .expected_run_id
                 .as_ref()
-                .is_some_and(|expected| expected != &session_id);
-            // Kept even when it is the wrong one: `session_id` is how the Station learns that.
-            *lock(&self.session_id)? = Some(session_id);
+                .is_some_and(|expected| expected != &run_id);
+            // Kept even when it is the wrong one: `run_id` is how the Station learns that.
+            *lock(&self.run_id)? = Some(run_id);
             if different {
                 return Err(refuse(
                     Status::GUATIAO_ERR_BAD_VALUE,
-                    "Claude resumed a different Session than requested",
+                    "Claude resumed a different Run than requested",
                 ));
             }
         }
@@ -1824,9 +1824,9 @@ fn control_answered(value: &Value) {
     }
 }
 
-impl ai6::AgentSession for ClaudeSession {
+impl ai6::AgentSession for ClaudeRun {
     fn session_id(&self) -> Result<Option<String>, ProviderError> {
-        Ok(lock(&self.session_id)?.clone().map(String::from))
+        Ok(lock(&self.run_id)?.clone().map(String::from))
     }
 
     fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {
@@ -1886,7 +1886,7 @@ fn spawn(
     argv: Vec<String>,
     cwd: &str,
     environment: &std::collections::BTreeMap<String, String>,
-) -> Result<Object<dyn TerminalSession>, ProviderError> {
+) -> Result<Object<dyn TerminalRun>, ProviderError> {
     let spec = Spec {
         argv,
         cwd: Some(cwd.to_string()),
@@ -2129,7 +2129,7 @@ fn decode_tools(value: &Value) -> Vec<String> {
         .collect()
 }
 
-/// The content block types an `assistant` message of a restricted Session may hold: prose,
+/// The content block types an `assistant` message of a restricted Run may hold: prose,
 /// reasoning, and a call of a tool Claude Code runs (checked by name).
 const EXPECTED_BLOCKS: [&str; 4] = ["text", "thinking", "redacted_thinking", "tool_use"];
 
@@ -2163,7 +2163,7 @@ fn unexpected_blocks(value: &Value) -> Vec<String> {
 fn lock<T>(mutex: &Mutex<T>) -> Result<std::sync::MutexGuard<'_, T>, ProviderError> {
     mutex
         .lock()
-        .map_err(|_| refuse(Status::GUATIAO_ERR_INTERNAL, "session lock was poisoned"))
+        .map_err(|_| refuse(Status::GUATIAO_ERR_INTERNAL, "run lock was poisoned"))
 }
 
 fn internal(error: impl std::fmt::Display) -> ProviderError {
@@ -2180,13 +2180,13 @@ mod tests {
     use std::collections::VecDeque;
 
     #[test]
-    fn a_sessions_transcript_is_found_under_its_configuration_directory() {
+    fn a_runs_transcript_is_found_under_its_configuration_directory() {
         let config = tempfile::tempdir().unwrap();
         let project = config.path().join("projects").join("-work-repo");
         std::fs::create_dir_all(&project).unwrap();
         std::fs::write(project.join("abc-123.jsonl"), "{}\n").unwrap();
-        let query = |session: &str| SessionRecordQuery {
-            session_id: session.to_owned(),
+        let query = |run: &str| RunRecordQuery {
+            run_id: run.to_owned(),
             working_directory: "/work/repo".to_owned(),
             environment: BTreeMap::from([(
                 "CLAUDE_CONFIG_DIR".to_owned(),
@@ -2343,14 +2343,14 @@ mod tests {
         fn spawn_private(
             &self,
             value: &ai6::guatiao::Value,
-        ) -> Result<Object<dyn TerminalSession>, ProviderError> {
+        ) -> Result<Object<dyn TerminalRun>, ProviderError> {
             self.spawn(value)
         }
 
         fn spawn(
             &self,
             value: &ai6::guatiao::Value,
-        ) -> Result<Object<dyn TerminalSession>, ProviderError> {
+        ) -> Result<Object<dyn TerminalRun>, ProviderError> {
             let spec = Spec::from_value(value).map_err(internal)?;
             self.specs.lock().unwrap().push(spec.clone());
 
@@ -2379,7 +2379,7 @@ mod tests {
             let held_open = self.keep_open.then(|| sender.clone());
             thread::spawn(move || forward_json_lines(stdout, sender));
 
-            Ok(ProcessTerminalSession {
+            Ok(ProcessTerminalRun {
                 child: Mutex::new(child),
                 stdin: Mutex::new(stdin),
                 receiver: Mutex::new(receiver),
@@ -2410,7 +2410,7 @@ mod tests {
         }
     }
 
-    struct ProcessTerminalSession {
+    struct ProcessTerminalRun {
         child: Mutex<Child>,
         stdin: Mutex<ChildStdin>,
         receiver: Mutex<Receiver<Vec<u8>>>,
@@ -2418,7 +2418,7 @@ mod tests {
         _held_open: Option<mpsc::Sender<Vec<u8>>>,
     }
 
-    impl TerminalSession for ProcessTerminalSession {
+    impl TerminalRun for ProcessTerminalRun {
         fn pid(&self) -> i64 {
             i64::from(self.child.lock().unwrap().id())
         }
@@ -2504,14 +2504,14 @@ mod tests {
             stdout.flush().unwrap();
             std::process::exit(code.parse().unwrap());
         }
-        let session_id = std::env::var("CLAUDE_FIXTURE_SESSION_ID").unwrap();
+        let run_id = std::env::var("CLAUDE_FIXTURE_RUN_ID").unwrap();
         let mut initialized = false;
         for line in std::io::stdin().lock().lines() {
             if !std::mem::replace(&mut initialized, true) {
                 writeln!(
                     stdout,
                     "{}",
-                    json!({"type":"system","subtype":"init","session_id":session_id})
+                    json!({"type":"system","subtype":"init","session_id":run_id})
                 )
                 .unwrap();
             }
@@ -2525,25 +2525,25 @@ mod tests {
             writeln!(
                 stdout,
                 "{}",
-                json!({"type":"assistant","session_id":session_id,"message":{"content":[{"type":"text","text":text}]}})
+                json!({"type":"assistant","session_id":run_id,"message":{"content":[{"type":"text","text":text}]}})
             )
             .unwrap();
             writeln!(
                 stdout,
                 "{}",
-                json!({"type":"result","session_id":session_id,"result":text})
+                json!({"type":"result","session_id":run_id,"result":text})
             )
             .unwrap();
             stdout.flush().unwrap();
         }
     }
 
-    fn read_to_completion(session: &Object<dyn AgentSession>) -> Vec<AgentEvent> {
+    fn read_to_completion(run: &Object<dyn AgentSession>) -> Vec<AgentEvent> {
         let deadline = Instant::now() + Duration::from_secs(60);
         let mut events = Vec::new();
         while Instant::now() < deadline {
             let remaining = deadline.saturating_duration_since(Instant::now());
-            if let Some(event) = session
+            if let Some(event) = run
                 .next_event(remaining.as_millis().min(i64::MAX as u128) as i64)
                 .unwrap()
             {
@@ -2554,16 +2554,16 @@ mod tests {
                 }
             }
         }
-        panic!("fake Claude did not complete the provider Session")
+        panic!("fake Claude did not complete the provider Run")
     }
 
     #[test]
-    fn process_session_restarts_and_resumes_with_the_same_provider_id() {
+    fn process_run_restarts_and_resumes_with_the_same_provider_id() {
         let terminal = ProcessTerminal::new();
-        let session_id = SessionId::try_new("claude-process-session-42").unwrap();
+        let run_id = RunId::try_new("claude-process-session-42").unwrap();
         let environment = BTreeMap::from([(
-            "CLAUDE_FIXTURE_SESSION_ID".to_owned(),
-            session_id.to_string(),
+            "CLAUDE_FIXTURE_RUN_ID".to_owned(),
+            run_id.to_string(),
         )]);
         let handler = ClaudeHandler::try_from(ClaudeConfig {
             executable: "claude-process-fixture".to_owned(),
@@ -2597,7 +2597,7 @@ mod tests {
             )
             .unwrap();
         let first_events = read_to_completion(&started);
-        assert_eq!(started.session_id().unwrap(), Some(session_id.to_string()));
+        assert_eq!(started.session_id().unwrap(), Some(run_id.to_string()));
         assert!(first_events.iter().any(|event| {
             event.kind == "completed" && event.text.as_deref() == Some("first process turn")
         }));
@@ -2608,7 +2608,7 @@ mod tests {
                 AgentResume {
                     clearance: "field".to_owned(),
                     mission_id: "mission-process-42".parse().unwrap(),
-                    session_id: session_id.clone(),
+                    run_id: run_id.clone(),
                     message: Some("resumed process turn".to_owned()),
                     working_directory: std::env::current_dir()
                         .unwrap()
@@ -2629,7 +2629,7 @@ mod tests {
             )
             .unwrap();
         let resumed_events = read_to_completion(&resumed);
-        assert_eq!(resumed.session_id().unwrap(), Some(session_id.to_string()));
+        assert_eq!(resumed.session_id().unwrap(), Some(run_id.to_string()));
         assert!(resumed_events.iter().any(|event| {
             event.kind == "completed" && event.text.as_deref() == Some("resumed process turn")
         }));
@@ -2647,7 +2647,7 @@ mod tests {
             specs[1]
                 .argv
                 .windows(2)
-                .any(|pair| { pair == ["--resume", session_id.as_str()] })
+                .any(|pair| { pair == ["--resume", run_id.as_str()] })
         );
     }
 
@@ -2671,9 +2671,9 @@ mod tests {
         );
     }
 
-    struct EofTerminalSession;
+    struct EofTerminalRun;
 
-    impl TerminalSession for EofTerminalSession {
+    impl TerminalRun for EofTerminalRun {
         fn pid(&self) -> i64 {
             1
         }
@@ -2709,16 +2709,16 @@ mod tests {
         fn spawn_private(
             &self,
             value: &ai6::guatiao::Value,
-        ) -> Result<Object<dyn TerminalSession>, ProviderError> {
+        ) -> Result<Object<dyn TerminalRun>, ProviderError> {
             self.spawn(value)
         }
 
         fn spawn(
             &self,
             value: &ai6::guatiao::Value,
-        ) -> Result<Object<dyn TerminalSession>, ProviderError> {
+        ) -> Result<Object<dyn TerminalRun>, ProviderError> {
             *self.spec.lock().unwrap() = Some(Spec::from_value(value).map_err(internal)?);
-            Ok(ResumeTerminalSession {
+            Ok(ResumeTerminalRun {
                 input: Mutex::new(self.input.clone()),
                 writes: self.writes.clone(),
             }
@@ -2726,12 +2726,12 @@ mod tests {
         }
     }
 
-    struct ResumeTerminalSession {
+    struct ResumeTerminalRun {
         input: Mutex<Vec<u8>>,
         writes: Arc<Mutex<Vec<u8>>>,
     }
 
-    impl TerminalSession for ResumeTerminalSession {
+    impl TerminalRun for ResumeTerminalRun {
         fn pid(&self) -> i64 {
             7
         }
@@ -2769,8 +2769,8 @@ mod tests {
     }
 
     #[test]
-    fn resume_uses_the_provider_session_and_stream_json_message() {
-        let session_id = SessionId::try_new("claude-session-42").unwrap();
+    fn resume_uses_the_provider_id_and_stream_json_message() {
+        let run_id = RunId::try_new("claude-session-42").unwrap();
         let spec = Arc::new(Mutex::new(None));
         let writes = Arc::new(Mutex::new(Vec::new()));
         let terminal = ResumeTerminal {
@@ -2785,13 +2785,13 @@ mod tests {
             ..ClaudeConfig::default()
         })
         .unwrap();
-        let session = handler
+        let run = handler
             .resume(
                 AgentResume {
                     clearance: "field".to_owned(),
                     mission_id: "mission-42".parse().unwrap(),
-                    session_id: session_id.clone(),
-                    message: Some("continue the same Session".to_owned()),
+                    run_id: run_id.clone(),
+                    message: Some("continue the same Run".to_owned()),
                     working_directory: "C:\\station\\mission-42".to_owned(),
                     environment: BTreeMap::from([("TOKEN".to_owned(), "fresh".to_owned())]),
                     model: Some("sonnet".to_owned()),
@@ -2809,13 +2809,13 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            session.session_id().unwrap(),
+            run.session_id().unwrap(),
             None,
             "unknown until Claude reports it"
         );
-        let event = session.next_event(50).unwrap().unwrap();
+        let event = run.next_event(50).unwrap().unwrap();
         assert_eq!(event.kind, "system");
-        assert_eq!(session.session_id().unwrap(), Some(session_id.to_string()));
+        assert_eq!(run.session_id().unwrap(), Some(run_id.to_string()));
 
         let spec = spec.lock().unwrap().clone().unwrap();
         assert!(
@@ -2836,7 +2836,7 @@ mod tests {
         assert_eq!(message["type"], "user");
         assert_eq!(
             message["message"]["content"][0]["text"],
-            "continue the same Session"
+            "continue the same Run"
         );
     }
 
@@ -2871,12 +2871,12 @@ mod tests {
             ..ClaudeConfig::default()
         })
         .unwrap();
-        let session = handler
+        let run = handler
             .resume(
                 AgentResume {
                     clearance: "field".to_owned(),
                     mission_id: "mission-42".parse().unwrap(),
-                    session_id: SessionId::try_new("claude-session-42").unwrap(),
+                    run_id: RunId::try_new("claude-session-42").unwrap(),
                     message: None,
                     working_directory: "C:\\station\\mission-42".to_owned(),
                     environment: BTreeMap::new(),
@@ -2893,7 +2893,7 @@ mod tests {
                 terminal.into_object(),
             )
             .unwrap();
-        let kinds_and_texts = std::iter::from_fn(|| session.next_event(50).unwrap())
+        let kinds_and_texts = std::iter::from_fn(|| run.next_event(50).unwrap())
             .map(|event| (event.kind, event.text))
             .collect::<Vec<_>>();
         assert_eq!(
@@ -2934,12 +2934,12 @@ mod tests {
             ..ClaudeConfig::default()
         })
         .unwrap();
-        let session = handler
+        let run = handler
             .resume(
                 AgentResume {
                     clearance: "field".to_owned(),
                     mission_id: "mission-42".parse().unwrap(),
-                    session_id: SessionId::try_new("claude-session-42").unwrap(),
+                    run_id: RunId::try_new("claude-session-42").unwrap(),
                     message: None,
                     working_directory: "C:\\station\\mission-42".to_owned(),
                     environment: BTreeMap::new(),
@@ -2957,8 +2957,8 @@ mod tests {
             )
             .unwrap();
 
-        session.interrupt().unwrap();
-        session.interrupt().unwrap();
+        run.interrupt().unwrap();
+        run.interrupt().unwrap();
 
         let written = String::from_utf8(writes.lock().unwrap().clone()).unwrap();
         assert!(!written.contains('\u{3}'), "no ^C byte reaches the stream");
@@ -2976,7 +2976,7 @@ mod tests {
         );
         assert!(written.ends_with('\n'));
 
-        let kinds_and_texts = std::iter::from_fn(|| session.next_event(50).unwrap())
+        let kinds_and_texts = std::iter::from_fn(|| run.next_event(50).unwrap())
             .map(|event| (event.kind, event.text))
             .collect::<Vec<_>>();
         assert_eq!(
@@ -2989,7 +2989,7 @@ mod tests {
     }
 
     #[test]
-    fn a_restricted_session_that_calls_a_tool_is_ended() {
+    fn a_restricted_run_that_calls_a_tool_is_ended() {
         let call = |tool: &str| {
             format!(
                 "{{\"type\":\"assistant\",\"message\":{{\"content\":[{{\"type\":\"tool_use\",\
@@ -3022,12 +3022,12 @@ mod tests {
                 ..ClaudeConfig::default()
             })
             .unwrap();
-            let session = handler
+            let run = handler
                 .resume(
                     AgentResume {
                         clearance: "desk".to_owned(),
                         mission_id: "mission-42".parse().unwrap(),
-                        session_id: SessionId::try_new("s-1").unwrap(),
+                        run_id: RunId::try_new("s-1").unwrap(),
                         message: None,
                         working_directory: "C:\\station\\mission-42".to_owned(),
                         environment: assistant_environment(),
@@ -3049,7 +3049,7 @@ mod tests {
                     .into_object(),
                 )
                 .unwrap();
-            let kinds = std::iter::from_fn(|| session.next_event(50).unwrap())
+            let kinds = std::iter::from_fn(|| run.next_event(50).unwrap())
                 .map(|event| (event.kind, event.text))
                 .collect::<Vec<_>>();
             if ends {
@@ -3068,11 +3068,11 @@ mod tests {
     }
 
     #[test]
-    fn resume_rejects_a_different_session_reported_by_claude() {
+    fn resume_rejects_a_different_run_reported_by_claude() {
         let terminal = ResumeTerminal {
             spec: Arc::new(Mutex::new(None)),
             input:
-                b"{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"different-session\"}\n"
+                b"{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"different-run\"}\n"
                     .to_vec(),
             writes: Arc::new(Mutex::new(Vec::new())),
         };
@@ -3081,12 +3081,12 @@ mod tests {
             ..ClaudeConfig::default()
         })
         .unwrap();
-        let session = handler
+        let run = handler
             .resume(
                 AgentResume {
                     clearance: "field".to_owned(),
                     mission_id: "mission-42".parse().unwrap(),
-                    session_id: SessionId::try_new("claude-session-42").unwrap(),
+                    run_id: RunId::try_new("claude-session-42").unwrap(),
                     message: None,
                     working_directory: "C:\\station\\mission-42".to_owned(),
                     environment: BTreeMap::new(),
@@ -3103,14 +3103,14 @@ mod tests {
                 terminal.into_object(),
             )
             .unwrap();
-        let error = match session.next_event(50) {
-            Ok(event) => panic!("a different provider Session ID was read as {event:?}"),
+        let error = match run.next_event(50) {
+            Ok(event) => panic!("a different provider ID was read as {event:?}"),
             Err(error) => error.to_string(),
         };
-        assert!(error.contains("different Session"), "{error}");
+        assert!(error.contains("different Run"), "{error}");
         assert_eq!(
-            session.session_id().unwrap().as_deref(),
-            Some("different-session")
+            run.session_id().unwrap().as_deref(),
+            Some("different-run")
         );
     }
 
@@ -3129,15 +3129,15 @@ mod tests {
                 AgentResume {
                     clearance: "field".to_owned(),
                     mission_id: "mission-silent".parse().unwrap(),
-                    session_id: SessionId::try_new("claude-silent-session").unwrap(),
+                    run_id: RunId::try_new("claude-silent-run").unwrap(),
                     message: Some("are you there?".to_owned()),
                     working_directory: std::env::current_dir()
                         .unwrap()
                         .to_string_lossy()
                         .into_owned(),
                     environment: BTreeMap::from([(
-                        "CLAUDE_FIXTURE_SESSION_ID".to_owned(),
-                        "claude-silent-session".to_owned(),
+                        "CLAUDE_FIXTURE_RUN_ID".to_owned(),
+                        "claude-silent-run".to_owned(),
                     )]),
                     model: None,
                     effort: None,
@@ -3159,7 +3159,7 @@ mod tests {
         }));
         assert_eq!(
             resumed.session_id().unwrap().as_deref(),
-            Some("claude-silent-session")
+            Some("claude-silent-run")
         );
         resumed.close().unwrap();
     }
@@ -3332,7 +3332,7 @@ mod tests {
             let event = decode_event(&value, b"{}".to_vec()).unwrap();
             assert_eq!(
                 event.kind, LIMIT_EVENT,
-                "not completed: the Session did not finish"
+                "not completed: the Run did not finish"
             );
             assert_eq!(event.limit.unwrap().resets_at, Some(expected));
             assert!(event.text.unwrap().contains("usage limit reached"));
@@ -3340,7 +3340,7 @@ mod tests {
     }
 
     #[test]
-    fn a_limit_without_a_parsable_reset_time_still_parks_the_session() {
+    fn a_limit_without_a_parsable_reset_time_still_parks_the_run() {
         let value = json!({
             "type": "result",
             "is_error": true,
@@ -3435,17 +3435,17 @@ mod tests {
         );
     }
 
-    /// A harness that exits while its terminal keeps the output open (ConPTY) ends the Session
+    /// A harness that exits while its terminal keeps the output open (ConPTY) ends the Run
     /// with one `failed` event naming its exit code and quoting what it wrote last.
     #[test]
-    fn a_harness_that_exits_early_fails_the_session_with_its_status_and_last_output() {
+    fn a_harness_that_exits_early_fails_the_run_with_its_status_and_last_output() {
         let terminal = ProcessTerminal::kept_open();
         let handler = ClaudeHandler::try_from(ClaudeConfig {
             executable: "claude-exit-fixture".to_owned(),
             ..ClaudeConfig::default()
         })
         .unwrap();
-        let session = handler
+        let run = handler
             .start(
                 AgentStart {
                     mission_id: "mission-exit".parse().unwrap(),
@@ -3476,7 +3476,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(10);
         let failed = loop {
             assert!(Instant::now() < deadline, "the exit was never noticed");
-            if let Some(event) = session.next_event(100).unwrap()
+            if let Some(event) = run.next_event(100).unwrap()
                 && event.kind == "failed"
             {
                 break event;
@@ -3488,17 +3488,17 @@ mod tests {
             reason.contains("Error: the stored login has expired"),
             "{reason}"
         );
-        assert_eq!(session.next_event(100).unwrap(), None, "reported once");
-        session.close().unwrap();
+        assert_eq!(run.next_event(100).unwrap(), None, "reported once");
+        run.close().unwrap();
     }
 
     #[test]
     fn terminal_eof_emits_one_failed_event_instead_of_polling_forever() {
-        let session = ClaudeSession::new(EofTerminalSession.into_object(), None);
+        let run = ClaudeRun::new(EofTerminalRun.into_object(), None);
 
-        let event = session.next_event(100).unwrap().unwrap();
+        let event = run.next_event(100).unwrap().unwrap();
         assert_eq!(event.kind, "failed");
-        assert_eq!(session.next_event(100).unwrap(), None);
+        assert_eq!(run.next_event(100).unwrap(), None);
     }
 
     #[test]
@@ -3510,7 +3510,7 @@ mod tests {
             ),
             (
                 "AI6_CABLE_MCP_TOKEN".to_owned(),
-                "session-secret-token".to_owned(),
+                "run-secret-token".to_owned(),
             ),
         ]);
         let mut argv = vec!["claude".to_owned()];
@@ -3521,7 +3521,7 @@ mod tests {
         let config = &argv[position("--mcp-config") + 1];
         assert!(config.contains("${AI6_CABLE_MCP_URL}"));
         assert!(config.contains("${AI6_CABLE_MCP_TOKEN}"));
-        assert!(!config.contains("session-secret-token"));
+        assert!(!config.contains("run-secret-token"));
     }
 
     #[test]
@@ -3556,7 +3556,7 @@ mod tests {
     }
 
     #[test]
-    fn a_session_with_both_servers_allows_exactly_their_tools() {
+    fn a_run_with_both_servers_allows_exactly_their_tools() {
         let environment = BTreeMap::from([
             ("AI6_CABLE_MCP_URL".to_owned(), "http://a/mcp".to_owned()),
             ("AI6_CABLE_MCP_TOKEN".to_owned(), "a".to_owned()),
@@ -3589,7 +3589,7 @@ mod tests {
     }
 
     #[test]
-    fn a_session_without_ai6_servers_allows_no_server() {
+    fn a_run_without_ai6_servers_allows_no_server() {
         let mut argv = vec!["claude".to_owned()];
         add_mcp(&mut argv, &BTreeMap::new());
         assert_eq!(argv, ["claude"]);
@@ -3652,7 +3652,7 @@ mod tests {
         assert!(position("--allowedTools") < position("--mcp-config"));
     }
 
-    /// What a field Session's tool flags say, as `(offered, denied, allowed)`, after a start.
+    /// What a field Run's tool flags say, as `(offered, denied, allowed)`, after a start.
     fn field_flags(argv: &[String]) -> (String, String, String) {
         assert_eq!(flag(argv, "--permission-mode").as_deref(), Some("dontAsk"));
         (
@@ -3668,11 +3668,11 @@ mod tests {
                                    TodoWrite,TaskCreate,TaskGet,TaskList,TaskUpdate";
 
     #[test]
-    fn a_field_session_runs_by_the_explicit_list_on_start_and_resume() {
+    fn a_field_run_runs_by_the_explicit_list_on_start_and_resume() {
         let mut environment = cable_environment();
         environment.insert(
-            "CLAUDE_FIXTURE_SESSION_ID".to_owned(),
-            "claude-field-session".to_owned(),
+            "CLAUDE_FIXTURE_RUN_ID".to_owned(),
+            "claude-field-run".to_owned(),
         );
         let terminal = ProcessTerminal::new();
         let handler = ClaudeHandler::try_from(ClaudeConfig {
@@ -3713,7 +3713,7 @@ mod tests {
                 AgentResume {
                     clearance: "field".to_owned(),
                     mission_id: "mission-field".parse().unwrap(),
-                    session_id: SessionId::try_new("claude-field-session").unwrap(),
+                    run_id: RunId::try_new("claude-field-run").unwrap(),
                     message: None,
                     working_directory,
                     environment,
@@ -3737,7 +3737,7 @@ mod tests {
             assert_eq!(offered, DEFAULT_OFFERED);
             assert_eq!(denied, "WebFetch,WebSearch,Agent");
             assert_eq!(allowed, format!("mcp__ai6-cables,{DEFAULT_ALLOWED}"));
-            // A gated Session keeps the same list: the gate decides each command.
+            // A gated Run keeps the same list: the gate decides each command.
             let settings = settings_of(&spec.argv).expect("the gate");
             let hook = &settings["hooks"]["PreToolUse"][0];
             assert_eq!(hook["matcher"], "Bash|PowerShell");
@@ -3746,7 +3746,7 @@ mod tests {
     }
 
     #[test]
-    fn a_field_session_without_a_station_keeps_the_list_and_has_no_gate() {
+    fn a_field_run_without_a_station_keeps_the_list_and_has_no_gate() {
         let mut argv = Vec::new();
         add_settings(
             &mut argv,
@@ -3761,7 +3761,7 @@ mod tests {
             },
             &ClaudeSettings::default(),
             None,
-            &SessionOverlays::default(),
+            &RunOverlays::default(),
         )
         .unwrap();
         let (offered, _, allowed) = field_flags(&argv);
@@ -3804,15 +3804,15 @@ denied_tools = [\"Bash(rm *)\"]
         assert_eq!(
             handler.weakenings().unwrap(),
             [
-                "allowed_tools adds WebFetch(domain:example.com) to what its field Sessions may call",
-                "allowed_tools adds Skill to what its field Sessions may call",
-                "allowed_tools adds mcp__docs to what its field Sessions may call",
+                "allowed_tools adds WebFetch(domain:example.com) to what its field Runs may call",
+                "allowed_tools adds Skill to what its field Runs may call",
+                "allowed_tools adds mcp__docs to what its field Runs may call",
             ]
         );
     }
 
     #[test]
-    fn only_a_rule_beyond_the_default_list_weakens_a_session() {
+    fn only_a_rule_beyond_the_default_list_weakens_a_run() {
         let weakenings = |text: &str| {
             ClaudeHandler::try_from(config(text))
                 .unwrap()
@@ -3842,8 +3842,8 @@ denied_tools = [\"Bash(rm *)\"]
     fn flags_at(clearance: &str, text: &str) -> Vec<(String, String, String)> {
         let mut environment = cable_environment();
         environment.insert(
-            "CLAUDE_FIXTURE_SESSION_ID".to_owned(),
-            "claude-clearance-session".to_owned(),
+            "CLAUDE_FIXTURE_RUN_ID".to_owned(),
+            "claude-clearance-run".to_owned(),
         );
         let terminal = ProcessTerminal::new();
         let handler = ClaudeHandler::try_from(ClaudeConfig {
@@ -3883,7 +3883,7 @@ denied_tools = [\"Bash(rm *)\"]
             .resume(
                 AgentResume {
                     mission_id: "mission-clearance".parse().unwrap(),
-                    session_id: SessionId::try_new("claude-clearance-session").unwrap(),
+                    run_id: RunId::try_new("claude-clearance-run").unwrap(),
                     message: None,
                     working_directory,
                     clearance: clearance.to_owned(),
@@ -3908,7 +3908,7 @@ denied_tools = [\"Bash(rm *)\"]
     }
 
     #[test]
-    fn a_sessions_tools_follow_its_clearance_on_start_and_resume() {
+    fn a_runs_tools_follow_its_clearance_on_start_and_resume() {
         let field = (
             DEFAULT_OFFERED.to_owned(),
             "WebFetch,WebSearch,Agent".to_owned(),
@@ -3933,7 +3933,7 @@ denied_tools = [\"Bash(rm *)\"]
     }
 
     #[test]
-    fn a_desk_session_is_given_a_command_tool_only_by_a_rule_reported_as_a_weakening() {
+    fn a_desk_run_is_given_a_command_tool_only_by_a_rule_reported_as_a_weakening() {
         let settings = "allowed_tools = [\"Bash(git status)\"]\n";
         let flags = flags_at("desk", settings);
         assert_eq!(
@@ -3954,15 +3954,15 @@ denied_tools = [\"Bash(rm *)\"]
         };
         assert_eq!(
             weakenings(settings),
-            ["allowed_tools adds Bash(git status) to what its desk Sessions may call"]
+            ["allowed_tools adds Bash(git status) to what its desk Runs may call"]
         );
         assert_eq!(
             weakenings("allowed_tools = [\"PowerShell\"]"),
-            ["allowed_tools adds PowerShell to what its desk Sessions may call"]
+            ["allowed_tools adds PowerShell to what its desk Runs may call"]
         );
         assert_eq!(
             weakenings("allowed_tools = [\"mcp__ai6-theater__theater_run\"]"),
-            ["allowed_tools adds mcp__ai6-theater__theater_run to what its desk Sessions may call"]
+            ["allowed_tools adds mcp__ai6-theater__theater_run to what its desk Runs may call"]
         );
         assert!(
             weakenings("allowed_tools = [\"Bash\"]\ndenied_tools = [\"Bash\"]").is_empty(),
@@ -3971,7 +3971,7 @@ denied_tools = [\"Bash(rm *)\"]
     }
 
     #[test]
-    fn a_desk_session_on_a_remote_theater_may_read_it_but_not_run_or_write() {
+    fn a_desk_run_on_a_remote_theater_may_read_it_but_not_run_or_write() {
         let environment = BTreeMap::from([
             ("AI6_THEATER_MCP_URL".to_owned(), "http://b/mcp".to_owned()),
             ("AI6_THEATER_MCP_TOKEN".to_owned(), "b".to_owned()),
@@ -4016,7 +4016,7 @@ denied_tools = [\"Bash(rm *)\"]
     }
 
     #[test]
-    fn a_session_held_to_its_plan_reads_and_calls_ai6_and_a_resume_at_field_has_its_tools() {
+    fn a_run_held_to_its_plan_reads_and_calls_ai6_and_a_resume_at_field_has_its_tools() {
         let flags = flags_at(
             ai6::READ_CLEARANCE,
             "allowed_tools = [\"Bash\", \"Edit(/**)\"]
@@ -4054,13 +4054,13 @@ denied_tools = [\"Bash(rm *)\"]
     }
 
     #[test]
-    fn this_handler_can_hold_a_session_to_its_plan() {
+    fn this_handler_can_hold_a_run_to_its_plan() {
         let handler = ClaudeHandler::try_from(ClaudeConfig::default()).unwrap();
         assert_eq!(handler.read_only_refusal().unwrap(), None);
     }
 
     #[test]
-    fn a_desk_session_without_a_station_has_no_server_and_no_command_tool() {
+    fn a_desk_run_without_a_station_has_no_server_and_no_command_tool() {
         let mut argv = Vec::new();
         add_settings(
             &mut argv,
@@ -4075,7 +4075,7 @@ denied_tools = [\"Bash(rm *)\"]
             },
             &ClaudeSettings::default(),
             None,
-            &SessionOverlays::default(),
+            &RunOverlays::default(),
         )
         .unwrap();
         let (offered, denied, allowed) = field_flags(&argv);
@@ -4101,7 +4101,7 @@ denied_tools = [\"Bash(rm *)\"]
                 },
                 &ClaudeSettings::default(),
                 assistant,
-                &SessionOverlays::default(),
+                &RunOverlays::default(),
             )
             .unwrap();
             argv
@@ -4132,7 +4132,7 @@ denied_tools = [\"Bash(rm *)\"]
     }
 
     #[test]
-    fn answer_only_and_assistant_sessions_ignore_the_settings() {
+    fn answer_only_and_assistant_runs_ignore_the_settings() {
         let settings = ClaudeSettings {
             allowed_tools: vec!["WebFetch".to_owned()],
             denied_tools: vec!["Read".to_owned()],
@@ -4153,7 +4153,7 @@ denied_tools = [\"Bash(rm *)\"]
                     },
                     settings,
                     assistant,
-                    &SessionOverlays::default(),
+                    &RunOverlays::default(),
                 )
                 .unwrap();
                 argv
@@ -4172,8 +4172,8 @@ denied_tools = [\"Bash(rm *)\"]
         );
     }
 
-    /// Terminal output holding one `result` line, as a resumed Session reads it.
-    fn result_session(result: Value) -> Object<dyn AgentSession> {
+    /// Terminal output holding one `result` line, as a resumed Run reads it.
+    fn result_run(result: Value) -> Object<dyn AgentSession> {
         let mut input = result.to_string().into_bytes();
         input.push(b'\n');
         let terminal = ResumeTerminal {
@@ -4187,7 +4187,7 @@ denied_tools = [\"Bash(rm *)\"]
                 AgentResume {
                     clearance: "field".to_owned(),
                     mission_id: "mission-denied".parse().unwrap(),
-                    session_id: SessionId::try_new("claude-session-denied").unwrap(),
+                    run_id: RunId::try_new("claude-run-denied").unwrap(),
                     message: None,
                     working_directory: "wd".to_owned(),
                     environment: BTreeMap::new(),
@@ -4209,7 +4209,7 @@ denied_tools = [\"Bash(rm *)\"]
     /// The shape Claude Code 2.1.316 writes after a turn whose calls were refused: a success.
     #[test]
     fn a_denied_call_is_reported_before_the_turn_ends_and_its_input_stays_out() {
-        let session = result_session(json!({
+        let run = result_run(json!({
             "type": "result",
             "subtype": "success",
             "is_error": false,
@@ -4220,7 +4220,7 @@ denied_tools = [\"Bash(rm *)\"]
                 {"tool_name": "Write", "tool_use_id": "t3", "tool_input": {"content": "secret"}},
             ],
         }));
-        let events = std::iter::from_fn(|| session.next_event(50).unwrap()).collect::<Vec<_>>();
+        let events = std::iter::from_fn(|| run.next_event(50).unwrap()).collect::<Vec<_>>();
         let kinds_and_texts = events
             .iter()
             .map(|event| (event.kind.as_str(), event.text.as_deref()))
@@ -4239,13 +4239,13 @@ denied_tools = [\"Bash(rm *)\"]
     #[test]
     fn a_turn_with_nothing_denied_reports_only_its_end() {
         for denials in [json!([]), Value::Null] {
-            let session = result_session(json!({
+            let run = result_run(json!({
                 "type": "result",
                 "subtype": "success",
                 "result": "finished",
                 "permission_denials": denials,
             }));
-            let kinds = std::iter::from_fn(|| session.next_event(50).unwrap())
+            let kinds = std::iter::from_fn(|| run.next_event(50).unwrap())
                 .map(|event| event.kind)
                 .collect::<Vec<_>>();
             assert_eq!(kinds, ["completed"]);
@@ -4265,11 +4265,11 @@ denied_tools = [\"Bash(rm *)\"]
     /// The hook as the Claude Code hooks reference describes a `PreToolUse` command hook: a
     /// regex matcher over tool names, exec form `command` + `args`, `timeout` in seconds.
     #[test]
-    fn a_session_with_a_station_gets_the_green_ink_hook_in_its_settings() {
+    fn a_run_with_a_station_gets_the_green_ink_hook_in_its_settings() {
         let mut environment = cable_environment();
         environment.insert(GATE_PROGRAM_ENV.to_owned(), "/opt/ai6/bin/ai6".to_owned());
         let mut argv = vec!["claude".to_owned()];
-        add_mission_settings(&mut argv, &environment, &SessionOverlays::default());
+        add_mission_settings(&mut argv, &environment, &RunOverlays::default());
 
         assert_eq!(argv[1], "--settings");
         let settings: Value = serde_json::from_str(&argv[2]).unwrap();
@@ -4301,7 +4301,7 @@ denied_tools = [\"Bash(rm *)\"]
 
         // Unnamed, the gate is the program hosting the handler.
         let mut argv = vec!["claude".to_owned()];
-        add_mission_settings(&mut argv, &cable_environment(), &SessionOverlays::default());
+        add_mission_settings(&mut argv, &cable_environment(), &RunOverlays::default());
         let settings: Value = serde_json::from_str(&argv[2]).unwrap();
         assert_eq!(
             settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
@@ -4310,7 +4310,7 @@ denied_tools = [\"Bash(rm *)\"]
 
         // Without a Station to ask there is no gate.
         let mut argv = vec!["claude".to_owned()];
-        add_mission_settings(&mut argv, &BTreeMap::new(), &SessionOverlays::default());
+        add_mission_settings(&mut argv, &BTreeMap::new(), &RunOverlays::default());
         assert_eq!(argv, ["claude"]);
     }
 
@@ -4318,8 +4318,8 @@ denied_tools = [\"Bash(rm *)\"]
     fn start_and_resume_both_pass_the_gate() {
         let mut environment = cable_environment();
         environment.insert(
-            "CLAUDE_FIXTURE_SESSION_ID".to_owned(),
-            "claude-gate-session".to_owned(),
+            "CLAUDE_FIXTURE_RUN_ID".to_owned(),
+            "claude-gate-run".to_owned(),
         );
         let terminal = ProcessTerminal::new();
         let handler = ClaudeHandler::try_from(ClaudeConfig {
@@ -4360,7 +4360,7 @@ denied_tools = [\"Bash(rm *)\"]
                 AgentResume {
                     clearance: "field".to_owned(),
                     mission_id: "mission-gate".parse().unwrap(),
-                    session_id: SessionId::try_new("claude-gate-session").unwrap(),
+                    run_id: RunId::try_new("claude-gate-run").unwrap(),
                     message: Some("approved".to_owned()),
                     working_directory,
                     environment,
@@ -4396,8 +4396,8 @@ denied_tools = [\"Bash(rm *)\"]
     fn project_settings_are_shut_out_unless_allowed_and_the_gate_stays_either_way() {
         let mut environment = cable_environment();
         environment.insert(
-            "CLAUDE_FIXTURE_SESSION_ID".to_owned(),
-            "claude-settings-session".to_owned(),
+            "CLAUDE_FIXTURE_RUN_ID".to_owned(),
+            "claude-settings-run".to_owned(),
         );
         let terminal = ProcessTerminal::new();
         let handler = ClaudeHandler::try_from(ClaudeConfig {
@@ -4443,7 +4443,7 @@ denied_tools = [\"Bash(rm *)\"]
                 AgentResume {
                     clearance: "field".to_owned(),
                     mission_id: "mission-settings".parse().unwrap(),
-                    session_id: SessionId::try_new("claude-settings-session").unwrap(),
+                    run_id: RunId::try_new("claude-settings-run").unwrap(),
                     message: None,
                     working_directory: working_directory.clone(),
                     environment: environment.clone(),
@@ -4521,7 +4521,7 @@ denied_tools = [\"Bash(rm *)\"]
             Some("1"),
             "answer-only has no advisor"
         );
-        assert_eq!(advisor(0), None, "an Operation's Session keeps its own");
+        assert_eq!(advisor(0), None, "an Operation's Run keeps its own");
     }
 
     /// Claude Code 2.1.310 warns that a deny rule naming `MultiEdit` or `LS` matches no known
@@ -4555,8 +4555,8 @@ denied_tools = [\"Bash(rm *)\"]
             "conversation-token".to_owned(),
         );
         environment.insert(
-            "CLAUDE_FIXTURE_SESSION_ID".to_owned(),
-            "claude-assistant-session".to_owned(),
+            "CLAUDE_FIXTURE_RUN_ID".to_owned(),
+            "claude-assistant-run".to_owned(),
         );
         environment
     }
@@ -4609,7 +4609,7 @@ denied_tools = [\"Bash(rm *)\"]
                 AgentResume {
                     clearance: "desk".to_owned(),
                     mission_id: "assistant-conversation".parse().unwrap(),
-                    session_id: SessionId::try_new("claude-assistant-session").unwrap(),
+                    run_id: RunId::try_new("claude-assistant-run").unwrap(),
                     message: Some("And now?".to_owned()),
                     working_directory,
                     environment,
@@ -4748,7 +4748,7 @@ denied_tools = [\"Bash(rm *)\"]
                 AgentResume {
                     clearance: "desk".to_owned(),
                     mission_id: "assistant-conversation".parse().unwrap(),
-                    session_id: SessionId::try_new("claude-assistant-session").unwrap(),
+                    run_id: RunId::try_new("claude-assistant-run").unwrap(),
                     message: Some("And now?".to_owned()),
                     working_directory,
                     environment,
@@ -4836,8 +4836,8 @@ denied_tools = [\"Bash(rm *)\"]
                 .as_bytes(),
             );
             input.extend_from_slice(b"{\"type\":\"result\",\"result\":\"done\"}\n");
-            let session = ClaudeSession::new(
-                ResumeTerminalSession {
+            let run = ClaudeRun::new(
+                ResumeTerminalRun {
                     input: Mutex::new(input),
                     writes: Arc::new(Mutex::new(Vec::new())),
                 }
@@ -4845,7 +4845,7 @@ denied_tools = [\"Bash(rm *)\"]
                 None,
             )
             .restricted_to(restriction(false, Some(&mode)));
-            let kinds = std::iter::from_fn(|| session.next_event(50).unwrap())
+            let kinds = std::iter::from_fn(|| run.next_event(50).unwrap())
                 .map(|event| event.kind)
                 .collect::<Vec<_>>();
             assert_eq!(
@@ -4985,8 +4985,8 @@ denied_tools = [\"Bash(rm *)\"]
                   \"id\":\"t\",\"name\":\"Skill\",\"input\":{\"skill\":\"ai6:charts\"}}]}}\n",
             );
             input.extend_from_slice(b"{\"type\":\"result\",\"result\":\"done\"}\n");
-            let session = ClaudeSession::new(
-                ResumeTerminalSession {
+            let run = ClaudeRun::new(
+                ResumeTerminalRun {
                     input: Mutex::new(input),
                     writes: Arc::new(Mutex::new(Vec::new())),
                 }
@@ -4994,7 +4994,7 @@ denied_tools = [\"Bash(rm *)\"]
                 None,
             )
             .restricted_to(restriction(false, Some(mode)));
-            let kinds = std::iter::from_fn(|| session.next_event(50).unwrap())
+            let kinds = std::iter::from_fn(|| run.next_event(50).unwrap())
                 .map(|event| event.kind)
                 .collect::<Vec<_>>();
             assert_eq!(kinds.contains(&"failed".to_owned()), ends, "{kinds:?}");
@@ -5471,7 +5471,7 @@ denied_tools = [\"Bash(rm *)\"]
     }
 
     /// Reads are denied everywhere but the sandbox's own relay sockets in `/tmp`, and, with a
-    /// temporary directory of the Session's own, the relay sockets there, by name: the whole
+    /// temporary directory of the Run's own, the relay sockets there, by name: the whole
     /// directory is not re-opened (that covers the writable `$TMPDIR` read-only and `bwrap`
     /// fails to start).
     #[test]
@@ -5696,8 +5696,8 @@ denied_tools = [\"Bash(rm *)\"]
                 .as_bytes(),
             );
             input.extend_from_slice(b"{\"type\":\"result\",\"result\":\"done\"}\n");
-            let session = ClaudeSession::new(
-                ResumeTerminalSession {
+            let run = ClaudeRun::new(
+                ResumeTerminalRun {
                     input: Mutex::new(input),
                     writes: Arc::new(Mutex::new(Vec::new())),
                 }
@@ -5705,7 +5705,7 @@ denied_tools = [\"Bash(rm *)\"]
                 None,
             )
             .restricted_to(restriction(false, Some(&mode)));
-            let kinds = std::iter::from_fn(|| session.next_event(50).unwrap())
+            let kinds = std::iter::from_fn(|| run.next_event(50).unwrap())
                 .map(|event| event.kind)
                 .collect::<Vec<_>>();
             assert_eq!(
@@ -5820,7 +5820,7 @@ denied_tools = [\"Bash(rm *)\"]
     }
 
     #[test]
-    fn a_server_side_tool_call_ends_a_restricted_session() {
+    fn a_server_side_tool_call_ends_a_restricted_run() {
         for (block, named) in [
             (
                 r#"{"type":"server_tool_use","id":"srvtoolu_1","name":"advisor","input":{}}"#,
@@ -5851,8 +5851,8 @@ denied_tools = [\"Bash(rm *)\"]
                     .as_bytes(),
             );
             input.extend_from_slice(b"{\"type\":\"result\",\"result\":\"done\"}\n");
-            let session = ClaudeSession::new(
-                ResumeTerminalSession {
+            let run = ClaudeRun::new(
+                ResumeTerminalRun {
                     input: Mutex::new(input),
                     writes: Arc::new(Mutex::new(Vec::new())),
                 }
@@ -5860,7 +5860,7 @@ denied_tools = [\"Bash(rm *)\"]
                 None,
             )
             .restricted_to(restriction(false, Some(&AssistantMode::moneypenny())));
-            let kinds = std::iter::from_fn(|| session.next_event(50).unwrap())
+            let kinds = std::iter::from_fn(|| run.next_event(50).unwrap())
                 .map(|event| (event.kind, event.text.unwrap_or_default()))
                 .collect::<Vec<_>>();
             assert_eq!(kinds.len(), 2, "{block}: {kinds:?}");
@@ -5871,7 +5871,7 @@ denied_tools = [\"Bash(rm *)\"]
 
     /// Prose, reasoning and an allowed call pass the tripwire.
     #[test]
-    fn expected_blocks_keep_a_restricted_session_going() {
+    fn expected_blocks_keep_a_restricted_run_going() {
         let message = json!({"type": "assistant", "message": {"content": [
             {"type": "thinking", "thinking": "hm"},
             {"type": "redacted_thinking", "data": "x"},
@@ -5879,8 +5879,8 @@ denied_tools = [\"Bash(rm *)\"]
             {"type": "tool_use", "id": "t", "name": "mcp__moneypenny__board", "input": {}},
         ]}});
         assert!(unexpected_blocks(&message).is_empty());
-        let session = ClaudeSession::new(
-            ResumeTerminalSession {
+        let run = ClaudeRun::new(
+            ResumeTerminalRun {
                 input: Mutex::new(Vec::new()),
                 writes: Arc::new(Mutex::new(Vec::new())),
             }
@@ -5889,7 +5889,7 @@ denied_tools = [\"Bash(rm *)\"]
         )
         .restricted_to(restriction(false, Some(&AssistantMode::moneypenny())));
         let event = decode_event(&message, Vec::new()).unwrap();
-        assert!(session.tripped(&event, &message).is_none());
+        assert!(run.tripped(&event, &message).is_none());
     }
 
     #[test]
@@ -5932,7 +5932,7 @@ denied_tools = [\"Bash(rm *)\"]
         }
     }
 
-    fn mission_argv(overlays: &SessionOverlays, commands: bool) -> Vec<String> {
+    fn mission_argv(overlays: &RunOverlays, commands: bool) -> Vec<String> {
         let mut argv = Vec::new();
         add_settings(
             &mut argv,
@@ -5957,7 +5957,7 @@ denied_tools = [\"Bash(rm *)\"]
     /// the plugin's skills were listed in the request and launched, at `field` and at `desk`.
     #[test]
     fn a_missions_overlay_skills_load_from_the_plugin_directory_under_its_rules() {
-        let overlays = SessionOverlays {
+        let overlays = RunOverlays {
             roots: vec!["/store/tools".to_owned()],
             skills: vec![overlay_skill("review", true), overlay_skill("audit", false)],
             plugin_dir: Some("/store/plugin".to_owned()),
@@ -5992,8 +5992,8 @@ denied_tools = [\"Bash(rm *)\"]
     #[test]
     fn a_mission_with_no_overlay_skill_is_offered_no_skill_tool() {
         for overlays in [
-            SessionOverlays::default(),
-            SessionOverlays {
+            RunOverlays::default(),
+            RunOverlays {
                 roots: vec!["/store/tools".to_owned()],
                 skills: vec![overlay_skill("audit", false)],
                 plugin_dir: None,

@@ -1,7 +1,7 @@
 //! An Agent's Report tools: file what it observed, and read the Reports it may.
 //!
-//! `file_report` exists for every Session whose Station opened its [`ReportDesk`]. It files
-//! against the Session's Operation, linked to its Mission. A Head of Station round files its
+//! `file_report` exists for every Run whose Station opened its [`ReportDesk`]. It files
+//! against the Run's Operation, linked to its Mission. A Head of Station round files its
 //! round's report instead: the Station's logbook, its check-in and the heads-of-station channel,
 //! and a Report of its Station.
 
@@ -173,14 +173,14 @@ impl FileReportArgs {
 }
 
 impl CableTools {
-    /// The provider Session, once the harness has reported it.
-    fn bound_session(&self) -> Option<String> {
+    /// The provider Run, once the harness has reported it.
+    fn bound_run(&self) -> Option<String> {
         self.principal()
             .ok()
-            .and_then(|principal| principal.session_id().map(str::to_owned))
+            .and_then(|principal| principal.run_id().map(str::to_owned))
     }
 
-    /// The Station whose Reports this Session reads as a Head of Station round.
+    /// The Station whose Reports this Run reads as a Head of Station round.
     fn round_station(&self) -> Option<String> {
         self.station.get().map(|desk| desk.station().to_owned())
     }
@@ -196,7 +196,7 @@ impl CableTools {
             + 'static,
     {
         let Some(desk) = self.report_desk.get().cloned() else {
-            return "Report tools are unavailable to this Session".to_owned();
+            return "Report tools are unavailable to this Run".to_owned();
         };
         let reader = self.reader();
         let station = self.round_station();
@@ -228,14 +228,14 @@ impl CableTools {
             };
             findings.push(StationFinding::new(kind, severity, finding.text.clone()));
         }
-        let session = self.bound_session();
+        let run = self.bound_run();
         let filing = desk.clone();
         let filed = tokio::task::spawn_blocking(move || {
             let name_bytes = filing.report_limits().name_bytes.or_max();
             let summary = args.summary.clone();
             let mut report = args.filing(name_bytes)?;
             report.kind.get_or_insert_with(|| "station".to_owned());
-            filing.file(summary, findings, report, session)
+            filing.file(summary, findings, report, run)
         })
         .await;
         let (logged, stored) = match filed {
@@ -255,18 +255,18 @@ impl CableTools {
 
 #[tool_router(router = report_router, vis = "pub(super)")]
 impl CableTools {
-    /// File a report of what this Session observed.
+    /// File a report of what this Run observed.
     #[tool(
-        description = "File a report of something you observed that someone should know or decide about: a problem found along the way, a risk, an idea for later work, a follow-up. It is recorded against your Operation and linked to your Mission, for your Operation's watch or a person to assess; it starts no work by itself, so propose_mission is still how work is asked for. Give a summary whose first line names it, optionally detail, typed findings, a proposed priority and deadline, and markings: a classification, a handling mark and compartments limit who reads it, and a tearline is a sanitised part for those cleared only for its lower marking. A Head of Station round files its round's report this way: findings typed disk, theater, safe-house, provider or other go into the Station's logbook, which the next round reads, are published with the Station's check-in, are sent as a Cable to the heads-of-station channel when that channel exists, and are kept as a report of the Station. Filing is rate limited per Session and per Operation."
+        description = "File a report of something you observed that someone should know or decide about: a problem found along the way, a risk, an idea for later work, a follow-up. It is recorded against your Operation and linked to your Mission, for your Operation's watch or a person to assess; it starts no work by itself, so propose_mission is still how work is asked for. Give a summary whose first line names it, optionally detail, typed findings, a proposed priority and deadline, and markings: a classification, a handling mark and compartments limit who reads it, and a tearline is a sanitised part for those cleared only for its lower marking. A Head of Station round files its round's report this way: findings typed disk, theater, safe-house, provider or other go into the Station's logbook, which the next round reads, are published with the Station's check-in, are sent as a Cable to the heads-of-station channel when that channel exists, and are kept as a report of the Station. Filing is rate limited per Run and per Operation."
     )]
     async fn file_report(&self, Parameters(args): Parameters<FileReportArgs>) -> String {
         if let Some(desk) = self.station.get().cloned() {
             return self.file_round_report(desk, args).await;
         }
-        let session = self.bound_session();
+        let run = self.bound_run();
         self.with_reports(move |desk, reader, _| {
             let filing = args.filing(desk.name_bytes())?;
-            desk.file(reader, session, filing)
+            desk.file(reader, run, filing)
                 .map(|filed| filed.to_string())
         })
         .await

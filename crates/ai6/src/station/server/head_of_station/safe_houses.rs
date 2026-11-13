@@ -20,7 +20,7 @@ pub(super) struct KeptSafeHouse {
     pub(super) operation: Option<String>,
     /// The Mission's state: `done`, `failed`, `working` and so on.
     pub(super) state: String,
-    /// Whether its Mission is not over, or a Session of it still runs here.
+    /// Whether its Mission is not over, or a Run of it still runs here.
     pub(super) live: bool,
     pub(super) path: String,
     pub(super) branch: Option<String>,
@@ -48,13 +48,13 @@ pub(super) fn rebuildable(hygiene: &SafeHouseHygiene, path: &str) -> bool {
         .any(|component| hygiene.is_cache(component))
 }
 
-/// Whether `mission` is over and no Session of it runs on this Station.
+/// Whether `mission` is over and no Run of it runs on this Station.
 pub(super) fn is_over(state: &DaemonState, mission: &Mission) -> bool {
     is_terminal_state(mission.state)
         && state
-            .sessions
+            .runs
             .lock()
-            .map(|sessions| !sessions.contains_key(mission.mission_id.as_str()))
+            .map(|runs| !runs.contains_key(mission.mission_id.as_str()))
             .unwrap_or(false)
 }
 

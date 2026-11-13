@@ -1,12 +1,12 @@
-//! Mock harnesses for review tests, behaving as the real ones do where it has mattered: no Session
-//! ID until the stream reports it, and a resume only of a Session that was reported.
+//! Mock harnesses for review tests, behaving as the real ones do where it has mattered: no Run
+//! ID until the stream reports it, and a resume only of a Run that was reported.
 
 use std::collections::{BTreeSet, VecDeque};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use crate::directorates::m::identity::SessionId;
+use crate::directorates::m::identity::RunId;
 use crate::directorates::q::terminal::AgentTerminal;
 use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
 use crate::guatiao::library::{Object, ProviderError};
@@ -19,7 +19,7 @@ pub(super) static AUTHOR_STARTS: Mutex<Vec<AgentStart>> = Mutex::new(Vec::new())
 pub(super) static AUTHOR_RESUMES: Mutex<Vec<AgentResume>> = Mutex::new(Vec::new());
 /// Each reviewer's start, as the handler was asked for it.
 pub(super) static REVIEWER_STARTS: Mutex<Vec<AgentStart>> = Mutex::new(Vec::new());
-/// The Session IDs a stream has reported, which are all a resume can find.
+/// The Run IDs a stream has reported, which are all a resume can find.
 static REPORTED: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 /// Words that hold back an author's `completed` while any of them is in its prompt, as a real
@@ -41,24 +41,24 @@ fn refused(message: &str) -> ProviderError {
     ProviderError::new(Status::GUATIAO_ERR_INTERNAL, message)
 }
 
-fn fresh(prefix: &str) -> Result<SessionId, ProviderError> {
-    SessionId::try_new(format!("{prefix}-{}", NEXT.fetch_add(1, Ordering::Relaxed)))
+fn fresh(prefix: &str) -> Result<RunId, ProviderError> {
+    RunId::try_new(format!("{prefix}-{}", NEXT.fetch_add(1, Ordering::Relaxed)))
         .map_err(|error| refused(&error.to_string()))
 }
 
-/// A harness that says nothing of its Session until its first event, as a real one does.
-pub(super) struct ScriptSession {
-    session_id: SessionId,
+/// A harness that says nothing of its Run until its first event, as a real one does.
+pub(super) struct ScriptRun {
+    run_id: RunId,
     reported: Mutex<bool>,
     events: Mutex<VecDeque<AgentEvent>>,
     /// The word in [`HELD`] that holds back `completed`, if any.
     hold: Option<String>,
 }
 
-impl ScriptSession {
-    fn new(session_id: SessionId, reported: bool, events: Vec<AgentEvent>) -> Self {
+impl ScriptRun {
+    fn new(run_id: RunId, reported: bool, events: Vec<AgentEvent>) -> Self {
         Self {
-            session_id,
+            run_id,
             reported: Mutex::new(reported),
             events: Mutex::new(events.into()),
             hold: None,
@@ -66,13 +66,13 @@ impl ScriptSession {
     }
 }
 
-impl AgentSession for ScriptSession {
+impl AgentSession for ScriptRun {
     fn session_id(&self) -> Result<Option<String>, ProviderError> {
         Ok(self
             .reported
             .lock()
             .unwrap()
-            .then(|| self.session_id.to_string()))
+            .then(|| self.run_id.to_string()))
     }
 
     fn send_message(&self, _message: AgentMessage) -> Result<(), ProviderError> {
@@ -100,7 +100,7 @@ impl AgentSession for ScriptSession {
                 REPORTED
                     .lock()
                     .unwrap()
-                    .insert(self.session_id.as_str().to_owned());
+                    .insert(self.run_id.as_str().to_owned());
                 Ok(Some(event))
             }
             None => {
@@ -144,7 +144,7 @@ impl AgentHandler for MockAuthorHandler {
     ) -> Result<Object<dyn AgentSession>, ProviderError> {
         AUTHOR_STARTS.lock().unwrap().push(request.clone());
         let output = scripted_output(&request.prompt);
-        let mut session = ScriptSession::new(
+        let mut run = ScriptRun::new(
             fresh("author")?,
             false,
             vec![
@@ -152,13 +152,13 @@ impl AgentHandler for MockAuthorHandler {
                 event("completed", Some(output)),
             ],
         );
-        session.hold = HELD
+        run.hold = HELD
             .lock()
             .unwrap()
             .iter()
             .find(|word| request.prompt.contains(word.as_str()))
             .cloned();
-        Ok(session.into_object())
+        Ok(run.into_object())
     }
 
     fn resume(
@@ -169,13 +169,13 @@ impl AgentHandler for MockAuthorHandler {
         if !REPORTED
             .lock()
             .unwrap()
-            .contains(request.session_id.as_str())
+            .contains(request.run_id.as_str())
         {
-            return Err(refused("no conversation found with that Session ID"));
+            return Err(refused("no conversation found with that Run ID"));
         }
         AUTHOR_RESUMES.lock().unwrap().push(request.clone());
-        Ok(ScriptSession::new(
-            request.session_id,
+        Ok(ScriptRun::new(
+            request.run_id,
             true,
             vec![event(
                 "completed",
@@ -217,9 +217,9 @@ pub(super) fn outside_fences(prompt: &str) -> String {
 /// - `pass`, `pass-2`, `redo`, `abstain`, `garbage`: that answer.
 /// - `strict`: `redo` until the quoted text says `FIXED`.
 /// - `persuaded`: `redo` until it reads another reviewer's reasons.
-/// - `fail`: the Session fails. `silent`: it never answers.
-/// - `lost-once`: its first start names no Session and never answers; its next answers `pass`.
-/// - `hang-then-pass`: it names its Session and hangs; resumed, it answers `pass`.
+/// - `fail`: the Run fails. `silent`: it never answers.
+/// - `lost-once`: its first start names no Run and never answers; its next answers `pass`.
+/// - `hang-then-pass`: it names its Run and hangs; resumed, it answers `pass`.
 #[derive(Default, Provider)]
 #[provider(AgentHandler, id = "mock-reviewer", name = "Mock Reviewer", crate = crate::guatiao)]
 pub(in crate::station::server) struct MockReviewerHandler;
@@ -255,7 +255,7 @@ impl AgentHandler for MockReviewerHandler {
     ) -> Result<Object<dyn AgentSession>, ProviderError> {
         REVIEWER_STARTS.lock().unwrap().push(request.clone());
         let model = request.model.clone().unwrap_or_default();
-        let session = fresh("reviewer")?;
+        let run = fresh("reviewer")?;
         let events = match model.as_str() {
             "lost-once" => {
                 let first = LOST_ONCE.lock().unwrap().insert(format!(
@@ -272,7 +272,7 @@ impl AgentHandler for MockReviewerHandler {
             "hang-then-pass" => vec![event("text", Some("reading".to_owned()))],
             _ => answer(&model, &request.prompt),
         };
-        Ok(ScriptSession::new(session, false, events).into_object())
+        Ok(ScriptRun::new(run, false, events).into_object())
     }
 
     fn resume(
@@ -283,10 +283,10 @@ impl AgentHandler for MockReviewerHandler {
         if !REPORTED
             .lock()
             .unwrap()
-            .contains(request.session_id.as_str())
+            .contains(request.run_id.as_str())
         {
-            return Err(refused("no conversation found with that Session ID"));
+            return Err(refused("no conversation found with that Run ID"));
         }
-        Ok(ScriptSession::new(request.session_id, true, answer("pass", "")).into_object())
+        Ok(ScriptRun::new(request.run_id, true, answer("pass", "")).into_object())
     }
 }

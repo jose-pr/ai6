@@ -170,21 +170,21 @@ impl std::error::Error for QError {
     }
 }
 
-/// Values a Session is given in its environment that are no secret: `env` on a record that
-/// says how a Session runs. Anyone who can read that record reads them, and exposure does not
-/// take them away; [`LoadoutCatalog::check_session_env`] keeps a credential's variables out.
+/// Values a Run is given in its environment that are no secret: `env` on a record that
+/// says how a Run runs. Anyone who can read that record reads them, and exposure does not
+/// take them away; [`LoadoutCatalog::check_run_env`] keeps a credential's variables out.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, ToValue, FromValue, Schema)]
 #[serde(transparent)]
 #[map(crate = ::guatiao, transparent)]
-pub struct SessionEnv(BTreeMap<String, String>);
+pub struct RunEnv(BTreeMap<String, String>);
 
-impl From<BTreeMap<String, String>> for SessionEnv {
+impl From<BTreeMap<String, String>> for RunEnv {
     fn from(values: BTreeMap<String, String>) -> Self {
         Self(values)
     }
 }
 
-impl SessionEnv {
+impl RunEnv {
     /// The values by variable name.
     pub fn values(&self) -> &BTreeMap<String, String> {
         &self.0
@@ -192,7 +192,7 @@ impl SessionEnv {
 
     /// Why an `env` on a roster record cannot be set: a name that is no variable, AI6's own or a
     /// provider credential's ([`CREDENTIAL_VARIABLES`]). The catalog's own variables are checked
-    /// when a Station has one ([`LoadoutCatalog::check_session_env`]).
+    /// when a Station has one ([`LoadoutCatalog::check_run_env`]).
     pub(crate) fn check_on_roster(&self) -> Result<(), String> {
         let taken: Vec<String> = CREDENTIAL_VARIABLES
             .iter()
@@ -239,7 +239,7 @@ pub struct Loadout {
     mcp: Vec<String>,
     overlays: Vec<String>,
     secrets: Vec<String>,
-    env: SessionEnv,
+    env: RunEnv,
 }
 
 impl Loadout {
@@ -258,7 +258,7 @@ impl Loadout {
         &self.mcp
     }
 
-    /// The overlays it issues, by `[overlay.<name>]` name, in the order declared; a Session
+    /// The overlays it issues, by `[overlay.<name>]` name, in the order declared; a Run
     /// gets them with its Operation's in composition order ([`overlays::issue_overlays`]).
     pub fn overlay_names(&self) -> &[String] {
         &self.overlays
@@ -269,8 +269,8 @@ impl Loadout {
         &self.secrets
     }
 
-    /// The values a Session of this Agent is given that are no secret.
-    pub fn env(&self) -> &SessionEnv {
+    /// The values a Run of this Agent is given that are no secret.
+    pub fn env(&self) -> &RunEnv {
         &self.env
     }
 
@@ -283,7 +283,7 @@ impl Loadout {
             mcp: Vec::new(),
             overlays: Vec::new(),
             secrets: vec![account.secret_name()?.to_owned()],
-            env: SessionEnv::default(),
+            env: RunEnv::default(),
         })
     }
 
@@ -296,7 +296,7 @@ impl Loadout {
             mcp: Vec::new(),
             overlays: Vec::new(),
             secrets: secrets.to_vec(),
-            env: SessionEnv::default(),
+            env: RunEnv::default(),
         }
     }
 }
@@ -363,7 +363,7 @@ impl McpServer {
     }
 }
 
-/// How a loadout secret reaches a Session: `[secret.<name>]`.
+/// How a loadout secret reaches a Run: `[secret.<name>]`.
 ///
 /// Every key has a default, so a secret a loadout names needs no table of its own.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -377,7 +377,7 @@ pub struct SecretDefinition {
 }
 
 impl SecretDefinition {
-    /// The definition every key at its default: the Session variable is the name in upper
+    /// The definition every key at its default: the Run variable is the name in upper
     /// case with `-` and `.` as `_`, read on the Station by the `file` provider from the file
     /// `<name>` in its secrets directory.
     pub fn new(name: impl Into<String>) -> Self {
@@ -404,7 +404,7 @@ impl SecretDefinition {
         &self.name
     }
 
-    /// The environment variable a Session sees it in.
+    /// The environment variable a Run sees it in.
     pub fn env(&self) -> &str {
         &self.env
     }
@@ -536,7 +536,7 @@ impl LoadoutCatalog {
             .map_err(|reason| QError::new(QErrorKind::Schema, None).because(reason))?;
         self.pools.insert(pool.id().to_owned(), pool);
         for loadout in self.loadouts.values() {
-            self.check_session_env(&loadout.env, Limit::UNBOUNDED)
+            self.check_run_env(&loadout.env, Limit::UNBOUNDED)
                 .map_err(|reason| {
                     QError::new(QErrorKind::Schema, None)
                         .because(format!("loadout {:?}: {reason}", loadout.agent))
@@ -545,14 +545,14 @@ impl LoadoutCatalog {
         Ok(self)
     }
 
-    /// Refuses an `env` table a Session could not be given beside this catalog: a name that is a
+    /// Refuses an `env` table a Run could not be given beside this catalog: a name that is a
     /// provider credential's ([`CREDENTIAL_VARIABLES`]), a secret's or a pool account's variable,
     /// or AI6's own. Case is ignored, as Windows ignores it.
     ///
     /// # Errors
     ///
     /// Why, naming the variable and never its value.
-    pub fn check_session_env(&self, env: &SessionEnv, chars: Limit) -> Result<(), String> {
+    pub fn check_run_env(&self, env: &RunEnv, chars: Limit) -> Result<(), String> {
         let mut taken: Vec<String> = CREDENTIAL_VARIABLES
             .iter()
             .map(|variable| (*variable).to_owned())
@@ -672,7 +672,7 @@ impl LoadoutCatalog {
         self.overlays.get(&coqui_aos::normalize_name(name))
     }
 
-    /// How the secret `name` reaches a Session: its `[secret.<name>]` table, or every default.
+    /// How the secret `name` reaches a Run: its `[secret.<name>]` table, or every default.
     pub fn secret(&self, name: &str) -> SecretDefinition {
         self.secrets.get(name).cloned().unwrap_or_else(|| {
             #[allow(unused_mut)]
@@ -855,7 +855,7 @@ struct RawLoadout {
     #[serde(default)]
     secrets: Vec<String>,
     #[serde(default)]
-    env: SessionEnv,
+    env: RunEnv,
 }
 
 #[derive(Deserialize)]
@@ -1201,7 +1201,7 @@ fn parse_document(
     };
     for loadout in catalog.loadouts.values() {
         catalog
-            .check_session_env(&loadout.env, chars)
+            .check_run_env(&loadout.env, chars)
             .map_err(|reason| {
                 QError::new(QErrorKind::Schema, path.clone())
                     .because(format!("loadout {:?}: {reason}", loadout.agent))
@@ -1235,7 +1235,7 @@ pub(crate) fn check_overlay_list(
 }
 
 /// Refuses a pool account whose secret is a green ink one: a pool account is handed to every
-/// Session that draws it, while a green ink credential is only for a step a person approved.
+/// Run that draws it, while a green ink credential is only for a step a person approved.
 fn refuse_green_ink(
     pool: &AccountPool,
     secrets: &BTreeMap<String, SecretDefinition>,
@@ -1303,7 +1303,7 @@ fn validate_text(
 
 #[cfg(test)]
 mod tests {
-    use super::{Account, AccountKind, AccountPool, BTreeMap, PathBuf, SessionEnv};
+    use super::{Account, AccountKind, AccountPool, BTreeMap, PathBuf, RunEnv};
     use super::{ConfigLimits, Limit, LoadoutCatalog, QErrorKind};
     use std::str::FromStr;
 
@@ -1327,7 +1327,7 @@ deny = ["git push --force"]
 "#;
 
     #[test]
-    fn a_loadout_s_env_is_config_a_session_is_given() {
+    fn a_loadout_s_env_is_config_a_run_is_given() {
         let catalog: LoadoutCatalog =
             "[loadout.007]\nenv = { PATH = \"/opt/tools/bin\", TOOL_MODE = \"\" }\n"
                 .parse()
@@ -1428,12 +1428,12 @@ deny = ["git push --force"]
     #[test]
     fn the_env_type_reads_and_writes_as_a_table_for_any_record_that_holds_one() {
         use crate::guatiao::{FromValue, ToValue};
-        let env = SessionEnv::from(BTreeMap::from([("PATH".to_owned(), "/bin".to_owned())]));
+        let env = RunEnv::from(BTreeMap::from([("PATH".to_owned(), "/bin".to_owned())]));
         assert_eq!(
-            SessionEnv::from_value(&env.to_value().unwrap()).unwrap(),
+            RunEnv::from_value(&env.to_value().unwrap()).unwrap(),
             env
         );
-        let by_serde: SessionEnv = toml::from_str::<toml::Table>("PATH = \"/bin\"\n")
+        let by_serde: RunEnv = toml::from_str::<toml::Table>("PATH = \"/bin\"\n")
             .unwrap()
             .try_into()
             .unwrap();

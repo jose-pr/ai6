@@ -114,7 +114,7 @@ class _MissionOutcomeSectionState extends State<MissionOutcomeSection> {
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Text(
-                'Held: its Session ended done, and its role requires a green '
+                'Held: its Run ended done, and its role requires a green '
                 'ink decision it does not have. A verdict settles it.',
                 style: text.bodyMedium,
               ),

@@ -5,19 +5,19 @@ use serde_json::{Value, json};
 
 use super::backend::RegistryBackend;
 use super::mission_issues::OutboxKind;
-use super::sessions::{SessionRecord, SessionStatus};
+use super::runs::{RunRecord, RunStatus};
 use super::store::{FiledBrief, Lease};
 use crate::bounds::Limit;
 
 /// Marks a text cut at a compartment's `max_product_bytes`.
 pub const CUT_MARKER: &str = "… [cut]";
 
-/// The keys of a filed outcome another Operation may read. An outcome also holds Session IDs and
+/// The keys of a filed outcome another Operation may read. An outcome also holds Run IDs and
 /// where the work ran, which are not part of a product.
 const OUTCOME_KEYS: [&str; 4] = ["state", "reason", "branch", "summary"];
 
 /// What any holder of `mission.status` sees of `filed`: its ID, Operation, state, role, Agent
-/// codename, attempts, creation time and why it is blocked. Never a brief, a Session ID, a
+/// codename, attempts, creation time and why it is blocked. Never a brief, a Run ID, a
 /// Station, a Theater, a safe house, a launch manifest, usage or cost.
 pub fn mission_status(registry: &dyn RegistryBackend, filed: &FiledBrief) -> Value {
     let key = filed.brief.key();
@@ -57,17 +57,17 @@ pub fn mission_status(registry: &dyn RegistryBackend, filed: &FiledBrief) -> Val
     answer
 }
 
-/// The latest Session of Mission `key`.
-fn latest_session(registry: &dyn RegistryBackend, key: &str) -> Option<SessionRecord> {
+/// The latest Run of Mission `key`.
+fn latest_run(registry: &dyn RegistryBackend, key: &str) -> Option<RunRecord> {
     registry
-        .sessions()
+        .runs()
         .ok()?
         .into_iter()
-        .filter(|session| session.mission_id == key)
-        .max_by_key(|session| session.attempt)
+        .filter(|run| run.mission_id == key)
+        .max_by_key(|run| run.attempt)
 }
 
-/// Why a Mission is not moving, as a word: held by vetting, or its Session parked or lost.
+/// Why a Mission is not moving, as a word: held by vetting, or its Run parked or lost.
 fn blocked_reason(registry: &dyn RegistryBackend, filed: &FiledBrief) -> Option<&'static str> {
     if filed.state == "held" {
         return Some("held");
@@ -75,9 +75,9 @@ fn blocked_reason(registry: &dyn RegistryBackend, filed: &FiledBrief) -> Option<
     if filed.state != "claimed" {
         return None;
     }
-    match latest_session(registry, &filed.brief.key())?.status {
-        SessionStatus::Parked => Some("parked"),
-        SessionStatus::Lost => Some("lost"),
+    match latest_run(registry, &filed.brief.key())?.status {
+        RunStatus::Parked => Some("parked"),
+        RunStatus::Lost => Some("lost"),
         _ => None,
     }
 }
@@ -113,7 +113,7 @@ pub fn mission_product(registry: &dyn RegistryBackend, filed: &FiledBrief, limit
     {
         refs.insert("branch".to_owned(), json!(branch));
     }
-    if let Some(checkpoint) = latest_session(registry, &key).and_then(|session| session.checkpoint)
+    if let Some(checkpoint) = latest_run(registry, &key).and_then(|run| run.checkpoint)
     {
         refs.insert("branch".to_owned(), json!(checkpoint.branch));
         refs.insert("commit".to_owned(), json!(checkpoint.commit));

@@ -358,7 +358,7 @@ mod tests {
             (0..n)
                 .map(|index| AttemptRef {
                     mission_id: format!("{prefix}-{index}"),
-                    session_id: format!("{prefix}-{index}.1"),
+                    run_id: format!("{prefix}-{index}.1"),
                     attempt: 1,
                 })
                 .collect()

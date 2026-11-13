@@ -1,15 +1,15 @@
-//! Recovery: how a Mission carries on when the Station supervising its Session goes dark, or
+//! Recovery: how a Mission carries on when the Station supervising its Run goes dark, or
 //! its harness does.
 //!
-//! A Session whose harness a runner supervises on a Theater other Stations reach outlives its
-//! Station: another Station takes the Session lease and re-attaches to the runner (adoption).
-//! Any other Session ended with its Station's host, so it is lost and the Mission is tried
+//! A Run whose harness a runner supervises on a Theater other Stations reach outlives its
+//! Station: another Station takes the Run lease and re-attaches to the runner (adoption).
+//! Any other Run ended with its Station's host, so it is lost and the Mission is tried
 //! again as a new attempt. [`adopter`] decides which, with the reason when no Station may
 //! adopt.
 //!
 //! A live Station whose runner, or wrapped harness, stays out of reach for an Operation's
 //! `lost_after_secs` ([`DEFAULT_LOST_AFTER_SECS`] unless set) probes it once more and, when it
-//! is still gone, marks the Session lost the same way. A Station retrying a re-attach waits
+//! is still gone, marks the Run lost the same way. A Station retrying a re-attach waits
 //! [`reattach_delay`] between tries.
 
 use std::time::Duration;
@@ -18,15 +18,15 @@ use crate::directorates::m::placement::{
     self, ExecutionMode, OperationPolicy, PlacementChoice, PlacementRequest, StationFacts,
 };
 use crate::directorates::m::theaters::LOCAL_THEATER;
-use crate::directorates::registry::sessions::SessionRecord;
+use crate::directorates::registry::runs::RunRecord;
 use crate::station::limits::RecoveryLimits;
 
-/// Seconds a Session's runner, or its wrapped harness, may stay out of reach before its
-/// Station probes it and gives the Session up when it is still gone: three Station check-in
+/// Seconds a Run's runner, or its wrapped harness, may stay out of reach before its
+/// Station probes it and gives the Run up when it is still gone: three Station check-in
 /// intervals.
 pub const DEFAULT_LOST_AFTER_SECS: u64 = 45;
 
-/// How long to wait before the next try at re-attaching to a Session after `failures` tries
+/// How long to wait before the next try at re-attaching to a Run after `failures` tries
 /// in a row failed: `limits.first_reattach_delay`, doubled for each failure after the first,
 /// up to `limits.max_reattach_delay`.
 pub fn reattach_delay(failures: u32, limits: &RecoveryLimits) -> Duration {
@@ -38,26 +38,26 @@ pub fn reattach_delay(failures: u32, limits: &RecoveryLimits) -> Duration {
         .min(limits.max_reattach_delay.0)
 }
 
-/// The live Station that should re-attach to `session`'s harness, or why none may.
+/// The live Station that should re-attach to `run`'s harness, or why none may.
 ///
-/// The adopter is placed like a new Session under `policy` and `request`, but only on the
-/// Session's own Theater, in field mode, on a Station that reaches that Theater's runner,
-/// and never on the Station that held the Session. A Session on a Station's own host
+/// The adopter is placed like a new Run under `policy` and `request`, but only on the
+/// Run's own Theater, in field mode, on a Station that reaches that Theater's runner,
+/// and never on the Station that held the Run. A Run on a Station's own host
 /// (`local`), or without a runner, cannot be adopted: its harness ended with the Station.
 pub fn adopter(
     policy: &OperationPolicy,
     request: &PlacementRequest,
     stations: &[StationFacts],
-    session: &SessionRecord,
+    run: &RunRecord,
 ) -> Result<PlacementChoice, String> {
-    let theater = session
+    let theater = run
         .theater
         .as_deref()
         .ok_or("its Theater was not recorded")?;
     if theater == LOCAL_THEATER {
         return Err("its harness ran on that Station's own host".into());
     }
-    let launch = session
+    let launch = run
         .launch
         .as_ref()
         .ok_or("its launch was not recorded, so nothing can re-attach to it")?;
@@ -68,7 +68,7 @@ pub fn adopter(
     }
     let others: Vec<StationFacts> = stations
         .iter()
-        .filter(|station| station.station != session.station)
+        .filter(|station| station.station != run.station)
         .filter(|station| {
             station
                 .theaters
@@ -118,7 +118,7 @@ mod tests {
     use crate::directorates::m::placement::AgentFacts;
     use crate::directorates::m::theaters::{Theater, TheaterAccess, TheaterSummary};
     use crate::directorates::registry::backend::*;
-    use crate::directorates::registry::sessions::{NewSession, SessionLaunch};
+    use crate::directorates::registry::runs::{NewRun, RunLaunch};
     use crate::directorates::registry::store::FileRegistry;
     use crate::{Capabilities, TransportAccess};
 
@@ -174,15 +174,15 @@ mod tests {
         policy
     }
 
-    fn session(theater: &str, runner: bool) -> SessionRecord {
+    fn run(theater: &str, runner: bool) -> RunRecord {
         let root = tempfile::tempdir().unwrap();
-        let mut launch = SessionLaunch::new("claude", "pty", "/srv/work");
+        let mut launch = RunLaunch::new("claude", "pty", "/srv/work");
         if runner {
             launch = launch.with_runner("key-1");
         }
         FileRegistry::open(root.path())
-            .open_session(
-                NewSession::new("s-1", "mission-1", "dark")
+            .open_run(
+                NewRun::new("s-1", "mission-1", "dark")
                     .with_theater(theater)
                     .with_launch(launch),
                 Duration::from_secs(60),
@@ -201,7 +201,7 @@ mod tests {
             agent: Some("007".to_owned()),
             ..PlacementRequest::default()
         };
-        let choice = adopter(&policy(), &request, &stations, &session("box", true)).unwrap();
+        let choice = adopter(&policy(), &request, &stations, &run("box", true)).unwrap();
         assert_eq!(
             (choice.station.as_str(), choice.theater.as_str()),
             ("live", "box")
@@ -209,16 +209,16 @@ mod tests {
     }
 
     #[test]
-    fn a_session_without_a_runner_or_on_a_stations_own_host_is_not_adopted() {
+    fn a_run_without_a_runner_or_on_a_stations_own_host_is_not_adopted() {
         let stations = [station("live", vec![field_theater(true)])];
         let request = PlacementRequest::default();
-        let without_runner = adopter(&policy(), &request, &stations, &session("box", false));
+        let without_runner = adopter(&policy(), &request, &stations, &run("box", false));
         assert!(without_runner.unwrap_err().contains("no runner"));
         let local = adopter(
             &policy(),
             &request,
             &stations,
-            &session(LOCAL_THEATER, true),
+            &run(LOCAL_THEATER, true),
         );
         assert!(local.unwrap_err().contains("own host"));
     }
@@ -245,7 +245,7 @@ mod tests {
             &policy(),
             &PlacementRequest::default(),
             &[busy],
-            &session("box", true),
+            &run("box", true),
         )
         .unwrap_err();
         assert!(refused.contains("live: it is at capacity"), "{refused}");
@@ -253,7 +253,7 @@ mod tests {
             &policy(),
             &PlacementRequest::default(),
             &[station("other", vec![field_theater(false)])],
-            &session("box", true),
+            &run("box", true),
         )
         .unwrap_err();
         assert!(

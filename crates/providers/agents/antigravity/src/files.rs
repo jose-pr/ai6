@@ -1,7 +1,7 @@
 //! The directory that gives one launch of agy its agent, MCP servers and hook.
 //!
 //! agy has no flag for any of the three: `--settings` refuses `mcpServers` and does not read hooks,
-//! and the user's own files are shared by every Session of that OS user. It does read a workspace's
+//! and the user's own files are shared by every Run of that OS user. It does read a workspace's
 //! `.agents/`, and `--add-dir` makes this directory a workspace outside the checkout. agy keeps
 //! workspaces in path order and runs commands in the first, so this directory is named after the
 //! working directory with a suffix, which sorts after it (agy 1.4.12 on Linux).
@@ -13,23 +13,23 @@ use ai6::guatiao::Status;
 use ai6::guatiao::library::ProviderError;
 use serde_json::{Map, Value, json};
 
-use ai6::SessionOverlays;
+use ai6::RunOverlays;
 
 use crate::{Plan, internal, refuse};
 
-const AGENT_DESCRIPTION: &str = "An AI6 Agent's Session, with the tools AI6 chose for it.";
+const AGENT_DESCRIPTION: &str = "An AI6 Agent's Run, with the tools AI6 chose for it.";
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// One launch's directory, removed when dropped.
 #[derive(Debug)]
-pub(crate) struct SessionFiles {
+pub(crate) struct RunFiles {
     path: PathBuf,
     agent: String,
     skills: Option<PathBuf>,
 }
 
-impl SessionFiles {
+impl RunFiles {
     /// Makes the directory beside `working_directory`, and in it the agent file (which a resumed
     /// conversation does not read, keeping the agent of its first launch), the MCP config with the
     /// plan's servers' URLs and tokens, and the hook.
@@ -39,7 +39,7 @@ impl SessionFiles {
         mcp_timeout_secs: i64,
         hooks: Option<&Value>,
         context: &str,
-        overlays: &SessionOverlays,
+        overlays: &RunOverlays,
     ) -> Result<Self, ProviderError> {
         let unique = unique_suffix();
         let root = working_directory.trim_end_matches(['/', '\\']);
@@ -48,7 +48,7 @@ impl SessionFiles {
         create_private_dir(&path).map_err(|error| {
             refuse(
                 Status::GUATIAO_ERR_INTERNAL,
-                format!("the Session's directory {}: {error}", path.display()),
+                format!("the Run's directory {}: {error}", path.display()),
             )
         })?;
         let mut files = Self {
@@ -94,7 +94,7 @@ impl SessionFiles {
     }
 }
 
-impl Drop for SessionFiles {
+impl Drop for RunFiles {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.path);
         if let Some(skills) = &self.skills {
@@ -105,13 +105,13 @@ impl Drop for SessionFiles {
 
 /// Copies each overlay skill agy may load into `<working directory>.ai6-agy-skills-<unique>`, as
 /// `skills/<name>/` in its `.agents` directory. agy 1.4.12 lists a workspace's skills with an `--agent` too, and reads
-/// one with `read_file`, so the directory holds nothing else: the Session's own, which holds the MCP
+/// one with `read_file`, so the directory holds nothing else: the Run's own, which holds the MCP
 /// tokens, stays denied to the file tools. Its name extends the working directory's, as that one's
 /// does, to sort after it.
 fn copy_skills(
     root: &str,
     unique: &str,
-    overlays: &SessionOverlays,
+    overlays: &RunOverlays,
 ) -> Result<Option<PathBuf>, ProviderError> {
     let native: Vec<_> = overlays
         .skills

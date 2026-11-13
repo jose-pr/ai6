@@ -14,24 +14,24 @@ import 'rules_editor.dart';
 /// Operation's own; globally, what the profile shows everywhere (the gateway's guard decides
 /// in the end).
 Set<String> heldActions(MissionBoard board, String? operationId) {
-  final session = board.userSession;
+  final run = board.userRun;
   if (board.demo) return {...operationActions, 'station.configure'};
-  if (session == null) return const {};
+  if (run == null) return const {};
   if (operationId != null) {
-    for (final operation in session.operations) {
+    for (final operation in run.operations) {
       if (operation.operationId == operationId) return {...operation.actions};
     }
     return const {};
   }
-  final everywhere = session.operations.isEmpty
+  final everywhere = run.operations.isEmpty
       ? <String>{}
-      : session.operations
+      : run.operations
             .map((operation) => operation.actions.toSet())
             .reduce((a, b) => a.intersection(b));
   return {
-    ...session.globalActions,
-    ...session.roster,
-    for (final station in session.stations) ...station.actions,
+    ...run.globalActions,
+    ...run.roster,
+    for (final station in run.stations) ...station.actions,
     ...everywhere,
   };
 }

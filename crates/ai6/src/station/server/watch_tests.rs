@@ -1,4 +1,4 @@
-//! Watches with a stand-in harness: a watch takes a turn per wake, resumes its Session across a
+//! Watches with a stand-in harness: a watch takes a turn per wake, resumes its Run across a
 //! restart, starts fresh with its logbook when it cannot, moves to another Station when its own
 //! goes dark, stops at its turn quota, and never becomes a Mission.
 
@@ -20,17 +20,17 @@ use super::*;
 use crate::directorates::q::terminal::AgentTerminal;
 use crate::directorates::registry::cables::{CableAction, CableGrant, CablePolicy, CableScope};
 use crate::directorates::registry::quarantine::Quarantine;
-use crate::directorates::registry::sessions::{NewSession, SessionResult, SessionUpdate};
+use crate::directorates::registry::runs::{NewRun, RunResult, RunUpdate};
 use crate::directorates::registry::watches::WatchRecord;
 use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
 
-/// What the stand-in was asked: `start`, `resume` or `message`, under which Session name, on which
-/// provider Session, with what text and, for a start, what context.
+/// What the stand-in was asked: `start`, `resume` or `message`, under which Run name, on which
+/// provider Run, with what text and, for a start, what context.
 #[derive(Debug, Clone)]
 struct Call {
     how: &'static str,
     key: String,
-    session: String,
+    run: String,
     text: String,
     context: Vec<String>,
 }
@@ -41,7 +41,7 @@ static CALLS: Mutex<Vec<Call>> = Mutex::new(Vec::new());
 /// environment naming its AI6 tools, and runs before the turn ends.
 type Turn = Arc<dyn Fn(&str, &BTreeMap<String, String>) + Send + Sync>;
 
-/// The turns the stand-in takes, by the watch's Session name.
+/// The turns the stand-in takes, by the watch's Run name.
 static TURNS: Mutex<BTreeMap<String, Turn>> = Mutex::new(BTreeMap::new());
 
 fn act(key: &str, text: &str, environment: &BTreeMap<String, String>) {
@@ -50,7 +50,7 @@ fn act(key: &str, text: &str, environment: &BTreeMap<String, String>) {
         turn(text, environment);
     }
 }
-static NEXT_SESSION: AtomicUsize = AtomicUsize::new(1);
+static NEXT_RUN: AtomicUsize = AtomicUsize::new(1);
 
 fn calls(key: &str) -> Vec<Call> {
     CALLS
@@ -68,7 +68,7 @@ fn event(kind: &str, text: Option<String>) -> AgentEvent {
 
 /// A harness that answers each message with a line and ends its turn. Its Agent's
 /// `MOCK_WATCH_RESUME` makes a resume `refuse` (the handler errs) or `fail` (the resumed
-/// Session fails before it answers, as one whose transcript is gone does).
+/// Run fails before it answers, as one whose transcript is gone does).
 #[derive(Default, Provider)]
 #[provider(AgentHandler, id = "mock-watch", name = "Mock Watch", crate = crate::guatiao)]
 pub(super) struct MockWatchHandler;
@@ -79,15 +79,15 @@ impl AgentHandler for MockWatchHandler {
         request: AgentStart,
         terminal: Object<dyn AgentTerminal>,
     ) -> Result<Object<dyn AgentSession>, ProviderError> {
-        let session = format!(
+        let run = format!(
             "{}-s{}",
             request.mission_id,
-            NEXT_SESSION.fetch_add(1, Ordering::AcqRel)
+            NEXT_RUN.fetch_add(1, Ordering::AcqRel)
         );
         CALLS.lock().unwrap().push(Call {
             how: "start",
             key: request.mission_id.to_string(),
-            session: session.clone(),
+            run: run.clone(),
             text: request.prompt.clone(),
             context: request.initial_context.clone(),
         });
@@ -96,9 +96,9 @@ impl AgentHandler for MockWatchHandler {
             &request.prompt,
             &request.environment,
         );
-        Ok(WatchSession::answering(
+        Ok(WatchRun::answering(
             request.mission_id.to_string(),
-            session,
+            run,
             request.environment,
             terminal,
         )
@@ -110,11 +110,11 @@ impl AgentHandler for MockWatchHandler {
         request: AgentResume,
         terminal: Object<dyn AgentTerminal>,
     ) -> Result<Object<dyn AgentSession>, ProviderError> {
-        let session = request.session_id.to_string();
+        let run = request.run_id.to_string();
         CALLS.lock().unwrap().push(Call {
             how: "resume",
             key: request.mission_id.to_string(),
-            session: session.clone(),
+            run: run.clone(),
             text: request.message.clone().unwrap_or_default(),
             context: request.initial_context.clone(),
         });
@@ -132,9 +132,9 @@ impl AgentHandler for MockWatchHandler {
                 guatiao::Status::GUATIAO_ERR_INTERNAL,
                 "no conversation found",
             )),
-            Some("fail") => Ok(WatchSession {
+            Some("fail") => Ok(WatchRun {
                 key: request.mission_id.to_string(),
-                session,
+                run,
                 events: Mutex::new(VecDeque::from([event(
                     "failed",
                     Some("no conversation found".to_owned()),
@@ -143,9 +143,9 @@ impl AgentHandler for MockWatchHandler {
                 _terminal: terminal,
             }
             .into_object()),
-            _ => Ok(WatchSession::answering(
+            _ => Ok(WatchRun::answering(
                 request.mission_id.to_string(),
-                session,
+                run,
                 request.environment,
                 terminal,
             )
@@ -154,19 +154,19 @@ impl AgentHandler for MockWatchHandler {
     }
 }
 
-struct WatchSession {
+struct WatchRun {
     key: String,
-    session: String,
+    run: String,
     environment: BTreeMap<String, String>,
     events: Mutex<VecDeque<AgentEvent>>,
     _terminal: Object<dyn AgentTerminal>,
 }
 
-impl WatchSession {
-    /// A Session answering the message it was started or resumed with.
+impl WatchRun {
+    /// A Run answering the message it was started or resumed with.
     fn answering(
         key: String,
-        session: String,
+        run: String,
         environment: BTreeMap<String, String>,
         terminal: Object<dyn AgentTerminal>,
     ) -> Self {
@@ -174,31 +174,31 @@ impl WatchSession {
             key,
             environment,
             events: Mutex::new(VecDeque::from([
-                event("text", Some(format!("noted on {session}"))),
+                event("text", Some(format!("noted on {run}"))),
                 event("completed", None),
             ])),
-            session,
+            run,
             _terminal: terminal,
         }
     }
 }
 
-impl AgentSession for WatchSession {
+impl AgentSession for WatchRun {
     fn session_id(&self) -> Result<Option<String>, ProviderError> {
-        Ok(Some(self.session.clone()))
+        Ok(Some(self.run.clone()))
     }
 
     fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {
         CALLS.lock().unwrap().push(Call {
             how: "message",
             key: self.key.clone(),
-            session: self.session.clone(),
+            run: self.run.clone(),
             text: message.text.clone(),
             context: Vec::new(),
         });
         act(&self.key, &message.text, &self.environment);
         let mut events = self.events.lock().unwrap();
-        events.push_back(event("text", Some(format!("noted on {}", self.session))));
+        events.push_back(event("text", Some(format!("noted on {}", self.run))));
         events.push_back(event("completed", None));
         Ok(())
     }
@@ -300,10 +300,10 @@ fn station_with(
             grants.push(CableGrant::try_new(who.to_owned(), action, target.clone()).unwrap());
         }
     }
-    let (roster, missions, sessions, station_id) = (
+    let (roster, missions, runs, station_id) = (
         state.roster.clone(),
         state.missions.clone(),
-        state.sessions.clone(),
+        state.runs.clone(),
         state.station_id.clone(),
     );
     let (resident_roster, resident_site) = (state.roster.clone(), state.station_id.clone());
@@ -311,7 +311,7 @@ fn station_with(
         CableRelay::new(
             state.intake.clone(),
             CablePolicy::try_new(grants, BTreeMap::new()).unwrap(),
-            move || cable_endpoints(&roster, &missions, &sessions, &station_id),
+            move || cable_endpoints(&roster, &missions, &runs, &station_id),
             BTreeMap::new(),
         )
         .with_residents(move |target| cable_residents(&resident_roster, &resident_site, target))
@@ -374,7 +374,7 @@ fn control(state: &DaemonState, tag: &str, note: &str) {
         .unwrap();
 }
 
-/// Nothing about the watch is a Mission: no Mission, brief, placement or Session record names it.
+/// Nothing about the watch is a Mission: no Mission, brief, placement or Run record names it.
 fn assert_no_mission(state: &DaemonState, tag: &str) {
     let key = key(tag);
     assert!(state.intake.list_new().unwrap().is_empty(), "no brief");
@@ -382,11 +382,11 @@ fn assert_no_mission(state: &DaemonState, tag: &str) {
     assert!(
         state
             .intake
-            .sessions()
+            .runs()
             .unwrap()
             .iter()
-            .all(|session| !session.mission_id.starts_with("watch--")),
-        "no Session record of a watch"
+            .all(|run| !run.mission_id.starts_with("watch--")),
+        "no Run record of a watch"
     );
     assert!(state.intake.resolve_mission(&key).unwrap().is_none());
     assert!(
@@ -428,9 +428,9 @@ async fn a_watch_takes_one_turn_per_wake_and_is_no_mission() {
         "{:?}",
         first[0].context
     );
-    let provider = first[0].session.clone();
+    let provider = first[0].run.clone();
     assert_eq!(
-        record(&state, tag).provider_session_id.as_deref(),
+        record(&state, tag).provider_id.as_deref(),
         Some(provider.as_str())
     );
     assert!(
@@ -442,8 +442,8 @@ async fn a_watch_takes_one_turn_per_wake_and_is_no_mission() {
     let (operation, _) = names(tag);
     let run = state
         .intake
-        .open_session(
-            NewSession::new("run-v1", "mission-v1", "elsewhere")
+        .open_run(
+            NewRun::new("run-v1", "mission-v1", "elsewhere")
                 .with_operation(operation.clone())
                 .with_handle("V-1"),
             Duration::from_secs(600),
@@ -451,11 +451,11 @@ async fn a_watch_takes_one_turn_per_wake_and_is_no_mission() {
         .unwrap();
     state
         .intake
-        .update_session(
+        .update_run(
             "run-v1",
             "elsewhere",
             run.fence,
-            SessionUpdate::default().result(SessionResult::new("verifying")),
+            RunUpdate::default().result(RunResult::new("verifying")),
         )
         .unwrap();
     tend_until(&state, "a turn for verifying", || turns(&state, tag) == 2).await;
@@ -466,7 +466,7 @@ async fn a_watch_takes_one_turn_per_wake_and_is_no_mission() {
     let mut expected = 2;
     #[cfg(feature = "cables-mcp")]
     {
-        // A Cable to the watch's Agent, which it takes in its own Session.
+        // A Cable to the watch's Agent, which it takes in its own Run.
         let from = CablePrincipal::try_new(
             "007".to_owned(),
             operation.clone(),
@@ -519,8 +519,8 @@ async fn a_watch_takes_one_turn_per_wake_and_is_no_mission() {
         "{all:?}"
     );
     assert!(
-        messages.iter().all(|call| call.session == provider),
-        "one provider Session"
+        messages.iter().all(|call| call.run == provider),
+        "one provider Run"
     );
     assert!(messages[0].text.contains("\"verifying\"") && messages[0].text.contains("V-1"));
     #[cfg(feature = "cables-mcp")]
@@ -556,14 +556,14 @@ async fn a_control_wakes_the_watch_once_though_it_is_tended_during_the_turn() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_restarted_station_resumes_the_watch_session() {
+async fn a_restarted_station_resumes_the_watch_run() {
     let root = tempfile::tempdir().unwrap();
     let tag = "w2";
     let before = station(root.path(), tag, "test", "", "");
     watches::tend(&before, false, true).await;
     control(&before, tag, "first");
     tend_until(&before, "the first turn", || turns(&before, tag) == 1).await;
-    let provider = record(&before, tag).provider_session_id.unwrap();
+    let provider = record(&before, tag).provider_id.unwrap();
     drop(before);
 
     let after = station(root.path(), tag, "test", "", "");
@@ -578,13 +578,13 @@ async fn a_restarted_station_resumes_the_watch_session() {
         .filter(|call| call.how == "resume")
         .collect();
     assert_eq!(resumed.len(), 1, "{resumed:?}");
-    assert_eq!(resumed[0].session, provider);
+    assert_eq!(resumed[0].run, provider);
     assert!(
         resumed[0].text.contains("after the restart"),
         "the wake is its message"
     );
     let kept = record(&after, tag);
-    assert_eq!(kept.provider_session_id.as_deref(), Some(provider.as_str()));
+    assert_eq!(kept.provider_id.as_deref(), Some(provider.as_str()));
     assert_eq!(kept.fence, 1, "the same Station renews under its own token");
     assert!(kept.logbook.iter().any(|entry| entry.kind == "resumed"));
     assert_no_mission(&after, tag);
@@ -600,7 +600,7 @@ async fn a_watch_that_cannot_resume_starts_fresh_with_its_logbook() {
         watches::tend(&before, false, true).await;
         control(&before, tag, "first");
         tend_until(&before, "the first turn", || turns(&before, tag) == 1).await;
-        let lost = record(&before, tag).provider_session_id.unwrap();
+        let lost = record(&before, tag).provider_id.unwrap();
         drop(before);
 
         let after = station(root.path(), tag, "test", "", &env);
@@ -616,7 +616,7 @@ async fn a_watch_that_cannot_resume_starts_fresh_with_its_logbook() {
             record(&after, tag).logbook
         );
         let fresh = &all[2];
-        assert_ne!(fresh.session, lost);
+        assert_ne!(fresh.run, lost);
         assert!(
             fresh.text.contains("after the restart"),
             "{mode}: the wake is its prompt"
@@ -629,8 +629,8 @@ async fn a_watch_that_cannot_resume_starts_fresh_with_its_logbook() {
         assert!(logbook.contains("woke for control"), "{mode}: {logbook}");
         let kept = record(&after, tag);
         assert_eq!(
-            kept.provider_session_id.as_deref(),
-            Some(fresh.session.as_str())
+            kept.provider_id.as_deref(),
+            Some(fresh.run.as_str())
         );
         assert!(
             kept.logbook.iter().any(|entry| entry.kind == "fresh"),
@@ -652,7 +652,7 @@ async fn a_watch_moves_to_another_station_when_its_station_goes_dark() {
     watches::tend(&first, false, true).await;
     control(&first, tag, "on a");
     tend_until(&first, "a turn on a", || turns(&first, tag) == 1).await;
-    let provider = record(&first, tag).provider_session_id.unwrap();
+    let provider = record(&first, tag).provider_id.unwrap();
     watches::tend(&second, false, true).await;
     assert!(!second.watches.is_live(&scope(tag)), "a's lease is live");
 
@@ -678,8 +678,8 @@ async fn a_watch_moves_to_another_station_when_its_station_goes_dark() {
         record(&second, tag).logbook
     );
     assert_eq!(
-        resumed[0].session, provider,
-        "b resumes a's provider Session"
+        resumed[0].run, provider,
+        "b resumes a's provider Run"
     );
 
     // a comes back, finds b holds the watch, and lets it go.
