@@ -1137,6 +1137,30 @@ fn a_session_with_a_station_has_the_green_ink_hook_on_its_commands() {
 }
 
 #[test]
+fn the_theater_server_waits_as_long_as_the_station_says_a_call_may_take() {
+    let (_root, wd) = checkout();
+    let mut request = start_request(&wd, "field");
+    request.environment.extend(endpoint("AI6_CABLE_MCP"));
+    request.environment.extend(endpoint("AI6_THEATER_MCP"));
+    request.environment.insert(
+        "AI6_THEATER_MCP_TIMEOUT_MS".to_owned(),
+        "3630001".to_owned(),
+    );
+    let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
+    let _session = started(&fake, request, "");
+    let mcp = fake.launch().mcp.expect("an MCP config");
+    assert_eq!(mcp["mcpServers"]["ai6-theater"]["timeoutSeconds"], 3631);
+    assert!(mcp["mcpServers"]["ai6-cables"]["timeoutSeconds"].is_null());
+
+    let (_root, wd) = checkout();
+    let mut request = start_request(&wd, "field");
+    request.environment.extend(endpoint("AI6_THEATER_MCP"));
+    let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
+    let _session = started(&fake, request, "");
+    let mcp = fake.launch().mcp.expect("an MCP config");
+    assert!(mcp["mcpServers"]["ai6-theater"]["timeoutSeconds"].is_null());
+}
+#[test]
 fn remote_hands_turns_its_own_tools_off_and_at_desk_the_theaters_commands_too() {
     let (_root, wd) = checkout();
     let mut request = start_request(&wd, "field");

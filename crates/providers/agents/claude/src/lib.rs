@@ -573,15 +573,27 @@ const DISABLE_AUTO_MEMORY_ENV: &str = "CLAUDE_CODE_DISABLE_AUTO_MEMORY";
 /// later), beside leaving it out of `--tools`.
 const DISABLE_WEB_FETCH_ENV: &str = "CLAUDE_CODE_DISABLE_WEB_FETCH";
 
+/// Milliseconds Claude Code's MCP client waits for a tool call (default 60 s, which would end a
+/// longer `theater_run`); the Station names the longest call in `AI6_THEATER_MCP_TIMEOUT_MS`.
+const MCP_TOOL_TIMEOUT_ENV: &str = "MCP_TOOL_TIMEOUT";
+
 /// The harness's environment: `environment`, with the advisor turned off for a restricted
 /// (answer-only or assistant) Session, auto memory off for an assistant, and WebFetch off for
-/// an assistant whose network reaches no host.
+/// an assistant whose network reaches no host. A Session with the Theater tools gets
+/// [`MCP_TOOL_TIMEOUT_ENV`] set to the longest call, unless the Agent's own environment sets it.
 fn harness_environment(
     environment: &BTreeMap<String, String>,
     restricted: bool,
     assistant: Option<&AssistantMode>,
 ) -> BTreeMap<String, String> {
     let mut environment = environment.clone();
+    if has_endpoint(&environment, "AI6_THEATER_MCP")
+        && let Some(timeout) = environment.get("AI6_THEATER_MCP_TIMEOUT_MS").cloned()
+    {
+        environment
+            .entry(MCP_TOOL_TIMEOUT_ENV.to_owned())
+            .or_insert(timeout);
+    }
     if restricted {
         environment.insert(DISABLE_ADVISOR_ENV.to_owned(), "1".to_owned());
     }
@@ -3510,6 +3522,37 @@ mod tests {
         assert!(config.contains("${AI6_CABLE_MCP_URL}"));
         assert!(config.contains("${AI6_CABLE_MCP_TOKEN}"));
         assert!(!config.contains("session-secret-token"));
+    }
+
+    #[test]
+    fn the_theater_tools_get_the_clients_timeout_the_station_names() {
+        let mut environment = BTreeMap::from([
+            ("AI6_THEATER_MCP_URL".to_owned(), "http://b/mcp".to_owned()),
+            ("AI6_THEATER_MCP_TOKEN".to_owned(), "b".to_owned()),
+            (
+                "AI6_THEATER_MCP_TIMEOUT_MS".to_owned(),
+                "3630000".to_owned(),
+            ),
+        ]);
+        let harness = harness_environment(&environment, false, None);
+        assert_eq!(harness["MCP_TOOL_TIMEOUT"], "3630000");
+        environment.insert("MCP_TOOL_TIMEOUT".to_owned(), "5000".to_owned());
+        assert_eq!(
+            harness_environment(&environment, false, None)["MCP_TOOL_TIMEOUT"],
+            "5000",
+            "the Agent's own setting stands"
+        );
+    }
+
+    #[test]
+    fn no_theater_tools_leave_the_clients_timeout_alone() {
+        let cables = BTreeMap::from([
+            ("AI6_CABLE_MCP_URL".to_owned(), "http://a/mcp".to_owned()),
+            ("AI6_CABLE_MCP_TOKEN".to_owned(), "a".to_owned()),
+        ]);
+        assert!(!harness_environment(&cables, false, None).contains_key("MCP_TOOL_TIMEOUT"));
+        let stray = BTreeMap::from([("AI6_THEATER_MCP_TIMEOUT_MS".to_owned(), "1".to_owned())]);
+        assert!(!harness_environment(&stray, false, None).contains_key("MCP_TOOL_TIMEOUT"));
     }
 
     #[test]

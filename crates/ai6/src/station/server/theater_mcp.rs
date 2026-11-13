@@ -37,10 +37,30 @@ use guatiao::Bytes;
 /// Asks the Station whether a Mission's Agent may take steps now (`check_approval`).
 pub(super) type StepCheck = Arc<dyn Fn(&[ActionScope]) -> Result<Answers, String> + Send + Sync>;
 
+/// Time added to the longest `theater_run` for the harness's MCP client, so the tool's own
+/// timeout answers before the client gives up.
+const ROUND_TRIP_MARGIN: Duration = Duration::from_secs(30);
+
+/// The most milliseconds an MCP client's timer takes (a 32-bit signed count); an unlimited
+/// `max_timeout` gets this.
+const LONGEST_CLIENT_TIMEOUT_MS: u64 = i32::MAX as u64;
+
+/// Milliseconds a harness's MCP client should wait for one tool call: the longest `theater_run`
+/// may take plus [`ROUND_TRIP_MARGIN`], at most [`LONGEST_CLIENT_TIMEOUT_MS`].
+pub(super) fn client_timeout_ms(limits: &TheaterToolLimits) -> u64 {
+    limits
+        .max_timeout
+        .get()
+        .map_or(LONGEST_CLIENT_TIMEOUT_MS, |longest| {
+            millis(longest.saturating_add(ROUND_TRIP_MARGIN)).min(LONGEST_CLIENT_TIMEOUT_MS)
+        })
+}
+
 /// A local MCP listener bound to one Mission's Theater.
 pub(super) struct Endpoint {
     token: String,
     url: String,
+    timeout_ms: u64,
     server: JoinHandle<()>,
 }
 
@@ -69,6 +89,7 @@ impl Endpoint {
         environment: Option<std::collections::BTreeMap<String, String>>,
     ) -> std::io::Result<Self> {
         let token = Uuid::new_v4().to_string();
+        let timeout_ms = client_timeout_ms(&limits);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
         let service = StreamableHttpService::<TheaterTools, LocalSessionManager>::new(
@@ -94,6 +115,7 @@ impl Endpoint {
         Ok(Self {
             token,
             url: format!("http://{address}/mcp"),
+            timeout_ms,
             server,
         })
     }
@@ -104,6 +126,10 @@ impl Endpoint {
     ) {
         environment.insert("AI6_THEATER_MCP_URL".to_owned(), self.url.clone());
         environment.insert("AI6_THEATER_MCP_TOKEN".to_owned(), self.token.clone());
+        environment.insert(
+            "AI6_THEATER_MCP_TIMEOUT_MS".to_owned(),
+            self.timeout_ms.to_string(),
+        );
     }
 }
 
@@ -500,6 +526,37 @@ mod tests {
         ))
         .await
         .unwrap()
+    }
+
+    #[test]
+    fn the_client_waits_for_the_longest_command_and_a_margin() {
+        let mut limits = TheaterToolLimits::default();
+        assert_eq!(client_timeout_ms(&limits), (3_600 + 30) * 1_000);
+        limits.max_timeout = crate::bounds::TimeLimit::secs(90);
+        assert_eq!(client_timeout_ms(&limits), 120_000);
+        limits.max_timeout = crate::bounds::TimeLimit::UNBOUNDED;
+        assert_eq!(client_timeout_ms(&limits), LONGEST_CLIENT_TIMEOUT_MS);
+        limits.max_timeout = crate::bounds::TimeLimit::secs(u64::MAX / 4);
+        assert_eq!(client_timeout_ms(&limits), LONGEST_CLIENT_TIMEOUT_MS);
+    }
+
+    #[tokio::test]
+    async fn the_environment_carries_the_client_timeout_of_the_limits() {
+        let theater = tempfile::tempdir().unwrap();
+        let transport = DirTransport::new(theater.path());
+        let capabilities = transport.capabilities_model();
+        let client = Arc::new(TransportClient::new(Box::new(transport)));
+        let limits = TheaterToolLimits {
+            max_timeout: crate::bounds::TimeLimit::secs(600),
+            ..TheaterToolLimits::default()
+        };
+        let endpoint = Endpoint::start(client, capabilities, None, unchecked(), (limits, 4))
+            .await
+            .unwrap();
+        let mut environment = std::collections::BTreeMap::new();
+        endpoint.add_environment(&mut environment);
+        assert_eq!(environment["AI6_THEATER_MCP_TIMEOUT_MS"], "630000");
+        assert_eq!(environment["AI6_THEATER_MCP_URL"], endpoint.url);
     }
 
     #[test]

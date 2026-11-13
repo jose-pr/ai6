@@ -13541,6 +13541,8 @@ theater = \"other-box\"
                 .any(|text| text.contains("remote Theater") && text.contains("/work"))
         );
         assert!(!started.environment.contains_key("AI6_CABLE_MCP_URL_UNSET"));
+        // The longest command (an hour) and the transport margin, with the default limits.
+        assert_eq!(started.environment["AI6_THEATER_MCP_TIMEOUT_MS"], "3630000");
         let manifest = state
             .missions
             .lock()

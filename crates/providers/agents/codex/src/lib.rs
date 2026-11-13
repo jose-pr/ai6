@@ -1861,12 +1861,32 @@ fn app_server_argv(
                 "-c".to_owned(),
                 format!("mcp_servers.{server}.default_tools_approval_mode=\"approve\""),
             ]);
+            if server == "ai6-theater"
+                && let Some(seconds) = theater_tool_timeout_secs(environment)
+            {
+                argv.extend([
+                    "-c".to_owned(),
+                    format!("mcp_servers.{server}.tool_timeout_sec={seconds}"),
+                ]);
+            }
         }
     }
     if is_remote_hands(environment) {
         argv.extend(["-c".to_owned(), "features.shell_tool=false".to_owned()]);
     }
     argv
+}
+
+/// Seconds Codex's MCP client waits for a Theater tool call (its default is 60 s, which would end a
+/// longer `theater_run`): the Station's `AI6_THEATER_MCP_TIMEOUT_MS`, rounded up.
+fn theater_tool_timeout_secs(
+    environment: &std::collections::BTreeMap<String, String>,
+) -> Option<u64> {
+    let millis: u64 = environment
+        .get("AI6_THEATER_MCP_TIMEOUT_MS")?
+        .parse()
+        .ok()?;
+    Some(millis.div_ceil(1000).max(1))
 }
 
 /// The Theater tools a `desk` thread may not call: one runs a command, the other writes any path on
@@ -3313,6 +3333,41 @@ mod tests {
                 assert_eq!(policy["approvalPolicy"], "untrusted", "{clearance:?}");
             }
         }
+    }
+
+    #[test]
+    fn the_theater_server_waits_as_long_as_the_station_says_a_call_may_take() {
+        let mut environment = cable();
+        environment.extend([
+            (
+                "AI6_THEATER_MCP_URL".to_owned(),
+                "http://127.0.0.1:2/mcp".to_owned(),
+            ),
+            ("AI6_THEATER_MCP_TOKEN".to_owned(), "token".to_owned()),
+        ]);
+        let without = app_server_argv("codex", &environment);
+        assert!(
+            !without
+                .iter()
+                .any(|argument| argument.contains("tool_timeout_sec")),
+            "no timeout named, none set"
+        );
+        environment.insert(
+            "AI6_THEATER_MCP_TIMEOUT_MS".to_owned(),
+            "3630001".to_owned(),
+        );
+        let argv = app_server_argv("codex", &environment);
+        let timeouts: Vec<&String> = argv
+            .iter()
+            .filter(|argument| argument.contains("tool_timeout_sec"))
+            .collect();
+        assert_eq!(timeouts, ["mcp_servers.ai6-theater.tool_timeout_sec=3631"]);
+        let cables_only = app_server_argv("codex", &cable());
+        assert!(
+            !cables_only
+                .iter()
+                .any(|argument| argument.contains("tool_timeout_sec"))
+        );
     }
 
     #[test]

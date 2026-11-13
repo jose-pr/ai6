@@ -166,8 +166,23 @@ fn agent_file(name: &str, plan: &Plan, context: &str) -> String {
     )
 }
 
+/// The prefix of the Theater tools' environment variables.
+const THEATER_PREFIX: &str = "AI6_THEATER_MCP";
+
+/// Seconds agy waits for a Theater tool call (its own limit is 180 s, which would end a longer
+/// `theater_run`): the Station's `AI6_THEATER_MCP_TIMEOUT_MS`, rounded up.
+fn theater_timeout_secs(plan: &Plan) -> Option<u64> {
+    let millis: u64 = plan
+        .endpoints
+        .get("AI6_THEATER_MCP_TIMEOUT_MS")?
+        .parse()
+        .ok()?;
+    Some(millis.div_ceil(1000).max(1))
+}
+
 /// agy's `mcp_config.json`, which expands no `${VARIABLE}` in a URL or a header (agy 1.4.12 sent the
-/// text as written), so it holds the values.
+/// text as written), so it holds the values. A positive `mcp_timeout_secs` applies to every
+/// server and is the operator's choice; at 0 the Theater server gets the Station's own timeout.
 fn mcp_config(plan: &Plan, timeout_secs: i64) -> Result<Value, ProviderError> {
     let mut servers = Map::new();
     for (name, prefix) in &plan.servers {
@@ -179,6 +194,11 @@ fn mcp_config(plan: &Plan, timeout_secs: i64) -> Result<Value, ProviderError> {
         });
         if timeout_secs != 0 {
             server["timeoutSeconds"] = json!(timeout_secs);
+        } else if let Some(seconds) = (prefix == THEATER_PREFIX)
+            .then(|| theater_timeout_secs(plan))
+            .flatten()
+        {
+            server["timeoutSeconds"] = json!(seconds);
         }
         servers.insert(name.clone(), server);
     }
