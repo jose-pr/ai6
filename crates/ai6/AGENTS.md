@@ -2403,7 +2403,8 @@ one-minute load average except on Windows, total and available memory; in this c
 tests every check-in repeats the process's first sample), its `resource_limits` (Registry
 settings, else the defaults), each Theater's running `runs`,
 local Operation paths (`operations`: the Operations with a checkout here, which placement reads), every Operation it may place a Mission of (`runnable_operations`: its `stations` list admits it and any Theater it names is one of this Station's, which Universal Exports reads to accept an Operation bound to a remote Theater), its Missions that wait for a person with no harness running (`waiting_missions`: verifying, held, or blocked with the Run closed, whose leases another Station placing work leaves out of this Station's load), available `handlers`, reachable `theaters` (with their capabilities) and each Operation's
-placement policy (`operation_policies`, omitted with a log line when over 512 KiB), every
+placement policy (`operation_policies`, omitted with a log line when over 512 KiB), the names Operations are called by
+(`operation_names`: `{"G": "guatiao"}`, only those with a `name`), every
 roster Operation's ancestors nearest first (`operation_lineage`: `{"G": ["P", "ROOT"],
 "ROOT": []}`, omitted with a log line when over 512 KiB), the
 Agents whose retirement is near or due (`retirements`: `{agent, retire_on, on_retire,

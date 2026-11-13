@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A Mission can be drafted in Moneypenny's conversation: the card shows the brief to edit and where the
+  Mission would run, the same Confirm as any proposal follows, and once queued it shows the Mission's
+  state and result and a link that reopens it. A confirmed `propose_mission` settles with a `receipt`
+  (`{page, operation_id, mission_id}`, from AI6's answer) and its `opens` then reopens that Mission. The
+  empty Missions queue offers New Mission and Draft with Moneypenny for an Operation picked by name.
+- Outer Office shows an Operation by its name, its ID when it has none: Stations check in `operation_names`,
+  and `GET /v1/user/profile` and `GET /v1/stations` operations carry `name`.
+- A Station card opens Settings on that Station, and a Station without the execution role says so there
+  instead of a disabled capacity field.
+
 - Outer Office lists the Missions no Session has been recorded for: queued, waiting for a place (with
   placement's reason), retrying a start (its failures and next try, with the reason), a brief no Station
   has taken, and a Mission that failed before it started (with its failure), on Missions and in
@@ -92,6 +102,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Missions' state filters that no Mission is in are left out until one is.
 - A Session is a Run, a watch is a charge, and a Mission's attempt is its next Run. The word Session stays only
   where another protocol or product owns it: ACP's `sessionId`, the Claude Code and Codex CLIs' own session ids,
   a person's sign-in session and its cookie, MCP's `Mcp-Session-Id`. A Run has one UUID AI6 makes (`id`) and

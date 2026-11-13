@@ -268,6 +268,11 @@ Moneypenny changes nothing herself. Her write tools only propose:
 | `propose_class_authorization` | A class authorisation | `approval.class` |
 | `propose_shared_change` | One file of a group's shared repository ([workspace](#her-workspace)) | membership of the group |
 
+A drafted Mission shows as its own card: the title and brief as editable fields, where the Mission would
+run now (the placement preview) and Confirm. An edit is never confirmed: the card asks her to draft again
+with it, so what is confirmed is always a proposal she recorded. Once the Mission is queued the card
+follows it on the board (queued, working, done), shows its final message and links to the Mission's page.
+
 A proposal shows in the chat with the exact request, a summary and the permission it needs
 ("Proposal · needs `mission.control` on `operation:G`"), what she had read since your last
 message ("Based on: missions (G), mission (G/m-12)", the tools with their identifier
