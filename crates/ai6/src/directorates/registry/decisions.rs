@@ -131,7 +131,7 @@ fn timeline(
 ) {
     let event = TimelineEvent::new(kind, decision.word(), decision.operation, decision.at)
         .mission(record.mission_id.clone())
-        .run(record.run_id.clone())
+        .run(record.id.clone())
         .actor(decision.by);
     let _ = store.record_event(&event);
 }

@@ -163,7 +163,7 @@ impl RunLaunch {
 #[serde(deny_unknown_fields)]
 pub struct RunRecord {
     /// AI6's identifier for this Run, distinct from the provider's: the run's UID.
-    pub run_id: String,
+    pub id: String,
     /// The UID of the Mission the Run works for.
     pub mission_id: String,
     /// The run's handle, `<mission handle>.<attempt>`, from the handle the Mission had when the
@@ -926,7 +926,7 @@ pub(super) fn opened(new: NewRun, ttl: Duration, now: f64, term: u64) -> RunReco
         handle: new
             .mission_handle
             .map(|handle| run_handle(&handle, new.attempt)),
-        run_id: new.run_id,
+        id: new.run_id,
         mission_id: new.mission_id,
         operation: new.operation,
         provider_id: new.provider_id,
@@ -1459,7 +1459,7 @@ impl RunStore for FileRegistry {
         }))
         .ok_or(RunError::NotFound)?;
         apply_verdict(&mut record, verdict.clone())?;
-        self.write_run(&self.run_path(&record.run_id), &record)?;
+        self.write_run(&self.run_path(&record.id), &record)?;
         Ok(record)
     }
 
@@ -1476,7 +1476,7 @@ impl RunStore for FileRegistry {
         }))
         .ok_or(RunError::NotFound)?;
         apply_recommendation(&mut record, recommendation.clone())?;
-        self.write_run(&self.run_path(&record.run_id), &record)?;
+        self.write_run(&self.run_path(&record.id), &record)?;
         Ok(record)
     }
 
@@ -1492,7 +1492,7 @@ impl RunStore for FileRegistry {
         }))
         .ok_or(RunError::NotFound)?;
         apply_probe_request(&mut record, at)?;
-        self.write_run(&self.run_path(&record.run_id), &record)?;
+        self.write_run(&self.run_path(&record.id), &record)?;
         Ok(record)
     }
 
@@ -1539,7 +1539,7 @@ impl FileRegistry {
                 records.push(record);
             }
         }
-        records.sort_by(|left, right| left.run_id.cmp(&right.run_id));
+        records.sort_by(|left, right| left.id.cmp(&right.id));
         Ok(records)
     }
 }
@@ -1739,7 +1739,7 @@ mod tests {
         let opened = registry.open_run_at(new, TTL, NOW).unwrap();
         registry
             .write_fenced(
-                &opened.run_id,
+                &opened.id,
                 "station-a",
                 opened.fence,
                 NOW,
@@ -1760,10 +1760,10 @@ mod tests {
             Some("the tag was never pushed".to_owned()),
         );
         let judged = registry.record_verdict("G", "m-1", &verdict).unwrap();
-        assert_eq!(judged.run_id, last.run_id);
+        assert_eq!(judged.id, last.id);
         assert_eq!(judged.verdict.as_ref(), Some(&verdict));
         assert_eq!(
-            registry.run(&last.run_id).unwrap().unwrap().verdict,
+            registry.run(&last.id).unwrap().unwrap().verdict,
             Some(verdict)
         );
         assert_eq!(registry.run("m-1-1").unwrap().unwrap().verdict, None);
@@ -1782,7 +1782,7 @@ mod tests {
                 &MissionVerdict::new(OutcomeVerdict::FailedVerification, "p", NOW, None),
             )
             .unwrap();
-        assert_eq!(judged.run_id, held.run_id);
+        assert_eq!(judged.id, held.id);
     }
 
     fn a_verdict_is_refused_on_an_attempt_with_no_outcome(store: &dyn Store) {
@@ -2085,7 +2085,7 @@ mod tests {
             .open_run_at(NewRun::new("s-9", "mission-2", "station-b"), TTL, NOW)
             .unwrap();
         let latest = registry.latest_run("mission-1").unwrap().unwrap();
-        assert_eq!((latest.run_id.as_str(), latest.attempt), ("s-0", 2));
+        assert_eq!((latest.id.as_str(), latest.attempt), ("s-0", 2));
     }
 
     #[test]

@@ -505,7 +505,7 @@ async fn stop(state: &DaemonState, live: &Arc<Live>, why: &str) {
 fn attempt_detail(state: &DaemonState, record: &RunRecord) -> serde_json::Value {
     let report = state
         .intake
-        .final_report(&record.run_id)
+        .final_report(&record.id)
         .ok()
         .flatten()
         .map(|report| report.text);
@@ -559,7 +559,7 @@ fn scan(state: &DaemonState, live: &Live, record: &WatchRecord) -> Vec<WatchEven
                     // The final report and the brief are text written outside AI6.
                     found.push(
                         WatchEvent::new("verifying", true, attempt_detail(state, &run))
-                            .keyed(format!("verifying:{}", run.run_id)),
+                            .keyed(format!("verifying:{}", run.id)),
                     );
                 }
             }

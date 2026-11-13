@@ -745,7 +745,7 @@ mod tests {
         assert_eq!(second.attempt, 2);
         assert_eq!(
             second.predecessor.as_deref(),
-            Some(first.run_id.as_str())
+            Some(first.id.as_str())
         );
         assert!(second.verdict.is_none(), "the next attempt starts clean");
         stop(&state);

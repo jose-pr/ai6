@@ -2283,7 +2283,7 @@ fn acquire_run_hold(
         Err(error) => return Err(run_error(error)),
     };
     let hold = RunHold {
-        id: record.run_id,
+        id: record.id,
         attempt: record.attempt,
         fence: record.fence,
     };
@@ -5775,7 +5775,7 @@ async fn start_mission(
         .or_else(|| {
             earlier
                 .as_ref()
-                .map(|record| (record.attempt, record.run_id.clone()))
+                .map(|record| (record.attempt, record.id.clone()))
         })
         .map_or((1, None), |(attempt, id)| (attempt + 1, Some(id)));
     let mut new_run =
@@ -5809,7 +5809,7 @@ async fn start_mission(
     }
     let hold = match open_run(&state, new_run) {
         Ok(record) => RunHold {
-            id: record.run_id,
+            id: record.id,
             attempt: record.attempt,
             fence: record.fence,
         },
@@ -12773,7 +12773,7 @@ theater = \"other-box\"
         state
             .intake
             .update_run(
-                &open.run_id,
+                &open.id,
                 "other",
                 open.fence,
                 RunUpdate::default().status(RunStatus::Ended),
@@ -12793,7 +12793,7 @@ theater = \"other-box\"
         )
         .unwrap();
         assert_eq!(opened.attempt, 3, "a Mission has one record per attempt");
-        assert_ne!(opened.run_id, hold.id);
+        assert_ne!(opened.id, hold.id);
         state.stopping.store(true, Ordering::Release);
     }
 

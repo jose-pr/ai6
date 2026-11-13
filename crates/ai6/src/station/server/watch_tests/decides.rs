@@ -416,7 +416,7 @@ async fn a_mission_whose_branch_is_missing_is_redispatched_with_the_reason_and_i
     let second = attempt(&state, &mission, 2);
     assert_eq!(
         second.predecessor.as_deref(),
-        Some(first.run_id.as_str())
+        Some(first.id.as_str())
     );
     assert!(second.verdict.is_none());
     watches::close_all(&state).await;

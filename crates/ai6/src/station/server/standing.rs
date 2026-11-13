@@ -629,7 +629,7 @@ mod tests {
         );
         assert_eq!(
             runs[1].predecessor.as_deref(),
-            Some(runs[0].run_id.as_str())
+            Some(runs[0].id.as_str())
         );
         assert!(
             testing::RESUMED

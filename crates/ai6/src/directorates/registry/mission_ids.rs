@@ -1413,7 +1413,7 @@ mod tests {
             )
         };
         let first = open(1, "G-1").unwrap();
-        assert!(is_uid(&first.run_id));
+        assert!(is_uid(&first.id));
         assert_eq!(first.handle.as_deref(), Some("G-1.1"));
         assert!(
             matches!(
@@ -1427,7 +1427,7 @@ mod tests {
         assert_eq!(second.handle.as_deref(), Some("G-fix.2"));
         assert_eq!(
             registry
-                .run(&first.run_id)
+                .run(&first.id)
                 .unwrap()
                 .unwrap()
                 .handle
@@ -1445,7 +1445,7 @@ mod tests {
             (third.attempt, third.handle.as_deref()),
             (3, Some("G-fix.3"))
         );
-        assert_ne!(third.run_id, second.run_id);
+        assert_ne!(third.id, second.id);
     }
 
     #[test]

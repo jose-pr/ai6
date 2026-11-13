@@ -754,7 +754,7 @@ mod tests {
             theater_id: None,
             mode: Default::default(),
             run: Some(RunHold {
-                id: record.run_id,
+                id: record.id,
                 attempt: record.attempt,
                 fence: record.fence,
             }),

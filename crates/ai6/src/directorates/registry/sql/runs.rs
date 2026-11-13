@@ -47,7 +47,7 @@ fn put_run(
          DO UPDATE SET mission_id = excluded.mission_id, record = excluded.record, \
          revision = excluded.revision",
         &[
-            record.run_id.as_str().into(),
+            record.id.as_str().into(),
             record.mission_id.as_str().into(),
             text.into(),
             revision.into(),

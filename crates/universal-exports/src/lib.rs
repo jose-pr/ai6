@@ -1074,7 +1074,7 @@ impl Gateway {
             record_updated_at(right)
                 .partial_cmp(&record_updated_at(left))
                 .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| left.run_id.cmp(&right.run_id))
+                .then_with(|| left.id.cmp(&right.id))
         });
         let mut runs = Vec::new();
         for (record, provider) in recorded {
@@ -5482,7 +5482,7 @@ impl MissionAttempt {
             recommendation: record.recommendation.clone(),
             final_report: None,
             attempt: record.attempt,
-            run_id: record.run_id.clone(),
+            run_id: record.id.clone(),
             handle: record.handle.clone(),
             provider_id: record.provider_id.clone(),
             predecessor: record.predecessor.clone(),

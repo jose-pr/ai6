@@ -387,7 +387,7 @@ mod tests {
             state
                 .intake
                 .update_run(
-                    &record.run_id,
+                    &record.id,
                     "test",
                     record.fence,
                     RunUpdate::default()

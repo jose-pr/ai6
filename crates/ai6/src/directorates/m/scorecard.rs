@@ -308,7 +308,7 @@ impl Standing {
     fn add(&mut self, record: &RunRecord, judgment: Judgment, usage: Option<&UsageTotals>) {
         self.attempts.entry(judgment).or_default().push(AttemptRef {
             mission_id: record.mission_id.clone(),
-            run_id: record.run_id.clone(),
+            run_id: record.id.clone(),
             attempt: record.attempt,
         });
         let denied = record
@@ -457,11 +457,11 @@ impl Scorecard {
             left.opened_at
                 .unwrap_or_default()
                 .total_cmp(&right.opened_at.unwrap_or_default())
-                .then_with(|| left.run_id.cmp(&right.run_id))
+                .then_with(|| left.id.cmp(&right.id))
         });
         for record in ordered {
             let judgment = judge(record);
-            let totals = usage.get(&record.run_id);
+            let totals = usage.get(&record.id);
             let launch = record.launch.as_ref();
             models
                 .entry(launch.and_then(|launch| launch.model.clone()))
@@ -537,7 +537,7 @@ mod tests {
         reason: Option<&str>,
     ) -> RunRecord {
         RunRecord {
-            run_id: format!("{id}.1"),
+            id: format!("{id}.1"),
             handle: None,
             mission_id: id.to_owned(),
             operation: Some("G".to_owned()),

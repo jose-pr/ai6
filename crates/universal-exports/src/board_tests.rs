@@ -39,7 +39,7 @@ fn record(
         .unwrap();
     registry
         .update_run(
-            &opened.run_id,
+            &opened.id,
             "worker",
             opened.fence,
             RunUpdate::default()

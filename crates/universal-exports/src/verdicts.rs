@@ -109,7 +109,7 @@ pub(crate) async fn give(
     .map_err(refused_by)?;
     let event = TimelineEvent::new("verdict", word.as_str(), operation.to_string(), at)
         .mission(record.mission_id.clone())
-        .run(record.run_id.clone())
+        .run(record.id.clone())
         .actor(person.id);
     // A timeline entry that fails is left out; the audit record and the verdict stand.
     let _ = tokio::task::spawn_blocking(move || registry.record_event(&event)).await;
@@ -117,7 +117,7 @@ pub(crate) async fn give(
         operation_id: operation.to_string(),
         mission_id: record.mission_id,
         attempt: record.attempt,
-        run_id: record.run_id,
+        run_id: record.id,
         verdict,
     }))
 }
@@ -201,7 +201,7 @@ pub(crate) async fn verify(
         operation_id: operation.to_string(),
         mission_id: record.mission_id,
         attempt: record.attempt,
-        run_id: record.run_id,
+        run_id: record.id,
         decision: request.decision,
         verdict,
     }))
@@ -261,7 +261,7 @@ pub(crate) async fn probe(
         operation_id: operation.to_string(),
         mission_id: record.mission_id,
         attempt: record.attempt,
-        run_id: record.run_id,
+        run_id: record.id,
         requested_at: at,
     }))
 }
@@ -318,7 +318,7 @@ mod tests {
         served
             .registry
             .update_run(
-                &opened.run_id,
+                &opened.id,
                 "worker",
                 opened.fence,
                 RunUpdate::default().result(RunResult::new(state)),
@@ -662,7 +662,7 @@ mod tests {
             served
                 .registry
                 .update_run(
-                    &opened.run_id,
+                    &opened.id,
                     "w",
                     opened.fence,
                     RunUpdate::default().result(RunResult::new("verifying")),

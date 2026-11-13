@@ -879,7 +879,7 @@ async fn agents_scorecard_prints_each_row_and_the_attempts_behind_a_judgment() {
             .unwrap();
         registry
             .update_run(
-                &record.run_id,
+                &record.id,
                 "station-01",
                 record.fence,
                 ai6::RunUpdate::default()
@@ -1708,7 +1708,7 @@ async fn a_verifying_mission_is_probed_and_decided_from_the_command_line() {
             .unwrap();
         registry
             .update_run(
-                &opened.run_id,
+                &opened.id,
                 "worker-01",
                 opened.fence,
                 ai6::RunUpdate::default()
@@ -1753,7 +1753,7 @@ async fn a_verifying_mission_is_probed_and_decided_from_the_command_line() {
     // The Station's findings are printed.
     registry
         .update_run(
-            &record.run_id,
+            &record.id,
             "worker-01",
             record.fence,
             ai6::RunUpdate::default()

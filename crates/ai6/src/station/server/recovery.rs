@@ -111,7 +111,7 @@ pub(super) fn extract(state: &DaemonState, lease: &Lease) -> Extraction {
     let why = match adoption_choice(state, lease, &record) {
         Ok(station) => {
             let meta =
-                BTreeMap::from([(ADOPT_KEY.to_owned(), serde_json::json!(record.run_id))]);
+                BTreeMap::from([(ADOPT_KEY.to_owned(), serde_json::json!(record.id))]);
             match state
                 .intake
                 .hand_over(lease, &station, state.mission_lease(), meta)
@@ -137,7 +137,7 @@ pub(super) fn extract(state: &DaemonState, lease: &Lease) -> Extraction {
             .map(|theater| format!(" with Theater {theater:?}"))
             .unwrap_or_default()
     );
-    match state.intake.lose_run(&record.run_id, &reason) {
+    match state.intake.lose_run(&record.id, &reason) {
         Ok(_) => eprintln!("ai6: Mission {mission_id:?} lost its Run: {reason}"),
         Err(RunError::Ended) => {}
         Err(RunError::HeldBy(_)) => return Extraction::Wait,
@@ -587,7 +587,7 @@ fn record_adopted(
         theater_id: record.theater.clone(),
         mode: launch.mode,
         run: Some(RunHold {
-            id: record.run_id.clone(),
+            id: record.id.clone(),
             attempt: record.attempt,
             fence: record.fence,
         }),

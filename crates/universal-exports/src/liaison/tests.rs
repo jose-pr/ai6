@@ -304,7 +304,7 @@ impl World {
                 Duration::from_secs(600),
             )
             .unwrap();
-        (record.run_id, record.fence)
+        (record.id, record.fence)
     }
 
     fn end_run(&self, (record, fence): &(String, u64)) {

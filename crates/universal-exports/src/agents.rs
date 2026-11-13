@@ -1230,7 +1230,7 @@ mod tests {
         served
             .registry
             .update_run(
-                &record.run_id,
+                &record.id,
                 "hq",
                 record.fence,
                 RunUpdate::default()
