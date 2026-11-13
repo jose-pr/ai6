@@ -1945,8 +1945,13 @@ pub fn ai6::directorates::m::reports::ReportRules<'a>::new(&'a ai6::directorates
 pub ai6::directorates::m::reports::ReportSettings::classifications: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::reports::ReportSettings::handlings: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::reports::ReportSettings::priorities: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::reports::ReportSettings::rating_bands: alloc::vec::Vec<u8>
+pub ai6::directorates::m::reports::ReportSettings::rating_confirms: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::reports::ReportSettings::rating_counts: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::reports::ReportSettings::rating_min_reports: u32
 impl ai6::directorates::m::reports::ReportSettings
 pub fn ai6::directorates::m::reports::ReportSettings::check(&self, &ai6::directorates::registry::reports::Report) -> core::result::Result<(), alloc::string::String>
+pub fn ai6::directorates::m::reports::ReportSettings::permits(&self, &ai6::directorates::registry::reports::Report, &str) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::directorates::m::reports::ReportSettings::rank(&self, core::option::Option<&str>) -> core::option::Option<usize>
 impl core::default::Default for ai6::directorates::m::reports::ReportSettings
 pub fn ai6::directorates::m::reports::ReportSettings::default() -> Self
@@ -4609,6 +4614,110 @@ pub fn ai6::directorates::registry::store::FileRegistry::request_approval(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::store::FileRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
+pub mod ai6::directorates::registry::assessments
+#[non_exhaustive] pub enum ai6::directorates::registry::assessments::Confidence
+pub ai6::directorates::registry::assessments::Confidence::High
+pub ai6::directorates::registry::assessments::Confidence::Low
+pub ai6::directorates::registry::assessments::Confidence::Moderate
+impl ai6::directorates::registry::assessments::Confidence
+pub fn ai6::directorates::registry::assessments::Confidence::as_str(self) -> &'static str
+impl core::str::traits::FromStr for ai6::directorates::registry::assessments::Confidence
+pub type ai6::directorates::registry::assessments::Confidence::Err = alloc::string::String
+pub fn ai6::directorates::registry::assessments::Confidence::from_str(&str) -> core::result::Result<Self, Self::Err>
+#[non_exhaustive] pub enum ai6::directorates::registry::assessments::Likelihood
+pub ai6::directorates::registry::assessments::Likelihood::AlmostCertain
+pub ai6::directorates::registry::assessments::Likelihood::HighlyLikely
+pub ai6::directorates::registry::assessments::Likelihood::HighlyUnlikely
+pub ai6::directorates::registry::assessments::Likelihood::Likely
+pub ai6::directorates::registry::assessments::Likelihood::RealisticPossibility
+pub ai6::directorates::registry::assessments::Likelihood::RemoteChance
+pub ai6::directorates::registry::assessments::Likelihood::Unlikely
+impl ai6::directorates::registry::assessments::Likelihood
+pub fn ai6::directorates::registry::assessments::Likelihood::band(self) -> &'static str
+pub fn ai6::directorates::registry::assessments::Likelihood::words(self) -> &'static str
+impl core::fmt::Display for ai6::directorates::registry::assessments::Likelihood
+pub fn ai6::directorates::registry::assessments::Likelihood::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::str::traits::FromStr for ai6::directorates::registry::assessments::Likelihood
+pub type ai6::directorates::registry::assessments::Likelihood::Err = alloc::string::String
+pub fn ai6::directorates::registry::assessments::Likelihood::from_str(&str) -> core::result::Result<Self, Self::Err>
+#[non_exhaustive] pub enum ai6::directorates::registry::assessments::Verdict
+pub ai6::directorates::registry::assessments::Verdict::Awaiting
+pub ai6::directorates::registry::assessments::Verdict::Awaiting::of: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::assessments::Verdict::Awaiting::question: alloc::string::String
+pub ai6::directorates::registry::assessments::Verdict::Awaiting::until: f64
+pub ai6::directorates::registry::assessments::Verdict::Awaiting::via: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::assessments::Verdict::Decision
+pub ai6::directorates::registry::assessments::Verdict::Decision::question: alloc::string::String
+pub ai6::directorates::registry::assessments::Verdict::Duplicate
+pub ai6::directorates::registry::assessments::Verdict::Duplicate::of: alloc::string::String
+pub ai6::directorates::registry::assessments::Verdict::Later
+pub ai6::directorates::registry::assessments::Verdict::Later::condition: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::assessments::Verdict::Later::until: core::option::Option<f64>
+pub ai6::directorates::registry::assessments::Verdict::Mission
+pub ai6::directorates::registry::assessments::Verdict::Mission::mission: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::assessments::Verdict::NoAction
+pub ai6::directorates::registry::assessments::Verdict::Related
+pub ai6::directorates::registry::assessments::Verdict::Related::to: alloc::string::String
+impl ai6::directorates::registry::assessments::Verdict
+pub fn ai6::directorates::registry::assessments::Verdict::parse(&str, &ai6::directorates::registry::assessments::VerdictParts<'_>, f64) -> core::result::Result<Self, alloc::string::String>
+pub fn ai6::directorates::registry::assessments::Verdict::word(&self) -> &'static str
+#[non_exhaustive] pub struct ai6::directorates::registry::assessments::Assessment<'a>
+pub ai6::directorates::registry::assessments::Assessment::at: f64
+pub ai6::directorates::registry::assessments::Assessment::by: &'a str
+pub ai6::directorates::registry::assessments::Assessment::credibility: core::option::Option<u8>
+pub ai6::directorates::registry::assessments::Assessment::judgement: core::option::Option<ai6::directorates::registry::assessments::Judgement>
+pub ai6::directorates::registry::assessments::Assessment::priority: core::option::Option<&'a str>
+pub ai6::directorates::registry::assessments::Assessment::reason: &'a str
+pub ai6::directorates::registry::assessments::Assessment::report: &'a str
+pub ai6::directorates::registry::assessments::Assessment::verdict: ai6::directorates::registry::assessments::Verdict
+impl<'a> ai6::directorates::registry::assessments::Assessment<'a>
+pub fn ai6::directorates::registry::assessments::Assessment<'a>::believed(self, core::option::Option<u8>) -> Self
+pub fn ai6::directorates::registry::assessments::Assessment<'a>::judged(self, core::option::Option<ai6::directorates::registry::assessments::Judgement>) -> Self
+pub fn ai6::directorates::registry::assessments::Assessment<'a>::new(&'a str, ai6::directorates::registry::assessments::Verdict, &'a str, &'a str, f64) -> Self
+pub fn ai6::directorates::registry::assessments::Assessment<'a>::prioritised(self, core::option::Option<&'a str>) -> Self
+pub struct ai6::directorates::registry::assessments::Context<'a>
+pub ai6::directorates::registry::assessments::Context::agent: &'a str
+pub ai6::directorates::registry::assessments::Context::reads: &'a dyn core::ops::function::Fn(&ai6::directorates::registry::reports::ReportScope) -> bool
+pub ai6::directorates::registry::assessments::Context::request_ttl: core::time::Duration
+pub ai6::directorates::registry::assessments::Context::settings: &'a ai6::directorates::m::reports::ReportSettings
+impl<'a> ai6::directorates::registry::assessments::Context<'a>
+pub fn ai6::directorates::registry::assessments::Context<'a>::within(&'a ai6::directorates::m::reports::ReportSettings, &'a dyn core::ops::function::Fn(&ai6::directorates::registry::reports::ReportScope) -> bool) -> Self
+#[non_exhaustive] pub struct ai6::directorates::registry::assessments::Judgement
+pub ai6::directorates::registry::assessments::Judgement::confidence: ai6::directorates::registry::assessments::Confidence
+pub ai6::directorates::registry::assessments::Judgement::likelihood: ai6::directorates::registry::assessments::Likelihood
+impl ai6::directorates::registry::assessments::Judgement
+pub fn ai6::directorates::registry::assessments::Judgement::new(ai6::directorates::registry::assessments::Likelihood, ai6::directorates::registry::assessments::Confidence) -> Self
+pub fn ai6::directorates::registry::assessments::Judgement::parse(core::option::Option<&str>, core::option::Option<&str>) -> core::result::Result<core::option::Option<Self>, alloc::string::String>
+pub fn ai6::directorates::registry::assessments::Judgement::statement(&self) -> alloc::string::String
+#[non_exhaustive] pub struct ai6::directorates::registry::assessments::SourceStanding
+pub ai6::directorates::registry::assessments::SourceStanding::behind: alloc::vec::Vec<ai6::directorates::registry::reports::Report>
+pub ai6::directorates::registry::assessments::SourceStanding::source: ai6::directorates::registry::reports::ReportSource
+#[non_exhaustive] pub struct ai6::directorates::registry::assessments::Swept
+pub ai6::directorates::registry::assessments::Swept::closed: alloc::vec::Vec<ai6::directorates::registry::reports::Report>
+pub ai6::directorates::registry::assessments::Swept::reopened: alloc::vec::Vec<ai6::directorates::registry::reports::Report>
+pub struct ai6::directorates::registry::assessments::VerdictParts<'a>
+pub ai6::directorates::registry::assessments::VerdictParts::ask: core::option::Option<&'a str>
+pub ai6::directorates::registry::assessments::VerdictParts::condition: core::option::Option<&'a str>
+pub ai6::directorates::registry::assessments::VerdictParts::mission: core::option::Option<&'a str>
+pub ai6::directorates::registry::assessments::VerdictParts::of: core::option::Option<&'a str>
+pub ai6::directorates::registry::assessments::VerdictParts::question: core::option::Option<&'a str>
+pub ai6::directorates::registry::assessments::VerdictParts::via: core::option::Option<&'a str>
+pub ai6::directorates::registry::assessments::VerdictParts::wait_seconds: core::option::Option<u64>
+pub const ai6::directorates::registry::assessments::ASSESS_ACTION: &str
+pub const ai6::directorates::registry::assessments::CLOSE_ACTION: &str
+pub const ai6::directorates::registry::assessments::CROSS_ACTION: &str
+pub const ai6::directorates::registry::assessments::DECISION_KIND: &str
+pub const ai6::directorates::registry::assessments::OUTCOMES: [&str; 7]
+pub const ai6::directorates::registry::assessments::REOPEN_ACTION: &str
+pub fn ai6::directorates::registry::assessments::assess(&dyn ai6::directorates::registry::backend::RegistryBackend, &ai6::directorates::registry::assessments::Assessment<'_>, &ai6::directorates::registry::assessments::Context<'_>) -> core::io::error::Result<ai6::directorates::registry::reports::Report>
+pub fn ai6::directorates::registry::assessments::mission_settled(&dyn ai6::directorates::registry::backend::RegistryBackend, &str, f64, &ai6::directorates::m::reports::ReportSettings) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reports::Report>>
+pub fn ai6::directorates::registry::assessments::rate(&dyn ai6::directorates::registry::backend::RegistryBackend, &ai6::directorates::registry::reports::Report, &str, &ai6::directorates::m::reports::ReportSettings, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::assessments::reliability_of(u32, u32, &[u8]) -> ai6::directorates::registry::reports::Reliability
+pub fn ai6::directorates::registry::assessments::reopen(&dyn ai6::directorates::registry::backend::RegistryBackend, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::reports::Report>
+pub fn ai6::directorates::registry::assessments::reopen_due(&dyn ai6::directorates::registry::backend::RegistryBackend, ai6::directorates::registry::reports::ReportFilter, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reports::Report>>
+pub fn ai6::directorates::registry::assessments::standing(&dyn ai6::directorates::registry::backend::RegistryBackend, &str) -> core::io::error::Result<ai6::directorates::registry::assessments::SourceStanding>
+pub fn ai6::directorates::registry::assessments::sweep(&dyn ai6::directorates::registry::backend::RegistryBackend, f64, &ai6::directorates::m::reports::ReportSettings) -> core::io::error::Result<ai6::directorates::registry::assessments::Swept>
+pub fn ai6::directorates::registry::assessments::sweep_matching(&dyn ai6::directorates::registry::backend::RegistryBackend, ai6::directorates::registry::reports::ReportFilter, f64, &ai6::directorates::m::reports::ReportSettings) -> core::io::error::Result<ai6::directorates::registry::assessments::Swept>
 pub mod ai6::directorates::registry::assistant_log
 #[non_exhaustive] pub struct ai6::directorates::registry::assistant_log::AssistantConversation
 pub ai6::directorates::registry::assistant_log::AssistantConversation::bytes: u64
@@ -6862,7 +6971,12 @@ pub fn ai6::directorates::registry::reports::Report::with_tearline(self, ai6::di
 pub ai6::directorates::registry::reports::ReportAssessment::at: f64
 pub ai6::directorates::registry::reports::ReportAssessment::by: alloc::string::String
 pub ai6::directorates::registry::reports::ReportAssessment::comment: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::reports::ReportAssessment::judgement: core::option::Option<ai6::directorates::registry::assessments::Judgement>
+pub ai6::directorates::registry::reports::ReportAssessment::until: core::option::Option<f64>
 pub ai6::directorates::registry::reports::ReportAssessment::verdict: alloc::string::String
+pub ai6::directorates::registry::reports::ReportAssessment::waits_for: core::option::Option<alloc::string::String>
+impl ai6::directorates::registry::reports::ReportAssessment
+pub fn ai6::directorates::registry::reports::ReportAssessment::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, f64) -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::reports::ReportClearance
 pub ai6::directorates::registry::reports::ReportClearance::at: f64
 pub ai6::directorates::registry::reports::ReportClearance::by: alloc::string::String
@@ -6877,11 +6991,13 @@ pub ai6::directorates::registry::reports::ReportFilter::limit: core::option::Opt
 pub ai6::directorates::registry::reports::ReportFilter::mission: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::reports::ReportFilter::priorities: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::registry::reports::ReportFilter::scope: core::option::Option<ai6::directorates::registry::reports::ReportScope>
+pub ai6::directorates::registry::reports::ReportFilter::source: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::reports::ReportFilter::state: core::option::Option<ai6::directorates::registry::reports::ReportState>
 impl ai6::directorates::registry::reports::ReportFilter
 pub fn ai6::directorates::registry::reports::ReportFilter::about_mission(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::reports::ReportFilter::all() -> Self
 pub fn ai6::directorates::registry::reports::ReportFilter::at_most(self, usize) -> Self
+pub fn ai6::directorates::registry::reports::ReportFilter::from_source(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::reports::ReportFilter::in_scope(self, ai6::directorates::registry::reports::ReportScope) -> Self
 pub fn ai6::directorates::registry::reports::ReportFilter::in_state(self, ai6::directorates::registry::reports::ReportState) -> Self
 pub fn ai6::directorates::registry::reports::ReportFilter::of_kind(self, impl core::convert::Into<alloc::string::String>) -> Self
@@ -6898,7 +7014,12 @@ pub fn ai6::directorates::registry::reports::ReportLink::new(ai6::directorates::
 pub ai6::directorates::registry::reports::ReportResolution::at: f64
 pub ai6::directorates::registry::reports::ReportResolution::by: alloc::string::String
 pub ai6::directorates::registry::reports::ReportResolution::note: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::reports::ReportResolution::outcome: core::option::Option<alloc::string::String>
+impl ai6::directorates::registry::reports::ReportResolution
+pub fn ai6::directorates::registry::reports::ReportResolution::new(impl core::convert::Into<alloc::string::String>, f64) -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::reports::ReportSource
+pub ai6::directorates::registry::reports::ReportSource::confirmed: u32
+pub ai6::directorates::registry::reports::ReportSource::counted: u32
 pub ai6::directorates::registry::reports::ReportSource::key: alloc::string::String
 pub ai6::directorates::registry::reports::ReportSource::rated: f64
 pub ai6::directorates::registry::reports::ReportSource::reliability: ai6::directorates::registry::reports::Reliability
@@ -7412,7 +7533,7 @@ impl<'a> ai6::directorates::registry::source_items::ItemDecision<'a>
 pub fn ai6::directorates::registry::source_items::ItemDecision<'a>::new(&'a str, &'a str, ai6::directorates::registry::source_items::ItemVerdict, &'a str, &'a str, f64) -> Self
 pub const ai6::directorates::registry::source_items::ITEM_KIND: &str
 pub fn ai6::directorates::registry::source_items::awaiting_queue(&dyn ai6::directorates::registry::backend::RegistryBackend, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reports::Report>>
-pub fn ai6::directorates::registry::source_items::decide_item(&dyn ai6::directorates::registry::backend::RegistryBackend, &ai6::directorates::registry::source_items::ItemDecision<'_>) -> core::io::error::Result<ai6::directorates::registry::reports::Report>
+pub fn ai6::directorates::registry::source_items::decide_item(&dyn ai6::directorates::registry::backend::RegistryBackend, &ai6::directorates::registry::source_items::ItemDecision<'_>, &ai6::directorates::m::reports::ReportSettings) -> core::io::error::Result<ai6::directorates::registry::reports::Report>
 pub fn ai6::directorates::registry::source_items::is_mission(&ai6::directorates::registry::reports::Report) -> bool
 pub fn ai6::directorates::registry::source_items::item_report(&dyn ai6::directorates::registry::backend::RegistryBackend, &str, &str) -> core::io::error::Result<ai6::directorates::registry::reports::Report>
 pub fn ai6::directorates::registry::source_items::offer(&dyn ai6::directorates::registry::backend::RegistryBackend, &str, &str, &ai6::directorates::registry::sources::SourceItem, f64) -> core::io::error::Result<ai6::directorates::registry::source_items::Offered>
