@@ -2,7 +2,7 @@
 
 AI6 drives every Agent Run through the [Agent Client Protocol](https://agentclientprotocol.com)
 (ACP): a JSON-RPC 2.0 protocol, one message per line, between a client (the Station) and an
-agent. The handler contract (`AgentHandler`, `AgentRun`) stays the Guatiao provider kind;
+agent. The handler contract (`AgentHandler`, `AgentSession`) stays the Guatiao provider kind;
 ACP is the wire between the Station and the harness.
 
 - A Run the Station supervises itself (a local Mission, Moneypenny's harness, a harness

@@ -1,4 +1,4 @@
-//! The Station's side of a runner: how it reaches one, and the [`AgentRun`] through which
+//! The Station's side of a runner: how it reaches one, and the [`AgentSession`] through which
 //! it drives a Run the runner supervises, over ACP.
 //!
 //! On the Station's own host the connection is the runner's loopback port. On another host it is

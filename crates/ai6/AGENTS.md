@@ -4143,13 +4143,13 @@ pub trait ExtensionHandler: Send + Sync { fn handle(&self, method: &str, params:
 #[derive(Clone)] pub struct Notifier;   // notifies the agent on the Run's connection while it is held
 impl Notifier { pub fn new(send: impl Fn(&str, Value) -> bool + Send + Sync + 'static) -> Self;
     pub fn notify(&self, method: &str, params: Value) -> bool; }  // whether it was taken
-pub struct AcpRun;           // implements AgentRun
+pub struct AcpRun;           // implements AgentSession
 impl AcpRun {
     /// initialize -> (authenticate) -> session/new | session/resume | session/load -> config
     /// options -> session/prompt. `on_close` ends the agent's process on close or failed open.
     pub fn connect(transport: impl ConnectTo<Client> + 'static, options: AcpOptions,
         on_close: Option<Box<dyn FnOnce() + Send>>) -> Result<Self, ProviderError>;
-    pub fn into_handle(self) -> Object<dyn AgentRun>;
+    pub fn into_handle(self) -> Object<dyn AgentSession>;
 }
 
 pub struct AcpFacade;            // an AgentHandler served as an ACP agent
@@ -4799,11 +4799,11 @@ same way, in `ai6_cable_quotas`, with the same bounds.
 `ai6::directorates::section_00::agent` defines `AgentStart`, `AgentResume` and the `AgentHandler`
 Guatiao kind `ai6_agent_handler`. The Run a handler returns is the shared agent run kind of
 [`coqui-acp-provider`](https://github.com/Boriken-Dev/coqui-acp) (object kind `agent_run`,
-pinned by revision with `coqui-acp`, on the same Guatiao revision): `AgentRun`, `AgentMessage`,
+pinned by revision with `coqui-acp`, on the same Guatiao revision): `AgentSession`, `AgentMessage`,
 `AgentEvent`, `LIMIT_EVENT` and `DENIED_EVENT` are re-exported at the crate root, with the usage model of
 `coqui-acp-api` (`Bucket`, `Coverage`, `Refill`, `Spend`, `LimitHit`, `UsageReport`, `UsageSupport`,
-`BucketStatus`, `UsageSource`, `infer_limit`, `DEFAULT_LIMIT_PHRASES`); they are re-exported at the crate root as `ai6::AgentRun` and so on; the event kinds `cancelled`
-(`CANCELLED_EVENT`) and `TURN_CANCELLED` are that crate's alone. `AgentRun::run_id`
+`BucketStatus`, `UsageSource`, `infer_limit`, `DEFAULT_LIMIT_PHRASES`); they are re-exported at the crate root as `ai6::AgentSession` and so on; the event kinds `cancelled`
+(`CANCELLED_EVENT`) and `TURN_CANCELLED` are that crate's alone. `AgentSession::run_id`
 answers `Result<Option<String>, ProviderError>`: the Station checks the ID as a `RunId` where
 it records it, and an ID that is not one fails the Run (`the provider reported a Run ID AI6
 cannot record: ...`). Handlers own harness launch, initial-context delivery, resume,
@@ -5071,7 +5071,7 @@ pub struct AssistantJob { pub job_id: String, pub conversation_id: String, pub a
                                        reads the bytes from Universal Exports */ }
 pub struct AssistantImage { pub sha256: String /* lowercase hex */, pub media_type: String,
     pub bytes: u64 }   // validate(&AssistantLimits): IMAGE_MEDIA_TYPES, at most image_bytes
-// section_00::content: a message with images, as the text an AgentRun is sent:
+// section_00::content: a message with images, as the text an AgentSession is sent:
 pub const CONTENT_PREFIX: &str = "\u{0}ai6-content\n";   // then the JSON of MessageContent
 pub const IMAGE_MEDIA_TYPES: [&str; 4];   // image/png, image/jpeg, image/webp, image/gif
 pub struct MessageContent { pub text: String, pub images: Vec<MessageImage> }
@@ -5926,7 +5926,7 @@ reported to the conversation. Handler events `text`, `tool`, `completed`, `faile
 a harness busy answering that reports nothing for ten minutes is closed after a `failed`
 event saying so. A closed harness reports `closed` with the reason (`idle`, `the harness
 stopped`, `the Station is stopping`, …). An `interrupt` job calls the running harness's
-`AgentRun::interrupt` while it is answering (nothing when it is idle or not running there;
+`AgentSession::interrupt` while it is answering (nothing when it is idle or not running there;
 `rejected` with the reason when the handler fails), and that turn's `completed` is reported as
 `interrupted`; the harness stays up for the next message. Its directory is removed after `close`, tried again
 for up to 2 s while Windows still holds it. Reports go in the order they were made, and a

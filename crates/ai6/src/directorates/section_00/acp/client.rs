@@ -1,4 +1,4 @@
-//! The ACP client: [`AcpRun`] drives one agent connection as an [`AgentRun`], over
+//! The ACP client: [`AcpRun`] drives one agent connection as an [`AgentSession`], over
 //! `coqui_acp`. This module adds what is AI6's: the launch extension and its event stream, the
 //! sequence numbers a reattaching Station acknowledges, what a restricted Run may use, and
 //! the words of `limit`, `blocked` and `failed` events.
@@ -342,7 +342,7 @@ fn provider_error(message: impl AsRef<str>) -> ProviderError {
     ProviderError::new(Status::GUATIAO_ERR_INTERNAL, message.as_ref())
 }
 
-/// One ACP connection to an agent, driven as an [`AgentRun`].
+/// One ACP connection to an agent, driven as an [`AgentSession`].
 pub struct AcpRun {
     run: Arc<Session>,
     /// Whoever reads the agent's events holds this, as the single reader.

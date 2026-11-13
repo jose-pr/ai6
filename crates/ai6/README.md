@@ -182,7 +182,7 @@ Exit status is `0` on success and `1` on a configuration, listener or identity f
 | `ai6::directorates::registry::vetting` | Held briefs and the clearances that keep vetting from holding a brief again |
 | `ai6::directorates::q` | Loadouts, Mission-scoped secret leases, MCP config and sandbox arguments |
 | `ai6::directorates::q::terminal` | Terminal and terminal-run kinds and the Run bridge |
-| `ai6::directorates::section_00::agent` | AgentHandler, AgentRun and provider-neutral events |
+| `ai6::directorates::section_00::agent` | AgentHandler, AgentSession and provider-neutral events |
 | `ai6::directorates::medical::watchdog` | Stall, loop and blocked-prompt detection for Runs |
 | `ai6::station::server` | `ServeConfig`, `StationConfig` and the `serve*` entry points |
 | `ai6::station::plugins` | Guatiao provider discovery and typed construction |

@@ -1,6 +1,6 @@
 //! The Agent Client Protocol (ACP) wire AI6 drives agent Runs over.
 //!
-//! [`AcpRun`] is an ACP client that implements [`AgentRun`]: the Station and the `acp`
+//! [`AcpRun`] is an ACP client that implements [`AgentSession`]: the Station and the `acp`
 //! handler provider use it to run any ACP agent. [`AcpFacade`] is the agent side of the same
 //! protocol serving any [`AgentHandler`]: the native Claude and Codex providers keep their
 //! restricted modes, hooks and limit detection, and reach the client over ACP. The two meet in
@@ -14,7 +14,7 @@
 //! [`EVENT_NOTIFICATION`] notification, which an agent advertises with [`EVENTS_CAPABILITY`].
 //! An agent that does not is driven by the standard `session/update` stream alone.
 //!
-//! [`AgentRun`]: coqui_acp_provider::AgentRun
+//! [`AgentSession`]: coqui_acp_provider::AgentSession
 //! [`AgentHandler`]: super::agent::AgentHandler
 //! [`AgentEvent`]: coqui_acp_provider::AgentEvent
 
