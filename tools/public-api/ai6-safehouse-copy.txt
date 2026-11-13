@@ -3,7 +3,7 @@ pub struct ai6_safehouse_copy::Copier
 impl ai6_safehouse_copy::Copier
 pub fn ai6_safehouse_copy::Copier::new(ai6_safehouse_copy::CopyConfig) -> Self
 impl ai6::directorates::q::safehouse::SafeHouseProvider for ai6_safehouse_copy::Copier
-pub fn ai6_safehouse_copy::Copier::open(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseSession>, guatiao::library::kind::ProviderError>
+pub fn ai6_safehouse_copy::Copier::open(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseRun>, guatiao::library::kind::ProviderError>
 impl core::convert::TryFrom<ai6_safehouse_copy::CopyConfig> for ai6_safehouse_copy::Copier
 pub type ai6_safehouse_copy::Copier::Error = guatiao::library::kind::ProviderError
 pub fn ai6_safehouse_copy::Copier::try_from(ai6_safehouse_copy::CopyConfig) -> core::result::Result<Self, Self::Error>

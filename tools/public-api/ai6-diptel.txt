@@ -17,21 +17,21 @@ pub ai6_diptel::IncomingFrame::Gap(ai6_diptel::TerminalGap)
 pub ai6_diptel::IncomingFrame::Lifecycle(ai6_diptel::LifecycleEvent)
 pub ai6_diptel::IncomingFrame::Resize(ai6_diptel::TerminalResize)
 pub ai6_diptel::IncomingFrame::Terminal(ai6_diptel::TerminalData)
-#[non_exhaustive] pub enum ai6_diptel::SessionState
-pub ai6_diptel::SessionState::Abandoned
-pub ai6_diptel::SessionState::Blocked
-pub ai6_diptel::SessionState::Done
-pub ai6_diptel::SessionState::Failed
-pub ai6_diptel::SessionState::Held
-pub ai6_diptel::SessionState::Parked
-pub ai6_diptel::SessionState::Quarantined
-pub ai6_diptel::SessionState::Queued
-pub ai6_diptel::SessionState::Stalled
-pub ai6_diptel::SessionState::Verifying
-pub ai6_diptel::SessionState::Working
-impl ai6_diptel::SessionState
-pub const fn ai6_diptel::SessionState::as_str(self) -> &'static str
-pub fn ai6_diptel::SessionState::parse(&str) -> core::option::Option<Self>
+#[non_exhaustive] pub enum ai6_diptel::RunState
+pub ai6_diptel::RunState::Abandoned
+pub ai6_diptel::RunState::Blocked
+pub ai6_diptel::RunState::Done
+pub ai6_diptel::RunState::Failed
+pub ai6_diptel::RunState::Held
+pub ai6_diptel::RunState::Parked
+pub ai6_diptel::RunState::Quarantined
+pub ai6_diptel::RunState::Queued
+pub ai6_diptel::RunState::Stalled
+pub ai6_diptel::RunState::Verifying
+pub ai6_diptel::RunState::Working
+impl ai6_diptel::RunState
+pub const fn ai6_diptel::RunState::as_str(self) -> &'static str
+pub fn ai6_diptel::RunState::parse(&str) -> core::option::Option<Self>
 #[non_exhaustive] pub enum ai6_diptel::TerminalDirection
 pub ai6_diptel::TerminalDirection::Input
 pub ai6_diptel::TerminalDirection::Output
@@ -73,9 +73,9 @@ pub struct ai6_diptel::LifecycleEvent
 pub ai6_diptel::LifecycleEvent::mission_id: ai6_diptel::MissionId
 pub ai6_diptel::LifecycleEvent::operation_id: ai6_diptel::OperationId
 pub ai6_diptel::LifecycleEvent::reason: core::option::Option<alloc::string::String>
+pub ai6_diptel::LifecycleEvent::run_id: ai6_diptel::RunId
 pub ai6_diptel::LifecycleEvent::sequence: u64
-pub ai6_diptel::LifecycleEvent::session_id: ai6_diptel::SessionId
-pub ai6_diptel::LifecycleEvent::state: ai6_diptel::SessionState
+pub ai6_diptel::LifecycleEvent::state: ai6_diptel::RunState
 pub struct ai6_diptel::MissionControl
 impl ai6_diptel::MissionControl
 pub const fn ai6_diptel::MissionControl::action(&self) -> ai6_diptel::ControlAction
@@ -85,10 +85,10 @@ pub fn ai6_diptel::MissionControl::message(&self) -> core::option::Option<&str>
 pub fn ai6_diptel::MissionControl::mission_id(&self) -> &ai6_diptel::MissionId
 pub fn ai6_diptel::MissionControl::new(ai6_diptel::ControlId, ai6_diptel::OperationId, ai6_diptel::MissionId, ai6_diptel::ControlAction) -> Self
 pub fn ai6_diptel::MissionControl::operation_id(&self) -> &ai6_diptel::OperationId
-pub fn ai6_diptel::MissionControl::session_id(&self) -> core::option::Option<&ai6_diptel::SessionId>
+pub fn ai6_diptel::MissionControl::run_id(&self) -> core::option::Option<&ai6_diptel::RunId>
 pub fn ai6_diptel::MissionControl::with_agent(self, impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, ai6_diptel::InvalidControl>
 pub fn ai6_diptel::MissionControl::with_message(self, impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, ai6_diptel::InvalidControl>
-pub fn ai6_diptel::MissionControl::with_session(self, ai6_diptel::SessionId) -> Self
+pub fn ai6_diptel::MissionControl::with_run(self, ai6_diptel::RunId) -> Self
 impl core::fmt::Debug for ai6_diptel::MissionControl
 pub fn ai6_diptel::MissionControl::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct ai6_diptel::MissionId(_)
@@ -103,40 +103,40 @@ pub fn ai6_diptel::OperationId::as_str(&self) -> &str
 pub fn ai6_diptel::OperationId::new(impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, ai6_diptel::InvalidIdentity>
 impl core::fmt::Display for ai6_diptel::OperationId
 pub fn ai6_diptel::OperationId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub struct ai6_diptel::SessionId(_)
-impl ai6_diptel::SessionId
-pub fn ai6_diptel::SessionId::as_str(&self) -> &str
-pub fn ai6_diptel::SessionId::new(impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, ai6_diptel::InvalidIdentity>
-impl core::fmt::Display for ai6_diptel::SessionId
-pub fn ai6_diptel::SessionId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub struct ai6_diptel::SessionSnapshot
-pub ai6_diptel::SessionSnapshot::mission_id: ai6_diptel::MissionId
-pub ai6_diptel::SessionSnapshot::operation_id: ai6_diptel::OperationId
-pub ai6_diptel::SessionSnapshot::sequence: u64
-pub ai6_diptel::SessionSnapshot::session_id: ai6_diptel::SessionId
-pub ai6_diptel::SessionSnapshot::state: ai6_diptel::SessionState
+pub struct ai6_diptel::RunId(_)
+impl ai6_diptel::RunId
+pub fn ai6_diptel::RunId::as_str(&self) -> &str
+pub fn ai6_diptel::RunId::new(impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, ai6_diptel::InvalidIdentity>
+impl core::fmt::Display for ai6_diptel::RunId
+pub fn ai6_diptel::RunId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6_diptel::RunSnapshot
+pub ai6_diptel::RunSnapshot::mission_id: ai6_diptel::MissionId
+pub ai6_diptel::RunSnapshot::operation_id: ai6_diptel::OperationId
+pub ai6_diptel::RunSnapshot::run_id: ai6_diptel::RunId
+pub ai6_diptel::RunSnapshot::sequence: u64
+pub ai6_diptel::RunSnapshot::state: ai6_diptel::RunState
 pub struct ai6_diptel::TerminalData
 impl ai6_diptel::TerminalData
 pub fn ai6_diptel::TerminalData::bytes(&self) -> &[u8]
 pub const fn ai6_diptel::TerminalData::direction(&self) -> ai6_diptel::TerminalDirection
-pub fn ai6_diptel::TerminalData::new(ai6_diptel::SessionId, u64, ai6_diptel::TerminalDirection, alloc::vec::Vec<u8>) -> core::result::Result<Self, ai6_diptel::FrameTooLarge>
+pub fn ai6_diptel::TerminalData::new(ai6_diptel::RunId, u64, ai6_diptel::TerminalDirection, alloc::vec::Vec<u8>) -> core::result::Result<Self, ai6_diptel::FrameTooLarge>
+pub fn ai6_diptel::TerminalData::run_id(&self) -> &ai6_diptel::RunId
 pub const fn ai6_diptel::TerminalData::sequence(&self) -> u64
-pub fn ai6_diptel::TerminalData::session_id(&self) -> &ai6_diptel::SessionId
 impl core::fmt::Debug for ai6_diptel::TerminalData
 pub fn ai6_diptel::TerminalData::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct ai6_diptel::TerminalGap
 impl ai6_diptel::TerminalGap
 pub const fn ai6_diptel::TerminalGap::after(&self) -> u64
 pub const fn ai6_diptel::TerminalGap::before(&self) -> u64
-pub fn ai6_diptel::TerminalGap::new(ai6_diptel::SessionId, u64, u64) -> core::result::Result<Self, ai6_diptel::InvalidGap>
-pub fn ai6_diptel::TerminalGap::session_id(&self) -> &ai6_diptel::SessionId
+pub fn ai6_diptel::TerminalGap::new(ai6_diptel::RunId, u64, u64) -> core::result::Result<Self, ai6_diptel::InvalidGap>
+pub fn ai6_diptel::TerminalGap::run_id(&self) -> &ai6_diptel::RunId
 pub struct ai6_diptel::TerminalResize
 impl ai6_diptel::TerminalResize
 pub const fn ai6_diptel::TerminalResize::columns(&self) -> u16
-pub fn ai6_diptel::TerminalResize::new(ai6_diptel::SessionId, u64, u16, u16) -> core::result::Result<Self, ai6_diptel::InvalidSize>
+pub fn ai6_diptel::TerminalResize::new(ai6_diptel::RunId, u64, u16, u16) -> core::result::Result<Self, ai6_diptel::InvalidSize>
 pub const fn ai6_diptel::TerminalResize::rows(&self) -> u16
+pub fn ai6_diptel::TerminalResize::run_id(&self) -> &ai6_diptel::RunId
 pub const fn ai6_diptel::TerminalResize::sequence(&self) -> u64
-pub fn ai6_diptel::TerminalResize::session_id(&self) -> &ai6_diptel::SessionId
 pub const ai6_diptel::MAX_CONTROL_MESSAGE_BYTES: usize
 pub const ai6_diptel::MAX_ID_BYTES: usize
 pub const ai6_diptel::MAX_REASON_BYTES: usize

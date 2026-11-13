@@ -20,7 +20,7 @@ impl ai6::directorates::q::transport::Transport for ai6_transport_ssh::Ssh
 pub fn ai6_transport_ssh::Ssh::capabilities(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6_transport_ssh::Ssh::forward(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::transport::TransportForward>, guatiao::library::kind::ProviderError>
 pub fn ai6_transport_ssh::Ssh::list_dir(&self, &str) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
-pub fn ai6_transport_ssh::Ssh::open_terminal(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn ai6_transport_ssh::Ssh::open_terminal(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalRun>, guatiao::library::kind::ProviderError>
 pub fn ai6_transport_ssh::Ssh::probe(&self) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6_transport_ssh::Ssh::read_file(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn ai6_transport_ssh::Ssh::run(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>

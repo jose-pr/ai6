@@ -7,7 +7,7 @@ pub struct ai6_terminal_pipe::Pipe
 impl ai6_terminal_pipe::Pipe
 pub fn ai6_terminal_pipe::Pipe::new(ai6_terminal_pipe::PipeConfig) -> Self
 impl ai6::directorates::q::terminal::Terminal for ai6_terminal_pipe::Pipe
-pub fn ai6_terminal_pipe::Pipe::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn ai6_terminal_pipe::Pipe::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalRun>, guatiao::library::kind::ProviderError>
 pub fn ai6_terminal_pipe::Pipe::tty(&self) -> bool
 impl core::convert::TryFrom<ai6_terminal_pipe::PipeConfig> for ai6_terminal_pipe::Pipe
 pub type ai6_terminal_pipe::Pipe::Error = guatiao::library::kind::ProviderError

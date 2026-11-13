@@ -3,7 +3,7 @@ pub struct ai6_terminal_pty::Pty
 impl ai6_terminal_pty::Pty
 pub fn ai6_terminal_pty::Pty::new(ai6_terminal_pty::PtyConfig) -> Self
 impl ai6::directorates::q::terminal::Terminal for ai6_terminal_pty::Pty
-pub fn ai6_terminal_pty::Pty::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalSession>, guatiao::library::kind::ProviderError>
+pub fn ai6_terminal_pty::Pty::spawn(&self, &guatiao::value::value::Value) -> core::result::Result<guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::TerminalRun>, guatiao::library::kind::ProviderError>
 impl core::convert::TryFrom<ai6_terminal_pty::PtyConfig> for ai6_terminal_pty::Pty
 pub type ai6_terminal_pty::Pty::Error = guatiao::library::kind::ProviderError
 pub fn ai6_terminal_pty::Pty::try_from(ai6_terminal_pty::PtyConfig) -> core::result::Result<Self, Self::Error>

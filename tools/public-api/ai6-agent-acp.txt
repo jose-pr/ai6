@@ -22,7 +22,7 @@ pub ai6_agent_acp::AcpSettings::command: core::option::Option<alloc::string::Str
 pub ai6_agent_acp::AcpSettings::describe_modes: usize
 pub ai6_agent_acp::AcpSettings::describe_options: usize
 pub ai6_agent_acp::AcpSettings::describe_pages: usize
-pub ai6_agent_acp::AcpSettings::describe_sessions: usize
+pub ai6_agent_acp::AcpSettings::describe_runs: usize
 pub ai6_agent_acp::AcpSettings::describe_text_bytes: usize
 pub ai6_agent_acp::AcpSettings::describe_values: usize
 pub ai6_agent_acp::AcpSettings::diagnostic_lines: usize
