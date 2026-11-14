@@ -7470,9 +7470,13 @@ class _AgentRoleEditorDialogState extends State<AgentRoleEditorDialog> {
   final resource = record.resource;
   if (resource == null) {
     return (
-      'Operation ${record.operation}',
+      'Operation ${OperationNames.of(record.operation)}',
       OoLinkTo.operation(record.operation),
     );
+  }
+  if (resource.startsWith('operation:')) {
+    final id = resource.substring('operation:'.length);
+    return ('Operation ${OperationNames.of(id)}', OoLinkTo.operation(id));
   }
   return resource.startsWith('station:')
       ? (

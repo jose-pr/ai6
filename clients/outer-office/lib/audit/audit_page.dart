@@ -5,6 +5,7 @@ import '../routes/oo_route.dart';
 import '../shell/oo_empty.dart';
 import '../shell/oo_freshness.dart';
 import '../shell/oo_link.dart';
+import '../shell/operation_names.dart';
 import '../theme/oo_icon.dart';
 import '../timeline/timeline_page.dart';
 import '../widgets/oo_data_table.dart';
@@ -170,7 +171,8 @@ class _AuditLogPageState extends State<AuditLogPage> {
                     '${ooPrincipalText(principals, record.actor)} '
                     '${record.actor} ${record.action} '
                     '${timelineSentence(record.action)} '
-                    '${record.operation} ${record.target} '
+                    '${record.operation} ${OperationNames.of(record.operation)} '
+                    '${record.target} '
                     '${record.resource ?? ''}',
                 facets: [
                   OoFacet(
@@ -204,5 +206,6 @@ class _AuditLogPageState extends State<AuditLogPage> {
 }
 
 /// `Operation: G` or `Station: hq` for the scope an Audit route is limited to.
-String routeScopeLabel(OoRoute route, String key) =>
-    '${key == 'operation_id' ? 'Operation' : 'Station'}: ${route[key]}';
+String routeScopeLabel(OoRoute route, String key) => key == 'operation_id'
+    ? 'Operation: ${OperationNames.of(route[key]!)}'
+    : 'Station: ${route[key]}';

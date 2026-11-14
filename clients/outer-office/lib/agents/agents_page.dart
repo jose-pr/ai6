@@ -11,6 +11,7 @@ import '../routes/oo_scope.dart';
 import '../settings/oo_config.dart';
 import '../shell/oo_empty.dart';
 import '../shell/oo_link.dart';
+import '../shell/operation_names.dart';
 import '../theme/oo_icon.dart';
 import 'scorecard.dart';
 
@@ -496,7 +497,7 @@ class _AgentsPageState extends State<AgentsPage>
         lowered.$1,
         lowered.$2,
       ),
-      '${agent.agent} now works at ${lowered.$1} in $operation.',
+      '${agent.agent} now works at ${lowered.$1} in ${OperationNames.of(operation)}.',
     );
   }
 
@@ -506,7 +507,7 @@ class _AgentsPageState extends State<AgentsPage>
       builder: (context) => AlertDialog(
         title: Text('Restore ${agent.agent}\'s configured clearance?'),
         content: Text(
-          'Removes the grant in $operation; ${agent.agent} works at '
+          'Removes the grant in ${OperationNames.of(operation)}; ${agent.agent} works at '
           '${agent.configuredClearance ?? 'its configured clearance'} again. '
           'A raise it had earned must be signed again.',
         ),
@@ -650,7 +651,7 @@ class _AgentsPageState extends State<AgentsPage>
           child: _unreadable
               ? Center(
                   child: Text(
-                    'Operation ${widget.route['operation_id']}\'s Agents are '
+                    'Operation ${OperationNames.of(widget.route['operation_id']!)}\'s Agents are '
                     'not visible to this account.',
                   ),
                 )
@@ -676,7 +677,7 @@ class _AgentsPageState extends State<AgentsPage>
                           (_, null) =>
                             'Agent $named is not in an Operation this account may read.',
                           (_, _) =>
-                            'Agent $named is not in Operation $operation.',
+                            'Agent $named is not in Operation ${OperationNames.of(operation!)}.',
                         }),
                 )
               : Column(
@@ -746,7 +747,7 @@ class _AgentsPageState extends State<AgentsPage>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      operation,
+                      OperationNames.of(operation),
                       style: Theme.of(context).textTheme.labelSmall,
                     ),
                     cell(operation, agent),
@@ -923,7 +924,7 @@ class _AgentsPageState extends State<AgentsPage>
                   onPressed: () => unawaited(_restore(operation, agent)),
                   child: Text(
                     row.reads.length > 1
-                        ? 'Restore configured clearance in $operation'
+                        ? 'Restore configured clearance in ${OperationNames.of(operation)}'
                         : 'Restore configured clearance',
                   ),
                 ),
@@ -934,7 +935,7 @@ class _AgentsPageState extends State<AgentsPage>
                   onPressed: () => unawaited(_lower(operation, agent)),
                   child: Text(
                     row.reads.length > 1
-                        ? 'Lower clearance in $operation'
+                        ? 'Lower clearance in ${OperationNames.of(operation)}'
                         : 'Lower clearance',
                   ),
                 ),
