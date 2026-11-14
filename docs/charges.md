@@ -165,6 +165,16 @@ for each thing the Run shows (`event`, `prompt`, `turn`, `permission`, `answered
 `{"type":"error","code","message"}` for what was refused. `ai6ctl charge attach SCOPE` is a line-based
 client of it, and Outer Office and other apps can be others.
 
+**Outer Office** shows charges on its Charges page (Machines in the rail): one card for M's, each Operation's
+and each Station's with its Run's state (running while a Station holds its lease, stopped while none does),
+the Agent and its route, the Station it runs on, when it last woke and what that turn recorded. Its detail
+has a Live tab (the attachment above, with history, a box to type to the Run, permission requests answered
+with the first answer deciding, and Interrupt only for a person who holds the action; leaving the tab
+detaches, and a dropped socket offers Reconnect from the last frame), Decisions (what the charge said at each
+wake and, for an Operation's, the Reports it assessed) and Logbook. A Mission's detail has the same Live Run
+view under `mission.control`. The list reads `GET /v1/user/charges`, which also says which controls the person
+holds; the logbook needs `charge.converse`.
+
 The gateway resolves the person's token again for every prompt, answer and interrupt, and looks again
 every `[attach] recheck_every` seconds (and when the sign-in ends, if that is sooner) at whether it
 stands and still holds `charge.converse`; a person whose sign-in ended or was revoked, or whose role was

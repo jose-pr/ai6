@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Outer Office has a Charges page: M's, each Operation's and each Station's charge with its Run's state, Agent and route,
+  Station, last wake and what that turn recorded, and for a person with `charge.converse` a live view of the
+  Run (history, then streaming; type to it, answer its permission requests, interrupt it where `mission.control`
+  or `station.configure` is held, reconnect from the last frame), its decisions and its logbook. A Mission's detail
+  has the same live view under `mission.control`. `GET /v1/user/charges` and `/v1/user/charges/{scope}` serve
+  it, and Moneypenny can open it (`charges`, with `charge`, `operation_id`, `station_id` and `tab`).
 - A person can attach to a charge's live Run, or a Mission's, as to a harness in tmux: with `charge.converse`
   on the charge's scope (`operation:<codename>`, `station:<id>`, or `config:charge` for M's), or
   `mission.control` on the Mission's Operation, `GET /v1/user/attach` replays the Run's history and then
