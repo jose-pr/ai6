@@ -1296,6 +1296,11 @@ pub struct AttachLimits {
     #[schema(title = "Clients attached to a Run")]
     #[map(default = AttachLimits::default().clients)]
     pub clients: Limit,
+    /// Frames queued for one attached client; one that falls further behind is let go and attaches
+    /// again.
+    #[schema(title = "Frames queued for a client")]
+    #[map(default = AttachLimits::default().client_backlog)]
+    pub client_backlog: Limit,
     /// Prompts of people waiting for a Run's turn to end; past it a prompt is refused.
     #[schema(title = "Prompts waiting for a turn")]
     #[map(default = AttachLimits::default().waiting_prompts)]
@@ -1325,6 +1330,15 @@ pub struct AttachLimits {
     #[schema(title = "Longest call", format = "seconds")]
     #[map(default = AttachLimits::default().call_margin)]
     pub call_margin: Seconds,
+    /// Seconds between looks, by something that waits, at whether it should go on: a permission
+    /// request at who is still attached, a client's delivery at whether the Station stops.
+    #[schema(title = "Between looks while waiting", format = "seconds")]
+    #[map(default = AttachLimits::default().poll_slice)]
+    pub poll_slice: Seconds,
+    /// Seconds between looks at whether the Station stops, while pausing after a failed call.
+    #[schema(title = "Between looks while pausing", format = "seconds")]
+    #[map(default = AttachLimits::default().pause_slice)]
+    pub pause_slice: Seconds,
 }
 
 impl Default for AttachLimits {
@@ -1332,6 +1346,7 @@ impl Default for AttachLimits {
         Self {
             history_frames: Limit::at(1_000),
             clients: Limit::at(16),
+            client_backlog: Limit::at(1_024),
             waiting_prompts: Limit::at(32),
             permission_wait: TimeLimit::secs(600),
             delivery_frames: Limit::at(64),
@@ -1339,6 +1354,8 @@ impl Default for AttachLimits {
             command_wait: Seconds::new(20),
             retry_delay: Seconds::new(1),
             call_margin: Seconds::new(30),
+            poll_slice: Seconds(std::time::Duration::from_millis(250)),
+            pause_slice: Seconds(std::time::Duration::from_millis(50)),
         }
     }
 }

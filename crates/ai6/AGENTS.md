@@ -232,9 +232,9 @@ pub enum HubOp { Attach { after: Option<u64> }, Detach, Prompt { text }, Answer 
 pub struct HubCommand { pub target: RunTarget, pub client: String, pub person: String, pub op: HubOp }  // gateway -> Station
 pub struct HubDelivery { pub station: String, pub target: RunTarget, pub frames: Vec<HubFrame> }       // Station -> gateway
 pub enum HubError { NoRun, TooManyClients, QueueFull, NotAttached, NoRequest, NotAnOption, Failed(String) }
-pub struct Attachment { pub replay: Vec<HubFrame>, pub live: std::sync::mpsc::Receiver<HubFrame>, pub attached: BTreeMap<String, String> }
+pub struct Attachment { pub replay: Vec<HubFrame>, pub live: FrameStream, pub attached: BTreeMap<String, String> }   // FrameStream: bounded per-client queue (frame_queue(bound))
 
-pub trait RunHub: Send + Sync {   // the Station's side; a shared session hub implements it in its place
+pub trait RunHub: Send + Sync {   // the Station's side; a shared Run hub implements it in its place
     fn attach(&self, target: &RunTarget, client: &str, person: &str, after: Option<u64>) -> Result<Attachment, HubError>;
     fn detach(&self, target: &RunTarget, client: &str);
     fn prompt(&self, target: &RunTarget, client: &str, person: &str, text: &str) -> Result<(), HubError>;
@@ -464,9 +464,9 @@ per run, the oldest go first) and `prompt_excerpt_chars` (200, the characters ke
 `AttachLimits` (`[attach]`: people attached to a live Run: `history_frames` 1000, the frames of a Run's history kept
 to replay; `clients` 16 per Run; `waiting_prompts` 32; `permission_wait` 600 s, then a request is decided as it would be
 with nobody attached; `delivery_frames` 64, `delivery_attempts` 5, `command_wait` 20 s, `retry_delay` 1 s,
-`call_margin` 30 s for the link to Universal Exports). `UnexAttachLimits` (the `unex` record's `[attach]`, at the root as
+`call_margin` 30 s for the link to Universal Exports, `client_backlog` 1024 frames queued for one client, `poll_slice` 250 ms and `pause_slice` 50 ms, how often a thread that waits looks at whether to go on). `UnexAttachLimits` (the `unex` record's `[attach]`, at the root as
 `ai6::UnexAttachLimits`): `clients` 16 per Run, `queue` 256 requests waiting per Station, `backlog` 1024 frames per
-person, `prompt_bytes` 16 KiB, `hello_timeout` 10 s, `max_wait` 25 s.
+person, `prompt_bytes` 16 KiB, `frame_slack` 4 KiB, `socket_bytes` 1 MiB, `hello_timeout` 10 s, `max_wait` 25 s, `poll_wait` 1 s, `recheck_every` 30 s.
 
 `OverlayLimits` (`[overlays]`: `manifest_bytes` 1 MiB, `manifest_depth` 64, `files` 4096,
 `bytes` 64 MiB, `file_bytes` 16 MiB, `unpinned` false, `context_bytes` 24 KiB, `fetch_timeout` 300 s,

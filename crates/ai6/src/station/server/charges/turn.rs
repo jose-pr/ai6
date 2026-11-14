@@ -461,9 +461,6 @@ pub(super) fn take(
     let Ok(mut harness) = live.harness.lock() else {
         return Outcome::refused("the charge's harness lock failed".to_owned());
     };
-    // An interrupt asked before this turn began was for the one before.
-    live.interrupt
-        .store(false, std::sync::atomic::Ordering::Release);
     let mut log = Vec::new();
     let now = super::unix_now();
     let previous = record.handler.clone().zip(record.provider_id.clone());

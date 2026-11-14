@@ -13,9 +13,8 @@
 pub(super) mod link;
 
 use std::collections::{BTreeMap, VecDeque};
-use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use coqui_acp_provider::AgentEvent;
 use serde_json::{Value, json};
@@ -24,25 +23,26 @@ use super::unix_now;
 use crate::directorates::section_00::acp::{
     PermissionDecider, PermissionDecision, PermissionRequest, RefuseAll,
 };
-use crate::directorates::section_00::hub::{Attachment, HubError, HubFrame, RunHub, RunTarget};
+use crate::directorates::section_00::hub::{
+    Attachment, FrameSender, HubError, HubFrame, RunHub, RunTarget, frame_queue,
+};
 use crate::station::limits::AttachLimits;
-
-/// How long a wait for a permission answer sleeps before it looks at who is still attached.
-const ASK_SLICE: Duration = Duration::from_millis(250);
 
 /// What a Run's driver lets people do to the Run.
 pub(crate) trait RunPort: Send + Sync {
     /// Types `text` into the Run as `person`: one turn of its own provider session, begun when the
     /// Run is free, after any turn under way.
-    fn prompt(&self, person: &str, text: &str) -> Result<(), HubError>;
+    /// `accepted` is called once the prompt is taken and before its turn can begin, so what the
+    /// attached people are shown comes in order.
+    fn prompt(&self, person: &str, text: &str, accepted: &dyn Fn()) -> Result<(), HubError>;
 
-    /// Interrupts the turn under way, if any.
-    fn interrupt(&self, person: &str) -> Result<(), HubError>;
+    /// Interrupts the turn under way: whether there was one to interrupt.
+    fn interrupt(&self, person: &str) -> Result<bool, HubError>;
 }
 
 struct Client {
     person: String,
-    sender: mpsc::Sender<HubFrame>,
+    sender: FrameSender,
 }
 
 struct Request {
@@ -95,7 +95,7 @@ impl Room {
         match frame.client.clone() {
             Some(client) => {
                 if let Some(entry) = inner.clients.get(&client)
-                    && entry.sender.send(frame).is_err()
+                    && entry.sender.try_send(frame).is_err()
                 {
                     inner.clients.remove(&client);
                 }
@@ -109,7 +109,7 @@ impl Room {
                 }
                 inner
                     .clients
-                    .retain(|_, client| client.sender.send(frame.clone()).is_ok());
+                    .retain(|_, client| client.sender.try_send(frame.clone()).is_ok());
             }
         }
     }
@@ -217,11 +217,12 @@ impl Room {
                 );
                 return None;
             }
+            let every = self.limits.poll_slice.0;
             let slice = deadline
-                .map_or(ASK_SLICE, |deadline| {
+                .map_or(every, |deadline| {
                     deadline.saturating_duration_since(Instant::now())
                 })
-                .min(ASK_SLICE);
+                .min(every);
             inner = self
                 .answered
                 .wait_timeout(inner, slice)
@@ -266,7 +267,12 @@ impl Room {
             .filter(|frame| after.is_none_or(|after| frame.seq > after))
             .cloned()
             .collect();
-        let (sender, live) = mpsc::channel();
+        let bound = self
+            .limits
+            .client_backlog
+            .get()
+            .map(|bound| usize::try_from(bound).unwrap_or(usize::MAX));
+        let (sender, live) = frame_queue(bound);
         inner.clients.insert(
             client.to_owned(),
             Client {
@@ -328,8 +334,8 @@ impl Room {
     fn prompt(&self, client: &str, person: &str, text: &str) -> Result<(), HubError> {
         self.person_of(client)?;
         let port = self.port().ok_or(HubError::NoRun)?;
-        self.publish("prompt", json!({"from": person, "text": text}));
-        let sent = port.prompt(person, text);
+        let accepted = || self.publish("prompt", json!({"from": person, "text": text}));
+        let sent = port.prompt(person, text, &accepted);
         if let Err(error) = &sent {
             self.publish(
                 "error",
@@ -374,8 +380,9 @@ impl Room {
     fn interrupt(&self, client: &str, person: &str) -> Result<(), HubError> {
         self.person_of(client)?;
         let port = self.port().ok_or(HubError::NoRun)?;
-        port.interrupt(person)?;
-        self.publish("interrupted", json!({"by": person}));
+        if port.interrupt(person)? {
+            self.publish("interrupted", json!({"by": person}));
+        }
         Ok(())
     }
 }
@@ -495,7 +502,7 @@ struct MissionPort {
 }
 
 impl RunPort for MissionPort {
-    fn prompt(&self, _person: &str, text: &str) -> Result<(), HubError> {
+    fn prompt(&self, _person: &str, text: &str, accepted: &dyn Fn()) -> Result<(), HubError> {
         self.runtime
             .block_on(super::send_message(
                 axum::extract::State(self.state.clone()),
@@ -504,17 +511,18 @@ impl RunPort for MissionPort {
                     text: text.to_owned(),
                 }),
             ))
-            .map(drop)
-            .map_err(|refused| HubError::Failed(format!("the Run refused it ({})", refused.0)))
+            .map_err(|refused| HubError::Failed(format!("the Run refused it ({})", refused.0)))?;
+        accepted();
+        Ok(())
     }
 
-    fn interrupt(&self, _person: &str) -> Result<(), HubError> {
+    fn interrupt(&self, _person: &str) -> Result<bool, HubError> {
         self.runtime
             .block_on(super::interrupt_mission(
                 axum::extract::State(self.state.clone()),
                 axum::extract::Path(self.mission_id.clone()),
             ))
-            .map(drop)
+            .map(|_| true)
             .map_err(|refused| HubError::Failed(format!("the Run refused it ({})", refused.0)))
     }
 }
@@ -679,7 +687,7 @@ mod tests {
             );
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
-        let seen: Vec<HubFrame> = attachment.live.try_iter().collect();
+        let seen: Vec<HubFrame> = attachment.live.drain();
         assert!(
             seen.iter()
                 .any(|frame| frame.kind == "prompt" && frame.data["from"] == "alice"),

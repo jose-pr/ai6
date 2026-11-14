@@ -617,7 +617,7 @@ to a [charge's](charges.md#attaching-to-a-charges-run): history, then the live s
 Run as its user, answering what it asks and interrupting it, with others attached at once. The hello
 frame of `GET /v1/user/attach` names the Mission, `{"type":"hello","token":ACCESS_TOKEN,"mission":
 {"operation":"G","mission":"mission-007"}}`, and the gateway sends the request to the Station holding
-the Mission's newest open Run. Attaching, detaching, each prompt, answer and interrupt are audited
+the Mission's newest open Run. The Operation is the Registry's (the Run's record, else the Mission's filed brief), never the hello's: a hello naming another, or a Mission the Registry cannot place, is refused `no_run`. Attaching, detaching, each prompt, answer and interrupt are audited
 (`mission.attach`, `mission.detach`, `mission.prompt`, `mission.answer`, `mission.interrupt`). A typed
 line takes the path a message to the Run takes elsewhere, and an interrupt is the Mission's interrupt
 above (it waits, `blocked` with reason `interrupted`, until resumed). A Mission whose Run has ended has

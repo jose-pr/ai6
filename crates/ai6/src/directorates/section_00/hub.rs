@@ -5,12 +5,14 @@
 //! live stream, may type into it, answer what it asks and interrupt it; several may be attached
 //! at once and detaching leaves the Run running. [`RunHub`] is the Station's side of that, the
 //! one trait the Station owns for it: the Station's own implementation keeps each Run's history
-//! and attached clients in memory, and a shared session hub can replace it by implementing the
+//! and attached clients in memory, and a shared Run hub can replace it by implementing the
 //! trait. [`HubCommand`] and [`HubFrame`] are what Universal Exports and a Station exchange.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{RecvTimeoutError, TryRecvError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -218,13 +220,154 @@ impl fmt::Display for HubError {
 
 impl std::error::Error for HubError {}
 
+struct Queue {
+    frames: VecDeque<HubFrame>,
+    /// The sender is gone: what is queued is the last there will be.
+    ended: bool,
+    /// The stream is gone: nothing sent is read.
+    abandoned: bool,
+}
+
+struct Shared {
+    queue: Mutex<Queue>,
+    ready: Condvar,
+    /// Frames the queue holds; `None` for no bound.
+    bound: Option<usize>,
+}
+
+impl Shared {
+    fn lock(&self) -> MutexGuard<'_, Queue> {
+        self.queue.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// The sending end of a client's bounded queue of frames.
+pub struct FrameSender(Arc<Shared>);
+
+/// The reading end of a client's queue of frames: what a client is shown after its replay.
+pub struct FrameStream(Arc<Shared>);
+
+/// Why a frame was not queued.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotQueued {
+    /// The client is as far behind as the queue allows.
+    Full,
+    /// Nobody reads the queue any more.
+    Gone,
+}
+
+/// A queue of frames for one client holding at most `bound` of them (`None` for no bound), so a
+/// client that does not read cannot grow without end.
+pub fn frame_queue(bound: Option<usize>) -> (FrameSender, FrameStream) {
+    let shared = Arc::new(Shared {
+        queue: Mutex::new(Queue {
+            frames: VecDeque::new(),
+            ended: false,
+            abandoned: false,
+        }),
+        ready: Condvar::new(),
+        bound,
+    });
+    (FrameSender(shared.clone()), FrameStream(shared))
+}
+
+impl FrameSender {
+    /// Queues `frame`, or says why it could not be.
+    ///
+    /// # Errors
+    ///
+    /// [`NotQueued::Full`] when the queue holds as many as it may, [`NotQueued::Gone`] when
+    /// its stream was dropped.
+    pub fn try_send(&self, frame: HubFrame) -> Result<(), NotQueued> {
+        let mut queue = self.0.lock();
+        if queue.abandoned {
+            return Err(NotQueued::Gone);
+        }
+        if self
+            .0
+            .bound
+            .is_some_and(|bound| queue.frames.len() >= bound)
+        {
+            return Err(NotQueued::Full);
+        }
+        queue.frames.push_back(frame);
+        drop(queue);
+        self.0.ready.notify_all();
+        Ok(())
+    }
+}
+
+impl Drop for FrameSender {
+    fn drop(&mut self) {
+        self.0.lock().ended = true;
+        self.0.ready.notify_all();
+    }
+}
+
+impl FrameStream {
+    /// The next frame, waiting up to `wait` for one.
+    ///
+    /// # Errors
+    ///
+    /// [`RecvTimeoutError::Timeout`] when none came, [`RecvTimeoutError::Disconnected`] when the
+    /// sender is gone and everything it queued was read.
+    pub fn recv_timeout(&self, wait: Duration) -> Result<HubFrame, RecvTimeoutError> {
+        let deadline = Instant::now() + wait;
+        let mut queue = self.0.lock();
+        loop {
+            if let Some(frame) = queue.frames.pop_front() {
+                return Ok(frame);
+            }
+            if queue.ended {
+                return Err(RecvTimeoutError::Disconnected);
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err(RecvTimeoutError::Timeout);
+            }
+            queue = self
+                .0
+                .ready
+                .wait_timeout(queue, left)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+    }
+
+    /// The next frame if one is queued.
+    ///
+    /// # Errors
+    ///
+    /// [`TryRecvError::Empty`], or [`TryRecvError::Disconnected`] once the sender is gone and
+    /// everything it queued was read.
+    pub fn try_recv(&self) -> Result<HubFrame, TryRecvError> {
+        let mut queue = self.0.lock();
+        match queue.frames.pop_front() {
+            Some(frame) => Ok(frame),
+            None if queue.ended => Err(TryRecvError::Disconnected),
+            None => Err(TryRecvError::Empty),
+        }
+    }
+
+    /// Everything queued now.
+    pub fn drain(&self) -> Vec<HubFrame> {
+        self.0.lock().frames.drain(..).collect()
+    }
+}
+
+impl Drop for FrameStream {
+    fn drop(&mut self) {
+        self.0.lock().abandoned = true;
+    }
+}
+
 /// What a client gets on attaching.
 #[non_exhaustive]
 pub struct Attachment {
     /// The history the client lacks, oldest first.
     pub replay: Vec<HubFrame>,
     /// Frames from here on. None is lost or repeated between `replay` and these.
-    pub live: Receiver<HubFrame>,
+    pub live: FrameStream,
     /// The persons attached now, by client.
     pub attached: BTreeMap<String, String>,
 }
@@ -233,7 +376,7 @@ impl Attachment {
     /// An attachment of `replay` then `live`.
     pub fn new(
         replay: Vec<HubFrame>,
-        live: Receiver<HubFrame>,
+        live: FrameStream,
         attached: BTreeMap<String, String>,
     ) -> Self {
         Self {

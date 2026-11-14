@@ -879,6 +879,7 @@ async fn wake(state: &DaemonState, live: &Arc<Live>) {
     {
         return;
     }
+    live.interrupt.store(false, Ordering::Release);
     let events: Vec<ChargeEvent> = live.waiting.lock().map_or_else(
         |_| Vec::new(),
         |mut waiting| {
@@ -1083,7 +1084,7 @@ struct ChargePort {
 }
 
 impl RunPort for ChargePort {
-    fn prompt(&self, person: &str, text: &str) -> Result<(), HubError> {
+    fn prompt(&self, person: &str, text: &str, accepted: &dyn Fn()) -> Result<(), HubError> {
         let live = self
             .live
             .upgrade()
@@ -1102,6 +1103,8 @@ impl RunPort for ChargePort {
                 person: person.to_owned(),
                 text: text.to_owned(),
             });
+            // Under the queue's lock, so no turn can take it before the people are told of it.
+            accepted();
         }
         let state = self.state.clone();
         drop(self.runtime.spawn(async move {
@@ -1110,17 +1113,20 @@ impl RunPort for ChargePort {
         Ok(())
     }
 
-    fn interrupt(&self, _person: &str) -> Result<(), HubError> {
+    fn interrupt(&self, _person: &str) -> Result<bool, HubError> {
         let live = self
             .live
             .upgrade()
             .filter(|live| !live.closing.load(Ordering::Acquire))
             .ok_or(HubError::NoRun)?;
-        // Between turns there is nothing to interrupt, and a flag set then would cut the next.
-        if live.busy.load(Ordering::Acquire) {
+        // Between turns there is nothing to interrupt, and a flag set then would cut the next. A turn
+        // clears the flag when it is claimed, so one asked after that, before its harness is read,
+        // still stops it.
+        let running = live.busy.load(Ordering::Acquire);
+        if running {
             live.interrupt.store(true, Ordering::Release);
         }
-        Ok(())
+        Ok(running)
     }
 }
 
@@ -1138,6 +1144,7 @@ async fn drain_prompts(state: &DaemonState, live: &Arc<Live>) {
         {
             return;
         }
+        live.interrupt.store(false, Ordering::Release);
         let next = live
             .prompts
             .lock()

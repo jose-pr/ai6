@@ -165,6 +165,14 @@ for each thing the Run shows (`event`, `prompt`, `turn`, `permission`, `answered
 `{"type":"error","code","message"}` for what was refused. `ai6ctl charge attach SCOPE` is a line-based
 client of it, and Outer Office and other apps can be others.
 
+The gateway resolves the person's token again for every prompt, answer and interrupt, and looks again
+every `[attach] recheck_every` seconds (and when the sign-in ends, if that is sooner) at whether it
+stands and still holds `charge.converse`; a person whose sign-in ended or was revoked, or whose role was
+withdrawn, is told and the socket is closed. A person who falls more than `backlog` frames behind is let
+go and attaches again. A prompt of up to `prompt_bytes` always fits a frame, however it is escaped
+(`frame_slack` is the room beyond six bytes per prompt byte); a larger frame is answered with a
+`bad_request` error and the socket stays open, up to `socket_bytes`, past which the socket closes.
+
 The Station serves its Runs through the `RunHub` trait
 (`ai6::directorates::section_00::hub`); an implementation that keeps the Run and its clients
 elsewhere can replace the Station's without the gateway or its clients changing. Universal Exports
@@ -174,8 +182,8 @@ queues what people ask for each Station, which takes it with its next poll
 
 | Setting | Where | Default |
 | --- | --- | --- |
-| `history_frames`, `clients`, `waiting_prompts`, `permission_wait`, `delivery_frames`, `delivery_attempts`, `command_wait`, `retry_delay`, `call_margin` | the `station` record's `[attach]` | see [Configuration](configuration.md) |
-| `clients`, `queue`, `backlog`, `prompt_bytes`, `hello_timeout`, `max_wait` | the `unex` record's `[attach]` | see [Configuration](configuration.md) |
+| `history_frames`, `clients`, `client_backlog`, `waiting_prompts`, `permission_wait`, `delivery_frames`, `delivery_attempts`, `command_wait`, `retry_delay`, `call_margin`, `poll_slice`, `pause_slice` | the `station` record's `[attach]` | see [Configuration](configuration.md) |
+| `clients`, `queue`, `backlog`, `prompt_bytes`, `frame_slack`, `socket_bytes`, `hello_timeout`, `max_wait`, `poll_wait`, `recheck_every` | the `unex` record's `[attach]` | see [Configuration](configuration.md) |
 
 None has a floor; `none` lifts each bound that is a count or a time limit.
 

@@ -2,11 +2,11 @@
 //! a turn of the same provider Run, answers that the first of any attached person decides, and
 //! detaching that leaves the Run going.
 
-use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
+use std::sync::mpsc::{RecvTimeoutError, channel};
 
 use super::*;
 use crate::bounds::{Limit, TimeLimit};
-use crate::directorates::section_00::hub::{HubError, HubFrame, RunHub, RunTarget};
+use crate::directorates::section_00::hub::{FrameStream, HubError, HubFrame, RunHub, RunTarget};
 use crate::station::limits::AttachLimits;
 use crate::station::server::attach::{HubDecider, LocalHub, RunPort};
 
@@ -16,7 +16,7 @@ fn target(tag: &str) -> RunTarget {
 
 /// Reads `live` until `done` says a frame is the last wanted, and answers everything read.
 fn read_until(
-    live: &Receiver<HubFrame>,
+    live: &FrameStream,
     what: &str,
     mut done: impl FnMut(&HubFrame) -> bool,
 ) -> Vec<HubFrame> {
@@ -322,6 +322,11 @@ async fn an_interrupt_ends_the_turn_under_way_and_nothing_else() {
     let attachment = hub.attach(&target(tag), "c1", "alice", None).unwrap();
     // Between turns an interrupt has nothing to cut.
     hub.interrupt(&target(tag), "c1", "alice").unwrap();
+    let idle: Vec<HubFrame> = attachment.live.drain();
+    assert!(
+        idle.iter().all(|frame| frame.kind != "interrupted"),
+        "nothing was running, so nothing was interrupted: {idle:?}"
+    );
 
     hub.prompt(&target(tag), "c1", "alice", "hold").unwrap();
     read_until(&attachment.live, "the turn to begin", |frame| {
@@ -375,12 +380,13 @@ async fn a_closed_run_tells_its_people_and_refuses_new_ones() {
 struct Quiet;
 
 impl RunPort for Quiet {
-    fn prompt(&self, _: &str, _: &str) -> Result<(), HubError> {
+    fn prompt(&self, _: &str, _: &str, accepted: &dyn Fn()) -> Result<(), HubError> {
+        accepted();
         Ok(())
     }
 
-    fn interrupt(&self, _: &str) -> Result<(), HubError> {
-        Ok(())
+    fn interrupt(&self, _: &str) -> Result<bool, HubError> {
+        Ok(false)
     }
 }
 
@@ -435,7 +441,12 @@ fn a_request_nobody_answers_is_left_to_its_asker() {
     assert_eq!(room.ask("a tool", &options, &serde_json::Value::Null), None);
     let attachment = hub.attach(&target, "c1", "alice", None).unwrap();
     assert_eq!(room.ask("a tool", &options, &serde_json::Value::Null), None);
-    let kinds: Vec<String> = attachment.live.try_iter().map(|f| f.kind).collect();
+    let kinds: Vec<String> = attachment
+        .live
+        .drain()
+        .into_iter()
+        .map(|f| f.kind)
+        .collect();
     assert_eq!(kinds, ["attached", "permission", "answered"]);
     // Everyone leaving while it waits ends the wait.
     limits_unbounded_wait_ends_when_the_last_client_leaves();
@@ -519,4 +530,66 @@ async fn an_acp_agents_permission_request_goes_to_the_people_attached() {
     read_until(&attachment.live, "the end of its turn", |frame| {
         event_text(frame).is_none() && frame.data["kind"] == "completed"
     });
+}
+
+/// A port that refuses what it is given.
+struct Refusing;
+
+impl RunPort for Refusing {
+    fn prompt(&self, _: &str, _: &str, _: &dyn Fn()) -> Result<(), HubError> {
+        Err(HubError::QueueFull)
+    }
+
+    fn interrupt(&self, _: &str) -> Result<bool, HubError> {
+        Ok(false)
+    }
+}
+
+#[test]
+fn a_prompt_the_run_refuses_is_never_part_of_its_history() {
+    let hub = LocalHub::default();
+    let target = RunTarget::Mission {
+        operation: "G".to_owned(),
+        mission: "m-2".to_owned(),
+    };
+    hub.open(&target, Arc::new(Refusing));
+    let attachment = hub.attach(&target, "c1", "alice", None).unwrap();
+    assert_eq!(
+        hub.prompt(&target, "c1", "alice", "hello"),
+        Err(HubError::QueueFull)
+    );
+    // The people attached are told it was refused; nothing says it was typed.
+    let seen: Vec<HubFrame> = attachment.live.drain();
+    assert!(seen.iter().all(|frame| frame.kind != "prompt"), "{seen:?}");
+    assert!(
+        seen.iter()
+            .any(|frame| frame.kind == "error" && frame.data["refused"] == "prompt")
+    );
+    let later = hub.attach(&target, "c2", "bob", None).unwrap();
+    assert!(later.replay.iter().all(|frame| frame.kind != "prompt"));
+}
+
+#[test]
+fn a_client_that_does_not_read_is_let_go_at_the_queue_setting() {
+    let limits = AttachLimits {
+        client_backlog: Limit::at(2),
+        ..AttachLimits::default()
+    };
+    let (hub, target) = quiet_hub(limits);
+    let room = hub.room(&target).unwrap();
+    let attachment = hub.attach(&target, "c1", "alice", None).unwrap();
+    // The `attached` frame and one more fill it; the next finds it behind.
+    for number in 0..5 {
+        room.publish_error(&format!("frame {number}"));
+    }
+    assert_eq!(room.attached(), 0, "the client was let go");
+    let read: Vec<HubFrame> = attachment.live.drain();
+    assert_eq!(read.len(), 2);
+    assert_eq!(
+        attachment.live.recv_timeout(Duration::from_millis(50)),
+        Err(RecvTimeoutError::Disconnected)
+    );
+    // The Run is not touched: someone else attaches and reads on.
+    let again = hub.attach(&target, "c2", "bob", None).unwrap();
+    assert!(again.replay.len() > 2);
 }

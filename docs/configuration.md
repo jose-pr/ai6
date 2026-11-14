@@ -1064,10 +1064,14 @@ pending_per_station = 8
 | --- | --- | --- |
 | `clients` | 16 | **People attached to a Run.** People attached to one Run at once. |
 | `queue` | 256 | **Requests waiting for a Station.** Requests of attached people waiting for their Station to take them, for each Station. |
-| `backlog` | 1,024 | **Frames queued for one person.** Frames queued for one attached person's socket, at least 1; one who falls further behind is let go and may attach again. |
+| `backlog` | 1,024 | **Frames queued for one person.** Frames queued for one attached person's socket; one who falls further behind is let go and may attach again. |
 | `prompt_bytes` | 16 KiB | **Longest prompt.** Bytes of one prompt. |
+| `frame_slack` | 4 KiB | **Slack of a frame.** Bytes a frame may hold beyond the largest prompt written out in JSON (six bytes for each byte of the prompt, at worst): what a hello, an answer or any other frame needs. |
+| `socket_bytes` | 1 MiB | **Largest frame the socket takes.** Bytes the socket takes of one frame before it is closed. A frame past what a prompt within `prompt_bytes` takes, and within this, is answered with an error and the socket stays open. |
 | `hello_timeout` | 10 | **Longest wait for a hello.** Seconds a socket may take to say who it is. |
 | `max_wait` | 25 | **Longest poll a Station may ask for.** The longest wait a Station's poll for requests may ask for, in seconds. |
+| `poll_wait` | 1 | **A Station's poll waits.** Seconds a Station's poll waits when it names no wait. |
+| `recheck_every` | 30 | **Sign-in and role checked every.** Seconds between looks at whether an attached person's sign-in and right to converse stand; one who no longer holds them stops receiving. |
 <!-- schema:record.unex.attach:end -->
 
 `[login]` (the tries allowed are the flat `login_tries_per_address` and `login_tries_per_name`)
@@ -1451,6 +1455,7 @@ a Run. `unpinned = true` is a weakening, named each time such an overlay is issu
 | --- | --- | --- |
 | `history_frames` | 1,000 | **Frames kept for a client that attaches.** Frames of a Run's history kept to replay to a client that attaches; the oldest go first. |
 | `clients` | 16 | **Clients attached to a Run.** Clients attached to one Run at once. |
+| `client_backlog` | 1,024 | **Frames queued for a client.** Frames queued for one attached client; one that falls further behind is let go and attaches again. |
 | `waiting_prompts` | 32 | **Prompts waiting for a turn.** Prompts of people waiting for a Run's turn to end; past it a prompt is refused. |
 | `permission_wait` | 600 | **A permission request waits.** Seconds a permission request waits for an attached person before it is decided as it would be with nobody attached. |
 | `delivery_frames` | 64 | **Frames in one delivery.** Frames of one Run a delivery to Universal Exports carries at most. |
@@ -1458,6 +1463,8 @@ a Run. `unpinned = true` is a weakening, named each time such an overlay is issu
 | `command_wait` | 20 | **Longest wait for a client's request.** Seconds a poll of Universal Exports for clients' requests waits. |
 | `retry_delay` | 1 | **Pause after a failed call.** Seconds between tries after a poll or a delivery failed. |
 | `call_margin` | 30 | **Longest call.** Seconds one call to Universal Exports may take besides a poll's wait. |
+| `poll_slice` | 0.25 | **Between looks while waiting.** Seconds between looks, by something that waits, at whether it should go on: a permission request at who is still attached, a client's delivery at whether the Station stops. |
+| `pause_slice` | 0.05 | **Between looks while pausing.** Seconds between looks at whether the Station stops, while pausing after a failed call. |
 <!-- schema:record.station.attach:end -->
 
 The `cables` record takes `grants`, `inbound` and `channels`, and the relay's limits:
