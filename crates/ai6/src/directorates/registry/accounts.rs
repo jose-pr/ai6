@@ -158,6 +158,9 @@ pub struct AccountProfile {
     /// Labels shown with the account.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub labels: BTreeMap<String, String>,
+    /// Its login is kept sealed in the Registry: it has none to show until one is added.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sealed_login: bool,
 }
 
 impl AccountProfile {
@@ -171,6 +174,7 @@ impl AccountProfile {
             priority: account.priority_value(),
             max_concurrent: account.concurrency(),
             labels: account.labels().clone(),
+            sealed_login: account.keeps_login_files(),
         })
     }
 }
@@ -220,6 +224,48 @@ pub struct LoginState {
     /// the next account or route.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub needs_person: Option<String>,
+    /// How the last renewal ended, in words that name no file content: `renewed`, `unchanged`
+    /// or `failed: <why>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_result: Option<String>,
+    /// When that renewal ended, as Unix seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_attempt_at: Option<f64>,
+    /// Changes a person asked for that only a Station holding the login can make, oldest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requests: Vec<LoginRequest>,
+}
+
+/// What a person asked of a login that a Station holding it makes: sealing needs its key.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, tag = "action", rename_all = "snake_case")]
+pub enum LoginRequestAction {
+    /// Seal it to one more Station.
+    AddStation {
+        /// The Station.
+        station: String,
+    },
+    /// Stop sealing it to a Station, dropping that Station's copy.
+    RemoveStation {
+        /// The Station.
+        station: String,
+    },
+    /// Sign out at the provider with the account's `logout_command`, then forget the login.
+    SignOutAndForget,
+}
+
+/// A change to a login waiting for a Station that holds it, and who asked.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LoginRequest {
+    /// What is asked.
+    #[serde(flatten)]
+    pub action: LoginRequestAction,
+    /// The person.
+    pub by: String,
+    /// When, as Unix seconds.
+    pub at: f64,
 }
 
 impl LoginState {
@@ -1340,6 +1386,7 @@ mod tests {
             priority: 1,
             max_concurrent: Some(2),
             labels: BTreeMap::new(),
+            sealed_login: false,
         };
         registry
             .report_quota(

@@ -50,6 +50,14 @@ enum Command {
         #[command(subcommand)]
         command: QuarantineCommand,
     },
+    /// Harness logins kept sealed in the Registry: add one from this host, change which Stations
+    /// hold it, forget it.
+    Pools {
+        #[command(flatten)]
+        bootstrap: BootstrapArg,
+        #[command(subcommand)]
+        command: PoolsCommand,
+    },
     /// The bootstrap file this command reads.
     Config {
         #[command(subcommand)]
@@ -362,6 +370,67 @@ enum QuarantineCommand {
     },
 }
 
+/// A person's act on a `harness-login` account's login, audited before it is made. A login's
+/// contents are never printed.
+#[derive(Debug, Subcommand)]
+enum PoolsCommand {
+    /// List the accounts that keep a login in the Registry: which Stations may hold it, when it
+    /// ends, its last renewal, and whether a person is needed.
+    List,
+    /// Seal the login a CLI left on this host as the account's. The files are the ones the
+    /// account declares as `files`, read from this host's home; nothing is taken from them.
+    AddLogin {
+        /// The pool ID.
+        pool: String,
+        /// The account's name in the pool.
+        account: String,
+        /// The pool's handler (`claude`, `codex`, `acp`, ...); refused when the pool serves
+        /// another, so a login is not sealed under the wrong account.
+        #[arg(long)]
+        handler: String,
+        /// The home directory holding the files (default: this user's home).
+        #[arg(long, value_name = "DIR")]
+        from: Option<PathBuf>,
+        /// A Station that may hold the login; repeat for several (default: this Station).
+        #[arg(long = "station", value_name = "STATION")]
+        stations: Vec<String>,
+        /// Replace the login the account already holds.
+        #[arg(long)]
+        replace: bool,
+    },
+    /// Let one more Station hold the login. Run on a host whose Station already holds it.
+    AddStation {
+        /// The pool ID.
+        pool: String,
+        /// The account's name in the pool.
+        account: String,
+        /// The Station to seal the login to; it must have published its sealing key.
+        station: String,
+    },
+    /// Stop sealing the login to a Station, dropping its copy. Run on a host whose Station holds
+    /// it. What that Station already opened stays with it, so replace the login if it is not
+    /// to be trusted.
+    RemoveStation {
+        /// The pool ID.
+        pool: String,
+        /// The account's name in the pool.
+        account: String,
+        /// The Station to stop sealing to.
+        station: String,
+    },
+    /// Forget the account's login. With `--sign-out`, first sign it out at the provider with the
+    /// account's `logout_command`; when that fails the login is kept.
+    RemoveLogin {
+        /// The pool ID.
+        pool: String,
+        /// The account's name in the pool.
+        account: String,
+        /// Also sign out at the provider.
+        #[arg(long)]
+        sign_out: bool,
+    },
+}
+
 #[derive(Debug, Subcommand)]
 enum SleeperCommand {
     /// List every sleeper and whether its current definition is authorized.
@@ -494,6 +563,16 @@ async fn main() -> ExitCode {
             }
             Err(error) => {
                 eprintln!("ai6: sleeper operation failed: {error}");
+                ExitCode::FAILURE
+            }
+        },
+        Command::Pools { bootstrap, command } => match pools_command(&bootstrap, command) {
+            Ok(output) => {
+                print!("{output}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("ai6: pools operation failed: {error}");
                 ExitCode::FAILURE
             }
         },
@@ -1596,6 +1675,156 @@ fn sleeper_command(bootstrap: &BootstrapArg, command: SleeperCommand) -> Result<
             } else {
                 format!("Sleeper {name} of Operation {operation} was not authorized\n")
             })
+        }
+    }
+}
+
+/// Runs `ai6 pools`: the account's declaration comes from this Station's records, and a login is
+/// sealed and opened with this host's sealing key.
+fn pools_command(bootstrap: &BootstrapArg, command: PoolsCommand) -> Result<String, String> {
+    use ai6::directorates::q::login_admin as admin;
+    use ai6::directorates::q::logins::CommandRenewer;
+    use ai6::directorates::q::sealing::Recipient;
+
+    let located = load_bootstrap(bootstrap)?;
+    let opened = open_station(&located)?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |elapsed| elapsed.as_secs_f64());
+    if matches!(command, PoolsCommand::List) {
+        let states = opened.registry.accounts().map_err(|e| e.to_string())?;
+        let mut output = String::new();
+        for state in states.iter().filter(|state| {
+            state.login.is_some() || state.profile().is_some_and(|profile| profile.sealed_login)
+        }) {
+            let standing = match &state.login {
+                Some(login) => ai6::directorates::q::login_standing::standing(login, now),
+                None => "NEEDS A PERSON: no login was added".to_owned(),
+            };
+            output.push_str(&format!("{}\t{standing}\n", state.account));
+        }
+        if output.is_empty() {
+            output.push_str("No account keeps a login in the Registry.\n");
+        }
+        return Ok(output);
+    }
+    let station = station_of(&located, &opened);
+    if station.is_empty() {
+        return Err(
+            "this host has no Station ID: set `[station] id` in the bootstrap file, or run \
+             `ai6 serve` once"
+                .to_owned(),
+        );
+    }
+    let settings = opened
+        .provider
+        .load(&station)
+        .map_err(|error| error.to_string())?
+        .settings;
+    let (pool_id, account_id) = match &command {
+        PoolsCommand::List => unreachable!("handled above"),
+        PoolsCommand::AddLogin { pool, account, .. }
+        | PoolsCommand::AddStation { pool, account, .. }
+        | PoolsCommand::RemoveStation { pool, account, .. }
+        | PoolsCommand::RemoveLogin { pool, account, .. } => (pool.clone(), account.clone()),
+    };
+    let reference = ai6::AccountRef::new(&pool_id, &account_id);
+    let pool = settings
+        .loadouts
+        .pool(&pool_id)
+        .ok_or_else(|| format!("this Station's records declare no pool {pool_id:?}"))?;
+    let declared = pool
+        .get(&account_id)
+        .ok_or_else(|| format!("pool {pool_id:?} declares no account {account_id:?}"))?;
+    let vault = ai6::open_sealing_vault(&opened.identity_dir, &opened.registry, &station)
+        .map_err(|error| format!("this host's sealing key: {error}"))?;
+    let actor = std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_else(|_| "operator".to_owned());
+    let refused = |error: admin::AdminError| error.to_string();
+    match command {
+        PoolsCommand::List => unreachable!("handled above"),
+        PoolsCommand::AddLogin {
+            handler,
+            from,
+            stations,
+            replace,
+            ..
+        } => {
+            if pool.handler() != handler {
+                return Err(format!(
+                    "pool {pool_id:?} serves the handler {:?}, not {handler:?}",
+                    pool.handler()
+                ));
+            }
+            let from = match from {
+                Some(from) => from,
+                None => std::env::var_os("HOME")
+                    .or_else(|| std::env::var_os("USERPROFILE"))
+                    .map(PathBuf::from)
+                    .ok_or("no home directory: pass --from")?,
+            };
+            let named = if stations.is_empty() {
+                vec![station.clone()]
+            } else {
+                stations
+            };
+            let recipients: Vec<Recipient> = named.iter().map(Recipient::named).collect();
+            admin::add_login(
+                &vault,
+                &actor,
+                &reference,
+                declared,
+                admin::Source {
+                    from: &from,
+                    stations: &recipients,
+                    replace,
+                },
+                now,
+            )
+            .map_err(refused)?;
+            Ok(format!(
+                "Sealed {reference}'s login to {}\n",
+                named.join(", ")
+            ))
+        }
+        PoolsCommand::AddStation { station: other, .. } => {
+            admin::add_station(&vault, &actor, &reference, &Recipient::named(&other), now)
+                .map_err(refused)?;
+            Ok(format!("{reference}'s login is now sealed to {other}\n"))
+        }
+        PoolsCommand::RemoveStation { station: other, .. } => {
+            admin::remove_station(&vault, &actor, &reference, &other, now).map_err(refused)?;
+            Ok(format!(
+                "{reference}'s login is no longer sealed to {other}\n"
+            ))
+        }
+        PoolsCommand::RemoveLogin { sign_out, .. } => {
+            if sign_out {
+                let scratch = opened.state_dir.join("accounts");
+                admin::sign_out_and_forget(
+                    &vault,
+                    admin::Commands {
+                        renewer: &CommandRenewer,
+                        scratch: &scratch,
+                        timeout: settings.station.accounts.renew_timeout.0,
+                    },
+                    &actor,
+                    &reference,
+                    declared,
+                    now,
+                )
+                .map_err(refused)?;
+                Ok(format!(
+                    "Signed {reference} out at its provider and forgot its login\n"
+                ))
+            } else {
+                admin::forget_login(opened.registry.as_ref(), &actor, &station, &reference, now)
+                    .map_err(refused)?;
+                Ok(format!(
+                    "Forgot {reference}'s login; it is still signed in at its provider\n"
+                ))
+            }
         }
     }
 }

@@ -3068,11 +3068,48 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::ephemeral
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::ephemeral::TheaterProvider>::destroy(&self, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::ephemeral::TheaterProvider>::list(&self, &str) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::ephemeral::TheaterProvider>::list_in(&self, &str, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
+pub mod ai6::directorates::q::login_admin
+pub enum ai6::directorates::q::login_admin::AdminError
+pub ai6::directorates::q::login_admin::AdminError::Audit(core::io::error::Error)
+pub ai6::directorates::q::login_admin::AdminError::Exists
+pub ai6::directorates::q::login_admin::AdminError::Login(ai6::directorates::q::logins::LoginError)
+pub ai6::directorates::q::login_admin::AdminError::NoFiles
+pub ai6::directorates::q::login_admin::AdminError::NoLogin
+pub ai6::directorates::q::login_admin::AdminError::NoSignOut
+pub ai6::directorates::q::login_admin::AdminError::NotHolder
+pub ai6::directorates::q::login_admin::AdminError::Registry(core::io::error::Error)
+pub ai6::directorates::q::login_admin::AdminError::SignOut(alloc::string::String)
+impl core::convert::From<ai6::directorates::q::logins::LoginError> for ai6::directorates::q::login_admin::AdminError
+pub fn ai6::directorates::q::login_admin::AdminError::from(ai6::directorates::q::logins::LoginError) -> Self
+impl core::convert::From<ai6::directorates::q::sealing::VaultError> for ai6::directorates::q::login_admin::AdminError
+pub fn ai6::directorates::q::login_admin::AdminError::from(ai6::directorates::q::sealing::VaultError) -> Self
+impl core::convert::From<core::io::error::Error> for ai6::directorates::q::login_admin::AdminError
+pub fn ai6::directorates::q::login_admin::AdminError::from(core::io::error::Error) -> Self
+impl core::error::Error for ai6::directorates::q::login_admin::AdminError
+impl core::fmt::Display for ai6::directorates::q::login_admin::AdminError
+pub fn ai6::directorates::q::login_admin::AdminError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn ai6::directorates::q::login_admin::add_login(&ai6::directorates::q::sealing::Vault, &str, &ai6::directorates::registry::accounts::AccountRef, &ai6::Account, &std::path::Path, &[ai6::directorates::q::sealing::Recipient], bool, f64) -> core::result::Result<u64, ai6::directorates::q::login_admin::AdminError>
+pub fn ai6::directorates::q::login_admin::add_station(&ai6::directorates::q::sealing::Vault, &str, &ai6::directorates::registry::accounts::AccountRef, &ai6::directorates::q::sealing::Recipient, f64) -> core::result::Result<u64, ai6::directorates::q::login_admin::AdminError>
+pub fn ai6::directorates::q::login_admin::apply_requests(&ai6::directorates::q::sealing::Vault, &[(ai6::directorates::registry::accounts::AccountRef, &ai6::Account)], &dyn ai6::directorates::q::logins::LoginRenewer, &std::path::Path, core::time::Duration, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::q::logins::LoginNotice>>
+pub fn ai6::directorates::q::login_admin::forget_login(&dyn ai6::directorates::registry::backend::RegistryBackend, &str, &str, &ai6::directorates::registry::accounts::AccountRef, f64) -> core::result::Result<(), ai6::directorates::q::login_admin::AdminError>
+pub fn ai6::directorates::q::login_admin::remove_station(&ai6::directorates::q::sealing::Vault, &str, &ai6::directorates::registry::accounts::AccountRef, &str, f64) -> core::result::Result<u64, ai6::directorates::q::login_admin::AdminError>
+pub fn ai6::directorates::q::login_admin::sign_out_and_forget(&ai6::directorates::q::sealing::Vault, &dyn ai6::directorates::q::logins::LoginRenewer, &str, &ai6::directorates::registry::accounts::AccountRef, &ai6::Account, &std::path::Path, core::time::Duration, f64) -> core::result::Result<(), ai6::directorates::q::login_admin::AdminError>
+pub mod ai6::directorates::q::login_standing
+pub fn ai6::directorates::q::login_standing::add_login_command(&ai6::directorates::registry::accounts::AccountRef, &str) -> alloc::string::String
+pub fn ai6::directorates::q::login_standing::audit_first(&dyn ai6::directorates::registry::backend::RegistryBackend, &str, &str, &str, &str, core::option::Option<alloc::string::String>, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::q::login_standing::describe(&ai6::directorates::registry::accounts::LoginRequestAction) -> alloc::string::String
+pub fn ai6::directorates::q::login_standing::forget(&dyn ai6::directorates::registry::backend::RegistryBackend, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
+pub fn ai6::directorates::q::login_standing::holds_login(&dyn ai6::directorates::registry::backend::RegistryBackend, &ai6::directorates::registry::accounts::AccountRef) -> core::io::error::Result<bool>
+pub fn ai6::directorates::q::login_standing::request(&dyn ai6::directorates::registry::backend::RegistryBackend, &ai6::directorates::registry::accounts::AccountRef, ai6::directorates::registry::accounts::LoginRequestAction, &str, f64) -> core::io::error::Result<bool>
+pub fn ai6::directorates::q::login_standing::sealed_name(&ai6::directorates::registry::accounts::AccountRef) -> alloc::string::String
+pub fn ai6::directorates::q::login_standing::standing(&ai6::directorates::registry::accounts::LoginState, f64) -> alloc::string::String
 pub mod ai6::directorates::q::logins
 pub enum ai6::directorates::q::logins::LoginError
 pub ai6::directorates::q::logins::LoginError::Io(core::io::error::Error)
 pub ai6::directorates::q::logins::LoginError::Missing(alloc::string::String)
 pub ai6::directorates::q::logins::LoginError::Vault(ai6::directorates::q::sealing::VaultError)
+impl core::convert::From<ai6::directorates::q::logins::LoginError> for ai6::directorates::q::login_admin::AdminError
+pub fn ai6::directorates::q::login_admin::AdminError::from(ai6::directorates::q::logins::LoginError) -> Self
 impl core::convert::From<ai6::directorates::q::sealing::VaultError> for ai6::directorates::q::logins::LoginError
 pub fn ai6::directorates::q::logins::LoginError::from(ai6::directorates::q::sealing::VaultError) -> Self
 impl core::convert::From<core::io::error::Error> for ai6::directorates::q::logins::LoginError
@@ -3081,6 +3118,7 @@ impl core::error::Error for ai6::directorates::q::logins::LoginError
 impl core::fmt::Display for ai6::directorates::q::logins::LoginError
 pub fn ai6::directorates::q::logins::LoginError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub enum ai6::directorates::q::logins::NoticeKind
+pub ai6::directorates::q::logins::NoticeKind::Changed
 pub ai6::directorates::q::logins::NoticeKind::Failed
 pub ai6::directorates::q::logins::NoticeKind::Leased(alloc::string::String)
 pub ai6::directorates::q::logins::NoticeKind::MayLapse
@@ -3099,6 +3137,7 @@ pub ai6::directorates::q::logins::Synced::Unchanged
 pub struct ai6::directorates::q::logins::CommandRenewer
 impl ai6::directorates::q::logins::LoginRenewer for ai6::directorates::q::logins::CommandRenewer
 pub fn ai6::directorates::q::logins::CommandRenewer::renew(&self, &ai6::Account, &std::path::Path, core::time::Duration) -> ai6::directorates::q::logins::RenewEnd
+pub fn ai6::directorates::q::logins::CommandRenewer::sign_out(&self, &ai6::Account, &std::path::Path, core::time::Duration) -> ai6::directorates::q::logins::RenewEnd
 pub struct ai6::directorates::q::logins::LoginFiles(_)
 impl ai6::directorates::q::logins::LoginFiles
 pub fn ai6::directorates::q::logins::LoginFiles::expires_at(&self) -> core::option::Option<f64>
@@ -3127,8 +3166,10 @@ pub fn ai6::directorates::q::logins::RunLogin::remove(&self) -> core::io::error:
 pub fn ai6::directorates::q::logins::RunLogin::sync(&mut self, &ai6::directorates::q::sealing::Vault, core::option::Option<u64>, f64) -> core::result::Result<ai6::directorates::q::logins::Synced, ai6::directorates::q::logins::LoginError>
 pub trait ai6::directorates::q::logins::LoginRenewer: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::q::logins::LoginRenewer::renew(&self, &ai6::Account, &std::path::Path, core::time::Duration) -> ai6::directorates::q::logins::RenewEnd
+pub fn ai6::directorates::q::logins::LoginRenewer::sign_out(&self, &ai6::Account, &std::path::Path, core::time::Duration) -> ai6::directorates::q::logins::RenewEnd
 impl ai6::directorates::q::logins::LoginRenewer for ai6::directorates::q::logins::CommandRenewer
 pub fn ai6::directorates::q::logins::CommandRenewer::renew(&self, &ai6::Account, &std::path::Path, core::time::Duration) -> ai6::directorates::q::logins::RenewEnd
+pub fn ai6::directorates::q::logins::CommandRenewer::sign_out(&self, &ai6::Account, &std::path::Path, core::time::Duration) -> ai6::directorates::q::logins::RenewEnd
 pub fn ai6::directorates::q::logins::add_login(&ai6::directorates::q::sealing::Vault, &ai6::directorates::registry::accounts::AccountRef, &std::path::Path, &[alloc::string::String], &[ai6::directorates::q::sealing::Recipient], f64) -> core::result::Result<u64, ai6::directorates::q::logins::LoginError>
 pub fn ai6::directorates::q::logins::assign_renewals(&dyn ai6::directorates::registry::backend::RegistryBackend, &[(ai6::directorates::registry::accounts::AccountRef, &ai6::Account)], &str, &[alloc::string::String], &ai6::station::limits::AccountLimits, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::q::logins::LoginNotice>>
 pub fn ai6::directorates::q::logins::login_accounts<'a>(impl core::iter::traits::collect::IntoIterator<Item = &'a ai6::AccountPool>) -> alloc::vec::Vec<(ai6::directorates::registry::accounts::AccountRef, &'a ai6::Account)>
@@ -3406,6 +3447,8 @@ pub ai6::directorates::q::sealing::VaultError::Registry(core::io::error::Error)
 pub ai6::directorates::q::sealing::VaultError::Sealing
 pub ai6::directorates::q::sealing::VaultError::Unreadable
 pub ai6::directorates::q::sealing::VaultError::Unverified(alloc::string::String)
+impl core::convert::From<ai6::directorates::q::sealing::VaultError> for ai6::directorates::q::login_admin::AdminError
+pub fn ai6::directorates::q::login_admin::AdminError::from(ai6::directorates::q::sealing::VaultError) -> Self
 impl core::convert::From<ai6::directorates::q::sealing::VaultError> for ai6::directorates::q::logins::LoginError
 pub fn ai6::directorates::q::logins::LoginError::from(ai6::directorates::q::sealing::VaultError) -> Self
 impl core::convert::From<ai6::directorates::registry::sealed::SealedWriteError> for ai6::directorates::q::sealing::VaultError
@@ -3970,6 +4013,8 @@ pub fn ai6::Account::label(self, impl core::convert::Into<alloc::string::String>
 pub fn ai6::Account::labels(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub fn ai6::Account::login_dir(&self) -> core::option::Option<&std::path::Path>
 pub fn ai6::Account::login_files(&self) -> &[alloc::string::String]
+pub fn ai6::Account::logout(&self) -> &[alloc::string::String]
+pub fn ai6::Account::logout_command(self, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
 pub fn ai6::Account::max_concurrent(self, usize) -> Self
 pub fn ai6::Account::name(&self) -> &str
 pub fn ai6::Account::new(impl core::convert::Into<alloc::string::String>, ai6::AccountKind) -> Self
@@ -4244,6 +4289,12 @@ pub fn ai6::directorates::q::claude_mcp_config(&ai6::directorates::q::LoadoutCat
 pub type ai6::directorates::q::SecretProviderLookup = (dyn core::ops::function::Fn(&str) -> core::result::Result<alloc::sync::Arc<ai6::directorates::q::secret_kind::SecretKeeper>, alloc::string::String> + core::marker::Send + core::marker::Sync)
 pub mod ai6::directorates::registry
 pub mod ai6::directorates::registry::accounts
+#[non_exhaustive] pub enum ai6::directorates::registry::accounts::LoginRequestAction
+pub ai6::directorates::registry::accounts::LoginRequestAction::AddStation
+pub ai6::directorates::registry::accounts::LoginRequestAction::AddStation::station: alloc::string::String
+pub ai6::directorates::registry::accounts::LoginRequestAction::RemoveStation
+pub ai6::directorates::registry::accounts::LoginRequestAction::RemoveStation::station: alloc::string::String
+pub ai6::directorates::registry::accounts::LoginRequestAction::SignOutAndForget
 pub struct ai6::directorates::registry::accounts::AccountCandidate
 pub ai6::directorates::registry::accounts::AccountCandidate::account: alloc::string::String
 pub ai6::directorates::registry::accounts::AccountCandidate::max_concurrent: core::option::Option<usize>
@@ -4273,6 +4324,7 @@ pub ai6::directorates::registry::accounts::AccountProfile::labels: alloc::collec
 pub ai6::directorates::registry::accounts::AccountProfile::max_concurrent: core::option::Option<usize>
 pub ai6::directorates::registry::accounts::AccountProfile::operations: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::registry::accounts::AccountProfile::priority: i64
+pub ai6::directorates::registry::accounts::AccountProfile::sealed_login: bool
 impl ai6::directorates::registry::accounts::AccountProfile
 pub fn ai6::directorates::registry::accounts::AccountProfile::of(&ai6::AccountPool, &str, alloc::vec::Vec<alloc::string::String>) -> core::option::Option<Self>
 pub struct ai6::directorates::registry::accounts::AccountRef
@@ -4298,14 +4350,21 @@ pub fn ai6::directorates::registry::accounts::AccountState::live_claims(&self, f
 pub fn ai6::directorates::registry::accounts::AccountState::new(ai6::directorates::registry::accounts::AccountRef) -> Self
 pub fn ai6::directorates::registry::accounts::AccountState::profile(&self) -> core::option::Option<ai6::directorates::registry::accounts::AccountProfile>
 pub fn ai6::directorates::registry::accounts::AccountState::tokens_on_day(&self, i64) -> u64
+#[non_exhaustive] pub struct ai6::directorates::registry::accounts::LoginRequest
+pub ai6::directorates::registry::accounts::LoginRequest::action: ai6::directorates::registry::accounts::LoginRequestAction
+pub ai6::directorates::registry::accounts::LoginRequest::at: f64
+pub ai6::directorates::registry::accounts::LoginRequest::by: alloc::string::String
 #[non_exhaustive] pub struct ai6::directorates::registry::accounts::LoginState
 pub ai6::directorates::registry::accounts::LoginState::checked_at: core::option::Option<f64>
 pub ai6::directorates::registry::accounts::LoginState::expires_at: core::option::Option<f64>
 pub ai6::directorates::registry::accounts::LoginState::failures: u32
+pub ai6::directorates::registry::accounts::LoginState::last_attempt_at: core::option::Option<f64>
+pub ai6::directorates::registry::accounts::LoginState::last_result: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::accounts::LoginState::lease: core::option::Option<ai6::directorates::registry::accounts::RenewalLease>
 pub ai6::directorates::registry::accounts::LoginState::needs_person: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::accounts::LoginState::next_try: core::option::Option<f64>
 pub ai6::directorates::registry::accounts::LoginState::renewed_at: core::option::Option<f64>
+pub ai6::directorates::registry::accounts::LoginState::requests: alloc::vec::Vec<ai6::directorates::registry::accounts::LoginRequest>
 pub ai6::directorates::registry::accounts::LoginState::revision: u64
 pub ai6::directorates::registry::accounts::LoginState::stations: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::registry::accounts::LoginState::warned_at: core::option::Option<f64>
@@ -9820,6 +9879,7 @@ pub const ai6::station::server::DEFAULT_CONFIG_POLL: core::time::Duration
 pub const ai6::station::server::DEFAULT_LISTEN: core::net::socket_addr::SocketAddr
 pub const ai6::station::server::DEFAULT_MAX_CONCURRENT_MISSIONS: usize
 pub const ai6::station::server::DEFAULT_RESOURCES_EVERY: core::time::Duration
+pub fn ai6::station::server::open_sealing_vault(&std::path::Path, &alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>, &str) -> core::io::error::Result<alloc::sync::Arc<ai6::directorates::q::sealing::Vault>>
 pub async fn ai6::station::server::serve<F>(core::net::socket_addr::SocketAddr, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
 pub async fn ai6::station::server::serve_with_capacity<F>(core::net::socket_addr::SocketAddr, usize, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
 pub async fn ai6::station::server::serve_with_config_dir<F>(core::net::socket_addr::SocketAddr, &[std::path::PathBuf], &std::path::Path, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
@@ -10125,6 +10185,12 @@ pub fn ai6::directorates::registry::bona_fides::KeepVerified::to_value_in(&self,
 #[non_exhaustive] pub enum ai6::LeaseRecovery
 pub ai6::LeaseRecovery::Failed
 pub ai6::LeaseRecovery::Requeued
+#[non_exhaustive] pub enum ai6::LoginRequestAction
+pub ai6::LoginRequestAction::AddStation
+pub ai6::LoginRequestAction::AddStation::station: alloc::string::String
+pub ai6::LoginRequestAction::RemoveStation
+pub ai6::LoginRequestAction::RemoveStation::station: alloc::string::String
+pub ai6::LoginRequestAction::SignOutAndForget
 #[non_exhaustive] pub enum ai6::MemoryError
 pub ai6::MemoryError::Changed
 pub ai6::MemoryError::Changed::revision: u64
@@ -10535,6 +10601,8 @@ pub fn ai6::Account::label(self, impl core::convert::Into<alloc::string::String>
 pub fn ai6::Account::labels(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub fn ai6::Account::login_dir(&self) -> core::option::Option<&std::path::Path>
 pub fn ai6::Account::login_files(&self) -> &[alloc::string::String]
+pub fn ai6::Account::logout(&self) -> &[alloc::string::String]
+pub fn ai6::Account::logout_command(self, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
 pub fn ai6::Account::max_concurrent(self, usize) -> Self
 pub fn ai6::Account::name(&self) -> &str
 pub fn ai6::Account::new(impl core::convert::Into<alloc::string::String>, ai6::AccountKind) -> Self
@@ -10603,6 +10671,7 @@ pub ai6::AccountProfile::labels: alloc::collections::btree::map::BTreeMap<alloc:
 pub ai6::AccountProfile::max_concurrent: core::option::Option<usize>
 pub ai6::AccountProfile::operations: alloc::vec::Vec<alloc::string::String>
 pub ai6::AccountProfile::priority: i64
+pub ai6::AccountProfile::sealed_login: bool
 impl ai6::directorates::registry::accounts::AccountProfile
 pub fn ai6::directorates::registry::accounts::AccountProfile::of(&ai6::AccountPool, &str, alloc::vec::Vec<alloc::string::String>) -> core::option::Option<Self>
 pub struct ai6::AccountRef
@@ -12447,14 +12516,21 @@ impl ai6::directorates::registry::limits::LogbookLimits
 pub fn ai6::directorates::registry::limits::LogbookLimits::record_bytes(&self) -> ai6::bounds::Limit
 impl core::default::Default for ai6::directorates::registry::limits::LogbookLimits
 pub fn ai6::directorates::registry::limits::LogbookLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::LoginRequest
+pub ai6::LoginRequest::action: ai6::directorates::registry::accounts::LoginRequestAction
+pub ai6::LoginRequest::at: f64
+pub ai6::LoginRequest::by: alloc::string::String
 #[non_exhaustive] pub struct ai6::LoginState
 pub ai6::LoginState::checked_at: core::option::Option<f64>
 pub ai6::LoginState::expires_at: core::option::Option<f64>
 pub ai6::LoginState::failures: u32
+pub ai6::LoginState::last_attempt_at: core::option::Option<f64>
+pub ai6::LoginState::last_result: core::option::Option<alloc::string::String>
 pub ai6::LoginState::lease: core::option::Option<ai6::directorates::registry::accounts::RenewalLease>
 pub ai6::LoginState::needs_person: core::option::Option<alloc::string::String>
 pub ai6::LoginState::next_try: core::option::Option<f64>
 pub ai6::LoginState::renewed_at: core::option::Option<f64>
+pub ai6::LoginState::requests: alloc::vec::Vec<ai6::directorates::registry::accounts::LoginRequest>
 pub ai6::LoginState::revision: u64
 pub ai6::LoginState::stations: alloc::vec::Vec<alloc::string::String>
 pub ai6::LoginState::warned_at: core::option::Option<f64>
@@ -15787,6 +15863,7 @@ pub fn ai6::micro_usd(f64) -> u64
 pub fn ai6::models_of(&ai6::directorates::m::roster::Agent) -> alloc::collections::btree::set::BTreeSet<alloc::string::String>
 pub fn ai6::narrow_to_key(&mut coqui_access::model::Person, &str, &[ai6::KeyScope])
 pub fn ai6::new_uid() -> alloc::string::String
+pub fn ai6::open_sealing_vault(&std::path::Path, &alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>, &str) -> core::io::error::Result<alloc::sync::Arc<ai6::directorates::q::sealing::Vault>>
 pub fn ai6::page_call_digest(&str) -> alloc::string::String
 pub fn ai6::place(&ai6::directorates::m::placement::OperationPolicy, &ai6::directorates::m::placement::PlacementRequest, &[ai6::directorates::m::placement::StationFacts]) -> ai6::directorates::m::placement::Placement
 pub fn ai6::probe_resources(&ai6::directorates::q::transport::TransportClient, &ai6::directorates::q::transport::Capabilities, &ai6::station::limits::ProvisionLimits) -> core::result::Result<ai6::directorates::m::placement::Resources, alloc::string::String>

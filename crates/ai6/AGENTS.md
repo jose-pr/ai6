@@ -6473,4 +6473,9 @@ declare (or a value it does not accept), naming the provider and the key. `handl
 - `ai6 quarantine list|add <AGENT> <REASON> [--operation ID | --all]|release <AGENT> (--operation ID | --all)`:
   stop an Agent, or lift that, through the Registry; a Station applies the change within a
   scheduler tick.
+- `ai6 pools list|add-login <POOL> <ACCOUNT> --handler <H> [--from DIR] [--station S]... [--replace]|add-station|remove-station <POOL> <ACCOUNT> <STATION>|remove-login <POOL> <ACCOUNT> [--sign-out]`:
+  a person's acts on a `harness-login` account's sealed login, run on a host whose Station holds the key
+  (`[station] id` or the `station-id` file names the Station). The files read are the account's `files`;
+  `--handler` must be its pool's. Each act is audited first (`pool.login.add|replace|station.add|
+  station.remove|sign_out|forget`) and a refused audit refuses it. Nothing it prints holds a login.
 - User-facing management goes through Universal Exports and the separate `ai6ctl` command.

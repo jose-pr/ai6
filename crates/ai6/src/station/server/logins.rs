@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 
+use crate::directorates::q::login_admin::{Commands, apply_requests};
 use crate::directorates::q::logins::{
     CommandRenewer, LoginNotice, NoticeKind, RunLogin, Synced, assign_renewals, login_accounts,
     run_leases, sealed_name,
@@ -328,6 +329,15 @@ pub(super) fn run_renewals(state: &DaemonState) {
         Ok(notices) => notices.iter().for_each(|notice| tell(state, notice)),
         Err(error) => eprintln!("ai6: leased renewals did not run: {error}"),
     }
+    let commands = Commands {
+        renewer: &CommandRenewer,
+        scratch: &scratch,
+        timeout: state.station.limits().accounts.renew_timeout.0,
+    };
+    match apply_requests(vault, &logins, commands, state.clock.now() as f64) {
+        Ok(notices) => notices.iter().for_each(|notice| tell(state, notice)),
+        Err(error) => eprintln!("ai6: requested login changes did not run: {error}"),
+    }
 }
 
 pub(super) fn end_renewals(state: &DaemonState) {
@@ -372,7 +382,10 @@ fn tell(state: &DaemonState, notice: &LoginNotice) {
         NoticeKind::Renewed => "pool.login.renewed",
         NoticeKind::NeedsPerson => "pool.login.needs_person",
         NoticeKind::MayLapse => "pool.login.may_lapse",
-        NoticeKind::Leased(_) | NoticeKind::Unchanged | NoticeKind::Failed => return,
+        NoticeKind::Leased(_)
+        | NoticeKind::Unchanged
+        | NoticeKind::Failed
+        | NoticeKind::Changed => return,
     };
     audit(state, action, &notice.account);
     if !matches!(notice.kind, NoticeKind::NeedsPerson | NoticeKind::MayLapse) {

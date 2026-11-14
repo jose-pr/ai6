@@ -1450,3 +1450,189 @@ fn config_keeps_only_what_concerns_the_bootstrap_file() {
         assert!(help.contains(kept), "{kept}: {help}");
     }
 }
+
+/// Every file under `root`, read whole, so a planted value can be looked for in all of them.
+fn files_under(root: &std::path::Path) -> Vec<(std::path::PathBuf, Vec<u8>)> {
+    let mut found = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if let Ok(bytes) = std::fs::read(&path) {
+                found.push((path, bytes));
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn a_login_is_added_from_a_host_shared_with_a_station_and_forgotten_and_never_printed() {
+    const PLANTED: &str = "planted-refresh-0451";
+    let dir = tempfile::tempdir().unwrap();
+    let (succeed, fail): (&[&str], &[&str]) = if cfg!(windows) {
+        (&["cmd", "/c", "exit 0"], &["cmd", "/c", "exit 1"])
+    } else {
+        (&["true"], &["false"])
+    };
+    let quoted = |argv: &[&str]| {
+        format!(
+            "[{}]",
+            argv.iter()
+                .map(|part| format!("\"{part}\""))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    std::fs::write(
+        dir.path().join("loadouts.toml"),
+        format!(
+            "[pool.free]\nhandler = \"acp\"\n\
+             [pool.free.account.plain]\nkind = \"harness-login\"\nfiles = [\".fake/auth.json\"]\n\
+             [pool.free.account.good]\nkind = \"harness-login\"\nfiles = [\".fake/auth.json\"]\nlogout_command = {}\n\
+             [pool.free.account.bad]\nkind = \"harness-login\"\nfiles = [\".fake/auth.json\"]\nlogout_command = {}\n",
+            quoted(succeed),
+            quoted(fail)
+        ),
+    )
+    .unwrap();
+    let host_a = bootstrap(
+        dir.path(),
+        "id = \"host-a\"\n[registry]\nlocation = \"registry\"\n",
+    );
+    let host_b = dir.path().join("ai6.b.cfg");
+    std::fs::write(
+        &host_b,
+        "[station]\nstate_dir = \"state-b\"\nid = \"host-b\"\n[registry]\nlocation = \"registry\"\n",
+    )
+    .unwrap();
+    let signed_in = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(signed_in.path().join(".fake")).unwrap();
+    std::fs::write(
+        signed_in.path().join(".fake/auth.json"),
+        format!("{{\"refresh_token\":\"{PLANTED}\",\"expires_at\":4102444800}}"),
+    )
+    .unwrap();
+    let run = |config: &std::path::Path, args: &[&str]| {
+        let output = ai6()
+            .arg("pools")
+            .args(args)
+            .arg("--config")
+            .arg(config)
+            .output()
+            .expect("the AI6 command should start");
+        let (out, err) = (
+            String::from_utf8(output.stdout).unwrap(),
+            String::from_utf8(output.stderr).unwrap(),
+        );
+        assert!(
+            !out.contains(PLANTED) && !err.contains(PLANTED),
+            "a login's contents are never printed: {out}{err}"
+        );
+        (output.status.success(), format!("{out}{err}"))
+    };
+    let from = signed_in.path().to_str().unwrap();
+    let add = |account: &str, extra: &[&str]| {
+        let mut args = vec![
+            "add-login",
+            "free",
+            account,
+            "--handler",
+            "acp",
+            "--from",
+            from,
+        ];
+        args.extend_from_slice(extra);
+        run(&host_a, &args)
+    };
+
+    // The wrong handler is refused; a file that is not there is refused.
+    let (ok, text) = run(
+        &host_a,
+        &[
+            "add-login",
+            "free",
+            "plain",
+            "--handler",
+            "claude",
+            "--from",
+            from,
+        ],
+    );
+    assert!(!ok && text.contains("serves the handler"), "{text}");
+    let empty = tempfile::tempdir().unwrap();
+    let (ok, text) = run(
+        &host_a,
+        &[
+            "add-login",
+            "free",
+            "plain",
+            "--handler",
+            "acp",
+            "--from",
+            empty.path().to_str().unwrap(),
+        ],
+    );
+    assert!(!ok && text.contains("no file"), "{text}");
+
+    for account in ["plain", "good", "bad"] {
+        let (ok, text) = add(account, &[]);
+        assert!(
+            ok && text.contains(&format!("Sealed free/{account}'s login to host-a")),
+            "{text}"
+        );
+    }
+    assert!(signed_in.path().join(".fake/auth.json").exists());
+    // Sealed: the planted refresh token is in no file of the Registry or the Station's state.
+    for (path, bytes) in files_under(dir.path()) {
+        assert!(
+            !String::from_utf8_lossy(&bytes).contains(PLANTED),
+            "{}",
+            path.display()
+        );
+    }
+    let (ok, text) = add("plain", &[]);
+    assert!(!ok && text.contains("--replace"), "{text}");
+    let (ok, text) = add("plain", &["--replace"]);
+    assert!(ok, "{text}");
+    let (_, listed) = run(&host_a, &["list"]);
+    assert!(listed.contains("free/plain\tsealed to host-a"), "{listed}");
+
+    // Another Station is added by one that holds the login, once it has published its key.
+    let (ok, text) = run(&host_a, &["add-station", "free", "good", "host-b"]);
+    assert!(
+        !ok && text.contains("host-b"),
+        "no key published yet: {text}"
+    );
+    let (ok, _) = run(&host_b, &["remove-station", "free", "good", "host-a"]);
+    assert!(!ok, "host-b holds nothing, but its key is now published");
+    let (ok, text) = run(&host_a, &["add-station", "free", "good", "host-b"]);
+    assert!(ok, "{text}");
+    let (_, listed) = run(&host_a, &["list"]);
+    assert!(
+        listed.contains("free/good\tsealed to host-a, host-b"),
+        "{listed}"
+    );
+    let (ok, text) = run(&host_a, &["remove-station", "free", "good", "host-b"]);
+    assert!(ok, "{text}");
+    let (ok, text) = run(&host_a, &["remove-station", "free", "good", "host-a"]);
+    assert!(!ok, "the last Station stays: {text}");
+
+    // Removing: signing out needs a command and keeps the login when it fails.
+    let (ok, text) = run(&host_a, &["remove-login", "free", "plain", "--sign-out"]);
+    assert!(!ok && text.contains("logout_command"), "{text}");
+    let (ok, text) = run(&host_a, &["remove-login", "free", "bad", "--sign-out"]);
+    assert!(!ok && text.contains("the login was kept"), "{text}");
+    let (ok, text) = run(&host_a, &["remove-login", "free", "good", "--sign-out"]);
+    assert!(ok && text.contains("out at its provider"), "{text}");
+    let (ok, text) = run(&host_a, &["remove-login", "free", "bad"]);
+    assert!(ok && text.contains("still signed in"), "{text}");
+    let (_, listed) = run(&host_a, &["list"]);
+    assert!(listed.contains("free/plain\tsealed to host-a"), "{listed}");
+    assert!(
+        !listed.contains("free/good\t") && !listed.contains("free/bad\t"),
+        "{listed}"
+    );
+}

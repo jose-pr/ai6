@@ -507,6 +507,7 @@ mod tests {
             priority: 0,
             max_concurrent: None,
             labels: BTreeMap::new(),
+            sealed_login: false,
         };
         state
             .intake
@@ -883,6 +884,7 @@ mod tests {
             priority: 0,
             max_concurrent: None,
             labels: BTreeMap::new(),
+            sealed_login: false,
         };
         state
             .intake

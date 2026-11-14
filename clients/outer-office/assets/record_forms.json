@@ -6743,6 +6743,16 @@
                 "description": "Environment the renew command gets.",
                 "x-advanced": true,
                 "default": {}
+              },
+              "logout_command": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "title": "Sign-out command",
+                "description": "The command that signs the login out at its provider, when its CLI has one.",
+                "x-advanced": true,
+                "default": []
               }
             },
             "additionalProperties": false,

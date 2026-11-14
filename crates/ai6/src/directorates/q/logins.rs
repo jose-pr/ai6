@@ -32,10 +32,7 @@ use crate::directorates::registry::backend::RegistryBackend;
 use crate::directorates::registry::sealed::SealedExpect;
 use crate::station::limits::AccountLimits;
 
-/// The name of the sealed value holding `account`'s login.
-pub fn sealed_name(account: &AccountRef) -> String {
-    format!("login/{}/{}", account.pool, account.account)
-}
+pub use super::login_standing::sealed_name;
 
 /// The files of one login, by path relative to a home. `Debug` shows the paths alone, and the bytes
 /// are overwritten when it is dropped.
@@ -137,7 +134,7 @@ impl LoginFiles {
         rendered
     }
 
-    fn from_value(value: &str) -> Option<Self> {
+    pub(super) fn from_value(value: &str) -> Option<Self> {
         let text = base64::engine::general_purpose::STANDARD;
         let mut document: serde_json::Value = serde_json::from_str(value).ok()?;
         let read = document.as_object().and_then(|files| {
@@ -433,6 +430,8 @@ pub fn add_login(
                 revision,
                 expires_at,
                 renewed_at: Some(now),
+                last_result: Some("added".to_owned()),
+                last_attempt_at: Some(now),
                 ..LoginState::default()
             });
         })
@@ -468,6 +467,8 @@ fn note_revision(
                 state.next_try = None;
                 state.warned_at = None;
                 state.needs_person = None;
+                state.last_result = Some("renewed".to_owned());
+                state.last_attempt_at = renewed;
             }
         })
         .map_err(VaultError::from)?;
@@ -677,6 +678,12 @@ pub enum RenewEnd {
 pub trait LoginRenewer: Send + Sync {
     /// Runs `account`'s command with `home` as its home, for no longer than `timeout`.
     fn renew(&self, account: &Account, home: &Path, timeout: Duration) -> RenewEnd;
+
+    /// Runs `account`'s sign-out command the same way, to end the login at its provider.
+    fn sign_out(&self, account: &Account, home: &Path, timeout: Duration) -> RenewEnd {
+        let _ = (account, home, timeout);
+        RenewEnd::NotRun("no sign-out command".to_owned())
+    }
 }
 
 /// Runs the command with `HOME` (and `USERPROFILE`) at the throwaway home, the account's
@@ -687,44 +694,55 @@ pub struct CommandRenewer;
 
 impl LoginRenewer for CommandRenewer {
     fn renew(&self, account: &Account, home: &Path, timeout: Duration) -> RenewEnd {
-        let Some((program, arguments)) = account.renewal().split_first() else {
-            return RenewEnd::NotRun("no renewal command".to_owned());
-        };
-        let mut command = Command::new(program);
-        command
-            .args(arguments)
-            .current_dir(home)
-            .env_clear()
-            .env("HOME", home)
-            .env("USERPROFILE", home)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        for name in ["PATH", "SYSTEMROOT", "TEMP", "TMP", "WINDIR"] {
-            if let Some(value) = std::env::var_os(name) {
-                command.env(name, value);
-            }
+        run_command(account.renewal(), account.renewal_env(), home, timeout)
+    }
+
+    fn sign_out(&self, account: &Account, home: &Path, timeout: Duration) -> RenewEnd {
+        run_command(account.logout(), &BTreeMap::new(), home, timeout)
+    }
+}
+
+fn run_command(
+    argv: &[String],
+    env: &BTreeMap<String, String>,
+    home: &Path,
+    timeout: Duration,
+) -> RenewEnd {
+    let Some((program, arguments)) = argv.split_first() else {
+        return RenewEnd::NotRun("no command".to_owned());
+    };
+    let mut command = Command::new(program);
+    command
+        .args(arguments)
+        .current_dir(home)
+        .env_clear()
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    for name in ["PATH", "SYSTEMROOT", "TEMP", "TMP", "WINDIR"] {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
         }
-        command.envs(account.renewal_env());
-        let mut child = match command.spawn() {
-            Ok(child) => child,
-            Err(error) => return RenewEnd::NotRun(format!("{program}: {error}")),
-        };
-        let deadline = Instant::now() + timeout;
-        loop {
-            match child.try_wait() {
-                Ok(Some(status)) if status.success() => return RenewEnd::Success,
-                Ok(Some(status)) => return RenewEnd::Failed(status.code()),
-                Ok(None) if Instant::now() >= deadline => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return RenewEnd::NotRun(format!(
-                        "{program} did not finish within {timeout:?}"
-                    ));
-                }
-                Ok(None) => std::thread::sleep(Duration::from_millis(50)),
-                Err(error) => return RenewEnd::NotRun(format!("{program}: {error}")),
+    }
+    command.envs(env);
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => return RenewEnd::NotRun(format!("{program}: {error}")),
+    };
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => return RenewEnd::Success,
+            Ok(Some(status)) => return RenewEnd::Failed(status.code()),
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return RenewEnd::NotRun(format!("{program} did not finish within {timeout:?}"));
             }
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Err(error) => return RenewEnd::NotRun(format!("{program}: {error}")),
         }
     }
 }
@@ -744,6 +762,8 @@ pub enum NoticeKind {
     NeedsPerson,
     /// It may lapse, and nothing can renew it with no model turn.
     MayLapse,
+    /// A person's request to add or remove a Station, or to sign out, was made.
+    Changed,
 }
 
 /// One thing a round did or found. The text names files and exit codes, never their contents.
@@ -1025,6 +1045,12 @@ fn settle(
             return;
         };
         state.lease = None;
+        state.last_attempt_at = Some(now);
+        state.last_result = Some(match &failure {
+            Some(reason) => format!("failed: {reason}"),
+            None if matches!(outcome, Outcome::Renewed) => "renewed".to_owned(),
+            None => "unchanged".to_owned(),
+        });
         match &failure {
             None => {
                 if !matches!(outcome, Outcome::Renewed) {

@@ -77,6 +77,10 @@ ai6 sleeper [--config PATH] list
 ai6 sleeper [--config PATH] authorize OPERATION NAME
 ai6 sleeper [--config PATH] revoke OPERATION NAME
 ai6 quarantine [--config PATH] list|add|release ...
+ai6 pools [--config PATH] list
+ai6 pools [--config PATH] add-login POOL ACCOUNT --handler HANDLER [--from DIR] [--station STATION]... [--replace]
+ai6 pools [--config PATH] add-station|remove-station POOL ACCOUNT STATION
+ai6 pools [--config PATH] remove-login POOL ACCOUNT [--sign-out]
 ai6 config path [--config PATH]
 ai6 config public [--output PATH] [--config PATH]
 ai6 config schema [SECTION]

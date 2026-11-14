@@ -179,6 +179,7 @@ pub struct Account {
     files: Vec<String>,
     renew_command: Vec<String>,
     renew_env: BTreeMap<String, String>,
+    logout_command: Vec<String>,
 }
 
 impl Account {
@@ -198,6 +199,7 @@ impl Account {
             files: Vec::new(),
             renew_command: Vec::new(),
             renew_env: BTreeMap::new(),
+            logout_command: Vec::new(),
         }
     }
 
@@ -214,6 +216,15 @@ impl Account {
     #[must_use]
     pub fn renew_command(mut self, command: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.renew_command = command.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// The program and arguments that sign the login out at its provider, run with its home as
+    /// `HOME` and working directory. None: the CLI has no way to, and removing the account only
+    /// forgets its login.
+    #[must_use]
+    pub fn logout_command(mut self, command: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.logout_command = command.into_iter().map(Into::into).collect();
         self
     }
 
@@ -321,6 +332,11 @@ impl Account {
     /// The variables the renewal command is given.
     pub fn renewal_env(&self) -> &BTreeMap<String, String> {
         &self.renew_env
+    }
+
+    /// The program and arguments that sign its login out at the provider.
+    pub fn logout(&self) -> &[String] {
+        &self.logout_command
     }
 
     /// The variable the harness reads the credential or directory from, given the pool's
@@ -587,6 +603,12 @@ impl AccountPool {
                 && (!account.renew_command.is_empty() || !account.renew_env.is_empty())
             {
                 return Err(at("`renew_command` and `renew_env` need `files`"));
+            }
+            if account.files.is_empty() && !account.logout_command.is_empty() {
+                return Err(at("`logout_command` needs `files`"));
+            }
+            if account.logout_command.iter().any(|part| part.is_empty()) {
+                return Err(at("`logout_command` needs a program"));
             }
             if account.renew_command.iter().any(|part| part.is_empty())
                 || (account.renew_command.is_empty() && !account.renew_env.is_empty())

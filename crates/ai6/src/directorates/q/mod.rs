@@ -7,6 +7,9 @@ mod secrets;
 
 pub mod ephemeral;
 #[cfg(feature = "daemon")]
+pub mod login_admin;
+pub mod login_standing;
+#[cfg(feature = "daemon")]
 pub mod logins;
 pub mod outbound;
 pub mod overlays;
@@ -769,6 +772,8 @@ struct RawAccount {
     renew_command: Vec<String>,
     #[serde(default)]
     renew_env: BTreeMap<String, String>,
+    #[serde(default)]
+    logout_command: Vec<String>,
 }
 
 impl RawPool {
@@ -809,7 +814,10 @@ impl RawPool {
             for (key, value) in raw.labels {
                 account = account.label(key, value);
             }
-            account = account.files(raw.files).renew_command(raw.renew_command);
+            account = account
+                .files(raw.files)
+                .renew_command(raw.renew_command)
+                .logout_command(raw.logout_command);
             for (key, value) in raw.renew_env {
                 account = account.renew_env(key, value);
             }

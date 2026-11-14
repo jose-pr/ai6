@@ -736,6 +736,20 @@ fn recover_startup_missions(missions: &mut MissionStore) -> io::Result<BTreeSet<
     Ok(pending)
 }
 
+/// Opens this host's sealing key in `dir` (made on first use) and publishes its public half for
+/// `station`, as a serving Station does: how a command run on a host acts for its Station.
+///
+/// # Errors
+///
+/// When the key cannot be read or made, or the Registry cannot be written.
+pub fn open_sealing_vault(
+    dir: &std::path::Path,
+    registry: &Arc<dyn RegistryBackend>,
+    station: &str,
+) -> io::Result<Arc<crate::directorates::q::sealing::Vault>> {
+    logins::open_vault(dir, registry, station)
+}
+
 /// Runs the daemon with explicit configuration, including optional Universal Exports publication.
 pub async fn serve_with_options<F>(mut config: ServeConfig, shutdown: F) -> io::Result<()>
 where

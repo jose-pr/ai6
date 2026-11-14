@@ -433,6 +433,10 @@ pub(crate) struct AccountForm {
     #[schema(title = "Renew environment", advanced)]
     #[map(default)]
     renew_env: BTreeMap<String, String>,
+    /// The command that signs the login out at its provider, when its CLI has one.
+    #[schema(title = "Sign-out command", advanced)]
+    #[map(default)]
+    logout_command: Vec<String>,
 }
 
 /// An account pool: the keys of a `[pool.<id>]` table.

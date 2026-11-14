@@ -597,7 +597,8 @@ fn family_example(record: ConfigRecord) -> Value {
                     "labels": {"tier": "max"},
                     "files": [],
                     "renew_command": [],
-                    "renew_env": {}
+                    "renew_env": {},
+                    "logout_command": []
                 }
             }
         }),
