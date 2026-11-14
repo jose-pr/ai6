@@ -88,7 +88,7 @@ async fn charge_with_a_run(root: &Path, tag: &str) -> (DaemonState, String) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn attaching_replays_the_history_then_a_prompt_is_a_turn_of_the_same_run() {
     let root = tempfile::tempdir().unwrap();
-    let tag = "a1";
+    let tag = "hub1";
     let (state, run) = charge_with_a_run(root.path(), tag).await;
     let hub: Arc<dyn RunHub> = state.hub.clone();
 
@@ -148,7 +148,7 @@ async fn attaching_replays_the_history_then_a_prompt_is_a_turn_of_the_same_run()
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn two_attached_people_see_a_turn_and_the_first_answer_to_a_request_decides() {
     let root = tempfile::tempdir().unwrap();
-    let tag = "a2";
+    let tag = "hub2";
     let (state, _) = charge_with_a_run(root.path(), tag).await;
     let hub: Arc<dyn RunHub> = state.hub.clone();
     let one = hub.attach(&target(tag), "c1", "alice", None).unwrap();
@@ -218,7 +218,7 @@ async fn two_attached_people_see_a_turn_and_the_first_answer_to_a_request_decide
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_prompt_during_a_wake_waits_for_the_wake_to_end() {
     let root = tempfile::tempdir().unwrap();
-    let tag = "a3";
+    let tag = "hub3";
     let state = station(root.path(), tag, "test", "", "");
     let (release, gate) = channel::<()>();
     let gate = Mutex::new(gate);
@@ -276,7 +276,7 @@ async fn a_prompt_during_a_wake_waits_for_the_wake_to_end() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn detaching_leaves_the_run_running_and_a_later_attach_picks_it_up() {
     let root = tempfile::tempdir().unwrap();
-    let tag = "a4";
+    let tag = "hub4";
     let (state, _) = charge_with_a_run(root.path(), tag).await;
     let hub: Arc<dyn RunHub> = state.hub.clone();
     let first = hub.attach(&target(tag), "c1", "alice", None).unwrap();
@@ -316,7 +316,7 @@ async fn detaching_leaves_the_run_running_and_a_later_attach_picks_it_up() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_interrupt_ends_the_turn_under_way_and_nothing_else() {
     let root = tempfile::tempdir().unwrap();
-    let tag = "a5";
+    let tag = "hub5";
     let (state, _) = charge_with_a_run(root.path(), tag).await;
     let hub: Arc<dyn RunHub> = state.hub.clone();
     let attachment = hub.attach(&target(tag), "c1", "alice", None).unwrap();
@@ -352,7 +352,7 @@ async fn an_interrupt_ends_the_turn_under_way_and_nothing_else() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_closed_run_tells_its_people_and_refuses_new_ones() {
     let root = tempfile::tempdir().unwrap();
-    let tag = "a6";
+    let tag = "hub6";
     let (state, _) = charge_with_a_run(root.path(), tag).await;
     let hub: Arc<dyn RunHub> = state.hub.clone();
     let attachment = hub.attach(&target(tag), "c1", "alice", None).unwrap();
