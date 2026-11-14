@@ -7,6 +7,15 @@ import 'attach_view.dart';
 /// The Mission states in which a Run may be live to attach to.
 const _liveStates = {'working', 'blocked', 'stalled'};
 
+/// The names the Run's frames know [session]'s person by.
+Set<String> attachNames(UserSessionSummary? session) => {
+  if (session != null) ...[
+    session.personId,
+    session.name,
+    ?session.displayName,
+  ],
+};
+
 /// A Mission's live Run to attach to, for a person with `mission.control` on its Operation.
 /// It attaches only once opened, and leaving or closing it detaches; the Run goes on.
 class MissionAttachSection extends StatelessWidget {
@@ -15,6 +24,7 @@ class MissionAttachSection extends StatelessWidget {
     required this.operationId,
     required this.missionId,
     required this.state,
+    this.agent,
     this.connect,
     super.key,
   });
@@ -23,6 +33,9 @@ class MissionAttachSection extends StatelessWidget {
   final String operationId;
   final String missionId;
   final String state;
+
+  /// The codename of the Agent on the Mission's Run, which labels its messages.
+  final String? agent;
 
   /// Opens the attach socket; tests give a fake one. The gateway's by default.
   final AttachChannel Function()? connect;
@@ -53,6 +66,8 @@ class MissionAttachSection extends StatelessWidget {
               target: MissionTarget(operationId, missionId),
               connect: connect ?? () => connectAttach(board.apiOrigin),
               canInterrupt: true,
+              agent: agent,
+              me: attachNames(board.userSession),
             ),
           ),
         ],

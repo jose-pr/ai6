@@ -173,6 +173,7 @@ class MissionDetail extends StatelessWidget {
             operationId: operationId,
             missionId: mission.missionId,
             state: mission.state,
+            agent: latest?.agent,
             connect: attachConnect,
           ),
           MissionOutcomeSection(

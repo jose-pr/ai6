@@ -7,7 +7,6 @@ import 'package:material_ui/material_ui.dart';
 import '../held/held_briefs_page.dart' show revealInvisible;
 import '../routes/oo_route.dart';
 import '../settings/oo_config.dart' show ControlSettings;
-import '../shell/oo_markdown.dart';
 import '../shell/oo_shell.dart' show OoPage;
 import '../theme/oo_theme.dart';
 import 'assistant_controller.dart';
@@ -19,7 +18,7 @@ import 'export.dart' as exporting;
 import 'mission_draft.dart';
 import 'pages.dart';
 import 'transcripts.dart';
-import 'turns.dart';
+import 'chat_transcript.dart';
 import 'navigation_card.dart';
 
 /// The chat with Moneypenny: her answers, the tools she used, her views and the changes she
@@ -386,15 +385,7 @@ class _AssistantPanelState extends State<AssistantPanel> {
   }
 
   /// [child] kept to [AssistantPanel.textWidth], centred, where one is set.
-  Widget _column(Widget child) => switch (widget.textWidth) {
-    null => child,
-    final width => Center(
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: width),
-        child: child,
-      ),
-    ),
-  };
+  Widget _column(Widget child) => chatColumn(widget.textWidth, child);
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -571,41 +562,22 @@ class _AssistantPanelState extends State<AssistantPanel> {
               ),
             ),
           Expanded(
-            child: ListView(
-              padding: const EdgeInsets.all(12),
-              reverse: true,
-              children: [
-                // Reversed: the oldest last.
-                for (final item in turnsOf(
-                  controller.entries,
-                  busy: controller.busy,
-                ).reversed)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: switch (item) {
-                      SourcesItem() => _column(SourcesChecked(item: item)),
-                      EntryItem(:final entry) => switch (_EntryView(
-                        entry: entry,
-                        controller: controller,
-                        onOpen: widget.onOpen,
-                        proposalWait: widget.proposalWait,
-                        pageActions: widget.pageActions,
-                        missions: widget.missions,
-                        imageLoader: widget.imageLoader,
-                      )) {
-                        // Views are tables and charts: they take the whole width.
-                        final view when entry.role == 'view' => view,
-                        final other => _column(other),
-                      },
-                    },
-                  ),
-                if (controller.earlier > 0)
-                  Text(
-                    '${controller.earlier} earlier entries are not shown.',
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.bodySmall,
-                  ),
-              ],
+            child: ChatTranscript(
+              entries: controller.entries,
+              busy: controller.busy,
+              earlier: controller.earlier,
+              textWidth: widget.textWidth,
+              // Views are tables and charts: they take the whole width.
+              wide: (entry) => entry.role == 'view',
+              entryBuilder: (context, entry) => _EntryView(
+                entry: entry,
+                controller: controller,
+                onOpen: widget.onOpen,
+                proposalWait: widget.proposalWait,
+                pageActions: widget.pageActions,
+                missions: widget.missions,
+                imageLoader: widget.imageLoader,
+              ),
             ),
           ),
           if (controller.connected &&
@@ -629,32 +601,21 @@ class _AssistantPanelState extends State<AssistantPanel> {
               ),
             ),
           if (controller.busy) const LinearProgressIndicator(),
-          if (controller.problem != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Semantics(
-                      liveRegion: true,
-                      child: Text(
-                        controller.problem!,
-                        style: TextStyle(color: theme.colorScheme.error),
-                      ),
-                    ),
+          if (controller.problem case final problem?)
+            ChatProblemLine(
+              text: problem,
+              actions: [
+                if (!controller.connected && !controller.connecting)
+                  TextButton(
+                    onPressed: controller.retry,
+                    child: const Text('Try again'),
                   ),
-                  if (!controller.connected && !controller.connecting)
-                    TextButton(
-                      onPressed: controller.retry,
-                      child: const Text('Try again'),
-                    ),
-                  if (controller.reconnecting)
-                    TextButton(
-                      onPressed: controller.stopRetrying,
-                      child: const Text('Stop trying'),
-                    ),
-                ],
-              ),
+                if (controller.reconnecting)
+                  TextButton(
+                    onPressed: controller.stopRetrying,
+                    child: const Text('Stop trying'),
+                  ),
+              ],
             ),
           if (_images.isNotEmpty)
             _column(
@@ -690,51 +651,23 @@ class _AssistantPanelState extends State<AssistantPanel> {
               ),
             ),
           if (widget.scopeBar case final bar?) _column(bar),
-          KeyedSubtree(
-            key: const ValueKey('composer'),
-            child: _column(
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  children: [
-                    if (widget.imageInput?.canPick ?? false)
-                      IconButton(
-                        tooltip: 'Add an image',
-                        onPressed: controller.connected ? _pick : null,
-                        icon: const Icon(Icons.add_photo_alternate_outlined),
-                      ),
-                    Expanded(
-                      child: TextField(
-                        controller: _message,
-                        focusNode: _composer,
-                        minLines: 1,
-                        maxLines: 4,
-                        enabled: controller.connected,
-                        decoration: const InputDecoration(
-                          hintText: 'Ask Moneypenny…',
-                        ),
-                        onSubmitted: (_) => _send(),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    if (controller.busy)
-                      IconButton.filled(
-                        tooltip: controller.stopping ? 'Stopping…' : 'Stop',
-                        onPressed: controller.connected && !controller.stopping
-                            ? controller.interrupt
-                            : null,
-                        icon: const Icon(Icons.stop),
-                      )
-                    else
-                      IconButton.filled(
-                        tooltip: 'Send',
-                        onPressed: controller.connected ? _send : null,
-                        icon: const Icon(Icons.send),
-                      ),
-                  ],
-                ),
-              ),
-            ),
+          ChatComposerBar(
+            message: _message,
+            focusNode: _composer,
+            enabled: controller.connected,
+            busy: controller.busy,
+            stopping: controller.stopping,
+            hint: 'Ask Moneypenny…',
+            onSend: _send,
+            onStop: controller.interrupt,
+            textWidth: widget.textWidth,
+            leading: widget.imageInput?.canPick ?? false
+                ? IconButton(
+                    tooltip: 'Add an image',
+                    onPressed: controller.connected ? _pick : null,
+                    icon: const Icon(Icons.add_photo_alternate_outlined),
+                  )
+                : null,
           ),
         ],
       );
@@ -763,89 +696,35 @@ class _EntryView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    final tokens = OoTokens.of(context);
     return switch (entry.role) {
-      'person' => Align(
-        alignment: Alignment.centerRight,
-        child: Container(
-          margin: const EdgeInsets.only(left: 40),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: tokens.selectedFill,
-            border: Border.all(color: tokens.accent.withValues(alpha: 0.5)),
-            borderRadius: const BorderRadius.only(
-              topLeft: Radius.circular(14),
-              topRight: Radius.circular(4),
-              bottomLeft: Radius.circular(14),
-              bottomRight: Radius.circular(14),
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            mainAxisSize: MainAxisSize.min,
+      'person' => ChatPersonBubble(
+        text: entry.text,
+        attachments: switch (_imagesOf(entry)) {
+          final images when images.isEmpty => null,
+          final images => Wrap(
             spacing: 8,
+            runSpacing: 8,
             children: [
-              if (_imagesOf(entry) case final images when images.isNotEmpty)
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final (index, sha256) in images.indexed)
-                      switch (imageLoader) {
-                        final loader? => StoredImage(
-                          sha256: sha256,
-                          loader: loader,
-                          label: 'Your image ${index + 1}',
-                        ),
-                        null => Chip(
-                          avatar: const Icon(Icons.image_outlined, size: 16),
-                          label: Text('Image ${index + 1}'),
-                        ),
-                      },
-                  ],
-                ),
-              Text(revealInvisible(entry.text)),
+              for (final (index, sha256) in images.indexed)
+                switch (imageLoader) {
+                  final loader? => StoredImage(
+                    sha256: sha256,
+                    loader: loader,
+                    label: 'Your image ${index + 1}',
+                  ),
+                  null => Chip(
+                    avatar: const Icon(Icons.image_outlined, size: 16),
+                    label: Text('Image ${index + 1}'),
+                  ),
+                },
             ],
           ),
-        ),
+        },
       ),
-      'moneypenny' => Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        spacing: 8,
-        children: [
-          const MoneypennyAvatar(),
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: tokens.raised,
-                border: Border.all(color: tokens.border),
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(4),
-                  topRight: Radius.circular(14),
-                  bottomLeft: Radius.circular(14),
-                  bottomRight: Radius.circular(14),
-                ),
-              ),
-              child: OoMarkdown(
-                entry.text,
-                onOpen: onOpen,
-                webLinks: false,
-                selectable: false,
-              ),
-            ),
-          ),
-          // Her words as she wrote them, Markdown included.
-          IconButton(
-            tooltip: 'Copy',
-            iconSize: 16,
-            visualDensity: VisualDensity.compact,
-            onPressed: () =>
-                unawaited(Clipboard.setData(ClipboardData(text: entry.text))),
-            icon: const Icon(Icons.copy_outlined),
-          ),
-        ],
+      'moneypenny' => ChatAgentBubble(
+        avatar: const MoneypennyAvatar(),
+        text: entry.text,
+        onOpen: onOpen,
       ),
       'proposal'
           when missions != null && entry.data?['tool'] == 'propose_mission' =>
@@ -881,72 +760,12 @@ class _EntryView extends StatelessWidget {
             ? null
             : (values) => controller.submit(entry.id!, values),
       ),
-      'notice' => Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        spacing: 6,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            spacing: 6,
-            children: [
-              Icon(Icons.stop_circle_outlined, size: 16, color: colors.outline),
-              Flexible(
-                child: Text(
-                  revealInvisible(entry.text),
-                  style: TextStyle(
-                    color: colors.outline,
-                    fontStyle: FontStyle.italic,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          if (entry.data?['diff'] case final String diff when diff.isNotEmpty)
-            _UnifiedDiff(diff),
-        ],
+      'notice' => ChatNotice(
+        text: entry.text,
+        diff: entry.data?['diff'] as String?,
       ),
-      _ => Text(
-        revealInvisible(entry.text),
-        style: TextStyle(color: colors.error),
-      ),
+      _ => ChatErrorLine(entry.text),
     };
-  }
-}
-
-/// A unified diff as a notice carries it: what she kept in her memory, line by line. It is taller
-/// than a chat line, so it scrolls within a bound of its own.
-class _UnifiedDiff extends StatelessWidget {
-  const _UnifiedDiff(this.diff);
-
-  final String diff;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxHeight: 240),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            for (final line in const LineSplitter().convert(diff))
-              Container(
-                color: switch (line) {
-                  _ when line.startsWith('+++') || line.startsWith('---') =>
-                    null,
-                  _ when line.startsWith('+') => colors.tertiaryContainer,
-                  _ when line.startsWith('-') => colors.errorContainer,
-                  _ => null,
-                },
-                child: Text(
-                  revealInvisible(line),
-                  style: const TextStyle(fontFamily: 'monospace'),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
   }
 }
 

@@ -1,11 +1,16 @@
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../assistant/assistant_controller.dart';
+import '../assistant/chat_transcript.dart';
 import '../theme/oo_tokens.dart';
+import 'attach_entries.dart';
 import 'attachment.dart';
 
-/// A live view of a Run a person is attached to: its history, then what it shows as it shows
-/// it, with a box to type to it, the answers to what it asks, and, when [canInterrupt], a way
-/// to interrupt it. Leaving the view detaches; the Run goes on.
+/// A live view of a Run a person is attached to, drawn as Moneypenny's chat is: its history,
+/// then what it shows as it shows it, with a box to type to it, the answers to what it
+/// asks and, when [canInterrupt], Interrupt where the chat has Stop. Leaving the view
+/// detaches; the Run goes on. Enter sends; Shift+Enter starts a new line.
 ///
 /// Whoever shows this holds the right to attach (`charge.converse` on a charge's scope,
 /// `mission.control` on a Mission's Operation); a person without it is never given the view.
@@ -15,6 +20,9 @@ class AttachView extends StatefulWidget {
     required this.target,
     required this.connect,
     required this.canInterrupt,
+    this.agent,
+    this.me = const {},
+    this.textWidth,
     super.key,
   });
 
@@ -27,6 +35,15 @@ class AttachView extends StatefulWidget {
   /// Whether the person holds the action that interrupts a turn here.
   final bool canInterrupt;
 
+  /// The codename of the Agent on the Run, which labels its messages; "Agent" without one.
+  final String? agent;
+
+  /// The names the Run knows this person by, so their own prompts read as theirs.
+  final Set<String> me;
+
+  /// Where set, messages and the box keep to a centred column this wide.
+  final double? textWidth;
+
   @override
   State<AttachView> createState() => _AttachViewState();
 }
@@ -37,22 +54,41 @@ class _AttachViewState extends State<AttachView> {
     target: widget.target,
     connect: widget.connect,
   )..connect();
-  final _prompt = TextEditingController();
-  final _scroll = ScrollController();
+  final _message = TextEditingController();
+  final _composer = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _composer.onKeyEvent = _key;
+  }
 
   @override
   void dispose() {
+    _composer.onKeyEvent = null;
+    _composer.dispose();
     _attachment.dispose();
-    _prompt.dispose();
-    _scroll.dispose();
+    _message.dispose();
     super.dispose();
   }
 
   void _send() {
-    final text = _prompt.text;
+    final text = _message.text;
     if (text.trim().isEmpty) return;
     _attachment.prompt(text);
-    _prompt.clear();
+    _message.clear();
+  }
+
+  /// Enter sends; with Shift it is left to the field, which starts a new line.
+  KeyEventResult _key(FocusNode _, KeyEvent event) {
+    if (event is! KeyDownEvent ||
+        (event.logicalKey != LogicalKeyboardKey.enter &&
+            event.logicalKey != LogicalKeyboardKey.numpadEnter) ||
+        HardwareKeyboard.instance.isShiftPressed) {
+      return KeyEventResult.ignored;
+    }
+    _send();
+    return KeyEventResult.handled;
   }
 
   @override
@@ -61,244 +97,101 @@ class _AttachViewState extends State<AttachView> {
     builder: (context, _) {
       final attachment = _attachment;
       final tokens = OoTokens.of(context);
-      final text = Theme.of(context).textTheme;
+      final label = widget.agent ?? 'Agent';
+      final dropped = attachment.phase == AttachPhase.dropped;
+      final problem =
+          attachment.refusal ??
+          (dropped ? 'The connection to this Run was lost.' : null);
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _status(attachment),
-                    key: const ValueKey('attach-status'),
-                    style: text.labelLarge?.copyWith(color: tokens.muted),
-                  ),
-                ),
-                if (attachment.phase == AttachPhase.dropped)
-                  TextButton.icon(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            child: Text(
+              _status(attachment),
+              key: const ValueKey('attach-status'),
+              style: Theme.of(context).textTheme.bodySmall
+                  ?.copyWith(color: tokens.muted),
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: ChatTranscript(
+              entries: attachEntries(attachment, me: widget.me),
+              busy: attachment.busy,
+              textWidth: widget.textWidth,
+              entryBuilder: (context, entry) =>
+                  _entry(label, attachment, entry),
+            ),
+          ),
+          if (attachment.busy) const LinearProgressIndicator(),
+          if (problem != null)
+            ChatProblemLine(
+              text: problem,
+              actions: [
+                if (dropped)
+                  TextButton(
                     key: const ValueKey('attach-reconnect'),
                     onPressed: attachment.reconnect,
-                    icon: const Icon(Icons.refresh, size: 18),
-                    label: const Text('Reconnect'),
-                  ),
-                if (widget.canInterrupt)
-                  TextButton.icon(
-                    key: const ValueKey('attach-interrupt'),
-                    onPressed: attachment.attached
-                        ? attachment.interrupt
-                        : null,
-                    icon: const Icon(Icons.stop_circle_outlined, size: 18),
-                    label: const Text('Interrupt'),
+                    child: const Text('Reconnect'),
                   ),
               ],
             ),
-          ),
-          if (attachment.refusal case final refusal?)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Text(
-                refusal,
-                key: const ValueKey('attach-refusal'),
-                style: text.bodyMedium?.copyWith(color: tokens.danger),
-              ),
-            ),
-          Expanded(
-            child: ListView.builder(
-              controller: _scroll,
-              itemCount: attachment.frames.length,
-              itemBuilder: (context, index) =>
-                  _FrameRow(attachment.frames[index], attachment),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  key: const ValueKey('attach-prompt'),
-                  controller: _prompt,
-                  enabled: attachment.attached,
-                  minLines: 1,
-                  maxLines: 4,
-                  decoration: const InputDecoration(
-                    labelText: 'Say something to this Run',
-                    border: OutlineInputBorder(),
-                  ),
-                  onSubmitted: (_) => _send(),
-                ),
-              ),
-              const SizedBox(width: 8),
-              FilledButton(
-                key: const ValueKey('attach-send'),
-                onPressed: attachment.attached ? _send : null,
-                child: const Text('Send'),
-              ),
-            ],
+          ChatComposerBar(
+            message: _message,
+            focusNode: _composer,
+            enabled: attachment.attached,
+            busy: attachment.busy,
+            hint: 'Say something to this Run',
+            onSend: _send,
+            onStop: widget.canInterrupt ? attachment.interrupt : null,
+            stopTooltip: 'Interrupt',
+            textWidth: widget.textWidth,
           ),
         ],
       );
     },
   );
 
+  Widget _entry(String agent, Attachment attachment, AssistantEntry entry) =>
+      switch (entry.role) {
+        'person' => ChatPersonBubble(
+          text: entry.text,
+          sender: entry.data?['mine'] == true
+              ? 'You'
+              : '${entry.data?['from'] ?? ''}',
+        ),
+        'agent' => ChatAgentBubble(
+          avatar: ChatAvatar(label: agent),
+          text: entry.text,
+        ),
+        'permission' => ChatPermissionCard(
+          request: '${entry.data?['request']}',
+          title: 'Asks permission: ${entry.text}',
+          detail: entry.data?['detail'] as String?,
+          options: [
+            for (final option
+                in entry.data?['options'] as List<PermissionOption>? ??
+                    const <PermissionOption>[])
+              (id: option.id, label: option.label),
+          ],
+          answeredBy: entry.data?['answered'] as String?,
+          onAnswer: attachment.attached
+              ? (option) =>
+                    attachment.answer('${entry.data?['request']}', option)
+              : null,
+        ),
+        'notice' => ChatNotice(text: entry.text),
+        _ => ChatErrorLine(entry.text),
+      };
+
   String _status(Attachment attachment) => switch (attachment.phase) {
     AttachPhase.connecting => 'Connecting to ${widget.target.label}',
     AttachPhase.replaying => 'Replaying what ${widget.target.label} showed',
-    AttachPhase.live => attachment.busy ? 'Taking a turn' : 'Idle',
+    AttachPhase.live => attachment.busy ? 'Answering…' : 'Idle',
     AttachPhase.ended => 'This Run has closed',
     AttachPhase.dropped => 'Disconnected',
     AttachPhase.refused => 'Not attached',
     AttachPhase.detached => 'Detached',
   };
-}
-
-class _FrameRow extends StatelessWidget {
-  const _FrameRow(this.frame, this.attachment);
-
-  final AttachFrame frame;
-  final Attachment attachment;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = OoTokens.of(context);
-    final text = Theme.of(context).textTheme;
-    final muted = text.bodySmall?.copyWith(color: tokens.muted);
-    Widget line(String words, {TextStyle? style}) => Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: SelectableText(words, style: style ?? muted),
-    );
-    switch (frame.kind) {
-      case 'prompt':
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('From ${frame.text('from')}', style: muted),
-              SelectableText(frame.text('text'), style: text.bodyMedium),
-            ],
-          ),
-        );
-      case 'event':
-        final tools = [
-          for (final tool in frame.data['tools'] as List<Object?>? ?? const [])
-            '$tool',
-        ];
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(_eventKind(frame.text('kind')), style: muted),
-              SelectableText(frame.text('text'), style: text.bodyMedium),
-              if (tools.isNotEmpty)
-                Text('Tools: ${tools.join(', ')}', style: muted),
-            ],
-          ),
-        );
-      case 'turn':
-        return line(
-          frame.data['state'] == 'begun'
-              ? 'Turn begun by ${frame.text('by')}'
-              : 'Turn ended by ${frame.text('by')}',
-        );
-      case 'permission':
-        return _Permission(frame, attachment);
-      case 'answered':
-        final reason = frame.text('reason');
-        return line(
-          '${frame.text('by')} answered request ${frame.text('request')}: '
-          '${frame.text('option')}${reason.isEmpty ? '' : ' ($reason)'}',
-        );
-      case 'attached':
-        return line('${frame.text('person')} attached');
-      case 'detached':
-        return line('${frame.text('person')} detached');
-      case 'interrupted':
-        return line('Interrupted by ${frame.text('by')}');
-      case 'ready':
-        return line('Replay complete');
-      case 'closed':
-        final reason = frame.text('reason');
-        return line('This Run closed${reason.isEmpty ? '' : ': $reason'}');
-      case 'error':
-        return line(
-          'Refused: ${frame.text('reason')}',
-          style: text.bodySmall?.copyWith(color: tokens.danger),
-        );
-    }
-    return const SizedBox.shrink();
-  }
-
-  static String _eventKind(String kind) => switch (kind) {
-    'text' => 'Said',
-    'tool' => 'Tool',
-    'plan' => 'Plan',
-    'completed' => 'Completed',
-    '' => 'Event',
-    _ => kind,
-  };
-}
-
-/// An agent's request for permission: its options, until one is answered; then who answered.
-class _Permission extends StatelessWidget {
-  const _Permission(this.frame, this.attachment);
-
-  final AttachFrame frame;
-  final Attachment attachment;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = OoTokens.of(context);
-    final text = Theme.of(context).textTheme;
-    final request = frame.text('request');
-    final answer = attachment.answers[request];
-    final detail = frame.text('detail');
-    final enabled = answer == null && attachment.attached;
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Asks permission: ${frame.text('tool')}',
-              style: text.titleSmall,
-            ),
-            if (detail.isNotEmpty)
-              SelectableText(
-                detail,
-                style: text.bodySmall?.copyWith(color: tokens.muted),
-              ),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              children: [
-                for (final option in Attachment.optionsOf(frame))
-                  OutlinedButton(
-                    key: ValueKey('permission-$request-${option.id}'),
-                    onPressed: enabled
-                        ? () => attachment.answer(request, option.id)
-                        : null,
-                    child: Text(option.label),
-                  ),
-              ],
-            ),
-            if (answer != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(
-                  'Answered by ${answer.text('by')}: ${answer.text('option')}',
-                  key: ValueKey('permission-$request-answered'),
-                  style: text.bodySmall?.copyWith(color: tokens.muted),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
 }

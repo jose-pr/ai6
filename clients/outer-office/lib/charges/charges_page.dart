@@ -13,6 +13,7 @@ import '../theme/oo_tokens.dart';
 import 'attachment.dart';
 import 'attach_view.dart';
 import 'charges_model.dart';
+import 'mission_attach.dart' show attachNames;
 
 /// The page width from which the selected charge sits beside the list.
 const _splitFrom = 1000.0;
@@ -381,6 +382,8 @@ class _Live extends StatelessWidget {
       target: ChargeTarget(charge.scope),
       connect: connect,
       canInterrupt: charge.canInterrupt,
+      agent: charge.agent,
+      me: attachNames(board.userSession),
     );
   }
 }
