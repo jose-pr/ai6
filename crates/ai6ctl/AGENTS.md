@@ -6,7 +6,7 @@ lives at <https://github.com/jose-pr/ai6>.
 
 ## Build
 
-No Cargo features. MSRV: Rust 1.89. Depends on clap, reqwest (rustls), serde and Tokio.
+No Cargo features. MSRV: Rust 1.89. Depends on clap, reqwest (rustls), tokio-tungstenite, tokio-rustls, serde and Tokio.
 The crate has no library target.
 
 ## Commands
@@ -261,6 +261,29 @@ control's status route every `--poll-interval` (0.5 s) until the Station reports
   prints `SLEEPER STATE`. Needs `mission.control`.
 - `ai6ctl mission resume <MISSION_ID> [--message <TEXT>]` resumes a parked, blocked or
   stalled Mission now, sending `--message` to the Agent.
+- `ai6ctl charge attach <SCOPE> [--after <SEQ>]` and `ai6ctl mission attach <MISSION_ID> [--operation <ID>]
+  [--after <SEQ>]` attach to a live Run through the gateway's `GET /v1/user/attach` WebSocket: a charge's
+  standing Run (`SCOPE` is `m`, `operation:CODENAME` or `station:ID`; needs `charge.converse` on it) or a
+  Mission's live Run (needs `mission.control` on its Operation; the Operation is looked up when not
+  given, as for `mission cancel`). The Run's history is replayed, then what it shows follows, one
+  line each on standard output: `attached as CLIENT` first, then `[SEQ] KIND: TEXT` (`SEQ` is `-` for a frame
+  meant for this client alone). `KIND` is `text`, `tool`, `plan` or `completed` for what the Agent does
+  (a tool call or a plan is shown as such), else `prompt from WHO`, `turn begun|ended by WHO`,
+  `permission N: TOOL (DETAIL) options: ID (LABEL), ...`, `answered N by WHO: OPTION`, `PERSON attached|detached`,
+  `interrupted by WHO`, `ready: busy B, attached N, last SEQ` (the replay is over), `closed: REASON`
+  and `error: REASON`; a kind not known prints as `KIND: DATA`. Newlines in text show as `
+`. `--after SEQ`
+  replays only frames after that number. Lines read from standard input: text is a prompt to the
+  Run (`//text` sends `/text`); `/answer N OPTION`, `/allow N`, `/refuse N` (options `allow`, `refuse`) answer
+  permission request `N` (the first answer decides); `/interrupt` stops the turn under way (needs
+  `mission.control`, or `station.configure` for a Station's charge, beyond attaching);
+  `/detach` or the end of input leaves. A request the gateway refuses (`forbidden`, `bad_request`,
+  `busy`, ...) prints `gateway: CODE: MESSAGE` on standard error and the attachment goes on, as does a
+  mistyped `/` line. Leaving, by either way or by closing the connection, does not stop the Run. Exit `0`
+  on leaving or when the Run closes; `1` with `ai6ctl: refused: CODE: MESSAGE` when the gateway refuses
+  the attachment, and with a message when the connection fails or ends first. The token is sent in the first
+  WebSocket frame only, never in the URL, and is printed nowhere. `https` gives `wss` with the same
+  trust as the other commands (public roots and the CA file); `http` gives `ws`.
 - `ai6ctl exec <MISSION_ID|RUN_ID> [--agent <CODENAME>] [--message <TEXT>]` executes a Mission or a
   Run through the same controls: a Run ID found on the board resumes (`resume`, `--message`), anything else
   is a Mission and starts its next Run (`retry`, `--agent`). Needs `mission.control`. The Station takes both

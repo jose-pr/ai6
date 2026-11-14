@@ -18,7 +18,13 @@ reqwest = { workspace = true }
 serde = { workspace = true, features = ["std"] }
 serde_json = { workspace = true }
 toml = { workspace = true }
-tokio = { workspace = true, features = ["time"] }
+tokio = { workspace = true, features = ["io-std", "io-util", "net", "time"] }
+# `attach`: the WebSocket to the gateway, over TLS the way the HTTP client is (public roots and
+# the bootstrap file's `ca_file`).
+tokio-rustls = { workspace = true }
+tokio-tungstenite = { workspace = true, features = ["handshake"] }
+futures-util = { workspace = true }
+webpki-root-certs = { workspace = true }
 
 [dev-dependencies]
 ai6 = { path = "../ai6", features = ["sqlite"] }

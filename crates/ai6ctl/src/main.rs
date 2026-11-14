@@ -5,6 +5,7 @@ use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 mod access;
+mod attach;
 mod compartments;
 mod keys;
 mod memories;
@@ -234,6 +235,11 @@ enum Command {
         operation: Option<String>,
         #[command(subcommand)]
         control: Option<MissionCommand>,
+    },
+    /// Attach to a charge's standing Run.
+    Charge {
+        #[command(subcommand)]
+        command: ChargeCommand,
     },
     /// List Runs, optionally filtered by Operation, Mission or state.
     Runs {
@@ -849,7 +855,34 @@ fn create_body(
 }
 
 #[derive(Debug, Subcommand)]
+enum ChargeCommand {
+    /// Attach to a charge's live Run (needs charge.converse on its scope): its history is
+    /// replayed and what it shows follows, one line each. Lines read from standard input are
+    /// prompts to the Run; /answer N OPTION, /allow N, /refuse N, /interrupt and /detach (or the
+    /// end of input) act on it or leave it. The Run keeps running after you leave.
+    Attach {
+        /// The charge's scope: `m`, `operation:CODENAME` or `station:ID`.
+        scope: String,
+        /// Replay only what the Run showed after this frame number (the `[N]` of a line).
+        #[arg(long)]
+        after: Option<u64>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum MissionCommand {
+    /// Attach to a Mission's live Run (needs mission.control on its Operation), as `charge
+    /// attach` does to a charge's.
+    Attach {
+        /// The Mission: its UID, or any handle it had.
+        mission_id: String,
+        /// The Mission's Operation; found from the visible board when omitted.
+        #[arg(long)]
+        operation: Option<String>,
+        /// Replay only what the Run showed after this frame number (the `[N]` of a line).
+        #[arg(long)]
+        after: Option<u64>,
+    },
     /// The issues a Mission is linked to and what it posted.
     Issues {
         mission: String,
@@ -1313,7 +1346,8 @@ struct AgentRole {
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    match run().await {
+    // Boxed: in a debug build the command future outgrows the main thread's stack on Windows.
+    match Box::pin(run()).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("ai6ctl: {error}");
@@ -1345,6 +1379,21 @@ fn ca_certificates(
     flag: Option<&std::path::Path>,
     config: Option<&std::path::Path>,
 ) -> Result<Vec<reqwest::Certificate>, String> {
+    ca_authorities(flag, config)?
+        .iter()
+        .map(|der| {
+            reqwest::Certificate::from_der(der).map_err(|error| {
+                format!("the CA file holds a certificate that cannot be used: {error}")
+            })
+        })
+        .collect()
+}
+
+/// The DER certificates [`ca_certificates`] trusts.
+fn ca_authorities(
+    flag: Option<&std::path::Path>,
+    config: Option<&std::path::Path>,
+) -> Result<Vec<Vec<u8>>, String> {
     let from_file = match flag {
         Some(_) => None,
         None => ai6::bootstrap::Bootstrap::find(config)
@@ -1354,15 +1403,41 @@ fn ca_certificates(
     let Some(path) = flag.or(from_file.as_deref()) else {
         return Ok(Vec::new());
     };
-    let certificates =
-        ai6::bootstrap::read_ca_file(path).map_err(|error| format!("the CA file {error}"))?;
-    certificates
-        .iter()
-        .map(|der| {
-            reqwest::Certificate::from_der(der)
-                .map_err(|error| format!("the CA file {}: {error}", path.display()))
-        })
-        .collect()
+    ai6::bootstrap::read_ca_file(path).map_err(|error| format!("the CA file {error}"))
+}
+
+/// Attaches to `target` with this process's standard streams and ends the process: standard
+/// input may be a terminal read by a thread that cannot be stopped, so the runtime is not left
+/// to drain it.
+async fn attach_and_exit(
+    server: &Url,
+    token: &str,
+    (ca_file, config): (Option<&std::path::Path>, Option<&std::path::Path>),
+    target: &attach::Target,
+    after: Option<u64>,
+) -> ! {
+    let result = match ca_authorities(ca_file, config) {
+        Ok(authorities) => {
+            attach::attach(
+                server,
+                &authorities,
+                target.hello(token, after),
+                tokio::io::BufReader::new(tokio::io::stdin()),
+                &mut std::io::stdout(),
+                &mut std::io::stderr(),
+            )
+            .await
+        }
+        Err(error) => Err(error),
+    };
+    let code = match result {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("ai6ctl: {error}");
+            1
+        }
+    };
+    std::process::exit(code)
 }
 
 async fn run() -> Result<(), String> {
@@ -2042,6 +2117,47 @@ async fn run() -> Result<(), String> {
             );
         }
         Command::Mission {
+            control:
+                Some(MissionCommand::Attach {
+                    mission_id,
+                    operation,
+                    after,
+                }),
+            ..
+        } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            let operation = match operation {
+                Some(operation) => operation,
+                None => mission_operation(&client, &server, &token, &mission_id).await?,
+            };
+            let target = attach::Target::Mission {
+                operation,
+                mission: mission_id,
+            };
+            Box::pin(attach_and_exit(
+                &server,
+                &token,
+                (cli.ca_file.as_deref(), cli.config.as_deref()),
+                &target,
+                after,
+            ))
+            .await;
+        }
+        Command::Charge {
+            command: ChargeCommand::Attach { scope, after },
+        } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            let target = attach::Target::Charge(scope);
+            Box::pin(attach_and_exit(
+                &server,
+                &token,
+                (cli.ca_file.as_deref(), cli.config.as_deref()),
+                &target,
+                after,
+            ))
+            .await;
+        }
+        Command::Mission {
             control: Some(command),
             ..
         } => {
@@ -2071,6 +2187,7 @@ async fn run() -> Result<(), String> {
                     message.map(|message| ("message", message)),
                 ),
                 MissionCommand::Issues { .. }
+                | MissionCommand::Attach { .. }
                 | MissionCommand::Withdraw { .. }
                 | MissionCommand::Settle { .. } => {
                     unreachable!("handled above")
