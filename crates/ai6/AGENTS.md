@@ -4180,7 +4180,7 @@ pub struct AcpOptions {          // Default: timeouts 20000 / 30000 / 2000 ms, n
     pub model_option: Option<String>, pub effort_option: Option<String>,  // config option ids
     pub prompt: Option<String>, pub resume: Option<String>, pub restricted: bool,
     pub authenticate: Option<Authenticate>, pub initialize_timeout_ms: u64,
-    pub request_timeout_ms: u64, pub close_grace_ms: u64, pub decider: Arc<dyn PermissionDecider>,
+    pub request_timeout_ms: u64, pub close_grace_ms: u64, pub abort_wait_ms: u64, pub decider: Arc<dyn PermissionDecider>,
     pub fail_on_disconnect: bool,                     // true: a connection lost mid-turn is `failed`
     pub limit_phrases: Vec<String>,                   // empty: no failure is a limit
     pub disconnect_detail: Option<DisconnectDetail>,  // what became of a lost agent

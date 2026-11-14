@@ -66,6 +66,7 @@ key; every number is a setting. They can also be set for every Agent in `[provid
 | `request_timeout_ms` | `30000` | How long a request other than a prompt may take. |
 | `start_timeout_ms` | `60000` | How long a facade-style start may take. |
 | `close_grace_ms` | `2000` | How long close waits before the process is ended. |
+| `abort_wait_ms` | `5000` | How long a Run ended without a close (dropped, or after a failure) waits for the agent to take its `session/cancel` before the process is ended. `0` does not wait. |
 | `diagnostic_lines` | `20` | Non-protocol output lines kept to explain the agent's death. |
 | `exit_wait_ms` | `1000` | How long the report of a lost agent waits for its exit status. |
 | `poll_ms` | `200` | How often a silent agent's output is checked for a stop request. |

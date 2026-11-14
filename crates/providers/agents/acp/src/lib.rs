@@ -75,6 +75,11 @@ pub struct AcpSettings {
     #[schema(section = "agent")]
     #[map(default = 2_000)]
     pub close_grace_ms: u64,
+    /// How long, in milliseconds, ending a Run that was not closed waits for the agent to take its
+    /// `session/cancel` before its process is ended.
+    #[schema(section = "agent")]
+    #[map(default = 5_000)]
+    pub abort_wait_ms: u64,
     /// How many of the agent's last non-protocol output lines are kept to explain its death.
     #[schema(section = "agent")]
     #[map(default = 20)]
@@ -365,6 +370,7 @@ impl AcpHandler {
             request_timeout_ms: settings.request_timeout_ms,
             start_timeout_ms: settings.start_timeout_ms,
             close_grace_ms: settings.close_grace_ms,
+            abort_wait_ms: settings.abort_wait_ms,
             decider: Arc::new(GateDecider::from_environment(
                 launch.environment,
                 launch.working_directory,

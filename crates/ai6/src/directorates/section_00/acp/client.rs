@@ -74,6 +74,9 @@ pub struct AcpOptions {
     pub start_timeout_ms: u64,
     /// How long `close` waits for the agent before ending its process.
     pub close_grace_ms: u64,
+    /// How long ending a run that was not closed (dropped, or after a failure) waits for the agent to
+    /// take its `session/cancel` before the agent's process is ended.
+    pub abort_wait_ms: u64,
     /// Answers permission requests.
     pub decider: Arc<dyn PermissionDecider>,
     /// Whether dropping the run without closing it closes the agent's run. A Station
@@ -162,6 +165,7 @@ impl Default for AcpOptions {
             request_timeout_ms: 30_000,
             start_timeout_ms: 60_000,
             close_grace_ms: 2_000,
+            abort_wait_ms: 5_000,
             decider: Arc::new(RefuseAll),
             close_on_drop: true,
             fail_on_disconnect: true,
@@ -410,6 +414,7 @@ impl AcpRun {
             .initialize_timeout(duration_of(options.initialize_timeout_ms))
             .request_timeout(duration_of(options.request_timeout_ms))
             .close_grace(duration_of(options.close_grace_ms))
+            .abort_wait(Duration::from_millis(options.abort_wait_ms))
             // The reader is the Station, which keeps up; no bound on what waits for it.
             .max_pending_events(usize::MAX)
             .text_flush(options.text_flush_bytes)

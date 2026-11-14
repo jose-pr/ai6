@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The `acp` handler has an `abort_wait_ms` setting (5000): how long a Run ended without a close waits for the agent to take its `session/cancel` before the process is ended.
 - Outer Office has a Charges page: M's, each Operation's and each Station's charge with its Run's state, Agent and route,
   Station, last wake and what that turn recorded, and for a person with `charge.converse` a live view of the
   Run (history, then streaming; type to it, answer its permission requests, interrupt it where `mission.control`

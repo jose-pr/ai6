@@ -20,7 +20,7 @@ handler_settings = { command = "npx", args = ["-y", "@agentclientprotocol/claude
 `command` (required), `args`, `env` (under the Run's own), `meta` (a table passed as
 `session/new._meta`, for an adapter's options), `model_option` and `effort_option` (config option
 ids), `protocol` (`"v1"`), and the timeouts `initialize_timeout_ms` (20000), `request_timeout_ms`
-(30000), `start_timeout_ms` (60000) and `close_grace_ms` (2000), `diagnostic_lines` (20),
+(30000), `start_timeout_ms` (60000) and `close_grace_ms` (2000), `abort_wait_ms` (5000), `diagnostic_lines` (20),
 `exit_wait_ms` (1000) and `poll_ms` (200), `unconfined_desk` (false), and `limit_phrases` (the words
 that mark a failed turn as a provider's limit). Unknown keys are refused when the handler loads.
 

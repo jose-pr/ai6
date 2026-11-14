@@ -19,6 +19,7 @@ pub struct AcpSettings {
     pub request_timeout_ms: u64,                // 30000
     pub start_timeout_ms: u64,                  // 60000
     pub close_grace_ms: u64,                    // 2000
+    pub abort_wait_ms: u64,                     // 5000
     pub diagnostic_lines: usize,                // 20
     pub exit_wait_ms: i64,                      // 1000
     pub poll_ms: i64,                           // 200
