@@ -3,8 +3,11 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use ai6::directorates::registry::backend::*;
+use ai6::directorates::registry::charges::{ChargeLogEntry, ChargeUpdate};
+use ai6::directorates::registry::reports::{Report, ReportFiler, ReportScope};
 use ai6::{
     ActionScope, ApprovalLimits, ApprovalRequest, ConfigProvider, ConfigRecord, ConfigScope,
 };
@@ -31,6 +34,11 @@ const ROLES: &str = r#"
     [[rule]]
     subject = "person:operator-007"
     scope = "station:worker"
+    role = "watcher"
+
+    [[rule]]
+    subject = "person:operator-007"
+    scope = "config:reports"
     role = "watcher"
 
     [[rule]]
@@ -102,6 +110,42 @@ impl Fixture {
                 target: format!("configuration revision {revision}: the roster does not parse"),
                 at: now() - ago,
             })
+            .unwrap();
+    }
+
+    /// An open Report of `scope`, filed by a person.
+    fn open_report(&self, id: &str, scope: ReportScope, title: &str) {
+        self.served
+            .registry
+            .file_report(&Report::new(
+                id,
+                scope,
+                "finding",
+                ai6::directorates::registry::logbook::Severity::Info,
+                title,
+                "What was seen.",
+                ReportFiler::Person {
+                    person: "operator-007".to_owned(),
+                },
+                now() - 60.0,
+            ))
+            .unwrap();
+    }
+
+    /// `scope`'s charge, held by `worker` for `lease`, whose last turn recorded `turn`.
+    fn charge(&self, scope: &str, lease: Duration, turn: &str) {
+        let record = self
+            .served
+            .registry
+            .claim_charge(scope, "kg", "worker", lease)
+            .unwrap();
+        let mut update = ChargeUpdate::default();
+        update.last_wake = Some(1_000.0);
+        update.turn_at = Some(1_000.0);
+        update.log = vec![ChargeLogEntry::new("turn", turn, 1_000.0)];
+        self.served
+            .registry
+            .update_charge(scope, "worker", record.fence, None, update)
             .unwrap();
     }
 
@@ -197,6 +241,12 @@ async fn an_online_station_refusing_a_configuration_now_is_a_current_item() {
     );
     assert!(item["checked_at"].as_f64().unwrap() > 0.0);
     assert!(item["observed_at"].as_f64().unwrap() > 0.0);
+    // Where a change is reviewed: the record editor on this Station's records.
+    assert_eq!(item["revision"], "78");
+    assert_eq!(
+        item["editor_link"],
+        "app:/roster?kind=station&station_id=worker"
+    );
 
     assert_eq!(summary["clear"], false);
     assert_eq!(summary["current"], 1);
@@ -420,4 +470,180 @@ async fn a_blocked_run_read_through_a_compartment_is_listed_and_the_crossing_is_
         audits(&fixture) > 0,
         "the crossing is written to the audit log"
     );
+}
+
+#[tokio::test]
+async fn an_unassessed_report_is_an_item_that_opens_it_and_coverage_says_what_was_read() {
+    let fixture = fixture().await;
+    fixture.report(json!({"revision": "79"}));
+    fixture.open_report(
+        "report-g",
+        ReportScope::Operation("G".to_owned()),
+        "Key in log",
+    );
+    fixture.open_report("report-m", ReportScope::M, "Upstream advisory");
+    let summary = fixture.summary(&fixture.served.operator).await;
+
+    let reports = items(&summary, "report");
+    assert_eq!(reports.len(), 2, "{summary}");
+    let in_g = reports
+        .iter()
+        .find(|r| r["id"] == "report:report-g")
+        .unwrap();
+    assert_eq!(in_g["condition"], "current");
+    assert_eq!(in_g["scope"], "operation:G");
+    assert_eq!(in_g["entity"]["kind"], "report");
+    assert_eq!(in_g["entity"]["operation_id"], "G");
+    assert_eq!(in_g["link"], "app:/reports?report_id=report-g");
+    assert!(in_g["title"].as_str().unwrap().contains("Key in log"));
+    let in_m = reports
+        .iter()
+        .find(|r| r["id"] == "report:report-m")
+        .unwrap();
+    assert_eq!(in_m["scope"], "m");
+    assert_eq!(in_m["link"], "app:/reports?report_id=report-m");
+
+    let read = coverage(&summary, "reports");
+    assert_eq!(read["status"], "checked");
+    let checked: Vec<&str> = read["checked"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|scope| scope.as_str().unwrap())
+        .collect();
+    assert!(checked.contains(&"operation:G"), "{read}");
+    assert!(checked.contains(&"station:worker"), "{read}");
+    assert!(checked.contains(&"m"), "{read}");
+    assert_eq!(summary["clear"], false);
+}
+
+#[tokio::test]
+async fn reports_a_person_may_not_read_are_named_not_listed_and_m_is_not_mentioned() {
+    let fixture = fixture().await;
+    fixture.report(json!({"revision": "79"}));
+    fixture.open_report(
+        "report-g",
+        ReportScope::Operation("G".to_owned()),
+        "Visible",
+    );
+    fixture.open_report(
+        "report-w",
+        ReportScope::Station("worker".to_owned()),
+        "Not for the viewer",
+    );
+    fixture.open_report("report-m", ReportScope::M, "Not for the viewer either");
+    let summary = fixture.summary(&fixture.served.viewer).await;
+
+    let reports = items(&summary, "report");
+    assert_eq!(reports.len(), 1, "{summary}");
+    assert_eq!(reports[0]["id"], "report:report-g");
+    let read = coverage(&summary, "reports");
+    assert_eq!(read["status"], "partial");
+    assert_eq!(read["not_permitted"], json!(["station:worker"]));
+    assert!(!summary.to_string().contains("Not for the viewer"));
+    assert!(
+        summary["headline"]
+            .as_str()
+            .unwrap()
+            .contains("Not visible to you"),
+        "{summary}"
+    );
+}
+
+#[tokio::test]
+async fn a_report_read_through_a_compartment_is_listed_and_the_crossing_is_audited() {
+    let fixture = fixture().await;
+    fixture.report(json!({"revision": "79"}));
+    fixture.lifecycle("L", "mission-l", "run-l", "budget").await;
+    fixture.open_report("report-l", ReportScope::Operation("L".to_owned()), "In L");
+    let before = fixture.summary(&fixture.served.viewer).await;
+    assert!(items(&before, "report").is_empty(), "{before}");
+    let crossings = |fixture: &Fixture| {
+        fixture
+            .served
+            .registry
+            .list_audit(100)
+            .unwrap()
+            .into_iter()
+            .filter(|record| record.action == "compartment.read")
+            .count()
+    };
+    assert_eq!(crossings(&fixture), 0);
+
+    fixture
+        .source
+        .put(
+            ConfigRecord::Compartment,
+            &ConfigScope::Global,
+            "LAPWING",
+            &json!({
+                "actions": ["mission.read"],
+                "covers": [{"operation": "L"}],
+                "read_in": [{"subject": "person:viewer-007"}],
+            }),
+        )
+        .unwrap();
+    let after = fixture.summary(&fixture.served.viewer).await;
+    let reports = items(&after, "report");
+    assert_eq!(reports.len(), 1, "{after}");
+    assert_eq!(reports[0]["entity"]["operation_id"], "L");
+    assert!(crossings(&fixture) > 0, "the crossing is audited");
+}
+
+#[tokio::test]
+async fn a_charge_whose_last_turn_failed_or_whose_lease_lapsed_is_an_item() {
+    let fixture = fixture().await;
+    fixture.report(json!({"revision": "79"}));
+    fixture.charge(
+        "operation:G",
+        Duration::from_secs(600),
+        "woke for a timer; the turn ended failed: the model refused. It said: nothing",
+    );
+    fixture.charge(
+        "station:worker",
+        Duration::ZERO,
+        "woke for a timer; the turn ended completed. It said: all well",
+    );
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let summary = fixture.summary(&fixture.served.operator).await;
+
+    let failed = items(&summary, "charge_failed");
+    assert_eq!(failed.len(), 1, "{summary}");
+    assert_eq!(failed[0]["id"], "charge_failed:operation:G");
+    assert_eq!(failed[0]["condition"], "current");
+    assert_eq!(failed[0]["entity"]["kind"], "charge");
+    assert_eq!(failed[0]["entity"]["operation_id"], "G");
+    assert_eq!(failed[0]["link"], "app:/charges?operation_id=G");
+    assert!(
+        failed[0]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("failed: the model refused"),
+        "{summary}"
+    );
+    // A completed turn is no trouble; its lapsed lease is.
+    let lapsed = items(&summary, "charge_lapsed");
+    assert_eq!(lapsed.len(), 1, "{summary}");
+    assert_eq!(lapsed[0]["entity"]["station_id"], "worker");
+    assert_eq!(lapsed[0]["link"], "app:/charges?station_id=worker");
+    assert_eq!(coverage(&summary, "charges")["status"], "checked");
+}
+
+#[tokio::test]
+async fn a_healthy_charge_is_not_an_item_and_one_the_person_cannot_see_is_not_read() {
+    let fixture = fixture().await;
+    fixture.report(json!({"revision": "79"}));
+    fixture.charge(
+        "operation:G",
+        Duration::from_secs(600),
+        "woke for a timer; the turn ended completed",
+    );
+    fixture.charge(
+        "operation:L",
+        Duration::from_secs(600),
+        "woke for a timer; the turn ended failed: no quota",
+    );
+    let summary = fixture.summary(&fixture.served.operator).await;
+    assert!(items(&summary, "charge_failed").is_empty(), "{summary}");
+    assert!(items(&summary, "charge_lapsed").is_empty(), "{summary}");
 }

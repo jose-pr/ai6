@@ -258,7 +258,11 @@ impl Page {
                 ("sort", OneOf(REPORT_SORTS)),
                 ("order", OneOf(ORDERS)),
             ],
-            Self::Roster => &[("kind", OneOf(ROSTER_KINDS)), ("key", Identifier)],
+            Self::Roster => &[
+                ("kind", OneOf(ROSTER_KINDS)),
+                ("key", Identifier),
+                ("station_id", Identifier),
+            ],
             Self::Pools => &[
                 ("operation_id", Identifier),
                 ("pool", Identifier),
@@ -617,6 +621,9 @@ impl Route {
             Page::Stations if has("theater_id") && !has("station_id") => {
                 return Err("theater_id needs station_id".to_owned());
             }
+            Page::Roster if has("station_id") && !has("kind") => {
+                return Err("station_id needs kind".to_owned());
+            }
             Page::Audit if has("operation_id") && has("station_id") => {
                 return Err("audit takes operation_id or station_id, not both".to_owned());
             }
@@ -717,8 +724,8 @@ pub(crate) fn describe() -> String {
     format!(
         "An app page link is app:/<page>?key=value&..., each value percent-encoded, every key \
          optional: {}. mission_id and subtree (true: the Operation and every Operation under it) need \
-         operation_id, theater_id needs station_id, and audit \
-         takes operation_id or station_id. Board states: {}. Example: \
+         operation_id, theater_id needs station_id, roster's station_id (one Station's own \
+         records) needs kind, and audit takes operation_id or station_id. Board states: {}. Example: \
          [failed Missions of G](app:/missions?operation_id=G&state=failed).",
         pages.join("; "),
         STATES.join(", ")

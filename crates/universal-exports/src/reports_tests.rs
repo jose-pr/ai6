@@ -200,6 +200,11 @@ async fn a_person_files_a_report_that_the_operation_reads_and_no_mission_is_made
         listed["classifications"],
         json!(["unclassified", "restricted", "confidential"])
     );
+    assert_eq!(
+        listed["handlings"],
+        json!(["operation", "compartments", "peers"]),
+        "so does how far a question about a Report may go"
+    );
     // L is not theirs to read: its Reports neither list nor show.
     let (status, _) = fixture
         .call(&viewer, Method::GET, "/v1/reports?scope=operation:L", None)

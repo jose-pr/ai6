@@ -171,6 +171,7 @@ const _fields = <OoPage, List<_Field>>{
       'unex',
     ]),
     _Field('key', _Kind.identifier),
+    _Field('station_id', _Kind.identifier),
   ],
   OoPage.pools: [
     _Field('operation_id', _Kind.identifier),
@@ -519,6 +520,9 @@ OoRoute _checked(OoPage page, List<(String, Object)> values) {
   }
   if (page == OoPage.stations && has('theater_id') && !has('station_id')) {
     throw const FormatException('theater_id needs station_id');
+  }
+  if (page == OoPage.roster && has('station_id') && !has('kind')) {
+    throw const FormatException('station_id needs kind');
   }
   if (page == OoPage.audit && has('operation_id') && has('station_id')) {
     throw const FormatException(

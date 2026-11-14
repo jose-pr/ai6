@@ -58,6 +58,10 @@ pub(crate) struct ChargeView {
     /// What the last turn recorded: what woke it and the start of what it said.
     #[serde(skip_serializing_if = "Option::is_none")]
     last_turn: Option<String>,
+    /// How the last turn ended (`completed`, `failed: why`, `limit`, `timed out`...), read from
+    /// what it recorded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_ended: Option<String>,
     /// Turns it began in the last hour.
     turns_last_hour: usize,
     /// Whether the person may attach to it, type and answer.
@@ -142,6 +146,81 @@ fn last_turn(record: &ChargeRecord) -> Option<String> {
         .map(|entry| entry.text.clone())
 }
 
+/// How a turn ended, from the line the Station logs for it: `woke for X; the turn ended Y. It
+/// said: ...`.
+fn turn_ended(text: &str) -> Option<String> {
+    let (_, rest) = text.split_once("the turn ended ")?;
+    let ended = rest
+        .split_once(". It said: ")
+        .map_or(rest, |(ended, _)| ended);
+    let ended = ended.trim();
+    (!ended.is_empty()).then(|| ended.to_owned())
+}
+
+/// Something wrong with a charge that a person should hear about.
+pub(crate) struct Trouble {
+    /// `charge_failed` or `charge_lapsed`.
+    pub(crate) kind: &'static str,
+    /// What the charge did, after its name.
+    pub(crate) title: String,
+    pub(crate) detail: String,
+    /// When it began, as Unix seconds.
+    pub(crate) since: Option<f64>,
+}
+
+impl ChargeView {
+    /// `m`, `operation:<codename>` or `station:<id>`.
+    pub(crate) fn scope(&self) -> &str {
+        &self.scope
+    }
+
+    /// What a person calls it.
+    pub(crate) fn label(&self) -> String {
+        match self.scope.split_once(':') {
+            Some(("operation", id)) => format!("Charge of Operation {id}"),
+            Some(("station", id)) => format!("Charge of Station {id}"),
+            _ => "M's charge".to_owned(),
+        }
+    }
+
+    /// What is wrong with it: its last turn ended failed, or no Station holds its lease any more.
+    /// A charge never claimed has no lease to lapse.
+    pub(crate) fn trouble(&self) -> Vec<Trouble> {
+        let mut found = Vec::new();
+        if let Some(ended) = self
+            .last_ended
+            .as_deref()
+            .filter(|e| e.starts_with("failed"))
+        {
+            found.push(Trouble {
+                kind: "charge_failed",
+                title: "failed its last turn".to_owned(),
+                detail: format!("The last turn ended {}.", plain(ended)),
+                since: self.last_wake,
+            });
+        }
+        if !self.held
+            && let Some(expired) = self.lease_expires
+        {
+            found.push(Trouble {
+                kind: "charge_lapsed",
+                title: "has no Station holding it".to_owned(),
+                detail: "Its lease lapsed, so nothing runs it until a Station claims it."
+                    .to_owned(),
+                since: Some(expired),
+            });
+        }
+        found
+    }
+}
+
+/// One line, with no control characters.
+fn plain(text: &str) -> String {
+    text.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
+}
+
 struct Sources {
     records: Vec<ChargeRecord>,
     configured: Vec<(String, Value)>,
@@ -213,6 +292,11 @@ async fn view(
         held,
         lease_expires: record.as_ref().map(|record| record.lease_expires),
         last_wake: record.as_ref().and_then(|record| record.last_wake),
+        last_ended: record
+            .as_ref()
+            .and_then(last_turn)
+            .as_deref()
+            .and_then(turn_ended),
         last_turn: record.as_ref().and_then(last_turn),
         turns_last_hour: record.as_ref().map_or(0, |record| {
             record.turns_since(sources.now - TURN_WINDOW_SECS)

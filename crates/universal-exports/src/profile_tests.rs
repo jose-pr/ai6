@@ -127,3 +127,35 @@ fn every_action_is_in_a_catalog_the_profile_reads_or_acts_elsewhere() {
         assert!(ai6::ACTIONS.contains(action), "{action}");
     }
 }
+
+#[tokio::test]
+async fn a_person_sees_what_they_hold_on_ms_own_reports() {
+    let served = served_with(
+        r#"
+        [role.reader]
+        actions = ["station.read"]
+
+        [role.keeper]
+        actions = ["station.read", "station.configure"]
+
+        [[rule]]
+        subject = "person:viewer-007"
+        scope = "config:reports"
+        role = "reader"
+
+        [[rule]]
+        subject = "person:operator-007"
+        scope = "config:reports"
+        role = "keeper"
+        "#,
+    )
+    .await;
+    assert_eq!(
+        profile(&served, &served.viewer).await["reports"],
+        serde_json::json!(["station.read"])
+    );
+    assert_eq!(
+        profile(&served, &served.operator).await["reports"],
+        serde_json::json!(["station.read", "station.configure"])
+    );
+}

@@ -23,6 +23,7 @@ use crate::{
     ApiError, BoardMission, BoardStation, Gateway, MissionsQuery, StationBoard, UserAuditQuery,
     bearer, green_ink, held, resolve_user, unix_timestamp,
 };
+use crate::{charges, reports};
 
 /// The audit action of a Station refusing a configuration.
 const REFUSED_ACTION: &str = "config.refused";
@@ -50,7 +51,7 @@ enum Condition {
 /// The thing an item is about, with the route that opens it.
 #[derive(Debug, Clone, Serialize)]
 struct Entity {
-    /// `run`, `mission`, `station`, `approval`, `brief` or `proposal`.
+    /// `run`, `mission`, `station`, `approval`, `brief`, `proposal`, `report` or `charge`.
     kind: &'static str,
     id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -64,8 +65,8 @@ struct Entity {
 struct Item {
     /// Stable for the same condition, so a page can keep its place.
     id: String,
-    /// `blocked_run`, `green_ink`, `held_brief`, `mission_proposal`, `station_dark` or
-    /// `config_refused`.
+    /// `blocked_run`, `green_ink`, `held_brief`, `mission_proposal`, `station_dark`,
+    /// `config_refused`, `report`, `charge_failed` or `charge_lapsed`.
     kind: &'static str,
     condition: Condition,
     /// One line, with identifiers; untrusted text in it is stripped of control characters.
@@ -90,6 +91,28 @@ struct Item {
     /// When the condition began, as Unix seconds, when the data says.
     #[serde(skip_serializing_if = "Option::is_none")]
     since: Option<f64>,
+    /// The configuration revision a refusal names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    revision: Option<String>,
+    /// Where a change to what the Station refused is reviewed and saved: the record editor on
+    /// that Station's own records.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    editor: Option<Value>,
+    /// The same page as a link in text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    editor_link: Option<String>,
+}
+
+impl Item {
+    /// Marks the item as a Station's refusal of `reason`, with the editor for its records.
+    fn refusal(mut self, reason: &str, station: &str) -> Self {
+        self.revision = revision_of(reason).map(str::to_owned);
+        let (editor, editor_link) =
+            page_link(&json!({"page": "roster", "kind": "station", "station_id": station}));
+        self.editor = editor;
+        self.editor_link = editor_link;
+        self
+    }
 }
 
 /// How one source was read.
@@ -270,11 +293,7 @@ pub(crate) async fn read(
     };
 
     // The Operations to look in: those the person may read, or the one asked for.
-    let mut operations: BTreeSet<String> = board
-        .operations
-        .iter()
-        .map(|operation| operation.operation_id.clone())
-        .collect();
+    let mut operations = operations_of(&board, None);
     operations.extend(missions.iter().map(|mission| mission.operation_id.clone()));
     if let Some(operation) = &wanted {
         operations.retain(|candidate| candidate == operation);
@@ -531,29 +550,32 @@ pub(crate) async fn read(
         for reason in &current {
             let key = refusal_key(reason);
             seen_now.insert(key.clone());
-            found.push(item(
-                format!("config_refused:{}:{key}", station.station_id),
-                "config_refused",
-                condition,
-                format!(
-                    "Station {} refused a configuration{} and keeps running {}",
-                    station.station_id,
-                    revision_of(reason)
-                        .map(|revision| format!(" (revision {revision})"))
-                        .unwrap_or_default(),
-                    running
-                        .as_deref()
-                        .map(|revision| format!("revision {revision}"))
-                        .unwrap_or_else(|| "the last good one".to_owned())
-                ),
-                Some(plain(reason)),
-                entity.clone(),
-                settings.clone(),
-                &scope,
-                now,
-                observed,
-                None,
-            ));
+            found.push(
+                item(
+                    format!("config_refused:{}:{key}", station.station_id),
+                    "config_refused",
+                    condition,
+                    format!(
+                        "Station {} refused a configuration{} and keeps running {}",
+                        station.station_id,
+                        revision_of(reason)
+                            .map(|revision| format!(" (revision {revision})"))
+                            .unwrap_or_default(),
+                        running
+                            .as_deref()
+                            .map(|revision| format!("revision {revision}"))
+                            .unwrap_or_else(|| "the last good one".to_owned())
+                    ),
+                    Some(plain(reason)),
+                    entity.clone(),
+                    settings.clone(),
+                    &scope,
+                    now,
+                    observed,
+                    None,
+                )
+                .refusal(reason, &station.station_id),
+            );
         }
         // Past refusals, from the audit log, against what the Station reports now.
         let mut shown: BTreeSet<String> = BTreeSet::new();
@@ -569,25 +591,152 @@ pub(crate) async fn read(
                 continue;
             }
             let (condition, detail) = history_of(station, config.is_some(), running.as_deref());
-            found.push(item(
-                format!("config_refused:{}:{key}", station.station_id),
-                "config_refused",
-                condition,
-                format!(
-                    "Station {} refused a configuration{}",
-                    station.station_id,
-                    revision_of(&record.target)
-                        .map(|revision| format!(" (revision {revision})"))
-                        .unwrap_or_default()
+            found.push(
+                item(
+                    format!("config_refused:{}:{key}", station.station_id),
+                    "config_refused",
+                    condition,
+                    format!(
+                        "Station {} refused a configuration{}",
+                        station.station_id,
+                        revision_of(&record.target)
+                            .map(|revision| format!(" (revision {revision})"))
+                            .unwrap_or_default()
+                    ),
+                    Some(format!("{} {}", plain(&record.target), detail)),
+                    entity.clone(),
+                    settings.clone(),
+                    &scope,
+                    now,
+                    observed,
+                    Some(record.at),
+                )
+                .refusal(&record.target, &station.station_id),
+            );
+        }
+    }
+
+    // Reports waiting for an assessment, and charges that failed or lapsed. A gateway that keeps
+    // no Registry holds neither, so neither is read.
+    let mut reports_read = Coverage::new("reports", "Unassessed Reports", now);
+    let mut charges_read = Coverage::new("charges", "Charges", now);
+    if gateway.registry.is_some() {
+        let scopes = report_scopes(&operations, stations.iter().copied(), wanted.is_some());
+        let open = reports::open_reports(
+            &gateway,
+            &headers,
+            &scopes,
+            limits.attention_items.or_max().saturating_add(1),
+        )
+        .await;
+        reports_read.checked = open.checked;
+        reports_read.unavailable = open.unavailable;
+        // M's Reports are for the few who hold `config:reports`; the rest are not told.
+        reports_read.not_permitted = open
+            .not_permitted
+            .into_iter()
+            .filter(|scope| scope != "m")
+            .collect();
+        for report in open.reports {
+            let (label, operation_id, station_id) = match report.scope.split_once(':') {
+                Some(("operation", id)) => (format!("Operation {id}"), Some(id.to_owned()), None),
+                Some(("station", id)) => (format!("Station {id}"), None, Some(id.to_owned())),
+                _ => ("M".to_owned(), None, None),
+            };
+            let kind = report
+                .kind
+                .as_deref()
+                .map(|kind| format!(" ({})", plain(kind)))
+                .unwrap_or_default();
+            let (title, detail) = match &report.title {
+                Some(title) => (
+                    format!(
+                        "Report \"{}\"{kind} waits for an assessment in {label}",
+                        plain(title)
+                    ),
+                    report.severity.as_deref().map(|severity| {
+                        format!(
+                            "Severity {}{}.",
+                            plain(severity),
+                            report
+                                .priority
+                                .as_deref()
+                                .map(|priority| format!(", priority {}", plain(priority)))
+                                .unwrap_or_default()
+                        )
+                    }),
                 ),
-                Some(format!("{} {}", plain(&record.target), detail)),
-                entity.clone(),
-                settings.clone(),
-                &scope,
+                None => (
+                    format!("A Report waits for an assessment in {label}"),
+                    Some("You are not read in to its content.".to_owned()),
+                ),
+            };
+            found.push(item(
+                format!("report:{}", report.id),
+                "report",
+                Condition::Current,
+                title,
+                detail,
+                Entity {
+                    kind: "report",
+                    id: report.id.clone(),
+                    operation_id,
+                    station_id,
+                },
+                json!({"page": "reports", "report_id": report.id}),
+                &report.scope,
                 now,
-                observed,
-                Some(record.at),
+                None,
+                report.created,
             ));
+        }
+
+        match Read::of(
+            charges::list(State(gateway.clone()), headers.clone())
+                .await
+                .map(|Json(charges)| charges),
+        ) {
+            Read::Done(charges) => {
+                charges_read.checked.push("all".to_owned());
+                for charge in charges {
+                    for trouble in charge.trouble() {
+                        let (operation_id, station_id) = match charge.scope().split_once(':') {
+                            Some(("operation", id)) => (Some(id.to_owned()), None),
+                            Some(("station", id)) => (None, Some(id.to_owned())),
+                            _ => (None, None),
+                        };
+                        let route = match (&operation_id, &station_id) {
+                            (Some(operation), _) => {
+                                json!({"page": "charges", "operation_id": operation})
+                            }
+                            (_, Some(station)) => {
+                                json!({"page": "charges", "station_id": station})
+                            }
+                            _ => json!({"page": "charges", "charge": "m"}),
+                        };
+                        found.push(item(
+                            format!("{}:{}", trouble.kind, charge.scope()),
+                            trouble.kind,
+                            Condition::Current,
+                            format!("{} {}", charge.label(), trouble.title),
+                            Some(trouble.detail),
+                            Entity {
+                                kind: "charge",
+                                id: charge.scope().to_owned(),
+                                operation_id,
+                                station_id,
+                            },
+                            route,
+                            &format!("charge:{}", charge.scope()),
+                            now,
+                            None,
+                            trouble.since,
+                        ));
+                    }
+                }
+            }
+            Read::NotPermitted => charges_read.not_permitted.push("all".to_owned()),
+            Read::Unavailable => charges_read.unavailable.push("all".to_owned()),
         }
     }
 
@@ -598,6 +747,8 @@ pub(crate) async fn read(
         held_read,
         proposals_read,
         audit_read,
+        reports_read,
+        charges_read,
     ] {
         coverage.push(read.settle());
     }
@@ -717,15 +868,7 @@ fn item(
     observed_at: Option<f64>,
     since: Option<f64>,
 ) -> Item {
-    // A value a route does not take (an identifier from outside AI6) opens the page alone.
-    let checked = Route::from_json(&route, Limits::default()).or_else(|_| {
-        let page = route.get("page").cloned().unwrap_or(Value::Null);
-        Route::from_json(&json!({"page": page}), Limits::default())
-    });
-    let (route, link) = match checked {
-        Ok(route) => (Some(route.to_json()), Some(route.to_uri())),
-        Err(_) => (None, None),
-    };
+    let (route, link) = page_link(&route);
     Item {
         id,
         kind,
@@ -739,11 +882,65 @@ fn item(
         checked_at,
         observed_at,
         since,
+        revision: None,
+        editor: None,
+        editor_link: None,
     }
 }
 
+/// The app page `route` names, as the route and as `app:/<page>?...` for a link in text. A value
+/// a route does not take (an identifier from outside AI6) opens the page alone.
+pub(crate) fn page_link(route: &Value) -> (Option<Value>, Option<String>) {
+    let checked = Route::from_json(route, Limits::default()).or_else(|_| {
+        let page = route.get("page").cloned().unwrap_or(Value::Null);
+        Route::from_json(&json!({"page": page}), Limits::default())
+    });
+    match checked {
+        Ok(route) => (Some(route.to_json()), Some(route.to_uri())),
+        Err(_) => (None, None),
+    }
+}
+
+/// The scopes whose Reports a summary reads: the Operations and Stations it covers, and M's
+/// unless it is about one Operation.
+pub(crate) fn report_scopes<'a>(
+    operations: impl IntoIterator<Item = &'a String>,
+    stations: impl IntoIterator<Item = &'a BoardStation>,
+    one_operation: bool,
+) -> Vec<String> {
+    let mut scopes: Vec<String> = operations
+        .into_iter()
+        .map(|operation| format!("operation:{operation}"))
+        .chain(
+            stations
+                .into_iter()
+                .map(|station| format!("station:{}", station.station_id)),
+        )
+        .collect();
+    if !one_operation {
+        scopes.push("m".to_owned());
+    }
+    scopes
+}
+
+/// The Operations a summary looks in: those on the board, or the one asked for.
+pub(crate) fn operations_of(board: &StationBoard, wanted: Option<&str>) -> BTreeSet<String> {
+    let mut operations: BTreeSet<String> = board
+        .operations
+        .iter()
+        .map(|operation| operation.operation_id.clone())
+        .collect();
+    if let Some(operation) = wanted {
+        operations.retain(|candidate| candidate == operation);
+        if board.operations.is_empty() {
+            operations.insert(operation.to_owned());
+        }
+    }
+    operations
+}
+
 /// Text from a record or an Agent on one line, with nothing that renders as nothing.
-fn plain(text: &str) -> String {
+pub(crate) fn plain(text: &str) -> String {
     text.chars()
         .map(|character| {
             if character.is_control() {

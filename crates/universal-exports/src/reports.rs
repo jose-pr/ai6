@@ -279,15 +279,17 @@ async fn list_reports(
             "reports": shown,
             "priorities": reader.settings.priorities,
             "classifications": reader.settings.classifications,
+            "handlings": reader.settings.handlings,
         })))
     })
     .await
 }
 
 /// `GET /v1/reports?scope=SCOPE|mission=ID[&state][&kind][&limit]`: `{"reports": [...],
-/// "priorities": [...], "classifications": [...]}`, the Reports most urgent first, each as far
-/// as the person may see it, and the deployment's priorities (most urgent first) and
-/// classifications (lowest first), which an assessment and the markings choose from.
+/// "priorities": [...], "classifications": [...], "handlings": [...]}`, the Reports most urgent
+/// first, each as far as the person may see it, and the deployment's priorities (most urgent
+/// first), classifications (lowest first) and handling marks (narrowest first), which an
+/// assessment and the markings choose from.
 pub(crate) async fn list(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
@@ -311,6 +313,172 @@ pub(crate) async fn of_mission(
         limit: None,
     };
     list_reports(&gateway, &headers, listing).await
+}
+
+/// One Report waiting for an assessment, as far as the person may see it.
+#[derive(Debug, Clone)]
+pub(crate) struct OpenReport {
+    pub(crate) id: String,
+    /// `operation:ID`, `station:ID` or `m`.
+    pub(crate) scope: String,
+    /// Only for a Report the person may read the content of.
+    pub(crate) title: Option<String>,
+    pub(crate) kind: Option<String>,
+    pub(crate) severity: Option<String>,
+    pub(crate) priority: Option<String>,
+    /// How much of it the person sees: `content`, `tearline` or `markings`.
+    pub(crate) sight: String,
+    /// When it was filed, as Unix seconds.
+    pub(crate) created: Option<f64>,
+}
+
+/// The unassessed Reports of some scopes, and which scopes were read.
+#[derive(Debug, Default)]
+pub(crate) struct OpenReports {
+    pub(crate) reports: Vec<OpenReport>,
+    pub(crate) checked: Vec<String>,
+    /// Scopes the person may not read Reports of; theirs to see or not, not a gap.
+    pub(crate) not_permitted: Vec<String>,
+    /// Scopes that could not be read now: a gap.
+    pub(crate) unavailable: Vec<String>,
+}
+
+/// The Reports in `open` state of each of `scopes` (`operation:ID`, `station:ID`, `m`), read
+/// through the same listing the Reports page uses, so each scope's read, its compartments and
+/// the audit of a crossing are decided there. At most `per_scope` of each are read.
+pub(crate) async fn open_reports(
+    gateway: &Gateway,
+    headers: &HeaderMap,
+    scopes: &[String],
+    per_scope: usize,
+) -> OpenReports {
+    let mut found = OpenReports::default();
+    for scope in scopes {
+        let listing = Listing {
+            scope: Some(scope.clone()),
+            mission: None,
+            state: Some("open".to_owned()),
+            kind: None,
+            limit: Some(per_scope),
+        };
+        match list_reports(gateway, headers, listing).await {
+            Ok(Json(body)) => {
+                found.checked.push(scope.clone());
+                for report in body["reports"].as_array().into_iter().flatten() {
+                    let text = |key: &str| report[key].as_str().map(str::to_owned);
+                    found.reports.push(OpenReport {
+                        id: text("id").unwrap_or_default(),
+                        scope: scope.clone(),
+                        title: text("title"),
+                        kind: text("kind"),
+                        severity: text("severity"),
+                        priority: text("priority"),
+                        sight: text("sight").unwrap_or_default(),
+                        created: report["created"].as_f64(),
+                    });
+                }
+            }
+            Err(error) if error.status == StatusCode::FORBIDDEN => {
+                found.not_permitted.push(scope.clone());
+            }
+            Err(_) => found.unavailable.push(scope.clone()),
+        }
+    }
+    found
+}
+
+/// `GET /v1/user/reports/unassessed[?operation_id=ID]`: the Reports still waiting for an
+/// assessment in every scope the person reads (their Operations, their Stations, and M's), each
+/// with the Reports page link that opens it, and which scopes were and were not read.
+pub(crate) async fn unassessed(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Query(query): Query<UnassessedQuery>,
+) -> Result<Json<Value>, ApiError> {
+    resolve_user(&gateway, bearer(&headers)?).await?;
+    let wanted = query
+        .operation_id
+        .map(|operation| {
+            ai6_diptel::OperationId::new(operation)
+                .map(|operation| operation.to_string())
+                .map_err(|_| ApiError::bad_request())
+        })
+        .transpose()?;
+    let now = unix_timestamp()?;
+    let limits = gateway.config.unex().timeline.clone();
+    let board = crate::stations(State(gateway.clone()), headers.clone())
+        .await
+        .map(|Json(board)| board)
+        .ok();
+    let scopes = match &board {
+        Some(board) => crate::attention::report_scopes(
+            &crate::attention::operations_of(board, wanted.as_deref()),
+            board.stations.iter().filter(|station| {
+                wanted
+                    .as_ref()
+                    .is_none_or(|operation| station.operations.contains(operation))
+            }),
+            wanted.is_some(),
+        ),
+        None => crate::attention::report_scopes(wanted.iter(), [], wanted.is_some()),
+    };
+    let read = open_reports(
+        &gateway,
+        &headers,
+        &scopes,
+        limits.attention_items.or_max().saturating_add(1),
+    )
+    .await;
+    let found = read.reports.len();
+    let keep = if limits.attention_items.allows(found) {
+        found
+    } else {
+        limits.attention_items.or_max()
+    };
+    let reports: Vec<Value> = read
+        .reports
+        .iter()
+        .take(keep)
+        .map(|report| {
+            let route = json!({"page": "reports", "report_id": report.id});
+            let (route, link) = crate::attention::page_link(&route);
+            json!({
+                "id": report.id,
+                "scope": report.scope,
+                "title": report.title.as_deref().map(crate::attention::plain),
+                "kind": report.kind,
+                "severity": report.severity,
+                "priority": report.priority,
+                "sight": report.sight,
+                "created": report.created,
+                "route": route,
+                "link": link,
+            })
+        })
+        .collect();
+    Ok(Json(json!({
+        "checked_at": now,
+        "scope": wanted.as_ref().map_or_else(
+            || "All accessible Operations and Stations".to_owned(),
+            |operation| format!("Operation {operation}"),
+        ),
+        "reports": reports,
+        "omitted": found - keep,
+        "coverage": {
+            "checked": read.checked,
+            "not_permitted": read.not_permitted,
+            "unavailable": read.unavailable,
+        },
+        "complete": read.unavailable.is_empty() && board.is_some(),
+    })))
+}
+
+/// `?operation_id=ID`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct UnassessedQuery {
+    #[serde(default)]
+    operation_id: Option<String>,
 }
 
 /// `GET /v1/reports/{id}`: the Report as far as the person may see it.

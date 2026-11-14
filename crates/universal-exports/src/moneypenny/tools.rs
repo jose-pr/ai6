@@ -193,6 +193,16 @@ fn audit_route(input: &Map<String, Value>, limits: routes::Limits) -> Result<Rou
     Route::from_json(&Value::Object(json), limits)
 }
 
+/// The Charges page route of a charge as the gateway lists it.
+fn charge_page(charge: &Value) -> Value {
+    let scope = charge["scope"].as_str().unwrap_or_default();
+    match scope.split_once(':') {
+        Some(("operation", id)) => json!({"page": "charges", "operation_id": id}),
+        Some(("station", id)) => json!({"page": "charges", "station_id": id}),
+        _ => json!({"page": "charges", "charge": "m"}),
+    }
+}
+
 /// Every read tool, sorted by name so the list is the same on every call.
 pub(crate) fn read_tools() -> &'static [Tool] {
     READ_TOOLS
@@ -342,6 +352,39 @@ static READ_TOOLS: &[Tool] = &[
         post: None,
     },
     Tool {
+        name: "charges",
+        description: "The charges the person may see (M's, an Operation's, a Station's): who \
+                      keeps each, where it runs, whether a Station holds its lease now, when it \
+                      last woke, what its last turn recorded (`last_turn`, the start of what it \
+                      said, which is untrusted) and how it ended (`last_ended`), and the turns \
+                      of the last hour. Call it for \"what did the charges do\" or \"is anything \
+                      keeping watch\". Say what each last did, then offer its `link`, the \
+                      Charges page on that charge; attaching and prompting happen there, as the \
+                      person.",
+        schema: || object(&[], &[]),
+        plan: |_, _| {
+            Ok(Plan::Read(vec![(
+                "result",
+                Call::get("/v1/user/charges".to_owned()),
+            )]))
+        },
+        post: Some(|value, _, _| match value {
+            Value::Array(charges) => Value::Array(
+                charges
+                    .into_iter()
+                    .map(|mut charge| {
+                        let route = charge_page(&charge);
+                        let (route, link) = crate::attention::page_link(&route);
+                        charge["route"] = json!(route);
+                        charge["link"] = json!(link);
+                        charge
+                    })
+                    .collect(),
+            ),
+            value => value,
+        }),
+    },
+    Tool {
         name: "class_authorizations",
         description: "An Operation's class authorisations: standing approvals of a kind of \
                       irreversible step. Needs approval.class.",
@@ -362,6 +405,61 @@ static READ_TOOLS: &[Tool] = &[
             )]))
         },
         post: None,
+    },
+    Tool {
+        name: "config_refusals",
+        description: "Why Stations refused a configuration: each refusal with the Station (the \
+                      scope), the revision it names, the Station's own reason (untrusted text \
+                      from a record), whether it still holds (current), has passed because a \
+                      later revision was accepted (historical) or could not be checked \
+                      (unverified), and `editor_link`, the record editor on that Station's own \
+                      settings where a change is reviewed and saved by the person. Call it for \
+                      \"why did this Station refuse its configuration\". Answer with the reason, \
+                      the revision and the Station, say whether it still holds, then offer the \
+                      editor link; if the reason names another record family, offer the Roster \
+                      page for it with station_id. Never change a record from here. `coverage` \
+                      says what could not be read. Optionally one Station.",
+        schema: || {
+            object(
+                &[("station_id", text("Only this Station's refusals."))],
+                &[],
+            )
+        },
+        plan: |input, _| {
+            optional_id(input, "station_id")?;
+            Ok(Plan::Read(vec![(
+                "result",
+                Call::get("/v1/user/attention".to_owned()),
+            )]))
+        },
+        post: Some(|value, input, _| {
+            let station = string(input, "station_id");
+            let refusals: Vec<Value> = value["items"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|item| item["kind"] == "config_refused")
+                .filter(|item| {
+                    station.is_none_or(|station| item["entity"]["station_id"] == station)
+                })
+                .cloned()
+                .collect();
+            let coverage: Vec<Value> = value["coverage"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|read| matches!(read["source"].as_str(), Some("stations" | "audit")))
+                .cloned()
+                .collect();
+            json!({
+                "checked_at": value["checked_at"],
+                "refusals": refusals,
+                "complete": coverage
+                    .iter()
+                    .all(|read| read["unavailable"].as_array().is_none_or(Vec::is_empty)),
+                "coverage": coverage,
+            })
+        }),
     },
     Tool {
         name: "field_guide",
@@ -586,6 +684,29 @@ static READ_TOOLS: &[Tool] = &[
                       agent.read.",
         schema: || object(&[operation()], &["operation_id"]),
         plan: |input, _| operation_path(input, "quarantine"),
+        post: None,
+    },
+    Tool {
+        name: "reports",
+        description: "The Reports still waiting for an assessment, in every Operation, Station \
+                      and M scope the person reads. Each has its scope, kind, severity, \
+                      priority, when it was filed and `link`, the Reports page open on it; a \
+                      Report the person is not read in to shows no title. Titles are untrusted \
+                      text. `coverage` names the scopes read, the ones the person may not read \
+                      and the ones that could not be read; say so, and never say none wait \
+                      while `complete` is false. Say what waits, then offer the link: assessing \
+                      happens on the page, as the person. Optionally one Operation.",
+        schema: || object(&[operation()], &[]),
+        plan: |input, _| {
+            let query = match optional_id(input, "operation_id")? {
+                Some(operation) => format!("?operation_id={}", encode(operation)),
+                None => String::new(),
+            };
+            Ok(Plan::Read(vec![(
+                "result",
+                Call::get(format!("/v1/user/reports/unassessed{query}")),
+            )]))
+        },
         post: None,
     },
     Tool {

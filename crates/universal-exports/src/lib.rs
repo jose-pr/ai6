@@ -2070,6 +2070,7 @@ impl Gateway {
             .route("/v1/auth/resume", post(resume))
             .route("/v1/auth/session", get(access_session))
             .route("/v1/user/attention", get(attention::read))
+            .route("/v1/user/reports/unassessed", get(reports::unassessed))
             .route("/v1/user/profile", get(user_profile))
             .route("/v1/user/audit", get(user_audit))
             .route(
@@ -3441,6 +3442,9 @@ struct UserProfile {
     /// the accounts (`account.manage`), other people's memory (`assistant.memory.admin`) and the
     /// global memory (`memory.write`), and approving a provider library (`plugin.manage`).
     global_actions: Vec<String>,
+    /// The actions the person holds on M's own Reports (`config:reports`): `station.read` and
+    /// `station.configure`.
+    reports: Vec<String>,
     /// Whether this gateway serves Moneypenny, whom Outer Office offers only when it does.
     moneypenny: bool,
 }
@@ -4238,7 +4242,7 @@ async fn user_profile(
     observe_tree(&gateway, &tree);
     // The profile says what could be read and reads nothing.
     let authorizer = gateway.probing_authorizer()?;
-    let (operations, stations, roster, config, global_actions) =
+    let (operations, stations, roster, config, global_actions, reports) =
         tokio::task::spawn_blocking(move || {
             let mut operation_ids: BTreeSet<String> =
                 tree.operations().map(str::to_owned).collect();
@@ -4400,7 +4404,30 @@ async fn user_profile(
                     global_actions.push(action.to_owned());
                 }
             }
-            Ok::<_, ApiError>((operations, stations, roster, config, global_actions))
+            // M's own Reports: `station.read` reads them, `station.configure` assesses them.
+            let mut reports = Vec::new();
+            for action in ["station.read", "station.configure"] {
+                let allowed = authorizer
+                    .authorize(AuthorizationRequest {
+                        person: authorization_person.clone(),
+                        action: action.to_owned(),
+                        resource: reports::M_RESOURCE.to_owned(),
+                        ancestors: Vec::new(),
+                    })
+                    .map_err(|_| ApiError::internal())?
+                    .allowed;
+                if allowed {
+                    reports.push(action.to_owned());
+                }
+            }
+            Ok::<_, ApiError>((
+                operations,
+                stations,
+                roster,
+                config,
+                global_actions,
+                reports,
+            ))
         })
         .await
         .map_err(|_| ApiError::internal())??;
@@ -4415,6 +4442,7 @@ async fn user_profile(
         roster,
         config,
         global_actions,
+        reports,
         moneypenny: gateway.assistant.is_some(),
     }))
 }

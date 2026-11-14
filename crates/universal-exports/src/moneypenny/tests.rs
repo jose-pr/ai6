@@ -6647,3 +6647,4 @@ mod sharing;
 mod sources;
 mod transcripts;
 mod viewing;
+mod workspace;
