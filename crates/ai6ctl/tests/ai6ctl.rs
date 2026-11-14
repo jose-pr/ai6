@@ -1957,3 +1957,155 @@ async fn a_run_shows_every_start_with_its_handler_history_and_prompt() {
     );
     let _ = shutdown.send(());
 }
+
+#[tokio::test]
+async fn pools_changes_who_holds_a_login_forgets_it_and_shows_what_a_person_must_run() {
+    use ai6::directorates::registry::backend::*;
+
+    let (server, shutdown, token, directory) = start_gateway().await;
+    let registry = FileRegistry::open(directory.path());
+    let pool = ai6::AccountPool::new("free", "acp").account(
+        ai6::Account::new("shared", ai6::AccountKind::HarnessLogin).files([".fake/auth.json"]),
+    );
+    let account = ai6::AccountRef::new("free", "shared");
+    registry
+        .declare_account(
+            &account,
+            "station-01",
+            &ai6::AccountProfile::of(&pool, "shared", vec!["operation-01".to_owned()]).unwrap(),
+        )
+        .unwrap();
+    let run = |args: Vec<&'static str>| {
+        let (server, token) = (server.clone(), token.clone());
+        async move { ai6ctl(server, Some(token), &args).await }
+    };
+
+    // Declared to keep a login, none added: a person is needed, and the command says what to run.
+    let listed = lines(&run(vec!["pools", "--operation", "operation-01"]).await);
+    assert!(
+        listed
+            .iter()
+            .any(|line| line.starts_with("free/shared\t-\t")
+                && line.contains("no login is kept for this account")
+                && line.contains("ai6 pools add-login free shared --handler acp --replace")),
+        "{listed:?}"
+    );
+
+    // With no login there is nothing to change.
+    let refused = run(vec![
+        "pools",
+        "add-station",
+        "free",
+        "shared",
+        "host-b",
+        "--operation",
+        "operation-01",
+    ])
+    .await;
+    assert!(!refused.status.success());
+
+    registry
+        .change_login(&account, &mut |state| {
+            let mut login = ai6::LoginState::default();
+            login.stations = vec!["station-01".to_owned()];
+            login.revision = 1;
+            *state = Some(login);
+        })
+        .unwrap();
+    let added = lines(
+        &run(vec![
+            "pools",
+            "add-station",
+            "free",
+            "shared",
+            "host-b",
+            "--operation",
+            "operation-01",
+        ])
+        .await,
+    );
+    assert_eq!(
+        added,
+        ["free/shared: asked a Station holding the login to seal it to host-b"]
+    );
+    let removed = lines(
+        &run(vec![
+            "pools",
+            "remove-station",
+            "free",
+            "shared",
+            "station-01",
+            "--operation",
+            "operation-01",
+        ])
+        .await,
+    );
+    assert_eq!(
+        removed,
+        ["free/shared: asked a Station holding the login to stop sealing it to station-01"]
+    );
+    let login = registry
+        .accounts()
+        .unwrap()
+        .into_iter()
+        .find(|state| state.account == account)
+        .and_then(|state| state.login)
+        .unwrap();
+    assert_eq!(login.requests.len(), 2);
+    let listed = lines(&run(vec!["pools", "--operation", "operation-01"]).await);
+    assert!(
+        listed
+            .iter()
+            .any(|line| line.starts_with("free/shared\tstation-01\t") && line.contains("\t2\t-")),
+        "two changes wait: {listed:?}"
+    );
+
+    let signed_out = lines(
+        &run(vec![
+            "pools",
+            "remove-login",
+            "free",
+            "shared",
+            "--operation",
+            "operation-01",
+            "--sign-out",
+        ])
+        .await,
+    );
+    assert_eq!(
+        signed_out,
+        [
+            "free/shared: asked a Station holding the login to sign it out at its provider and forget it"
+        ]
+    );
+    let forgotten = lines(
+        &run(vec![
+            "pools",
+            "remove-login",
+            "free",
+            "shared",
+            "--operation",
+            "operation-01",
+        ])
+        .await,
+    );
+    assert_eq!(forgotten, ["free/shared: login forgotten"]);
+    assert!(
+        registry
+            .accounts()
+            .unwrap()
+            .into_iter()
+            .find(|state| state.account == account)
+            .and_then(|state| state.login)
+            .is_none()
+    );
+    let audited: Vec<String> = registry
+        .audit_records()
+        .unwrap()
+        .into_iter()
+        .map(|record| record.action)
+        .filter(|action| action.starts_with("pool.login"))
+        .collect();
+    assert_eq!(audited.len(), 4, "{audited:?}");
+    let _ = shutdown.send(());
+}

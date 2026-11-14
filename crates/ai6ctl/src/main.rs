@@ -396,6 +396,38 @@ enum PoolCommand {
         /// The account's name in the pool.
         account: String,
     },
+    /// Let one more Station hold the account's login. A Station that already holds it seals it
+    /// to the new one at its next check-in (needs pool.manage on the Operation; audited).
+    AddStation {
+        /// The pool ID.
+        pool: String,
+        /// The account's name in the pool.
+        account: String,
+        /// The Station; it must have published its sealing key.
+        station: String,
+    },
+    /// Stop sealing the account's login to a Station, dropping its copy at the next check-in of
+    /// a Station that holds it (needs pool.manage on the Operation; audited).
+    RemoveStation {
+        /// The pool ID.
+        pool: String,
+        /// The account's name in the pool.
+        account: String,
+        /// The Station.
+        station: String,
+    },
+    /// Forget the account's login. With `--sign-out` a Station holding it first signs it out at
+    /// the provider with the account's `logout_command`, and keeps it if that fails (needs
+    /// pool.manage on the Operation; audited).
+    RemoveLogin {
+        /// The pool ID.
+        pool: String,
+        /// The account's name in the pool.
+        account: String,
+        /// Also sign out at the provider.
+        #[arg(long)]
+        sign_out: bool,
+    },
 }
 
 /// Green ink: a person's approval of one irreversible step an Agent asked to take.
@@ -2409,26 +2441,88 @@ async fn run() -> Result<(), String> {
                         Method::POST,
                         &[&operation, "pools", &pool, &account, "clear-limit"],
                     )?;
-                    let response = request
-                        .send()
-                        .await
-                        .map_err(|_| "could not contact Universal Exports".to_owned())?;
-                    match response.status() {
-                        status if status.is_success() => {
-                            println!("{}/{}: limit cleared", plain(&pool), plain(&account));
-                        }
-                        StatusCode::FORBIDDEN => {
-                            return Err("Universal Exports returned HTTP 403 Forbidden \
-                                 (pool.manage on the Operation is required)"
-                                .to_owned());
-                        }
-                        StatusCode::NOT_FOUND => {
-                            return Err("Universal Exports returned HTTP 404 Not Found (no \
-                                 such account declared for the Operation)"
-                                .to_owned());
-                        }
-                        status => return Err(format!("Universal Exports returned HTTP {status}")),
-                    }
+                    pool_change(
+                        request,
+                        &format!("{}/{}: limit cleared", plain(&pool), plain(&account)),
+                    )
+                    .await?;
+                }
+                Some(PoolCommand::AddStation {
+                    pool,
+                    account,
+                    station,
+                }) => {
+                    let request = operation_request(
+                        &client,
+                        &server,
+                        &token,
+                        Method::POST,
+                        &[&operation, "pools", &pool, &account, "login", "stations"],
+                    )?
+                    .json(&serde_json::json!({ "station": station }));
+                    pool_change(
+                        request,
+                        &format!(
+                            "{}/{}: asked a Station holding the login to seal it to {}",
+                            plain(&pool),
+                            plain(&account),
+                            plain(&station)
+                        ),
+                    )
+                    .await?;
+                }
+                Some(PoolCommand::RemoveStation {
+                    pool,
+                    account,
+                    station,
+                }) => {
+                    let request = operation_request(
+                        &client,
+                        &server,
+                        &token,
+                        Method::DELETE,
+                        &[
+                            &operation, "pools", &pool, &account, "login", "stations", &station,
+                        ],
+                    )?;
+                    pool_change(
+                        request,
+                        &format!(
+                            "{}/{}: asked a Station holding the login to stop sealing it to {}",
+                            plain(&pool),
+                            plain(&account),
+                            plain(&station)
+                        ),
+                    )
+                    .await?;
+                }
+                Some(PoolCommand::RemoveLogin {
+                    pool,
+                    account,
+                    sign_out,
+                }) => {
+                    let request = operation_request(
+                        &client,
+                        &server,
+                        &token,
+                        Method::DELETE,
+                        &[&operation, "pools", &pool, &account, "login"],
+                    )?
+                    .query(&[("sign_out", sign_out)]);
+                    pool_change(
+                        request,
+                        &if sign_out {
+                            format!(
+                                "{}/{}: asked a Station holding the login to sign it out at \
+                                 its provider and forget it",
+                                plain(&pool),
+                                plain(&account)
+                            )
+                        } else {
+                            format!("{}/{}: login forgotten", plain(&pool), plain(&account))
+                        },
+                    )
+                    .await?;
                 }
             }
         }
@@ -3509,6 +3603,23 @@ struct PoolAccount {
     windows: Vec<PoolWindow>,
     limited_until: Option<f64>,
     tokens_today: u64,
+    #[serde(default)]
+    login: Option<PoolLogin>,
+}
+
+/// What the board says of a login kept in the Registry: never the login.
+#[derive(Debug, Deserialize)]
+struct PoolLogin {
+    #[serde(default)]
+    stations: Vec<String>,
+    expires_at: Option<f64>,
+    renewed_at: Option<f64>,
+    renewal_held_by: Option<String>,
+    last_result: Option<String>,
+    needs_person: Option<String>,
+    needs_person_command: Option<String>,
+    #[serde(default)]
+    requests: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -3881,6 +3992,27 @@ fn print_agents(agents: &[AgentView]) {
     }
 }
 
+/// Sends a change to a pool account and says `done` when the gateway accepts it.
+async fn pool_change(request: reqwest::RequestBuilder, done: &str) -> Result<(), String> {
+    let response = request
+        .send()
+        .await
+        .map_err(|_| "could not contact Universal Exports".to_owned())?;
+    match response.status() {
+        status if status.is_success() => {
+            println!("{done}");
+            Ok(())
+        }
+        StatusCode::FORBIDDEN => Err("Universal Exports returned HTTP 403 Forbidden \
+             (pool.manage on the Operation is required)"
+            .to_owned()),
+        StatusCode::NOT_FOUND => Err("Universal Exports returned HTTP 404 Not Found (no \
+             such account declared for the Operation, or it holds no login)"
+            .to_owned()),
+        status => Err(format!("Universal Exports returned HTTP {status}")),
+    }
+}
+
 fn print_pools(board: &PoolBoard, now: f64) {
     println!("POOL\tACCOUNT\tKIND\tRUNS\tWINDOWS\tREAD_UNIX\tLIMITED_UNTIL_UNIX\tTOKENS_TODAY");
     for account in &board.accounts {
@@ -3924,6 +4056,50 @@ fn print_pools(board: &PoolBoard, now: f64) {
                 .map_or_else(|| "-".to_owned(), |until| format!("{until:.0}")),
             account.tokens_today,
         );
+    }
+    if board.accounts.iter().any(|account| account.login.is_some()) {
+        println!();
+        println!(
+            "LOGIN\tSTATIONS\tENDS_UNIX\tRENEWED_UNIX\tRENEWAL_HELD_BY\tLAST\tWAITING\tNEEDS_A_PERSON"
+        );
+        let time = |at: Option<f64>| at.map_or_else(|| "-".to_owned(), |at| format!("{at:.0}"));
+        let text = |value: Option<&String>| value.map_or_else(|| "-".to_owned(), |v| plain(v));
+        for account in &board.accounts {
+            let Some(login) = &account.login else {
+                continue;
+            };
+            let needs = match (&login.needs_person, &login.needs_person_command) {
+                (Some(why), Some(run)) => {
+                    format!(
+                        "{}; run on a host where you are signed in: {}",
+                        plain(why),
+                        plain(run)
+                    )
+                }
+                (Some(why), None) => plain(why),
+                _ => "-".to_owned(),
+            };
+            println!(
+                "{}/{}\t{}\t{}\t{}\t{}\t{}\t{}\t{needs}",
+                plain(&account.pool),
+                plain(&account.account),
+                if login.stations.is_empty() {
+                    "-".to_owned()
+                } else {
+                    login
+                        .stations
+                        .iter()
+                        .map(|s| plain(s))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                },
+                time(login.expires_at),
+                time(login.renewed_at),
+                text(login.renewal_held_by.as_ref()),
+                text(login.last_result.as_ref()),
+                login.requests.len(),
+            );
+        }
     }
 }
 

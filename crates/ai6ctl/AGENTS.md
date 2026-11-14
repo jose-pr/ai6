@@ -86,6 +86,13 @@ origin leaves the public roots alone.
 - `ai6ctl pools clear-limit <POOL> <ACCOUNT> --operation <OPERATION_ID>` posts
   `.../pools/{pool}/{account}/clear-limit` and prints `pool/account: limit cleared`; 403 names
   `pool.manage`, 404 an account not declared for the Operation.
+- `ai6ctl pools add-station|remove-station <POOL> <ACCOUNT> <STATION> --operation <ID>` and
+  `ai6ctl pools remove-login <POOL> <ACCOUNT> --operation <ID> [--sign-out]` change which Stations hold
+  an account's sealed login, or forget it, through `.../pools/{pool}/{account}/login[/stations[/{station}]]`
+  (`pool.manage`, audited first; 404 for an account not declared for the Operation or one that holds no
+  login). A change that needs a Station holding the login is queued (202) and made at its next
+  check-in. `ai6ctl pools` also lists the logins' standing after the table: Stations, end, renewal,
+  lease holder, last result, changes waiting and what a person must run.
 - `ai6ctl missions [--operation <ID> [--subtree]]` lists visible Missions as `STATION MISSION
   RUNS NAME UID`: `MISSION` the handle (the ID when the gateway gives none), `NAME` the name
   beside it (`-` before a Station published one; an issue's title, as data) and `UID` the

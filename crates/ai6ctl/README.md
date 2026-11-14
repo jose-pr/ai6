@@ -67,6 +67,9 @@ ai6ctl held-briefs release source_jira--OPS-12 --operation G
 | `agent-roles --operation <ID>` | Role purpose and policy visible with `agent.read` |
 | `pools --operation <ID>` | Pool accounts the Operation may draw from: Runs, quota used, limited until and tokens today (`pool.read`) |
 | `pools clear-limit <POOL> <ACCOUNT> --operation <ID>` | Lifts an account's provider limit (`pool.manage`, audited) |
+| `pools add-station <POOL> <ACCOUNT> <STATION> --operation <ID>` | Lets one more Station hold the account's sealed login; a Station holding it makes the change at its next check-in (`pool.manage`, audited) |
+| `pools remove-station <POOL> <ACCOUNT> <STATION> --operation <ID>` | Stops sealing the login to a Station, dropping its copy (`pool.manage`, audited) |
+| `pools remove-login <POOL> <ACCOUNT> --operation <ID> [--sign-out]` | Forgets the account's login; with `--sign-out` a Station holding it first signs it out at the provider and keeps it if that fails (`pool.manage`, audited) |
 | `missions [--operation <ID>]` | Visible Missions and their Run counts |
 | `mission <MISSION_ID> [--operation <ID>]` | One Mission and its Runs; `--operation` disambiguates a repeated ID |
 | `runs [--operation <ID>] [--mission <ID>] [--state <STATE>]` | Authorized Runs, filtered |
