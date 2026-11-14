@@ -34,6 +34,7 @@ pub fn disconnect_detail(self, detail: impl FnOnce() -> Option<String> + Send + 
 pub const fn initialize_timeout(self, limit: Option<Duration>) -> Self
 pub const fn request_timeout(self, limit: Option<Duration>) -> Self
 pub const fn close_grace(self, limit: Option<Duration>) -> Self
+pub const fn abort_wait(self, limit: Duration) -> Self
 pub const fn max_pending_events(self, events: usize) -> Self
 pub const fn text_flush(self, bytes: usize) -> Self
 pub const fn max_tool_kinds(self, calls: usize) -> Self
@@ -72,7 +73,7 @@ pub fn cancel(&self) -> Result<(), Error>
 pub fn close(&self)
 ```
 
-`next_event` answers `None` when none came in time or the session has ended. `send` is never retried: after a lost connection its outcome is unknown. `close` waits no longer than the close grace, then runs `on_close`.
+`next_event` answers `None` when none came in time or the session has ended. `send` is never retried: after a lost connection its outcome is unknown. `close` waits no longer than the close grace, then runs `on_close`. A session ended without `close` (dropped, or after `Event::Failed`) sends `session/cancel` and then one `_coqui/flush` request, waiting up to `abort_wait` (default 5 s, whatever the close grace) for its answer (an error is fine), before `on_close` runs, so the cancel reaches the agent ahead of any kill. When `abort_wait` passes, `on_close` runs anyway: a drop never blocks longer than it.
 
 Only this session's traffic counts: a `session/update` whose `sessionId` is not this session's is dropped, and a `session/request_permission` naming another session is answered cancelled without asking the decider. Before the session is known nothing is this session's, except that `resume` and `load` know it from the start. That is what an agent kept by a bridge (`coqui-acp-bridge serve --linger`) sends of an earlier connection's session. Request ids are the SDK's UUIDs, so they do not repeat across connections.
 
@@ -173,7 +174,7 @@ pub const CAPABILITY: &str = "dev.boriken.coqui.acp/secrets";   // clientCapabil
 pub const REQUEST_METHOD: &str = "_coqui_acp/secret_request";
 pub const SHOW_OPEN_METHOD: &str = "_coqui_acp/secret_show_open"; pub const SHOW_DELIVER_METHOD: &str = "_coqui_acp/secret_show_deliver";
 pub const VERSION: u64 = 1; pub const DEFAULT_LIFETIME: Duration;   // 240 s
-pub const BINDING_ECDSA: &str = "ecdsa-p256-sha256"; pub const BINDING_DH: &str = "x25519-hmac-sha256";
+pub const BINDING_ECDSA: &str = "ecdsa-p256-sha256"; pub const BINDING_DH: &str = "x25519-hmac-sha256"; pub const BINDING_LINK: &str = "link-hmac-sha256";
 
 pub struct Capability { pub request: bool, pub show: bool, pub bindings: Vec<String> }       // #[non_exhaustive]
 impl Capability { pub fn all() -> Self; pub fn to_value(&self) -> Value; pub fn from_meta(meta: &Map<String, Value>) -> Option<Self> }
@@ -206,6 +207,11 @@ pub mod unprotected {   // raw keys in this process's memory: tests and tools on
     pub fn x25519(secret: &[u8], collector_spki: &[u8]) -> Result<Prover, Error>;  pub fn x25519_pkcs8(der: &[u8], collector_spki: &[u8]) -> Result<Prover, Error>;
     pub fn x25519_agreement(secret: &[u8]) -> Result<(Vec<u8> /* spki */, impl Fn(&[u8; 32]) -> Result<[u8; 32], Error>), Error>;
 }
+pub enum LinkRole { Host, App }                                     // an end of the in-process link
+pub struct LinkKey;                                                 // derived from the link's per-process secret (>= 16 bytes); Debug shows no key
+impl LinkKey { pub fn derive(secret: &[u8]) -> Result<LinkKey, Error>; pub fn identity(&self, role: LinkRole) -> IdentityId }
+impl Prover { pub fn linked(link: &LinkKey, role: LinkRole) -> Prover }   // binds only for the other end; spki() is the role's 32-byte tag
+impl VerifierBuilder { pub fn link(self, link: &LinkKey, role: LinkRole) -> Result<Self, Error> }   // the verifier must be built for link.identity(role)
 pub struct Verifier;                                                // a checker: its own id, the identities it knows
 impl Verifier {
     pub fn builder(own: IdentityId) -> VerifierBuilder;   // .trust(id) .trust_spki(&[u8]) .agreement(spki, fn)? .max_lifetime(Duration) (5 min) .skew(Duration) (30 s) .limits(Limits) .build()
@@ -238,6 +244,7 @@ pub enum Error { Schema, Malformed, Unsupported, Key, UnknownIdentity, BadProof,
 - **Sealing.** HPKE (RFC 9180) base mode, DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, AES-128-GCM, one message per field, no aad; the `info` is the extension's label, the method, the request id, the context digest and the field name, each length-prefixed, so a ciphertext opens only for the field and request it was sealed for. A secret value is its text (UTF-8, or JSON number grammar for a number) and is never parsed as JSON.
 - **Forms.** The root has only `type`, `properties`, `required`, `title` and `description`. A secret field is `writeOnly` or `x-sensitive` (a non-boolean is refused), must be text or a number, and has only `type`, `title`, `description`, `minLength`, `maxLength`, `minimum`, `maximum`, `writeOnly`, `x-sensitive`, `contentEncoding`, `contentMediaType` and `format` (`password` only); `format: "password"` needs the mark; whole-number bounds stay within 2^53 - 1. Schema, layout, values and plain text are read strictly: a repeated key is refused. `Form::check_layout` (called for a context's layout) refuses a layout that is not guatiao-intake's flat form document, a `password` widget on a question that is not secret, any widget but `password` on one that is, and a `visibleWhen` on a secret question's value. A frontend masks from `FormField::secret` alone. `check_plain` refuses a name the form lacks, a secret field holding a plain value, a missing required one, and a value that does not fit. `open_values` checks both halves before it opens anything.
 - **Bindings.** `ecdsa-p256-sha256` for an identity that signs (the `webcrypto` peer method; `s` low, a high `s` is refused and a signer's is normalized); `x25519-hmac-sha256` for one that cannot (the `noise` method), which needs `VerifierBuilder::agreement` and a `Prover::agreeing` made for that one collector. Every binding names its audience; a verifier refuses one made for another id. Proof bytes are not identifiers. The Diffie-Hellman proof is not transferable and whoever holds the checker's static key can forge it to the checker. A binding ends at the maker's `lifetime` (`DEFAULT_LIFETIME` 240 s); a verifier takes it that long plus `skew` (30 s) after it ended and refuses one beyond `max_lifetime` (5 min) plus `skew` from now.
+- **The in-process link.** `link-hmac-sha256` (`LinkKey`, `Prover::linked`, `VerifierBuilder::link`) is for an application and the host it runs in its own process, which share a secret no wire carries: HMAC of the same statement under a key derived from it, with a role tag per end. Offer it only on that link; a verifier not built with `link` refuses it as `Unsupported`, which is what a link with a relay gets. See `docs/secrets.md`.
 - **Secrets in memory.** Plaintexts, the per-request private key and the MAC key and HMAC state are zeroed on drop (`zeroize`); no `Debug` prints a value, key or proof. The identity key is the caller's: this module only calls the signer or key agreement it was given. Copies a move leaves on the stack and `serde_json` strings of plain values are not zeroed.
 - **Not here** (`coqui-acp-secrets` does these). The handle store, the use and show tools, approvals, output scrubbing, routing to the owner's frontend, the frontend's pending-open table, request-id memory, certificate chains for `tls` identities, (the plain values of an answer are covered by `auth`).
 

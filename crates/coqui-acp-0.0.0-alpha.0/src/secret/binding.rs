@@ -1,11 +1,12 @@
 //! Binding a per-request key, and the values sealed to it, to the identity that holds them, so a collector seals only to a key a peer
 //! it already knows stands behind, and a receiver opens only what that peer sent.
 //!
-//! A binding proves, for one request, that the holder of an identity made a statement. Two proofs cover the peer identity methods:
-//! an ECDSA signature (P-256, SHA-256, IEEE P1363, low s) by an identity that signs, and a Diffie-Hellman proof (HMAC under a key
-//! derived from the two X25519 static keys) by one that cannot, such as a Noise static key. The identity's private key is never
-//! handed to this crate: a [`Prover`] calls a signer or a key agreement the caller supplies, which is how a platform key store or a
-//! WebCrypto key is used.
+//! A binding proves, for one request, that the holder of an identity made a statement. Three proofs cover the cases: an ECDSA
+//! signature (P-256, SHA-256, IEEE P1363, low s) by an identity that signs, a Diffie-Hellman proof (HMAC under a key derived from the
+//! two X25519 static keys) by one that cannot, such as a Noise static key, and, for the one link between an application and the host
+//! that runs inside the same process, an HMAC under a key derived from the secret that link already shares ([`LinkKey`]). The
+//! identity's private key is never handed to this crate: a [`Prover`] calls a signer or a key agreement the caller supplies, which is
+//! how a platform key store or a WebCrypto key is used.
 
 use super::error::Error;
 use super::{b64u, b64u_decode};
@@ -30,9 +31,17 @@ pub const BINDING_ECDSA: &str = "ecdsa-p256-sha256";
 /// and the collector's, so only those two can make it. The key is the identity's SPKI.
 pub const BINDING_DH: &str = "x25519-hmac-sha256";
 
+/// The binding method for the in-process link only: HMAC-SHA-256 under a key derived from the link's own secret ([`LinkKey`]). The
+/// secret never travels, so only the two ends of that link can make one. It is never offered on a link that has a relay.
+pub const BINDING_LINK: &str = "link-hmac-sha256";
+
 const KEY_LABEL: &[u8] = b"dev.boriken.coqui.acp/secret/v1 binding";
 const VALUES_LABEL: &[u8] = b"dev.boriken.coqui.acp/secret/v1 values";
 const DH_LABEL: &[u8] = b"dev.boriken.coqui.acp/secret/v1 dh";
+const LINK_MAC_LABEL: &[u8] = b"dev.boriken.coqui.acp/secret/v1 link mac";
+const LINK_ROLE_LABEL: &[u8] = b"dev.boriken.coqui.acp/secret/v1 link role";
+/// The shortest link secret taken, in bytes.
+const LINK_SECRET_MIN: usize = 16;
 
 /// `SubjectPublicKeyInfo` of a P-256 key before its 65-byte uncompressed point.
 pub(crate) const P256_SPKI_PREFIX: [u8; 26] = [
@@ -123,9 +132,10 @@ pub(crate) enum Kind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Binding {
-    /// [`BINDING_ECDSA`] or [`BINDING_DH`]; any other is refused.
+    /// [`BINDING_ECDSA`], [`BINDING_DH`] or [`BINDING_LINK`]; any other is refused.
     pub method: String,
-    /// The holder's public key as `SubjectPublicKeyInfo`. Its [`IdentityId`] is what a collector looks up.
+    /// The holder's public key as `SubjectPublicKeyInfo` (for [`BINDING_LINK`], its role's 32-byte tag). Its [`IdentityId`] is what a
+    /// collector looks up.
     pub key: Vec<u8>,
     /// When the binding ends, in Unix seconds.
     pub expires: u64,
@@ -250,6 +260,81 @@ fn dh_key(
     mac_over(&*prk, &[DH_LABEL, holder, collector, &[1]])
 }
 
+/// Which end of the in-process link a party is: the host that runs the agent, or the application in the same process.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinkRole {
+    /// The host.
+    Host,
+    /// The application.
+    App,
+}
+
+impl LinkRole {
+    const fn name(self) -> &'static [u8] {
+        match self {
+            Self::Host => b"host",
+            Self::App => b"app",
+        }
+    }
+
+    const fn other(self) -> Self {
+        match self {
+            Self::Host => Self::App,
+            Self::App => Self::Host,
+        }
+    }
+}
+
+/// What the two ends of the in-process link derive from the secret they share: the MAC key and each role's public tag, which names
+/// the role as an identity (the SHA-256 of the 32-byte tag, as for any other identity). The tags and the key come from one HKDF-SHA-256
+/// (RFC 5869, no salt) extraction under different labels, so a tag shows nothing of the key. The secret must be minted by the host,
+/// held in memory, and sent over no wire and to no agent; this crate only derives from it and does not keep it.
+pub struct LinkKey {
+    mac: Zeroizing<[u8; 32]>,
+    host: [u8; 32],
+    app: [u8; 32],
+}
+
+impl fmt::Debug for LinkKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "LinkKey({})", self.identity(LinkRole::Host))
+    }
+}
+
+impl LinkKey {
+    /// Derives the link's keys from its secret.
+    ///
+    /// # Errors
+    /// [`Error::Key`] for a secret shorter than 16 bytes.
+    pub fn derive(secret: &[u8]) -> Result<Self, Error> {
+        if secret.len() < LINK_SECRET_MIN {
+            return Err(Error::Key("a link secret is at least 16 bytes"));
+        }
+        let prk = mac_over(&[0u8; 32], &[secret])?;
+        let tag = |role: LinkRole| -> Result<[u8; 32], Error> {
+            Ok(*mac_over(&*prk, &[LINK_ROLE_LABEL, role.name(), &[1]])?)
+        };
+        Ok(Self {
+            mac: mac_over(&*prk, &[LINK_MAC_LABEL, &[1]])?,
+            host: tag(LinkRole::Host)?,
+            app: tag(LinkRole::App)?,
+        })
+    }
+
+    const fn tag(&self, role: LinkRole) -> &[u8; 32] {
+        match role {
+            LinkRole::Host => &self.host,
+            LinkRole::App => &self.app,
+        }
+    }
+
+    /// The identity of a role on this link, which a [`Verifier`] for that role is built for.
+    #[must_use]
+    pub fn identity(&self, role: LinkRole) -> IdentityId {
+        IdentityId::of(self.tag(role))
+    }
+}
+
 /// A signer: the 64-byte IEEE P1363 ECDSA P-256 signature of SHA-256 of the message, by the identity's key.
 type Signer = Box<dyn Fn(&[u8]) -> Result<[u8; 64], Error> + Send + Sync>;
 /// A key agreement: the X25519 Diffie-Hellman of the identity's static key and a peer's public key.
@@ -263,6 +348,11 @@ pub struct Prover {
 }
 
 enum ProverKind {
+    Linked {
+        mac: Zeroizing<[u8; 32]>,
+        tag: [u8; 32],
+        audience: IdentityId,
+    },
     Signing {
         spki: Vec<u8>,
         sign: Signer,
@@ -323,11 +413,24 @@ impl Prover {
         })
     }
 
-    /// The identity's public key as `SubjectPublicKeyInfo`.
+    /// The `role` end of the in-process link whose secret `link` was derived from, binding for the other end only.
+    #[must_use]
+    pub fn linked(link: &LinkKey, role: LinkRole) -> Self {
+        Self {
+            kind: ProverKind::Linked {
+                mac: link.mac.clone(),
+                tag: *link.tag(role),
+                audience: link.identity(role.other()),
+            },
+        }
+    }
+
+    /// The identity's public key as `SubjectPublicKeyInfo` (for the in-process link, its role's tag).
     #[must_use]
     pub fn spki(&self) -> &[u8] {
         match &self.kind {
             ProverKind::Signing { spki, .. } | ProverKind::Agreeing { spki, .. } => spki,
+            ProverKind::Linked { tag, .. } => tag,
         }
     }
 
@@ -346,6 +449,22 @@ impl Prover {
     ) -> Result<Binding, Error> {
         let bytes = statement.bytes(expires, audience);
         match &self.kind {
+            ProverKind::Linked {
+                mac,
+                tag,
+                audience: only,
+            } => {
+                if audience != only {
+                    return Err(Error::WrongAudience);
+                }
+                Ok(Binding {
+                    method: BINDING_LINK.into(),
+                    key: tag.to_vec(),
+                    expires,
+                    audience: *only,
+                    proof: mac_over(&**mac, &[&bytes])?.to_vec(),
+                })
+            }
             ProverKind::Signing { spki, sign } => {
                 let signature = Signature::from_slice(&sign(&bytes)?).map_err(|_| Error::Seal)?;
                 Ok(Binding {
@@ -386,15 +505,22 @@ fn p256_key_of_spki(spki: &[u8]) -> Result<VerifyingKey, Error> {
         .ok_or(Error::Key("not a P-256 SubjectPublicKeyInfo"))
 }
 
-/// The collector's side: the identities it knows by pairing or pinning, its own id, and its key agreement when it takes
-/// [`BINDING_DH`].
+/// The collector's side: the identities it knows by pairing or pinning, its own id, its key agreement when it takes [`BINDING_DH`], and
+/// the link's key when it is an end of the in-process link and takes [`BINDING_LINK`].
 pub struct Verifier {
     known: BTreeSet<IdentityId>,
     own: IdentityId,
     agreement: Option<OwnAgreement>,
+    link: Option<LinkSide>,
     max_lifetime: Duration,
     skew: Duration,
     pub(crate) limits: super::Limits,
+}
+
+/// The in-process link as this verifier's end sees it: the MAC key and the other end's tag.
+struct LinkSide {
+    mac: Zeroizing<[u8; 32]>,
+    peer: [u8; 32],
 }
 
 struct OwnAgreement {
@@ -455,6 +581,24 @@ impl VerifierBuilder {
         Ok(self)
     }
 
+    /// Takes [`BINDING_LINK`] from the other end of the in-process link, and knows that end. This verifier must be `role`'s: built for
+    /// `link.identity(role)`. Do this only on the in-process link: a link with a relay never takes the method.
+    ///
+    /// # Errors
+    /// [`Error::Key`] when this verifier is not that role's identity.
+    pub fn link(mut self, link: &LinkKey, role: LinkRole) -> Result<Self, Error> {
+        if link.identity(role) != self.verifier.own {
+            return Err(Error::Key("the link is not this verifier's identity"));
+        }
+        let peer = *link.tag(role.other());
+        self.verifier.known.insert(IdentityId::of(&peer));
+        self.verifier.link = Some(LinkSide {
+            mac: link.mac.clone(),
+            peer,
+        });
+        Ok(self)
+    }
+
     /// The longest a binding may last from now, 5 minutes by default; any value is taken.
     pub const fn max_lifetime(mut self, lifetime: Duration) -> Self {
         self.verifier.max_lifetime = lifetime;
@@ -489,6 +633,7 @@ impl Verifier {
                 known: BTreeSet::new(),
                 own,
                 agreement: None,
+                link: None,
                 max_lifetime: Duration::from_secs(300),
                 skew: Duration::from_secs(30),
                 limits: super::Limits::new(),
@@ -519,7 +664,7 @@ impl Verifier {
     ) -> Result<IdentityId, Error> {
         let ecdsa = match binding.method.as_str() {
             BINDING_ECDSA => true,
-            BINDING_DH => false,
+            BINDING_DH | BINDING_LINK => false,
             _ => {
                 return Err(Error::Unsupported(
                     "a binding method this side does not have",
@@ -528,6 +673,11 @@ impl Verifier {
         };
         let point = if ecdsa {
             Some(p256_key_of_spki(&binding.key)?)
+        } else if binding.method == BINDING_LINK {
+            if binding.key.len() != 32 {
+                return Err(Error::Key("a link tag is 32 bytes"));
+            }
+            None
         } else {
             x25519_of_spki(&binding.key)?;
             None
@@ -557,6 +707,16 @@ impl Verifier {
             }
             verifying
                 .verify(&signed, &signature)
+                .map_err(|_| Error::BadProof)?;
+        } else if binding.method == BINDING_LINK {
+            let link = self.link.as_ref().ok_or(Error::Unsupported(
+                "this collector is not an end of the in-process link",
+            ))?;
+            if binding.key != link.peer {
+                return Err(Error::UnknownIdentity);
+            }
+            mac(&*link.mac, &[&signed])?
+                .verify_slice(&binding.proof)
                 .map_err(|_| Error::BadProof)?;
         } else {
             let own = self.agreement.as_ref().ok_or(Error::Unsupported(

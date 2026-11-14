@@ -20,14 +20,16 @@ impl Run<'_> {
         let spent = self.steps.get().saturating_add(cost as u64);
         self.steps.set(spent);
         if !self.limits.substitution_steps.allows(spent) {
-            return Err(Error::new(Class::TooComplex, "a pattern"));
+            return Err(Error::new(Class::TooComplex, "a pattern").over("substitution_steps"));
         }
         Ok(())
     }
 
     fn fits(&self, out: &str) -> Result<(), Error> {
         if !self.limits.substitution_bytes.allows(out.len()) {
-            return Err(Error::new(Class::TooLarge, "a substituted value"));
+            return Err(
+                Error::new(Class::TooLarge, "a substituted value").over("substitution_bytes")
+            );
         }
         Ok(())
     }
@@ -69,7 +71,7 @@ pub fn substitute_with(
 
 fn substitute_chars(text: &[char], run: &Run<'_>) -> Result<String, Error> {
     if !run.limits.substitution_depth.allows(run.depth.get()) {
-        return Err(Error::new(Class::TooDeep, "an expression"));
+        return Err(Error::new(Class::TooDeep, "an expression").over("substitution_depth"));
     }
     run.depth.set(run.depth.get() + 1);
     let result = substitute_inner(text, run);

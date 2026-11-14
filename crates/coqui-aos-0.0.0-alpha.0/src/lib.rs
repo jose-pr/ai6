@@ -17,6 +17,7 @@ mod digest;
 mod error;
 mod front_matter;
 mod fs;
+mod hook_env;
 mod hooks;
 mod kinds;
 mod limits;
@@ -26,7 +27,10 @@ mod read;
 mod skills;
 mod source;
 mod subst;
+mod template;
 mod validate;
+#[cfg(feature = "test-support")]
+pub mod vectors;
 
 pub use apply::{
     Change, ComposedEnvironment, Effective, Environment, Facts, Needs, NonDefaultSetting, Phase,
@@ -56,10 +60,11 @@ pub use front_matter::{
 #[cfg(feature = "fs")]
 pub use fs::StdFs;
 pub use fs::{FileKind, FileSystem, Metadata};
+pub use hook_env::{EnvSet, OverlayProcess, hook_environment, hook_order, process_environment};
 pub use hooks::{
     Decision, FiredEvent, Hook, HookEvent, HookFacts, HookFailure, HookOutput, HookPlan,
-    HookReport, HookRun, HookScope, OnFailure, fire_event, hook_matches, hook_payload, hook_plan,
-    hook_result, hooks_of, read_hook_output,
+    HookReport, HookRun, HookScope, OnFailure, fire_event, fire_event_after, fire_event_for_call,
+    hook_matches, hook_payload, hook_plan, hook_result, hooks_declared, hooks_of, read_hook_output,
 };
 pub use kinds::{FailStep, Format, LeftState, ManifestFile, NonDefaultId, Runtime, Step};
 pub use limits::{Limit, NonDefault, Settings};
@@ -79,4 +84,5 @@ pub use skills::{
 };
 pub use source::{Source, SourceKind};
 pub use subst::{Lookup, substitute, substitute_with};
+pub use template::{Template, TemplateFacts, context_text, skill_text, template, template_values};
 pub use validate::{Issue, IssueCode, applies, named_files, skill_flags, valid_license, validate};

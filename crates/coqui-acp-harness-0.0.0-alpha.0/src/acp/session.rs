@@ -13,6 +13,8 @@ use serde_json::{Map, Value, json};
 
 use super::connection::{INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST, Shared};
 use super::shape::{self, Shapes};
+use coqui_acp_api::NoticeKind;
+
 use super::{Conversation, HarnessError, Settings};
 use crate::event::{
     Content, Event, Outcome, PermissionRequest, Severity, Stop, ToolCall, TurnEnd, Usage,
@@ -185,7 +187,10 @@ impl Session {
                     };
                     if state.questions >= shared.settings.max_open_questions {
                         drop(state);
-                        shared.note("a permission request past the limit was answered cancelled");
+                        shared.note(
+                            NoticeKind::Fault,
+                            "a permission request past the limit was answered cancelled",
+                        );
                         return;
                     }
                     state.questions += 1;
@@ -201,7 +206,10 @@ impl Session {
                     });
                 if let Err(error) = spawned {
                     self.state().questions -= 1;
-                    shared.note(&format!("a permission request could not be asked: {error}"));
+                    shared.note(
+                        NoticeKind::Fault,
+                        &format!("a permission request could not be asked: {error}"),
+                    );
                 }
             }
             Event::TurnEnd(end) => {
@@ -210,14 +218,14 @@ impl Session {
             }
             Event::Exited(reason) => {
                 self.state().gone = Some(reason.clone());
-                shared.note(&reason);
+                shared.note(NoticeKind::Exited, crate::stream::without_tail(&reason));
                 self.finish(shared, TurnEnd::Failed(reason));
             }
             Event::Output(_) | Event::SessionId(_) => {}
             Event::Buckets(buckets) => shared.usage_buckets(self.id(), buckets),
             other => {
                 if let Event::Notice { title, .. } = &other {
-                    shared.note(title);
+                    shared.note(NoticeKind::Notice, title);
                 }
                 if let Event::Usage(usage) = &other
                     && let Some(spend) = &usage.spend
@@ -380,7 +388,10 @@ impl Session {
             .name("coqui-acp-harness-interrupt".into())
             .spawn(move || {
                 if let Err(error) = interrupting.interrupt() {
-                    noting.note(&format!("the turn could not be interrupted: {error}"));
+                    noting.note(
+                        NoticeKind::Fault,
+                        &format!("the turn could not be interrupted: {error}"),
+                    );
                 }
             });
     }
@@ -470,7 +481,10 @@ impl Session {
                 }
             });
         if let Err(error) = spawned {
-            shared.note(&format!("usage could not be read: {error}"));
+            shared.note(
+                NoticeKind::Fault,
+                &format!("usage could not be read: {error}"),
+            );
         }
     }
 
@@ -658,9 +672,10 @@ impl Session {
             Err(_) => Outcome::Cancelled,
         };
         if let Err(error) = request.responder.answer(outcome) {
-            shared.note(&format!(
-                "a permission answer could not reach the harness: {error}"
-            ));
+            shared.note(
+                NoticeKind::Fault,
+                &format!("a permission answer could not reach the harness: {error}"),
+            );
         }
         if version >= 2 {
             let running = self

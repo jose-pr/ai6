@@ -48,6 +48,10 @@ pub enum IssueCode {
     MissingSkill,
     /// `ref-not-allowed`.
     RefNotAllowed,
+    /// `option-default-type`.
+    OptionDefaultType,
+    /// `option-sensitive-default`.
+    OptionSensitiveDefault,
     /// `reserved-name`.
     ReservedName,
     /// `reserved-variable`.
@@ -88,6 +92,8 @@ impl IssueCode {
             Self::MissingFile => "missing-file",
             Self::MissingSkill => "missing-skill",
             Self::RefNotAllowed => "ref-not-allowed",
+            Self::OptionDefaultType => "option-default-type",
+            Self::OptionSensitiveDefault => "option-sensitive-default",
             Self::ReservedName => "reserved-name",
             Self::ReservedVariable => "reserved-variable",
             Self::Schema => "schema",
@@ -119,6 +125,8 @@ impl IssueCode {
             "missing-file" => Some(Self::MissingFile),
             "missing-skill" => Some(Self::MissingSkill),
             "ref-not-allowed" => Some(Self::RefNotAllowed),
+            "option-default-type" => Some(Self::OptionDefaultType),
+            "option-sensitive-default" => Some(Self::OptionSensitiveDefault),
             "reserved-name" => Some(Self::ReservedName),
             "reserved-variable" => Some(Self::ReservedVariable),
             "schema" => Some(Self::Schema),
@@ -424,6 +432,7 @@ impl Check {
                     self.each(value, &at, Self::skill_entry);
                     self.unique(value, &at);
                 }
+                "options" => self.options(value, &at),
                 "env" => self.env_map(value, &at),
                 "env_files" => self.each(value, &at, Self::env_file),
                 "paths" => self.each(value, &at, Self::path_addition),
@@ -564,6 +573,51 @@ impl Check {
             let here = join(at, name);
             self.variable(name, &here);
             self.require(env_value_ok(entry), &here);
+        }
+    }
+
+    /// `options`: a mapping from a variable name that is not reserved to a table of `type` and
+    /// optionally `default`, `sensitive` and `description`.
+    fn options(&mut self, value: &Data, at: &str) {
+        let Some(map) = value.as_object() else {
+            self.fail(IssueCode::Schema, at);
+            return;
+        };
+        for (name, declared) in map {
+            let here = join(at, name);
+            self.variable(name, &here);
+            let Some(table) = self.object(
+                declared,
+                &here,
+                &["type", "default", "sensitive", "description"],
+            ) else {
+                continue;
+            };
+            self.required(table, &here, &["type"]);
+            if let Some(kind) = table.get("type") {
+                self.require(
+                    matches!(kind.as_str(), Some("string" | "integer" | "boolean")),
+                    &join(&here, "type"),
+                );
+            }
+            if let Some(flag) = table.get("sensitive") {
+                self.boolean(flag, &join(&here, "sensitive"));
+            }
+            if let Some(text) = table.get("description") {
+                self.string(text, &join(&here, "description"), |_| true);
+            }
+            if let Some(default) = table.get("default") {
+                let there = join(&here, "default");
+                if !matches!(default, Data::String(_) | Data::Number(_) | Data::Bool(_)) {
+                    self.fail(IssueCode::Schema, there);
+                } else if table.get("sensitive") == Some(&Data::Bool(true)) {
+                    self.fail(IssueCode::OptionSensitiveDefault, there);
+                } else if let Some(kind) = table.get("type").and_then(Data::as_str)
+                    && !crate::template::value_is(kind, default)
+                {
+                    self.fail(IssueCode::OptionDefaultType, there);
+                }
+            }
         }
     }
 

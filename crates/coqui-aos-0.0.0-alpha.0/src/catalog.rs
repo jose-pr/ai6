@@ -122,10 +122,15 @@ pub fn read_catalog_document(
         ..*settings
     };
     let Some(format) = catalog_format(name) else {
-        return read_document(data, &bounded);
+        return read_document(data, &bounded).map_err(|mut error| {
+            if error.setting == Some("manifest_bytes") {
+                error.setting = Some("catalog_bytes");
+            }
+            error
+        });
     };
     if !bounded.manifest_bytes.allows(data.len()) {
-        return Err(Error::new(Class::TooLarge, "a catalog"));
+        return Err(Error::new(Class::TooLarge, "a catalog").over("catalog_bytes"));
     }
     let data = data.strip_prefix(b"\xef\xbb\xbf").unwrap_or(data);
     parse_payload(data, format, &bounded, false)
@@ -712,7 +717,7 @@ pub fn read_icon(data: &[u8], name: &str, settings: &Settings) -> Result<Icon, E
         return Err(Error::new(Class::IconFormat, ""));
     }
     if !settings.icon_bytes.allows(data.len()) {
-        return Err(Error::new(Class::IconTooLarge, ""));
+        return Err(Error::new(Class::IconTooLarge, "").over("icon_bytes"));
     }
     let format = if data.starts_with(b"\x89PNG\r\n\x1a\n") {
         IconFormat::Png
@@ -731,8 +736,11 @@ pub fn read_icon(data: &[u8], name: &str, settings: &Settings) -> Result<Icon, E
     if width == 0 || height == 0 {
         return Err(Error::new(Class::IconUnreadable, ""));
     }
-    if !settings.icon_width.allows(width) || !settings.icon_height.allows(height) {
-        return Err(Error::new(Class::IconDimensions, ""));
+    if !settings.icon_width.allows(width) {
+        return Err(Error::new(Class::IconDimensions, "").over("icon_width"));
+    }
+    if !settings.icon_height.allows(height) {
+        return Err(Error::new(Class::IconDimensions, "").over("icon_height"));
     }
     Ok(Icon {
         format,

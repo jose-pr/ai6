@@ -18,8 +18,8 @@ use super::host::{self, Conn, GRACE, PATIENCE, open, status};
 use crate::usage::{LimitHit, Refill, Status, UsageQuery, UsageReport};
 use crate::{
     AccountGrant, AcpHarness, Environment, ExportPage, FILES_UNDER, HARNESS_LOGIN, ImportReport,
-    LIMIT_META_KEY, ModelsRequest, Requirement, SessionExport, SessionImport, SessionQuery,
-    StartRequest, USAGE_CAPABILITY, USAGE_METHOD, USAGE_NOTIFICATION, is_session_id,
+    LIMIT_META_KEY, ModelsRequest, NoticeKind, Requirement, SessionExport, SessionImport,
+    SessionQuery, StartRequest, USAGE_CAPABILITY, USAGE_METHOD, USAGE_NOTIFICATION, is_session_id,
 };
 
 // `guatiao_status` numbers, as a channel's `close` and `closed` carry them.
@@ -66,6 +66,10 @@ pub(super) fn all(contract: &Contract, harness: &dyn AcpHarness) -> Vec<(&'stati
             reopens(contract, harness, &place),
         ),
         ("a cancel ends the turn", cancel(contract, harness, &place)),
+        (
+            "an exit reaches the host as a notice",
+            exit_is_noticed(contract, harness, &place),
+        ),
         (
             "the host answers permission",
             permission(contract, harness, &place),
@@ -1056,6 +1060,33 @@ fn cancel(contract: &Contract, harness: &dyn AcpHarness, place: &Place) -> Outco
     ensure!(
         answer["result"]["stopReason"] == "cancelled",
         "a cancelled turn ended {answer}"
+    );
+    conn.close_with(OK)
+}
+
+/// A program that ends mid-session is told to the host: through the spawner's `notice`, in one line that says how it
+/// ended and holds nothing it wrote, or, for a provider that relays it, by ending the connection with a failure. A
+/// provider with no program of its own has none to end.
+fn exit_is_noticed(contract: &Contract, harness: &dyn AcpHarness, place: &Place) -> Outcome {
+    if !contract.program_agent {
+        return Ok(());
+    }
+    let (conn, session) = open_session(
+        contract,
+        harness,
+        StartRequest::new(),
+        &place.root,
+        json!({}),
+    )?;
+    conn.send(&prompt(2, &session, "die"))?;
+    let Some(text) = conn.told_of_exit(NoticeKind::Exited)? else {
+        // The provider relays the program, so its end is the connection's: told by `closed` with a failure.
+        conn.channel().close(OK, "");
+        return conn.destroyed();
+    };
+    ensure!(
+        !text.contains('\n') && !text.contains("its last output"),
+        "the exit notice was not one line of how it ended: {text:?}"
     );
     conn.close_with(OK)
 }

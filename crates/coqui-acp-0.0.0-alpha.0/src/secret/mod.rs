@@ -25,7 +25,8 @@ mod wire;
 mod tests;
 
 pub use binding::{
-    BINDING_DH, BINDING_ECDSA, Binding, IdentityId, Method, Prover, Verifier, VerifierBuilder,
+    BINDING_DH, BINDING_ECDSA, BINDING_LINK, Binding, IdentityId, LinkKey, LinkRole, Method,
+    Prover, Verifier, VerifierBuilder,
 };
 pub use context::Context;
 pub use error::Error;

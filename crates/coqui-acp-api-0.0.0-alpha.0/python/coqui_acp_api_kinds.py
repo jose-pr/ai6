@@ -77,7 +77,7 @@ class SpawnedProcess(KindProtocol, Protocol, kind="spawned_process", floor_hash=
         ...
 
 
-class ProcessSpawner(KindProtocol, Protocol, kind="process_spawner", floor_hash=4134697914, is_object=True):
+class ProcessSpawner(KindProtocol, Protocol, kind="process_spawner", floor_hash=4038904472, is_object=True):
     """Starts programs where the host chooses: on this machine, on another over SSH, in a container or
     a virtual machine. The host implements it and hands one to every
     [`AcpHarness::start`](crate::AcpHarness::start); the provider owns it from then on, starts its
@@ -142,6 +142,18 @@ class ProcessSpawner(KindProtocol, Protocol, kind="process_spawner", floor_hash=
     def remove_file(self, path: str) -> None:
         """Removes the file `path`; removing a file that is not there is no error.
         `GUATIAO_ERR_NOT_FOUND` for a path [`write_file`](Self::write_file) refuses.
+        """
+        ...
+
+    @required
+    @fallible
+    def notice(self, notice: Ref) -> None:
+        """Tells the host something about the connection this spawner serves that is no message of the
+        client's: the harness exited, gave a notice (a version it was not tested with), or a part of
+        the provider's own plumbing failed. The host logs it. Called from a thread of the provider's,
+        at any time while the connection runs, and never with client text or a value of the
+        environment or the credentials; a spawner that has no use for it returns `Ok`, and the
+        provider ignores a failure.
         """
         ...
 

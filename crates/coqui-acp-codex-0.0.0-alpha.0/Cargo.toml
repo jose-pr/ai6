@@ -1,4 +1,4 @@
-# coqui-acp/crates/coqui-acp-codex at ce40cfe10396a83ecfbfefd8d1143edfd3441d44, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-codex at 77f7a9d692844ce256e2c7cbda509ade6917768e, with what it inherits written out.
 bin = [{ name = "coqui-acp-codex", path = "src/main.rs" }]
 example = [{ name = "codex_provider", crate-type = ["cdylib"] }]
 [package]

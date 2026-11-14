@@ -4,7 +4,7 @@
 //! The RFC section is copied from the RFC. The rest is written by `vectors_are_current` when `COQUI_ACP_WRITE_VECTORS` is set, from
 //! the fixed inputs below, and is read back and checked independently of how it was made.
 
-use super::binding::{Kind, Method, Prover, Statement, Verifier};
+use super::binding::{Kind, LinkKey, LinkRole, Method, Prover, Statement, Verifier};
 use super::context::Context;
 use super::form::{Form, Limits, base64_canonical, base64url_canonical, json_integer, json_number};
 use super::seal::testing::{key_pair, open_raw, open_with, seal_raw, seal_with};
@@ -62,6 +62,9 @@ const ECDSA_RECEIVER: &str = "c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b
 const ECDSA_SENDER: &str = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
 const X25519_RECEIVER: &str = "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a";
 const X25519_SENDER: &str = "5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb";
+/// A link secret as the host mints it (any 16 bytes or more), and another link's.
+const LINK_SECRET: &str = "a1b2c3d4e5f60718293a4b5c6d7e8f90112233445566778899aabbccddeeff00";
+const OTHER_LINK_SECRET: &str = "00ffeeddccbbaa99887766554433221100908f7e6d5c4b3a2918f7e6d5c4b3a2";
 const NOW: u64 = 1_700_000_000;
 const LIFETIME: u64 = 240;
 
@@ -102,6 +105,14 @@ fn provers(case: &Value) -> (Prover, Prover) {
         hex(case["receiver_private"].as_str().unwrap()),
         hex(case["sender_private"].as_str().unwrap()),
     );
+    if case["kind"] == "link" {
+        // The one secret both ends hold: the host receives a request, the application answers it.
+        let link = LinkKey::derive(&receiver).unwrap();
+        return (
+            Prover::linked(&link, LinkRole::Host),
+            Prover::linked(&link, LinkRole::App),
+        );
+    }
     if case["kind"] == "ecdsa" {
         return (
             unprotected::ecdsa_p256(&receiver).unwrap(),
@@ -124,10 +135,40 @@ struct Tuning {
     no_agreement: bool,
     max_lifetime: Option<u64>,
     skew: Option<u64>,
+    /// A link's secret other than the case's (another link).
+    secret: Option<Vec<u8>>,
+    /// The verifier is the host's end of a link; else the application's.
+    receiver: bool,
+}
+
+/// The verifier of one end of the in-process link. With `trusts` it knows the other end and, unless told otherwise, holds the link.
+fn link_verifier(private: &str, tuning: &Tuning) -> Verifier {
+    let link = LinkKey::derive(&tuning.secret.clone().unwrap_or_else(|| hex(private))).unwrap();
+    let role = if tuning.receiver {
+        LinkRole::Host
+    } else {
+        LinkRole::App
+    };
+    let other = link.identity(if tuning.receiver {
+        LinkRole::App
+    } else {
+        LinkRole::Host
+    });
+    let builder = Verifier::builder(tuning.own.unwrap_or_else(|| link.identity(role)));
+    if tuning.trusts.is_none() {
+        return builder.build();
+    }
+    if tuning.own.is_some() || tuning.no_agreement {
+        return builder.trust(other).build();
+    }
+    builder.link(&link, role).unwrap().build()
 }
 
 /// The verifier of the side whose private key is `private`: it is itself (or `own`), knows `trusts`, and for X25519 holds its agreement.
 fn verifier(kind: &str, private: &str, tuning: &Tuning) -> Verifier {
+    if kind == "link" {
+        return link_verifier(private, tuning);
+    }
     let secret = hex(private);
     let (spki, agree) = unprotected::x25519_agreement(&secret).unwrap();
     let me = if kind == "ecdsa" {
@@ -169,6 +210,14 @@ fn base_cases() -> Vec<Value> {
             X25519_SENDER,
             "show",
             "show-1",
+        ),
+        (
+            "the in-process link's own secret proves a request's key",
+            "link",
+            LINK_SECRET,
+            LINK_SECRET,
+            "request",
+            "link-1",
         ),
     ] {
         let case = json!({"name": name, "kind": kind, "receiver_private": receiver, "sender_private": sender});
@@ -252,6 +301,14 @@ fn base_cases() -> Vec<Value> {
             "plain": PLAIN, "fields": fields,
             "values_digest": HEXLOWER.encode(&payload), "values_statement": HEXLOWER.encode(&values_statement), "auth": auth.to_value(),
         }));
+        if kind == "link" {
+            // The tags name the two ends and are public; the MAC key behind the proofs is reproduced by the proofs alone.
+            let last = out.last_mut().and_then(Value::as_object_mut).unwrap();
+            last.insert(
+                "link".into(),
+                json!({"secret": LINK_SECRET, "host_tag": HEXLOWER.encode(prover_r.spki()), "app_tag": HEXLOWER.encode(prover_s.spki())}),
+            );
+        }
     }
     out
 }
@@ -401,6 +458,7 @@ fn layouts() -> Value {
 fn refusals() -> Value {
     let a = "a webcrypto identity signs a request's key";
     let b = "a noise identity proves a show's key by Diffie-Hellman";
+    let c = "the in-process link's own secret proves a request's key";
     json!([
         {"case": "verify", "name": "an identity nobody knows", "base": a, "change": {"trusted": false}, "expect": "unknown_identity"},
         {"case": "verify", "name": "a known identity that is not the one expected", "base": a, "change": {"expected": "sha256:0000000000000000000000000000000000000000000000000000000000000000"}, "expect": "unknown_identity"},
@@ -466,6 +524,28 @@ fn refusals() -> Value {
         {"case": "open", "name": "an authenticated ciphertext made for the other method", "base": a, "change": {"reseal_method": "show"}, "expect": "open"},
         {"case": "open", "name": "an authenticated ciphertext made for another form", "base": a, "change": {"reseal_message": "Send the money"}, "expect": "open"},
         {"case": "open", "name": "an authenticated value that does not fit its question", "base": a, "change": {"seal_value": "not a number"}, "expect": "field"},
+        {"case": "verify", "name": "a link binding from an end that is not known", "base": c, "change": {"trusted": false}, "expect": "unknown_identity"},
+        {"case": "verify", "name": "a link binding under another link's secret", "base": c, "change": {"other_secret": OTHER_LINK_SECRET}, "expect": "unknown_identity"},
+        {"case": "verify", "name": "a link binding whose proof changed", "base": c, "change": {"flip_proof": true}, "expect": "bad_proof"},
+        {"case": "verify", "name": "a link request key changed after it was bound", "base": c, "change": {"flip_key": true}, "expect": "bad_proof"},
+        {"case": "verify", "name": "a link binding for another request", "base": c, "change": {"request_id": "another"}, "expect": "bad_proof"},
+        {"case": "verify", "name": "a link binding for another session", "base": c, "change": {"session_id": "s2"}, "expect": "bad_proof"},
+        {"case": "verify", "name": "a link binding for another form", "base": c, "change": {"schema": schema_text().replace("\"writeOnly\":true", "\"writeOnly\":false")}, "expect": "bad_proof"},
+        {"case": "verify", "name": "a link binding for another message", "base": c, "change": {"message": "Send the money"}, "expect": "bad_proof"},
+        {"case": "verify", "name": "a link binding for the other method", "base": c, "change": {"method": "show"}, "expect": "bad_proof"},
+        {"case": "verify", "name": "a link binding that ended", "base": c, "change": {"now": NOW + LIFETIME + 31}, "expect": "expired"},
+        {"case": "verify", "name": "a link binding made for another end", "base": c, "change": {"own_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111"}, "expect": "wrong_audience"},
+        {"case": "verify", "name": "a link binding taken by a side that is not an end of the link", "base": c, "change": {"no_agreement": true}, "expect": "unsupported"},
+        {"case": "verify", "name": "a link binding with a tag of another shape", "base": c, "change": {"truncate_binding_key": true}, "expect": "key"},
+        {"case": "verify", "name": "a link binding named as the Diffie-Hellman method", "base": c, "change": {"binding_method": "x25519-hmac-sha256"}, "expect": "key"},
+        {"case": "verify", "name": "a link binding named as the signature method", "base": c, "change": {"binding_method": "ecdsa-p256-sha256"}, "expect": "key"},
+        {"case": "open", "name": "values for the link's host, untouched", "base": c, "change": {}, "expect": "ok"},
+        {"case": "open", "name": "link values under another link's secret", "base": c, "change": {"other_secret": OTHER_LINK_SECRET}, "expect": "unknown_identity"},
+        {"case": "open", "name": "link values from an end nobody knows", "base": c, "change": {"trusted": false}, "expect": "unknown_identity"},
+        {"case": "open", "name": "link values authenticated for another request", "base": c, "change": {"receiver_request_id": "another"}, "expect": "bad_proof"},
+        {"case": "open", "name": "a link ciphertext changed after it was authenticated", "base": c, "change": {"flip_ct": "password"}, "expect": "bad_proof"},
+        {"case": "open", "name": "a link plain value changed after it was authenticated", "base": c, "change": {"plain": "{\"user\":\"mallory\"}"}, "expect": "bad_proof"},
+        {"case": "open", "name": "link values authenticated for another form", "base": c, "change": {"reseal_message": "Send the money"}, "expect": "open"},
         {"case": "open", "name": "values for a noise receiver, untouched", "base": b, "change": {}, "expect": "ok"},
         {"case": "open", "name": "a noise ciphertext changed after it was authenticated", "base": b, "change": {"flip_ct": "token"}, "expect": "bad_proof"}
     ])
@@ -521,6 +601,8 @@ fn verify_case(case: &Value, change: &Value) -> Result<IdentityId, Error> {
         no_agreement: change["no_agreement"] == true,
         max_lifetime: change["max_lifetime"].as_u64(),
         skew: change["skew"].as_u64(),
+        secret: change["other_secret"].as_str().map(hex),
+        receiver: false,
     };
     let builder_verifier = verifier(kind_name, case["sender_private"].as_str().unwrap(), &tuning);
     let mut recipient = Recipient::from_value(&case["recipient"]).unwrap();
@@ -592,6 +674,8 @@ fn open_case(case: &Value, change: &Value) -> Result<(), Error> {
     let own_recipient = Recipient::from_value(&case["recipient"]).unwrap();
     let tuning = Tuning {
         trusts: (change["trusted"] != false).then_some(id_s),
+        secret: change["other_secret"].as_str().map(hex),
+        receiver: true,
         ..Tuning::default()
     };
     let verifier_r = verifier(
@@ -1087,4 +1171,84 @@ fn a_recipient_key_of_low_order_is_a_seal_refusal() {
         collector.seal("password", "correct horse").unwrap_err(),
         Error::Seal
     );
+}
+
+#[test]
+fn a_link_secret_must_be_long_enough_and_each_end_is_its_own_role() {
+    assert!(matches!(LinkKey::derive(&[7u8; 15]), Err(Error::Key(_))));
+    let link = LinkKey::derive(&hex(LINK_SECRET)).unwrap();
+    assert_ne!(link.identity(LinkRole::Host), link.identity(LinkRole::App));
+    // A verifier is built for the role it holds.
+    assert!(
+        Verifier::builder(link.identity(LinkRole::Host))
+            .link(&link, LinkRole::App)
+            .is_err()
+    );
+    // Another secret is another pair of ends.
+    let other = LinkKey::derive(&hex(OTHER_LINK_SECRET)).unwrap();
+    assert_ne!(
+        link.identity(LinkRole::Host),
+        other.identity(LinkRole::Host)
+    );
+}
+
+/// Both tags are on the wire, so a party that has seen one request still cannot make a binding without the secret.
+#[test]
+fn a_binding_made_from_the_public_tags_alone_is_refused() {
+    let case = &base_cases()[2];
+    let (prover_r, prover_s) = provers(case);
+    let link = LinkKey::derive(&hex(LINK_SECRET)).unwrap();
+    let ctx = context_of(case, &json!({}));
+    let method = method_of(case["method"].as_str().unwrap());
+    let digest = ctx.digest(method);
+    let (_, public) = key_pair(&ikm(0));
+    let key: [u8; 32] = public.to_bytes().as_slice().try_into().unwrap();
+    let statement = Statement {
+        kind: Kind::Key,
+        method,
+        request_id: &ctx.request_id,
+        digest: &digest,
+        key: &key,
+        payload: &[],
+    };
+    let mut forged = prover_r
+        .bind(&statement, NOW + LIFETIME, &prover_s.id())
+        .unwrap();
+    // The tags are public: the proof of someone without the secret is a MAC under some other key.
+    let thief = Prover::linked(
+        &LinkKey::derive(&hex(OTHER_LINK_SECRET)).unwrap(),
+        LinkRole::Host,
+    );
+    let other_id = LinkKey::derive(&hex(OTHER_LINK_SECRET))
+        .unwrap()
+        .identity(LinkRole::App);
+    forged.proof = thief
+        .bind(&statement, NOW + LIFETIME, &other_id)
+        .unwrap()
+        .proof;
+    let app = Verifier::builder(link.identity(LinkRole::App))
+        .link(&link, LinkRole::App)
+        .unwrap()
+        .build();
+    assert_eq!(
+        app.verify(&statement, &forged, NOW).unwrap_err(),
+        Error::BadProof
+    );
+    // A prover refuses to bind for anyone but the other end.
+    assert_eq!(
+        prover_r
+            .bind(&statement, NOW + LIFETIME, &link.identity(LinkRole::Host))
+            .unwrap_err(),
+        Error::WrongAudience
+    );
+    // The host's own binding does not verify at the host: no reflection.
+    let own = prover_r
+        .bind(&statement, NOW + LIFETIME, &prover_s.id())
+        .unwrap();
+    let host = Verifier::builder(link.identity(LinkRole::Host))
+        .link(&link, LinkRole::Host)
+        .unwrap()
+        .build();
+    assert!(host.verify(&statement, &own, NOW).is_err());
+    assert!(app.verify(&statement, &own, NOW).is_ok());
 }

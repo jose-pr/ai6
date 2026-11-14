@@ -361,7 +361,7 @@
     },
     {
       "name": "process_spawner",
-      "floor_hash": 4134697914,
+      "floor_hash": 4038904472,
       "object": true,
       "doc": "Starts programs where the host chooses: on this machine, on another over SSH, in a container or\na virtual machine. The host implements it and hands one to every\n[`AcpHarness::start`](crate::AcpHarness::start); the provider owns it from then on, starts its\nprograms through it, or never calls it, and destroys it by the time it calls the sink's\n`closed`.\n\nEvery slot takes `&self`, so a provider may call it from several threads at once.",
       "slots": [
@@ -458,6 +458,19 @@
             }
           ],
           "doc": "Removes the file `path`; removing a file that is not there is no error.\n`GUATIAO_ERR_NOT_FOUND` for a path [`write_file`](Self::write_file) refuses."
+        },
+        {
+          "name": "notice",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "notice",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "doc": "Tells the host something about the connection this spawner serves that is no message of the\nclient's: the harness exited, gave a notice (a version it was not tested with), or a part of\nthe provider's own plumbing failed. The host logs it. Called from a thread of the provider's,\nat any time while the connection runs, and never with client text or a value of the\nenvironment or the credentials; a spawner that has no use for it returns `Ok`, and the\nprovider ignores a failure."
         }
       ]
     },

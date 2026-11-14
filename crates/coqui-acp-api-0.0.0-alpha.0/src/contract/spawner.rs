@@ -270,6 +270,13 @@ mod tests {
         struct Careless(std::path::PathBuf);
 
         impl ProcessSpawner for Careless {
+            fn notice(
+                &self,
+                _notice: crate::HarnessNotice,
+            ) -> Result<(), guatiao::library::ProviderError> {
+                Ok(())
+            }
+
             fn describe(&self) -> Result<crate::SpawnerInfo, guatiao::library::ProviderError> {
                 let mut info = crate::SpawnerInfo::new("linux", "x86_64", true);
                 info.files = true;

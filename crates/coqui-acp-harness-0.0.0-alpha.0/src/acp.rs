@@ -621,8 +621,8 @@ pub trait Conversation: Send + Sync {
     fn close(&self);
 }
 
-/// What [`Settings::on_notice`] calls with each notice.
-pub type NoticeHook = Arc<dyn Fn(&str) + Send + Sync>;
+/// What [`Settings::on_notice`] calls with each notice: what it is about, and one line of text that holds no client text.
+pub type NoticeHook = Arc<dyn Fn(coqui_acp_api::NoticeKind, &str) + Send + Sync>;
 
 /// What [`Settings::on_usage`] calls with the connection's report each time it changes.
 pub type UsageHook = Arc<dyn Fn(&coqui_acp_api::UsageReport) + Send + Sync>;

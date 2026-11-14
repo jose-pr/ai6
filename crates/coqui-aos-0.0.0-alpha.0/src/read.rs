@@ -113,7 +113,8 @@ pub fn read_document(data: &[u8], settings: &Settings) -> Result<Document, Error
         return Err(Error::new(
             Class::TooLarge,
             format!("over {} bytes", settings.manifest_bytes),
-        ));
+        )
+        .over("manifest_bytes"));
     }
     let data = data.strip_prefix(b"\xef\xbb\xbf").unwrap_or(data);
     let (format, payload, lined) = choose_format(data, "toml")?;

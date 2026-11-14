@@ -128,6 +128,14 @@ pub struct Exit {
     pub signal: Option<i32>,
 }
 
+impl Exit {
+    /// How a process ended: by exiting with `code`, or by `signal`.
+    #[must_use]
+    pub const fn new(code: Option<i32>, signal: Option<i32>) -> Self {
+        Self { code, signal }
+    }
+}
+
 impl fmt::Display for Exit {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match (self.code, self.signal) {
@@ -325,9 +333,32 @@ pub trait Spawn: Send + Sync {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PlainSpawn;
 
+/// What starts every process this crate starts itself ([`PlainSpawn`], and `LocalSpawner` with what it
+/// serves) in place of this process's own children, once [`set_starter`] has named one: for a host that cannot wait on its own
+/// children, as one inside an application whose process handling collects every child that ends cannot. It is told where the
+/// standard error goes, and starts the process as [`PlainSpawn`] describes, in a group of its own where the system has one,
+/// and returns a [`Process`] whose `kill` ends that group and collects the process, and whose `try_wait` says how it ended
+/// without collecting it.
+pub trait Starter: Send + Sync {
+    /// Starts `launch` with its standard input and output piped, and its standard error as `errors` says.
+    ///
+    /// # Errors
+    ///
+    /// The process could not be started.
+    fn start(&self, launch: &Launch, errors: ErrorStream) -> io::Result<Spawned>;
+}
+
+static STARTER: Mutex<Option<Arc<dyn Starter>>> = Mutex::new(None);
+
+/// Has every process this crate starts from now on started by `starter`.
+pub fn set_starter(starter: Arc<dyn Starter>) {
+    *STARTER.lock().unwrap_or_else(PoisonError::into_inner) = Some(starter);
+}
+
 /// Where a started process's standard error goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ErrorStream {
+#[non_exhaustive]
+pub enum ErrorStream {
     /// A pipe of its own.
     Piped,
     /// The same pipe as standard output.
@@ -344,6 +375,13 @@ impl Spawn for PlainSpawn {
 
 /// Starts `launch` as [`PlainSpawn`] does, standard error going where `errors` says.
 pub(crate) fn start(launch: &Launch, errors: ErrorStream) -> io::Result<Spawned> {
+    let starter = STARTER
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    if let Some(starter) = starter {
+        return starter.start(launch, errors);
+    }
     // A batch file does not start in a folder on a share: what it names starts there instead.
     let (program, args) = match &launch.cwd {
         Some(cwd) => coqui_acp_api::batch::start_in(&launch.program, &launch.args, cwd)?,

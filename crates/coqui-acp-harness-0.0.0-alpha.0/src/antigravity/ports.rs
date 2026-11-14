@@ -52,6 +52,43 @@ fn is_loopback(address: &SocketAddr) -> bool {
     address.port() != 0 && address.ip().to_canonical().is_loopback()
 }
 
+/// Runs `launch` with its standard output read, and ends it at `deadline`. It starts through this crate's own start, so a
+/// host's starter, when one is named, starts it and not this process.
+#[cfg_attr(
+    not(any(target_os = "macos", test)),
+    allow(dead_code, reason = "only the macOS tool is started this way")
+)]
+pub(super) fn run_launch_until(
+    launch: &crate::process::Launch,
+    deadline: Option<Instant>,
+) -> io::Result<(crate::process::Exit, Vec<u8>)> {
+    use std::io::Read as _;
+    let spawned = crate::process::start(launch, crate::process::ErrorStream::Discarded)?;
+    drop(spawned.stdin);
+    let stdout = spawned.stdout;
+    let reader = std::thread::spawn(move || {
+        let mut output = Vec::new();
+        stdout
+            .take(OUTPUT_LIMIT)
+            .read_to_end(&mut output)
+            .map(|_| output)
+    });
+    loop {
+        if let Some(exit) = spawned.process.try_wait()? {
+            let output = reader
+                .join()
+                .map_err(|_| io::Error::other("the output was not read"))??;
+            return Ok((exit, output));
+        }
+        if deadline.is_none_or(|deadline| Instant::now() >= deadline) {
+            let _ = spawned.process.kill();
+            let _ = reader.join();
+            return Err(io::ErrorKind::TimedOut.into());
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 /// Runs `command` with its standard output read, and ends it at `deadline`.
 #[cfg_attr(
     not(any(windows, target_os = "macos", test)),
@@ -155,8 +192,8 @@ fn system(owners: &[u32], deadline: Option<Instant>) -> io::Result<Vec<SocketAdd
         .map(u32::to_string)
         .collect::<Vec<_>>()
         .join(",");
-    let (status, output) = run_until(
-        std::process::Command::new("/usr/sbin/lsof").args([
+    let (status, output) = run_launch_until(
+        &crate::process::Launch::new("/usr/sbin/lsof").args([
             "-nP",
             "-a",
             "-iTCP",
@@ -168,7 +205,7 @@ fn system(owners: &[u32], deadline: Option<Instant>) -> io::Result<Vec<SocketAdd
         deadline,
     )?;
     // lsof exits 1 when it finds nothing to list.
-    if !status.success() && !output.is_empty() {
+    if status.code != Some(0) && !output.is_empty() {
         return Err(io::Error::other(alloc::format!("lsof {status}")));
     }
     Ok(parse_lsof(&String::from_utf8_lossy(&output), owners))
@@ -357,6 +394,34 @@ Active Connections
         .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::TimedOut);
         assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn a_launch_that_outlasts_the_deadline_is_ended_by_the_starter_it_is_given() {
+        let launch = if cfg!(windows) {
+            crate::process::Launch::new("ping").args(["-n", "30", "127.0.0.1"])
+        } else {
+            crate::process::Launch::new("sleep").arg("30")
+        };
+        let started = Instant::now();
+        let error = run_launch_until(
+            &launch,
+            Instant::now().checked_add(Duration::from_millis(300)),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < Duration::from_secs(5));
+        let (exit, output) = run_launch_until(
+            &if cfg!(windows) {
+                crate::process::Launch::new("cmd").args(["/d", "/c", "echo hi"])
+            } else {
+                crate::process::Launch::new("/bin/sh").args(["-c", "echo hi"])
+            },
+            Instant::now().checked_add(Duration::from_secs(20)),
+        )
+        .expect("it runs");
+        assert_eq!(exit.code, Some(0));
+        assert!(String::from_utf8_lossy(&output).contains("hi"));
     }
 
     #[test]

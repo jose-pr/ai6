@@ -44,9 +44,9 @@ pub use requirement::{
 };
 pub use roots::{PathRefusal, PathStyle, WorkingRoots, is_plain_absolute, is_session_id};
 pub use spawner::{
-    ErrorOutput, FileInfo, LinkState, ProcessExit, ProcessSpawner, ProcessSpawnerVtable,
-    READ_LINK_DOWN, READ_TIMED_OUT, SecretBytes, SpawnSpec, SpawnedProcess, SpawnedProcessVtable,
-    SpawnerInfo, TerminalSize,
+    ErrorOutput, FileInfo, HarnessNotice, LinkState, NoticeKind, ProcessExit, ProcessSpawner,
+    ProcessSpawnerVtable, READ_LINK_DOWN, READ_TIMED_OUT, SecretBytes, SpawnSpec, SpawnedProcess,
+    SpawnedProcessVtable, SpawnerInfo, TerminalSize,
 };
 pub use usage::{
     Bucket, Coverage, DEFAULT_LIMIT_PHRASES, LIMIT_META_KEY, LimitHit, ModelSpend, Refill, Source,

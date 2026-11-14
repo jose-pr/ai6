@@ -86,7 +86,9 @@ pub fn read_overlay(tree: &OverlayTree, settings: &Settings) -> Result<OverlayRe
         .any(|byte| !matches!(byte, b' ' | b'\t' | b'\r' | b'\n'));
     if body_is_named && has_body {
         if !settings.context_bytes.allows(body.len()) {
-            return Err(Error::new(Class::TooLarge, "the body of OVERLAY.md").on_line(body_line));
+            return Err(Error::new(Class::TooLarge, "the body of OVERLAY.md")
+                .over("context_bytes")
+                .on_line(body_line));
         }
         if core::str::from_utf8(body).is_err() {
             return Err(Error::new(Class::InvalidUtf8, "the body of OVERLAY.md").on_line(body_line));

@@ -19,6 +19,17 @@ use crate::event::{Event, Severity};
 use crate::lines::{self, Line, Tail};
 use crate::process::{Process, ending_once, exit_text, watch_exit};
 
+/// Where an exit reason turns to what the program last wrote on standard error.
+const TAIL_MARK: &str = "; its last output:\n";
+
+/// `reason` without what the program last wrote: that is the harness's own text, which may hold a prompt or a secret,
+/// and a host's log is no place for it.
+pub(crate) fn without_tail(reason: &str) -> &str {
+    reason
+        .split_once(TAIL_MARK)
+        .map_or(reason, |(head, _)| head)
+}
+
 /// A check of every line a harness writes, before anything reads it; `false` ends the harness.
 pub type LineHook = Arc<dyn Fn(&Value) -> bool + Send + Sync>;
 
@@ -299,9 +310,26 @@ impl Stream {
         }
         let tail = locked(&self.tail);
         if !tail.is_empty() {
-            reason.push_str("; its last output:\n");
+            reason.push_str(TAIL_MARK);
             reason.push_str(&tail.text());
         }
         reason
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TAIL_MARK, without_tail};
+
+    #[test]
+    fn an_exit_reason_loses_what_the_program_last_wrote() {
+        let reason = format!(
+            "claude exited with code 1 before completing the session{TAIL_MARK}a secret it printed"
+        );
+        assert_eq!(
+            without_tail(&reason),
+            "claude exited with code 1 before completing the session"
+        );
+        assert_eq!(without_tail("it exited"), "it exited");
     }
 }

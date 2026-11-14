@@ -1100,6 +1100,50 @@
     },
     "properties": {}
   },
+  "NoticeKind": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "string",
+    "enum": [
+      "exited",
+      "notice",
+      "fault"
+    ],
+    "x-enum-labels": {
+      "exited": "The harness ended mid-session; the text says how, and never what it last wrote.",
+      "notice": "The harness gave a notice, such as a version it was not tested with.",
+      "fault": "A part of the provider's own plumbing failed, such as a permission answer that could not reach the harness."
+    },
+    "properties": {}
+  },
+  "HarnessNotice": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "kind": {
+        "type": "string",
+        "enum": [
+          "exited",
+          "notice",
+          "fault"
+        ],
+        "x-enum-labels": {
+          "exited": "The harness ended mid-session; the text says how, and never what it last wrote.",
+          "notice": "The harness gave a notice, such as a version it was not tested with.",
+          "fault": "A part of the provider's own plumbing failed, such as a permission answer that could not reach the harness."
+        },
+        "description": "What it is about."
+      },
+      "text": {
+        "type": "string",
+        "description": "What happened, in one line, for people."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "kind",
+      "text"
+    ]
+  },
   "UsageQuery": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",

@@ -11,7 +11,12 @@ use crate::error::{Class, Error};
 use crate::limits::Limit;
 
 fn refusal(class: Class, detail: &str) -> Error {
-    Error::new(class, detail)
+    let error = Error::new(class, detail);
+    if class == Class::TooDeep {
+        error.over("manifest_depth")
+    } else {
+        error
+    }
 }
 
 /// The data model's number for a number's text: an integer in the signed 64-bit range, or a

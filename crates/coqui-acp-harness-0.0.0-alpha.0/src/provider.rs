@@ -20,7 +20,9 @@ use std::thread::JoinHandle;
 use coqui_acp_api::guatiao::Status;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::usage::Bucket;
-use coqui_acp_api::{Channel, ChannelSink, ProcessSpawner, UsageReport, UsageSupport};
+use coqui_acp_api::{
+    Channel, ChannelSink, HarnessNotice, ProcessSpawner, UsageReport, UsageSupport,
+};
 use serde_json::Value;
 
 use crate::acp::{Harness, Settings, UsageTracker, serve};
@@ -125,11 +127,21 @@ impl Serving {
     ///
     /// `harness` refused, or no thread could be started.
     pub fn open_shared(
-        self,
+        mut self,
         spawner: Arc<Object<dyn ProcessSpawner>>,
         sink: Object<dyn ChannelSink>,
         harness: impl FnOnce(Arc<dyn Spawn>) -> Result<Arc<dyn Harness>, ProviderError>,
     ) -> Result<Object<dyn Channel>, ProviderError> {
+        // A notice goes to the host through the spawner, which the connection must not outlive: the route holds it weakly,
+        // so that the spawner is destroyed when its holders let go, and a notice after that is nobody's.
+        let noticing = Arc::downgrade(&spawner);
+        self.settings.on_notice.get_or_insert_with(|| {
+            Arc::new(move |kind, text: &str| {
+                if let Some(spawner) = noticing.upgrade() {
+                    let _ = spawner.notice(HarnessNotice::new(kind, text));
+                }
+            })
+        });
         let lent = Arc::new(Lent {
             spawner: Mutex::new(Some(ThroughSpawner::shared(spawner))),
         });

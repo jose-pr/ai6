@@ -12,7 +12,7 @@ use crate::defaults::{
     dependencies_of, entry_on, env_files_of, first_variant, named,
 };
 use crate::error::{Class, Error};
-use crate::hooks::{Decision, HookEvent, HookReport, HookRun, fire_event};
+use crate::hooks::{Decision, HookEvent, HookReport, HookRun, fire_event, same_digest};
 use crate::kinds::{FailStep, NonDefaultId, Runtime, Step};
 use crate::limits::Settings;
 use crate::names::{
@@ -27,17 +27,28 @@ use crate::validate::validate;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub struct NonDefaultSetting {
-    /// `unpinned`, `setup-network`, `env-script`, `secret-read`, and the others AOS lists.
+    /// `unpinned`, `setup-network`, `env-script`, `secret-read`, and the others AOS lists, or a
+    /// host's own word.
     pub id: NonDefaultId,
     /// The variable, path, file or reference it is about; empty for `unpinned`.
     pub subject: String,
 }
 
 impl NonDefaultSetting {
-    fn new(id: NonDefaultId, subject: &str) -> Self {
+    /// A setting a host defines, by its own `id` (`read-only-not-enforced`, `skill-collision`):
+    /// shown as given wherever the id is, and the AOS id when `id` is a word AOS defines.
+    #[must_use]
+    pub fn host(id: &'static str, subject: impl Into<String>) -> Self {
+        Self::new(NonDefaultId::host(id), subject)
+    }
+
+    /// A non-default setting `id` about `subject`, empty for `unpinned`: the constructor a host
+    /// uses to report one of its own beside the ones [`effective`] finds.
+    #[must_use]
+    pub fn new(id: NonDefaultId, subject: impl Into<String>) -> Self {
         Self {
             id,
-            subject: subject.to_owned(),
+            subject: subject.into(),
         }
     }
 }
@@ -122,6 +133,14 @@ impl Environment {
 
     /// Sets `name`, keeping the name already there under another case on Windows.
     pub fn set(&mut self, name: &str, value: String, secret: bool) {
+        self.put(name, value, secret);
+    }
+
+    pub(crate) fn windows(&self) -> bool {
+        self.windows
+    }
+
+    fn put(&mut self, name: &str, value: String, secret: bool) {
         let key = match self.key(name) {
             Some(index) => {
                 self.values[index].1 = value;
@@ -206,6 +225,13 @@ pub struct Facts {
     pub enforces_network: Option<bool>,
     /// Whether env scripts run; `None` is yes.
     pub env_scripts_enabled: Option<bool>,
+    /// Whether env scripts run only while `digest` is the `allowed` one, the allowance of the
+    /// overlay's hooks; off, none is held back.
+    pub gate_env_scripts: bool,
+    /// The overlay's tree digest, when the consumer has computed it.
+    pub digest: Option<String>,
+    /// The one digest at which the user allowed this overlay's hooks and env scripts.
+    pub allowed: Option<String>,
     /// The interpreters the consumer can run; `None` is every one AOS names.
     pub interpreters: Option<Vec<String>>,
     /// Each runtime's installed packages directory, by runtime.
@@ -395,7 +421,7 @@ fn apply_mapping(
             } else {
                 non_defaults.push(NonDefaultSetting::new(
                     NonDefaultId::SecretRead,
-                    &reference_name(&entry),
+                    reference_name(&entry),
                 ));
             }
             value
@@ -466,13 +492,19 @@ fn apply_paths(
             }
         }
         let current = env.get(variable).unwrap_or_default().to_owned();
-        let kept = current
+        let kept: Vec<String> = current
             .split(separator)
             .filter(|component| !component.is_empty() && !seen.contains(*component))
-            .map(str::to_owned);
-        let joined: Vec<String> = prepend.into_iter().chain(kept).chain(append).collect();
+            .map(str::to_owned)
+            .collect();
+        let joined: Vec<String> = prepend
+            .iter()
+            .cloned()
+            .chain(kept)
+            .chain(append.iter().cloned())
+            .collect();
         let secret = env.is_secret(variable);
-        env.set(variable, joined.join(&separator.to_string()), secret);
+        env.put(variable, joined.join(&separator.to_string()), secret);
     }
 }
 
@@ -583,11 +615,12 @@ fn require_applicable(manifest: &Document) -> Result<(), Error> {
 
 /// Steps 2.1 to 2.4 of the order of application for one overlay; returns the env scripts
 /// that run.
-fn apply_overlay(
+pub(crate) fn apply_overlay(
     env: &mut Environment,
     manifest: &Document,
     facts: &Facts,
     non_defaults: &mut Vec<NonDefaultSetting>,
+    reports: &mut Vec<(String, String)>,
 ) -> Result<Vec<ScriptRun>, Error> {
     require_applicable(manifest)?;
     env.extra = vec![
@@ -601,7 +634,7 @@ fn apply_overlay(
         env.extra
             .push(("AOS_OVERLAY_STATE".to_owned(), state.clone()));
     }
-    let result = apply_overlay_inner(env, manifest, facts, non_defaults);
+    let result = apply_overlay_inner(env, manifest, facts, non_defaults, reports);
     env.extra.clear();
     result
 }
@@ -611,6 +644,7 @@ fn apply_overlay_inner(
     manifest: &Document,
     facts: &Facts,
     non_defaults: &mut Vec<NonDefaultSetting>,
+    reports: &mut Vec<(String, String)>,
 ) -> Result<Vec<ScriptRun>, Error> {
     let (os, root, tree) = (facts.os.as_str(), facts.root.as_str(), &facts.tree);
     let mut paths = default_paths(manifest, tree);
@@ -706,6 +740,22 @@ fn apply_overlay_inner(
             os,
             &facts.interpreters(),
         );
+        let allowed = !facts.gate_env_scripts
+            || facts
+                .digest
+                .as_deref()
+                .zip(facts.allowed.as_deref())
+                .is_some_and(|(digest, allowed)| same_digest(digest, allowed));
+        if !allowed {
+            // Off until the user allows the digest: the overlay is otherwise applied.
+            if choice.chosen.is_some()
+                || !choice.present.is_empty()
+                || choice.others.iter().any(|script| entry_on(script, os))
+            {
+                reports.push(("env-script-not-allowed".to_owned(), facts.identity.clone()));
+            }
+            return Ok(scripts);
+        }
         if choice.chosen.is_none() {
             non_defaults.extend(
                 choice
@@ -790,6 +840,8 @@ pub struct Effective {
     pub needs: Needs,
     /// What is reported, sorted, each once.
     pub non_defaults: Vec<NonDefaultSetting>,
+    /// `(id, subject)` reports, sorted: `env-script-not-allowed`.
+    pub reports: Vec<(String, String)>,
 }
 
 /// What a consumer applies for one overlay: its environment, setup, runtime, needs and
@@ -812,7 +864,8 @@ pub fn effective(manifest: &Document, facts: &Facts) -> Result<Effective, Error>
     if let Some(state) = &facts.state {
         env.set(&state_variable(&facts.identity), state.clone(), false);
     }
-    let scripts = apply_overlay(&mut env, manifest, facts, &mut non_defaults)?;
+    let mut reports = Vec::new();
+    let scripts = apply_overlay(&mut env, manifest, facts, &mut non_defaults, &mut reports)?;
     let choice = default_script(
         manifest,
         "setup",
@@ -966,12 +1019,12 @@ pub fn effective(manifest: &Document, facts: &Facts) -> Result<Effective, Error>
                 } else if reference.get("provider").and_then(Data::as_str) == Some("env") {
                     non_defaults.push(NonDefaultSetting::new(
                         NonDefaultId::EnvPassthrough,
-                        &text_of(value, "key"),
+                        text_of(value, "key"),
                     ));
                 } else {
                     non_defaults.push(NonDefaultSetting::new(
                         NonDefaultId::SecretRead,
-                        &reference_name(reference),
+                        reference_name(reference),
                     ));
                 }
             }
@@ -1011,7 +1064,7 @@ pub fn effective(manifest: &Document, facts: &Facts) -> Result<Effective, Error>
             if host != "localhost" && host != "[::1]" && !host.starts_with("127.") {
                 non_defaults.push(NonDefaultSetting::new(
                     NonDefaultId::InsecureTransport,
-                    &text_of(server, "name"),
+                    text_of(server, "name"),
                 ));
             }
         }
@@ -1039,6 +1092,11 @@ pub fn effective(manifest: &Document, facts: &Facts) -> Result<Effective, Error>
             commands: commands.into_iter().collect(),
         },
         non_defaults: non_defaults.into_iter().collect(),
+        reports: reports
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
     })
 }
 
@@ -1064,7 +1122,7 @@ pub enum Change {
     Remove,
 }
 
-/// A setup phase.
+/// A setup phase. With the `serde` feature it is written as its [`name`](Phase::name).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Phase {
@@ -1085,10 +1143,22 @@ impl Phase {
             Self::Remove => "remove",
         }
     }
+
+    /// The phase a name stands for: exactly `install`, `sync` or `remove`.
+    #[must_use]
+    pub fn named(name: &str) -> Option<Self> {
+        match name {
+            "install" => Some(Self::Install),
+            "sync" => Some(Self::Sync),
+            "remove" => Some(Self::Remove),
+            _ => None,
+        }
+    }
 }
 
 /// The last preparation that succeeded for an overlay identity on one OS (per Theater, for a
-/// Station): its digest and phase.
+/// Station): its digest and phase. With the `serde` feature it is the object
+/// `{"digest": ..., "phase": ...}`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct SetupRecord {
@@ -1106,6 +1176,50 @@ impl SetupRecord {
             digest: digest.into(),
             phase,
         }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for Phase {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.name())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for Phase {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let name = <alloc::string::String as serde::Deserialize>::deserialize(deserializer)?;
+        Self::named(&name)
+            .ok_or_else(|| serde::de::Error::unknown_variant(&name, &["install", "sync", "remove"]))
+    }
+}
+
+/// The object a record is written as and read from.
+#[cfg(feature = "serde")]
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename = "SetupRecord")]
+struct RecordObject<D> {
+    digest: D,
+    phase: Phase,
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for SetupRecord {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        RecordObject {
+            digest: self.digest.as_str(),
+            phase: self.phase,
+        }
+        .serialize(serializer)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for SetupRecord {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let object = RecordObject::<String>::deserialize(deserializer)?;
+        Ok(Self::new(object.digest, object.phase))
     }
 }
 
@@ -1278,7 +1392,8 @@ pub fn composed_environment(
         }
     }
     for (manifest, facts) in active {
-        if let Err(error) = apply_overlay(&mut env, manifest, facts, non_defaults) {
+        if let Err(error) = apply_overlay(&mut env, manifest, facts, non_defaults, &mut Vec::new())
+        {
             composed.env = Err(error);
             return composed;
         }

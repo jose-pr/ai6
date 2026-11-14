@@ -1,4 +1,4 @@
-# coqui-aos/rust at 6c476c4553c9b195502cb505a89d50e27cb85afd, with what it inherits written out.
+# coqui-aos/rust at 5176974f30f664a4a9c382fdd467d4a1ab87765b, with what it inherits written out.
 test = [{ name = "tree", required-features = ["fs"] }]
 [package]
 name = "coqui-aos"
@@ -22,6 +22,8 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 default = ["fs"]
 fs = []
+test-support = ["dep:base64"]
+serde = ["dep:serde"]
 [dependencies]
 unicode-general-category = "1"
 [dependencies.guatiao]
@@ -36,6 +38,14 @@ features = ["std"]
 [dependencies.serde_json]
 version = "1"
 features = ["preserve_order"]
+[dependencies.base64]
+version = "0.22"
+optional = true
+[dependencies.serde]
+version = "1"
+default-features = false
+features = ["alloc", "derive"]
+optional = true
 [dependencies.sha2]
 version = "0.10"
 default-features = false
@@ -44,8 +54,11 @@ version = "1"
 default-features = false
 features = ["std", "parse", "serde", "preserve_order"]
 [dev-dependencies]
-base64 = "0.22"
 tempfile = "3"
+[dev-dependencies.coqui-aos]
+path = "."
+default-features = false
+features = ["test-support", "serde"]
 [lints]
 [lints.rust]
 missing_docs = "warn"

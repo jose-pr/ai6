@@ -34,8 +34,8 @@ use crate::spawner::{
     SpawnedProcess, SpawnerInfo, TerminalSize,
 };
 use crate::{
-    AccountKeeper, AccountLoss, AccountRenewal, AcpHarness, LoginAnswer, LoginForm, LoginPrompter,
-    OpenUrl, StartRequest,
+    AccountKeeper, AccountLoss, AccountRenewal, AcpHarness, HarnessNotice, LoginAnswer, LoginForm,
+    LoginPrompter, NoticeKind, OpenUrl, StartRequest,
 };
 
 /// Runs whose spawners start nothing share the lock; a run whose spawners start the programs they are asked to holds it
@@ -115,6 +115,8 @@ struct Log {
     writes: Vec<(String, Vec<u8>)>,
     renewed: Vec<AccountRenewal>,
     lost: Vec<AccountLoss>,
+    /// Every notice the provider gave through the spawner.
+    notices: Vec<HarnessNotice>,
     /// Everything the provider sent the person through the prompter, as text.
     said: Vec<String>,
     /// How many `say`, `open_url` and `ask` calls the prompter took.
@@ -287,6 +289,12 @@ impl Spawner {
 }
 
 impl ProcessSpawner for Spawner {
+    fn notice(&self, notice: HarnessNotice) -> Result<(), ProviderError> {
+        self.shared.lock().notices.push(notice);
+        self.shared.changed.notify_all();
+        Ok(())
+    }
+
     fn describe(&self) -> Result<SpawnerInfo, ProviderError> {
         let mut info = SpawnerInfo::new(std::env::consts::OS, std::env::consts::ARCH, true);
         info.files = self.files.is_some();
@@ -565,6 +573,9 @@ impl Watch {
             .collect::<Vec<_>>()
             .join("\n");
         text.push_str(&log.reason);
+        for notice in &log.notices {
+            text.push_str(&notice.text);
+        }
         text
     }
 }
@@ -821,6 +832,19 @@ impl Conn {
     pub(super) fn reason(&self) -> Result<String, String> {
         self.closed()?;
         Ok(self.shared.lock().reason.clone())
+    }
+
+    /// Waits for how the host is told that the program ended: a notice of `kind` (its text), or the provider ending
+    /// the connection with a failure (`None`, for a provider that relays the program and has no part of it to say).
+    pub(super) fn told_of_exit(&self, kind: NoticeKind) -> Result<Option<String>, String> {
+        self.must("the end of the program told", |log| {
+            if let Some(notice) = log.notices.iter().find(|notice| notice.kind == kind) {
+                return Some(Some(notice.text.clone()));
+            }
+            log.closed
+                .is_some_and(|status| status != u32::from(Status::GUATIAO_OK))
+                .then_some(None)
+        })
     }
 
     /// Whether the spawner was destroyed by the time `closed` came.

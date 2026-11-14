@@ -38,8 +38,8 @@ pub use acp::{
 pub use event::{Event, Outcome, PermissionRequest, Responder};
 pub use mode::Mode;
 pub use process::{
-    Exit, Launch, LineWriter, PlainSpawn, Process, Spawn, Spawned, ending_once, exit_text,
-    line_writer, watch_exit,
+    ErrorStream, Exit, Launch, LineWriter, PlainSpawn, Process, Spawn, Spawned, Starter,
+    ending_once, exit_text, line_writer, set_starter, watch_exit,
 };
 #[cfg(feature = "kind")]
 pub use spawner::{LocalSpawner, ThroughSpawner};

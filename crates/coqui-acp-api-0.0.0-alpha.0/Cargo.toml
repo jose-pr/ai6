@@ -1,4 +1,4 @@
-# coqui-acp/crates/coqui-acp-api at ce40cfe10396a83ecfbfefd8d1143edfd3441d44, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-api at 77f7a9d692844ce256e2c7cbda509ade6917768e, with what it inherits written out.
 bin = [{ name = "acp-harness-check", required-features = ["contract"] }]
 example = [{ name = "echo_harness", crate-type = ["cdylib"] }]
 test = [{ name = "echo", required-features = ["contract"] }, { name = "check", required-features = ["contract"] }]

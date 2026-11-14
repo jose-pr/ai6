@@ -90,6 +90,7 @@ pub struct Builder {
     initialize_timeout: Option<Duration>,
     request_timeout: Option<Duration>,
     close_grace: Option<Duration>,
+    abort_wait: Duration,
     max_pending_events: usize,
     text_flush: usize,
     max_tool_kinds: usize,
@@ -138,6 +139,7 @@ impl Client {
             initialize_timeout: Some(Duration::from_secs(20)),
             request_timeout: Some(Duration::from_secs(30)),
             close_grace: Some(Duration::from_secs(2)),
+            abort_wait: Duration::from_secs(5),
             max_pending_events: 100_000,
             text_flush: TEXT_FLUSH,
             max_tool_kinds: TOOL_KINDS,
@@ -276,6 +278,13 @@ impl Builder {
         self
     }
 
+    /// How long ending a session without closing it (dropping it, or after [`Event::Failed`]) waits for the agent to take its
+    /// `session/cancel`; once it passes, `on_close` runs anyway. Default 5 s, whatever the close grace.
+    pub const fn abort_wait(mut self, limit: Duration) -> Self {
+        self.abort_wait = limit;
+        self
+    }
+
     /// Events held for a slow reader, past which the session ends with [`Event::Failed`]. Default 100000.
     pub const fn max_pending_events(mut self, events: usize) -> Self {
         self.max_pending_events = events;
@@ -376,10 +385,13 @@ impl Builder {
             ),
         });
         let close_grace = self.close_grace;
+        let abort_wait = self.abort_wait;
         let worker = shared.clone();
+        let (finished_tx, finished) = mpsc::channel::<()>();
         let thread = std::thread::Builder::new()
             .name("coqui-acp-client".to_owned())
             .spawn(move || {
+                let _finished = finished_tx;
                 let for_requests = worker.clone();
                 let for_notifications = worker.clone();
                 let failed = ready_tx.clone();
@@ -439,7 +451,9 @@ impl Builder {
             commands: commands_tx,
             on_close: Mutex::new(on_close),
             close_grace,
+            abort_wait,
             thread: Mutex::new(Some(thread)),
+            finished: Mutex::new(finished),
         };
         match opened {
             Ok(()) => Ok(session),
@@ -510,12 +524,13 @@ impl Shared {
     }
 
     fn apply(&self, step: Step) {
-        for event in step.events {
-            self.emit(event);
-        }
+        // Ahead of the events: a reader that drops the session on `Failed` must find it closing, or it queues a close ahead of the abort.
         if step.abort {
             self.closing.store(true, Ordering::SeqCst);
             let _ = self.commands.unbounded_send(Command::Abort);
+        }
+        for event in step.events {
+            self.emit(event);
         }
     }
 
@@ -1334,6 +1349,9 @@ async fn main_task(
             Some(Command::Abort) => {
                 if let Ok(message) = cancel() {
                     let _ = cx.send_notification(message);
+                    // The connection ends with this task and may drop the queued notification. The agent answers a request sent
+                    // after it only once it has read the notification, so wait for that, no longer than the close grace.
+                    let _ = call(&cx, "_coqui/flush", json!({}), Some(options.abort_wait)).await;
                 }
                 break;
             }
@@ -1350,7 +1368,9 @@ pub struct Session {
     commands: async_mpsc::UnboundedSender<Command>,
     on_close: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     close_grace: Option<Duration>,
+    abort_wait: Duration,
     thread: Mutex<Option<std::thread::JoinHandle<()>>>,
+    finished: Mutex<mpsc::Receiver<()>>,
 }
 
 impl fmt::Debug for Session {
@@ -1451,6 +1471,13 @@ impl Session {
         }
     }
 
+    /// Waits for the connection's thread to end, which it does after telling the agent to stop, so `on_close` (which may end the
+    /// agent's process) never runs ahead of the `session/cancel`. Bounded by the abort wait, after which `on_close` runs anyway.
+    fn await_abort(&self) {
+        let finished = self.finished.lock().unwrap_or_else(PoisonError::into_inner);
+        let _ = finished.recv_timeout(self.abort_wait);
+    }
+
     fn release(&self) {
         if !self.shared.closing.swap(true, Ordering::SeqCst) && self.shared.close_on_drop {
             // Never closed: say so to the agent, which may hold a process.
@@ -1458,6 +1485,7 @@ impl Session {
             let _ = self.commands.unbounded_send(Command::Close(ack));
         }
         let _ = self.commands.unbounded_send(Command::Abort);
+        self.await_abort();
         if let Some(on_close) = self
             .on_close
             .lock()

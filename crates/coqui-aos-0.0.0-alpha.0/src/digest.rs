@@ -78,6 +78,11 @@ fn refused(class: Class, path: impl Into<String>) -> Error {
     Error::new(class, path)
 }
 
+/// A `too-large` refusal of the limit `setting`.
+fn over(setting: &'static str, subject: impl Into<String>) -> Error {
+    Error::new(Class::TooLarge, subject).over(setting)
+}
+
 /// One entry of a tree, for [`digest_entries`].
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -294,8 +299,8 @@ impl Walk<'_> {
         depth: usize,
     ) -> Result<(), Error> {
         if !self.settings.tree_depth.allows(depth) {
-            return Err(refused(
-                Class::TooLarge,
+            return Err(over(
+                "tree_depth",
                 format!(
                     "directories nested deeper than {}",
                     self.settings.tree_depth
@@ -344,8 +349,8 @@ impl Walk<'_> {
             FileKind::Directory => {
                 self.entries += 1;
                 if !self.settings.tree_files.allows(self.entries) {
-                    return Err(refused(
-                        Class::TooLarge,
+                    return Err(over(
+                        "tree_files",
                         format!(
                             "more than {} files and directories",
                             self.settings.tree_files
@@ -360,8 +365,8 @@ impl Walk<'_> {
         let member = member_path(&borrowed)?;
         self.entries += 1;
         if !self.settings.tree_files.allows(self.entries) {
-            return Err(refused(
-                Class::TooLarge,
+            return Err(over(
+                "tree_files",
                 format!(
                     "more than {} files and directories",
                     self.settings.tree_files
@@ -378,15 +383,15 @@ impl Walk<'_> {
             .read(path, most)
             .map_err(|_| refused(Class::Io, member.as_str()))?;
         if !self.settings.file_bytes.allows(bytes.len()) {
-            return Err(refused(
-                Class::TooLarge,
+            return Err(over(
+                "file_bytes",
                 format!("{member} is larger than {} bytes", self.settings.file_bytes),
             ));
         }
         self.bytes = self.bytes.saturating_add(bytes.len() as u64);
         if !self.settings.tree_bytes.allows(self.bytes) {
-            return Err(refused(
-                Class::TooLarge,
+            return Err(over(
+                "tree_bytes",
                 format!("more than {} bytes", self.settings.tree_bytes),
             ));
         }
@@ -409,8 +414,8 @@ pub(crate) fn check_entries(
     settings: &Settings,
 ) -> Result<(), Error> {
     if !settings.tree_files.allows(entries.len()) {
-        return Err(refused(
-            Class::TooLarge,
+        return Err(over(
+            "tree_files",
             format!("more than {} files and directories", settings.tree_files),
         ));
     }
@@ -418,8 +423,8 @@ pub(crate) fn check_entries(
     for (_, entry) in entries {
         if let TreeEntry::File(bytes) = entry {
             if !settings.file_bytes.allows(bytes.len()) {
-                return Err(refused(
-                    Class::TooLarge,
+                return Err(over(
+                    "file_bytes",
                     format!("a file larger than {} bytes", settings.file_bytes),
                 ));
             }
@@ -427,8 +432,8 @@ pub(crate) fn check_entries(
         }
     }
     if !settings.tree_bytes.allows(total) {
-        return Err(refused(
-            Class::TooLarge,
+        return Err(over(
+            "tree_bytes",
             format!("more than {} bytes", settings.tree_bytes),
         ));
     }

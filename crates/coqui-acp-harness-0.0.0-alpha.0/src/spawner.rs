@@ -16,9 +16,9 @@ use std::time::Instant;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Secret, Status};
 use coqui_acp_api::{
-    Environment, ErrorOutput, FileInfo, LinkState, PrivateDir, ProcessExit, ProcessSpawner,
-    READ_LINK_DOWN, READ_TIMED_OUT, SecretBytes, SpawnSpec, SpawnedProcess, SpawnerInfo,
-    TerminalSize,
+    Environment, ErrorOutput, FileInfo, HarnessNotice, LinkState, PrivateDir, ProcessExit,
+    ProcessSpawner, READ_LINK_DOWN, READ_TIMED_OUT, SecretBytes, SpawnSpec, SpawnedProcess,
+    SpawnerInfo, TerminalSize,
 };
 
 /// How long a read waits for a link that is down, by default.
@@ -34,12 +34,24 @@ use crate::process::{ErrorStream, Exit, Launch, Process, Spawn, Spawned, start};
 /// refused `GUATIAO_ERR_UNSUPPORTED`.
 ///
 /// It serves the kind's file methods in one directory when given one with [`files`](Self::files),
-/// and says `files` false and refuses them `GUATIAO_ERR_UNSUPPORTED` otherwise.
-#[derive(Clone, Debug)]
+/// and says `files` false and refuses them `GUATIAO_ERR_UNSUPPORTED` otherwise. A connection's notices go to the hook of
+/// [`notices`](Self::notices), and nowhere without one.
+#[derive(Clone)]
 #[must_use]
 pub struct LocalSpawner {
     buffer: usize,
     files: Option<PrivateDir>,
+    notices: Option<Arc<dyn Fn(HarnessNotice) + Send + Sync>>,
+}
+
+impl core::fmt::Debug for LocalSpawner {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("LocalSpawner")
+            .field("buffer", &self.buffer)
+            .field("files", &self.files)
+            .field("notices", &self.notices.is_some())
+            .finish()
+    }
 }
 
 impl Default for LocalSpawner {
@@ -54,7 +66,14 @@ impl LocalSpawner {
         Self {
             buffer: 1 << 20,
             files: None,
+            notices: None,
         }
+    }
+
+    /// Calls `hook` with each notice the connection this spawner serves gives, on a thread of the provider's.
+    pub fn notices(mut self, hook: impl Fn(HarnessNotice) + Send + Sync + 'static) -> Self {
+        self.notices = Some(Arc::new(hook));
+        self
     }
 
     /// Holds at most `bytes` of each output stream unread; past it, the program waits to write.
@@ -94,6 +113,13 @@ fn io_refused(error: &io::Error) -> ProviderError {
 }
 
 impl ProcessSpawner for LocalSpawner {
+    fn notice(&self, notice: HarnessNotice) -> Result<(), ProviderError> {
+        if let Some(hook) = &self.notices {
+            hook(notice);
+        }
+        Ok(())
+    }
+
     fn describe(&self) -> Result<SpawnerInfo, ProviderError> {
         let mut info = SpawnerInfo::new(std::env::consts::OS, std::env::consts::ARCH, true);
         info.separate_error = true;

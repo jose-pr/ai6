@@ -17,6 +17,9 @@
 //! [`Contract::holds`] names and refuses every other, and keeps every session inside the working
 //! roots.
 //!
+//! A stand-in for a harness's program (`program_agent`) also takes `die`: it exits with status 3, and the provider is held
+//! to telling the host that it ended: through the spawner's `notice`, or by ending the connection with a failure.
+//!
 //! Its sessions are kept: it imports a history at the host's UUID, an empty one seeding a fresh
 //! session, exports what its sessions said in the standard format (a header line with `version`
 //! and a `digest`, then the turns) in pages of whole lines, and `session/load` replays a session's

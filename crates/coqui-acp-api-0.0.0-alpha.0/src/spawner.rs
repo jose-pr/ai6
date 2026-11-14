@@ -66,6 +66,62 @@ pub trait ProcessSpawner: Send + Sync {
     /// Removes the file `path`; removing a file that is not there is no error.
     /// `GUATIAO_ERR_NOT_FOUND` for a path [`write_file`](Self::write_file) refuses.
     fn remove_file(&self, path: &str) -> Result<(), ProviderError>;
+
+    /// Tells the host something about the connection this spawner serves that is no message of the
+    /// client's: the harness exited, gave a notice (a version it was not tested with), or a part of
+    /// the provider's own plumbing failed. The host logs it. Called from a thread of the provider's,
+    /// at any time while the connection runs, and never with client text or a value of the
+    /// environment or the credentials; a spawner that has no use for it returns `Ok`, and the
+    /// provider ignores a failure.
+    fn notice(&self, notice: HarnessNotice) -> Result<(), ProviderError>;
+}
+
+/// What a [`HarnessNotice`] is about.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq)]
+#[map(crate = ::guatiao, rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum NoticeKind {
+    /// The harness ended mid-session; the text says how, and never what it last wrote.
+    Exited,
+    /// The harness gave a notice, such as a version it was not tested with.
+    Notice,
+    /// A part of the provider's own plumbing failed, such as a permission answer that could not
+    /// reach the harness.
+    Fault,
+}
+
+impl NoticeKind {
+    /// The kind's name, as a log carries it.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Exited => "exited",
+            Self::Notice => "notice",
+            Self::Fault => "fault",
+        }
+    }
+}
+
+/// One thing a provider tells the host through [`ProcessSpawner::notice`].
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::guatiao)]
+#[non_exhaustive]
+pub struct HarnessNotice {
+    /// What it is about.
+    pub kind: NoticeKind,
+    /// What happened, in one line, for people.
+    pub text: String,
+}
+
+impl HarnessNotice {
+    /// A notice of `kind` saying `text`.
+    #[must_use]
+    pub fn new(kind: NoticeKind, text: impl Into<String>) -> Self {
+        Self {
+            kind,
+            text: text.into(),
+        }
+    }
 }
 
 /// One program a spawner started, and everything it starts in turn.

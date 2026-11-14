@@ -14,6 +14,7 @@ use std::sync::mpsc;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::thread;
 
+use coqui_acp_api::NoticeKind;
 use coqui_acp_api::usage::{Bucket, LimitHit, Spend};
 use coqui_acp_api::{USAGE_CAPABILITY, USAGE_METHOD, USAGE_NOTIFICATION, USAGE_VERSION};
 use serde_json::{Value, json};
@@ -139,9 +140,9 @@ impl Shared {
     }
 
     /// Tells the host something that is no message to the client.
-    pub(crate) fn note(&self, text: &str) {
+    pub(crate) fn note(&self, kind: NoticeKind, text: &str) {
         if let Some(note) = &self.settings.on_notice {
-            note(&crate::lines::one_line(text));
+            note(kind, &crate::lines::one_line(text));
         }
     }
 

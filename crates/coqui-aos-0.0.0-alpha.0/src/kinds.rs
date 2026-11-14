@@ -222,6 +222,9 @@ pub enum NonDefaultId {
     Hook,
     /// `unlocked-dependencies`.
     UnlockedDependencies,
+    /// A host's own id, such as `read-only-not-enforced`, which AOS does not define. Build it with
+    /// [`NonDefaultId::host`], so a word AOS defines is never a second spelling.
+    Host(&'static str),
 }
 
 impl NonDefaultId {
@@ -243,7 +246,14 @@ impl NonDefaultId {
             Self::PrivateSource => "private-source",
             Self::Hook => "hook",
             Self::UnlockedDependencies => "unlocked-dependencies",
+            Self::Host(word) => word,
         }
+    }
+
+    /// The id for `word`: the AOS id when AOS defines the word, else a host's own.
+    #[must_use]
+    pub fn host(word: &'static str) -> Self {
+        Self::named(word).unwrap_or(Self::Host(word))
     }
 
     /// What a word stands for.

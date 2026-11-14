@@ -86,7 +86,7 @@ impl HookEvent {
             Self::SessionEnd | Self::TurnEnd => &[],
             Self::Prompt => &["context", "block", "env"],
             Self::PreCompact => &["context", "block"],
-            Self::PreTool => &["context", "deny", "ask", "env"],
+            Self::PreTool => &["context", "deny", "ask", "allow", "input", "env"],
             Self::PostTool => &["context"],
         }
     }
@@ -136,6 +136,8 @@ pub enum Decision {
     Deny,
     /// The user is asked.
     Ask,
+    /// The tool call is approved, as rewritten when the output carries an input.
+    Allow,
     /// The session does not start.
     Refuse,
 }
@@ -144,8 +146,9 @@ impl Decision {
     const fn rank(decision: Option<Self>) -> u8 {
         match decision {
             None => 0,
-            Some(Self::Ask) => 1,
-            Some(_) => 2,
+            Some(Self::Allow) => 1,
+            Some(Self::Ask) => 2,
+            Some(_) => 3,
         }
     }
 }
@@ -287,6 +290,20 @@ pub fn hooks_of(
     (entries, if needs_default { present } else { Vec::new() })
 }
 
+/// Whether the overlay declares a hook on any OS with any interpreter: [`hooks_of`] finds an entry
+/// or a `hook.<ext>` that cannot run, for some OS, were every interpreter AOS names present.
+/// Entries an overlay switches off (`false`, or `defaults.hooks = false`) are not declared.
+///
+/// For a consumer that runs no hooks and refuses an overlay that asks for any, whatever it runs on.
+#[must_use]
+pub fn hooks_declared(manifest: &Document, tree: &OverlayTree) -> bool {
+    let interpreters: Vec<String> = INTERPRETERS.iter().map(|name| (*name).to_owned()).collect();
+    ["windows", "linux"].into_iter().any(|os| {
+        let (hooks, not_run) = hooks_of(manifest, tree, os, &interpreters);
+        !hooks.is_empty() || !not_run.is_empty()
+    })
+}
+
 /// Whose hooks they are.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
@@ -357,6 +374,14 @@ pub struct HookPlan {
     pub non_defaults: Vec<(String, String)>,
 }
 
+/// Whether two digests in text are the same digest; one that does not parse is no digest.
+pub(crate) fn same_digest(a: &str, b: &str) -> bool {
+    Digest::parse(a)
+        .ok()
+        .zip(Digest::parse(b).ok())
+        .is_some_and(|(a, b)| a == b)
+}
+
 /// What a consumer would do with an overlay's hooks, or a scope's own, on one harness.
 ///
 /// # Errors
@@ -399,17 +424,11 @@ pub fn hook_plan(
                 .to_string(),
         );
     }
-    let same = |a: &str, b: &str| {
-        Digest::parse(a)
-            .ok()
-            .zip(Digest::parse(b).ok())
-            .is_some_and(|(a, b)| a == b)
-    };
     let on = facts.scope == HookScope::User
         || digest
             .as_deref()
             .zip(facts.allowed.as_deref())
-            .is_some_and(|(digest, allowed)| same(digest, allowed));
+            .is_some_and(|(digest, allowed)| same_digest(digest, allowed));
     let fires: Vec<HookEvent> = facts
         .fires
         .clone()
@@ -510,8 +529,6 @@ pub enum HookFailure {
     TooLarge,
     /// The exit status was not 0.
     Exit,
-    /// The output asked for what the event does not let a hook grant.
-    Grant,
     /// The output is not what the event reads.
     Output,
     /// The event's own time had passed before the hook started.
@@ -530,6 +547,8 @@ pub struct HookOutput {
     pub reason: Option<String>,
     /// Text for the agent.
     pub context: Option<String>,
+    /// With an allow, the whole object that replaces the call's input.
+    pub input: Option<Map<String, Value>>,
     /// Variables to set, or `None` to unset, in the order given.
     pub env: Option<Vec<(String, Option<String>)>>,
 }
@@ -546,12 +565,13 @@ fn hook_text(text: &str) -> bool {
 /// A successful run's standard output: what it asks for.
 ///
 /// `pre-env` reads as an env script's output. Every other event reads one JSON object, whose keys
-/// are those the event takes; a `decision` that is not one of the event's own is an attempt to
-/// grant, and `env` may name only the variables `sets` lists.
+/// are those the event takes; a `decision` that is not one of the event's own is an `output`
+/// failure, so is an `input` that does not come with an allow, and `env` may name only the
+/// variables `sets` lists.
 ///
 /// # Errors
 ///
-/// [`HookFailure::Output`] or [`HookFailure::Grant`].
+/// [`HookFailure::Output`].
 pub fn read_hook_output(
     event: HookEvent,
     data: &[u8],
@@ -583,13 +603,16 @@ pub fn read_hook_output(
             Some("block") if outputs.contains(&"block") => Some(Decision::Block),
             Some("deny") if outputs.contains(&"deny") => Some(Decision::Deny),
             Some("ask") if outputs.contains(&"ask") => Some(Decision::Ask),
-            _ => return Err(HookFailure::Grant),
+            Some("allow") if outputs.contains(&"allow") => Some(Decision::Allow),
+            _ => return Err(HookFailure::Output),
         };
     }
-    if value
-        .keys()
-        .any(|key| !matches!(key.as_str(), "context" | "decision" | "reason" | "env"))
-    {
+    if value.keys().any(|key| {
+        !matches!(
+            key.as_str(),
+            "context" | "decision" | "reason" | "input" | "env"
+        )
+    }) {
         return Err(HookFailure::Output);
     }
     if let Some(reason) = value.get("reason") {
@@ -603,6 +626,16 @@ pub fn read_hook_output(
             return Err(HookFailure::Output);
         }
         out.reason = Some(reason.to_owned());
+    }
+    if let Some(input) = value.get("input") {
+        match input {
+            Value::Object(input)
+                if outputs.contains(&"input") && out.decision == Some(Decision::Allow) =>
+            {
+                out.input = Some(input.clone());
+            }
+            _ => return Err(HookFailure::Output),
+        }
     }
     if let Some(context) = value.get("context") {
         match context.as_str() {
@@ -661,6 +694,9 @@ pub struct HookRun {
     pub exit: i32,
     /// The variables its entry declares.
     pub sets: Vec<String>,
+    /// Its entry's `match`, or `None` for every call: on a call of kind `other` only a hook with
+    /// none, or one naming `other`, may allow.
+    pub select: Option<Vec<String>>,
 }
 
 impl HookRun {
@@ -720,7 +756,7 @@ pub struct HookReport {
 pub struct FiredEvent {
     /// The sources of the hooks that were started, those that failed to start excepted.
     pub ran: Vec<String>,
-    /// The tightest decision any asked for.
+    /// The tightest decision any asked for: a deny, then an ask, then an allow.
     pub decision: Option<Decision>,
     /// The source of that decision.
     pub by: Option<String>,
@@ -734,12 +770,17 @@ pub struct FiredEvent {
     pub reports: Vec<HookReport>,
     /// `(id, subject)`: `env-sensitive`.
     pub non_defaults: Vec<(String, String)>,
+    /// With a call's input given: `(source, input)` for what each hook that ran was given.
+    pub seen: Option<Vec<(String, Value)>>,
+    /// With a call's input given: the input the call runs with. Set only for a combined allow;
+    /// `None` is the input it was given.
+    pub input: Option<Value>,
 }
 
 /// Every hook of one event, in the order given, combined to the tightest result.
 ///
 /// `applies` are the outputs the consumer can apply on this harness (`context`, `env`, `block`,
-/// `deny`, `ask`, `refuse`); none is all the event takes, and refuse. A hook that would start after
+/// `deny`, `ask`, `allow`, `input`, `refuse`); none is all the event takes, and refuse. A hook that would start after
 /// the event's own bound has passed fails as `event-timeout`. `windows` makes a variable's name
 /// compare without case, keeping the spelling it was first given.
 #[must_use]
@@ -750,6 +791,63 @@ pub fn fire_event(
     settings: &Settings,
     windows: bool,
 ) -> FiredEvent {
+    fire_event_after(event, runs, applies, settings, windows, 0)
+}
+
+/// [`fire_event`] for a session whose context already holds `context_used` bytes.
+///
+/// A part of a hook's context is checked in run order, in the bytes of its UTF-8 text, together
+/// with what the session holds: one that would take the total past `settings.context_bytes` is not
+/// added, whole and never cut, and is reported as `hook-not-applied`; a later part that fits still
+/// is added, and a part that reaches the bound exactly fits.
+#[must_use]
+pub fn fire_event_after(
+    event: HookEvent,
+    runs: &[HookRun],
+    applies: Option<&[&str]>,
+    settings: &Settings,
+    windows: bool,
+    context_used: usize,
+) -> FiredEvent {
+    fire_event_for_call(
+        event,
+        runs,
+        applies,
+        settings,
+        windows,
+        context_used,
+        None,
+        None,
+    )
+}
+
+/// [`fire_event_after`] for a `pre-tool` call whose input, `tool_input`, a hook's allow may
+/// rewrite.
+///
+/// [`FiredEvent::seen`] says what each hook was given: a hook's `input` replaces the call's for
+/// the hooks after it. [`FiredEvent::input`] is what the call runs with, set only by a combined
+/// allow, since an ask or a deny beats a rewrite. An allow whose `input` the consumer cannot apply
+/// (`input` is not in `applies`) is not applied at all and is reported `hook-not-applied`; a
+/// rewrite that an ask beat is reported the same way.
+///
+/// `tool_kind` is the call's kind: on `other`, a run whose [`HookRun::select`] is given and does
+/// not name `other` still runs and its deny and ask count, but its allow and input do not, and
+/// are reported `hook-not-applied` `allow`.
+#[must_use]
+#[allow(clippy::too_many_arguments)]
+pub fn fire_event_for_call(
+    event: HookEvent,
+    runs: &[HookRun],
+    applies: Option<&[&str]>,
+    settings: &Settings,
+    windows: bool,
+    context_used: usize,
+    tool_input: Option<&Value>,
+    tool_kind: Option<&str>,
+) -> FiredEvent {
+    let mut context_used = context_used;
+    let mut current = tool_input.cloned();
+    let mut rewriter: Option<String> = None;
     let can = |output: &str| {
         applies.map_or_else(
             || output == "refuse" || event.outputs().contains(&output),
@@ -757,7 +855,10 @@ pub fn fire_event(
         )
     };
     let mut spent = 0u64;
-    let mut fired = FiredEvent::default();
+    let mut fired = FiredEvent {
+        seen: tool_input.map(|_| Vec::new()),
+        ..FiredEvent::default()
+    };
     // Where each variable sits in `fired.env`, by the name as it compares.
     let mut env_at: BTreeMap<String, usize> = BTreeMap::new();
     for run in runs {
@@ -778,10 +879,13 @@ pub fn fire_event(
             Err(HookFailure::EventTimeout)
         } else {
             fired.ran.push(source.clone());
+            if let (Some(seen), Some(current)) = (&mut fired.seen, &current) {
+                seen.push((source.clone(), current.clone()));
+            }
             spent = spent.saturating_add(run.seconds);
             hook_result(event, run, settings)
         };
-        let out = match attempt {
+        let mut out = match attempt {
             Ok(out) => out,
             Err(cause) => {
                 fired.reports.push(failed(cause));
@@ -815,12 +919,50 @@ pub fn fire_event(
             });
             decision = None;
         }
+        if decision == Some(Decision::Allow)
+            && tool_kind == Some("other")
+            && run
+                .select
+                .as_ref()
+                .is_some_and(|select| !select.iter().any(|item| item == "other"))
+        {
+            fired.reports.push(HookReport {
+                id: "hook-not-applied",
+                about: vec![
+                    source.clone(),
+                    event.as_str().to_owned(),
+                    "allow".to_owned(),
+                ],
+            });
+            decision = None;
+            out.input = None;
+        }
+        if decision == Some(Decision::Allow)
+            && let Some(input) = out.input
+        {
+            if can("input") {
+                if current.is_some() {
+                    current = Some(Value::Object(input));
+                }
+                rewriter = Some(source.clone());
+            } else {
+                fired.reports.push(HookReport {
+                    id: "hook-not-applied",
+                    about: vec![
+                        source.clone(),
+                        event.as_str().to_owned(),
+                        "input".to_owned(),
+                    ],
+                });
+                decision = None;
+            }
+        }
         if Decision::rank(decision) > Decision::rank(fired.decision) {
             fired.decision = decision;
             fired.by = Some(source.clone());
             fired.reason.clone_from(&out.reason);
         }
-        if Decision::rank(decision) == 2 {
+        if Decision::rank(decision) == 3 {
             // The prompt, compaction, call or session does not happen: nothing else applies.
             fired.context.clear();
             fired.env.clear();
@@ -828,7 +970,9 @@ pub fn fire_event(
             break;
         }
         if let Some(context) = out.context.filter(|context| !context.is_empty()) {
-            if can("context") {
+            let total = context_used.saturating_add(context.len());
+            if can("context") && settings.context_bytes.allows(total) {
+                context_used = total;
                 fired.context.push((source.clone(), context));
             } else {
                 fired.reports.push(HookReport {
@@ -874,6 +1018,18 @@ pub fn fire_event(
         .collect();
     sensitive.sort();
     fired.non_defaults = sensitive;
+    if let Some(rewriter) = rewriter
+        && fired.seen.is_some()
+    {
+        match fired.decision {
+            Some(Decision::Allow) => fired.input = current,
+            Some(Decision::Ask) => fired.reports.push(HookReport {
+                id: "hook-not-applied",
+                about: vec![rewriter, event.as_str().to_owned(), "input".to_owned()],
+            }),
+            _ => {}
+        }
+    }
     fired
 }
 
@@ -929,6 +1085,7 @@ impl Decision {
             Self::Block => "block",
             Self::Deny => "deny",
             Self::Ask => "ask",
+            Self::Allow => "allow",
             Self::Refuse => "refuse",
         }
     }
@@ -940,6 +1097,7 @@ impl Decision {
             "block" => Some(Self::Block),
             "deny" => Some(Self::Deny),
             "ask" => Some(Self::Ask),
+            "allow" => Some(Self::Allow),
             "refuse" => Some(Self::Refuse),
             _ => None,
         }
@@ -956,7 +1114,6 @@ impl HookFailure {
             Self::Timeout => "timeout",
             Self::TooLarge => "too-large",
             Self::Exit => "exit",
-            Self::Grant => "grant",
             Self::Output => "output",
             Self::EventTimeout => "event-timeout",
         }
@@ -971,7 +1128,6 @@ impl HookFailure {
             "timeout" => Some(Self::Timeout),
             "too-large" => Some(Self::TooLarge),
             "exit" => Some(Self::Exit),
-            "grant" => Some(Self::Grant),
             "output" => Some(Self::Output),
             "event-timeout" => Some(Self::EventTimeout),
             _ => None,
@@ -986,6 +1142,7 @@ impl core::fmt::Debug for HookOutput {
             .field("decision", &self.decision)
             .field("reason", &self.reason.as_ref().map(String::len))
             .field("context", &self.context.as_ref().map(String::len))
+            .field("input", &self.input.as_ref().map(Map::len))
             .field(
                 "env",
                 &self

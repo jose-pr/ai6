@@ -301,7 +301,9 @@ pub fn read_front_matter(data: &[u8], settings: &Settings) -> FrontMatter {
         ),
         SplitCase::TooLarge => refused(
             Case::TooLarge,
-            Error::new(Class::TooLarge, "front matter").on_line(1),
+            Error::new(Class::TooLarge, "front matter")
+                .over("manifest_bytes")
+                .on_line(1),
         ),
         _ => {
             let metadata = split.metadata.unwrap_or_default();
@@ -350,7 +352,9 @@ pub fn read_front_matter(data: &[u8], settings: &Settings) -> FrontMatter {
 pub fn context_file_text<'a>(data: &'a [u8], settings: &Settings) -> Result<&'a [u8], Error> {
     let split = split_front_matter(data, settings);
     if split.case == SplitCase::TooLarge {
-        return Err(Error::new(Class::TooLarge, "front matter").on_line(1));
+        return Err(Error::new(Class::TooLarge, "front matter")
+            .over("manifest_bytes")
+            .on_line(1));
     }
     Ok(split.body(data))
 }
