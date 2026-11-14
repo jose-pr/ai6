@@ -51,6 +51,9 @@ class AssistantPanel extends StatefulWidget {
     this.imageLoader,
     this.commands,
     this.onCommandMenu,
+    this.talkPicker,
+    this.attached,
+    this.talkingTo,
     super.key,
   });
 
@@ -121,6 +124,17 @@ class AssistantPanel extends StatefulWidget {
 
   /// Told whether the `/` menu is open, so Escape closes it before it leaves the chat.
   final ValueChanged<bool>? onCommandMenu;
+
+  /// The "Talking to" picker under the header; without it the chat is only with Moneypenny.
+  final Widget? talkPicker;
+
+  /// A Run's view that takes the conversation's place while the person talks to it. Her
+  /// conversation stays mounted under it, so her draft, scroll and scope are as they were.
+  final Widget? attached;
+
+  /// Names who the header is about while [attached] is shown, in place of Moneypenny. Her
+  /// New conversation and menu are hidden then, as they act on her conversation.
+  final ({String title, Widget avatar})? talkingTo;
 
   @override
   State<AssistantPanel> createState() => _AssistantPanelState();
@@ -410,14 +424,18 @@ class _AssistantPanelState extends State<AssistantPanel> {
                     )
                   else if (constraints.maxWidth >= 360)
                     // The title names her; the portrait beside it is decoration.
-                    const ExcludeSemantics(child: MoneypennyAvatar(size: 40)),
+                    ExcludeSemantics(
+                      child:
+                          widget.talkingTo?.avatar ??
+                          const MoneypennyAvatar(size: 40),
+                    ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Moneypenny',
+                          widget.talkingTo?.title ?? 'Moneypenny',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.titleMedium?.copyWith(
@@ -427,111 +445,116 @@ class _AssistantPanelState extends State<AssistantPanel> {
                             color: OoTokens.of(context).accent,
                           ),
                         ),
-                        Text(
-                          controller.reconnecting
-                              ? 'Reconnecting…'
-                              : controller.connecting
-                              ? 'Connecting…'
-                              : !controller.connected
-                              ? 'Not connected'
-                              : controller.stopping
-                              ? 'Stopping…'
-                              : controller.busy
-                              ? 'Answering…'
-                              : 'Ask about AI6, or ask her to propose a change.',
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall,
-                        ),
+                        if (widget.talkingTo == null)
+                          Text(
+                            controller.reconnecting
+                                ? 'Reconnecting…'
+                                : controller.connecting
+                                ? 'Connecting…'
+                                : !controller.connected
+                                ? 'Not connected'
+                                : controller.stopping
+                                ? 'Stopping…'
+                                : controller.busy
+                                ? 'Answering…'
+                                : 'Ask about AI6, or ask her to propose a change.',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall,
+                          ),
                       ],
                     ),
                   ),
-                  IconButton(
-                    tooltip: 'New conversation',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: controller.connected
-                        ? controller.startOver
-                        : null,
-                    icon: const Icon(Icons.add_comment_outlined),
-                  ),
-                  PopupMenuButton<void>(
-                    tooltip: 'Moneypenny menu',
-                    style: const ButtonStyle(
+                  if (widget.talkingTo == null) ...[
+                    IconButton(
+                      tooltip: 'New conversation',
                       visualDensity: VisualDensity.compact,
+                      onPressed: controller.connected
+                          ? controller.startOver
+                          : null,
+                      icon: const Icon(Icons.add_comment_outlined),
                     ),
-                    itemBuilder: (menuContext) => [
-                      PopupMenuItem(
-                        enabled: controller.entries.isNotEmpty,
-                        onTap: () => unawaited(_export()),
-                        child: const ListTile(
-                          leading: Icon(Icons.download_outlined),
-                          title: Text('Export conversation'),
-                        ),
+                    PopupMenuButton<void>(
+                      tooltip: 'Moneypenny menu',
+                      style: const ButtonStyle(
+                        visualDensity: VisualDensity.compact,
                       ),
-                      if ((widget.transcripts, controller.conversationId) case (
-                        final reads?,
-                        final conversation?,
-                      ))
+                      itemBuilder: (menuContext) => [
                         PopupMenuItem(
-                          onTap: () => unawaited(
-                            Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) => ConversationLogPage(
-                                  reads: reads,
-                                  conversation: conversation,
+                          enabled: controller.entries.isNotEmpty,
+                          onTap: () => unawaited(_export()),
+                          child: const ListTile(
+                            leading: Icon(Icons.download_outlined),
+                            title: Text('Export conversation'),
+                          ),
+                        ),
+                        if ((widget.transcripts, controller.conversationId)
+                            case (final reads?, final conversation?))
+                          PopupMenuItem(
+                            onTap: () => unawaited(
+                              Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => ConversationLogPage(
+                                    reads: reads,
+                                    conversation: conversation,
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                          child: const ListTile(
-                            leading: Icon(Icons.receipt_long_outlined),
-                            title: Text('Conversation log'),
-                          ),
-                        ),
-                      if (widget.transcripts case final reads?)
-                        PopupMenuItem(
-                          onTap: () => unawaited(
-                            Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) => ConversationsPage(reads: reads),
-                              ),
+                            child: const ListTile(
+                              leading: Icon(Icons.receipt_long_outlined),
+                              title: Text('Conversation log'),
                             ),
                           ),
-                          child: const ListTile(
-                            leading: Icon(Icons.forum_outlined),
-                            title: Text('Logged conversations'),
-                          ),
-                        ),
-                      if (widget.onMemory case final onMemory?)
-                        PopupMenuItem(
-                          onTap: onMemory,
-                          child: const ListTile(
-                            leading: Icon(Icons.psychology_outlined),
-                            title: Text('Her memory of you'),
-                          ),
-                        ),
-                      if (widget.pageActions case final actions?)
-                        PopupMenuItem(
-                          onTap: () => unawaited(
-                            Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) => HerPagesPage(actions: actions),
+                        if (widget.transcripts case final reads?)
+                          PopupMenuItem(
+                            onTap: () => unawaited(
+                              Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) =>
+                                      ConversationsPage(reads: reads),
+                                ),
                               ),
                             ),
+                            child: const ListTile(
+                              leading: Icon(Icons.forum_outlined),
+                              title: Text('Logged conversations'),
+                            ),
                           ),
-                          child: const ListTile(
-                            leading: Icon(Icons.web_outlined),
-                            title: Text('Her pages'),
+                        if (widget.onMemory case final onMemory?)
+                          PopupMenuItem(
+                            onTap: onMemory,
+                            child: const ListTile(
+                              leading: Icon(Icons.psychology_outlined),
+                              title: Text('Her memory of you'),
+                            ),
                           ),
-                        ),
-                      if (widget.onFollowAtOnce case final onFollow?)
-                        CheckedPopupMenuItem(
-                          checked: widget.followAtOnce,
-                          onTap: () => onFollow(!widget.followAtOnce),
-                          child: const Text("Open Moneypenny's links at once"),
-                        ),
-                    ],
-                  ),
+                        if (widget.pageActions case final actions?)
+                          PopupMenuItem(
+                            onTap: () => unawaited(
+                              Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) =>
+                                      HerPagesPage(actions: actions),
+                                ),
+                              ),
+                            ),
+                            child: const ListTile(
+                              leading: Icon(Icons.web_outlined),
+                              title: Text('Her pages'),
+                            ),
+                          ),
+                        if (widget.onFollowAtOnce case final onFollow?)
+                          CheckedPopupMenuItem(
+                            checked: widget.followAtOnce,
+                            onTap: () => onFollow(!widget.followAtOnce),
+                            child: const Text(
+                              "Open Moneypenny's links at once",
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
                   ...widget.actions,
                 ],
               ),
@@ -561,113 +584,164 @@ class _AssistantPanelState extends State<AssistantPanel> {
                 ),
               ),
             ),
+          ?widget.talkPicker,
           Expanded(
-            child: ChatTranscript(
-              entries: controller.entries,
-              busy: controller.busy,
-              earlier: controller.earlier,
-              textWidth: widget.textWidth,
-              // Views are tables and charts: they take the whole width.
-              wide: (entry) => entry.role == 'view',
-              entryBuilder: (context, entry) => _EntryView(
-                entry: entry,
-                controller: controller,
-                onOpen: widget.onOpen,
-                proposalWait: widget.proposalWait,
-                pageActions: widget.pageActions,
-                missions: widget.missions,
-                imageLoader: widget.imageLoader,
-              ),
-            ),
-          ),
-          if (controller.connected &&
-              !controller.busy &&
-              controller.entries.isEmpty)
-            _column(
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final prompt in moneypennyPrompts)
-                      ActionChip(
-                        label: Text(prompt),
-                        onPressed: () =>
-                            widget.controller.say(prompt, route: widget.route),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Offstage(
+                  offstage: widget.attached != null,
+                  child: ExcludeFocus(
+                    excluding: widget.attached != null,
+                    child: TickerMode(
+                      enabled: widget.attached == null,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Expanded(
+                            child: ChatTranscript(
+                              entries: controller.entries,
+                              busy: controller.busy,
+                              earlier: controller.earlier,
+                              textWidth: widget.textWidth,
+                              // Views are tables and charts: they take the whole width.
+                              wide: (entry) => entry.role == 'view',
+                              entryBuilder: (context, entry) => _EntryView(
+                                entry: entry,
+                                controller: controller,
+                                onOpen: widget.onOpen,
+                                proposalWait: widget.proposalWait,
+                                pageActions: widget.pageActions,
+                                missions: widget.missions,
+                                imageLoader: widget.imageLoader,
+                              ),
+                            ),
+                          ),
+                          if (controller.connected &&
+                              !controller.busy &&
+                              controller.entries.isEmpty)
+                            _column(
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  12,
+                                  4,
+                                  12,
+                                  0,
+                                ),
+                                child: Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    for (final prompt in moneypennyPrompts)
+                                      ActionChip(
+                                        label: Text(prompt),
+                                        onPressed: () => widget.controller.say(
+                                          prompt,
+                                          route: widget.route,
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          if (controller.busy) const LinearProgressIndicator(),
+                          if (controller.problem case final problem?)
+                            ChatProblemLine(
+                              text: problem,
+                              actions: [
+                                if (!controller.connected &&
+                                    !controller.connecting)
+                                  TextButton(
+                                    onPressed: controller.retry,
+                                    child: const Text('Try again'),
+                                  ),
+                                if (controller.reconnecting)
+                                  TextButton(
+                                    onPressed: controller.stopRetrying,
+                                    child: const Text('Stop trying'),
+                                  ),
+                              ],
+                            ),
+                          if (_images.isNotEmpty)
+                            _column(
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  12,
+                                  8,
+                                  12,
+                                  0,
+                                ),
+                                child: Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    for (final (index, image)
+                                        in _images.indexed)
+                                      ImageThumbnail(
+                                        key: ValueKey('composer-image-$index'),
+                                        image: MemoryImage(image.bytes),
+                                        label: 'Image ${index + 1}',
+                                        size: 64,
+                                        onRemove: () => setState(
+                                          () =>
+                                              _images = [..._images]
+                                                ..removeAt(index),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          if (_menuOpen)
+                            _column(
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  12,
+                                  8,
+                                  12,
+                                  0,
+                                ),
+                                child: CommandMenu(
+                                  commands: _matches,
+                                  highlighted: _highlight.clamp(
+                                    0,
+                                    _matches.length - 1,
+                                  ),
+                                  onPick: _pickCommand,
+                                ),
+                              ),
+                            ),
+                          if (widget.scopeBar case final bar?) _column(bar),
+                          ChatComposerBar(
+                            message: _message,
+                            focusNode: _composer,
+                            enabled: controller.connected,
+                            busy: controller.busy,
+                            stopping: controller.stopping,
+                            hint: 'Ask Moneypenny…',
+                            onSend: _send,
+                            onStop: controller.interrupt,
+                            textWidth: widget.textWidth,
+                            leading: widget.imageInput?.canPick ?? false
+                                ? IconButton(
+                                    tooltip: 'Add an image',
+                                    onPressed: controller.connected
+                                        ? _pick
+                                        : null,
+                                    icon: const Icon(
+                                      Icons.add_photo_alternate_outlined,
+                                    ),
+                                  )
+                                : null,
+                          ),
+                        ],
                       ),
-                  ],
+                    ),
+                  ),
                 ),
-              ),
-            ),
-          if (controller.busy) const LinearProgressIndicator(),
-          if (controller.problem case final problem?)
-            ChatProblemLine(
-              text: problem,
-              actions: [
-                if (!controller.connected && !controller.connecting)
-                  TextButton(
-                    onPressed: controller.retry,
-                    child: const Text('Try again'),
-                  ),
-                if (controller.reconnecting)
-                  TextButton(
-                    onPressed: controller.stopRetrying,
-                    child: const Text('Stop trying'),
-                  ),
+                ?widget.attached,
               ],
             ),
-          if (_images.isNotEmpty)
-            _column(
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final (index, image) in _images.indexed)
-                      ImageThumbnail(
-                        key: ValueKey('composer-image-$index'),
-                        image: MemoryImage(image.bytes),
-                        label: 'Image ${index + 1}',
-                        size: 64,
-                        onRemove: () => setState(
-                          () => _images = [..._images]..removeAt(index),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          if (_menuOpen)
-            _column(
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                child: CommandMenu(
-                  commands: _matches,
-                  highlighted: _highlight.clamp(0, _matches.length - 1),
-                  onPick: _pickCommand,
-                ),
-              ),
-            ),
-          if (widget.scopeBar case final bar?) _column(bar),
-          ChatComposerBar(
-            message: _message,
-            focusNode: _composer,
-            enabled: controller.connected,
-            busy: controller.busy,
-            stopping: controller.stopping,
-            hint: 'Ask Moneypenny…',
-            onSend: _send,
-            onStop: controller.interrupt,
-            textWidth: widget.textWidth,
-            leading: widget.imageInput?.canPick ?? false
-                ? IconButton(
-                    tooltip: 'Add an image',
-                    onPressed: controller.connected ? _pick : null,
-                    icon: const Icon(Icons.add_photo_alternate_outlined),
-                  )
-                : null,
           ),
         ],
       );

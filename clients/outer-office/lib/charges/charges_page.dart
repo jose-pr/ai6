@@ -10,10 +10,9 @@ import '../shell/oo_freshness.dart';
 import '../shell/oo_shell.dart' show OoPage;
 import '../theme/oo_icon.dart';
 import '../theme/oo_tokens.dart';
-import 'attachment.dart';
-import 'attach_view.dart';
+import '../assistant/chat_talk.dart';
+import 'board_talk.dart';
 import 'charges_model.dart';
-import 'mission_attach.dart' show attachNames;
 
 /// The page width from which the selected charge sits beside the list.
 const _splitFrom = 1000.0;
@@ -26,14 +25,13 @@ const _tabs = [
 
 /// The Charges page: M's charge, each Operation's and each Station's, with its Run's state,
 /// the Agent and where it runs and when it last woke; the selected charge opens beside the
-/// list (under it on a narrow screen) with its live attachment, what it decided and its
+/// list (under it on a narrow screen) with a way to talk to its Run in the chat, what it decided and its
 /// logbook.
 class ChargesPage extends StatefulWidget {
   const ChargesPage({
     required this.board,
     required this.route,
     required this.onRoute,
-    this.connect,
     this.refreshEvery,
     super.key,
   });
@@ -44,9 +42,6 @@ class ChargesPage extends StatefulWidget {
   /// picks what the detail shows.
   final OoRoute route;
   final ValueChanged<OoRoute> onRoute;
-
-  /// Opens the attach socket; tests give a fake one. The gateway's by default.
-  final AttachChannel Function()? connect;
 
   /// How often the list is read again while the page is shown; never when null.
   final Duration? refreshEvery;
@@ -79,9 +74,6 @@ class _ChargesPageState extends State<ChargesPage> {
     if (!mounted) return;
     setState(() => _charges = widget.board.loadCharges());
   }
-
-  AttachChannel Function() get _connect =>
-      widget.connect ?? () => connectAttach(widget.board.apiOrigin);
 
   /// The scope the route selects, or null.
   String? get _selected {
@@ -150,12 +142,11 @@ class _ChargesPageState extends State<ChargesPage> {
         final detail = selected == null
             ? null
             : _ChargeDetail(
-                // Keyed so that another charge opens its own attachment.
+                // Keyed so that another charge opens its own tabs.
                 key: ValueKey(selected.scope),
                 board: widget.board,
                 charge: selected,
                 tab: _tab,
-                connect: _connect,
                 onTab: (tab) => _pick(selected, tab),
                 onClose: split ? null : _close,
               );
@@ -288,7 +279,6 @@ class _ChargeDetail extends StatelessWidget {
     required this.board,
     required this.charge,
     required this.tab,
-    required this.connect,
     required this.onTab,
     required this.onClose,
     super.key,
@@ -297,7 +287,6 @@ class _ChargeDetail extends StatelessWidget {
   final MissionBoard board;
   final ChargeSummary charge;
   final String tab;
-  final AttachChannel Function() connect;
   final ValueChanged<String> onTab;
   final VoidCallback? onClose;
 
@@ -340,7 +329,7 @@ class _ChargeDetail extends StatelessWidget {
             child: switch (tab) {
               'decisions' => _Decisions(board: board, charge: charge),
               'logbook' => _Logbook(board: board, charge: charge),
-              _ => _Live(board: board, charge: charge, connect: connect),
+              _ => _Live(board: board, charge: charge),
             },
           ),
         ],
@@ -350,15 +339,10 @@ class _ChargeDetail extends StatelessWidget {
 }
 
 class _Live extends StatelessWidget {
-  const _Live({
-    required this.board,
-    required this.charge,
-    required this.connect,
-  });
+  const _Live({required this.board, required this.charge});
 
   final MissionBoard board;
   final ChargeSummary charge;
-  final AttachChannel Function() connect;
 
   @override
   Widget build(BuildContext context) {
@@ -377,13 +361,23 @@ class _Live extends StatelessWidget {
         style: TextStyle(color: OoTokens.of(context).muted),
       );
     }
-    return AttachView(
-      token: token,
-      target: ChargeTarget(charge.scope),
-      connect: connect,
-      canInterrupt: charge.canInterrupt,
-      agent: charge.agent,
-      me: attachNames(board.userSession),
+    final open = RunTalkScope.maybeOf(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      spacing: 12,
+      children: [
+        Text(
+          "Talk to this charge's Run in the chat: read what it shows, type to it "
+          'and answer what it asks.',
+          style: TextStyle(color: OoTokens.of(context).muted),
+        ),
+        FilledButton.icon(
+          key: const ValueKey('charge-open-chat'),
+          onPressed: open == null ? null : () => open(BoardTalk.charge(charge)),
+          icon: const Icon(Icons.forum_outlined, size: 18),
+          label: const Text('Open in chat'),
+        ),
+      ],
     );
   }
 }

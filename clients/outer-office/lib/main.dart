@@ -25,6 +25,7 @@ import 'pools/models_section.dart';
 import 'assistant/assistant_controller.dart';
 import 'assistant/chat_commands.dart';
 import 'assistant/chat_layout.dart';
+import 'assistant/chat_talk.dart';
 import 'assistant/chat_popout.dart';
 import 'assistant/chat_popout_app.dart';
 import 'assistant/chat_region.dart';
@@ -43,6 +44,8 @@ import 'issues/linked_issues.dart';
 import 'keys/keys_section.dart';
 import 'pools/pools_page.dart';
 import 'reviews/mission_reviews.dart';
+import 'charges/attachment.dart';
+import 'charges/board_talk.dart';
 import 'charges/charges_model.dart';
 import 'charges/charges_page.dart';
 import 'reports/reports_model.dart';
@@ -234,6 +237,7 @@ class MissionBoard extends ChangeNotifier
     this.onThemeChanged,
     this.onBackdropChanged,
     this.assistantChannel,
+    this.attachChannel,
     http.Client? client,
     this.pollInterval = RefreshSettings.defaultRuns,
     this.limits = const OoLimits(),
@@ -440,6 +444,9 @@ class MissionBoard extends ChangeNotifier
   /// Opens the channel to Moneypenny; without one, her socket on [apiOrigin]. Tests give a
   /// fake one.
   final AssistantChannel Function()? assistantChannel;
+
+  /// Opens the attach socket to a Run; without one, the gateway's. Tests give a fake one.
+  final AttachChannel Function()? attachChannel;
   final http.Client _client;
   Timer? _poll;
 
@@ -5778,6 +5785,7 @@ MoneypennyChat moneypennyChatFor(
     imageInput: board.demo ? null : platformImageInput(),
     imageLoader: board.demo ? null : board.conversationImage,
     commands: board.demo ? const DemoCommands() : board,
+    talk: board.demo ? null : BoardTalk(board),
     openWindow: openWindow,
     windowOutlivesPage: windowOutlivesPage,
   );
@@ -6253,7 +6261,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
     final width = MediaQuery.sizeOf(context).width;
     final phone = width < OoBreakpoints.phone;
     final notice = widget.notice;
-    return ChatShell(
+    final shell = ChatShell(
       chat: chat,
       personId: widget.board.userSession?.personId,
       route: route,
@@ -6357,6 +6365,10 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
         ),
       ),
     );
+    // Pages that point at a Run (a charge, a Mission's live Run) open the chat on it.
+    return chat == null || chat.talk == null
+        ? shell
+        : RunTalkScope(open: chat.showTalk, child: shell);
   }
 }
 

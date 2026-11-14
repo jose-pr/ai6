@@ -5,6 +5,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:outer_office/assistant/chat_layout.dart';
+import 'package:outer_office/assistant/chat_region.dart';
+import 'package:outer_office/assistant/chat_talk.dart';
 import 'package:outer_office/assistant/chat_transcript.dart';
 import 'package:outer_office/assistant/turns.dart';
 import 'package:outer_office/charges/attach_view.dart';
@@ -13,10 +16,13 @@ import 'package:outer_office/charges/charges_page.dart';
 import 'package:outer_office/charges/charges_model.dart';
 import 'package:outer_office/main.dart';
 import 'package:outer_office/routes/oo_route.dart';
+import 'package:outer_office/settings/oo_config.dart' show ChatSettings;
 import 'package:outer_office/shell/mission_detail.dart';
 import 'package:outer_office/shell/missions_board.dart';
 import 'package:outer_office/shell/oo_shell.dart' show OoPage;
 import 'package:outer_office/theme/oo_theme.dart';
+
+import 'polish_test.dart' show FakeChannel;
 
 /// A stand-in for the attach socket: what the app sent, and frames the test makes arrive.
 class FakeAttach implements AttachChannel {
@@ -81,10 +87,15 @@ Map<String, Object?> _charge(
   ...?extra,
 };
 
-MissionBoard _board(List<Map<String, Object?>> charges) {
+MissionBoard _board(
+  List<Map<String, Object?>> charges, {
+  AttachChannel Function()? attach,
+}) {
   final board = MissionBoard(
     apiOrigin: Uri.parse('https://oo.example'),
     pollInterval: null,
+    attachChannel: attach,
+    assistantChannel: FakeChannel.new,
     client: MockClient((request) async {
       http.Response json(Object body) => http.Response(
         jsonEncode(body),
@@ -112,12 +123,21 @@ MissionBoard _board(List<Map<String, Object?>> charges) {
   return board;
 }
 
-class _Host extends StatefulWidget {
-  const _Host({required this.board, required this.connect, this.start});
+/// Moneypenny's chat for [board]'s person, which talks to the Runs [board] offers.
+MoneypennyChat _chat(MissionBoard board) {
+  final chat = moneypennyChatFor(board, const ChatSettings(), remember: false);
+  addTearDown(chat.dispose);
+  return chat;
+}
 
-  final MissionBoard board;
-  final AttachChannel Function() connect;
+/// A page with the chat panel beside it (over it on a phone, once it talks to a Run), and
+/// the scope a page opens the chat through.
+class _Host extends StatefulWidget {
+  const _Host({required this.chat, required this.page, this.start});
+
+  final MoneypennyChat chat;
   final OoRoute? start;
+  final Widget Function(OoRoute route, ValueChanged<OoRoute> go) page;
 
   @override
   State<_Host> createState() => _HostState();
@@ -127,13 +147,43 @@ class _HostState extends State<_Host> {
   late OoRoute route = widget.start ?? OoRoute(OoPage.charges);
 
   @override
-  Widget build(BuildContext context) => ChargesPage(
-    board: widget.board,
-    route: route,
-    onRoute: (next) => setState(() => route = next),
-    connect: widget.connect,
+  Widget build(BuildContext context) => RunTalkScope(
+    open: widget.chat.showTalk,
+    child: ListenableBuilder(
+      listenable: widget.chat,
+      builder: (context, _) {
+        final page = widget.page(route, (next) => setState(() => route = next));
+        final phone = MediaQuery.sizeOf(context).width < 800;
+        if (phone) {
+          return widget.chat.talking == null
+              ? page
+              : ChatPanel(
+                  chat: widget.chat,
+                  placement: ChatPlacement.fullScreen,
+                );
+        }
+        return Row(
+          children: [
+            Expanded(child: page),
+            SizedBox(
+              width: 420,
+              child: ChatPanel(
+                chat: widget.chat,
+                placement: ChatPlacement.side,
+              ),
+            ),
+          ],
+        );
+      },
+    ),
   );
 }
+
+Widget _chargesHost(MissionBoard board, {OoRoute? start}) => _Host(
+  chat: _chat(board),
+  start: start,
+  page: (route, go) => ChargesPage(board: board, route: route, onRoute: go),
+);
 
 Future<void> _show(
   WidgetTester tester,
@@ -152,7 +202,7 @@ Future<void> _show(
   await tester.pumpAndSettle();
 }
 
-/// Opens Operation G's charge on the Live tab, attached to a fake socket.
+/// Opens Operation G's charge on the Live tab and its Run in the chat, on a fake socket.
 Future<FakeAttach> _attach(
   WidgetTester tester, {
   bool interrupt = false,
@@ -161,9 +211,13 @@ Future<FakeAttach> _attach(
   String? person,
 }) async {
   final sockets = <FakeAttach>[];
-  final board = _board([
-    _charge('operation:G', interrupt: interrupt, converse: converse),
-  ]);
+  final board = _board(
+    [_charge('operation:G', interrupt: interrupt, converse: converse)],
+    attach: () {
+      sockets.add(FakeAttach());
+      return sockets.last;
+    },
+  );
   if (person != null) {
     board.userSession = UserSessionSummary(
       personId: person,
@@ -174,19 +228,13 @@ Future<FakeAttach> _attach(
       operations: const [],
     );
   }
-  await _show(
-    tester,
-    _Host(
-      board: board,
-      connect: () {
-        sockets.add(FakeAttach());
-        return sockets.last;
-      },
-    ),
-    size: size,
-  );
+  await _show(tester, _chargesHost(board), size: size);
   await tester.tap(find.byKey(const ValueKey('charge-operation:G')));
   await tester.pumpAndSettle();
+  if (converse) {
+    await tester.tap(find.byKey(const ValueKey('charge-open-chat')));
+    await _flush(tester);
+  }
   return sockets.isEmpty ? FakeAttach() : sockets.last;
 }
 
@@ -211,7 +259,7 @@ void main() {
         _charge('operation:G'),
         _charge('station:worker', held: false),
       ]);
-      await _show(tester, _Host(board: board, connect: FakeAttach.new));
+      await _show(tester, _chargesHost(board));
 
       expect(find.text('M'), findsOneWidget);
       expect(find.text('Operation G'), findsOneWidget);
@@ -258,8 +306,14 @@ void main() {
         expect(find.text('ana'), findsOneWidget);
         expect(find.text('status?'), findsOneWidget);
         expect(find.byType(ChatAgentBubble), findsOneWidget);
-        expect(find.byType(ChatAvatar), findsOneWidget);
-        expect(find.text('007'), findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byType(ChatAgentBubble),
+            matching: find.byType(ChatAvatar),
+          ),
+          findsOneWidget,
+        );
+        expect(find.text('007'), findsWidgets);
         expect(find.textContaining('quiet'), findsOneWidget);
         expect(find.text('Idle'), findsOneWidget);
         expect(find.byType(LinearProgressIndicator), findsNothing);
@@ -414,9 +468,9 @@ void main() {
   ) async {
     final socket = await _attach(tester, converse: false);
     expect(socket.sent, isEmpty, reason: 'nothing is attached to');
-    expect(find.byType(ChatComposerBar), findsNothing);
-    expect(find.byTooltip('Send'), findsNothing);
+    expect(find.byType(AttachView), findsNothing);
     expect(find.byTooltip('Interrupt'), findsNothing);
+    expect(find.byKey(const ValueKey('charge-open-chat')), findsNothing);
     expect(find.textContaining('needs charge.converse'), findsOneWidget);
   });
 
@@ -424,18 +478,17 @@ void main() {
     tester,
   ) async {
     final sockets = <FakeAttach>[];
-    final board = _board([_charge('operation:G')]);
-    await _show(
-      tester,
-      _Host(
-        board: board,
-        connect: () {
-          sockets.add(FakeAttach());
-          return sockets.last;
-        },
-      ),
+    final board = _board(
+      [_charge('operation:G')],
+      attach: () {
+        sockets.add(FakeAttach());
+        return sockets.last;
+      },
     );
+    await _show(tester, _chargesHost(board));
     await tester.tap(find.byKey(const ValueKey('charge-operation:G')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('charge-open-chat')));
     await _flush(tester);
     final first = sockets.single;
     first.attached();
@@ -520,25 +573,34 @@ void main() {
     final board = _board([_charge('operation:G')]);
     await _show(
       tester,
-      _Host(
-        board: board,
-        connect: FakeAttach.new,
+      _chargesHost(
+        board,
         start: OoRoute(OoPage.charges)
             .withField('operation_id', 'G')
             .withField('tab', 'logbook'),
       ),
     );
     expect(find.text('Started a Run'), findsOneWidget);
-    expect(find.text('woke on a timer'), findsNWidgets(2));
+    expect(find.text('woke on a timer'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('charge-tab-decisions')));
     await _flush(tester);
-    expect(find.text('woke on a timer'), findsNWidgets(2));
+    expect(find.text('woke on a timer'), findsOneWidget);
     expect(find.text('Started a Run'), findsNothing);
   });
 
   group('a Mission\'s live Run', () {
-    MissionBoard missionBoard(List<String> actions) {
-      final board = _board(const []);
+    Future<List<FakeAttach>> detail(
+      WidgetTester tester,
+      List<String> actions,
+    ) async {
+      final sockets = <FakeAttach>[];
+      final board = _board(
+        const [],
+        attach: () {
+          sockets.add(FakeAttach());
+          return sockets.last;
+        },
+      );
       board.userSession = UserSessionSummary(
         personId: 'ana',
         name: 'ana',
@@ -547,55 +609,44 @@ void main() {
         expiresAt: 0,
         operations: [UserOperationAccess(operationId: 'G', actions: actions)],
       );
-      return board;
-    }
-
-    Future<List<FakeAttach>> detail(
-      WidgetTester tester,
-      MissionBoard board,
-    ) async {
-      final sockets = <FakeAttach>[];
       await _show(
         tester,
-        MissionDetail(
-          board: board,
-          mission: const MissionGroup(
-            operationId: 'G',
-            missionId: 'm1',
-            runs: [
-              RunSummary(
-                operationId: 'G',
-                missionId: 'm1',
-                runId: 's1',
-                state: 'working',
-                sequence: 1,
-                stationId: 'hq',
-              ),
-            ],
+        _Host(
+          chat: _chat(board),
+          page: (_, _) => MissionDetail(
+            board: board,
+            mission: const MissionGroup(
+              operationId: 'G',
+              missionId: 'm1',
+              runs: [
+                RunSummary(
+                  operationId: 'G',
+                  missionId: 'm1',
+                  runId: 's1',
+                  state: 'working',
+                  sequence: 1,
+                  stationId: 'hq',
+                  agent: '009',
+                ),
+              ],
+            ),
+            pages: const [OoPage.missions],
+            onRoute: (_) {},
+            onOpenRun: (_) {},
+            onClose: () {},
           ),
-          pages: const [OoPage.missions],
-          onRoute: (_) {},
-          onOpenRun: (_) {},
-          onClose: () {},
-          attachConnect: () {
-            sockets.add(FakeAttach());
-            return sockets.last;
-          },
         ),
       );
       return sockets;
     }
 
-    testWidgets('is offered under mission.control and attaches when opened', (
+    testWidgets('is offered under mission.control and opens in the chat', (
       tester,
     ) async {
-      final sockets = await detail(
-        tester,
-        missionBoard(['mission.read', 'mission.control']),
-      );
+      final sockets = await detail(tester, ['mission.read', 'mission.control']);
       expect(find.text('Live Run'), findsOneWidget);
       expect(sockets, isEmpty, reason: 'nothing attaches until it is opened');
-      await tester.tap(find.text('Live Run'));
+      await tester.tap(find.byKey(const ValueKey('attach-open-chat')));
       await _flush(tester);
       expect(sockets.single.sent.single, {
         'type': 'hello',
@@ -603,15 +654,207 @@ void main() {
         'mission': {'operation': 'G', 'mission': 'm1'},
       });
       sockets.single.attached();
-      sockets.single.frame(1, 'ready', {'busy': true});
+      sockets.single.frame(1, 'event', {'kind': 'text', 'text': 'On it.'});
+      sockets.single.frame(2, 'ready', {'busy': true});
       await _flush(tester);
+      // The Run is talked to in the chat panel, which names the Agent on it.
+      expect(
+        find.descendant(
+          of: find.byType(ChatPanel),
+          matching: find.byType(AttachView),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('009'), findsWidgets);
+      expect(find.byType(ChatAgentBubble), findsOneWidget);
       expect(find.byTooltip('Interrupt'), findsOneWidget);
     });
 
     testWidgets('is not offered without mission.control', (tester) async {
-      final sockets = await detail(tester, missionBoard(['mission.read']));
+      final sockets = await detail(tester, ['mission.read']);
       expect(find.text('Live Run'), findsNothing);
       expect(sockets, isEmpty);
+    });
+  });
+
+  group('the chat\'s "Talking to" picker', () {
+    /// A chat for a person who holds `charge.converse` on Operation G's and the Station's
+    /// charges, and `mission.control` on Operation G but only `mission.read` on H.
+    Future<(MoneypennyChat, List<FakeAttach>)> open(WidgetTester tester) async {
+      final sockets = <FakeAttach>[];
+      final board = _board(
+        [
+          _charge('m', converse: false),
+          _charge('operation:G'),
+          _charge('station:worker', interrupt: true),
+        ],
+        attach: () {
+          sockets.add(FakeAttach());
+          return sockets.last;
+        },
+      );
+      board.userSession = const UserSessionSummary(
+        personId: 'ana',
+        name: 'ana',
+        displayName: null,
+        groups: [],
+        expiresAt: 0,
+        operations: [
+          UserOperationAccess(
+            operationId: 'G',
+            actions: ['mission.read', 'mission.control'],
+          ),
+          UserOperationAccess(operationId: 'H', actions: ['mission.read']),
+        ],
+      );
+      RunSummary run(String operation, String mission, String state) =>
+          RunSummary(
+            operationId: operation,
+            missionId: mission,
+            runId: '$mission-run',
+            state: state,
+            sequence: 1,
+            stationId: 'hq',
+            agent: '009',
+          );
+      board.runs = [
+        run('G', 'm1', 'working'),
+        run('H', 'm2', 'working'),
+        run('G', 'm3', 'done'),
+      ];
+      final chat = _chat(board);
+      await _show(
+        tester,
+        _Host(
+          chat: chat,
+          page: (_, _) => const Center(child: Text('the page')),
+        ),
+      );
+      return (chat, sockets);
+    }
+
+    Future<void> choose(WidgetTester tester, String id) async {
+      await tester.tap(find.byKey(const ValueKey('talking-to')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(ValueKey('talking-to-$id')));
+      await _flush(tester);
+    }
+
+    testWidgets('lists only what the person may attach to', (tester) async {
+      await open(tester);
+      await tester.tap(find.byKey(const ValueKey('talking-to')));
+      await tester.pumpAndSettle();
+      for (final id in [
+        'moneypenny',
+        'charge:operation:G',
+        'charge:station:worker',
+        'mission:G/m1',
+      ]) {
+        expect(
+          find.byKey(ValueKey('talking-to-$id')),
+          findsOneWidget,
+          reason: id,
+        );
+      }
+      // No charge.converse on M's, no mission.control on H, and a finished Mission has
+      // no Run to talk to.
+      for (final id in ['charge:m', 'mission:H/m2', 'mission:G/m3']) {
+        expect(
+          find.byKey(ValueKey('talking-to-$id')),
+          findsNothing,
+          reason: id,
+        );
+      }
+      expect(find.text('Charges'), findsOneWidget);
+      expect(find.text('Mission Runs'), findsOneWidget);
+      expect(find.textContaining('Session'), findsNothing);
+      expect(find.textContaining('Watch'), findsNothing);
+    });
+
+    testWidgets(
+      'choosing a charge attaches; Moneypenny detaches and keeps her draft',
+      (tester) async {
+        final (chat, sockets) = await open(tester);
+        chat.message.text = 'half a thought';
+        await tester.pumpAndSettle();
+        expect(
+          sockets,
+          isEmpty,
+          reason: 'nothing attaches until one is chosen',
+        );
+
+        await choose(tester, 'charge:operation:G');
+        expect(sockets.single.sent.single, {
+          'type': 'hello',
+          'token': 'user-token',
+          'charge': 'operation:G',
+        });
+        sockets.single.attached();
+        sockets.single.frame(1, 'event', {
+          'kind': 'text',
+          'text': 'Hello from G.',
+        });
+        sockets.single.frame(2, 'ready', {'busy': false});
+        await _flush(tester);
+        expect(find.byType(AttachView), findsOneWidget);
+        expect(find.text('Hello from G.'), findsOneWidget);
+        // Her conversation is under it, out of view, and her draft is not in the Run's box.
+        expect(find.widgetWithText(TextField, 'half a thought'), findsNothing);
+        expect(find.byTooltip('New conversation'), findsNothing);
+
+        await choose(tester, 'moneypenny');
+        expect(sockets.single.ofType('detach'), hasLength(1));
+        expect(sockets.single.closed, isTrue);
+        expect(find.byType(AttachView), findsNothing);
+        expect(
+          find.widgetWithText(TextField, 'half a thought'),
+          findsOneWidget,
+        );
+        expect(chat.message.text, 'half a thought');
+        expect(find.byTooltip('New conversation'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      "a Mission's live Run is chosen the same way, and a refusal shows in the chat",
+      (tester) async {
+        final (_, sockets) = await open(tester);
+        await choose(tester, 'mission:G/m1');
+        expect(sockets.single.sent.single, {
+          'type': 'hello',
+          'token': 'user-token',
+          'mission': {'operation': 'G', 'mission': 'm1'},
+        });
+        sockets.single.receive({
+          'type': 'error',
+          'code': 'forbidden',
+          'message': 'You may no longer attach to that Run.',
+        });
+        await sockets.single.drop();
+        await _flush(tester);
+        expect(
+          find.descendant(
+            of: find.byType(ChatPanel),
+            matching: find.text('You may no longer attach to that Run.'),
+          ),
+          findsOneWidget,
+        );
+        expect(find.byType(ChatProblemLine), findsOneWidget);
+      },
+    );
+
+    testWidgets("the Charges page's Live tab opens the chat on that charge", (
+      tester,
+    ) async {
+      final socket = await _attach(tester);
+      expect(socket.sent.single['charge'], 'operation:G');
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('talking-to')),
+          matching: find.text('Operation G'),
+        ),
+        findsOneWidget,
+      );
     });
   });
 

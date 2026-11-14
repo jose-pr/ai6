@@ -17,6 +17,7 @@ import '../shell/oo_shell.dart';
 import 'assistant_controller.dart';
 import 'chat_scope.dart';
 import 'chat_commands.dart' show ChatCommands;
+import 'chat_talk.dart';
 import 'chat_popout.dart' show ChatWindowBlocked;
 
 /// Where Moneypenny's chat is, as the person chose it.
@@ -190,6 +191,7 @@ class MoneypennyChat extends ChangeNotifier {
     this.imageInput,
     this.imageLoader,
     this.commands,
+    this.talk,
   }) : _width = settings.width {
     controller.addListener(_heard);
   }
@@ -221,6 +223,28 @@ class MoneypennyChat extends ChangeNotifier {
 
   /// Where the composer's `/` menu reads her commands; none, no menu.
   final ChatCommands? commands;
+
+  /// The Runs the chat may talk to instead of her, and how to attach to one; none, and the
+  /// chat is only with her.
+  final TalkSource? talk;
+
+  /// The Run the chat is talking to now; null is Moneypenny. Her conversation stays as it
+  /// was while the person talks to a Run.
+  TalkOption? get talking => _talking;
+  TalkOption? _talking;
+
+  /// Talks to [option], or to her again for null; the Run is left, and goes on.
+  void talkTo(TalkOption? option) {
+    if (talk == null || _talking == option) return;
+    _talking = option;
+    notifyListeners();
+  }
+
+  /// Talks to [option] and shows the chat, in the layout it was last open in if it is hidden.
+  void showTalk(TalkOption option) {
+    talkTo(option);
+    if (_layout == ChatLayout.collapsed) open(focus: false);
+  }
 
   /// The composer's `/` menu is open: Escape closes it and leaves the chat as it is.
   bool commandMenuOpen = false;

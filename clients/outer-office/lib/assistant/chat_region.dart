@@ -5,6 +5,7 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../charges/attach_view.dart';
 import '../routes/oo_route.dart';
 import '../shell/oo_shell.dart';
 import '../theme/oo_icon.dart';
@@ -13,6 +14,8 @@ import 'assistant_controller.dart';
 import 'assistant_panel.dart';
 import 'chat_layout.dart';
 import 'chat_scope.dart';
+import 'chat_talk.dart';
+import 'chat_transcript.dart' show ChatAvatar;
 import 'navigation_card.dart';
 
 /// How long [chat] takes to move, unless the platform asks for no animations.
@@ -404,6 +407,21 @@ class ChatPanel extends StatelessWidget {
             textWidth: placement == ChatPlacement.centre
                 ? chat.settings.textWidth
                 : null,
+            talkPicker: chat.talk == null
+                ? null
+                : TalkingToPicker(
+                    source: chat.talk!,
+                    talking: chat.talking,
+                    onPick: chat.talkTo,
+                  ),
+            attached: _attached(),
+            talkingTo: switch (chat.talking) {
+              final run? when chat.talk?.token != null => (
+                title: run.label,
+                avatar: ChatAvatar(label: run.agent ?? 'Agent', size: 40),
+              ),
+              _ => null,
+            },
           ),
         ),
       ),
@@ -441,6 +459,27 @@ class ChatPanel extends StatelessWidget {
     return _FocusWhenConnected(
       chat: chat,
       child: placement.modal ? FocusScope(child: noticed) : noticed,
+    );
+  }
+
+  /// The Run's view while the chat talks to one, else null.
+  Widget? _attached() {
+    final run = chat.talking;
+    final source = chat.talk;
+    final token = source?.token;
+    if (run == null || source == null || token == null) return null;
+    return AttachView(
+      // Another Run attaches afresh.
+      key: ValueKey(run.id),
+      token: token,
+      target: run.target,
+      connect: source.connect,
+      canInterrupt: run.canInterrupt,
+      agent: run.agent,
+      me: source.me,
+      textWidth: placement == ChatPlacement.centre
+          ? chat.settings.textWidth
+          : null,
     );
   }
 
