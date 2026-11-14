@@ -41,6 +41,9 @@ mod rename_tests;
 mod reports;
 mod reviews;
 mod roster;
+mod run_attach;
+#[cfg(test)]
+mod run_attach_tests;
 mod source_reads;
 mod timeline;
 mod tls;
@@ -604,6 +607,8 @@ pub struct Gateway {
     stand_ins: Arc<std::sync::Mutex<HashMap<String, String>>>,
     /// Live tracker reads waiting for the Headquarters Station.
     source_reads: Arc<source_reads::SourceReads>,
+    /// The people attached to Runs, and what waits for their Stations.
+    attach: Arc<run_attach::Relay>,
     /// The images people send Moneypenny, kept beside the pages.
     images: Option<Arc<moneypenny::images::ImageStore>>,
     /// The peers Liaison serves A2A to, on links and on `/v1/a2a`.
@@ -718,6 +723,7 @@ impl Gateway {
             pages_config: None,
             stand_ins: Arc::default(),
             source_reads: Arc::default(),
+            attach: Arc::default(),
             images: None,
             liaison: None,
             own_providers: Arc::default(),
@@ -2045,6 +2051,9 @@ impl Gateway {
                 "/v1/user/assistant/memory/{id}/versions",
                 get(moneypenny::memory::versions),
             )
+            .route("/v1/user/attach", get(run_attach::socket))
+            .route("/v1/station/hub/next", get(run_attach::next))
+            .route("/v1/station/hub/frames", post(run_attach::frames))
             .route("/v1/station/assistant/next", get(moneypenny::next))
             .route("/v1/station/assistant/reports", post(moneypenny::reports))
             .route(
