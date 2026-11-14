@@ -366,7 +366,7 @@ class _OperationTimelinePageState extends State<OperationTimelinePage> {
           child: operation == null
               ? Center(
                   child: Text(
-                    'Operation ${widget.route['operation_id']}\'s timeline is '
+                    'Operation ${OperationNames.of('${widget.route['operation_id']}')}\'s timeline is '
                     'not visible to this account.',
                   ),
                 )

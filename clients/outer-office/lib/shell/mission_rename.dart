@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../main.dart';
+import 'operation_names.dart';
 
 /// Renames a Mission: gives it another handle. Its UID, its route and everything kept by it
 /// stay; the old handle still names it. Without `mission.control` the action shows disabled
@@ -41,7 +42,7 @@ class RenameMissionButton extends StatelessWidget {
         : Tooltip(
             message: board.demo
                 ? 'Renaming is unavailable in preview'
-                : 'Needs mission.control in Operation $operationId',
+                : 'Needs mission.control in Operation ${OperationNames.of(operationId)}',
             child: button,
           );
   }

@@ -5,6 +5,7 @@ import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
 import '../shell/oo_freshness.dart';
 import '../shell/oo_link.dart';
+import '../shell/operation_names.dart';
 
 /// One thing vetting found in a brief.
 @immutable
@@ -270,7 +271,7 @@ class _HeldBriefsPageState extends State<HeldBriefsPage> {
             Expanded(
               child: Center(
                 child: Text(
-                  'Operation ${widget.route['operation_id']} does not grant '
+                  'Operation ${OperationNames.of('${widget.route['operation_id']}')} does not grant '
                   'Mission creation access.',
                 ),
               ),
@@ -315,7 +316,7 @@ class _HeldBriefsPageState extends State<HeldBriefsPage> {
                         itemId == null
                             ? 'No briefs are held. Vetting holds a brief here when it finds '
                                   'something a person should see first.'
-                            : 'No brief $itemId is held in Operation $operationId.',
+                            : 'No brief $itemId is held in Operation ${OperationNames.of(operationId)}.',
                       ),
                     );
                   }

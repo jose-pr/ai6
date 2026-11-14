@@ -10,7 +10,7 @@
 //! could not be made). A source that could not be read is named in `coverage`; the summary
 //! never says everything is clear while one is missing.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -254,6 +254,7 @@ pub(crate) async fn read(
             empty_board()
         }
     };
+    let names = names_of(&board);
     let stations: Vec<&BoardStation> = board
         .stations
         .iter()
@@ -333,10 +334,11 @@ pub(crate) async fn read(
                     asked.insert((operation.clone(), request.run.to_string()));
                     let (title, entity) = (
                         format!(
-                            "Agent {} waits for green ink to {} {} in Operation {operation}",
+                            "Agent {} waits for green ink to {} {} in Operation {}",
                             plain(&request.agent),
                             plain(&request.scope.kind),
-                            plain(&request.scope.target)
+                            plain(&request.scope.target),
+                            called(&names, operation)
                         ),
                         Entity {
                             kind: "approval",
@@ -378,8 +380,9 @@ pub(crate) async fn read(
                         "held_brief",
                         Condition::Current,
                         format!(
-                            "Brief \"{}\" is held for review in Operation {operation}",
-                            plain(&entry.held.brief.title)
+                            "Brief \"{}\" is held for review in Operation {}",
+                            plain(&entry.held.brief.title),
+                            called(&names, operation)
                         ),
                         None,
                         entity,
@@ -409,8 +412,9 @@ pub(crate) async fn read(
                         "mission_proposal",
                         Condition::Current,
                         format!(
-                            "Mission proposal \"{}\" waits for a decision in Operation {operation}",
-                            plain(&proposal.brief.title)
+                            "Mission proposal \"{}\" waits for a decision in Operation {}",
+                            plain(&proposal.brief.title),
+                            called(&names, operation)
                         ),
                         None,
                         entity,
@@ -639,7 +643,11 @@ pub(crate) async fn read(
             .collect();
         for report in open.reports {
             let (label, operation_id, station_id) = match report.scope.split_once(':') {
-                Some(("operation", id)) => (format!("Operation {id}"), Some(id.to_owned()), None),
+                Some(("operation", id)) => (
+                    format!("Operation {}", called(&names, id)),
+                    Some(id.to_owned()),
+                    None,
+                ),
                 Some(("station", id)) => (format!("Station {id}"), None, Some(id.to_owned())),
                 _ => ("M".to_owned(), None, None),
             };
@@ -718,7 +726,7 @@ pub(crate) async fn read(
                             format!("{}:{}", trouble.kind, charge.scope()),
                             trouble.kind,
                             Condition::Current,
-                            format!("{} {}", charge.label(), trouble.title),
+                            format!("{} {}", charge.label(&names), trouble.title),
                             Some(trouble.detail),
                             Entity {
                                 kind: "charge",
@@ -785,7 +793,7 @@ pub(crate) async fn read(
         kind: if wanted.is_some() { "operation" } else { "all" },
         label: wanted.as_ref().map_or_else(
             || "All accessible Operations".to_owned(),
-            |operation| format!("Operation {operation}"),
+            |operation| format!("Operation {}", called(&names, operation)),
         ),
         operation_id: wanted,
         operations: operations.into_iter().collect(),
@@ -921,6 +929,25 @@ pub(crate) fn report_scopes<'a>(
         scopes.push("m".to_owned());
     }
     scopes
+}
+
+/// What each Operation on the board is called, where it has a name.
+pub(crate) fn names_of(board: &StationBoard) -> BTreeMap<String, String> {
+    board
+        .operations
+        .iter()
+        .filter_map(|operation| {
+            operation
+                .name
+                .clone()
+                .map(|name| (operation.operation_id.clone(), name))
+        })
+        .collect()
+}
+
+/// The name of Operation `id`, or the ID when it has none or is not known.
+pub(crate) fn called(names: &BTreeMap<String, String>, id: &str) -> String {
+    plain(names.get(id).map_or(id, String::as_str))
 }
 
 /// The Operations a summary looks in: those on the board, or the one asked for.

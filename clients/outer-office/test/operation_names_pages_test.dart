@@ -5,6 +5,8 @@ import 'dart:ui' show Size;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:outer_office/charges/charges_model.dart';
+import 'package:outer_office/controls/mission_actions.dart';
 import 'package:outer_office/main.dart';
 import 'package:outer_office/shell/operation_names.dart';
 
@@ -92,6 +94,7 @@ MissionBoard _demoNamed() {
 }
 
 void main() {
+  group('titles', unitNames);
   setUp(() => OperationNames.use(const {'G': 'Guatiao', 'L': 'LineupMux'}));
   tearDown(() => OperationNames.use(const {}));
 
@@ -121,4 +124,35 @@ void main() {
       expect(find.text('Operation: Guatiao'), findsOneWidget);
     });
   }
+}
+
+void unitNames() {
+  setUp(() => OperationNames.use(const {'G': 'Guatiao'}));
+  tearDown(() => OperationNames.use(const {}));
+
+  test('a control request and a charge name their Operation, by its ID when '
+      'it has no name', () {
+    const control = PendingControl(
+      operationId: 'G',
+      missionId: 'm-7',
+      action: 'cancel',
+      stage: ControlStage.applied,
+    );
+    expect(control.target, 'Operation Guatiao › m-7');
+    const other = PendingControl(
+      operationId: 'Q',
+      missionId: 'm-7',
+      action: 'cancel',
+      stage: ControlStage.applied,
+    );
+    expect(other.target, 'Operation Q › m-7');
+    const charge = ChargeSummary(
+      scope: 'operation:G',
+      held: true,
+      turnsLastHour: 0,
+      canConverse: false,
+      canInterrupt: false,
+    );
+    expect(charge.title, 'Operation Guatiao');
+  });
 }

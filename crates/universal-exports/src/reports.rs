@@ -460,7 +460,13 @@ pub(crate) async fn unassessed(
         "checked_at": now,
         "scope": wanted.as_ref().map_or_else(
             || "All accessible Operations and Stations".to_owned(),
-            |operation| format!("Operation {operation}"),
+            |operation| {
+                let names = board
+                    .as_ref()
+                    .map(crate::attention::names_of)
+                    .unwrap_or_default();
+                format!("Operation {}", crate::attention::called(&names, operation))
+            },
         ),
         "reports": reports,
         "omitted": found - keep,

@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../main.dart';
 import '../shell/mission_verification.dart' show decideMission;
+import '../shell/operation_names.dart';
 
 /// Mission states after which a Mission has ended.
 const _ended = {'done', 'failed', 'blown', 'abandoned'};
@@ -135,8 +136,9 @@ class PendingControl {
   /// What the person asked for, as the menu names it.
   String get effect => _labels[action] ?? action;
 
-  /// `Operation G › mission-007`.
-  String get target => 'Operation $operationId › $missionId';
+  /// `Operation Guatiao › mission-007`: the Operation by its name.
+  String get target =>
+      'Operation ${OperationNames.of(operationId)} › $missionId';
 }
 
 const _labels = {

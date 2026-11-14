@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart' show immutable;
 
+import '../shell/operation_names.dart';
+
 /// One line of a charge's logbook.
 @immutable
 class ChargeLogLine {
@@ -99,10 +101,11 @@ class ChargeSummary {
   /// Its logbook, oldest first; only in the detail read.
   final List<ChargeLogLine> logbook;
 
-  /// Whose charge it is: `M`, `Operation G` or `Station worker`.
+  /// Whose charge it is: `M`, `Operation Guatiao` (its name, else its ID) or `Station worker`.
   String get title => switch (scope.split(':')) {
     ['m'] => 'M',
-    ['operation', ...final rest] => 'Operation ${rest.join(':')}',
+    ['operation', ...final rest] =>
+      'Operation ${OperationNames.of(rest.join(':'))}',
     ['station', ...final rest] => 'Station ${rest.join(':')}',
     _ => scope,
   };

@@ -296,7 +296,7 @@ class _GreenInkPageState extends State<GreenInkPage> {
             Expanded(
               child: Center(
                 child: Text(
-                  'Operation ${widget.route['operation_id']} does not grant '
+                  'Operation ${OperationNames.of('${widget.route['operation_id']}')} does not grant '
                   'approval.decide to this account.',
                 ),
               ),
@@ -593,7 +593,7 @@ class _ExpiredGreenInkPageState extends State<ExpiredGreenInkPage> {
             Expanded(
               child: Center(
                 child: Text(
-                  'Operation ${widget.route['operation_id']} does not grant '
+                  'Operation ${OperationNames.of('${widget.route['operation_id']}')} does not grant '
                   'approval.decide to this account.',
                 ),
               ),
@@ -988,7 +988,7 @@ class _ClassAuthorizationsPageState extends State<ClassAuthorizationsPage> {
             Expanded(
               child: Center(
                 child: Text(
-                  'Operation ${widget.route['operation_id']} does not grant '
+                  'Operation ${OperationNames.of('${widget.route['operation_id']}')} does not grant '
                   'approval.class to this account.',
                 ),
               ),

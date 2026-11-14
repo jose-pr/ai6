@@ -13,6 +13,7 @@ import 'models_section.dart';
 import '../shell/oo_empty.dart';
 import '../shell/oo_freshness.dart';
 import '../shell/oo_link.dart';
+import '../shell/operation_names.dart';
 
 /// How much of one provider quota window an account has used.
 @immutable
@@ -295,7 +296,7 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
           child: scope.unreadable
               ? Center(
                   child: Text(
-                    'Operation ${widget.route['operation_id']}\'s account pools '
+                    'Operation ${OperationNames.of('${widget.route['operation_id']}')}\'s account pools '
                     'are not visible to this account.',
                   ),
                 )
@@ -317,7 +318,7 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
                     (_, null) =>
                       'No account pool named $pool in an Operation this account may read.',
                     (_, _) =>
-                      'No account pool named $pool in Operation $operation.',
+                      'No account pool named $pool in Operation ${OperationNames.of('$operation')}.',
                   },
                   body:
                       'A pool shares logins among Runs. Without one, a Run uses '

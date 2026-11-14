@@ -175,9 +175,14 @@ impl ChargeView {
     }
 
     /// What a person calls it.
-    pub(crate) fn label(&self) -> String {
+    pub(crate) fn label(&self, names: &std::collections::BTreeMap<String, String>) -> String {
         match self.scope.split_once(':') {
-            Some(("operation", id)) => format!("Charge of Operation {id}"),
+            Some(("operation", id)) => {
+                format!(
+                    "Charge of Operation {}",
+                    crate::attention::called(names, id)
+                )
+            }
             Some(("station", id)) => format!("Charge of Station {id}"),
             _ => "M's charge".to_owned(),
         }

@@ -647,3 +647,54 @@ async fn a_healthy_charge_is_not_an_item_and_one_the_person_cannot_see_is_not_re
     assert!(items(&summary, "charge_failed").is_empty(), "{summary}");
     assert!(items(&summary, "charge_lapsed").is_empty(), "{summary}");
 }
+
+#[tokio::test]
+async fn titles_name_an_operation_by_its_name_and_by_its_id_when_it_has_none() {
+    let fixture = fixture().await;
+    fixture
+        .served
+        .registry
+        .check_in(
+            "worker",
+            BTreeMap::from([
+                ("operations".to_owned(), json!(["G", "L"])),
+                ("operation_lineage".to_owned(), json!({"G": [], "L": []})),
+                ("operation_names".to_owned(), json!({"G": "Guatiao"})),
+                ("config".to_owned(), json!({"revision": "79"})),
+            ]),
+        )
+        .unwrap();
+    fixture.open_report("report-g", ReportScope::Operation("G".to_owned()), "In G");
+    fixture.charge(
+        "operation:G",
+        Duration::from_secs(600),
+        "woke for a timer; the turn ended failed: no quota",
+    );
+    let summary = fixture.summary(&fixture.served.operator).await;
+    let title = |kind: &str| {
+        items(&summary, kind)[0]["title"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    assert!(
+        title("report").ends_with("in Operation Guatiao"),
+        "{summary}"
+    );
+    assert!(
+        title("charge_failed").starts_with("Charge of Operation Guatiao"),
+        "{summary}"
+    );
+    let all = summary.to_string();
+    assert!(!all.contains("Operation G "), "{all}");
+    // The scope's label is the person's words too; the ID stays in the machine fields.
+    assert_eq!(summary["scope"]["label"], "All accessible Operations");
+    let (_, narrowed) = fixture
+        .get(
+            &fixture.served.operator,
+            "/v1/user/attention?operation_id=G",
+        )
+        .await;
+    assert_eq!(narrowed["scope"]["label"], "Operation Guatiao");
+    assert_eq!(narrowed["scope"]["operation_id"], "G");
+}
