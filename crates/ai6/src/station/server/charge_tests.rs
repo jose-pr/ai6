@@ -4,6 +4,7 @@
 
 #[cfg(feature = "cables-mcp")]
 mod assess;
+mod attach;
 #[cfg(feature = "cables-mcp")]
 mod decides;
 mod sources;
@@ -144,6 +145,7 @@ impl AgentHandler for MockChargeHandler {
                     Some("no conversation found".to_owned()),
                 )])),
                 environment: request.environment,
+                holding: Default::default(),
                 _terminal: terminal,
             }
             .into_object()),
@@ -163,6 +165,8 @@ struct ChargeRun {
     run: String,
     environment: BTreeMap<String, String>,
     events: Mutex<VecDeque<AgentEvent>>,
+    /// The message `hold` was taken: the turn goes on until it is interrupted.
+    holding: std::sync::atomic::AtomicBool,
     _terminal: Object<dyn AgentTerminal>,
 }
 
@@ -182,6 +186,7 @@ impl ChargeRun {
                 event("completed", None),
             ])),
             run,
+            holding: Default::default(),
             _terminal: terminal,
         }
     }
@@ -201,6 +206,10 @@ impl AgentSession for ChargeRun {
             context: Vec::new(),
         });
         act(&self.key, &message.text, &self.environment);
+        if message.text == "hold" {
+            self.holding.store(true, Ordering::Release);
+            return Ok(());
+        }
         let mut events = self.events.lock().unwrap();
         events.push_back(event("text", Some(format!("noted on {}", self.run))));
         events.push_back(event("completed", None));
@@ -221,6 +230,12 @@ impl AgentSession for ChargeRun {
     }
 
     fn interrupt(&self) -> Result<(), ProviderError> {
+        if self.holding.swap(false, Ordering::AcqRel) {
+            self.events
+                .lock()
+                .unwrap()
+                .push_back(event("cancelled", None));
+        }
         Ok(())
     }
 

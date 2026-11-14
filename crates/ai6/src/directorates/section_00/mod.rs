@@ -7,6 +7,7 @@ pub mod assistant;
 pub mod content;
 pub mod denied;
 pub mod gate;
+pub mod hub;
 pub mod listing;
 pub mod programs;
 pub mod records;

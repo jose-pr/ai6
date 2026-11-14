@@ -253,7 +253,12 @@ fn open(
             initial_context: context.clone(),
             overlays: Default::default(),
         };
-        let why = match crate::station::acp::resume(built, terminal, request) {
+        let why = match crate::station::acp::resume_deciding(
+            built,
+            terminal,
+            request,
+            Some(decider(state, scope)),
+        ) {
             Ok(run) => {
                 super::super::log_harness_start(&who, "resumed", &handler, &provider);
                 return Ok((Harnessed { run, handler }, Opened::Resumed));
@@ -281,11 +286,12 @@ fn open(
                 assistant: None,
                 overlays: Default::default(),
             },
+            scope,
             &who,
             why,
         );
     }
-    let run = crate::station::acp::start(
+    let run = crate::station::acp::start_deciding(
         built,
         terminal,
         AgentStart {
@@ -305,6 +311,7 @@ fn open(
             assistant: None,
             overlays: Default::default(),
         },
+        Some(decider(state, scope)),
     )
     .map_err(|error| format!("the harness did not start: {error}"))?;
     super::super::log_harness_start(&who, "started", &handler, &provider);
@@ -321,6 +328,7 @@ fn start(
     state: &DaemonState,
     (handler, settings, provider): (&str, &serde_json::Map<String, serde_json::Value>, &str),
     request: AgentStart,
+    scope: &ChargeScope,
     who: &str,
     why: String,
 ) -> Result<(Harnessed, Opened), String> {
@@ -332,8 +340,13 @@ fn start(
         .plugins
         .terminal(provider, None)
         .map_err(|error| error.to_string())?;
-    let run = crate::station::acp::start(built, TerminalBridge::agent_terminal(terminal), request)
-        .map_err(|error| format!("the harness did not start: {error}"))?;
+    let run = crate::station::acp::start_deciding(
+        built,
+        TerminalBridge::agent_terminal(terminal),
+        request,
+        Some(decider(state, scope)),
+    )
+    .map_err(|error| format!("the harness did not start: {error}"))?;
     super::super::log_harness_start(who, "started", handler, provider);
     Ok((
         Harnessed {
@@ -355,9 +368,11 @@ struct Read {
 }
 
 /// Reads `run` until its turn ends, interrupting it past `timeout`.
-fn read_turn(run: &Object<dyn AgentSession>, timeout: Option<Duration>) -> Read {
+fn read_turn(run: &Object<dyn AgentSession>, timeout: Option<Duration>, live: &Live) -> Read {
     let deadline = timeout.map(|timeout| Instant::now() + timeout);
     let mut interrupted: Option<Instant> = None;
+    // Whether the Station cut the turn short for its time, rather than a person.
+    let mut timed = false;
     let mut read = Read {
         ended: String::new(),
         said: String::new(),
@@ -367,16 +382,26 @@ fn read_turn(run: &Object<dyn AgentSession>, timeout: Option<Duration>) -> Read 
     loop {
         if let Some(at) = interrupted {
             if at.elapsed() > INTERRUPT_GRACE {
-                read.ended = "timed out".to_owned();
+                read.ended = if timed { "timed out" } else { "interrupted" }.to_owned();
                 read.lost = true;
                 return read;
             }
         } else if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
             let _ = run.interrupt();
             interrupted = Some(Instant::now());
+            timed = true;
+        } else if live
+            .interrupt
+            .swap(false, std::sync::atomic::Ordering::AcqRel)
+        {
+            let _ = run.interrupt();
+            interrupted = Some(Instant::now());
         }
         let event = match run.next_event(READ_SLICE_MS) {
-            Ok(Some(event)) => event,
+            Ok(Some(event)) => {
+                live.room.publish_event(&event);
+                event
+            }
             Ok(None) => continue,
             Err(error) => {
                 read.ended = format!("failed: {error}");
@@ -396,7 +421,7 @@ fn read_turn(run: &Object<dyn AgentSession>, timeout: Option<Duration>) -> Read 
             TOOL_EVENT => read.answered = true,
             COMPLETED_EVENT | BLOCKED_EVENT | CANCELLED_EVENT | LIMIT_EVENT => {
                 read.ended = if interrupted.is_some() {
-                    "timed out".to_owned()
+                    if timed { "timed out" } else { "interrupted" }.to_owned()
                 } else {
                     event.kind.clone()
                 };
@@ -436,6 +461,9 @@ pub(super) fn take(
     let Ok(mut harness) = live.harness.lock() else {
         return Outcome::refused("the charge's harness lock failed".to_owned());
     };
+    // An interrupt asked before this turn began was for the one before.
+    live.interrupt
+        .store(false, std::sync::atomic::Ordering::Release);
     let mut log = Vec::new();
     let now = super::unix_now();
     let previous = record.handler.clone().zip(record.provider_id.clone());
@@ -483,7 +511,7 @@ pub(super) fn take(
     let Some(kept) = harness.as_ref() else {
         return Outcome::refused("no harness".to_owned());
     };
-    let mut read = read_turn(&kept.run, timeout);
+    let mut read = read_turn(&kept.run, timeout, live);
     // A resumed Run that fails before it answers was not there to resume.
     if matches!(opened, Some(Opened::Resumed)) && read.lost && !read.answered {
         let why = format!("the resumed Run {}", read.ended);
@@ -495,7 +523,7 @@ pub(super) fn take(
                     format!("a fresh Run started with the logbook: {why}"),
                     now,
                 ));
-                read = read_turn(&kept.run, timeout);
+                read = read_turn(&kept.run, timeout, live);
                 *harness = Some(kept);
             }
             Err(reason) => {
@@ -573,4 +601,18 @@ pub(super) fn close(live: &Live) {
     if let Ok(mut harness) = live.harness.lock() {
         close_harness(harness.take());
     }
+}
+
+/// The decider of a charge's Run: the people attached answer what it asks, and it refuses what
+/// nobody attached answers.
+fn decider(
+    state: &DaemonState,
+    scope: &ChargeScope,
+) -> std::sync::Arc<dyn crate::directorates::section_00::acp::PermissionDecider> {
+    super::super::attach::HubDecider::refusing(
+        &state.hub,
+        crate::directorates::section_00::hub::RunTarget::Charge {
+            scope: scope.to_string(),
+        },
+    )
 }

@@ -70,6 +70,8 @@ pub struct StationLimits {
     pub head_of_station: HeadOfStationLimits,
     /// `[probes]`: reading a Mission's deliverables back.
     pub probes: ProbeLimits,
+    /// `[attach]`: people attached to a live Run.
+    pub attach: AttachLimits,
     /// `[providers.<id>]`: the Guatiao configuration a Station hands provider `<id>` when it
     /// builds it with none of its own (handlers, terminals and safe houses).
     pub providers: BTreeMap<String, serde_json::Value>,
@@ -1277,6 +1279,66 @@ impl Default for ProbeLimits {
             tracker_timeout: Seconds::new(30),
             file_timeout: Seconds::new(5),
             comments: Limit::at(100),
+        }
+    }
+}
+
+/// `[attach]`: people attached to a live Run.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
+pub struct AttachLimits {
+    /// Frames of a Run's history kept to replay to a client that attaches; the oldest go first.
+    #[schema(title = "Frames kept for a client that attaches")]
+    #[map(default = AttachLimits::default().history_frames)]
+    pub history_frames: Limit,
+    /// Clients attached to one Run at once.
+    #[schema(title = "Clients attached to a Run")]
+    #[map(default = AttachLimits::default().clients)]
+    pub clients: Limit,
+    /// Prompts of people waiting for a Run's turn to end; past it a prompt is refused.
+    #[schema(title = "Prompts waiting for a turn")]
+    #[map(default = AttachLimits::default().waiting_prompts)]
+    pub waiting_prompts: Limit,
+    /// Seconds a permission request waits for an attached person before it is decided as it
+    /// would be with nobody attached.
+    #[schema(title = "A permission request waits")]
+    #[map(default = AttachLimits::default().permission_wait)]
+    pub permission_wait: TimeLimit,
+    /// Frames of one Run a delivery to Universal Exports carries at most.
+    #[schema(title = "Frames in one delivery")]
+    #[map(default = AttachLimits::default().delivery_frames)]
+    pub delivery_frames: Limit,
+    /// Tries to deliver a batch of frames before the client is let go.
+    #[schema(title = "Tries to deliver frames")]
+    #[map(default = AttachLimits::default().delivery_attempts)]
+    pub delivery_attempts: Limit,
+    /// Seconds a poll of Universal Exports for clients' requests waits.
+    #[schema(title = "Longest wait for a client's request", format = "seconds")]
+    #[map(default = AttachLimits::default().command_wait)]
+    pub command_wait: Seconds,
+    /// Seconds between tries after a poll or a delivery failed.
+    #[schema(title = "Pause after a failed call", format = "seconds")]
+    #[map(default = AttachLimits::default().retry_delay)]
+    pub retry_delay: Seconds,
+    /// Seconds one call to Universal Exports may take besides a poll's wait.
+    #[schema(title = "Longest call", format = "seconds")]
+    #[map(default = AttachLimits::default().call_margin)]
+    pub call_margin: Seconds,
+}
+
+impl Default for AttachLimits {
+    fn default() -> Self {
+        Self {
+            history_frames: Limit::at(1_000),
+            clients: Limit::at(16),
+            waiting_prompts: Limit::at(32),
+            permission_wait: TimeLimit::secs(600),
+            delivery_frames: Limit::at(64),
+            delivery_attempts: Limit::at(5),
+            command_wait: Seconds::new(20),
+            retry_delay: Seconds::new(1),
+            call_margin: Seconds::new(30),
         }
     }
 }

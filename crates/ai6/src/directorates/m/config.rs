@@ -674,6 +674,10 @@ pub struct StationRuntime {
     #[schema(title = "Deliverable probes")]
     #[map(default)]
     pub probes: limits::ProbeLimits,
+    /// `[attach]`: people attached to a live Run.
+    #[schema(title = "Attaching to a Run")]
+    #[map(default)]
+    pub attach: limits::AttachLimits,
     /// Bytes of a terminal line the watchdog holds before it counts as a line. Default: 4096.
     #[schema(title = "Longest partial terminal line", format = "bytes")]
     pub partial_line_bytes: Option<Limit>,
@@ -757,6 +761,7 @@ impl StationRuntime {
             theater_tools: self.theater_tools.clone(),
             head_of_station: self.head_of_station.clone(),
             probes: self.probes.clone(),
+            attach: self.attach.clone(),
             providers: self.providers.clone(),
         }
     }
@@ -920,6 +925,10 @@ pub struct UnexRecord {
     #[schema(title = "Timeline pages")]
     #[map(default)]
     pub timeline: super::unex_limits::UnexTimelineLimits,
+    /// `[attach]`: people attached to a Run through the gateway.
+    #[schema(title = "Attaching to a Run")]
+    #[map(default)]
+    pub attach: super::unex_limits::UnexAttachLimits,
     /// `[login]`: how password and key tries are told apart and counted.
     #[schema(title = "Counting sign-in tries")]
     #[map(default)]
@@ -958,6 +967,7 @@ impl Default for UnexRecord {
             gateway: Default::default(),
             controls: Default::default(),
             timeline: Default::default(),
+            attach: Default::default(),
             login: Default::default(),
             text: Default::default(),
         }
@@ -1043,12 +1053,13 @@ impl UnexRecord {
         found
     }
 
-    /// The five limit tables together.
+    /// The six limit tables together.
     pub fn limits(&self) -> super::unex_limits::UnexLimits {
         super::unex_limits::UnexLimits {
             gateway: self.gateway.clone(),
             controls: self.controls.clone(),
             timeline: self.timeline.clone(),
+            attach: self.attach.clone(),
             login: self.login.clone(),
             text: self.text.clone(),
         }

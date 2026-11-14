@@ -9,7 +9,8 @@ use guatiao::library::{Object, ProviderError};
 
 use crate::directorates::q::terminal::AgentTerminal;
 use crate::directorates::section_00::acp::{
-    AcpFacade, AcpOptions, AcpRun, LAUNCH_META_KEY, LaunchMeta, ResumeMeta, UNBOUNDED_MS, duplex,
+    AcpFacade, AcpOptions, AcpRun, LAUNCH_META_KEY, LaunchMeta, PermissionDecider, ResumeMeta,
+    UNBOUNDED_MS, duplex,
 };
 use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
 use coqui_acp_provider::AgentSession;
@@ -52,6 +53,16 @@ pub(crate) fn start(
     terminal: Object<dyn AgentTerminal>,
     request: AgentStart,
 ) -> Result<Object<dyn AgentSession>, ProviderError> {
+    start_deciding(handler, terminal, request, None)
+}
+
+/// [`start`], with `decider` answering the agent's permission requests when one is given.
+pub(crate) fn start_deciding(
+    handler: Box<dyn AgentHandler>,
+    terminal: Object<dyn AgentTerminal>,
+    request: AgentStart,
+    decider: Option<Arc<dyn PermissionDecider>>,
+) -> Result<Object<dyn AgentSession>, ProviderError> {
     let facade = facade(handler, terminal);
     let (agent_end, client_end) = duplex();
     facade.serve(agent_end);
@@ -59,6 +70,9 @@ pub(crate) fn start(
         request.working_directory.clone(),
         request.answer_only || request.assistant.is_some(),
     );
+    if let Some(decider) = decider {
+        options.decider = decider;
+    }
     options.prompt = Some(request.prompt.clone());
     options.meta.insert(
         LAUNCH_META_KEY.to_owned(),
@@ -73,6 +87,16 @@ pub(crate) fn resume(
     terminal: Object<dyn AgentTerminal>,
     request: AgentResume,
 ) -> Result<Object<dyn AgentSession>, ProviderError> {
+    resume_deciding(handler, terminal, request, None)
+}
+
+/// [`resume`], with `decider` answering the agent's permission requests when one is given.
+pub(crate) fn resume_deciding(
+    handler: Box<dyn AgentHandler>,
+    terminal: Object<dyn AgentTerminal>,
+    request: AgentResume,
+    decider: Option<Arc<dyn PermissionDecider>>,
+) -> Result<Object<dyn AgentSession>, ProviderError> {
     let facade = facade(handler, terminal);
     let (agent_end, client_end) = duplex();
     facade.serve(agent_end);
@@ -80,6 +104,9 @@ pub(crate) fn resume(
         request.working_directory.clone(),
         request.answer_only || request.assistant.is_some(),
     );
+    if let Some(decider) = decider {
+        options.decider = decider;
+    }
     options.resume = Some(request.run_id.to_string());
     options.meta.insert(
         LAUNCH_META_KEY.to_owned(),

@@ -76,6 +76,8 @@ pub const CONFIG_ACCOUNTS: &str = "config:accounts";
 /// `run.context` reads what an agent was given and did in a Run: on `operation:<id>` a
 /// Mission's, and with `audit.read` on `config:assistant` another person's conversations with
 /// Moneypenny. `mission.verify` gives a verdict on a Mission's outcome.
+/// `charge.converse` attaches a person to a charge's live Run, at `operation:<id>`, `station:<id>` or
+/// `config:charge` (M's charge), to read it, prompt it and answer what it asks.
 pub const ACTIONS: &[&str] = &[
     "access.manage",
     "access.read",
@@ -88,6 +90,7 @@ pub const ACTIONS: &[&str] = &[
     "audit.read",
     "cable.read",
     "cable.send",
+    "charge.converse",
     "compartment.cover",
     "compartment.manage",
     "compartment.read",
@@ -118,7 +121,12 @@ pub const ACTIONS: &[&str] = &[
 ];
 
 /// The actions that mean something on a Station, at `station:<id>`.
-pub const STATION_ACTIONS: &[&str] = &["audit.read", "station.configure", "station.read"];
+pub const STATION_ACTIONS: &[&str] = &[
+    "audit.read",
+    "charge.converse",
+    "station.configure",
+    "station.read",
+];
 
 /// The actions that mean something on an Operation: a role bound at `operation:<id>` grants
 /// only these there, and an Operation's own roles may hold only these.
@@ -132,6 +140,7 @@ pub const OPERATION_ACTIONS: &[&str] = &[
     "audit.read",
     "cable.read",
     "cable.send",
+    "charge.converse",
     "compartment.cover",
     "issue.comment",
     "issue.create",

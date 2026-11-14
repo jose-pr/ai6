@@ -114,7 +114,8 @@ pub use directorates::m::theaters::{
     TheaterError, TheaterKind, TheaterSummary, Theaters, TransportAccess, is_sha256_pin,
 };
 pub use directorates::m::unex_limits::{
-    ControlLimits, LoginTable, TextLimits, UnexGatewayLimits, UnexLimits, UnexTimelineLimits,
+    ControlLimits, LoginTable, TextLimits, UnexAttachLimits, UnexGatewayLimits, UnexLimits,
+    UnexTimelineLimits,
 };
 pub use directorates::m::vetting::{
     CHIEF_OF_STAFF_ROLE, DEFAULT_MAX_BRIEF_BYTES, DEFAULT_MAX_PER_HOUR,

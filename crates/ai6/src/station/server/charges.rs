@@ -32,6 +32,7 @@ use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 
+use super::attach::{self, RunPort};
 use super::{DaemonState, StationRole, unix_now};
 use crate::directorates::m::charges::{Charge, ChargeScope};
 use crate::directorates::medical::exposure::ExposureGate;
@@ -40,6 +41,7 @@ use crate::directorates::registry::charges::{
     ChargeError, ChargeLogEntry, ChargeRecord, ChargeUpdate, TURN_WINDOW_SECS,
 };
 use crate::directorates::registry::runs::RunRecord;
+use crate::directorates::section_00::hub::{HubError, RunTarget};
 use crate::station::sources::PollBoard;
 
 /// How far back M's charge looks for Stations that checked in and went dark, in seconds.
@@ -153,6 +155,14 @@ pub(super) struct Live {
     /// The logbook has said the hour's turns are spent.
     quota_noted: AtomicBool,
     harness: Mutex<Option<turn::Harnessed>>,
+    /// Where the people attached to its Run are served.
+    room: Arc<attach::Room>,
+    /// How people reach its Run; the hub closes the room only while this still drives it.
+    port: Arc<dyn RunPort>,
+    /// What people typed that waits for the Run to be free, oldest first.
+    prompts: Mutex<VecDeque<PersonPrompt>>,
+    /// A person asked to interrupt the turn under way.
+    interrupt: AtomicBool,
     /// Who it is to the Cable relay, bound to its Run once it has one; `None` for a
     /// charge whose Cables are in no Operation.
     principal: Mutex<Option<CablePrincipal>>,
@@ -389,26 +399,40 @@ async fn open(state: &DaemonState, charge: &Charge, record: &ChargeRecord) -> Ar
             .ok()
         });
     let exposure = ExposureGate::default();
-    let live = Arc::new(Live {
-        scope: charge.scope.clone(),
-        key: run_key(&charge.scope),
-        charge: Mutex::new(charge.clone()),
-        fence: AtomicU64::new(record.fence),
-        claimed_at: unix_now(),
-        busy: AtomicBool::new(false),
-        closing: AtomicBool::new(false),
-        retry_at: Mutex::new(0.0),
-        waiting: Mutex::new(VecDeque::new()),
-        told: Mutex::default(),
-        dropped: AtomicU64::new(0),
-        turns: Mutex::new(record.turns.clone()),
-        last_wake: Mutex::new(record.last_wake),
-        quota_noted: AtomicBool::new(false),
-        harness: Mutex::new(None),
-        principal: Mutex::new(principal.clone()),
-        exposure: exposure.clone(),
-        #[cfg(feature = "cables-mcp")]
-        endpoint: Mutex::new(None),
+    let target = RunTarget::Charge {
+        scope: charge.scope.to_string(),
+    };
+    let live = Arc::new_cyclic(|this| {
+        let port: Arc<dyn RunPort> = Arc::new(ChargePort {
+            state: state.clone(),
+            live: this.clone(),
+            runtime: tokio::runtime::Handle::current(),
+        });
+        Live {
+            room: state.hub.open(&target, port.clone()),
+            port,
+            prompts: Mutex::new(VecDeque::new()),
+            interrupt: AtomicBool::new(false),
+            scope: charge.scope.clone(),
+            key: run_key(&charge.scope),
+            charge: Mutex::new(charge.clone()),
+            fence: AtomicU64::new(record.fence),
+            claimed_at: unix_now(),
+            busy: AtomicBool::new(false),
+            closing: AtomicBool::new(false),
+            retry_at: Mutex::new(0.0),
+            waiting: Mutex::new(VecDeque::new()),
+            told: Mutex::default(),
+            dropped: AtomicU64::new(0),
+            turns: Mutex::new(record.turns.clone()),
+            last_wake: Mutex::new(record.last_wake),
+            quota_noted: AtomicBool::new(false),
+            harness: Mutex::new(None),
+            principal: Mutex::new(principal.clone()),
+            exposure: exposure.clone(),
+            #[cfg(feature = "cables-mcp")]
+            endpoint: Mutex::new(None),
+        }
     });
     #[cfg(feature = "cables-mcp")]
     {
@@ -498,6 +522,16 @@ async fn stop(state: &DaemonState, live: &Arc<Live>, why: &str) {
         .is_some_and(|current| Arc::ptr_eq(&current, live))
     {
         state.charges.remove(&scope);
+    }
+    state.hub.close(
+        &RunTarget::Charge {
+            scope: scope.clone(),
+        },
+        &live.port,
+        why,
+    );
+    if let Ok(mut prompts) = live.prompts.lock() {
+        prompts.clear();
     }
     let (closing, releasing) = (live.clone(), state.clone());
     let _ = tokio::task::spawn_blocking(move || {
@@ -837,6 +871,14 @@ async fn wake(state: &DaemonState, live: &Arc<Live>) {
         return;
     }
     live.quota_noted.store(false, Ordering::Release);
+    // A person's turn may have begun since the check above: the events wait for it.
+    if live
+        .busy
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return;
+    }
     let events: Vec<ChargeEvent> = live.waiting.lock().map_or_else(
         |_| Vec::new(),
         |mut waiting| {
@@ -849,12 +891,12 @@ async fn wake(state: &DaemonState, live: &Arc<Live>) {
         },
     );
     if events.is_empty() {
+        live.busy.store(false, Ordering::Release);
         return;
     }
     if let Ok(mut told) = live.told.lock() {
         told.extend(events.iter().filter_map(|event| event.key.clone()));
     }
-    live.busy.store(true, Ordering::Release);
     if let Ok(mut turns) = live.turns.lock() {
         turns.push(now);
     }
@@ -865,6 +907,7 @@ async fn wake(state: &DaemonState, live: &Arc<Live>) {
     tokio::spawn(async move {
         run_turn(&state, &live, events, now).await;
         live.busy.store(false, Ordering::Release);
+        drain_prompts(&state, &live).await;
     });
 }
 
@@ -946,6 +989,8 @@ async fn run_turn(state: &DaemonState, live: &Arc<Live>, events: Vec<ChargeEvent
         return;
     };
     let prompt = render(&live.scope, &events);
+    live.room.publish_prompt("station", &prompt);
+    live.room.turn(true, "station");
     let (taking, live_for_turn, charge) = (state.clone(), live.clone(), live.settings());
     let previous = record.clone();
     let outcome = tokio::task::spawn_blocking(move || {
@@ -953,6 +998,7 @@ async fn run_turn(state: &DaemonState, live: &Arc<Live>, events: Vec<ChargeEvent
     })
     .await
     .unwrap_or_else(|_| turn::Outcome::refused("the turn's thread failed".to_owned()));
+    live.room.turn(false, "station");
     let kinds: Vec<&str> = events.iter().map(|event| event.kind).collect();
     let mut update = ChargeUpdate::default().woke(now, true);
     for entry in outcome.log.iter().cloned() {
@@ -1020,5 +1066,150 @@ async fn run_turn(state: &DaemonState, live: &Arc<Live>, events: Vec<ChargeEvent
             .filter_map(|event| event.control.clone())
             .collect(),
     );
+    let _ = write(state, live, update).await;
+}
+
+/// What a person typed into the charge's Run, waiting for it to be free.
+struct PersonPrompt {
+    person: String,
+    text: String,
+}
+
+/// How people attached to a charge's Run type into it and interrupt it.
+struct ChargePort {
+    state: DaemonState,
+    live: std::sync::Weak<Live>,
+    runtime: tokio::runtime::Handle,
+}
+
+impl RunPort for ChargePort {
+    fn prompt(&self, person: &str, text: &str) -> Result<(), HubError> {
+        let live = self
+            .live
+            .upgrade()
+            .filter(|live| !live.closing.load(Ordering::Acquire))
+            .ok_or(HubError::NoRun)?;
+        {
+            let mut prompts = live
+                .prompts
+                .lock()
+                .map_err(|_| HubError::Failed("the prompt queue failed".to_owned()))?;
+            let limit = self.state.station.limits().attach.waiting_prompts;
+            if !limit.allows(prompts.len() + 1) {
+                return Err(HubError::QueueFull);
+            }
+            prompts.push_back(PersonPrompt {
+                person: person.to_owned(),
+                text: text.to_owned(),
+            });
+        }
+        let state = self.state.clone();
+        drop(self.runtime.spawn(async move {
+            drain_prompts(&state, &live).await;
+        }));
+        Ok(())
+    }
+
+    fn interrupt(&self, _person: &str) -> Result<(), HubError> {
+        let live = self
+            .live
+            .upgrade()
+            .filter(|live| !live.closing.load(Ordering::Acquire))
+            .ok_or(HubError::NoRun)?;
+        // Between turns there is nothing to interrupt, and a flag set then would cut the next.
+        if live.busy.load(Ordering::Acquire) {
+            live.interrupt.store(true, Ordering::Release);
+        }
+        Ok(())
+    }
+}
+
+/// Takes the prompts people made, one turn each, while the charge is free. A turn under way
+/// takes what waits when it ends, so a prompt made during a wake runs after it and never in it.
+async fn drain_prompts(state: &DaemonState, live: &Arc<Live>) {
+    loop {
+        if live.closing.load(Ordering::Acquire) {
+            return;
+        }
+        if live
+            .busy
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return;
+        }
+        let next = live
+            .prompts
+            .lock()
+            .ok()
+            .and_then(|mut prompts| prompts.pop_front());
+        let Some(prompt) = next else {
+            live.busy.store(false, Ordering::Release);
+            // One may have been queued between the pop and the release.
+            if live.prompts.lock().is_ok_and(|prompts| prompts.is_empty()) {
+                return;
+            }
+            continue;
+        };
+        person_turn(state, live, prompt).await;
+        live.busy.store(false, Ordering::Release);
+    }
+}
+
+/// One turn of `live` with what `prompt`'s person typed, in the Run it already has. It does not
+/// count against the hour's turns: a person asked for it.
+async fn person_turn(state: &DaemonState, live: &Arc<Live>, prompt: PersonPrompt) {
+    let scope = live.scope.to_string();
+    let intake = state.intake.clone();
+    let record = tokio::task::spawn_blocking(move || intake.charge(&scope))
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .flatten();
+    let Some(record) = record else {
+        live.room
+            .publish_error("the charge's record is not readable, so its Run was not prompted");
+        return;
+    };
+    live.room.turn(true, &prompt.person);
+    let (taking, live_for_turn, charge) = (state.clone(), live.clone(), live.settings());
+    let (text, previous) = (prompt.text.clone(), record.clone());
+    let outcome = tokio::task::spawn_blocking(move || {
+        turn::take(&taking, &live_for_turn, &charge, &text, &previous)
+    })
+    .await
+    .unwrap_or_else(|_| turn::Outcome::refused("the turn's thread failed".to_owned()));
+    live.room.turn(false, &prompt.person);
+    let now = unix_now();
+    let mut update = ChargeUpdate::default();
+    for entry in outcome.log.iter().cloned() {
+        update = update.log(entry);
+    }
+    if !outcome.ran {
+        live.room.publish_error(&format!(
+            "the Run took no turn for {}: {}",
+            prompt.person, outcome.ended
+        ));
+        update = update.log(ChargeLogEntry::new(
+            "prompt",
+            format!(
+                "{} prompted it but no harness took the turn: {}",
+                prompt.person, outcome.ended
+            ),
+            now,
+        ));
+    } else {
+        update = update.log(ChargeLogEntry::new(
+            "prompt",
+            format!(
+                "{} prompted it; the turn ended {}",
+                prompt.person, outcome.ended
+            ),
+            now,
+        ));
+        if let Some((handler, run)) = outcome.run {
+            update = update.run(handler, run);
+        }
+    }
     let _ = write(state, live, update).await;
 }

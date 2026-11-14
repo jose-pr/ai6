@@ -5,6 +5,7 @@ mod agents;
 mod assessing;
 #[cfg(feature = "publisher")]
 mod assistant;
+mod attach;
 mod bona_fides;
 #[cfg(test)]
 mod cable_reach_tests;
@@ -1009,6 +1010,9 @@ where
         runs,
         cables: Arc::new(cables),
         station_id,
+        hub: Arc::new(attach::LocalHub::new(
+            config.station.limits().attach.clone(),
+        )),
         station: config.station,
         transports,
         starting: Arc::new(Mutex::new(BTreeSet::new())),
@@ -1046,6 +1050,8 @@ where
     let controls = controls::spawn(&state)?;
     #[cfg(feature = "publisher")]
     let assistant = assistant::spawn(&state)?;
+    #[cfg(feature = "publisher")]
+    attach::link::spawn(&state)?;
     #[cfg(feature = "publisher")]
     source_reads::spawn(&state)?;
     let stopping = state.stopping.clone();
@@ -1654,6 +1660,8 @@ struct DaemonState {
     usage_watch: Arc<usage_watch::UsageWatch>,
     /// The charges this Station runs.
     charges: Arc<charges::ChargeDesk>,
+    /// The people attached to this Station's live Runs.
+    hub: Arc<attach::LocalHub>,
 }
 
 impl DaemonState {
@@ -5669,14 +5677,27 @@ async fn start_mission(
             #[cfg(not(feature = "publisher"))]
             let terminal_handle =
                 TerminalBridge::agent_terminal_with_watchdog(terminal, watchdog.clone());
+            let deciding = attach::HubDecider::refusing(
+                &state.hub,
+                crate::directorates::section_00::hub::RunTarget::Mission {
+                    operation: String::new(),
+                    mission: mission_id.to_string(),
+                },
+            );
             tokio::task::spawn_blocking(move || {
                 match launch {
-                    Launch::Start(request) => {
-                        crate::station::acp::start(handler, terminal_handle, request)
-                    }
-                    Launch::Resume(request) => {
-                        crate::station::acp::resume(handler, terminal_handle, request)
-                    }
+                    Launch::Start(request) => crate::station::acp::start_deciding(
+                        handler,
+                        terminal_handle,
+                        request,
+                        Some(deciding),
+                    ),
+                    Launch::Resume(request) => crate::station::acp::resume_deciding(
+                        handler,
+                        terminal_handle,
+                        request,
+                        Some(deciding),
+                    ),
                 }
                 .map_err(|error| error.to_string())
             })
@@ -6623,10 +6644,22 @@ async fn resume_mission(
             #[cfg(not(feature = "publisher"))]
             let terminal_handle =
                 TerminalBridge::agent_terminal_with_watchdog(terminal, watchdog.clone());
+            let deciding = attach::HubDecider::refusing(
+                &state.hub,
+                crate::directorates::section_00::hub::RunTarget::Mission {
+                    operation: String::new(),
+                    mission: mission_id.to_string(),
+                },
+            );
             tokio::task::spawn_blocking(move || {
                 let expected_run_id = resume_request.run_id.clone();
-                let resumed = crate::station::acp::resume(handler, terminal_handle, resume_request)
-                    .map_err(|error| error.to_string())?;
+                let resumed = crate::station::acp::resume_deciding(
+                    handler,
+                    terminal_handle,
+                    resume_request,
+                    Some(deciding),
+                )
+                .map_err(|error| error.to_string())?;
                 let reported =
                     provider_id(resumed.session_id()).map_err(|error| error.to_string())?;
                 if another_run(reported.as_ref(), &expected_run_id) {
@@ -7195,7 +7228,9 @@ fn spawn_event_pump_with_monitor(
         operation.watchdog = monitor.clone();
     }
     let event_pumps = state.event_pumps.clone();
+    let runtime = tokio::runtime::Handle::current();
     let event_pump = tokio::task::spawn_blocking(move || {
+        let attached = attach::MissionRoom::open(&state, &mission_id, runtime);
         let mut output_revision = monitor.output_revision();
         let mut usage_tracker = UsageTracker::default();
         let mut budget_notices = BTreeSet::new();
@@ -7247,6 +7282,7 @@ fn spawn_event_pump_with_monitor(
             match result {
                 Ok((Some(event), run_id)) => {
                     monitor.record_activity();
+                    attached.room.publish_event(&event);
                     tape.record(&event);
                     if run_id.is_some() {
                         last_run.clone_from(&run_id);
@@ -9067,6 +9103,7 @@ queue = 1
             models: Default::default(),
             usage_watch: Default::default(),
             charges: Default::default(),
+            hub: Default::default(),
         };
 
         let Json(briefs) = list_intake_briefs(State(state)).await.unwrap();
@@ -9235,6 +9272,7 @@ queue = 1
             models: Default::default(),
             usage_watch: Default::default(),
             charges: Default::default(),
+            hub: Default::default(),
         };
 
         let response = send_cable(
@@ -10258,6 +10296,7 @@ queue = 1
             models: Default::default(),
             usage_watch: Default::default(),
             charges: Default::default(),
+            hub: Default::default(),
         }
     }
 
@@ -10823,6 +10862,7 @@ queue = 1
             models: Default::default(),
             usage_watch: Default::default(),
             charges: Default::default(),
+            hub: Default::default(),
         };
 
         schedule_queued_once(&state).await;
@@ -10955,6 +10995,7 @@ queue = 1
             models: Default::default(),
             usage_watch: Default::default(),
             charges: Default::default(),
+            hub: Default::default(),
         };
 
         publish_station_check_in(&state);
@@ -11181,6 +11222,7 @@ queue = 1
             models: Default::default(),
             usage_watch: Default::default(),
             charges: Default::default(),
+            hub: Default::default(),
         };
 
         publish_station_check_in(&state);
@@ -11324,6 +11366,7 @@ queue = 1
             models: Default::default(),
             usage_watch: Default::default(),
             charges: Default::default(),
+            hub: Default::default(),
         };
 
         publish_station_check_in(&state);
@@ -11383,6 +11426,7 @@ queue = 1
             models: Default::default(),
             usage_watch: Default::default(),
             charges: Default::default(),
+            hub: Default::default(),
         }
     }
 
@@ -11612,6 +11656,7 @@ theater = \"other-box\"
             models: Default::default(),
             usage_watch: Default::default(),
             charges: Default::default(),
+            hub: Default::default(),
         };
         let result = create_mission(
             State(state.clone()),
@@ -11732,6 +11777,7 @@ theater = \"other-box\"
             models: Default::default(),
             usage_watch: Default::default(),
             charges: Default::default(),
+            hub: Default::default(),
         };
         let mission_id = MissionId::try_new("mission-lifecycle").unwrap();
         let result = create_mission(
@@ -11960,6 +12006,7 @@ theater = \"other-box\"
             models: Default::default(),
             usage_watch: Default::default(),
             charges: Default::default(),
+            hub: Default::default(),
         };
         state.runs.lock().unwrap().insert(
             mission_id.to_string(),
@@ -12067,6 +12114,7 @@ theater = \"other-box\"
             models: Default::default(),
             usage_watch: Default::default(),
             charges: Default::default(),
+            hub: Default::default(),
         };
         let monitor = Watchdog::with_limits(
             std::time::Duration::from_secs(5),
@@ -12258,6 +12306,7 @@ theater = \"other-box\"
             models: Default::default(),
             usage_watch: Default::default(),
             charges: Default::default(),
+            hub: Default::default(),
         };
         state.runs.lock().unwrap().insert(
             mission_id.to_string(),
@@ -12642,6 +12691,7 @@ theater = \"other-box\"
             models: Default::default(),
             usage_watch: Default::default(),
             charges: Default::default(),
+            hub: Default::default(),
         };
         let spec = SafeHouseSpec {
             operation_id: "G".to_owned(),

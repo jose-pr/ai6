@@ -1,5 +1,5 @@
 //! The bounds and pace of Universal Exports that the `unex` record sets, one table per area:
-//! `[gateway]`, `[controls]`, `[timeline]`, `[login]` and `[text]`. Each default is the value
+//! `[gateway]`, `[controls]`, `[timeline]`, `[attach]`, `[login]` and `[text]`. Each default is the value
 //! applied when the record says nothing, and the record applies at restart.
 //!
 //! Counts and sizes are [`Limit`]s and ceilings on durations are [`TimeLimit`]s: `null` (or
@@ -24,6 +24,8 @@ pub struct UnexLimits {
     pub controls: ControlLimits,
     /// `[timeline]`: a Mission's timeline pages.
     pub timeline: UnexTimelineLimits,
+    /// `[attach]`: people attached to a Run through the gateway.
+    pub attach: UnexAttachLimits,
     /// `[login]`: how password and key tries are told apart and counted.
     pub login: LoginTable,
     /// `[text]`: the longest single request fields.
@@ -212,6 +214,51 @@ impl Default for ControlLimits {
     }
 }
 
+/// `[attach]`: people attached to a Run through the gateway.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
+pub struct UnexAttachLimits {
+    /// People attached to one Run at once.
+    #[schema(title = "People attached to a Run")]
+    #[map(default = UnexAttachLimits::default().clients)]
+    pub clients: Limit,
+    /// Requests of attached people waiting for their Station to take them, for each Station.
+    #[schema(title = "Requests waiting for a Station")]
+    #[map(default = UnexAttachLimits::default().queue)]
+    pub queue: Limit,
+    /// Frames queued for one attached person's socket, at least 1; one who falls further behind is
+    /// let go and may attach again.
+    #[schema(title = "Frames queued for one person")]
+    #[map(default = UnexAttachLimits::default().backlog)]
+    pub backlog: u64,
+    /// Bytes of one prompt.
+    #[schema(title = "Longest prompt", format = "bytes")]
+    #[map(default = UnexAttachLimits::default().prompt_bytes)]
+    pub prompt_bytes: Limit,
+    /// Seconds a socket may take to say who it is.
+    #[schema(title = "Longest wait for a hello")]
+    #[map(default = UnexAttachLimits::default().hello_timeout)]
+    pub hello_timeout: Seconds,
+    /// The longest wait a Station's poll for requests may ask for, in seconds.
+    #[schema(title = "Longest poll a Station may ask for")]
+    #[map(default = UnexAttachLimits::default().max_wait)]
+    pub max_wait: Seconds,
+}
+
+impl Default for UnexAttachLimits {
+    fn default() -> Self {
+        Self {
+            clients: Limit::at(16),
+            queue: Limit::at(256),
+            backlog: 1_024,
+            prompt_bytes: Limit::at(16 * KIB),
+            hello_timeout: Seconds::new(10),
+            max_wait: Seconds::new(25),
+        }
+    }
+}
+
 /// `[timeline]`.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
@@ -373,6 +420,9 @@ const PACE: &[&str] = &[
     "write_lease_ttl",
     "input_queue",
     "fanout",
+    "backlog",
+    "hello_timeout",
+    "max_wait",
     "socket_buffer_bytes",
     "audit_page",
     "attention_items",
@@ -449,6 +499,16 @@ impl UnexLimits {
             return Err("timeline.audit_page: at least 1".to_owned());
         }
         at_least_one("timeline", &[("max_page", self.timeline.max_page)])?;
+        at_least_one(
+            "attach",
+            &[
+                ("clients", self.attach.clients),
+                ("queue", self.attach.queue),
+            ],
+        )?;
+        if self.attach.backlog == 0 {
+            return Err("attach.backlog: at least 1".to_owned());
+        }
         if self.login.forget_every == 0 {
             return Err("login.forget_every: at least 1".to_owned());
         }
@@ -461,6 +521,7 @@ impl UnexLimits {
         let mut found = looser("unex.gateway", &self.gateway);
         found.extend(looser("unex.controls", &self.controls));
         found.extend(looser("unex.timeline", &self.timeline));
+        found.extend(looser("unex.attach", &self.attach));
         found.extend(looser("unex.login", &self.login));
         found.extend(looser("unex.text", &self.text));
         found
