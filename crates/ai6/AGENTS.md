@@ -68,7 +68,7 @@ pub const SCOPE_KINDS: [&str; 5] = ["station", "operation", "theater", "config",
 pub const ACTIONS: &[&str];   // sorted: access.manage, access.read, account.manage,
                               // agent.configure, agent.read, approval.class,
                               // approval.decide, assistant.memory.admin, audit.read,
-                              // cable.read, cable.send, compartment.cover, compartment.manage,
+                              // cable.read, cable.send, charge.converse, compartment.cover, compartment.manage,
                               // compartment.read, config.manage, config.read, mission.control, mission.create, mission.read, mission.review,
                               // mission.status, mission.verify, pool.manage, pool.read, product.read, roster.manage,
                               // roster.read, run.input, run.read,
@@ -215,6 +215,41 @@ registers no access provider of its own. The providers are the loadable librarie
 live in memory. `coqui_access_ldap` also takes `cache` (on by default). The host's own tests build the plugin libraries as dev-dependencies and load them from
 beside the test binary; after removing or renaming a plugin, clean `target/`, because the host
 loads every library it finds.
+
+## Attaching to a Run (`ai6::directorates::section_00::hub`, no feature)
+
+People attached to a charge's or a Mission's live Run (history replayed, then the live stream; typing, answering
+and interrupting; several at once; detaching leaves it running). The Station serves it; Universal Exports relays
+it (`GET /v1/user/attach`, see its header); `ai6ctl charge|mission attach` is a client.
+
+```rust
+pub enum RunTarget { Charge { scope: String }, Mission { operation: String, mission: String } }   // key() "charge:SCOPE" | "mission:ID"
+pub struct HubFrame { pub seq: u64, pub at: f64, pub kind: String, pub client: Option<String>, pub data: Value }
+                              // kinds: event (data {kind,text,tools}), prompt ({from,text}), turn ({state,by}),
+                              // permission ({request,tool,options,detail}), answered, attached, detached,
+                              // interrupted, ready ({busy,attached,last}), closed, error ({reason}); open vocabulary
+pub enum HubOp { Attach { after: Option<u64> }, Detach, Prompt { text }, Answer { request: u64, option }, Interrupt }
+pub struct HubCommand { pub target: RunTarget, pub client: String, pub person: String, pub op: HubOp }  // gateway -> Station
+pub struct HubDelivery { pub station: String, pub target: RunTarget, pub frames: Vec<HubFrame> }       // Station -> gateway
+pub enum HubError { NoRun, TooManyClients, QueueFull, NotAttached, NoRequest, NotAnOption, Failed(String) }
+pub struct Attachment { pub replay: Vec<HubFrame>, pub live: std::sync::mpsc::Receiver<HubFrame>, pub attached: BTreeMap<String, String> }
+
+pub trait RunHub: Send + Sync {   // the Station's side; a shared session hub implements it in its place
+    fn attach(&self, target: &RunTarget, client: &str, person: &str, after: Option<u64>) -> Result<Attachment, HubError>;
+    fn detach(&self, target: &RunTarget, client: &str);
+    fn prompt(&self, target: &RunTarget, client: &str, person: &str, text: &str) -> Result<(), HubError>;
+    fn answer(&self, target: &RunTarget, client: &str, person: &str, request: u64, option: &str) -> Result<(), HubError>;
+    fn interrupt(&self, target: &RunTarget, client: &str, person: &str) -> Result<(), HubError>;
+}
+```
+
+The Station's implementation (`station::server::attach::LocalHub`, in memory) holds a room per Run: a bounded
+history, the clients attached, the open permission requests (the first valid answer wins), and the Run's driver
+(a charge's turns, a Mission's event pump), which publishes what the harness does and gets prompts and interrupts
+through a port. A prompt is one turn of the Run's own provider session, queued behind a turn under way. The link
+(`attach::link`, feature `publisher`) polls `GET /v1/station/hub/next` and delivers to `POST /v1/station/hub/frames`.
+`HubDecider` offers an ACP agent's permission requests to the attached people; with nobody attached the request is
+decided as before. The action is `charge.converse` (`operation:<id>`, `station:<id>`, `config:charge`).
 
 ## Review (`ai6::directorates::m::review`)
 
@@ -425,6 +460,13 @@ impl StationLimits { pub fn validate(&self) -> Result<(), String>; }   // zero q
 tracker probe reads). `[registry.limits.runs]` also holds `amendment_bytes` (8 KiB), `deliverables` (32 per
 run), `evidence_entries` (64, the oldest go first) and `evidence_detail_chars` (300), `start_entries` (32 starts
 per run, the oldest go first) and `prompt_excerpt_chars` (200, the characters kept of a start's prompt).
+
+`AttachLimits` (`[attach]`: people attached to a live Run: `history_frames` 1000, the frames of a Run's history kept
+to replay; `clients` 16 per Run; `waiting_prompts` 32; `permission_wait` 600 s, then a request is decided as it would be
+with nobody attached; `delivery_frames` 64, `delivery_attempts` 5, `command_wait` 20 s, `retry_delay` 1 s,
+`call_margin` 30 s for the link to Universal Exports). `UnexAttachLimits` (the `unex` record's `[attach]`, at the root as
+`ai6::UnexAttachLimits`): `clients` 16 per Run, `queue` 256 requests waiting per Station, `backlog` 1024 frames per
+person, `prompt_bytes` 16 KiB, `hello_timeout` 10 s, `max_wait` 25 s.
 
 `OverlayLimits` (`[overlays]`: `manifest_bytes` 1 MiB, `manifest_depth` 64, `files` 4096,
 `bytes` 64 MiB, `file_bytes` 16 MiB, `unpinned` false, `context_bytes` 24 KiB, `fetch_timeout` 300 s,

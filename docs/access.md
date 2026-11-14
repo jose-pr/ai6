@@ -143,7 +143,7 @@ that table bound the people kept, a record and a name.
 first rule that matches decides, and no match denies. The actions Universal Exports checks
 are `access.manage`, `access.read`, `account.manage`, `agent.configure`, `agent.read`, `approval.class`, `approval.decide`,
 `assistant.memory.admin`, `audit.read`,
-`cable.read`, `cable.send`, `issue.comment`, `issue.create`, `issue.link`, `issue.update`,
+`cable.read`, `cable.send`, `charge.converse`, `issue.comment`, `issue.create`, `issue.link`, `issue.update`,
 `memory.write`, `mission.control`, `mission.create`, `mission.read`,
 `mission.control`, `mission.create`, `mission.read`, `mission.review`, `mission.verify`,
 `config.manage`, `config.read`, `plugin.manage`, `pool.manage`, `pool.read`,
@@ -162,7 +162,7 @@ a Run does not grant stopping it. `approval.decide` signs or refuses an Agent's 
 for [green ink](missions.md#green-ink) and `approval.class` manages class authorisations;
 neither comes with `mission.create` or `mission.control`. `mission.review` decides over a
 Mission's [review](review.md) panel, with a reason, and lets a brief name a review policy, which
-may weaken one. `mission.verify` gives a [verdict](missions.md#checking-an-outcome) on a Mission's
+may weaken one. `charge.converse` attaches a person to a [charge's live Run](charges.md#attaching-to-a-charges-run), at `operation:<id>`, `station:<id>` or `config:charge` (M's), to read it, type into it and answer it; it is in no seeded role. `mission.verify` gives a [verdict](missions.md#checking-an-outcome) on a Mission's
 outcome, which counts on its Agent's scorecard and settles a held Mission; it does not come with
 `mission.control`. `cable.send` and `cable.read` on
 `operation:<id>` are what [Moneypenny](assistant.md#cables) may do with Cables there for

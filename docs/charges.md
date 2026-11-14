@@ -121,6 +121,64 @@ One turn is given at most `max_events_per_turn` events; the rest wait for the ne
 how many. A turn that runs past `turn_timeout` is interrupted. None of these has a floor: `none`
 lifts each bound.
 
+## Attaching to a charge's Run
+
+A person can attach to a charge's Run, as with a harness running in tmux that someone connects a
+terminal to. Attaching is to the charge's own live Run, not a copy and not a queued question: they
+are given the Run's history, then what it shows from then on (its messages, tool calls, plans and
+permission requests), and may type into it as its user, answer what it asks and interrupt it. Several
+people may be attached at once, each prompt is stamped with who sent it, and detaching leaves the Run
+running. It works for every handler, a JSON one such as `claude` as much as an `acp` agent, because the
+Station already drives each Run over ACP; a `pty` Run's terminal view stays the
+[terminal attach](terminals.md) it has always had.
+
+What each needs, on the charge's scope:
+
+| To | Action | On |
+| --- | --- | --- |
+| attach, type, answer | `charge.converse` | `operation:<codename>`, `station:<id>`, or `config:charge` for M's charge |
+| interrupt the turn under way | `mission.control` on an Operation's charge; `station.configure` on a Station's or M's | the same scope |
+
+`charge.converse` is in no seeded role: the chief holds it, and a role grants it on purpose. It is
+checked again for every prompt, answer and interrupt, so a role withdrawn after attaching applies at
+once. Attaching, detaching, every prompt, answer and interrupt are audited before they are passed on
+(`charge.attach`, `charge.detach`, `charge.prompt`, `charge.answer`, `charge.interrupt`, naming the
+person, never the text of a prompt).
+
+A prompt is one turn of the Run's own provider session: no new Run starts and no Mission is made, and
+the Station's logbook names who prompted it. If a wake's turn is running, the prompt waits behind it
+and runs when it ends, never inside it; a prompt does not use up the hour's `max_turns_per_hour`. A
+request for leave that an ACP agent makes reaches the attached people, and the first answer to it
+decides; with nobody attached, it is decided as it would have been (a restricted Run refuses). What the
+Run shows is kept per Run, in the Station's memory, up to the `[attach]` `history_frames` setting; a
+Station that restarts has its Runs' history begin again.
+
+### The socket
+
+`GET /v1/user/attach` on Universal Exports is a WebSocket of text frames. The first, within
+`[attach] hello_timeout`, is `{"type":"hello","token":ACCESS_TOKEN,"charge":"operation:G"}` (add
+`"after":SEQ` to be replayed only what follows a frame you already have). Then `{"type":"prompt",
+"text"}`, `{"type":"answer","request":N,"option":"allow"|"refuse"}`, `{"type":"interrupt"}` and
+`{"type":"detach"}`. Back come `{"type":"attached"}`, a `{"type":"frame","frame":{seq,at,kind,data}}`
+for each thing the Run shows (`event`, `prompt`, `turn`, `permission`, `answered`, `attached`,
+`detached`, `interrupted`, `ready` when the replay is over, `closed`, `error`) and
+`{"type":"error","code","message"}` for what was refused. `ai6ctl charge attach SCOPE` is a line-based
+client of it, and Outer Office and other apps can be others.
+
+The Station serves its Runs through the `RunHub` trait
+(`ai6::directorates::section_00::hub`); an implementation that keeps the Run and its clients
+elsewhere can replace the Station's without the gateway or its clients changing. Universal Exports
+queues what people ask for each Station, which takes it with its next poll
+(`GET /v1/station/hub/next`) and delivers what the Run shows to
+`POST /v1/station/hub/frames`.
+
+| Setting | Where | Default |
+| --- | --- | --- |
+| `history_frames`, `clients`, `waiting_prompts`, `permission_wait`, `delivery_frames`, `delivery_attempts`, `command_wait`, `retry_delay`, `call_margin` | the `station` record's `[attach]` | see [Configuration](configuration.md) |
+| `clients`, `queue`, `backlog`, `prompt_bytes`, `hello_timeout`, `max_wait` | the `unex` record's `[attach]` | see [Configuration](configuration.md) |
+
+None has a floor; `none` lifts each bound that is a count or a time limit.
+
 ## Tools
 
 A charge's tools are its scope's, and their rules are Station code:

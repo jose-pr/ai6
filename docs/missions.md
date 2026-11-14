@@ -610,6 +610,20 @@ Run of another Operation, or with no context, answers `404`. Outer Office shows 
 Context tab of a Run's page: the turns, each tool call and its result folded, and
 **Download** for the file as kept.
 
+## Attaching to a Mission's Run
+
+A person with `mission.control` on a Mission's Operation can attach to its live Run the way they can
+to a [charge's](charges.md#attaching-to-a-charges-run): history, then the live stream, typing into the
+Run as its user, answering what it asks and interrupting it, with others attached at once. The hello
+frame of `GET /v1/user/attach` names the Mission, `{"type":"hello","token":ACCESS_TOKEN,"mission":
+{"operation":"G","mission":"mission-007"}}`, and the gateway sends the request to the Station holding
+the Mission's newest open Run. Attaching, detaching, each prompt, answer and interrupt are audited
+(`mission.attach`, `mission.detach`, `mission.prompt`, `mission.answer`, `mission.interrupt`). A typed
+line takes the path a message to the Run takes elsewhere, and an interrupt is the Mission's interrupt
+above (it waits, `blocked` with reason `interrupted`, until resumed). A Mission whose Run has ended has
+nothing to attach to. `ai6ctl mission attach` is the line-based client; a `pty` Run's terminal view is
+the [Run view](terminals.md) as before.
+
 ## File-backed intake
 
 The Registry defaults to `registry` in the Station's state directory and can be named

@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A person can attach to a charge's live Run, or a Mission's, as to a harness in tmux: with `charge.converse`
+  on the charge's scope (`operation:<codename>`, `station:<id>`, or `config:charge` for M's), or
+  `mission.control` on the Mission's Operation, `GET /v1/user/attach` replays the Run's history and then
+  streams what it shows (messages, tool calls, plans, permission requests). They type into it as its
+  user (a prompt is one turn of the Run's own provider session, queued behind a wake, stamped with who
+  sent it, and never a Mission), answer what it asks (several people may be attached and the first
+  answer decides), and interrupt it (`mission.control`, or `station.configure` for a Station's or M's
+  charge); detaching leaves the Run running. Every attach, detach, prompt, answer and interrupt is
+  audited. The Station serves it through the `RunHub` trait. `ai6ctl charge attach SCOPE` and `ai6ctl
+  mission attach ID` are line-based clients. Settings: `[attach]` in the `station` and `unex` records.
 - The Station's charge is the Chief of Station: one standing Run per Station (`station:<id>`) that keeps
   the Station fit and provides what the Operations ask of it, replacing the Head of Station rounds that an
   `each_station` Sleeper queued as Missions. Its tools are `station_report` (now with each Run's quiet
