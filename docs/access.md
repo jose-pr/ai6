@@ -330,9 +330,13 @@ so the page authenticator or an app's [hand-off](assistant.md#pages-she-publishe
 viewers. A front door's access log sees a hand-off's token in the query: it works once, for
 seconds, and is spent by the time the log is read.
 
-Two paths under `/v1/` are WebSockets, so the proxy must pass the upgrade: `/v1/socket/{run_id}`
-(a Run's terminal, subprotocol `ai6.guatiao`) and `/v1/user/moneypenny` (her chat). Neither
-sends a ping, so the proxy's idle timeout closes a quiet one; give those two a long one. For
+### Behind a reverse proxy
+
+Three paths under `/v1/` are WebSockets, so the proxy must pass the upgrade: `/v1/socket/{run_id}`
+(a Run's terminal, subprotocol `ai6.guatiao`), `/v1/socket/attach` (a person attached to a charge's
+or a Mission's Run) and `/v1/user/moneypenny` (her chat). None sends a ping, so the proxy's idle
+timeout closes a quiet one; give them a long one, as one location for `/v1/socket/` and one for
+`/v1/user/moneypenny`. For
 every request under `/v1/` the proxy must:
 
 - set `X-Forwarded-Proto: https`, replacing what the client sent, and pass `Origin` unchanged:
@@ -351,6 +355,125 @@ connect-src 'self'; frame-ancestors 'none'; base-uri 'self'`. The engine compile
 sets inline styles, and a public `ai6.cfg`'s `[oo.assets] cdn` other than `none` needs those hosts added. Run
 `dart run tool/build_guatiao_wasm.dart` before the build, or Run terminals say the protocol
 could not be initialized. Serve `.wasm` as `application/wasm`.
+
+#### nginx
+
+One `server` for the app's origin, with the gateway on `127.0.0.1:7082` and the build in
+`/opt/ai6/web`. The gateway's `client_address_header` is `X-Forwarded-For` here, which the proxy
+replaces rather than appends to, so a client cannot choose its own login count.
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name ai6.example.org;
+    ssl_certificate     /etc/ssl/ai6.example.org.crt;
+    ssl_certificate_key /etc/ssl/ai6.example.org.key;
+
+    root /opt/ai6/web;
+    index index.html;
+    client_max_body_size 256k;           # the unex record's frame_bytes
+    types { application/wasm wasm; }
+
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'" always;
+
+    # The WebSockets: a Run's terminal, attaching to a Run, and Moneypenny's chat.
+    location ~ ^/v1/(socket/|user/moneypenny$) {
+        proxy_pass http://127.0.0.1:7082;
+        proxy_http_version 1.1;
+        proxy_buffering off;
+        proxy_read_timeout 1d;
+        proxy_send_timeout 1d;
+        proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $remote_addr;
+    }
+
+    # Everything else of the API; /v1/moneypenny/mcp streams and a Station's job poll is held open.
+    location /v1/ {
+        proxy_pass http://127.0.0.1:7082;
+        proxy_http_version 1.1;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 1h;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "";
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $remote_addr;
+    }
+
+    # Its own add_header keeps the server's policy off pages, which carry their own.
+    location /pages/ {
+        proxy_pass http://127.0.0.1:7082;
+        proxy_http_version 1.1;
+        proxy_buffering off;
+        proxy_read_timeout 5m;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "";
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        add_header X-Robots-Tag noindex always;
+    }
+
+    location = /health {
+        proxy_pass http://127.0.0.1:7082;
+    }
+
+    location / {
+        expires -1;
+        try_files $uri $uri/ =404;
+    }
+}
+```
+
+A WebSocket path left to the plain `/v1/` location loses its `Upgrade` header there, and the
+gateway answers the handshake `400`; the app shows the connection as lost.
+
+#### Caddy
+
+Caddy passes WebSocket upgrades and streams without being told, and sets `X-Forwarded-Proto` and
+`X-Forwarded-For` itself; `client_address_header` is `X-Forwarded-For`.
+
+```caddyfile
+ai6.example.org {
+    request_body {
+        max_size 256KB
+    }
+    @api path /v1/* /health
+    handle @api {
+        reverse_proxy 127.0.0.1:7082 {
+            flush_interval -1
+            stream_timeout 24h
+        }
+    }
+    handle /pages/* {
+        reverse_proxy 127.0.0.1:7082 {
+            flush_interval -1
+        }
+        header X-Robots-Tag noindex
+    }
+    handle {
+        root * /opt/ai6/web
+        header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'"
+        file_server
+    }
+}
+```
+
+#### Checking it
+
+A WebSocket handshake through the proxy answers `101 Switching Protocols`; `400` means the
+upgrade was dropped on the way:
+
+```sh
+curl -s -o /dev/null -w '%{http_code}\n' --max-time 5 \
+  -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' \
+  -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' https://ai6.example.org/v1/socket/attach
+```
+
+curl then waits on the open socket until `--max-time`; the code it prints is the answer.
+
 ## Roles, the chief and who may change them
 
 The policy has four built-in role names and two places to write more.
