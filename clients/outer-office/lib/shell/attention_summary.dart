@@ -80,7 +80,7 @@ class AttentionEntry {
   final String id;
 
   /// `blocked_run`, `green_ink`, `held_brief`, `mission_proposal`, `station_dark`,
-  /// `config_refused`, `report`, `charge_failed` or `charge_lapsed`.
+  /// `config_refused`, `report`, `charge_failed`, `charge_lapsed` or `login_needs_person`.
   final String kind;
   final AttentionCondition condition;
   final String title;

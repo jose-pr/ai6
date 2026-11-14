@@ -2139,6 +2139,63 @@ class MissionBoard extends ChangeNotifier
   /// Operations whose account pools this account may read (`pool.read`).
   List<String> get poolOperations => _operationsWith('pool.read');
 
+  /// Operations whose pool accounts' logins this account may change (`pool.manage`).
+  List<String> get poolManageOperations => _operationsWith('pool.manage');
+
+  /// Asks the gateway to change an account's login in [operationId]; returns what to tell the
+  /// person. Only the status of a refusal is reported, never a body.
+  Future<String> changePoolLogin(
+    String operationId,
+    String pool,
+    String account,
+    PoolLoginChange change,
+  ) async {
+    if (demo) return 'Preview: no login was changed.';
+    final token = accessToken;
+    if (token == null) throw StateError('Sign in before changing a login.');
+    final login =
+        '/v1/user/operations/${Uri.encodeComponent(operationId)}/pools/'
+        '${Uri.encodeComponent(pool)}/${Uri.encodeComponent(account)}/login';
+    final headers = {'authorization': 'Bearer $token'};
+    final http.Response response;
+    final String done;
+    switch (change) {
+      case PoolLoginAddStation(:final station):
+        response = await _client.post(
+          apiOrigin.resolve('$login/stations'),
+          headers: {...headers, 'content-type': 'application/json'},
+          body: jsonEncode({'station': station}),
+        );
+        done =
+            'Asked a Station holding the login to seal it to $station at its next check-in.';
+      case PoolLoginRemoveStation(:final station):
+        response = await _client.delete(
+          apiOrigin.resolve('$login/stations/${Uri.encodeComponent(station)}'),
+          headers: headers,
+        );
+        done =
+            'Asked a Station holding the login to stop sealing it to $station.';
+      case PoolLoginForget(:final signOut):
+        response = await _client.delete(
+          apiOrigin
+              .resolve(login)
+              .replace(
+                queryParameters: signOut ? const {'sign_out': 'true'} : null,
+              ),
+          headers: headers,
+        );
+        done = signOut
+            ? 'Asked a Station holding the login to sign it out at the provider and forget it.'
+            : 'The login was forgotten.';
+    }
+    return switch (response.statusCode) {
+      200 || 202 || 204 => done,
+      403 => 'This account may not change that login (HTTP 403).',
+      404 => 'No such account or login (HTTP 404).',
+      final status => 'The gateway refused the change (HTTP $status).',
+    };
+  }
+
   /// Whether the person may see any charge: M's (`config.read` on charges), an Operation's
   /// (`mission.read`) or a Station's (`station.read`), or may converse with one.
   bool get canOpenCharges =>
@@ -2617,6 +2674,13 @@ class MissionBoard extends ChangeNotifier
             QuotaWindowSummary(name: 'seven_day', usedPermille: 210),
           ],
           tokensToday: 182_400,
+          login: PoolLogin(
+            stations: ['station-a', 'station-b'],
+            expiresAt: 1_798_172_800,
+            renewedAt: 1_797_990_000,
+            lastResult: 'renewed',
+            lastAttemptAt: 1_797_990_000,
+          ),
         ),
         PoolAccountSummary(
           pool: 'claude-team',
@@ -2633,6 +2697,12 @@ class MissionBoard extends ChangeNotifier
           ],
           limitedUntil: 1_798_003_600,
           tokensToday: 951_020,
+          login: PoolLogin(
+            needsPerson: 'the login was refused as expired',
+            needsPersonCommand: 'ai6 pools add-login claude-team beta --handler claude --replace',
+            lastResult: 'failed: refused as expired',
+            failures: 3,
+          ),
         ),
       ];
     }

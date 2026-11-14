@@ -90,6 +90,7 @@ OoIconName _iconOf(String kind) => switch (kind) {
   'green_ink' => OoIconName.greenInk,
   'held_brief' || 'mission_proposal' => OoIconName.briefings,
   'blocked_run' => OoIconName.interrupt,
+  'login_needs_person' => OoIconName.pools,
   'report' => OoIconName.reports,
   'charge_failed' || 'charge_lapsed' => OoIconName.timeline,
   _ => OoIconName.stations,

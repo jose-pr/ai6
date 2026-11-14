@@ -9,6 +9,7 @@ import '../routes/oo_route.dart';
 import '../routes/oo_scope.dart';
 import '../settings/oo_config.dart';
 import '../theme/oo_icon.dart';
+import '../theme/oo_tokens.dart';
 import 'models_section.dart';
 import '../shell/oo_empty.dart';
 import '../shell/oo_freshness.dart';
@@ -63,6 +64,167 @@ class QuotaWindowSummary {
   }
 }
 
+/// A request waiting for a Station that holds a login to act on it.
+@immutable
+class PoolLoginRequest {
+  const PoolLoginRequest({
+    required this.action,
+    this.station,
+    this.by = '',
+    this.at,
+  });
+
+  /// `add_station`, `remove_station` or `sign_out_and_forget`.
+  final String action;
+  final String? station;
+  final String by;
+
+  /// Unix seconds.
+  final double? at;
+
+  factory PoolLoginRequest.fromJson(Map<String, dynamic> json) =>
+      PoolLoginRequest(
+        action: json['action'] as String,
+        station: json['station'] as String?,
+        by: json['by'] as String? ?? '',
+        at: (json['at'] as num?)?.toDouble(),
+      );
+
+  /// What it asks, as `adding Station x`.
+  String get label => switch (action) {
+    'add_station' => 'adding Station ${station ?? ''}'.trim(),
+    'remove_station' => 'removing Station ${station ?? ''}'.trim(),
+    'sign_out_and_forget' => 'signing out and forgetting the login',
+    _ => action.replaceAll('_', ' '),
+  };
+}
+
+/// The state of a pool account's sealed login: never its contents.
+@immutable
+class PoolLogin {
+  const PoolLogin({
+    this.stations = const [],
+    this.expiresAt,
+    this.renewedAt,
+    this.renewalHeldBy,
+    this.renewalHeldUntil,
+    this.lastResult,
+    this.lastAttemptAt,
+    this.failures = 0,
+    this.needsPerson,
+    this.needsPersonCommand,
+    this.requests = const [],
+  });
+
+  /// The Stations the login is sealed to.
+  final List<String> stations;
+
+  /// Unix seconds, when its files say.
+  final double? expiresAt;
+  final double? renewedAt;
+  final String? renewalHeldBy;
+  final double? renewalHeldUntil;
+
+  /// `renewed`, `unchanged`, `added` or `failed: <why>`.
+  final String? lastResult;
+  final double? lastAttemptAt;
+  final int failures;
+
+  /// Why a person is needed, when one is.
+  final String? needsPerson;
+  final String? needsPersonCommand;
+  final List<PoolLoginRequest> requests;
+
+  factory PoolLogin.fromJson(Map<String, dynamic> json) => PoolLogin(
+    stations: [...?(json['stations'] as List<dynamic>?)?.cast<String>()],
+    expiresAt: (json['expires_at'] as num?)?.toDouble(),
+    renewedAt: (json['renewed_at'] as num?)?.toDouble(),
+    renewalHeldBy: json['renewal_held_by'] as String?,
+    renewalHeldUntil: (json['renewal_held_until'] as num?)?.toDouble(),
+    lastResult: json['last_result'] as String?,
+    lastAttemptAt: (json['last_attempt_at'] as num?)?.toDouble(),
+    failures: json['failures'] as int? ?? 0,
+    needsPerson: json['needs_person'] as String?,
+    needsPersonCommand: json['needs_person_command'] as String?,
+    requests: [
+      for (final request in (json['requests'] as List<dynamic>?) ?? const [])
+        PoolLoginRequest.fromJson(request as Map<String, dynamic>),
+    ],
+  );
+
+  /// `Renewal held by station-a until in 4 min`, while a Station holds the renewal.
+  String? get holderLabel => switch (renewalHeldBy) {
+    final holder? =>
+      'Renewal held by $holder'
+          '${renewalHeldUntil == null ? '' : ' until ${ooRelativeTime(renewalHeldUntil!)}'}',
+    null => null,
+  };
+
+  /// `Renewed 3 h ago`, or `Renewal failed: why` when the last attempt failed.
+  String? get renewalLabel {
+    final result = lastResult;
+    if (result != null && result.startsWith('failed')) {
+      final why = result.substring(6).replaceFirst(RegExp(r'^:\s*'), '');
+      return 'Renewal failed${why.isEmpty ? '' : ': $why'}'
+          '${lastAttemptAt == null ? '' : ' (${ooRelativeTime(lastAttemptAt!)})'}';
+    }
+    if (renewedAt == null) return null;
+    final verb = result == 'added' ? 'Added' : 'Renewed';
+    return '$verb ${ooRelativeTime(renewedAt!)}';
+  }
+
+  /// `Ends in 2 d`, or `Ended 1 h ago`.
+  String? get expiryLabel => switch (expiresAt) {
+    final at? =>
+      at > ooClock().millisecondsSinceEpoch / 1000
+          ? 'Ends ${ooRelativeTime(at)}'
+          : 'Ended ${ooRelativeTime(at)}',
+    null => null,
+  };
+
+  /// `May be held by station-a, station-b`, or that no Station may.
+  String get stationsLabel => stations.isEmpty
+      ? 'No Station may hold it'
+      : 'May be held by ${stations.join(', ')}';
+
+  /// One line per request still waiting.
+  List<String> get requestLabels => [
+    for (final request in requests)
+      'Waiting for a Station holding the login: ${request.label}',
+  ];
+
+  /// What a person is to run, when one is needed.
+  String? get needsPersonLabel => switch (needsPerson) {
+    final why? =>
+      'Needs a person: $why.'
+          '${needsPersonCommand == null ? '' : ' Run `$needsPersonCommand` on a host where you are signed in.'}',
+    null => null,
+  };
+}
+
+/// A change to an account's login a person asks for.
+sealed class PoolLoginChange {
+  const PoolLoginChange();
+}
+
+/// Seal the login to one more Station.
+class PoolLoginAddStation extends PoolLoginChange {
+  const PoolLoginAddStation(this.station);
+  final String station;
+}
+
+/// Stop sealing the login to a Station.
+class PoolLoginRemoveStation extends PoolLoginChange {
+  const PoolLoginRemoveStation(this.station);
+  final String station;
+}
+
+/// Forget the login, first signing it out at the provider when [signOut].
+class PoolLoginForget extends PoolLoginChange {
+  const PoolLoginForget({this.signOut = false});
+  final bool signOut;
+}
+
 /// One pool account as the board shows it: never a credential.
 @immutable
 class PoolAccountSummary {
@@ -77,6 +239,7 @@ class PoolAccountSummary {
     this.windows = const [],
     this.limitedUntil,
     this.tokensToday = 0,
+    this.login,
   });
 
   final String pool;
@@ -96,6 +259,9 @@ class PoolAccountSummary {
   final double? limitedUntil;
   final int tokensToday;
 
+  /// The sealed login it keeps, or null for an account that keeps none.
+  final PoolLogin? login;
+
   factory PoolAccountSummary.fromJson(Map<String, dynamic> json) =>
       PoolAccountSummary(
         pool: json['pool'] as String,
@@ -114,6 +280,10 @@ class PoolAccountSummary {
         ],
         limitedUntil: (json['limited_until'] as num?)?.toDouble(),
         tokensToday: json['tokens_today'] as int,
+        login: switch (json['login']) {
+          final Map<String, dynamic> login => PoolLogin.fromJson(login),
+          _ => null,
+        },
       );
 
   /// `1/2 Runs`, or `1 Run` without a limit.
@@ -359,6 +529,165 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
     );
   }
 
+  /// The Operation in which the person may change [row]'s login, when there is one.
+  String? _manageIn(OoGrouped<PoolAccountSummary> row) {
+    final may = widget.board.poolManageOperations;
+    for (final operation in row.operations) {
+      if (may.contains(operation)) return operation;
+    }
+    return null;
+  }
+
+  Future<void> _change(
+    String operation,
+    PoolAccountSummary account,
+    PoolLoginChange change,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    String outcome;
+    try {
+      outcome = await widget.board.changePoolLogin(
+        operation,
+        account.pool,
+        account.account,
+        change,
+      );
+    } on Object catch (error) {
+      outcome = error is StateError
+          ? error.message
+          : 'The change could not be sent.';
+    }
+    messenger.showSnackBar(SnackBar(content: Text(outcome)));
+    if (mounted) unawaited(_load());
+  }
+
+  Future<void> _addStation(String operation, PoolAccountSummary account) async {
+    final station = await showDialog<String>(
+      context: context,
+      builder: (context) => const _StationNameDialog(),
+    );
+    if (station == null || station.isEmpty || !mounted) return;
+    await _change(operation, account, PoolLoginAddStation(station));
+  }
+
+  Future<void> _removeLogin(
+    String operation,
+    PoolAccountSummary account,
+  ) async {
+    var signOut = false;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text('Remove login'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'The login kept for ${account.pool}/${account.account} is '
+                'forgotten: no Station keeps it afterwards.',
+              ),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                value: signOut,
+                onChanged: (value) => setState(() => signOut = value ?? false),
+                title: const Text('Also sign out at the provider'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Remove login'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await _change(operation, account, PoolLoginForget(signOut: signOut));
+  }
+
+  /// The sealed login's state, and what a person may do to it.
+  Widget _loginBlock(
+    BuildContext context,
+    OoGrouped<PoolAccountSummary> row,
+    PoolLogin login,
+  ) {
+    final tokens = OoTokens.of(context);
+    final account = row.row;
+    final operation = _manageIn(row);
+    final needs = login.needsPersonLabel;
+    final lines = [
+      ?login.holderLabel,
+      ?login.renewalLabel,
+      ?login.expiryLabel,
+      login.stationsLabel,
+      ...login.requestLabels,
+    ];
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (needs != null)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.warning_amber, size: 18, color: tokens.warning),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    needs,
+                    style: TextStyle(
+                      color: tokens.warning,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          Text('Login', style: Theme.of(context).textTheme.labelMedium),
+          for (final line in lines) Text(line),
+          if (operation != null)
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                for (final station in login.stations)
+                  InputChip(
+                    label: Text(station),
+                    deleteButtonTooltipMessage: 'Remove Station $station',
+                    onDeleted: () => unawaited(
+                      _change(
+                        operation,
+                        account,
+                        PoolLoginRemoveStation(station),
+                      ),
+                    ),
+                  ),
+                TextButton(
+                  onPressed: () => unawaited(_addStation(operation, account)),
+                  child: const Text('Add Station'),
+                ),
+                TextButton(
+                  onPressed: () => unawaited(_removeLogin(operation, account)),
+                  child: const Text('Remove login'),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
   List<OoColumn<OoGrouped<PoolAccountSummary>>> _columns() => [
     OoColumn(
       id: 'pool',
@@ -368,7 +697,9 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
       cell: (context, row) => Row(
         children: [
           Icon(
-            row.row.limitedLabel == null
+            row.row.login?.needsPerson != null
+                ? Icons.warning_amber
+                : row.row.limitedLabel == null
                 ? Icons.vpn_key_outlined
                 : Icons.hourglass_bottom,
             size: 18,
@@ -425,6 +756,8 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
               ].join(' · '),
             ),
             if (account.readLabel case final read?) Text(read),
+            if (account.login case final login?)
+              _loginBlock(context, row, login),
             for (final (operation, read) in row.reads)
               if (read.active.isNotEmpty)
                 OoLinkLine([
@@ -437,4 +770,43 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
       },
     ),
   ];
+}
+
+/// Asks for the name of the Station to add; pops the trimmed name.
+class _StationNameDialog extends StatefulWidget {
+  const _StationNameDialog();
+
+  @override
+  State<_StationNameDialog> createState() => _StationNameDialogState();
+}
+
+class _StationNameDialogState extends State<_StationNameDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Add Station'),
+    content: TextField(
+      controller: _controller,
+      autofocus: true,
+      decoration: const InputDecoration(labelText: 'Station name'),
+      onSubmitted: (value) => Navigator.of(context).pop(value.trim()),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: () => Navigator.of(context).pop(_controller.text.trim()),
+        child: const Text('Add'),
+      ),
+    ],
+  );
 }
