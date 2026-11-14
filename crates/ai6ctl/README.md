@@ -72,8 +72,8 @@ ai6ctl held-briefs release source_jira--OPS-12 --operation G
 | `runs [--operation <ID>] [--mission <ID>] [--state <STATE>]` | Authorized Runs, filtered |
 | `run <RUN_ID>` | One Run |
 | `mission cancel <MISSION_ID>` | Stops the live Run, if any, and abandons the Mission |
-| `charge attach <SCOPE> [--after <SEQ>]` | Attaches to a charge's live Run (`charge.converse`): its history and what it shows, a line each; typed lines prompt it, `/answer`, `/allow`, `/refuse`, `/interrupt` and `/detach` act on it |
-| `mission attach <MISSION_ID> [--operation <ID>] [--after <SEQ>]` | The same for a Mission's live Run (`mission.control`) |
+| `charge attach <SCOPE> [--after <SEQ>] [--connect-timeout <SECONDS>] [--hello-timeout <SECONDS>] [--leave-wait <SECONDS>]` | Attaches to a charge's live Run (`charge.converse`): its history and what it shows, a line each; typed lines prompt it, `/answer`, `/allow`, `/refuse`, `/interrupt` and `/detach` act on it |
+| `mission attach <MISSION_ID> [--operation <ID>] [--after <SEQ>] [--connect-timeout <SECONDS>] [--hello-timeout <SECONDS>] [--leave-wait <SECONDS>]` | The same for a Mission's live Run (`mission.control`) |
 | `mission retry <MISSION_ID> [--agent <CODENAME>]` | Queues a stalled or finished Mission again as a new run |
 | `mission resume <MISSION_ID> [--message <TEXT>]` | Resumes a parked, blocked or stalled Mission now |
 | `exec <MISSION_ID\|RUN_ID> [--agent <CODENAME>] [--message <TEXT>]` | Executes a Mission or a Run: a Mission starts its next run (`mission retry`); a Run that ran is resumed with its Mission (`mission resume`) |

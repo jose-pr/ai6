@@ -15,12 +15,27 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{WebSocketStream, client_async};
 
-/// The time to connect and complete the WebSocket handshake.
-const CONNECT: Duration = Duration::from_secs(10);
-/// The time the gateway has to answer the hello; it holds its own deadline for receiving one.
-const HELLO_REPLY: Duration = Duration::from_secs(15);
-/// The time a closing handshake may take once the person has left.
-const LEAVE: Duration = Duration::from_secs(2);
+/// How long each step of attaching may take.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Waits {
+    /// Connecting, TLS and the WebSocket handshake, each; `None` for no limit.
+    pub(crate) connect: Option<Duration>,
+    /// The gateway's answer to the hello; `None` for no limit.
+    pub(crate) hello: Option<Duration>,
+    /// The closing handshake once the person has left; zero does not wait for it.
+    pub(crate) leave: Duration,
+}
+
+/// Runs `future` for at most `limit`; `Err` when it ran out.
+async fn within<F: std::future::Future>(
+    limit: Option<Duration>,
+    future: F,
+) -> Result<F::Output, ()> {
+    match limit {
+        Some(limit) => tokio::time::timeout(limit, future).await.map_err(|_| ()),
+        None => Ok(future.await),
+    }
+}
 
 const USAGE: &str = "type text to prompt the Run; //text prompts with a leading slash; /answer N OPTION, \
 /allow N, /refuse N, /interrupt, /detach (or end of input) to leave";
@@ -62,6 +77,7 @@ pub(crate) async fn attach<I, O, E>(
     server: &Url,
     authorities: &[Vec<u8>],
     hello: Value,
+    waits: Waits,
     input: I,
     out: &mut O,
     err: &mut E,
@@ -86,7 +102,7 @@ where
     );
     let unreachable = || "could not contact Universal Exports".to_owned();
 
-    let tcp = tokio::time::timeout(CONNECT, TcpStream::connect((host.as_str(), port)))
+    let tcp = within(waits.connect, TcpStream::connect((host.as_str(), port)))
         .await
         .map_err(|_| unreachable())?
         .map_err(|_| unreachable())?;
@@ -94,21 +110,21 @@ where
         let name = tokio_rustls::rustls::pki_types::ServerName::try_from(host)
             .map_err(|_| "Universal Exports URL has an invalid host name".to_owned())?;
         let connector = tokio_rustls::TlsConnector::from(tls_config(authorities)?);
-        let stream = tokio::time::timeout(CONNECT, connector.connect(name, tcp))
+        let stream = within(waits.connect, connector.connect(name, tcp))
             .await
             .map_err(|_| unreachable())?
             .map_err(|_| "could not establish a TLS connection to Universal Exports".to_owned())?;
-        let (socket, _) = tokio::time::timeout(CONNECT, client_async(address.as_str(), stream))
+        let (socket, _) = within(waits.connect, client_async(address.as_str(), stream))
             .await
             .map_err(|_| unreachable())?
             .map_err(|_| unreachable())?;
-        session(socket, hello, input, out, err).await
+        attachment(socket, hello, waits, input, out, err).await
     } else {
-        let (socket, _) = tokio::time::timeout(CONNECT, client_async(address.as_str(), tcp))
+        let (socket, _) = within(waits.connect, client_async(address.as_str(), tcp))
             .await
             .map_err(|_| unreachable())?
             .map_err(|_| unreachable())?;
-        session(socket, hello, input, out, err).await
+        attachment(socket, hello, waits, input, out, err).await
     }
 }
 
@@ -136,9 +152,10 @@ fn tls_config(authorities: &[Vec<u8>]) -> Result<Arc<tokio_rustls::rustls::Clien
 }
 
 /// The conversation over an open WebSocket: the hello, then frames out and lines in.
-pub(crate) async fn session<S, I, O, E>(
+pub(crate) async fn attachment<S, I, O, E>(
     mut socket: WebSocketStream<S>,
     hello: Value,
+    waits: Waits,
     input: I,
     out: &mut O,
     err: &mut E,
@@ -150,7 +167,7 @@ where
     E: Write,
 {
     send(&mut socket, &hello).await?;
-    let first = tokio::time::timeout(HELLO_REPLY, next(&mut socket))
+    let first = within(waits.hello, next(&mut socket))
         .await
         .map_err(|_| "the gateway did not answer".to_owned())??;
     match first {
@@ -176,7 +193,7 @@ where
                     Some("frame") => {
                         emit(out, &frame_line(&message["frame"]))?;
                         if message["frame"]["kind"] == "closed" {
-                            leave(&mut socket, false).await;
+                            leave(&mut socket, false, waits.leave).await;
                             return Ok(());
                         }
                     }
@@ -191,14 +208,14 @@ where
             line = lines.next_line() => {
                 let line = line.map_err(|_| "could not read input".to_owned())?;
                 let Some(line) = line else {
-                    leave(&mut socket, true).await;
+                    leave(&mut socket, true, waits.leave).await;
                     return Ok(());
                 };
                 match parse_line(&line) {
                     Input::Blank => {}
                     Input::Send(request) => send(&mut socket, &request).await?,
                     Input::Detach => {
-                        leave(&mut socket, true).await;
+                        leave(&mut socket, true, waits.leave).await;
                         return Ok(());
                     }
                     Input::Bad(why) => {
@@ -213,14 +230,14 @@ where
 }
 
 /// Leaves the Run, which goes on; `say` tells the gateway first.
-async fn leave<S>(socket: &mut WebSocketStream<S>, say: bool)
+async fn leave<S>(socket: &mut WebSocketStream<S>, say: bool, wait: Duration)
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     if say {
         let _ = send(socket, &json!({"type": "detach"})).await;
     }
-    let _ = tokio::time::timeout(LEAVE, socket.close(None)).await;
+    let _ = tokio::time::timeout(wait, socket.close(None)).await;
 }
 
 async fn send<S>(socket: &mut WebSocketStream<S>, value: &Value) -> Result<(), String>
@@ -475,6 +492,18 @@ mod tests {
             "[-] ready: busy false, attached 2, last 9"
         );
         assert_eq!(line("future", json!({"a": 1})), r#"[4] future: {"a":1}"#);
+    }
+
+    #[test]
+    fn an_error_code_is_shown_as_the_gateway_sent_it() {
+        assert_eq!(
+            problem(&json!({"type": "error", "code": "gone", "message": "dropped"})),
+            "gone: dropped"
+        );
+        assert_eq!(
+            problem(&json!({"code": "some_future_code", "message": "x"})),
+            "some_future_code: x"
+        );
     }
 
     #[test]

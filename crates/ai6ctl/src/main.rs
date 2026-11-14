@@ -854,6 +854,38 @@ fn create_body(
     Ok(body)
 }
 
+/// What `attach` takes beside what to attach to.
+#[derive(Debug, Args)]
+struct AttachOptions {
+    /// Replay only what the Run showed after this frame number (the `[N]` of a line).
+    #[arg(long, value_name = "SEQ")]
+    after: Option<u64>,
+    /// Seconds to connect to the gateway, and again to finish TLS and the WebSocket handshake;
+    /// 0 for no limit.
+    #[arg(long, value_name = "SECONDS", default_value_t = 10.0, value_parser = seconds)]
+    connect_timeout: f64,
+    /// Seconds the gateway has to answer once attaching; 0 for no limit.
+    #[arg(long, value_name = "SECONDS", default_value_t = 15.0, value_parser = seconds)]
+    hello_timeout: f64,
+    /// Seconds to wait for the gateway to complete the closing handshake after you leave; 0
+    /// does not wait. The Run keeps running either way.
+    #[arg(long, value_name = "SECONDS", default_value_t = 2.0, value_parser = seconds)]
+    leave_wait: f64,
+}
+
+impl AttachOptions {
+    fn waits(&self) -> attach::Waits {
+        let limit = |secs: f64| {
+            (secs > 0.0).then(|| Duration::try_from_secs_f64(secs).unwrap_or(Duration::MAX))
+        };
+        attach::Waits {
+            connect: limit(self.connect_timeout),
+            hello: limit(self.hello_timeout),
+            leave: Duration::try_from_secs_f64(self.leave_wait).unwrap_or(Duration::MAX),
+        }
+    }
+}
+
 #[derive(Debug, Subcommand)]
 enum ChargeCommand {
     /// Attach to a charge's live Run (needs charge.converse on its scope): its history is
@@ -863,9 +895,8 @@ enum ChargeCommand {
     Attach {
         /// The charge's scope: `m`, `operation:CODENAME` or `station:ID`.
         scope: String,
-        /// Replay only what the Run showed after this frame number (the `[N]` of a line).
-        #[arg(long)]
-        after: Option<u64>,
+        #[command(flatten)]
+        options: AttachOptions,
     },
 }
 
@@ -879,9 +910,8 @@ enum MissionCommand {
         /// The Mission's Operation; found from the visible board when omitted.
         #[arg(long)]
         operation: Option<String>,
-        /// Replay only what the Run showed after this frame number (the `[N]` of a line).
-        #[arg(long)]
-        after: Option<u64>,
+        #[command(flatten)]
+        options: AttachOptions,
     },
     /// The issues a Mission is linked to and what it posted.
     Issues {
@@ -1344,10 +1374,27 @@ struct AgentRole {
     operation_override: bool,
 }
 
-#[tokio::main]
-async fn main() -> ExitCode {
-    // Boxed: in a debug build the command future outgrows the main thread's stack on Windows.
-    match Box::pin(run()).await {
+/// The stack of the thread that runs the command: the command future and clap's parser are large
+/// in a debug build and overflow the 1 MiB main thread of Windows.
+const STACK_BYTES: usize = 16 * 1024 * 1024;
+
+fn main() -> ExitCode {
+    let run = std::thread::Builder::new()
+        .stack_size(STACK_BYTES)
+        .spawn(|| {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .map_err(|_| "could not start the runtime".to_owned())?;
+            runtime.block_on(Box::pin(run()))
+        })
+        .map_err(|_| "could not start the command".to_owned())
+        .and_then(|thread| {
+            thread
+                .join()
+                .unwrap_or_else(|_| Err("the command failed".to_owned()))
+        });
+    match run {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("ai6ctl: {error}");
@@ -1414,14 +1461,15 @@ async fn attach_and_exit(
     token: &str,
     (ca_file, config): (Option<&std::path::Path>, Option<&std::path::Path>),
     target: &attach::Target,
-    after: Option<u64>,
+    options: &AttachOptions,
 ) -> ! {
     let result = match ca_authorities(ca_file, config) {
         Ok(authorities) => {
             attach::attach(
                 server,
                 &authorities,
-                target.hello(token, after),
+                target.hello(token, options.after),
+                options.waits(),
                 tokio::io::BufReader::new(tokio::io::stdin()),
                 &mut std::io::stdout(),
                 &mut std::io::stderr(),
@@ -2121,7 +2169,7 @@ async fn run() -> Result<(), String> {
                 Some(MissionCommand::Attach {
                     mission_id,
                     operation,
-                    after,
+                    options,
                 }),
             ..
         } => {
@@ -2139,12 +2187,12 @@ async fn run() -> Result<(), String> {
                 &token,
                 (cli.ca_file.as_deref(), cli.config.as_deref()),
                 &target,
-                after,
+                &options,
             ))
             .await;
         }
         Command::Charge {
-            command: ChargeCommand::Attach { scope, after },
+            command: ChargeCommand::Attach { scope, options },
         } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             let target = attach::Target::Charge(scope);
@@ -2153,7 +2201,7 @@ async fn run() -> Result<(), String> {
                 &token,
                 (cli.ca_file.as_deref(), cli.config.as_deref()),
                 &target,
-                after,
+                &options,
             ))
             .await;
         }

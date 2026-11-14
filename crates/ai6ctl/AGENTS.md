@@ -261,8 +261,8 @@ control's status route every `--poll-interval` (0.5 s) until the Station reports
   prints `SLEEPER STATE`. Needs `mission.control`.
 - `ai6ctl mission resume <MISSION_ID> [--message <TEXT>]` resumes a parked, blocked or
   stalled Mission now, sending `--message` to the Agent.
-- `ai6ctl charge attach <SCOPE> [--after <SEQ>]` and `ai6ctl mission attach <MISSION_ID> [--operation <ID>]
-  [--after <SEQ>]` attach to a live Run through the gateway's `GET /v1/user/attach` WebSocket: a charge's
+- `ai6ctl charge attach <SCOPE> [OPTIONS]` and `ai6ctl mission attach <MISSION_ID> [--operation <ID>] [OPTIONS]`
+  (`OPTIONS`: `--after <SEQ>`, `--connect-timeout <SECONDS>`, `--hello-timeout <SECONDS>`, `--leave-wait <SECONDS>`) attach to a live Run through the gateway's `GET /v1/user/attach` WebSocket: a charge's
   standing Run (`SCOPE` is `m`, `operation:CODENAME` or `station:ID`; needs `charge.converse` on it) or a
   Mission's live Run (needs `mission.control` on its Operation; the Operation is looked up when not
   given, as for `mission cancel`). The Run's history is replayed, then what it shows follows, one
@@ -273,7 +273,11 @@ control's status route every `--poll-interval` (0.5 s) until the Station reports
   `interrupted by WHO`, `ready: busy B, attached N, last SEQ` (the replay is over), `closed: REASON`
   and `error: REASON`; a kind not known prints as `KIND: DATA`. Newlines in text show as `
 `. `--after SEQ`
-  replays only frames after that number. Lines read from standard input: text is a prompt to the
+  replays only frames after that number. `--connect-timeout` (default 10; 0 for no limit) bounds the TCP
+  connection, TLS and the WebSocket handshake each, `--hello-timeout` (default 15; 0 for no limit) the gateway's answer
+  once attaching, and `--leave-wait` (default 2; 0 does not wait) the closing handshake after you leave; the
+  global `--timeout` does not apply to an attachment, which lasts as long as you stay. An error code the printer
+  does not know is shown as the gateway sent it. Lines read from standard input: text is a prompt to the
   Run (`//text` sends `/text`); `/answer N OPTION`, `/allow N`, `/refuse N` (options `allow`, `refuse`) answer
   permission request `N` (the first answer decides); `/interrupt` stops the turn under way (needs
   `mission.control`, or `station.configure` for a Station's charge, beyond attaching);
