@@ -161,7 +161,7 @@ const ROLES: &str = r#"
     [role.operator]
     actions = [
         "mission.read", "mission.control", "mission.create", "audit.read", "cable.send", "cable.read",
-        "issue.link", "issue.comment", "issue.update", "issue.create", "run.context",
+        "pool.read", "issue.link", "issue.comment", "issue.update", "issue.create", "run.context",
     ]
 
     [role.roster-reader]
@@ -1034,6 +1034,18 @@ async fn her_attention_tool_gives_the_answer_the_overview_page_reads() {
             ]),
         )
         .unwrap();
+    // A harness login with none added, which needs a person.
+    let pool = ai6::AccountPool::new("free", "acp").account(
+        ai6::Account::new("shared", ai6::AccountKind::HarnessLogin).files([".fake/auth.json"]),
+    );
+    served
+        .registry
+        .declare_account(
+            &ai6::AccountRef::new("free", "shared"),
+            "worker",
+            &ai6::AccountProfile::of(&pool, "shared", vec!["G".to_owned()]).unwrap(),
+        )
+        .unwrap();
     let (mut app, _) = open(&served, &served.operator).await;
     say(&mut app, "What needs my attention?", None).await;
     let job = take(&served, "hq").await;
@@ -1083,6 +1095,19 @@ async fn her_attention_tool_gives_the_answer_the_overview_page_reads() {
     assert_eq!(from_page["clear"], false);
     assert_eq!(from_page["items"][0]["kind"], "config_refused");
     assert_eq!(from_page["items"][0]["condition"], "current");
+    // Her answer carries the login that needs a person, with what to run.
+    let login = from_tool["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["kind"] == "login_needs_person")
+        .unwrap_or_else(|| panic!("no login item: {from_tool}"));
+    assert!(
+        login["detail"]
+            .as_str()
+            .unwrap()
+            .contains("ai6 pools add-login free shared --handler acp --replace")
+    );
 
     // One Operation, as an input: a bad identifier never reaches the route.
     let narrowed = call_tool(

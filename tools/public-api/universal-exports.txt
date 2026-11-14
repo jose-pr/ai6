@@ -148,7 +148,7 @@ pub universal_exports::BoardAccount::kind: alloc::string::String
 pub universal_exports::BoardAccount::labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
 pub universal_exports::BoardAccount::last_used: core::option::Option<f64>
 pub universal_exports::BoardAccount::limited_until: core::option::Option<f64>
-pub universal_exports::BoardAccount::login: core::option::Option<universal_exports::pools::BoardLogin>
+pub universal_exports::BoardAccount::login: core::option::Option<universal_exports::BoardLogin>
 pub universal_exports::BoardAccount::max_concurrent: core::option::Option<usize>
 pub universal_exports::BoardAccount::other_runs: usize
 pub universal_exports::BoardAccount::pool: alloc::string::String
@@ -159,6 +159,23 @@ pub universal_exports::BoardAccount::windows: alloc::vec::Vec<universal_exports:
 pub universal_exports::BoardClaim::mission_id: alloc::string::String
 pub universal_exports::BoardClaim::since: f64
 pub universal_exports::BoardClaim::station_id: alloc::string::String
+#[non_exhaustive] pub struct universal_exports::BoardLogin
+pub universal_exports::BoardLogin::expires_at: core::option::Option<f64>
+pub universal_exports::BoardLogin::failures: u32
+pub universal_exports::BoardLogin::last_attempt_at: core::option::Option<f64>
+pub universal_exports::BoardLogin::last_result: core::option::Option<alloc::string::String>
+pub universal_exports::BoardLogin::needs_person: core::option::Option<alloc::string::String>
+pub universal_exports::BoardLogin::needs_person_command: core::option::Option<alloc::string::String>
+pub universal_exports::BoardLogin::renewal_held_by: core::option::Option<alloc::string::String>
+pub universal_exports::BoardLogin::renewal_held_until: core::option::Option<f64>
+pub universal_exports::BoardLogin::renewed_at: core::option::Option<f64>
+pub universal_exports::BoardLogin::requests: alloc::vec::Vec<universal_exports::BoardLoginRequest>
+pub universal_exports::BoardLogin::stations: alloc::vec::Vec<alloc::string::String>
+#[non_exhaustive] pub struct universal_exports::BoardLoginRequest
+pub universal_exports::BoardLoginRequest::action: alloc::string::String
+pub universal_exports::BoardLoginRequest::at: f64
+pub universal_exports::BoardLoginRequest::by: alloc::string::String
+pub universal_exports::BoardLoginRequest::station: core::option::Option<alloc::string::String>
 #[non_exhaustive] pub struct universal_exports::BoardMission
 pub universal_exports::BoardMission::brief: core::option::Option<universal_exports::LaunchManifest>
 pub universal_exports::BoardMission::handle: alloc::string::String

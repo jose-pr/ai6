@@ -107,7 +107,7 @@ pub use keys::KeyProvider;
 use login_limit::LoginGuard;
 pub use login_limit::LoginLimits;
 pub use moneypenny::{AssistantConfig, PagesConfig, ViewLimits};
-pub use pools::{BoardAccount, BoardClaim, BoardWindow, PoolBoard};
+pub use pools::{BoardAccount, BoardClaim, BoardLogin, BoardLoginRequest, BoardWindow, PoolBoard};
 pub use roster::{EffectiveOperation, RosterChange, RosterRecord, RosterRecords};
 pub use timeline::{TimelineItem, TimelinePage};
 pub use tls::tls_server_config;
@@ -1886,6 +1886,18 @@ impl Gateway {
             .route(
                 "/v1/user/operations/{operation_id}/pools/{pool}/{account}/clear-limit",
                 post(pools::clear_limit),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/pools/{pool}/{account}/login",
+                axum::routing::delete(pools::forget_login),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/pools/{pool}/{account}/login/stations",
+                post(pools::add_login_station),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/pools/{pool}/{account}/login/stations/{station}",
+                axum::routing::delete(pools::remove_login_station),
             )
             .route("/v1/user/access", get(access_admin::read_global_policy))
             .route(

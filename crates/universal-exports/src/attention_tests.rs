@@ -21,7 +21,7 @@ use crate::controls::tests::{STATION_TOKEN, Served, served_with_roster};
 /// `viewer-007` only reads G.
 const ROLES: &str = r#"
     [role.watcher]
-    actions = ["mission.read", "mission.create", "approval.decide", "audit.read", "station.read"]
+    actions = ["mission.read", "mission.create", "approval.decide", "audit.read", "station.read", "pool.read"]
 
     [role.viewer]
     actions = ["mission.read"]
@@ -697,4 +697,90 @@ async fn titles_name_an_operation_by_its_name_and_by_its_id_when_it_has_none() {
         .await;
     assert_eq!(narrowed["scope"]["label"], "Operation Guatiao");
     assert_eq!(narrowed["scope"]["operation_id"], "G");
+}
+
+#[tokio::test]
+async fn a_harness_login_that_needs_a_person_is_one_item_saying_what_to_run() {
+    use ai6::{Account, AccountKind, AccountPool, AccountProfile, AccountRef};
+
+    let fixture = fixture().await;
+    fixture.report(json!({"revision": "79"}));
+    let pool = AccountPool::new("free", "acp")
+        .account(Account::new("shared", AccountKind::HarnessLogin).files([".fake/auth.json"]))
+        .account(Account::new("steady", AccountKind::HarnessLogin).files([".fake/auth.json"]));
+    for name in ["shared", "steady"] {
+        fixture
+            .served
+            .registry
+            .declare_account(
+                &AccountRef::new("free", name),
+                "worker",
+                &AccountProfile::of(&pool, name, vec!["G".to_owned()]).unwrap(),
+            )
+            .unwrap();
+    }
+    let at = now() - 60.0;
+    let standing = |needs: Option<&str>| {
+        let needs = needs.map(str::to_owned);
+        move |state: &mut Option<ai6::LoginState>| {
+            let mut login = ai6::LoginState::default();
+            login.stations = vec!["worker".to_owned()];
+            login.last_attempt_at = Some(at);
+            login.needs_person = needs.clone();
+            *state = Some(login);
+        }
+    };
+    // `shared` has none yet; `steady` is healthy.
+    fixture
+        .served
+        .registry
+        .change_login(&AccountRef::new("free", "steady"), &mut standing(None))
+        .unwrap();
+    let summary = fixture.summary(&fixture.served.operator).await;
+    let needing = items(&summary, "login_needs_person");
+    assert_eq!(needing.len(), 1, "{summary}");
+    assert_eq!(needing[0]["id"], "login_needs_person:free/shared");
+    assert_eq!(needing[0]["condition"], "current");
+    assert_eq!(needing[0]["entity"]["kind"], "account");
+    assert_eq!(needing[0]["entity"]["operation_id"], "G");
+    assert_eq!(needing[0]["link"], "app:/pools?operation_id=G&pool=free");
+    assert!(
+        needing[0]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("ai6 pools add-login free shared --handler acp --replace"),
+        "{summary}"
+    );
+    assert_eq!(coverage(&summary, "pools")["status"], "checked");
+    assert!(!summary["clear"].as_bool().unwrap());
+
+    // A renewal that was refused marks the other one as well, and says why.
+    fixture
+        .served
+        .registry
+        .change_login(
+            &AccountRef::new("free", "steady"),
+            &mut standing(Some("3 renewals failed in a row")),
+        )
+        .unwrap();
+    let summary = fixture.summary(&fixture.served.operator).await;
+    let needing = items(&summary, "login_needs_person");
+    assert_eq!(needing.len(), 2, "{summary}");
+    let steady = needing
+        .iter()
+        .find(|item| item["id"] == "login_needs_person:free/steady")
+        .unwrap();
+    assert_eq!(steady["since"], at);
+    assert!(
+        steady["detail"]
+            .as_str()
+            .unwrap()
+            .contains("3 renewals failed in a row")
+    );
+    assert!(!summary.to_string().contains("auth.json"), "{summary}");
+
+    // Reading logins is `pool.read`, which the viewer lacks: named, not a gap.
+    let summary = fixture.summary(&fixture.served.viewer).await;
+    assert_eq!(coverage(&summary, "pools")["status"], "not_permitted");
+    assert!(items(&summary, "login_needs_person").is_empty());
 }

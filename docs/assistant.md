@@ -1172,8 +1172,10 @@ be read or are not the person's to see. She never says everything is clear while
 condition is listed.
 
 The summary also lists the Reports still waiting for an assessment, a charge whose last turn ended
-failed and a charge whose lease lapsed (`charge_failed`, `charge_lapsed`: no Station holds it). Each
-opens its page: Reports on that Report, Charges on that charge. A refusal item names its revision and
+failed and a charge whose lease lapsed (`charge_failed`, `charge_lapsed`: no Station holds it), and a
+harness login that needs a person (`login_needs_person`: its renewals failed, or none was added; the
+item says what to run). Each opens its page: Reports on that Report, Charges on that charge, Account
+Pools on that pool. A refusal item names its revision and
 offers the record editor on that Station's records (the Roster page's `station_id`), where a change is
 reviewed and saved; "Why did this Station refuse its configuration?" is answered from her
 `config_refusals` tool with the refusal, its revision and the Station, and she offers that editor and

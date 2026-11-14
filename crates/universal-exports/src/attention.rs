@@ -23,7 +23,7 @@ use crate::{
     ApiError, BoardMission, BoardStation, Gateway, MissionsQuery, StationBoard, UserAuditQuery,
     bearer, green_ink, held, resolve_user, unix_timestamp,
 };
-use crate::{charges, reports};
+use crate::{charges, pools, reports};
 
 /// The audit action of a Station refusing a configuration.
 const REFUSED_ACTION: &str = "config.refused";
@@ -51,7 +51,8 @@ enum Condition {
 /// The thing an item is about, with the route that opens it.
 #[derive(Debug, Clone, Serialize)]
 struct Entity {
-    /// `run`, `mission`, `station`, `approval`, `brief`, `proposal`, `report` or `charge`.
+    /// `run`, `mission`, `station`, `approval`, `brief`, `proposal`, `report`, `charge` or
+    /// `account`.
     kind: &'static str,
     id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -66,7 +67,7 @@ struct Item {
     /// Stable for the same condition, so a page can keep its place.
     id: String,
     /// `blocked_run`, `green_ink`, `held_brief`, `mission_proposal`, `station_dark`,
-    /// `config_refused`, `report`, `charge_failed` or `charge_lapsed`.
+    /// `config_refused`, `report`, `charge_failed`, `charge_lapsed` or `login_needs_person`.
     kind: &'static str,
     condition: Condition,
     /// One line, with identifiers; untrusted text in it is stripped of control characters.
@@ -307,10 +308,12 @@ pub(crate) async fn read(
     let mut green_read = Coverage::new("green_ink", "Green ink requests", now);
     let mut held_read = Coverage::new("held_briefs", "Held briefs", now);
     let mut proposals_read = Coverage::new("mission_proposals", "Mission proposals", now);
+    let mut pools_read = Coverage::new("pools", "Harness logins", now);
+    let mut told_of: BTreeSet<String> = BTreeSet::new();
     let mut asked: BTreeSet<(String, String)> = BTreeSet::new();
     for operation in &operations {
         let scope = format!("operation:{operation}");
-        let (requests, briefs, proposals) = tokio::join!(
+        let (requests, briefs, proposals, pools) = tokio::join!(
             green_ink::pending(
                 State(gateway.clone()),
                 headers.clone(),
@@ -326,7 +329,69 @@ pub(crate) async fn read(
                 headers.clone(),
                 Path(operation.clone())
             ),
+            async {
+                // A gateway that keeps no Registry holds no logins to ask after.
+                gateway.registry.as_ref()?;
+                Some(
+                    pools::operation_pools(
+                        State(gateway.clone()),
+                        headers.clone(),
+                        Path(operation.clone()),
+                    )
+                    .await,
+                )
+            },
         );
+        match pools.map(Read::of) {
+            None => {}
+            Some(Read::Done(Json(board))) => {
+                pools_read.checked.push(scope.clone());
+                for account in board.accounts {
+                    let Some(login) = account.login else {
+                        continue;
+                    };
+                    let Some(why) = login.needs_person else {
+                        continue;
+                    };
+                    let name = format!("{}/{}", account.pool, account.account);
+                    // One account may serve several Operations: it is one item.
+                    if !told_of.insert(name.clone()) {
+                        continue;
+                    }
+                    found.push(item(
+                        format!("login_needs_person:{name}"),
+                        "login_needs_person",
+                        Condition::Current,
+                        format!(
+                            "Account {} needs a person to sign it in again",
+                            plain(&name)
+                        ),
+                        Some(format!(
+                            "{} On a host where its CLI is signed in, run: {}",
+                            plain(&why),
+                            login
+                                .needs_person_command
+                                .as_deref()
+                                .map(plain)
+                                .unwrap_or_default()
+                        )),
+                        Entity {
+                            kind: "account",
+                            id: name,
+                            operation_id: Some(operation.clone()),
+                            station_id: None,
+                        },
+                        json!({"page": "pools", "operation_id": operation, "pool": account.pool}),
+                        &scope,
+                        now,
+                        None,
+                        login.last_attempt_at,
+                    ));
+                }
+            }
+            Some(Read::NotPermitted) => pools_read.not_permitted.push(scope.clone()),
+            Some(Read::Unavailable) => pools_read.unavailable.push(scope.clone()),
+        }
         match Read::of(requests) {
             Read::Done(Json(requests)) => {
                 green_read.checked.push(scope.clone());
@@ -757,6 +822,7 @@ pub(crate) async fn read(
         audit_read,
         reports_read,
         charges_read,
+        pools_read,
     ] {
         coverage.push(read.settle());
     }

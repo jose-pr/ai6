@@ -61,10 +61,95 @@ pub struct BoardLogin {
     pub renewed_at: Option<f64>,
     /// The Station holding its renewal lease now.
     pub renewal_held_by: Option<String>,
+    /// When that lease lapses unless it is renewed, as Unix seconds.
+    pub renewal_held_until: Option<f64>,
+    /// How the last renewal ended: `renewed`, `unchanged`, `failed: <why>` or `added`.
+    pub last_result: Option<String>,
+    /// When it ended, as Unix seconds.
+    pub last_attempt_at: Option<f64>,
     /// Renewals that failed since the last that did not.
     pub failures: u32,
     /// Why a person is needed, when one is.
     pub needs_person: Option<String>,
+    /// What to run on a host where the CLI is signed in, when a person is needed.
+    pub needs_person_command: Option<String>,
+    /// Changes a person asked for that wait for a Station holding the login.
+    pub requests: Vec<BoardLoginRequest>,
+}
+
+/// A change to a login waiting for a Station that holds it.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct BoardLoginRequest {
+    /// `add_station`, `remove_station` or `sign_out_and_forget`.
+    pub action: String,
+    /// The Station it is about, for the first two.
+    pub station: Option<String>,
+    /// Who asked.
+    pub by: String,
+    /// When, as Unix seconds.
+    pub at: f64,
+}
+
+/// The login as the board shows it: what is kept, or that an account declared to keep one has none.
+fn board_login(
+    login: Option<&ai6::LoginState>,
+    sealed: bool,
+    account: &AccountRef,
+    handler: &str,
+    now: f64,
+) -> Option<BoardLogin> {
+    let fix = || ai6::directorates::q::login_standing::add_login_command(account, handler);
+    let Some(login) = login else {
+        return sealed.then(|| BoardLogin {
+            stations: Vec::new(),
+            expires_at: None,
+            renewed_at: None,
+            renewal_held_by: None,
+            renewal_held_until: None,
+            last_result: None,
+            last_attempt_at: None,
+            failures: 0,
+            needs_person: Some("no login is kept for this account".to_owned()),
+            needs_person_command: Some(fix()),
+            requests: Vec::new(),
+        });
+    };
+    let lease = login.leased_at(now);
+    Some(BoardLogin {
+        stations: login.stations.clone(),
+        expires_at: login.expires_at,
+        renewed_at: login.renewed_at,
+        renewal_held_by: lease.map(|lease| lease.station.clone()),
+        renewal_held_until: lease.map(|lease| lease.until),
+        last_result: login.last_result.clone(),
+        last_attempt_at: login.last_attempt_at,
+        failures: login.failures,
+        needs_person: login.needs_person.clone(),
+        needs_person_command: login.needs_person.is_some().then(fix),
+        requests: login
+            .requests
+            .iter()
+            .map(|asked| {
+                let (action, station) = match &asked.action {
+                    ai6::LoginRequestAction::AddStation { station } => {
+                        ("add_station", Some(station.clone()))
+                    }
+                    ai6::LoginRequestAction::RemoveStation { station } => {
+                        ("remove_station", Some(station.clone()))
+                    }
+                    ai6::LoginRequestAction::SignOutAndForget => ("sign_out_and_forget", None),
+                    _ => ("change", None),
+                };
+                BoardLoginRequest {
+                    action: action.to_owned(),
+                    station,
+                    by: asked.by.clone(),
+                    at: asked.at,
+                }
+            })
+            .collect(),
+    })
 }
 
 /// One pool account on the board.
@@ -120,14 +205,13 @@ fn board_account(state: AccountState, operation: &str, now: f64) -> Option<Board
     let (own, others): (Vec<_>, Vec<_>) = state
         .live_claims(now)
         .partition(|claim| claim.operation.as_deref() == Some(operation));
-    let login = state.login.as_ref().map(|login| BoardLogin {
-        stations: login.stations.clone(),
-        expires_at: login.expires_at,
-        renewed_at: login.renewed_at,
-        renewal_held_by: login.leased_at(now).map(|lease| lease.station.clone()),
-        failures: login.failures,
-        needs_person: login.needs_person.clone(),
-    });
+    let login = board_login(
+        state.login.as_ref(),
+        profile.sealed_login,
+        &state.account,
+        &profile.handler,
+        now,
+    );
     Some(BoardAccount {
         login,
         tokens_today: state.tokens_on_day(now as i64),
@@ -237,6 +321,231 @@ pub(crate) async fn clear_limit(
         .map_err(|_| ApiError::internal())?
         .map_err(|_| ApiError::internal())?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// The account of `{pool}/{account}` declared for the Operation, for a person who may manage it.
+async fn manageable(
+    gateway: &Gateway,
+    headers: &HeaderMap,
+    operation_id: String,
+    pool: String,
+    account: String,
+) -> Result<(ai6::Person, OperationId, AccountRef), ApiError> {
+    let person = resolve_user(gateway, bearer(headers)?).await?;
+    let operation = OperationId::new(operation_id).map_err(|_| ApiError::bad_request())?;
+    let account = AccountRef::new(pool, account);
+    authorize_operation_action(gateway, person.clone(), &operation, "pool.manage").await?;
+    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+    let (name, target) = (operation.to_string(), account.clone());
+    let declared = tokio::task::spawn_blocking(move || {
+        registry.accounts().map(|states| {
+            states
+                .into_iter()
+                .find(|state| state.account == target)
+                .and_then(|state| state.profile())
+                .is_some_and(|profile| profile.operations.contains(&name))
+        })
+    })
+    .await
+    .map_err(|_| ApiError::internal())?
+    .map_err(|_| ApiError::internal())?;
+    if !declared {
+        return Err(ApiError::from(GatewayError::NotFound));
+    }
+    Ok((person, operation, account))
+}
+
+/// Refuses with 404 when `account` holds no login, before anything is audited or queued.
+async fn require_login(gateway: &Gateway, account: &AccountRef) -> Result<(), ApiError> {
+    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+    let target = account.clone();
+    let held = tokio::task::spawn_blocking(move || {
+        ai6::directorates::q::login_standing::holds_login(registry.as_ref(), &target)
+    })
+    .await
+    .map_err(|_| ApiError::internal())?
+    .map_err(|_| ApiError::internal())?;
+    if held {
+        Ok(())
+    } else {
+        Err(ApiError::from(GatewayError::NotFound))
+    }
+}
+
+/// Writes the audit record of a change to a login; the change waits for it.
+async fn audit_login_change(
+    gateway: &Gateway,
+    person: &ai6::Person,
+    operation: &OperationId,
+    action: &str,
+    target: String,
+) -> Result<(), ApiError> {
+    let audit = AuditRecord {
+        id: Uuid::new_v4().to_string(),
+        actor: crate::actor_of(person),
+        action: action.to_owned(),
+        operation: operation.to_string(),
+        resource: None,
+        target,
+        at: unix_timestamp()?,
+    };
+    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+    tokio::task::spawn_blocking(move || registry.record_audit(&audit))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(|_| ApiError::internal())
+}
+
+/// Queues a change a Station holding the login makes: sealing needs its key.
+async fn queue_login_change(
+    gateway: &Gateway,
+    person: &ai6::Person,
+    account: AccountRef,
+    action: ai6::LoginRequestAction,
+) -> Result<StatusCode, ApiError> {
+    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+    let (by, now) = (crate::actor_of(person), unix_timestamp()?);
+    tokio::task::spawn_blocking(move || {
+        ai6::directorates::q::login_standing::request(registry.as_ref(), &account, action, &by, now)
+    })
+    .await
+    .map_err(|_| ApiError::internal())?
+    .map_err(|_| ApiError::internal())?
+    .then_some(StatusCode::ACCEPTED)
+    .ok_or_else(|| ApiError::from(GatewayError::NotFound))
+}
+
+/// A Station ID as a path or body carries it: not empty, and nothing a log line could be split by.
+fn station_name(station: String) -> Result<String, ApiError> {
+    if station.is_empty() || station.contains(char::is_control) {
+        return Err(ApiError::bad_request());
+    }
+    Ok(station)
+}
+
+/// The body of an add-Station request.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AddStation {
+    station: String,
+}
+
+/// `POST /v1/user/operations/{operation_id}/pools/{pool}/{account}/login/stations`: lets one more
+/// Station hold the account's login. A Station that holds it seals it to the new one at its next
+/// check-in, so the answer is 202. Needs `pool.manage`; audited (`pool.login.station.add`) before
+/// it is queued.
+pub(crate) async fn add_login_station(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path((operation_id, pool, account)): Path<(String, String, String)>,
+    Json(body): Json<AddStation>,
+) -> Result<StatusCode, ApiError> {
+    let station = station_name(body.station)?;
+    let (person, operation, account) =
+        manageable(&gateway, &headers, operation_id, pool, account).await?;
+    require_login(&gateway, &account).await?;
+    audit_login_change(
+        &gateway,
+        &person,
+        &operation,
+        "pool.login.station.add",
+        format!("{account} {station}"),
+    )
+    .await?;
+    queue_login_change(
+        &gateway,
+        &person,
+        account,
+        ai6::LoginRequestAction::AddStation { station },
+    )
+    .await
+}
+
+/// `DELETE /v1/user/operations/{operation_id}/pools/{pool}/{account}/login/stations/{station}`:
+/// stops sealing the login to a Station, which drops its copy at the next check-in of a Station
+/// that holds it (202). Needs `pool.manage`; audited (`pool.login.station.remove`) first.
+pub(crate) async fn remove_login_station(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path((operation_id, pool, account, station)): Path<(String, String, String, String)>,
+) -> Result<StatusCode, ApiError> {
+    let station = station_name(station)?;
+    let (person, operation, account) =
+        manageable(&gateway, &headers, operation_id, pool, account).await?;
+    require_login(&gateway, &account).await?;
+    audit_login_change(
+        &gateway,
+        &person,
+        &operation,
+        "pool.login.station.remove",
+        format!("{account} {station}"),
+    )
+    .await?;
+    queue_login_change(
+        &gateway,
+        &person,
+        account,
+        ai6::LoginRequestAction::RemoveStation { station },
+    )
+    .await
+}
+
+/// `?sign_out=` of a login removal.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ForgetLogin {
+    #[serde(default)]
+    sign_out: bool,
+}
+
+/// `DELETE /v1/user/operations/{operation_id}/pools/{pool}/{account}/login`: forgets the account's
+/// login (204). With `sign_out=true` a Station holding it first signs it out at the provider with
+/// the account's `logout_command`, so it is queued (202) and kept if that fails. Needs
+/// `pool.manage`; audited (`pool.login.forget` or `pool.login.sign_out`) before it is made or
+/// queued.
+pub(crate) async fn forget_login(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path((operation_id, pool, account)): Path<(String, String, String)>,
+    axum::extract::Query(query): axum::extract::Query<ForgetLogin>,
+) -> Result<StatusCode, ApiError> {
+    let (person, operation, account) =
+        manageable(&gateway, &headers, operation_id, pool, account).await?;
+    require_login(&gateway, &account).await?;
+    if query.sign_out {
+        audit_login_change(
+            &gateway,
+            &person,
+            &operation,
+            "pool.login.sign_out",
+            account.to_string(),
+        )
+        .await?;
+        return queue_login_change(
+            &gateway,
+            &person,
+            account,
+            ai6::LoginRequestAction::SignOutAndForget,
+        )
+        .await;
+    }
+    audit_login_change(
+        &gateway,
+        &person,
+        &operation,
+        "pool.login.forget",
+        account.to_string(),
+    )
+    .await?;
+    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+    tokio::task::spawn_blocking(move || {
+        ai6::directorates::q::login_standing::forget(registry.as_ref(), &account)
+    })
+    .await
+    .map_err(|_| ApiError::internal())?
+    .map_err(|_| ApiError::internal())?
+    .then_some(StatusCode::NO_CONTENT)
+    .ok_or_else(|| ApiError::from(GatewayError::NotFound))
 }
 
 #[cfg(test)]
@@ -521,6 +830,336 @@ mod tests {
                     && record.actor == "operator-007"
                     && record.operation == "G")
         );
+    }
+
+    /// `free/shared`, a login account declared for G, and `free/other`, declared for L only.
+    fn declare_login(served: &Served) -> AccountRef {
+        let pool = AccountPool::new("free", "acp")
+            .account(Account::new("shared", AccountKind::HarnessLogin).files([".fake/auth.json"]))
+            .account(Account::new("other", AccountKind::HarnessLogin).files([".fake/auth.json"]));
+        for (name, operation) in [("shared", "G"), ("other", "L")] {
+            served
+                .registry
+                .declare_account(
+                    &AccountRef::new("free", name),
+                    "worker",
+                    &AccountProfile::of(&pool, name, vec![operation.to_owned()]).unwrap(),
+                )
+                .unwrap();
+        }
+        AccountRef::new("free", "shared")
+    }
+
+    fn login_state(served: &Served, account: &AccountRef) -> Option<ai6::LoginState> {
+        served
+            .registry
+            .accounts()
+            .unwrap()
+            .into_iter()
+            .find(|state| state.account == *account)
+            .and_then(|state| state.login)
+    }
+
+    /// Gives `account` a login standing, with no sealed value: the gateway holds no key.
+    fn give_login(served: &Served, account: &AccountRef, change: impl Fn(&mut ai6::LoginState)) {
+        served
+            .registry
+            .change_login(account, &mut |state| {
+                let mut login = ai6::LoginState::default();
+                login.stations = vec!["worker".to_owned()];
+                login.revision = 1;
+                change(&mut login);
+                *state = Some(login);
+            })
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_board_says_when_a_login_needs_a_person_and_what_to_run() {
+        let served = served_with(ROLES).await;
+        let account = declare_login(&served);
+        // Declared to keep a login, and none was added.
+        let response = board(&served, &served.viewer, "G").await;
+        let body: serde_json::Value = response.json().await.unwrap();
+        let login = &body["accounts"][0]["login"];
+        assert_eq!(login["stations"], serde_json::json!([]));
+        assert_eq!(login["needs_person"], "no login is kept for this account");
+        assert_eq!(
+            login["needs_person_command"],
+            "ai6 pools add-login free shared --handler acp --replace"
+        );
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64()
+            .floor();
+        give_login(&served, &account, |login| {
+            login.expires_at = Some(now + 600.0);
+            login.renewed_at = Some(now - 60.0);
+            login.last_result = Some("failed: its harness removed its login file".to_owned());
+            login.last_attempt_at = Some(now - 30.0);
+            login.failures = 3;
+            login.needs_person = Some("3 renewals failed in a row".to_owned());
+            login.lease = Some(
+                serde_json::from_value(
+                    serde_json::json!({"station": "worker", "until": now + 120.0}),
+                )
+                .unwrap(),
+            );
+        });
+        let body: serde_json::Value = board(&served, &served.viewer, "G")
+            .await
+            .json()
+            .await
+            .unwrap();
+        let login = &body["accounts"][0]["login"];
+        assert_eq!(login["stations"], serde_json::json!(["worker"]));
+        assert_eq!(login["renewal_held_by"], "worker");
+        assert_eq!(login["renewal_held_until"], now + 120.0);
+        assert_eq!(login["last_attempt_at"], now - 30.0);
+        assert!(
+            login["last_result"]
+                .as_str()
+                .unwrap()
+                .starts_with("failed: ")
+        );
+        assert_eq!(login["failures"], 3);
+        assert_eq!(login["needs_person"], "3 renewals failed in a row");
+        assert_eq!(
+            login["needs_person_command"],
+            "ai6 pools add-login free shared --handler acp --replace"
+        );
+
+        // Healthy: no person, no command.
+        give_login(&served, &account, |login| {
+            login.last_result = Some("renewed".to_owned());
+        });
+        let body: serde_json::Value = board(&served, &served.viewer, "G")
+            .await
+            .json()
+            .await
+            .unwrap();
+        let login = &body["accounts"][0]["login"];
+        assert_eq!(login["needs_person"], serde_json::Value::Null);
+        assert_eq!(login["needs_person_command"], serde_json::Value::Null);
+    }
+
+    async fn change(
+        served: &Served,
+        token: &str,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<serde_json::Value>,
+    ) -> StatusCode {
+        let mut request = reqwest::Client::new()
+            .request(method, format!("{}/v1/user/operations/{path}", served.base))
+            .bearer_auth(token);
+        if let Some(body) = body {
+            request = request.json(&body);
+        }
+        request.send().await.unwrap().status()
+    }
+
+    #[tokio::test]
+    async fn stations_and_the_login_are_changed_with_pool_manage_and_audited_first() {
+        use reqwest::Method;
+        let served = served_with(ROLES).await;
+        let account = declare_login(&served);
+        let stations = "G/pools/free/shared/login/stations";
+        let add = || serde_json::json!({"station": "host-b"});
+
+        assert_eq!(
+            change(&served, &served.viewer, Method::POST, stations, Some(add())).await,
+            StatusCode::FORBIDDEN,
+            "pool.read is not enough"
+        );
+        assert_eq!(
+            change(
+                &served,
+                &served.operator,
+                Method::POST,
+                "G/pools/free/other/login/stations",
+                Some(add())
+            )
+            .await,
+            StatusCode::NOT_FOUND,
+            "free/other is not declared for G"
+        );
+        assert_eq!(
+            change(
+                &served,
+                &served.operator,
+                Method::POST,
+                stations,
+                Some(add())
+            )
+            .await,
+            StatusCode::NOT_FOUND,
+            "there is no login to change"
+        );
+        assert!(
+            served
+                .registry
+                .audit_records()
+                .unwrap()
+                .iter()
+                .all(|record| !record.action.starts_with("pool.login")),
+            "a refused request leaves no trace beyond the refusal"
+        );
+
+        give_login(&served, &account, |_| {});
+        assert_eq!(
+            change(
+                &served,
+                &served.operator,
+                Method::POST,
+                stations,
+                Some(add())
+            )
+            .await,
+            StatusCode::ACCEPTED
+        );
+        assert_eq!(
+            change(
+                &served,
+                &served.operator,
+                Method::DELETE,
+                &format!("{stations}/worker"),
+                None
+            )
+            .await,
+            StatusCode::ACCEPTED
+        );
+        let login = login_state(&served, &account).unwrap();
+        let asked: Vec<_> = login.requests.iter().map(|asked| &asked.action).collect();
+        assert_eq!(
+            asked,
+            [
+                &ai6::LoginRequestAction::AddStation {
+                    station: "host-b".to_owned()
+                },
+                &ai6::LoginRequestAction::RemoveStation {
+                    station: "worker".to_owned()
+                },
+            ]
+        );
+        assert_eq!(
+            login.stations,
+            ["worker"],
+            "a Station with the key makes it"
+        );
+        let body: serde_json::Value = board(&served, &served.viewer, "G")
+            .await
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(
+            body["accounts"][0]["login"]["requests"][0],
+            serde_json::json!({"action": "add_station", "station": "host-b",
+                "by": "operator-007", "at": body["accounts"][0]["login"]["requests"][0]["at"]})
+        );
+
+        // Signing out waits for a Station; forgetting alone is done at once.
+        assert_eq!(
+            change(
+                &served,
+                &served.operator,
+                Method::DELETE,
+                "G/pools/free/shared/login?sign_out=true",
+                None
+            )
+            .await,
+            StatusCode::ACCEPTED
+        );
+        assert!(login_state(&served, &account).is_some());
+        assert_eq!(
+            change(
+                &served,
+                &served.operator,
+                Method::DELETE,
+                "G/pools/free/shared/login",
+                None
+            )
+            .await,
+            StatusCode::NO_CONTENT
+        );
+        assert!(login_state(&served, &account).is_none());
+        assert_eq!(
+            change(
+                &served,
+                &served.operator,
+                Method::DELETE,
+                "G/pools/free/shared/login",
+                None
+            )
+            .await,
+            StatusCode::NOT_FOUND,
+            "it holds none now"
+        );
+        let mut made: Vec<(String, String)> = served
+            .registry
+            .audit_records()
+            .unwrap()
+            .into_iter()
+            .filter(|record| record.action.starts_with("pool.login"))
+            .inspect(|record| {
+                assert_eq!(record.actor, "operator-007");
+                assert_eq!(record.operation, "G");
+            })
+            .map(|record| (record.action, record.target))
+            .collect();
+        made.sort();
+        assert_eq!(
+            made,
+            [
+                ("pool.login.forget".to_owned(), "free/shared".to_owned()),
+                ("pool.login.sign_out".to_owned(), "free/shared".to_owned()),
+                (
+                    "pool.login.station.add".to_owned(),
+                    "free/shared host-b".to_owned()
+                ),
+                (
+                    "pool.login.station.remove".to_owned(),
+                    "free/shared worker".to_owned()
+                ),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refused_audit_refuses_the_change() {
+        use reqwest::Method;
+        let served = served_with(ROLES).await;
+        let account = declare_login(&served);
+        give_login(&served, &account, |_| {});
+        // The audit log cannot be written: a file stands where its directory belongs.
+        let audit = served.registry.root().join("audit");
+        let _ = std::fs::remove_dir_all(&audit);
+        std::fs::write(&audit, b"not a directory").unwrap();
+        for (method, path, body) in [
+            (
+                Method::POST,
+                "G/pools/free/shared/login/stations",
+                Some(serde_json::json!({"station": "host-b"})),
+            ),
+            (
+                Method::DELETE,
+                "G/pools/free/shared/login/stations/worker",
+                None,
+            ),
+            (
+                Method::DELETE,
+                "G/pools/free/shared/login?sign_out=true",
+                None,
+            ),
+            (Method::DELETE, "G/pools/free/shared/login", None),
+        ] {
+            let status = change(&served, &served.operator, method, path, body).await;
+            assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{path}");
+        }
+        let login = login_state(&served, &account).expect("the login was not forgotten");
+        assert!(login.requests.is_empty(), "nothing was queued");
     }
 
     #[tokio::test]
