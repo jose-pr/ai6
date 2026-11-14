@@ -220,7 +220,7 @@ loads every library it finds.
 
 People attached to a charge's or a Mission's live Run (history replayed, then the live stream; typing, answering
 and interrupting; several at once; detaching leaves it running). The Station serves it; Universal Exports relays
-it (`GET /v1/user/attach`, see its header); `ai6ctl charge|mission attach` is a client.
+it (`GET /v1/socket/attach`, see its header); `ai6ctl charge|mission attach` is a client.
 
 ```rust
 pub enum RunTarget { Charge { scope: String }, Mission { operation: String, mission: String } }   // key() "charge:SCOPE" | "mission:ID"

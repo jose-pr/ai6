@@ -262,7 +262,7 @@ control's status route every `--poll-interval` (0.5 s) until the Station reports
 - `ai6ctl mission resume <MISSION_ID> [--message <TEXT>]` resumes a parked, blocked or
   stalled Mission now, sending `--message` to the Agent.
 - `ai6ctl charge attach <SCOPE> [OPTIONS]` and `ai6ctl mission attach <MISSION_ID> [--operation <ID>] [OPTIONS]`
-  (`OPTIONS`: `--after <SEQ>`, `--connect-timeout <SECONDS>`, `--hello-timeout <SECONDS>`, `--leave-wait <SECONDS>`) attach to a live Run through the gateway's `GET /v1/user/attach` WebSocket: a charge's
+  (`OPTIONS`: `--after <SEQ>`, `--connect-timeout <SECONDS>`, `--hello-timeout <SECONDS>`, `--leave-wait <SECONDS>`) attach to a live Run through the gateway's `GET /v1/socket/attach` WebSocket: a charge's
   standing Run (`SCOPE` is `m`, `operation:CODENAME` or `station:ID`; needs `charge.converse` on it) or a
   Mission's live Run (needs `mission.control` on its Operation; the Operation is looked up when not
   given, as for `mission cancel`). The Run's history is replayed, then what it shows follows, one

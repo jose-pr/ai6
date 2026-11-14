@@ -9,7 +9,7 @@
 //! ([`ai6::directorates::section_00::hub`]), reached by the Station polling `GET
 //! /v1/station/hub/next` and delivering frames to `POST /v1/station/hub/frames`.
 //!
-//! `GET /v1/user/attach` is a WebSocket of text frames. The first, within `[attach]
+//! `GET /v1/socket/attach` is a WebSocket of text frames. The first, within `[attach]
 //! hello_timeout`, is `{"type":"hello","token":ACCESS_TOKEN,"charge":SCOPE | "mission":
 //! {"operation","mission"},"after"?:SEQ}`. Then the person sends `{"type":"prompt","text"}`,
 //! `{"type":"answer","request","option"}`, `{"type":"interrupt"}` or `{"type":"detach"}`, and
@@ -454,7 +454,7 @@ fn frame_limit(limits: &UnexAttachLimits) -> usize {
         .saturating_add(limits.frame_slack.or_max())
 }
 
-/// `GET /v1/user/attach`: a person's attachment to a Run, as described in this module.
+/// `GET /v1/socket/attach`: a person's attachment to a Run, as described in this module.
 pub(crate) async fn socket(State(gateway): State<Gateway>, upgrade: WebSocketUpgrade) -> Response {
     let most = gateway.config.unex().attach.socket_bytes.or_max();
     upgrade

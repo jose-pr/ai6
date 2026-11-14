@@ -70,7 +70,7 @@ async fn served_charge(roles: &str) -> Served {
 }
 
 fn url(served: &Served) -> String {
-    format!("{}/v1/user/attach", served.base.replacen("http", "ws", 1))
+    format!("{}/v1/socket/attach", served.base.replacen("http", "ws", 1))
 }
 
 async fn connect(served: &Served, hello: Value) -> Socket {

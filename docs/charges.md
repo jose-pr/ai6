@@ -155,7 +155,7 @@ Station that restarts has its Runs' history begin again, and the people attached
 
 ### The socket
 
-`GET /v1/user/attach` on Universal Exports is a WebSocket of text frames. The first, within
+`GET /v1/socket/attach` on Universal Exports is a WebSocket of text frames. The first, within
 `[attach] hello_timeout`, is `{"type":"hello","token":ACCESS_TOKEN,"charge":"operation:G"}` (add
 `"after":SEQ` to be replayed only what follows a frame you already have). Then `{"type":"prompt",
 "text"}`, `{"type":"answer","request":N,"option":"allow"|"refuse"}`, `{"type":"interrupt"}` and

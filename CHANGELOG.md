@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   it, and Moneypenny can open it (`charges`, with `charge`, `operation_id`, `station_id` and `tab`).
 - A person can attach to a charge's live Run, or a Mission's, as to a harness in tmux: with `charge.converse`
   on the charge's scope (`operation:<codename>`, `station:<id>`, or `config:charge` for M's), or
-  `mission.control` on the Mission's Operation, `GET /v1/user/attach` replays the Run's history and then
+  `mission.control` on the Mission's Operation, `GET /v1/socket/attach` replays the Run's history and then
   streams what it shows (messages, tool calls, plans, permission requests). They type into it as its
   user (a prompt is one turn of the Run's own provider session, queued behind a wake, stamped with who
   sent it, and never a Mission), answer what it asks (several people may be attached and the first

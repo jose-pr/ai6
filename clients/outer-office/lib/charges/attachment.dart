@@ -38,8 +38,8 @@ class _SocketChannel implements AttachChannel {
   }
 }
 
-/// `/v1/user/attach` on the gateway's origin, as a WebSocket URL.
-Uri attachSocketUri(Uri apiOrigin) => socketUri(apiOrigin, '/v1/user/attach');
+/// `/v1/socket/attach` on the gateway's origin, as a WebSocket URL.
+Uri attachSocketUri(Uri apiOrigin) => socketUri(apiOrigin, '/v1/socket/attach');
 
 /// Opens the real socket.
 AttachChannel connectAttach(Uri apiOrigin) =>

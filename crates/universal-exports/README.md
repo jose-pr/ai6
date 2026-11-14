@@ -177,7 +177,7 @@ All `/v1/station/` paths require the Station bearer credential.
 | `PUT` | `/v1/user/operations/{operation_id}/agent-roles/{role_id}` | Require `agent.configure`; validate and store a role purpose and policy in the shared Registry. |
 | `DELETE` | `/v1/user/operations/{operation_id}/agent-roles/{role_id}` | Require `agent.configure`; remove the Operation override, fall back to the Station definition and record a metadata-only audit event. |
 | `POST` | `/v1/user/attach-grants` | Issue a Run attach token only when `run.read` or `run.input` is allowed at that Station. |
-| `GET` | `/v1/user/attach` | WebSocket: attach to a charge's Run (`charge.converse` on its scope) or a Mission's (`mission.control` on its Operation); history, live stream, prompts, answers and interrupts, audited. |
+| `GET` | `/v1/socket/attach` | WebSocket: attach to a charge's Run (`charge.converse` on its scope) or a Mission's (`mission.control` on its Operation); history, live stream, prompts, answers and interrupts, audited. |
 | `GET` | `/v1/station/hub/next` | Station bearer; long poll for what attached people asked of the Station's Runs. |
 | `POST` | `/v1/station/hub/frames` | Station bearer; what a Run shows, for the people attached to it. |
 | `POST` | `/v1/user/operations/{operation_id}/missions` | Require `mission.create` for the Operation and atomically enqueue the bounded title and explicit brief in the shared Registry. |

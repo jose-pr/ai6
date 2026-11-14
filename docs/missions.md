@@ -615,7 +615,7 @@ Context tab of a Run's page: the turns, each tool call and its result folded, an
 A person with `mission.control` on a Mission's Operation can attach to its live Run the way they can
 to a [charge's](charges.md#attaching-to-a-charges-run): history, then the live stream, typing into the
 Run as its user, answering what it asks and interrupting it, with others attached at once. The hello
-frame of `GET /v1/user/attach` names the Mission, `{"type":"hello","token":ACCESS_TOKEN,"mission":
+frame of `GET /v1/socket/attach` names the Mission, `{"type":"hello","token":ACCESS_TOKEN,"mission":
 {"operation":"G","mission":"mission-007"}}`, and the gateway sends the request to the Station holding
 the Mission's newest open Run. The Operation is the Registry's (the Run's record, else the Mission's filed brief), never the hello's: a hello naming another, or a Mission the Registry cannot place, is refused `no_run`. Attaching, detaching, each prompt, answer and interrupt are audited
 (`mission.attach`, `mission.detach`, `mission.prompt`, `mission.answer`, `mission.interrupt`). A typed

@@ -2054,7 +2054,7 @@ impl Gateway {
             )
             .route("/v1/user/charges", get(charges::list))
             .route("/v1/user/charges/{scope}", get(charges::show))
-            .route("/v1/user/attach", get(run_attach::socket))
+            .route("/v1/socket/attach", get(run_attach::socket))
             .route("/v1/station/hub/next", get(run_attach::next))
             .route("/v1/station/hub/frames", post(run_attach::frames))
             .route("/v1/station/assistant/next", get(moneypenny::next))

@@ -1,5 +1,5 @@
 //! `ai6ctl charge attach` and `ai6ctl mission attach`: a line-based client of the gateway's
-//! `GET /v1/user/attach` WebSocket. Each frame the Run shows is printed as one line; each line
+//! `GET /v1/socket/attach` WebSocket. Each frame the Run shows is printed as one line; each line
 //! read from the input is a prompt, or a `/` command. The access token travels in the first
 //! WebSocket frame only, never in the URL, and is printed nowhere.
 
@@ -96,7 +96,7 @@ where
         .port_or_known_default()
         .ok_or_else(|| "Universal Exports URL has no port".to_owned())?;
     let address = format!(
-        "{}://{}/v1/user/attach",
+        "{}://{}/v1/socket/attach",
         if secure { "wss" } else { "ws" },
         server.authority()
     );
