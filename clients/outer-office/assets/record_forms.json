@@ -7643,6 +7643,107 @@
             "attention_history": 604800.0
           }
         },
+        "attach": {
+          "type": "object",
+          "properties": {
+            "clients": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "People attached to a Run",
+              "description": "People attached to one Run at once.",
+              "default": 16
+            },
+            "queue": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Requests waiting for a Station",
+              "description": "Requests of attached people waiting for their Station to take them, for each Station.",
+              "default": 256
+            },
+            "backlog": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Frames queued for one person",
+              "description": "Frames queued for one attached person's socket, at least 1; one who falls further behind is let go and may attach again.",
+              "default": 1024
+            },
+            "prompt_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest prompt",
+              "description": "Bytes of one prompt.",
+              "default": 16384
+            },
+            "hello_timeout": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest wait for a hello",
+              "description": "Seconds a socket may take to say who it is.",
+              "default": 10.0
+            },
+            "max_wait": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest poll a Station may ask for",
+              "description": "The longest wait a Station's poll for requests may ask for, in seconds.",
+              "default": 25.0
+            }
+          },
+          "additionalProperties": false,
+          "title": "Attaching to a Run",
+          "description": "`[attach]`: people attached to a Run through the gateway.",
+          "default": {
+            "clients": 16,
+            "queue": 256,
+            "backlog": 1024,
+            "prompt_bytes": 16384,
+            "hello_timeout": 10.0,
+            "max_wait": 25.0
+          }
+        },
         "login": {
           "type": "object",
           "properties": {
@@ -10405,6 +10506,171 @@
             "tracker_timeout": 30.0,
             "file_timeout": 5.0,
             "comments": 100
+          }
+        },
+        "attach": {
+          "type": "object",
+          "properties": {
+            "history_frames": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Frames kept for a client that attaches",
+              "description": "Frames of a Run's history kept to replay to a client that attaches; the oldest go first.",
+              "default": 1000
+            },
+            "clients": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Clients attached to a Run",
+              "description": "Clients attached to one Run at once.",
+              "default": 16
+            },
+            "waiting_prompts": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Prompts waiting for a turn",
+              "description": "Prompts of people waiting for a Run's turn to end; past it a prompt is refused.",
+              "default": 32
+            },
+            "permission_wait": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "format": "seconds"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "seconds",
+              "title": "A permission request waits",
+              "description": "Seconds a permission request waits for an attached person before it is decided as it would be with nobody attached.",
+              "default": 600.0
+            },
+            "delivery_frames": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Frames in one delivery",
+              "description": "Frames of one Run a delivery to Universal Exports carries at most.",
+              "default": 64
+            },
+            "delivery_attempts": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Tries to deliver frames",
+              "description": "Tries to deliver a batch of frames before the client is let go.",
+              "default": 5
+            },
+            "command_wait": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest wait for a client's request",
+              "description": "Seconds a poll of Universal Exports for clients' requests waits.",
+              "default": 20.0
+            },
+            "retry_delay": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Pause after a failed call",
+              "description": "Seconds between tries after a poll or a delivery failed.",
+              "default": 1.0
+            },
+            "call_margin": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "Longest call",
+              "description": "Seconds one call to Universal Exports may take besides a poll's wait.",
+              "default": 30.0
+            }
+          },
+          "additionalProperties": false,
+          "title": "Attaching to a Run",
+          "description": "`[attach]`: people attached to a live Run.",
+          "default": {
+            "history_frames": 1000,
+            "clients": 16,
+            "waiting_prompts": 32,
+            "permission_wait": 600.0,
+            "delivery_frames": 64,
+            "delivery_attempts": 5,
+            "command_wait": 20.0,
+            "retry_delay": 1.0,
+            "call_margin": 30.0
           }
         },
         "partial_line_bytes": {

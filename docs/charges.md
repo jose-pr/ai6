@@ -151,7 +151,7 @@ and runs when it ends, never inside it; a prompt does not use up the hour's `max
 request for leave that an ACP agent makes reaches the attached people, and the first answer to it
 decides; with nobody attached, it is decided as it would have been (a restricted Run refuses). What the
 Run shows is kept per Run, in the Station's memory, up to the `[attach]` `history_frames` setting; a
-Station that restarts has its Runs' history begin again.
+Station that restarts has its Runs' history begin again, and the people attached to them, who are not told, attach again.
 
 ### The socket
 
