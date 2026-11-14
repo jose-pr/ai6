@@ -17,6 +17,7 @@ const operationActions = [
   'audit.read',
   'cable.read',
   'cable.send',
+  'charge.converse',
   'issue.comment',
   'issue.create',
   'issue.link',

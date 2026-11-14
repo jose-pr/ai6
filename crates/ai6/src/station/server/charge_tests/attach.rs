@@ -50,7 +50,7 @@ fn event_text(frame: &HubFrame) -> Option<&str> {
         .flatten()
 }
 
-fn turn_end_by<'a>(frame: &'a HubFrame, who: &str) -> bool {
+fn turn_end_by(frame: &HubFrame, who: &str) -> bool {
     frame.kind == "turn" && frame.data["state"] == "ended" && frame.data["by"] == who
 }
 

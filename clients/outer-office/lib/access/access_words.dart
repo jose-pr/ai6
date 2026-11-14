@@ -32,6 +32,7 @@ const _areas = <(String, Map<String, String>)>[
     {
       'run.read': 'charge',
       'run.input': 'type into',
+      'charge.converse': 'attach to a charge of',
       'run.context': 'read the context of',
     },
   ),
