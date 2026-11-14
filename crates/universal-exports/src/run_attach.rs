@@ -18,11 +18,12 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use ai6::directorates::m::charges::ChargeScope;
 use ai6::directorates::section_00::hub::{HubCommand, HubDelivery, HubFrame, HubOp, RunTarget};
-use ai6::{AuditRecord, Person, UnexAttachLimits};
+use ai6::{AuditRecord, Limit, Person, UnexAttachLimits};
 use axum::Json;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
@@ -91,13 +92,31 @@ struct Book {
 struct Slot {
     target: RunTarget,
     station: String,
-    sender: mpsc::Sender<HubFrame>,
+    sender: mpsc::UnboundedSender<HubFrame>,
+    /// Frames sent and not yet taken by the person's socket.
+    queued: std::sync::Arc<AtomicUsize>,
+}
+
+/// What a person's socket reads: the frames the gateway queued for them.
+struct Frames {
+    frames: mpsc::UnboundedReceiver<HubFrame>,
+    queued: std::sync::Arc<AtomicUsize>,
+}
+
+impl Frames {
+    async fn next(&mut self) -> Option<HubFrame> {
+        let frame = self.frames.recv().await?;
+        self.queued.fetch_sub(1, Ordering::AcqRel);
+        Some(frame)
+    }
 }
 
 /// Why a request could not be taken.
 enum Refused {
     /// The Run has all the people attached `[attach] clients` allows.
     Full,
+    /// The person is not attached any more: their attachment ended.
+    Gone,
     /// As many requests wait for the Station as `[attach] queue` allows.
     Busy,
 }
@@ -117,7 +136,7 @@ impl Relay {
         target: &RunTarget,
         person: &str,
         after: Option<u64>,
-    ) -> Result<(String, mpsc::Receiver<HubFrame>), Refused> {
+    ) -> Result<(String, Frames), Refused> {
         let mut state = self.lock();
         let attached = state
             .clients
@@ -133,13 +152,15 @@ impl Relay {
         }
         state.next += 1;
         let client = format!("c{}-{}", state.next, Uuid::new_v4().simple());
-        let (sender, frames) = mpsc::channel(usize::try_from(limits.backlog).unwrap_or(usize::MAX));
+        let (sender, frames) = mpsc::unbounded_channel();
+        let queued = std::sync::Arc::new(AtomicUsize::new(0));
         state.clients.insert(
             client.clone(),
             Slot {
                 target: target.clone(),
                 station: station.to_owned(),
                 sender,
+                queued: queued.clone(),
             },
         );
         state
@@ -154,7 +175,7 @@ impl Relay {
             ));
         drop(state);
         self.ready.notify_waiters();
-        Ok((client, frames))
+        Ok((client, Frames { frames, queued }))
     }
 
     /// Passes a request of `client`'s person to the Station.
@@ -171,7 +192,7 @@ impl Relay {
             .get(client)
             .map(|slot| (slot.station.clone(), slot.target.clone()))
         else {
-            return Err(Refused::Busy);
+            return Err(Refused::Gone);
         };
         let queue = state.commands.entry(station).or_default();
         if !limits.queue.allows(queue.len() + 1) {
@@ -199,7 +220,7 @@ impl Relay {
 
     /// Hands what a Station delivered to the people it is for. `false` when it was for a client
     /// that is not here (gone), so the Station stops sending to it.
-    fn deliver(&self, limits: &UnexAttachLimits, delivery: HubDelivery) -> bool {
+    fn deliver(&self, backlog: Limit, delivery: HubDelivery) -> bool {
         let mut state = self.lock();
         let mut known = true;
         let mut dropped: Vec<String> = Vec::new();
@@ -231,8 +252,17 @@ impl Relay {
                 let Some(slot) = state.clients.get(&client) else {
                     continue;
                 };
-                let sent = slot.sender.try_send(frame.clone());
-                if sent.is_err() || closing {
+                // A person further behind than the backlog allows is let go.
+                let room = backlog.allows(slot.queued.load(Ordering::Acquire) + 1);
+                let sent = room && {
+                    slot.queued.fetch_add(1, Ordering::AcqRel);
+                    let sent = slot.sender.send(frame.clone()).is_ok();
+                    if !sent {
+                        slot.queued.fetch_sub(1, Ordering::AcqRel);
+                    }
+                    sent
+                };
+                if !sent || closing {
                     dropped.push(client);
                 }
             }
@@ -247,7 +277,6 @@ impl Relay {
                     .push_back(HubCommand::new(slot.target, client, "", HubOp::Detach));
             }
         }
-        let _ = limits;
         known
     }
 
@@ -374,16 +403,19 @@ impl Subject {
                         .runs()
                         .ok()?
                         .into_iter()
-                        .filter(|run| {
-                            run.mission_id == uid
-                                && !run.status.is_closed()
-                                && run.operation.as_deref().is_none_or(|op| op == operation)
-                        })
+                        .filter(|run| run.mission_id == uid && !run.status.is_closed())
                         .max_by_key(|run| run.number)?;
-                    Some((
-                        run.station,
+                    // The Operation is the Registry's word, never the client's: from the Run, else
+                    // from the Mission's filed brief. A hello naming another is refused.
+                    let filed = match run.operation.clone() {
+                        Some(filed) => filed,
+                        None => registry.filed_brief(&uid).ok().flatten()?.brief.operation?,
+                    };
+                    let station = run.station;
+                    (filed == *operation).then_some((
+                        station,
                         RunTarget::Mission {
-                            operation: operation.clone(),
+                            operation: filed,
                             mission: uid,
                         },
                     ))
@@ -412,27 +444,71 @@ fn close(code: u16, reason: &'static str) -> Message {
     }))
 }
 
-/// `GET /v1/user/attach`: a person's attachment to a Run, as described in this module.
-pub(crate) async fn socket(State(gateway): State<Gateway>, upgrade: WebSocketUpgrade) -> Response {
-    let most = gateway
-        .config
-        .unex()
-        .attach
+/// The most a frame carrying a prompt of `[attach] prompt_bytes` takes: every byte written as a
+/// six-byte JSON escape, and the slack.
+fn frame_limit(limits: &UnexAttachLimits) -> usize {
+    limits
         .prompt_bytes
         .or_max()
-        .saturating_add(4_096);
+        .saturating_mul(6)
+        .saturating_add(limits.frame_slack.or_max())
+}
+
+/// `GET /v1/user/attach`: a person's attachment to a Run, as described in this module.
+pub(crate) async fn socket(State(gateway): State<Gateway>, upgrade: WebSocketUpgrade) -> Response {
+    let most = gateway.config.unex().attach.socket_bytes.or_max();
     upgrade
         .max_message_size(most)
         .on_upgrade(move |socket| attached(socket, gateway))
 }
 
-async fn refuse(
-    sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    code: &str,
-    message: &str,
-) {
+type Out = futures_util::stream::SplitSink<WebSocket, Message>;
+
+async fn refuse(sender: &mut Out, code: &str, message: &str) {
     let _ = sender.send(frame(&problem(code, message))).await;
     let _ = sender.send(close(1008, "refused")).await;
+}
+
+/// Who `token` is now, and that they still hold the right to attach to `subject`.
+async fn still_holds(
+    gateway: &Gateway,
+    subject: &Subject,
+    token: &str,
+) -> Result<Person, (&'static str, String)> {
+    let person = resolve_user(gateway, token)
+        .await
+        .map_err(|_| ("unauthorized", "Your sign-in has ended.".to_owned()))?;
+    if subject.allows(gateway, &person, subject.converse).await {
+        Ok(person)
+    } else {
+        Err((
+            "forbidden",
+            "You may no longer attach to that Run.".to_owned(),
+        ))
+    }
+}
+
+/// When `token`'s sign-in ends, as Unix seconds; `None` for one the Registry holds no record of
+/// (a key).
+async fn sign_in_ends(gateway: &Gateway, token: &str) -> Option<f64> {
+    let registry = gateway.registry.clone()?;
+    let digest = crate::access_token_digest(token);
+    let record = tokio::task::spawn_blocking(move || registry.find_access_token(&digest))
+        .await
+        .ok()?
+        .ok()??;
+    Some(record.expires_at())
+}
+
+/// The next time to look at whether the person still holds what they attached with: after
+/// `[attach] recheck_every`, or when their sign-in ends if that is sooner.
+async fn next_check(gateway: &Gateway, token: &str) -> tokio::time::Instant {
+    let every = gateway.config.unex().attach.recheck_every.0;
+    let mut wait = every;
+    if let (Some(ends), Ok(now)) = (sign_in_ends(gateway, token).await, crate::unix_timestamp()) {
+        wait = wait.min(Duration::from_secs_f64((ends - now).max(0.0)));
+    }
+    tokio::time::Instant::now() + wait
 }
 
 async fn attached(socket: WebSocket, gateway: Gateway) {
@@ -486,20 +562,20 @@ async fn attached(socket: WebSocket, gateway: Gateway) {
     let relay = gateway.attach.clone();
     let (client, mut frames) = match relay.open(&limits, &station, &target, &person.id, after) {
         Ok(opened) => opened,
+        Err(Refused::Busy | Refused::Gone) => {
+            refuse(
+                &mut sender,
+                "busy",
+                "The Station has too many requests waiting.",
+            )
+            .await;
+            return;
+        }
         Err(Refused::Full) => {
             refuse(
                 &mut sender,
                 "full",
                 "The Run has all the people attached it allows.",
-            )
-            .await;
-            return;
-        }
-        Err(Refused::Busy) => {
-            refuse(
-                &mut sender,
-                "busy",
-                "The Station has too many requests waiting.",
             )
             .await;
             return;
@@ -515,16 +591,28 @@ async fn attached(socket: WebSocket, gateway: Gateway) {
         relay.close(&client, &person.id);
         return;
     }
+    let widest = frame_limit(&limits);
+    let mut check = next_check(&gateway, &token).await;
+    let mut person = person;
     loop {
         tokio::select! {
             incoming = receiver.next() => match incoming {
                 Some(Ok(Message::Text(text))) => {
-                    let answer = request(&gateway, &subject, &person, &client, &text).await;
+                    let answer = if text.len() > widest {
+                        Err(("bad_request", "That frame is larger than a prompt may be.".to_owned()))
+                    } else {
+                        request(&gateway, &subject, &token, &client, &text).await
+                    };
                     match answer {
-                        Ok(true) => {}
-                        Ok(false) => break,
+                        Ok(Some(acting)) => person = acting,
+                        Ok(None) => break,
                         Err((code, message)) => {
+                            let ended = matches!(code, "unauthorized");
                             if sender.send(frame(&problem(code, &message))).await.is_err() {
+                                break;
+                            }
+                            if ended {
+                                let _ = sender.send(close(1008, "sign-in ended")).await;
                                 break;
                             }
                         }
@@ -542,7 +630,7 @@ async fn attached(socket: WebSocket, gateway: Gateway) {
                 }
                 Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
             },
-            shown = frames.recv() => match shown {
+            shown = frames.next() => match shown {
                 Some(shown) => {
                     if sender.send(frame(&json!({"type": "frame", "frame": shown}))).await.is_err() {
                         break;
@@ -554,24 +642,39 @@ async fn attached(socket: WebSocket, gateway: Gateway) {
                     break;
                 }
             },
+            () = tokio::time::sleep_until(check) => {
+                // A person whose sign-in ended or role was withdrawn stops receiving.
+                match still_holds(&gateway, &subject, &token).await {
+                    Ok(holder) => {
+                        person = holder;
+                        check = next_check(&gateway, &token).await;
+                    }
+                    Err((code, message)) => {
+                        let _ = sender.send(frame(&problem(code, &message))).await;
+                        let _ = sender.send(close(1008, "no longer allowed")).await;
+                        break;
+                    }
+                }
+            },
         }
     }
     relay.close(&client, &person.id);
     let _ = subject.audit(&gateway, &person, "detach").await;
 }
 
-/// Applies one frame of an attached person. `Ok(false)` ends the attachment.
+/// Applies one frame of an attached person, as who the token is now. `Ok(None)` ends the
+/// attachment; `Ok(Some(person))` goes on.
 async fn request(
     gateway: &Gateway,
     subject: &Subject,
-    person: &Person,
+    token: &str,
     client: &str,
     text: &str,
-) -> Result<bool, (&'static str, String)> {
+) -> Result<Option<Person>, (&'static str, String)> {
     let limits = &gateway.config.unex().attach;
     let wrong = || ("bad_request", "That frame is not understood.".to_owned());
     let (what, action, op) = match serde_json::from_str::<FromClient>(text).map_err(|_| wrong())? {
-        FromClient::Detach {} => return Ok(false),
+        FromClient::Detach {} => return Ok(None),
         FromClient::Hello { .. } => return Err(wrong()),
         FromClient::Prompt { text } => {
             if text.trim().is_empty() || !limits.prompt_bytes.allows(text.len()) {
@@ -589,24 +692,30 @@ async fn request(
         ),
         FromClient::Interrupt {} => ("interrupt", subject.control, HubOp::Interrupt),
     };
-    // Held at every request: a role changed since attaching applies at once.
-    if !subject.allows(gateway, person, action).await {
+    // Resolved again for every act: a sign-in ended or revoked, or a role withdrawn since
+    // attaching, applies at once.
+    let person = still_holds(gateway, subject, token).await?;
+    if action != subject.converse && !subject.allows(gateway, &person, action).await {
         return Err(("forbidden", format!("You may not {what} that Run.")));
     }
     subject
-        .audit(gateway, person, what)
+        .audit(gateway, &person, what)
         .await
         .map_err(|_| ("unavailable", "That could not be recorded.".to_owned()))?;
     gateway
         .attach
         .submit(limits, client, &person.id, op)
-        .map_err(|_| {
-            (
+        .map_err(|refused| match refused {
+            Refused::Gone => (
+                "gone",
+                "You are no longer attached to that Run; attach again.".to_owned(),
+            ),
+            Refused::Busy | Refused::Full => (
                 "busy",
                 "The Station has too many requests waiting.".to_owned(),
-            )
+            ),
         })?;
-    Ok(true)
+    Ok(Some(person))
 }
 
 #[derive(Deserialize)]
@@ -617,7 +726,7 @@ pub(crate) struct NextQuery {
 
 /// `GET /v1/station/hub/next?station=ID&wait_ms=N`: what attached people asked of the Runs the
 /// Station keeps (`200` and a JSON array of [`HubCommand`]), or `204` after `wait_ms` (default
-/// 1,000, at most `[attach] max_wait`).
+/// `[attach] poll_wait`, at most `[attach] max_wait`).
 pub(crate) async fn next(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
@@ -627,8 +736,11 @@ pub(crate) async fn next(
     if !ai6::directorates::section_00::assistant::valid_identity(&query.station) {
         return Err(ApiError::bad_request());
     }
-    let max_wait = gateway.config.unex().attach.max_wait.0;
-    let wait = Duration::from_millis(query.wait_ms.unwrap_or(1_000)).min(max_wait);
+    let limits = &gateway.config.unex().attach;
+    let wait = query
+        .wait_ms
+        .map_or(limits.poll_wait.0, Duration::from_millis)
+        .min(limits.max_wait.0);
     let deadline = tokio::time::Instant::now() + wait;
     let relay = gateway.attach.clone();
     loop {
@@ -655,10 +767,54 @@ pub(crate) async fn frames(
     gateway.authenticate_station(bearer(&headers)?)?;
     if gateway
         .attach
-        .deliver(&gateway.config.unex().attach, delivery)
+        .deliver(gateway.config.unex().attach.backlog, delivery)
     {
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(ApiError::not_found())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn target() -> RunTarget {
+        RunTarget::Charge {
+            scope: "operation:G".to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_request_for_a_client_already_let_go_is_gone_and_not_busy() {
+        let relay = Relay::default();
+        let refused = relay.submit(
+            &UnexAttachLimits::default(),
+            "nobody",
+            "p",
+            HubOp::Interrupt,
+        );
+        assert!(matches!(refused, Err(Refused::Gone)));
+    }
+
+    #[test]
+    fn a_person_further_behind_than_the_backlog_is_let_go() {
+        let relay = Relay::default();
+        let limits = UnexAttachLimits::default();
+        let (client, mut frames) = relay
+            .open(&limits, "worker", &target(), "p", None)
+            .ok()
+            .unwrap();
+        let frame = |text: &str| HubFrame::new("event", 1.0, json!({ "text": text }));
+        let delivery = HubDelivery::new("worker", target(), vec![frame("a"), frame("b")]);
+        // Room for one frame: the second finds the person behind, and they are let go.
+        assert!(relay.deliver(Limit::at(1), delivery));
+        assert!(matches!(
+            relay.submit(&limits, &client, "p", HubOp::Interrupt),
+            Err(Refused::Gone)
+        ));
+        let first = frames.frames.try_recv().unwrap();
+        assert_eq!(first.data["text"], "a");
+        assert!(frames.frames.try_recv().is_err());
     }
 }

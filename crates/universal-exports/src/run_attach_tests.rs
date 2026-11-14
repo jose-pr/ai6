@@ -6,6 +6,7 @@
 use std::time::Duration;
 
 use ai6::directorates::registry::backend::*;
+use ai6::directorates::registry::runs::NewRun;
 use ai6::directorates::section_00::hub::{HubCommand, HubDelivery, HubFrame, HubOp, RunTarget};
 use futures_util::{SinkExt, StreamExt};
 use reqwest::StatusCode;
@@ -152,7 +153,9 @@ async fn attach(served: &Served, token: &str, charge: &str) -> (Socket, HubComma
     let mut socket = connect(served, hello(token, charge)).await;
     let attached = receive(&mut socket).await;
     assert_eq!(attached["type"], "attached", "{attached}");
+    // What waits for the Station may include other clients' detaches: this one's attach is what is asked.
     let mut commands = poll(served, 5_000).await;
+    commands.retain(|command| command.client == attached["client"].as_str().unwrap_or_default());
     assert_eq!(commands.len(), 1, "{commands:?}");
     let command = commands.remove(0);
     assert_eq!(attached["client"], command.client.as_str());
@@ -500,4 +503,161 @@ async fn only_the_station_may_poll_and_deliver() {
     let served = served_with(CONVERSE).await;
     let mut socket = connect(&served, hello(&served.operator, "operation:G")).await;
     assert_eq!(receive(&mut socket).await["code"], "no_run");
+}
+
+/// A Run of `mission` with no Operation on its record, held by Station `worker`, and the
+/// brief of the Mission naming an Operation when one is given.
+fn operationless_run(served: &Served, mission: &str, brief_operation: Option<&str>) {
+    served
+        .registry
+        .open_run(
+            NewRun::new(format!("record-{mission}"), mission, "worker"),
+            Duration::from_secs(600),
+        )
+        .unwrap();
+    if let Some(operation) = brief_operation {
+        let brief: ai6::Brief = serde_json::from_value(json!({
+            "title": "work", "id": mission, "mission_id": mission, "operation": operation,
+        }))
+        .unwrap();
+        served.registry.submit_brief(&brief).unwrap();
+    }
+}
+
+fn mission_hello(token: &str, operation: &str, mission: &str) -> Value {
+    json!({"type": "hello", "token": token,
+           "mission": {"operation": operation, "mission": mission}})
+}
+
+#[tokio::test]
+async fn a_missions_operation_is_the_registrys_and_not_the_hellos() {
+    let served = served_charge(CONTROL).await;
+    // The person controls G only. A Run whose record names no Operation, with a brief that names
+    // L, is L's: naming G in the hello does not make it theirs.
+    operationless_run(&served, "mission-l2", Some("L"));
+    let mut wrong = connect(&served, mission_hello(&served.operator, "G", "mission-l2")).await;
+    assert_eq!(receive(&mut wrong).await["code"], "no_run");
+    // With nothing in the Registry that says whose it is, it is refused too.
+    operationless_run(&served, "mission-nobody", None);
+    let mut unknown = connect(
+        &served,
+        mission_hello(&served.operator, "G", "mission-nobody"),
+    )
+    .await;
+    assert_eq!(receive(&mut unknown).await["code"], "no_run");
+    assert!(poll(&served, 0).await.is_empty());
+    assert!(audits(&served, "mission.attach").is_empty());
+    // Where the brief agrees with the hello, and the person controls that Operation, it attaches
+    // and the audit names the Operation the Registry gave.
+    operationless_run(&served, "mission-g2", Some("G"));
+    let mut socket = connect(&served, mission_hello(&served.operator, "G", "mission-g2")).await;
+    assert_eq!(receive(&mut socket).await["type"], "attached");
+    let audited = audits(&served, "mission.attach");
+    assert_eq!(audited.len(), 1);
+    assert_eq!(audited[0].operation, "G");
+}
+
+/// Limits that check an attached person's sign-in every 200 ms.
+fn quick_checks() -> ai6::UnexLimits {
+    let mut limits = ai6::UnexLimits::default();
+    limits.attach.recheck_every = ai6::Seconds(Duration::from_millis(200));
+    limits
+}
+
+async fn token_for(served: &Served, ttl: Duration) -> (String, String) {
+    let issued = crate::issue_access_token_record(
+        std::sync::Arc::new(served.registry.clone()),
+        "operator-007".to_owned(),
+        ttl,
+        ai6::TimeLimit::UNBOUNDED,
+    )
+    .await
+    .ok()
+    .unwrap();
+    (issued.token, issued.token_id)
+}
+
+#[tokio::test]
+async fn a_sign_in_that_ends_mid_attachment_ends_the_attachment() {
+    let served =
+        crate::controls::tests::served_with_unex(CONVERSE, None, Some(quick_checks())).await;
+    served
+        .registry
+        .claim_charge("operation:G", "kg", "worker", Duration::from_secs(600))
+        .unwrap();
+    // A token that expires: the socket is closed when it does, not when the person next speaks.
+    let (token, _) = token_for(&served, Duration::from_secs(1)).await;
+    let (mut socket, _) = attach(&served, &token, "operation:G").await;
+    let ended = receive(&mut socket).await;
+    assert_eq!(ended["code"], "unauthorized", "{ended}");
+    assert_eq!(receive(&mut socket).await["type"], "closed");
+
+    // One revoked is refused at its next act.
+    let (token, id) = token_for(&served, Duration::from_secs(600)).await;
+    let (mut acting, _) = attach(&served, &token, "operation:G").await;
+    served.registry.revoke_access_token(&id).unwrap();
+    acting
+        .send(WsMessage::Text(
+            json!({"type": "prompt", "text": "still there?"})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    let refused = receive(&mut acting).await;
+    assert_eq!(refused["code"], "unauthorized", "{refused}");
+    assert_eq!(receive(&mut acting).await["type"], "closed");
+    assert!(
+        poll(&served, 0)
+            .await
+            .iter()
+            .all(|command| !matches!(command.op, HubOp::Prompt { .. }))
+    );
+
+    // And one revoked while the person says nothing is closed at the next look.
+    let (token, id) = token_for(&served, Duration::from_secs(600)).await;
+    let (mut idle, _) = attach(&served, &token, "operation:G").await;
+    served.registry.revoke_access_token(&id).unwrap();
+    assert_eq!(receive(&mut idle).await["code"], "unauthorized");
+    assert_eq!(receive(&mut idle).await["type"], "closed");
+}
+
+#[tokio::test]
+async fn a_prompt_within_the_limit_fits_a_frame_however_it_is_escaped() {
+    let mut limits = ai6::UnexLimits::default();
+    limits.attach.prompt_bytes = ai6::Limit::at(1_024);
+    limits.attach.frame_slack = ai6::Limit::at(100);
+    let served = crate::controls::tests::served_with_unex(CONVERSE, None, Some(limits)).await;
+    served
+        .registry
+        .claim_charge("operation:G", "kg", "worker", Duration::from_secs(600))
+        .unwrap();
+    let (mut socket, _) = attach(&served, &served.operator, "operation:G").await;
+    // Every byte a control character: six bytes each once written as JSON.
+    let heavy = "\u{1}".repeat(1_024);
+    let sent = json!({"type": "prompt", "text": heavy}).to_string();
+    assert!(sent.len() > 6 * 1_024, "{}", sent.len());
+    socket.send(WsMessage::Text(sent.into())).await.unwrap();
+    let commands = poll(&served, 5_000).await;
+    assert!(matches!(&commands[0].op, HubOp::Prompt { text } if text.len() == 1_024));
+    // A frame past what such a prompt takes is answered, and the socket stays open.
+    socket
+        .send(WsMessage::Text(
+            json!({"type": "prompt", "text": "x".repeat(8_000)})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(receive(&mut socket).await["code"], "bad_request");
+    socket
+        .send(WsMessage::Text(
+            json!({"type": "prompt", "text": "still open"})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    let commands = poll(&served, 5_000).await;
+    assert!(matches!(&commands[0].op, HubOp::Prompt { text } if text == "still open"));
 }

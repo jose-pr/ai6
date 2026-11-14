@@ -941,6 +941,15 @@ pub(crate) mod tests {
         roles: &str,
         roster: Option<Arc<dyn ai6::ConfigProvider>>,
     ) -> Served {
+        served_with_unex(roles, roster, None).await
+    }
+
+    /// As [`served_with_roster`], with the `unex` record's limits when given.
+    pub(crate) async fn served_with_unex(
+        roles: &str,
+        roster: Option<Arc<dyn ai6::ConfigProvider>>,
+        unex: Option<ai6::UnexLimits>,
+    ) -> Served {
         let directory = tempfile::tempdir().unwrap();
         let registry = FileRegistry::open(directory.path());
         for (station, operations) in [("hq", vec![]), ("worker", vec!["G", "L"])] {
@@ -969,7 +978,8 @@ pub(crate) mod tests {
                 Duration::from_secs(30),
                 Duration::from_secs(30),
             )
-            .unwrap(),
+            .unwrap()
+            .with_unex_limits(unex.unwrap_or_default()),
             Arc::new(registry.clone()),
             AccessProviders::new(Arc::new(People), Arc::new(People), Arc::new(authorizer)),
         );

@@ -227,15 +227,25 @@ pub struct UnexAttachLimits {
     #[schema(title = "Requests waiting for a Station")]
     #[map(default = UnexAttachLimits::default().queue)]
     pub queue: Limit,
-    /// Frames queued for one attached person's socket, at least 1; one who falls further behind is
-    /// let go and may attach again.
+    /// Frames queued for one attached person's socket; one who falls further behind is let go and may
+    /// attach again.
     #[schema(title = "Frames queued for one person")]
     #[map(default = UnexAttachLimits::default().backlog)]
-    pub backlog: u64,
+    pub backlog: Limit,
     /// Bytes of one prompt.
     #[schema(title = "Longest prompt", format = "bytes")]
     #[map(default = UnexAttachLimits::default().prompt_bytes)]
     pub prompt_bytes: Limit,
+    /// Bytes a frame may hold beyond the largest prompt written out in JSON (six bytes for each byte
+    /// of the prompt, at worst): what a hello, an answer or any other frame needs.
+    #[schema(title = "Slack of a frame", format = "bytes")]
+    #[map(default = UnexAttachLimits::default().frame_slack)]
+    pub frame_slack: Limit,
+    /// Bytes the socket takes of one frame before it is closed. A frame past what a prompt within
+    /// `prompt_bytes` takes, and within this, is answered with an error and the socket stays open.
+    #[schema(title = "Largest frame the socket takes", format = "bytes")]
+    #[map(default = UnexAttachLimits::default().socket_bytes)]
+    pub socket_bytes: Limit,
     /// Seconds a socket may take to say who it is.
     #[schema(title = "Longest wait for a hello")]
     #[map(default = UnexAttachLimits::default().hello_timeout)]
@@ -244,6 +254,15 @@ pub struct UnexAttachLimits {
     #[schema(title = "Longest poll a Station may ask for")]
     #[map(default = UnexAttachLimits::default().max_wait)]
     pub max_wait: Seconds,
+    /// Seconds a Station's poll waits when it names no wait.
+    #[schema(title = "A Station's poll waits")]
+    #[map(default = UnexAttachLimits::default().poll_wait)]
+    pub poll_wait: Seconds,
+    /// Seconds between looks at whether an attached person's sign-in and right to converse stand; one
+    /// who no longer holds them stops receiving.
+    #[schema(title = "Sign-in and role checked every")]
+    #[map(default = UnexAttachLimits::default().recheck_every)]
+    pub recheck_every: Seconds,
 }
 
 impl Default for UnexAttachLimits {
@@ -251,10 +270,14 @@ impl Default for UnexAttachLimits {
         Self {
             clients: Limit::at(16),
             queue: Limit::at(256),
-            backlog: 1_024,
+            backlog: Limit::at(1_024),
             prompt_bytes: Limit::at(16 * KIB),
+            frame_slack: Limit::at(4 * KIB),
+            socket_bytes: Limit::at(MIB),
             hello_timeout: Seconds::new(10),
             max_wait: Seconds::new(25),
+            poll_wait: Seconds::new(1),
+            recheck_every: Seconds::new(30),
         }
     }
 }
@@ -420,9 +443,10 @@ const PACE: &[&str] = &[
     "write_lease_ttl",
     "input_queue",
     "fanout",
-    "backlog",
     "hello_timeout",
     "max_wait",
+    "recheck_every",
+    "frame_slack",
     "socket_buffer_bytes",
     "audit_page",
     "attention_items",
@@ -506,8 +530,21 @@ impl UnexLimits {
                 ("queue", self.attach.queue),
             ],
         )?;
-        if self.attach.backlog == 0 {
-            return Err("attach.backlog: at least 1".to_owned());
+        // A prompt that fits must fit the socket, escaped.
+        let attach = &self.attach;
+        let widest = attach
+            .prompt_bytes
+            .or_max()
+            .saturating_mul(6)
+            .saturating_add(attach.frame_slack.or_max());
+        if attach
+            .socket_bytes
+            .get()
+            .is_some_and(|socket| socket < widest as u64)
+        {
+            return Err(
+                "attach.socket_bytes: at least 6 times prompt_bytes plus frame_slack".to_owned(),
+            );
         }
         if self.login.forget_every == 0 {
             return Err("login.forget_every: at least 1".to_owned());
