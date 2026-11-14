@@ -37,17 +37,27 @@ class AttentionEntry {
     this.route,
     this.observedAt,
     this.since,
+    this.editor,
+    this.revision,
   });
 
   factory AttentionEntry.fromJson(Map<String, dynamic> json) {
     final entity = json['entity'] as Map<String, dynamic>?;
     OoRoute? route;
+    OoRoute? editor;
     try {
       if (json['route'] case final Object value) {
         route = OoRoute.fromJson(value);
       }
     } on FormatException {
       route = null;
+    }
+    try {
+      if (json['editor'] case final Object value) {
+        editor = OoRoute.fromJson(value);
+      }
+    } on FormatException {
+      editor = null;
     }
     return AttentionEntry(
       id: json['id'] as String,
@@ -62,13 +72,15 @@ class AttentionEntry {
       entityKind: entity?['kind'] as String?,
       entityId: entity?['id'] as String?,
       route: route,
+      editor: editor,
+      revision: json['revision'] as String?,
     );
   }
 
   final String id;
 
-  /// `blocked_run`, `green_ink`, `held_brief`, `mission_proposal`, `station_dark` or
-  /// `config_refused`.
+  /// `blocked_run`, `green_ink`, `held_brief`, `mission_proposal`, `station_dark`,
+  /// `config_refused`, `report`, `charge_failed` or `charge_lapsed`.
   final String kind;
   final AttentionCondition condition;
   final String title;
@@ -92,6 +104,13 @@ class AttentionEntry {
 
   /// The page that deals with it.
   final OoRoute? route;
+
+  /// For a refused configuration, the record editor on that Station's own records, where a
+  /// change is reviewed and saved.
+  final OoRoute? editor;
+
+  /// The configuration revision a refusal names.
+  final String? revision;
 }
 
 /// How one source of the summary was read.

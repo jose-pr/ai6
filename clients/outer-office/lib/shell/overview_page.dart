@@ -1189,6 +1189,15 @@ class _AttentionTile extends StatelessWidget {
               OoTime(item.checkedAt),
             ],
           ),
+          if (item.editor case final editor? when pages.contains(editor.page))
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                key: Key('attention-editor-${item.scope}'),
+                onPressed: () => onRoute(editor),
+                child: const Text('Review the Station records'),
+              ),
+            ),
         ],
       ),
       trailing: openable && !phone

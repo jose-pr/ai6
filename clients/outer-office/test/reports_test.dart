@@ -23,6 +23,7 @@ Map<String, Object?> report(
   Map<String, Object?>? assessment,
   Map<String, Object?>? resolution,
   String kind = 'finding',
+  String? handling,
 }) => {
   'id': id,
   'scope': scope,
@@ -43,6 +44,7 @@ Map<String, Object?> report(
   'updated': 1_700_000_100.0,
   'assessment': ?assessment,
   'resolution': ?resolution,
+  'handling': ?handling,
 };
 
 /// The Reports the gateway holds, by scope, and what was asked of it.
@@ -50,10 +52,14 @@ class Gateway {
   Gateway(
     this.byScope, {
     this.actions = const ['mission.read', 'mission.control'],
+    this.mActions = const [],
   });
 
   final Map<String, List<Map<String, Object?>>> byScope;
   final List<String> actions;
+
+  /// What the profile says the person holds on M's own Reports.
+  final List<String> mActions;
   final seen = <http.Request>[];
 
   /// What a PUT assessment answers: a status and a body.
@@ -88,6 +94,7 @@ class Gateway {
             'reports': shown,
             'priorities': ['critical', 'high', 'normal', 'low'],
             'classifications': ['unclassified', 'restricted'],
+            'handlings': ['operation', 'compartments', 'peers'],
           });
         }
         if (path.startsWith('/v1/reports/sources/')) {
@@ -157,6 +164,7 @@ class Gateway {
               {'operation_id': 'L', 'name': 'LineupMux', 'actions': actions},
             ],
             'stations': [],
+            'reports': mActions,
           }),
           _ => json(const <Object>[]),
         };
@@ -529,5 +537,92 @@ void main() {
       confidence: 'low',
     );
     expect(judgement.words, 'realistic possibility (40-50%), low confidence');
+  });
+  for (final (name, size) in [
+    ('desktop', const Size(1400, 1000)),
+    ('phone', const Size(390, 900)),
+  ]) {
+    testWidgets('a question may go only as far as the Report\'s handling mark, '
+        'at $name width', (tester) async {
+      final gateway = Gateway({
+        'operation:G': [
+          report('r1', 'Marked for compartments', handling: 'compartments'),
+        ],
+      });
+      await openAt(
+        tester,
+        await gateway.board(),
+        '/reports?report_id=r1',
+        size: size,
+      );
+      await tester.tap(find.text('Assess this Report'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('assessment')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Awaiting an answer').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('question')), 'Who?');
+      await tester.enterText(find.byKey(const ValueKey('wait')), '1');
+      await tester.enterText(find.byKey(const ValueKey('reason')), 'Ask');
+      await tester.ensureVisible(find.byKey(const ValueKey('via')));
+      await tester.tap(find.byKey(const ValueKey('via')));
+      await tester.pumpAndSettle();
+      expect(find.text('peers'), findsNothing, reason: 'wider than its mark');
+      expect(find.text('operation'), findsWidgets);
+      await tester.tap(find.text('compartments').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save the assessment'));
+      await tester.pumpAndSettle();
+      expect(gateway.puts, [
+        {
+          'assessment': 'awaiting',
+          'reason': 'Ask',
+          'question': 'Who?',
+          'wait_seconds': 3600,
+          'via': 'compartments',
+        },
+      ]);
+    });
+
+    testWidgets("M's own Reports are listed for who holds config:reports, at "
+        '$name width', (tester) async {
+      final gateway = Gateway(
+        {
+          'operation:G': [report('r1', 'In Guatiao')],
+          'm': [report('rm', 'Upstream advisory', scope: 'm')],
+        },
+        mActions: const ['station.read'],
+      );
+      await openAt(tester, await gateway.board(), '/reports', size: size);
+      expect(find.text('Upstream advisory'), findsOneWidget);
+      final scopes = [
+        for (final request in gateway.seen)
+          if (request.url.path == '/v1/reports')
+            request.url.queryParameters['scope'],
+      ];
+      expect(scopes, unorderedEquals(['operation:G', 'operation:L', 'm']));
+
+      // Reading M's Reports is not assessing them: that is station.configure.
+      await tester.tap(find.text('Upstream advisory'));
+      await tester.pumpAndSettle();
+      final button = tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'Assess this Report'),
+      );
+      expect(button.onPressed, isNull);
+    });
+  }
+
+  testWidgets('a person without config:reports is not shown M and does not '
+      'ask for it', (tester) async {
+    final gateway = Gateway({
+      'operation:G': [report('r1', 'In Guatiao')],
+    });
+    await openAt(tester, await gateway.board(), '/reports');
+    final scopes = [
+      for (final request in gateway.seen)
+        if (request.url.path == '/v1/reports')
+          request.url.queryParameters['scope'],
+    ];
+    expect(scopes, unorderedEquals(['operation:G', 'operation:L']));
   });
 }

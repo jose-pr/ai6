@@ -21,12 +21,14 @@ Future<ReportSummary?> showAssessReport(
   required ReportSummary report,
   required List<String> priorities,
   required List<ReportSummary> others,
+  List<String> handlings = const [],
 }) => showDialog<ReportSummary>(
   context: context,
   builder: (_) => AssessReportDialog(
     board: board,
     report: report,
     priorities: priorities,
+    handlings: handlings,
     others: others,
   ),
 );
@@ -47,12 +49,16 @@ class AssessReportDialog extends StatefulWidget {
     required this.report,
     required this.priorities,
     required this.others,
+    this.handlings = const [],
     super.key,
   });
 
   final MissionBoard board;
   final ReportSummary report;
   final List<String> priorities;
+
+  /// The deployment's handling marks, narrowest first.
+  final List<String> handlings;
   final List<ReportSummary> others;
 
   @override
@@ -68,6 +74,7 @@ class _AssessReportDialogState extends State<AssessReportDialog> {
   final _condition = TextEditingController();
   final _wait = TextEditingController();
   String? _of;
+  String? _via;
   int _unit = 1;
   int? _credibility;
   String? _priority;
@@ -93,6 +100,13 @@ class _AssessReportDialogState extends State<AssessReportDialog> {
 
   bool get _takesQuestion => _verdict == 'awaiting' || _verdict == 'decision';
   bool get _waits => _verdict == 'awaiting' || _verdict == 'later';
+
+  /// The handling marks a question about this Report may go as far as: up to the Report's own,
+  /// the narrowest when it has none.
+  List<String> get _viaChoices {
+    final held = widget.handlings.indexOf(widget.report.handling ?? '');
+    return widget.handlings.take((held < 0 ? 0 : held) + 1).toList();
+  }
 
   /// The PUT's body, or null with [_problem] set when what is entered cannot be sent.
   Map<String, Object?>? _body() {
@@ -124,6 +138,7 @@ class _AssessReportDialogState extends State<AssessReportDialog> {
     if (_verdict == 'awaiting') {
       final ask = _ask.text.trim();
       if (ask.isNotEmpty) body['ask'] = ask;
+      if (_via != null) body['via'] = _via;
     }
     if (_verdict == 'later') {
       final condition = _condition.text.trim();
@@ -269,6 +284,30 @@ class _AssessReportDialogState extends State<AssessReportDialog> {
                   decoration: const InputDecoration(
                     labelText: 'Asked of (optional): a channel, tracker item or person',
                   ),
+                ),
+              if (_verdict == 'awaiting' && _viaChoices.isNotEmpty)
+                DropdownButtonFormField<String?>(
+                  key: const ValueKey('via'),
+                  initialValue: _via,
+                  isExpanded: true,
+                  decoration: InputDecoration(
+                    labelText: 'May go as far as (optional)',
+                    helperText: widget.report.handling == null
+                        ? 'This Report has no handling mark, so only the narrowest.'
+                        : "Up to this Report's handling mark, "
+                              '${widget.report.handling}.',
+                  ),
+                  items: [
+                    const DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text('No limit named'),
+                    ),
+                    for (final mark in _viaChoices)
+                      DropdownMenuItem<String?>(value: mark, child: Text(mark)),
+                  ],
+                  onChanged: _sending
+                      ? null
+                      : (value) => setState(() => _via = value),
                 ),
               if (_verdict == 'later')
                 TextField(

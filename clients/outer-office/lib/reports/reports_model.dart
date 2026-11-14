@@ -322,6 +322,7 @@ class ReportsRead {
     required this.reports,
     this.priorities = const [],
     this.classifications = const [],
+    this.handlings = const [],
   });
 
   factory ReportsRead.fromJson(Map<String, dynamic> json) => ReportsRead(
@@ -337,6 +338,10 @@ class ReportsRead {
       for (final name in json['classifications'] as List<dynamic>? ?? const [])
         name as String,
     ],
+    handlings: [
+      for (final name in json['handlings'] as List<dynamic>? ?? const [])
+        name as String,
+    ],
   );
 
   final List<ReportSummary> reports;
@@ -346,6 +351,9 @@ class ReportsRead {
 
   /// Its classifications, lowest first.
   final List<String> classifications;
+
+  /// Its handling marks, narrowest first: how far a question about a Report may go.
+  final List<String> handlings;
 }
 
 /// Every Report this person reads, and which scopes could not be read.
@@ -355,6 +363,7 @@ class ReportsListing {
     required this.reports,
     this.priorities = const [],
     this.classifications = const [],
+    this.handlings = const [],
     this.unread = const {},
     this.refused = 0,
   });
@@ -362,6 +371,7 @@ class ReportsListing {
   final List<ReportSummary> reports;
   final List<String> priorities;
   final List<String> classifications;
+  final List<String> handlings;
 
   /// The scopes that failed, each with why.
   final Map<String, String> unread;

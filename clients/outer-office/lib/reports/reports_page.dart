@@ -94,6 +94,7 @@ class _ReportsPageState extends State<ReportsPage> {
                 board: widget.board,
                 reportId: selected,
                 priorities: listing.priorities,
+                handlings: listing.handlings,
                 others: listing.reports,
                 onRoute: widget.onRoute,
                 onChanged: (_) => _refresh(),

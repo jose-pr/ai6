@@ -1675,20 +1675,24 @@ class MissionBoard extends ChangeNotifier
     ];
   }
 
-  /// The scopes whose Reports this account may read: its Operations (`mission.read`) and its
-  /// Stations (`station.read`).
+  /// The scopes whose Reports this account may read: its Operations (`mission.read`), its
+  /// Stations (`station.read`) and M's own (`station.read` on `config:reports`).
   List<String> get reportScopes => [
     for (final operation in _operationsWith('mission.read'))
       'operation:$operation',
     for (final station in userSession?.stations ?? const <UserStationAccess>[])
       if (station.actions.contains('station.read'))
         'station:${station.stationId}',
+    if (demo || (userSession?.reports.contains('station.read') ?? false)) 'm',
   ];
 
   /// Whether this account may assess or reopen a Report of [scope]: `mission.control` on an
-  /// Operation, `station.configure` on a Station.
+  /// Operation, `station.configure` on a Station or on M's own.
   bool controlsReports(String scope) {
     if (demo) return true;
+    if (scope == 'm') {
+      return userSession?.reports.contains('station.configure') ?? false;
+    }
     if (scope.startsWith('operation:')) {
       return _operationsWith('mission.control')
           .contains(scope.substring('operation:'.length));
@@ -1813,6 +1817,7 @@ class MissionBoard extends ChangeNotifier
       reports: [for (final read in sweep.items) ...read.reports],
       priorities: sweep.items.firstOrNull?.priorities ?? const [],
       classifications: sweep.items.firstOrNull?.classifications ?? const [],
+      handlings: sweep.items.firstOrNull?.handlings ?? const [],
       unread: sweep.unread,
       refused: sweep.refused,
     );
@@ -4736,6 +4741,7 @@ class UserSessionSummary {
     this.roster = const [],
     this.config = const {},
     this.globalActions = const [],
+    this.reports = const [],
     this.moneypenny = false,
   });
 
@@ -4756,6 +4762,10 @@ class UserSessionSummary {
 
   /// The person's actions on the global access policy and the accounts.
   final List<String> globalActions;
+
+  /// The person's actions on M's own Reports (`station.read` reads them, `station.configure`
+  /// assesses them).
+  final List<String> reports;
 
   /// Whether this gateway serves Moneypenny; the app offers her only when it does.
   final bool moneypenny;
@@ -4786,6 +4796,7 @@ class UserSessionSummary {
               in (json['config'] as Map<String, dynamic>? ?? const {}).entries)
             key: (value as List<dynamic>).cast<String>(),
         },
+        reports: (json['reports'] as List<dynamic>? ?? const []).cast<String>(),
         globalActions: (json['global_actions'] as List<dynamic>? ?? const [])
             .cast<String>(),
         moneypenny: json['moneypenny'] as bool? ?? false,

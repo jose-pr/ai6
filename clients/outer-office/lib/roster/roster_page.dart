@@ -297,9 +297,18 @@ class _RosterPageState extends State<RosterPage> {
   static String _singular(String kind) =>
       _routeKinds.entries.firstWhere((entry) => entry.value == kind).key;
 
+  /// The Station the route names, for a kind a Station may have records of its own for.
+  String? get _routeStation {
+    final station = widget.route['station_id'];
+    return station != null && stationScopedKinds.contains(_kind)
+        ? station
+        : null;
+  }
+
   @override
   void initState() {
     super.initState();
+    _station = _routeStation;
     unawaited(_load());
   }
 
@@ -307,13 +316,14 @@ class _RosterPageState extends State<RosterPage> {
   void didUpdateWidget(RosterPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.route['kind'] != widget.route['kind'] ||
+        oldWidget.route['station_id'] != widget.route['station_id'] ||
         (oldWidget.route['key'] == null) != (widget.route['key'] == null)) {
       setState(() {
         _records = null;
         _everything = const {};
         _spec = null;
         _weakened = const [];
-        _station = null;
+        _station = _routeStation;
         _overrides = const {};
       });
       unawaited(_load());
@@ -386,7 +396,8 @@ class _RosterPageState extends State<RosterPage> {
           value: null,
           child: Text('Global defaults (all Stations)'),
         ),
-        for (final id in _stationIds)
+        // A link may name a Station the board has not listed (yet); it stays choosable.
+        for (final id in {..._stationIds, ?_station})
           DropdownMenuItem<String?>(
             value: id,
             child: Text(

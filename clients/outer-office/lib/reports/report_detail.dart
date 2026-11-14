@@ -58,6 +58,7 @@ class ReportDetail extends StatefulWidget {
     required this.reportId,
     required this.onRoute,
     this.priorities = const [],
+    this.handlings = const [],
     this.others = const [],
     this.onChanged,
     this.onClose,
@@ -70,6 +71,9 @@ class ReportDetail extends StatefulWidget {
 
   /// The deployment's priorities, most urgent first, for an assessment to choose from.
   final List<String> priorities;
+
+  /// The deployment's handling marks, narrowest first, for a question to be limited by.
+  final List<String> handlings;
 
   /// The other Reports a duplicate or related assessment may name.
   final List<ReportSummary> others;
@@ -135,6 +139,7 @@ class _ReportDetailState extends State<ReportDetail> {
         board: widget.board,
         report: report,
         priorities: widget.priorities,
+        handlings: widget.handlings,
         others: widget.others,
         onRoute: widget.onRoute,
         onChanged: _changed,
@@ -158,6 +163,7 @@ class _Facts extends StatelessWidget {
     required this.board,
     required this.report,
     required this.priorities,
+    required this.handlings,
     required this.others,
     required this.onRoute,
     required this.onChanged,
@@ -167,6 +173,7 @@ class _Facts extends StatelessWidget {
   final MissionBoard board;
   final ReportSummary report;
   final List<String> priorities;
+  final List<String> handlings;
   final List<ReportSummary> others;
   final ValueChanged<OoRoute> onRoute;
   final ValueChanged<ReportSummary> onChanged;
@@ -378,6 +385,7 @@ class _Facts extends StatelessWidget {
                   board: board,
                   report: report,
                   priorities: priorities,
+                  handlings: handlings,
                   others: [
                     for (final other in others)
                       if (other.id != report.id && other.whole) other,

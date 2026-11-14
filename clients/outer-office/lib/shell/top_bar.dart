@@ -19,9 +19,10 @@ import 'oo_freshness.dart';
 import 'oo_shell.dart';
 
 /// One thing that needs the person: a blocked Run, a green ink request or Mission
-/// proposal waiting for a decision, a held brief, a dark Station or a Station's refused
-/// configuration, as the gateway's attention summary lists it, with whether it still holds,
-/// what was checked and when.
+/// proposal waiting for a decision, a held brief, a dark Station, a Station's refused
+/// configuration, a Report waiting for an assessment or a charge whose last turn failed or
+/// whose lease lapsed, as the gateway's attention summary lists it, with whether it still
+/// holds, what was checked and when.
 @immutable
 class OoAttention {
   const OoAttention({
@@ -34,6 +35,7 @@ class OoAttention {
     required this.checkedAt,
     this.detail,
     this.at,
+    this.editor,
   });
 
   final OoIconName icon;
@@ -55,6 +57,9 @@ class OoAttention {
 
   /// When it began, as Unix seconds, when the data says.
   final double? at;
+
+  /// Where a change to what a Station refused is reviewed: the record editor on its records.
+  final OoRoute? editor;
 }
 
 /// The sources the attention list is read from; it says "nothing" only when it is live.
@@ -85,6 +90,8 @@ OoIconName _iconOf(String kind) => switch (kind) {
   'green_ink' => OoIconName.greenInk,
   'held_brief' || 'mission_proposal' => OoIconName.briefings,
   'blocked_run' => OoIconName.interrupt,
+  'report' => OoIconName.reports,
+  'charge_failed' || 'charge_lapsed' => OoIconName.timeline,
   _ => OoIconName.stations,
 };
 
@@ -100,7 +107,10 @@ List<OoAttention> attentionItems(MissionBoard board, OoTokens tokens) {
         icon: _iconOf(entry.kind),
         color: switch (entry.condition) {
           AttentionCondition.historical => tokens.muted,
-          _ when entry.kind == 'station_dark' => tokens.danger,
+          _
+              when entry.kind == 'station_dark' ||
+                  entry.kind == 'charge_failed' =>
+            tokens.danger,
           _ => tokens.warning,
         },
         // Parts of a title are an Agent's or a Source's own words: show what renders as nothing.
@@ -111,6 +121,7 @@ List<OoAttention> attentionItems(MissionBoard board, OoTokens tokens) {
         checkedAt: entry.checkedAt,
         detail: entry.detail == null ? null : revealInvisible(entry.detail!),
         at: entry.since,
+        editor: entry.editor,
       ),
   ];
 }
