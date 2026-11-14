@@ -156,7 +156,8 @@ Moneypenny ([her conversation log](assistant.md#her-conversation-log)); seeing a
 roster's Operations, Agents, roles and covers ([Changing the configuration of running
 Stations](operations.md#changing-the-configuration-of-running-stations)); `audit.read` there
 shows those edits and the refused ones. `pool.read` shows the [account pools](agents.md#account-pools) an Operation
-may draw from, never a credential; `pool.manage` lifts an account's limit. `mission.control`
+may draw from, never a credential; `pool.manage` lifts an account's limit and changes which Stations hold a
+login or forgets it ([Logins kept in the Registry](agents.md#logins-kept-in-the-registry)). `mission.control`
 (cancel, retry, resume and interrupt a Mission) is separate from `run.input`: typing into
 a Run does not grant stopping it. `approval.decide` signs or refuses an Agent's request
 for [green ink](missions.md#green-ink) and `approval.class` manages class authorisations;

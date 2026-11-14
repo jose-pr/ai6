@@ -978,6 +978,7 @@ files = [".grok/auth.json"]            # relative to a home, none with `..`
 max_concurrent = 1                     # see "May it be shared?" below
 renew_command = ["grok", "models"]     # default: none, so it is left to its next real use
 renew_env = { GROK_AUTH_EARLY_INVALIDATION_SECS = "3600" }
+logout_command = ["grok", "logout"]    # default: none, so removing the account only forgets its login
 ```
 
 - **What the Registry holds.** Ciphertext, one sealed box per Station named, and who is named. A
@@ -1018,12 +1019,77 @@ renew_env = { GROK_AUTH_EARLY_INVALIDATION_SECS = "3600" }
   is in the Registry, so the next Headquarters Station carries on where this one stopped. With no
   `renew_command`, a login is left to its next real use and a person is told it may lapse.
 - **The board.** `pool.read` shows the Stations named, when the login ends, when it was last
-  renewed, who holds its lease and why a person is needed: never the login.
+  renewed and how that ended, who holds its lease and until when, the changes waiting for a Station
+  that holds the login, and why a person is needed: never the login.
 - **A Run whose token was refused** fails with a line naming the renewal under it, and a resume
   takes the current login.
 
 The value of a login reaches no record, log, error or response, and what a renewal command prints is
 never read.
+
+#### Adding a login, and which Stations hold it
+
+The files an account names in `files` are the only ones read, so no command hard-codes where a CLI
+keeps its login. On a host where the CLI is signed in:
+
+```bash
+ai6 pools add-login grok-free shared --handler acp           # from this user's home
+ai6 pools add-login grok-free shared --handler acp --from /srv/login-home --station host-a --station host-b
+```
+
+- `add-login` reads those files from `--from` (default: the user's home), seals them to the Stations
+  named with `--station` (default: this Station, whose `[station] id` or `station-id` file names it)
+  and records an audit event (`pool.login.add`) first: a refused audit refuses the command. It takes
+  nothing from the host, never prints a file, and refuses an account that already holds a login
+  unless `--replace` (`pool.login.replace`). `--handler` must be the handler the pool serves, so a
+  login is not sealed under the wrong account. A Station named must have published its sealing key,
+  which every Station does when it starts.
+- `ai6 pools add-station POOL ACCOUNT STATION` and `ai6 pools remove-station POOL ACCOUNT STATION`
+  change which Stations may hold it, on a host whose Station already holds it (sealing needs its key).
+  Removing a Station drops its sealed copy from the next revision on; what it already opened stays with
+  it, so replace a login that Station should no longer have (`add-login --replace`). The last Station
+  cannot be removed. Audited as `pool.login.station.add` and `pool.login.station.remove`.
+- `ai6 pools remove-login POOL ACCOUNT` forgets the login: the sealed value and everything the
+  Registry kept of its state. It is still signed in at its provider. With `--sign-out` the account's
+  `logout_command` runs first, on a Station that holds the login, in a throwaway home; the login is
+  forgotten only when that ends with success, and an account with no `logout_command` is refused with
+  nothing changed. Audited (`pool.login.sign_out`, `pool.login.forget`).
+- `ai6 pools list` shows, per account, the Stations named, when the login ends, its last renewal, the
+  lease holder and what waits.
+
+The same three changes are made from `ai6ctl` and Outer Office, which hold no key: they go through
+Universal Exports, need `pool.manage` on an Operation that may draw the account, and are audited
+(`pool.login.station.add`, `pool.login.station.remove`, `pool.login.sign_out` or `pool.login.forget`)
+before anything is recorded.
+
+```bash
+ai6ctl pools add-station grok-free shared host-b --operation G
+ai6ctl pools remove-station grok-free shared host-b --operation G
+ai6ctl pools remove-login grok-free shared --operation G --sign-out
+```
+
+Forgetting without signing out happens at once (`204`). A new Station, a removed Station and a sign-out
+need a Station that holds the login, so they are recorded on the login (`202`, shown on the board as
+waiting) and a Station that holds it makes them at its next check-in, auditing each as it does
+(`pool.login.station.added` and the like, by the Station). A request nothing can ever make (a Station
+with no sealing key, the last Station, a sign-out that failed) is cleared with its reason as the
+login's last result.
+
+#### Needs a person
+
+A login that cannot be renewed any more is marked as needing a person: `renew_attempts` renewals
+failed in a row, or the account is declared to keep a login and none was ever added or it was forgotten.
+Its Runs go to the next account or route. Nothing renews it; a person signs the CLI in again on a
+host and runs
+
+```bash
+ai6 pools add-login POOL ACCOUNT --handler H --replace
+```
+
+which clears the mark. The state is shown, with that command, on the Account Pools page of Outer
+Office and in `ai6ctl pools`, and it is an item (`login_needs_person`) of the attention summary
+(`GET /v1/user/attention`, the Overview page, and Moneypenny's `attention` tool), read per Operation with
+`pool.read`, once per account however many Operations may draw it.
 
 **May it be shared?** `max_concurrent` keeps its meaning: several Runs may share a login, across
 Stations. Whether that is safe depends on the CLI and on its provider. What each measured CLI does is
