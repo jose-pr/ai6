@@ -1,5 +1,5 @@
 {
-  "description": "Applying one overlay. 'facts' describe the consumer: os, root, identity, state (its state directory), pinned, grants (what this overlay may read, by provider: secret names, file keys, host variables), base_env (the environment being built), host_env (its own), secrets (named), secret_files (the secrets directory), files (the overlay's files by relative path, with the text of those read as env files; the fields a manifest does not write take their defaults from them), providers, interpreters (the interpreters the consumer can run here; absent, python, node, powershell, bash and sh), env_scripts_enabled (the consumer's policy; absent, true), enforces_network, packages (each runtime's installed packages directory), and for setup phases change ('add', 'sync', 'activate' or 'remove'), digest (the overlay's), record (the digest and phase of the last preparation of this overlay that succeeded on this OS; absent, none) and fails (the step that fails: 'deps' or 'setup'). 'expect' gives the resulting environment, the selected setup and runtime variants, the dependencies (runtime, file, lock or null, environment), what a probe needs, and the non_defaults as [id, subject], and with a change the setup_phase (null when nothing runs), setup_arguments (the phase, then the variant's args; null when no setup runs), the steps in order ('empty-state', 'deps:<runtime>', 'setup', 'record', 'delete'), the record afterwards, and whether the digest activates; or the refusal, its 'error' and its 'subject' as the conformance chapter writes one: escaped and cut.",
+  "description": "Applying one overlay. 'facts' describe the consumer: os, root, identity, state (its state directory), pinned, grants (what this overlay may read, by provider: secret names, file keys, host variables), base_env (the environment being built), host_env (its own), secrets (named), secret_files (the secrets directory), files (the overlay's files by relative path, with the text of those read as env files; the fields a manifest does not write take their defaults from them), providers, interpreters (the interpreters the consumer can run here; absent, python, node, powershell, bash and sh), env_scripts_enabled (the consumer's policy; absent, true), enforces_network, packages (each runtime's installed packages directory), and for setup phases change ('add', 'sync', 'activate' or 'remove'), digest (the overlay's), record (the digest and phase of the last preparation of this overlay that succeeded on this OS; absent, none) and fails (the step that fails: 'deps' or 'setup'). 'expect' gives the resulting environment, the selected setup and runtime variants, the dependencies (runtime, file, lock or null, environment), what a probe needs, and the non_defaults as [id, subject], and with a change the setup_phase (null when nothing runs), setup_arguments (the phase, then the variant's args; null when no setup runs), the steps in order ('empty-state', 'deps:<runtime>', 'setup', 'record', 'delete'), the record afterwards, and whether the digest activates; or the refusal, its 'error' and its 'subject' as the conformance chapter writes one: escaped and cut. 'facts' may give 'digest' and 'allowed' (absent: the allowance is not in play; null: nothing allowed): an overlay whose digest is not the allowed one runs no env script, and 'expect' then holds 'reports' ([id, overlay]).",
   "spec": "spec/v0/environment.md#order-of-application",
   "cases": [
     {
@@ -3235,6 +3235,461 @@
           "commands": []
         },
         "non_defaults": []
+      }
+    },
+    {
+      "id": "env-scripts-not-allowed",
+      "description": "The overlay's digest is not the one the user allowed: no env script runs, declared or default, and it is reported; the rest of the overlay applies.",
+      "manifest": {
+        "env": {
+          "MODE": "x"
+        },
+        "env_scripts": [
+          {
+            "interpreter": "python",
+            "path": "env/a.py"
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env.py": "",
+          "env/a.py": ""
+        },
+        "digest": "sha256:1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a",
+        "allowed": "sha256:2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b"
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "MODE": "x"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "dependencies": [],
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "non_defaults": [],
+        "reports": [
+          [
+            "env-script-not-allowed",
+            "docs-tools"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "env-scripts-allowed",
+      "description": "At the allowed digest they run, each reported env-script; a digest compares without regard to case.",
+      "manifest": {
+        "env": {
+          "MODE": "x"
+        },
+        "env_scripts": [
+          {
+            "interpreter": "python",
+            "path": "env/a.py"
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env.py": "",
+          "env/a.py": ""
+        },
+        "digest": "sha256:1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a",
+        "allowed": "sha256:1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A"
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "MODE": "x"
+        },
+        "env_scripts": [
+          {
+            "interpreter": "python",
+            "path": "env.py",
+            "args": [],
+            "timeout": 60
+          },
+          {
+            "interpreter": "python",
+            "path": "env/a.py",
+            "args": [],
+            "timeout": 60
+          }
+        ],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "dependencies": [],
+        "needs": {
+          "interpreters": [
+            "python"
+          ],
+          "commands": []
+        },
+        "non_defaults": [
+          [
+            "env-script",
+            "env.py"
+          ],
+          [
+            "env-script",
+            "env/a.py"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "env-scripts-nothing-allowed",
+      "description": "A consumer that has allowed nothing for the overlay runs none.",
+      "manifest": {
+        "env_scripts": [
+          {
+            "interpreter": "sh",
+            "path": "env/a.sh"
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env/a.sh": ""
+        },
+        "digest": "sha256:1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a",
+        "allowed": null
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "dependencies": [],
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "non_defaults": [],
+        "reports": [
+          [
+            "env-script-not-allowed",
+            "docs-tools"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "env-scripts-digest-unknown",
+      "description": "A consumer that has not computed the overlay's digest allows nothing.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env.py": ""
+        },
+        "allowed": "sha256:1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a"
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "dependencies": [],
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "non_defaults": [],
+        "reports": [
+          [
+            "env-script-not-allowed",
+            "docs-tools"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "default-env-script-not-allowed",
+      "description": "The default env.<ext> is off too, and the interpreter it needs is not a requirement.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env.py": "",
+          "env.sh": ""
+        },
+        "digest": "sha256:1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a",
+        "allowed": "sha256:2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b"
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "dependencies": [],
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "non_defaults": [],
+        "reports": [
+          [
+            "env-script-not-allowed",
+            "docs-tools"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "env-scripts-not-allowed-none-here",
+      "description": "An overlay whose env scripts are for another OS has none to report.",
+      "manifest": {
+        "env_scripts": [
+          {
+            "interpreter": "powershell",
+            "path": "env/c.ps1",
+            "os": [
+              "windows"
+            ]
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env/c.ps1": ""
+        },
+        "digest": "sha256:1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a",
+        "allowed": "sha256:2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b"
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "dependencies": [],
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "non_defaults": []
+      }
+    },
+    {
+      "id": "env-scripts-not-allowed-none",
+      "description": "An overlay with no env script has nothing to report.",
+      "manifest": {
+        "env": {
+          "MODE": "x"
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "digest": "sha256:1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a",
+        "allowed": "sha256:2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b"
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools",
+          "MODE": "x"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "dependencies": [],
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "non_defaults": []
+      }
+    },
+    {
+      "id": "env-scripts-not-allowed-defaults-off",
+      "description": "With the default off and none declared there is no env script.",
+      "manifest": {
+        "defaults": {
+          "env_scripts": false
+        }
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env.py": ""
+        },
+        "digest": "sha256:1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a",
+        "allowed": "sha256:2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b"
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "dependencies": [],
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "non_defaults": []
+      }
+    },
+    {
+      "id": "env-scripts-not-allowed-consumer-off",
+      "description": "A consumer whose policy turns env scripts off runs none, and has nothing to ask the user about.",
+      "manifest": {},
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env.py": ""
+        },
+        "env_scripts_enabled": false,
+        "digest": "sha256:1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a",
+        "allowed": "sha256:2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b"
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": null,
+        "python": null,
+        "node": null,
+        "dependencies": [],
+        "needs": {
+          "interpreters": [],
+          "commands": []
+        },
+        "non_defaults": []
+      }
+    },
+    {
+      "id": "env-scripts-not-allowed-setup-runs",
+      "description": "The allowance covers env scripts and hooks, not setup: setup still runs under the decision to activate.",
+      "manifest": {
+        "setup": [
+          {
+            "interpreter": "sh",
+            "path": "s.sh",
+            "network": false
+          }
+        ],
+        "env_scripts": [
+          {
+            "interpreter": "python",
+            "path": "env/a.py"
+          }
+        ]
+      },
+      "facts": {
+        "os": "linux",
+        "root": "/srv/ov/docs-tools",
+        "identity": "docs-tools",
+        "pinned": true,
+        "files": {
+          "env/a.py": "",
+          "s.sh": ""
+        },
+        "digest": "sha256:1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a",
+        "allowed": "sha256:2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b"
+      },
+      "expect": {
+        "ungranted": [],
+        "supported": true,
+        "env": {
+          "DOCS_TOOLS_OVERLAY_ROOT": "/srv/ov/docs-tools"
+        },
+        "env_scripts": [],
+        "setup": {
+          "interpreter": "sh",
+          "path": "s.sh",
+          "args": [],
+          "timeout": 300,
+          "network": false
+        },
+        "python": null,
+        "node": null,
+        "dependencies": [],
+        "needs": {
+          "interpreters": [
+            "sh"
+          ],
+          "commands": []
+        },
+        "non_defaults": [],
+        "reports": [
+          [
+            "env-script-not-allowed",
+            "docs-tools"
+          ]
+        ]
       }
     },
     {

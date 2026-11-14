@@ -1,0 +1,3991 @@
+{
+  "description": "OVERLAY.md and the front matter of any document. A case with an input ('text', 'base64', or 'parts', a list of [text, times] to concatenate) and optional 'limits' ('max_bytes', 'max_depth') expects the split and the reading: 'case' is 'none', 'malformed', 'unterminated', 'too-large', 'empty', 'unknown-format', 'does-not-parse', 'not-a-mapping' or 'mapping'; offsets are bytes from the start of the file and lines count from 1; 'metadata' and 'body' are text ('..._base64' when not UTF-8, '..._size' when the input is 'parts'); 'format' is the format read; 'data' is the manifest where there is one, and 'error' and 'line' what a gate refuses with ('line' only where one answer is right whatever the parser). A 'context_file' case expects the context's 'text', or an 'error'. A 'files' case gives an overlay's files by relative path (text, or {'base64': ...}) and expects 'manifest_file', 'manifest', the 'context' entries in order ('OVERLAY.md' standing for its body), 'context_ignored', 'issues' (pointers of the manifest's problems), 'applies', 'harness_context' where a harness names context, 'digest' where stated; or an 'error' and 'line'.",
+  "spec": "spec/v0/manifest.md#overlaymd",
+  "cases": [
+    {
+      "id": "doc-none-markdown",
+      "description": "No fence: the whole file is the body, and the manifest is empty.",
+      "text": "# Title\n\ntext\n",
+      "expect": {
+        "case": "none",
+        "body_offset": 0,
+        "body_line": 1,
+        "body": "# Title\n\ntext\n",
+        "data": {}
+      }
+    },
+    {
+      "id": "doc-none-empty-file",
+      "description": "An empty file.",
+      "text": "",
+      "expect": {
+        "case": "none",
+        "body_offset": 0,
+        "body_line": 1,
+        "body": "",
+        "data": {}
+      }
+    },
+    {
+      "id": "doc-none-bom",
+      "description": "A byte-order mark belongs to the file, not the body.",
+      "text": "﻿# Title\n",
+      "expect": {
+        "case": "none",
+        "body_offset": 3,
+        "body_line": 1,
+        "body": "# Title\n",
+        "data": {}
+      }
+    },
+    {
+      "id": "doc-none-two-boms",
+      "description": "Only one is dropped; the second is the body's. A gate refuses it as a malformed fence, and a viewer shows it as text.",
+      "text": "﻿﻿---\nname: x\n---\n",
+      "expect": {
+        "case": "malformed",
+        "body_offset": 3,
+        "body_line": 1,
+        "error": "malformed-fence",
+        "body": "﻿---\nname: x\n---\n",
+        "line": 1
+      }
+    },
+    {
+      "id": "doc-malformed-leading-space-dots",
+      "description": "'...' after white space. A gate refuses it as a malformed fence, and a viewer shows it as text.",
+      "text": "  ...\nname: x\n...\n",
+      "expect": {
+        "case": "malformed",
+        "body_offset": 0,
+        "body_line": 1,
+        "error": "malformed-fence",
+        "body": "  ...\nname: x\n...\n"
+      }
+    },
+    {
+      "id": "doc-none-thematic-later",
+      "description": "A rule on a later line, after text, is text.",
+      "text": "# Title\n---\nname: x\n---\n",
+      "expect": {
+        "case": "none",
+        "body_offset": 0,
+        "body_line": 1,
+        "body": "# Title\n---\nname: x\n---\n",
+        "data": {}
+      }
+    },
+    {
+      "id": "doc-none-format-line-alone",
+      "description": "A format line with no fence after it is text.",
+      "text": "#!toml\nname = 'x'\n",
+      "expect": {
+        "case": "none",
+        "body_offset": 0,
+        "body_line": 1,
+        "body": "#!toml\nname = 'x'\n",
+        "data": {}
+      }
+    },
+    {
+      "id": "doc-none-format-line-first",
+      "description": "A format line before the fence hides nothing: it is no fence, and the text is the body. A gate refuses it as a malformed fence, and a viewer shows it as text.",
+      "text": "#!toml\n---\nname = 'x'\n---\n",
+      "expect": {
+        "case": "malformed",
+        "body_offset": 0,
+        "body_line": 1,
+        "error": "malformed-fence",
+        "body": "#!toml\n---\nname = 'x'\n---\n",
+        "line": 1
+      }
+    },
+    {
+      "id": "doc-none-blank-first",
+      "description": "A blank first line. A gate refuses it as a malformed fence, and a viewer shows it as text.",
+      "text": "\n---\nname: x\n---\n",
+      "expect": {
+        "case": "malformed",
+        "body_offset": 0,
+        "body_line": 1,
+        "error": "malformed-fence",
+        "body": "\n---\nname: x\n---\n",
+        "line": 1
+      }
+    },
+    {
+      "id": "doc-none-leading-space",
+      "description": "A fence is not indented. A gate refuses it as a malformed fence, and a viewer shows it as text.",
+      "text": " ---\nname: x\n---\n",
+      "expect": {
+        "case": "malformed",
+        "body_offset": 0,
+        "body_line": 1,
+        "error": "malformed-fence",
+        "body": " ---\nname: x\n---\n"
+      }
+    },
+    {
+      "id": "doc-none-dots-do-not-open",
+      "description": "'...' only closes. A gate refuses it as a malformed fence, and a viewer shows it as text.",
+      "text": "...\nname: x\n...\n",
+      "expect": {
+        "case": "malformed",
+        "body_offset": 0,
+        "body_line": 1,
+        "error": "malformed-fence",
+        "body": "...\nname: x\n...\n"
+      }
+    },
+    {
+      "id": "doc-none-four-dashes",
+      "description": "Four dashes. A gate refuses it as a malformed fence, and a viewer shows it as text.",
+      "text": "----\nname: x\n----\n",
+      "expect": {
+        "case": "malformed",
+        "body_offset": 0,
+        "body_line": 1,
+        "error": "malformed-fence",
+        "body": "----\nname: x\n----\n"
+      }
+    },
+    {
+      "id": "doc-none-two-dashes",
+      "description": "Two dashes.",
+      "text": "--\nname: x\n--\n",
+      "expect": {
+        "case": "none",
+        "body_offset": 0,
+        "body_line": 1,
+        "body": "--\nname: x\n--\n",
+        "data": {}
+      }
+    },
+    {
+      "id": "doc-none-comment-after-fence",
+      "description": "A comment is text on the fence's line. A gate refuses it as a malformed fence, and a viewer shows it as text.",
+      "text": "--- # manifest\nname: x\n---\n",
+      "expect": {
+        "case": "malformed",
+        "body_offset": 0,
+        "body_line": 1,
+        "error": "malformed-fence",
+        "body": "--- # manifest\nname: x\n---\n",
+        "line": 1
+      }
+    },
+    {
+      "id": "doc-none-text-after-fence",
+      "description": "A document on the fence's line. A gate refuses it as a malformed fence, and a viewer shows it as text.",
+      "text": "--- name: x\n---\n",
+      "expect": {
+        "case": "malformed",
+        "body_offset": 0,
+        "body_line": 1,
+        "error": "malformed-fence",
+        "body": "--- name: x\n---\n"
+      }
+    },
+    {
+      "id": "doc-none-form-feed",
+      "description": "A form feed is not a blank. A gate refuses it as a malformed fence, and a viewer shows it as text.",
+      "text": "---\f\nname: x\n---\n",
+      "expect": {
+        "case": "malformed",
+        "body_offset": 0,
+        "body_line": 1,
+        "error": "malformed-fence",
+        "body": "---\f\nname: x\n---\n"
+      }
+    },
+    {
+      "id": "doc-none-nbsp",
+      "description": "A no-break space is not a blank. A gate refuses it as a malformed fence, and a viewer shows it as text.",
+      "text": "--- \nname: x\n---\n",
+      "expect": {
+        "case": "malformed",
+        "body_offset": 0,
+        "body_line": 1,
+        "error": "malformed-fence",
+        "body": "--- \nname: x\n---\n"
+      }
+    },
+    {
+      "id": "doc-none-lone-cr",
+      "description": "A carriage return alone ends no line. A gate refuses it as a malformed fence, and a viewer shows it as text.",
+      "text": "---\rname: x\r---\r",
+      "expect": {
+        "case": "malformed",
+        "body_offset": 0,
+        "body_line": 1,
+        "error": "malformed-fence",
+        "body": "---\rname: x\r---\r"
+      }
+    },
+    {
+      "id": "doc-none-cr-before-blank",
+      "description": "A carriage return is part of a line end only directly before the line feed. A gate refuses it as a malformed fence, and a viewer shows it as text.",
+      "text": "---\r \nname: x\n---\n",
+      "expect": {
+        "case": "malformed",
+        "body_offset": 0,
+        "body_line": 1,
+        "error": "malformed-fence",
+        "body": "---\r \nname: x\n---\n"
+      }
+    },
+    {
+      "id": "doc-none-unicode-line-break",
+      "description": "U+2028 ends no line. A gate refuses it as a malformed fence, and a viewer shows it as text.",
+      "text": "--- name: x\n---\n",
+      "expect": {
+        "case": "malformed",
+        "body_offset": 0,
+        "body_line": 1,
+        "error": "malformed-fence",
+        "body": "--- name: x\n---\n"
+      }
+    },
+    {
+      "id": "doc-yaml-lf",
+      "description": "YAML, the default, closed by '---'; the body starts after the closing line.",
+      "text": "---\nname: x\n---\n# Body\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 16,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "name: x\n",
+        "body": "# Body\n",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-yaml-crlf",
+      "description": "CRLF throughout; the metadata and the body keep their bytes.",
+      "text": "---\r\nname: x\r\n---\r\n# Body\r\n\r\nmore\r\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 5,
+        "metadata_line": 2,
+        "body_offset": 19,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "name: x\r\n",
+        "body": "# Body\r\n\r\nmore\r\n",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-mixed-line-ends",
+      "description": "Each line ends its own way.",
+      "text": "---\r\nname: x\n---\r\nbody\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 5,
+        "metadata_line": 2,
+        "body_offset": 18,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "name: x\n",
+        "body": "body\n",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-close-dots",
+      "description": "'...' closes too.",
+      "text": "---\nname: x\n...\nbody\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 16,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "name: x\n",
+        "body": "body\n",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-close-dots-crlf",
+      "description": "'...' with CRLF.",
+      "text": "---\r\nname: x\r\n...\r\nbody\r\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 5,
+        "metadata_line": 2,
+        "body_offset": 19,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "name: x\r\n",
+        "body": "body\r\n",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-close-first-wins",
+      "description": "The first closing line ends the block, whichever it is.",
+      "text": "---\nname: x\n...\nbody\n---\nmore\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 16,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "name: x\n",
+        "body": "body\n---\nmore\n",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-close-first-wins-dashes",
+      "description": "And the other way round.",
+      "text": "---\nname: x\n---\nbody\n...\nmore\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 16,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "name: x\n",
+        "body": "body\n...\nmore\n",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-close-at-eof",
+      "description": "A closing line at the end of the file, with no line end: the body is empty.",
+      "text": "---\nname: x\n---",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 15,
+        "body_line": 3,
+        "format": "yaml",
+        "metadata": "name: x\n",
+        "body": "",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-close-dots-at-eof",
+      "description": "'...' likewise.",
+      "text": "---\nname: x\n...",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 15,
+        "body_line": 3,
+        "format": "yaml",
+        "metadata": "name: x\n",
+        "body": "",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-close-blanks-at-eof",
+      "description": "With blanks and no line end.",
+      "text": "---\nname: x\n--- \t",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 17,
+        "body_line": 3,
+        "format": "yaml",
+        "metadata": "name: x\n",
+        "body": "",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-blanks-on-opening",
+      "description": "Spaces and tabs after the opening fence.",
+      "text": "--- \t \nname: x\n---\nbody\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 7,
+        "metadata_line": 2,
+        "body_offset": 19,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "name: x\n",
+        "body": "body\n",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-blanks-on-closing",
+      "description": "Spaces and tabs after the closing fence.",
+      "text": "---\nname: x\n---  \t\nbody\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 19,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "name: x\n",
+        "body": "body\n",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-blanks-before-crlf",
+      "description": "Blanks before a CRLF, on both fences.",
+      "text": "---  \r\nname: x\r\n...\t\r\nbody\r\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 7,
+        "metadata_line": 2,
+        "body_offset": 22,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "name: x\r\n",
+        "body": "body\r\n",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-bom-fence",
+      "description": "A byte-order mark before the opening fence moves every offset.",
+      "text": "﻿---\nname: x\n---\nbody\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 7,
+        "metadata_line": 2,
+        "body_offset": 19,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "name: x\n",
+        "body": "body\n",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-bom-fence-crlf",
+      "description": "With CRLF.",
+      "text": "﻿---\r\nname: x\r\n---\r\nbody\r\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 8,
+        "metadata_line": 2,
+        "body_offset": 22,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "name: x\r\n",
+        "body": "body\r\n",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-dashes-in-a-value",
+      "description": "A line that only holds dashes after other text closes nothing.",
+      "text": "---\nname: x ---\ndescription: '--- '\n---\nbody\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 40,
+        "body_line": 5,
+        "format": "yaml",
+        "metadata": "name: x ---\ndescription: '--- '\n",
+        "body": "body\n",
+        "data": {
+          "name": "x ---",
+          "description": "--- "
+        }
+      }
+    },
+    {
+      "id": "doc-closing-comment-is-metadata",
+      "description": "'... # end' is no closing line; it stays in the metadata, where YAML reads it as the end of the document.",
+      "text": "---\nname: x\n... # end\n---\nbody\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 26,
+        "body_line": 5,
+        "format": "yaml",
+        "metadata": "name: x\n... # end\n",
+        "body": "body\n",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-body-kept-exactly",
+      "description": "Leading blank lines, trailing blanks, tabs, CRLF, no final line end: every byte stays.",
+      "text": "---\nname: x\n---\n\n\n  # T  \t\r\n\tcode\r\n--- \n...\nend",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 16,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "name: x\n",
+        "body": "\n\n  # T  \t\r\n\tcode\r\n--- \n...\nend",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-body-fences-are-text",
+      "description": "A fence in the body is the body's.",
+      "text": "---\nname: x\n---\n---\nnot: metadata\n---\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 16,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "name: x\n",
+        "body": "---\nnot: metadata\n---\n",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-body-bom-kept",
+      "description": "A byte-order mark in the body stays.",
+      "text": "---\nname: x\n---\n﻿text\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 16,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "name: x\n",
+        "body": "﻿text\n",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-body-invalid-utf8",
+      "description": "The split changes and checks nothing in the body.",
+      "base64": "LS0tCm5hbWU6IHgKLS0tCv/+Cg==",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 16,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "name: x\n",
+        "body_base64": "//4K",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-body-only-white-space",
+      "description": "A body of white space is still returned as it is.",
+      "text": "---\nname: x\n---\n \t\r\n\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 16,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "name: x\n",
+        "body": " \t\r\n\n",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-empty-block",
+      "description": "Nothing between the fences: the empty mapping.",
+      "text": "---\n---\nbody\n",
+      "expect": {
+        "case": "empty",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 8,
+        "body_line": 3,
+        "metadata": "",
+        "body": "body\n",
+        "data": {}
+      }
+    },
+    {
+      "id": "doc-empty-dots",
+      "description": "Closed by '...'.",
+      "text": "---\n...\n",
+      "expect": {
+        "case": "empty",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 8,
+        "body_line": 3,
+        "metadata": "",
+        "body": "",
+        "data": {}
+      }
+    },
+    {
+      "id": "doc-empty-white-space",
+      "description": "Only spaces, tabs and line breaks.",
+      "text": "---\n \t\r\n\n---\nbody\n",
+      "expect": {
+        "case": "empty",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 13,
+        "body_line": 5,
+        "metadata": " \t\r\n\n",
+        "body": "body\n",
+        "data": {}
+      }
+    },
+    {
+      "id": "doc-empty-format-line-only",
+      "description": "A format line and nothing else.",
+      "text": "---\n#!toml\n---\nbody\n",
+      "expect": {
+        "case": "empty",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 15,
+        "body_line": 4,
+        "format": "toml",
+        "metadata": "#!toml\n",
+        "body": "body\n",
+        "data": {}
+      }
+    },
+    {
+      "id": "doc-empty-format-line-json",
+      "description": "In JSON too: as the manifest's rule says, an empty document is the empty mapping.",
+      "text": "---\n#!json\n \n---\n",
+      "expect": {
+        "case": "empty",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 17,
+        "body_line": 5,
+        "format": "json",
+        "metadata": "#!json\n \n",
+        "body": "",
+        "data": {}
+      }
+    },
+    {
+      "id": "doc-comment-only",
+      "description": "A YAML comment reads as the empty mapping, and is not empty text.",
+      "text": "---\n# nothing yet\n---\nbody\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 22,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "# nothing yet\n",
+        "body": "body\n",
+        "data": {}
+      }
+    },
+    {
+      "id": "doc-unterminated",
+      "description": "No closing line: not a block. A viewer shows the text; a gate refuses.",
+      "text": "---\nname: x\n\nbody\n",
+      "expect": {
+        "case": "unterminated",
+        "body_offset": 0,
+        "body_line": 1,
+        "error": "unterminated-front-matter",
+        "body": "---\nname: x\n\nbody\n",
+        "line": 1
+      }
+    },
+    {
+      "id": "doc-unterminated-crlf",
+      "description": "With CRLF.",
+      "text": "---\r\nname: x\r\n",
+      "expect": {
+        "case": "unterminated",
+        "body_offset": 0,
+        "body_line": 1,
+        "error": "unterminated-front-matter",
+        "body": "---\r\nname: x\r\n",
+        "line": 1
+      }
+    },
+    {
+      "id": "doc-unterminated-opening-only",
+      "description": "An opening fence alone.",
+      "text": "---\n",
+      "expect": {
+        "case": "unterminated",
+        "body_offset": 0,
+        "body_line": 1,
+        "error": "unterminated-front-matter",
+        "body": "---\n",
+        "line": 1
+      }
+    },
+    {
+      "id": "doc-unterminated-opening-at-eof",
+      "description": "An opening fence and no line end.",
+      "text": "---",
+      "expect": {
+        "case": "unterminated",
+        "body_offset": 0,
+        "body_line": 1,
+        "error": "unterminated-front-matter",
+        "body": "---"
+      }
+    },
+    {
+      "id": "doc-unterminated-bom",
+      "description": "With a byte-order mark.",
+      "text": "﻿---\nname: x\n",
+      "expect": {
+        "case": "unterminated",
+        "body_offset": 3,
+        "body_line": 1,
+        "error": "unterminated-front-matter",
+        "body": "---\nname: x\n",
+        "line": 1
+      }
+    },
+    {
+      "id": "doc-unterminated-cr-at-eof",
+      "description": "A carriage return at the end of the file ends no line, so this is no closing line.",
+      "text": "---\nname: x\n---\r",
+      "expect": {
+        "case": "unterminated",
+        "body_offset": 0,
+        "body_line": 1,
+        "error": "unterminated-front-matter",
+        "body": "---\nname: x\n---\r"
+      }
+    },
+    {
+      "id": "doc-unterminated-indented-close",
+      "description": "A closing fence is not indented.",
+      "text": "---\nname: x\n ---\n",
+      "expect": {
+        "case": "unterminated",
+        "body_offset": 0,
+        "body_line": 1,
+        "error": "unterminated-front-matter",
+        "body": "---\nname: x\n ---\n"
+      }
+    },
+    {
+      "id": "doc-unterminated-four-dashes",
+      "description": "Four dashes close nothing.",
+      "text": "---\nname: x\n----\n",
+      "expect": {
+        "case": "unterminated",
+        "body_offset": 0,
+        "body_line": 1,
+        "error": "unterminated-front-matter",
+        "body": "---\nname: x\n----\n"
+      }
+    },
+    {
+      "id": "doc-unterminated-form-feed-close",
+      "description": "A form feed is not a blank.",
+      "text": "---\nname: x\n---\f\n",
+      "expect": {
+        "case": "unterminated",
+        "body_offset": 0,
+        "body_line": 1,
+        "error": "unterminated-front-matter",
+        "body": "---\nname: x\n---\f\n"
+      }
+    },
+    {
+      "id": "doc-unterminated-unicode-line-break",
+      "description": "U+2029 does not make a line of the fence.",
+      "text": "---\nname: x --- body\n",
+      "expect": {
+        "case": "unterminated",
+        "body_offset": 0,
+        "body_line": 1,
+        "error": "unterminated-front-matter",
+        "body": "---\nname: x --- body\n"
+      }
+    },
+    {
+      "id": "doc-unterminated-unicode-line-break-before-fence",
+      "description": "A line ending in '---' after U+2029 is no fence.",
+      "text": "---\nname: x ---\nbody\n",
+      "expect": {
+        "case": "unterminated",
+        "body_offset": 0,
+        "body_line": 1,
+        "error": "unterminated-front-matter",
+        "body": "---\nname: x ---\nbody\n"
+      }
+    },
+    {
+      "id": "doc-unterminated-next-line-before-fence",
+      "description": "Nor after U+0085.",
+      "text": "---\nname: x...\nbody\n",
+      "expect": {
+        "case": "unterminated",
+        "body_offset": 0,
+        "body_line": 1,
+        "error": "unterminated-front-matter",
+        "body": "---\nname: x...\nbody\n"
+      }
+    },
+    {
+      "id": "doc-bound-exact",
+      "description": "The head fits the bound exactly: it counts through the closing line's end.",
+      "text": "---\nname: x\n---\nbody\n",
+      "limits": {
+        "max_bytes": 16
+      },
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 16,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "name: x\n",
+        "body": "body\n",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-bound-one-short",
+      "description": "One byte short.",
+      "text": "---\nname: x\n---\nbody\n",
+      "limits": {
+        "max_bytes": 15
+      },
+      "expect": {
+        "case": "too-large",
+        "error": "too-large",
+        "line": 1
+      }
+    },
+    {
+      "id": "doc-bound-excludes-bom",
+      "description": "A byte-order mark does not count.",
+      "text": "﻿---\nname: x\n---\nbody\n",
+      "limits": {
+        "max_bytes": 16
+      },
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 7,
+        "metadata_line": 2,
+        "body_offset": 19,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "name: x\n",
+        "body": "body\n",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-bound-excludes-body",
+      "description": "A body far larger than the bound is not read, and not refused.",
+      "parts": [
+        [
+          "---\nname: x\n---\n",
+          1
+        ],
+        [
+          "body text\n",
+          400000
+        ]
+      ],
+      "limits": {
+        "max_bytes": 64
+      },
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 16,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata_size": 8,
+        "body_size": 4000000,
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-bound-at-eof",
+      "description": "A closing line at the end of the file, exactly at the bound.",
+      "text": "---\nname: x\n---",
+      "limits": {
+        "max_bytes": 15
+      },
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 15,
+        "body_line": 3,
+        "format": "yaml",
+        "metadata": "name: x\n",
+        "body": "",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-bound-first-line-undecided",
+      "description": "A first line still a possible fence when the bound ends is too large.",
+      "text": "---          x\n",
+      "limits": {
+        "max_bytes": 8
+      },
+      "expect": {
+        "case": "too-large",
+        "error": "too-large"
+      }
+    },
+    {
+      "id": "doc-bound-first-line-decided",
+      "description": "A first line already no fence is not, however long the file.",
+      "text": "#  a long heading\n",
+      "limits": {
+        "max_bytes": 8
+      },
+      "expect": {
+        "case": "none",
+        "body_offset": 0,
+        "body_line": 1,
+        "body": "#  a long heading\n",
+        "data": {}
+      }
+    },
+    {
+      "id": "doc-bound-no-fence-large-file",
+      "description": "A file with no fence is bounded by nothing here.",
+      "parts": [
+        [
+          "# text\n",
+          400000
+        ]
+      ],
+      "limits": {
+        "max_bytes": 64
+      },
+      "expect": {
+        "case": "none",
+        "body_offset": 0,
+        "body_line": 1,
+        "body_size": 2800000,
+        "data": {}
+      }
+    },
+    {
+      "id": "doc-bound-no-floor",
+      "description": "No floor: a bound smaller than a fence refuses a fence, for a reader that set it.",
+      "text": "---\n---\n",
+      "limits": {
+        "max_bytes": 3
+      },
+      "expect": {
+        "case": "too-large",
+        "error": "too-large"
+      }
+    },
+    {
+      "id": "doc-bound-zero",
+      "description": "Even zero.",
+      "text": "---\n---\n",
+      "limits": {
+        "max_bytes": 0
+      },
+      "expect": {
+        "case": "too-large",
+        "error": "too-large"
+      }
+    },
+    {
+      "id": "doc-bound-unterminated-past",
+      "description": "An unclosed block past the bound is too large, not unterminated: nothing further was read.",
+      "text": "---\nname: x\nname2: y\n",
+      "limits": {
+        "max_bytes": 12
+      },
+      "expect": {
+        "case": "too-large",
+        "error": "too-large"
+      }
+    },
+    {
+      "id": "doc-bound-unterminated-within",
+      "description": "An unclosed block within the bound is unterminated.",
+      "text": "---\nname: x\n",
+      "limits": {
+        "max_bytes": 64
+      },
+      "expect": {
+        "case": "unterminated",
+        "body_offset": 0,
+        "body_line": 1,
+        "error": "unterminated-front-matter",
+        "body": "---\nname: x\n"
+      }
+    },
+    {
+      "id": "doc-bound-raised",
+      "description": "A setting can be raised past the default.",
+      "parts": [
+        [
+          "---\nname: x\n# ",
+          1
+        ],
+        [
+          "x",
+          1100000
+        ],
+        [
+          "\n---\n",
+          1
+        ]
+      ],
+      "limits": {
+        "max_bytes": 2000000
+      },
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 1100019,
+        "body_line": 5,
+        "format": "yaml",
+        "metadata_size": 1100011,
+        "body_size": 0,
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-huge-block",
+      "description": "A block past the default bound: refused without reading on.",
+      "parts": [
+        [
+          "---\na: '",
+          1
+        ],
+        [
+          "x",
+          1100000
+        ],
+        [
+          "'\n---\nbody\n",
+          1
+        ]
+      ],
+      "expect": {
+        "case": "too-large",
+        "error": "too-large",
+        "line": 1
+      }
+    },
+    {
+      "id": "doc-huge-unclosed",
+      "description": "An unclosed block past the default bound.",
+      "parts": [
+        [
+          "---\n",
+          1
+        ],
+        [
+          "a: b\n",
+          300000
+        ]
+      ],
+      "expect": {
+        "case": "too-large",
+        "error": "too-large",
+        "line": 1
+      }
+    },
+    {
+      "id": "doc-format-toml",
+      "description": "#!toml is the first line inside the fence.",
+      "text": "---\n#!toml\nname = \"x\"\n---\nbody\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 26,
+        "body_line": 5,
+        "format": "toml",
+        "metadata": "#!toml\nname = \"x\"\n",
+        "body": "body\n",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-format-json",
+      "description": "#!json.",
+      "text": "---\n#!json\n{\"name\": \"x\"}\n---\nbody\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 29,
+        "body_line": 5,
+        "format": "json",
+        "metadata": "#!json\n{\"name\": \"x\"}\n",
+        "body": "body\n",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-format-yaml",
+      "description": "#!yaml names the default.",
+      "text": "---\n#!yaml\nname: x\n---\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 23,
+        "body_line": 5,
+        "format": "yaml",
+        "metadata": "#!yaml\nname: x\n",
+        "body": "",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-format-yml",
+      "description": "The alias.",
+      "text": "---\n#!yml\nname: x\n---\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 22,
+        "body_line": 5,
+        "format": "yaml",
+        "metadata": "#!yml\nname: x\n",
+        "body": "",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-format-rules",
+      "description": "The format line's own rules: the last word, after any '/', ASCII case ignored.",
+      "text": "---\n#!/usr/bin/env .TOML\nname = \"x\"\n---\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 40,
+        "body_line": 5,
+        "format": "toml",
+        "metadata": "#!/usr/bin/env .TOML\nname = \"x\"\n",
+        "body": "",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-format-crlf",
+      "description": "With CRLF.",
+      "text": "---\r\n#!toml\r\nname = \"x\"\r\n---\r\nbody\r\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 5,
+        "metadata_line": 2,
+        "body_offset": 30,
+        "body_line": 5,
+        "format": "toml",
+        "metadata": "#!toml\r\nname = \"x\"\r\n",
+        "body": "body\r\n",
+        "data": {
+          "name": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-format-second-line",
+      "description": "On any other line #! is a YAML comment, so this is not TOML: the rest is a plain scalar, which is no mapping.",
+      "text": "---\n\n#!toml\nname = \"x\"\n---\n",
+      "expect": {
+        "case": "not-a-mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 27,
+        "body_line": 6,
+        "format": "yaml",
+        "error": "not-a-mapping",
+        "metadata": "\n#!toml\nname = \"x\"\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-format-default-is-yaml",
+      "description": "TOML with no format line in a fence: YAML reads a scalar.",
+      "text": "---\nname = \"x\"\n---\n",
+      "expect": {
+        "case": "not-a-mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 19,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "not-a-mapping",
+        "metadata": "name = \"x\"\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-format-unknown",
+      "description": "An unknown format: unreadable text to a viewer, a refusal at a gate, by name.",
+      "text": "---\n#!ini\nname=x\n---\nbody\n",
+      "expect": {
+        "case": "unknown-format",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 21,
+        "body_line": 5,
+        "error": "unsupported-format",
+        "metadata": "#!ini\nname=x\n",
+        "body": "body\n",
+        "line": 2
+      }
+    },
+    {
+      "id": "doc-format-unknown-not-shown",
+      "description": "A word that is not a plain name is not echoed, and is still unknown.",
+      "text": "---\n#!/bin/a$b\nx\n---\n",
+      "expect": {
+        "case": "unknown-format",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 21,
+        "body_line": 5,
+        "error": "unsupported-format",
+        "metadata": "#!/bin/a$b\nx\n",
+        "body": "",
+        "line": 2
+      }
+    },
+    {
+      "id": "doc-format-unknown-empty",
+      "description": "Unknown even with nothing after it.",
+      "text": "---\n#!ini\n---\n",
+      "expect": {
+        "case": "unknown-format",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 14,
+        "body_line": 4,
+        "error": "unsupported-format",
+        "metadata": "#!ini\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-format-none-named",
+      "description": "'#!' names nothing.",
+      "text": "---\n#!\nname: x\n---\n",
+      "expect": {
+        "case": "unknown-format",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 19,
+        "body_line": 5,
+        "error": "no-format-named",
+        "metadata": "#!\nname: x\n",
+        "body": "",
+        "line": 2
+      }
+    },
+    {
+      "id": "doc-format-invalid-utf8",
+      "description": "A format line that is not UTF-8.",
+      "base64": "LS0tCiMh/wpuYW1lOiB4Ci0tLQo=",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 20,
+        "body_line": 5,
+        "error": "invalid-utf8",
+        "metadata_base64": "IyH/Cm5hbWU6IHgK",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-not-a-mapping-sequence",
+      "description": "A sequence.",
+      "text": "---\n- a\n- b\n---\nbody\n",
+      "expect": {
+        "case": "not-a-mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 16,
+        "body_line": 5,
+        "format": "yaml",
+        "error": "not-a-mapping",
+        "metadata": "- a\n- b\n",
+        "body": "body\n"
+      }
+    },
+    {
+      "id": "doc-not-a-mapping-scalar",
+      "description": "A scalar.",
+      "text": "---\njust text\n---\nbody\n",
+      "expect": {
+        "case": "not-a-mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 18,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "not-a-mapping",
+        "metadata": "just text\n",
+        "body": "body\n"
+      }
+    },
+    {
+      "id": "doc-not-a-mapping-number",
+      "description": "A number.",
+      "text": "---\n5\n---\n",
+      "expect": {
+        "case": "not-a-mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 10,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "not-a-mapping",
+        "metadata": "5\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-not-a-mapping-json",
+      "description": "A JSON array.",
+      "text": "---\n#!json\n[1, 2]\n---\n",
+      "expect": {
+        "case": "not-a-mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 22,
+        "body_line": 5,
+        "format": "json",
+        "error": "not-a-mapping",
+        "metadata": "#!json\n[1, 2]\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-parse-yaml",
+      "description": "A YAML syntax error.",
+      "text": "---\nname: [x\n---\nbody\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 17,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "parse-error",
+        "metadata": "name: [x\n",
+        "body": "body\n"
+      }
+    },
+    {
+      "id": "doc-parse-yaml-tab",
+      "description": "A tab as indentation.",
+      "text": "---\nname:\n\t- x\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 19,
+        "body_line": 5,
+        "format": "yaml",
+        "error": "parse-error",
+        "metadata": "name:\n\t- x\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-parse-toml",
+      "description": "A TOML syntax error, its line counted from the file's first.",
+      "text": "---\n#!toml\nname = \n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 23,
+        "body_line": 5,
+        "format": "toml",
+        "error": "parse-error",
+        "metadata": "#!toml\nname = \n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-parse-json",
+      "description": "A JSON syntax error.",
+      "text": "---\n#!json\n{\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 17,
+        "body_line": 5,
+        "format": "json",
+        "error": "parse-error",
+        "metadata": "#!json\n{\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-parse-invalid-utf8",
+      "description": "Metadata that is not UTF-8.",
+      "base64": "LS0tCm5hbWU6IP8KLS0tCg==",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 16,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "invalid-utf8",
+        "metadata_base64": "bmFtZTog/wo=",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-parse-bom-in-metadata",
+      "description": "A byte-order mark where the parser's text starts.",
+      "text": "---\n﻿name: x\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 19,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "parse-error",
+        "metadata": "﻿name: x\n",
+        "body": "",
+        "line": 2
+      }
+    },
+    {
+      "id": "doc-parse-bom-after-format",
+      "description": "Also after a format line.",
+      "text": "---\n#!yaml\n﻿name: x\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 26,
+        "body_line": 5,
+        "format": "yaml",
+        "error": "parse-error",
+        "metadata": "#!yaml\n﻿name: x\n",
+        "body": "",
+        "line": 3
+      }
+    },
+    {
+      "id": "doc-parse-early-close-in-toml",
+      "description": "A multi-line string holding a fence ends the block there: the split knows no format.",
+      "text": "---\n#!toml\na = \"\"\"\n---\n\"\"\"\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 23,
+        "body_line": 5,
+        "format": "toml",
+        "error": "parse-error",
+        "metadata": "#!toml\na = \"\"\"\n",
+        "body": "\"\"\"\n---\n"
+      }
+    },
+    {
+      "id": "doc-parse-document-on-closing-line",
+      "description": "'--- x' closes nothing, and is a second document.",
+      "text": "---\nname: x\n--- y\n---\nbody\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 22,
+        "body_line": 5,
+        "format": "yaml",
+        "error": "parse-error",
+        "metadata": "name: x\n--- y\n",
+        "body": "body\n"
+      }
+    },
+    {
+      "id": "doc-yaml-anchor",
+      "description": "An anchor is refused where it stands.",
+      "text": "---\nname: x\nbase: &b {a: 1}\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 32,
+        "body_line": 5,
+        "format": "yaml",
+        "error": "yaml-anchor",
+        "metadata": "name: x\nbase: &b {a: 1}\n",
+        "body": "",
+        "line": 3
+      }
+    },
+    {
+      "id": "doc-yaml-alias",
+      "description": "An alias: refused whether or not its anchor exists.",
+      "text": "---\nname: x\nuse: *b\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 24,
+        "body_line": 5,
+        "format": "yaml",
+        "error": [
+          "yaml-anchor",
+          "parse-error"
+        ],
+        "metadata": "name: x\nuse: *b\n",
+        "body": "",
+        "line": 3
+      }
+    },
+    {
+      "id": "doc-yaml-billion-laughs",
+      "description": "The shape of a billion laughs: refused at the first anchor, nothing expanded.",
+      "text": "---\na: &a [x, x, x, x, x, x, x, x, x]\nb: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a]\nc: &c [*b, *b, *b, *b, *b, *b, *b, *b, *b]\nd: &d [*c, *c, *c, *c, *c, *c, *c, *c, *c]\ne: &e [*d, *d, *d, *d, *d, *d, *d, *d, *d]\nf: &f [*e, *e, *e, *e, *e, *e, *e, *e, *e]\ng: &g [*f, *f, *f, *f, *f, *f, *f, *f, *f]\nh: &h [*g, *g, *g, *g, *g, *g, *g, *g, *g]\ni: &i [*h, *h, *h, *h, *h, *h, *h, *h, *h]\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 386,
+        "body_line": 12,
+        "format": "yaml",
+        "error": "yaml-anchor",
+        "metadata": "a: &a [x, x, x, x, x, x, x, x, x]\nb: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a]\nc: &c [*b, *b, *b, *b, *b, *b, *b, *b, *b]\nd: &d [*c, *c, *c, *c, *c, *c, *c, *c, *c]\ne: &e [*d, *d, *d, *d, *d, *d, *d, *d, *d]\nf: &f [*e, *e, *e, *e, *e, *e, *e, *e, *e]\ng: &g [*f, *f, *f, *f, *f, *f, *f, *f, *f]\nh: &h [*g, *g, *g, *g, *g, *g, *g, *g, *g]\ni: &i [*h, *h, *h, *h, *h, *h, *h, *h, *h]\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-self-reference",
+      "description": "A node that holds itself.",
+      "text": "---\na: &a [*a]\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 19,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "yaml-anchor",
+        "metadata": "a: &a [*a]\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-merge",
+      "description": "A merge key.",
+      "text": "---\nbase: {a: 1}\nc:\n  <<: {a: 1}\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 37,
+        "body_line": 6,
+        "format": "yaml",
+        "error": "yaml-merge-key",
+        "metadata": "base: {a: 1}\nc:\n  <<: {a: 1}\n",
+        "body": "",
+        "line": 4
+      }
+    },
+    {
+      "id": "doc-yaml-merge-single-quoted",
+      "description": "'<<' in any scalar style: a reader must not depend on its parser's view of the style.",
+      "text": "---\nc:\n  '<<': {a: 1}\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 26,
+        "body_line": 5,
+        "format": "yaml",
+        "error": "yaml-merge-key",
+        "metadata": "c:\n  '<<': {a: 1}\n",
+        "body": "",
+        "line": 3
+      }
+    },
+    {
+      "id": "doc-yaml-merge-double-quoted",
+      "description": "Double-quoted.",
+      "text": "---\nc:\n  \"<<\": {a: 1}\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 26,
+        "body_line": 5,
+        "format": "yaml",
+        "error": "yaml-merge-key",
+        "metadata": "c:\n  \"<<\": {a: 1}\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-merge-escaped",
+      "description": "Written with an escape.",
+      "text": "---\nc:\n  \"\\x3c<\": {a: 1}\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 29,
+        "body_line": 5,
+        "format": "yaml",
+        "error": "yaml-merge-key",
+        "metadata": "c:\n  \"\\x3c<\": {a: 1}\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-tag-include",
+      "description": "A tag.",
+      "text": "---\nenv: !include other.yaml\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 33,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "yaml-tag",
+        "metadata": "env: !include other.yaml\n",
+        "body": "",
+        "line": 2
+      }
+    },
+    {
+      "id": "doc-yaml-tag-python",
+      "description": "A language tag.",
+      "text": "---\na: !!python/object/apply:os.system [\"echo\"]\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 52,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "yaml-tag",
+        "metadata": "a: !!python/object/apply:os.system [\"echo\"]\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-tag-core",
+      "description": "Even a core tag.",
+      "text": "---\na: !!str 5\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 19,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "yaml-tag",
+        "metadata": "a: !!str 5\n",
+        "body": "",
+        "line": 2
+      }
+    },
+    {
+      "id": "doc-yaml-tag-verbatim",
+      "description": "A verbatim tag.",
+      "text": "---\na: !<tag:yaml.org,2002:str> 5\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 38,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "yaml-tag",
+        "metadata": "a: !<tag:yaml.org,2002:str> 5\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-tag-empty",
+      "description": "The non-specific tag.",
+      "text": "---\na: ! 5\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 15,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "yaml-tag",
+        "metadata": "a: ! 5\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-tag-on-mapping",
+      "description": "A tag on a collection.",
+      "text": "---\na: !!map {b: 1}\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 24,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "yaml-tag",
+        "metadata": "a: !!map {b: 1}\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-directive",
+      "description": "A %YAML directive.",
+      "text": "---\n%YAML 1.1\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 18,
+        "body_line": 4,
+        "format": "yaml",
+        "error": [
+          "yaml-directive",
+          "parse-error"
+        ],
+        "metadata": "%YAML 1.1\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-two-documents",
+      "description": "A second document, begun on a line with text.",
+      "text": "---\na: 1\n--- {b: 2}\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 24,
+        "body_line": 5,
+        "format": "yaml",
+        "error": "parse-error",
+        "metadata": "a: 1\n--- {b: 2}\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-document-after-end",
+      "description": "Content after '... # end'.",
+      "text": "---\na: 1\n... # end\nb: 2\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 28,
+        "body_line": 6,
+        "format": "yaml",
+        "error": "parse-error",
+        "metadata": "a: 1\n... # end\nb: 2\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-int-key",
+      "description": "A key that resolves to an integer.",
+      "text": "---\n1: x\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 13,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "non-string-key",
+        "metadata": "1: x\n",
+        "body": "",
+        "line": 2
+      }
+    },
+    {
+      "id": "doc-yaml-bool-key",
+      "description": "A boolean key.",
+      "text": "---\ntrue: x\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 16,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "non-string-key",
+        "metadata": "true: x\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-null-key",
+      "description": "A null key.",
+      "text": "---\n~: x\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 13,
+        "body_line": 4,
+        "format": "yaml",
+        "error": [
+          "null-value",
+          "non-string-key"
+        ],
+        "metadata": "~: x\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-complex-key",
+      "description": "A collection as a key.",
+      "text": "---\n? [a]\n: x\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 18,
+        "body_line": 5,
+        "format": "yaml",
+        "error": [
+          "non-string-key",
+          "parse-error"
+        ],
+        "metadata": "? [a]\n: x\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-quoted-number-key",
+      "description": "A quoted key is a string.",
+      "text": "---\n\"1\": x\n---\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 15,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "\"1\": x\n",
+        "body": "",
+        "data": {
+          "1": "x"
+        }
+      }
+    },
+    {
+      "id": "doc-yaml-duplicate",
+      "description": "A duplicate key.",
+      "text": "---\na: 1\nb: 2\na: 3\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 23,
+        "body_line": 6,
+        "format": "yaml",
+        "error": "duplicate-key",
+        "metadata": "a: 1\nb: 2\na: 3\n",
+        "body": "",
+        "line": 4
+      }
+    },
+    {
+      "id": "doc-yaml-duplicate-styles",
+      "description": "Two keys equal once read, in different styles.",
+      "text": "---\na: 1\n\"a\": 2\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 20,
+        "body_line": 5,
+        "format": "yaml",
+        "error": "duplicate-key",
+        "metadata": "a: 1\n\"a\": 2\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-duplicate-escaped",
+      "description": "Equal after an escape.",
+      "text": "---\nab: 1\n\"a\\x62\": 2\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 25,
+        "body_line": 5,
+        "format": "yaml",
+        "error": "duplicate-key",
+        "metadata": "ab: 1\n\"a\\x62\": 2\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-null-tilde",
+      "description": "A null.",
+      "text": "---\nname: x\na: ~\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 21,
+        "body_line": 5,
+        "format": "yaml",
+        "error": "null-value",
+        "metadata": "name: x\na: ~\n",
+        "body": "",
+        "line": 3
+      }
+    },
+    {
+      "id": "doc-yaml-null-word",
+      "description": "The word.",
+      "text": "---\na: Null\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 16,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "null-value",
+        "metadata": "a: Null\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-null-empty",
+      "description": "An empty value.",
+      "text": "---\na:\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 11,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "null-value",
+        "metadata": "a:\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-null-in-list",
+      "description": "An empty item.",
+      "text": "---\na:\n  - \n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 16,
+        "body_line": 5,
+        "format": "yaml",
+        "error": "null-value",
+        "metadata": "a:\n  - \n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-strings",
+      "description": "YAML 1.1's other booleans, and dates, are strings.",
+      "text": "---\na: yes\nb: on\nc: No\nd: 2026-11-05\ne: 1_000\nf: 0b11\ng: 1:20\nh: Y\n---\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 71,
+        "body_line": 11,
+        "format": "yaml",
+        "metadata": "a: yes\nb: on\nc: No\nd: 2026-11-05\ne: 1_000\nf: 0b11\ng: 1:20\nh: Y\n",
+        "body": "",
+        "data": {
+          "a": "yes",
+          "b": "on",
+          "c": "No",
+          "d": "2026-11-05",
+          "e": "1_000",
+          "f": "0b11",
+          "g": "1:20",
+          "h": "Y"
+        }
+      }
+    },
+    {
+      "id": "doc-yaml-numbers",
+      "description": "The core schema's numbers and booleans; a leading zero is decimal.",
+      "text": "---\na: 12\nb: 0o17\nc: 0x1F\nd: -3\ne: 1.5\nf: 2e3\ng: true\nh: False\ni: 010\nj: '12'\n---\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 82,
+        "body_line": 13,
+        "format": "yaml",
+        "metadata": "a: 12\nb: 0o17\nc: 0x1F\nd: -3\ne: 1.5\nf: 2e3\ng: true\nh: False\ni: 010\nj: '12'\n",
+        "body": "",
+        "data": {
+          "a": 12,
+          "b": 15,
+          "c": 31,
+          "d": -3,
+          "e": 1.5,
+          "f": 2000.0,
+          "g": true,
+          "h": false,
+          "i": 10,
+          "j": "12"
+        }
+      }
+    },
+    {
+      "id": "doc-yaml-inf",
+      "description": "Not finite.",
+      "text": "---\na: .inf\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 16,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "non-finite-float",
+        "metadata": "a: .inf\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-nan",
+      "description": "Not a number.",
+      "text": "---\na: .NaN\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 16,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "non-finite-float",
+        "metadata": "a: .NaN\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-int-range",
+      "description": "Past signed 64 bits.",
+      "text": "---\na: 9223372036854775808\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 31,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "integer-range",
+        "metadata": "a: 9223372036854775808\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-int-range-hex",
+      "description": "In hexadecimal too.",
+      "text": "---\na: 0xFFFFFFFFFFFFFFFF\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 30,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "integer-range",
+        "metadata": "a: 0xFFFFFFFFFFFFFFFF\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-int-max",
+      "description": "The largest.",
+      "text": "---\na: 9223372036854775807\n---\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 31,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "a: 9223372036854775807\n",
+        "body": "",
+        "data": {
+          "a": 9223372036854775807
+        }
+      }
+    },
+    {
+      "id": "doc-yaml-bom-later-line",
+      "description": "A byte-order mark on a later line is refused, since parsers keep or drop it from a key.",
+      "text": "---\n# c\n﻿a: 1\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 20,
+        "body_line": 5,
+        "format": "yaml",
+        "error": "parse-error",
+        "metadata": "# c\n﻿a: 1\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-bom-escaped",
+      "description": "As an escape it is a character.",
+      "text": "---\na: \"\\ufeffx\"\n---\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 21,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "a: \"\\ufeffx\"\n",
+        "body": "",
+        "data": {
+          "a": "﻿x"
+        }
+      }
+    },
+    {
+      "id": "doc-yaml-huge-int",
+      "description": "An integer thousands of digits long is refused, not converted.",
+      "text": "---\na: 99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 5012,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "integer-range",
+        "metadata": "a: 99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-huge-hex",
+      "description": "In hexadecimal.",
+      "text": "---\na: 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 5014,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "integer-range",
+        "metadata": "a: 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-leading-zeros",
+      "description": "Leading zeros are not digits that count.",
+      "text": "---\na: 000000000000000000000000000012\n---\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 42,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "a: 000000000000000000000000000012\n",
+        "body": "",
+        "data": {
+          "a": 12
+        }
+      }
+    },
+    {
+      "id": "doc-json-huge-int",
+      "description": "In JSON.",
+      "text": "---\n#!json\n{\"a\": 99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999}\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 5023,
+        "body_line": 5,
+        "format": "json",
+        "error": "integer-range",
+        "metadata": "#!json\n{\"a\": 99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999}\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-toml-huge-int",
+      "description": "In TOML.",
+      "text": "---\n#!toml\na = 99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 5020,
+        "body_line": 5,
+        "format": "toml",
+        "error": "integer-range",
+        "metadata": "#!toml\na = 99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-escape-past-unicode",
+      "description": "An escape past Unicode.",
+      "text": "---\na: \"\\UFFFFFFFF\"\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 24,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "parse-error",
+        "metadata": "a: \"\\UFFFFFFFF\"\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-signed-nan",
+      "description": "'+.nan' is no core-schema float: a string.",
+      "text": "---\na: +.nan\n---\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 17,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "a: +.nan\n",
+        "body": "",
+        "data": {
+          "a": "+.nan"
+        }
+      }
+    },
+    {
+      "id": "doc-yaml-line-separator",
+      "description": "U+2028 in the text is refused.",
+      "text": "---\na: one two\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 21,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "parse-error",
+        "metadata": "a: one two\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-paragraph-separator",
+      "description": "U+2029.",
+      "text": "---\na: one two\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 21,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "parse-error",
+        "metadata": "a: one two\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-next-line",
+      "description": "U+0085.",
+      "text": "---\na: onetwo\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 20,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "parse-error",
+        "metadata": "a: onetwo\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-yaml-escaped-line-separator",
+      "description": "As an escape it is a character of the string, and no parser splits on it.",
+      "text": "---\na: \"one\\u2028two\"\n---\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 26,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "a: \"one\\u2028two\"\n",
+        "body": "",
+        "data": {
+          "a": "one two"
+        }
+      }
+    },
+    {
+      "id": "doc-yaml-block-scalars",
+      "description": "Block scalars are plain YAML, not a restriction.",
+      "text": "---\na: |\n  one\n  two\nb: >-\n  three\n  four\n---\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 46,
+        "body_line": 9,
+        "format": "yaml",
+        "metadata": "a: |\n  one\n  two\nb: >-\n  three\n  four\n",
+        "body": "",
+        "data": {
+          "a": "one\ntwo\n",
+          "b": "three four"
+        }
+      }
+    },
+    {
+      "id": "doc-yaml-flow-and-comments",
+      "description": "Flow collections and comments.",
+      "text": "---\na: {b: [1, 'c'], d: {}} # note\n# note\ne: []\n---\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 52,
+        "body_line": 6,
+        "format": "yaml",
+        "metadata": "a: {b: [1, 'c'], d: {}} # note\n# note\ne: []\n",
+        "body": "",
+        "data": {
+          "a": {
+            "b": [
+              1,
+              "c"
+            ],
+            "d": {}
+          },
+          "e": []
+        }
+      }
+    },
+    {
+      "id": "doc-depth-at-limit",
+      "description": "Nesting exactly at the bound: the top-level mapping is depth 1.",
+      "text": "---\na: [[1]]\n---\n",
+      "limits": {
+        "max_depth": 3
+      },
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 17,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata": "a: [[1]]\n",
+        "body": "",
+        "data": {
+          "a": [
+            [
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "doc-depth-past-limit",
+      "description": "One past it.",
+      "text": "---\na: [[[1]]]\n---\n",
+      "limits": {
+        "max_depth": 3
+      },
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 19,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "too-deep",
+        "metadata": "a: [[[1]]]\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-depth-block-past-limit",
+      "description": "In block style.",
+      "text": "---\na:\n  b:\n    c:\n      d: 1\n---\n",
+      "limits": {
+        "max_depth": 3
+      },
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 34,
+        "body_line": 7,
+        "format": "yaml",
+        "error": "too-deep",
+        "metadata": "a:\n  b:\n    c:\n      d: 1\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-depth-no-floor",
+      "description": "No floor: a depth of 1 allows the top level alone.",
+      "text": "---\na: {}\n---\n",
+      "limits": {
+        "max_depth": 1
+      },
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 14,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "too-deep",
+        "metadata": "a: {}\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-depth-default-at-limit",
+      "description": "The default of 64: the top-level mapping and 63 arrays.",
+      "parts": [
+        [
+          "---\na: ",
+          1
+        ],
+        [
+          "[",
+          63
+        ],
+        [
+          "]",
+          63
+        ],
+        [
+          "\n---\n",
+          1
+        ]
+      ],
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 138,
+        "body_line": 4,
+        "format": "yaml",
+        "metadata_size": 130,
+        "body_size": 0,
+        "data": {
+          "a": [
+            [
+              [
+                [
+                  [
+                    [
+                      [
+                        [
+                          [
+                            [
+                              [
+                                [
+                                  [
+                                    [
+                                      [
+                                        [
+                                          [
+                                            [
+                                              [
+                                                [
+                                                  [
+                                                    [
+                                                      [
+                                                        [
+                                                          [
+                                                            [
+                                                              [
+                                                                [
+                                                                  [
+                                                                    [
+                                                                      [
+                                                                        [
+                                                                          [
+                                                                            [
+                                                                              [
+                                                                                [
+                                                                                  [
+                                                                                    [
+                                                                                      [
+                                                                                        [
+                                                                                          [
+                                                                                            [
+                                                                                              [
+                                                                                                [
+                                                                                                  [
+                                                                                                    [
+                                                                                                      [
+                                                                                                        [
+                                                                                                          [
+                                                                                                            [
+                                                                                                              [
+                                                                                                                [
+                                                                                                                  [
+                                                                                                                    [
+                                                                                                                      [
+                                                                                                                        [
+                                                                                                                          [
+                                                                                                                            [
+                                                                                                                              [
+                                                                                                                                [
+                                                                                                                                  [
+                                                                                                                                    [
+                                                                                                                                      []
+                                                                                                                                    ]
+                                                                                                                                  ]
+                                                                                                                                ]
+                                                                                                                              ]
+                                                                                                                            ]
+                                                                                                                          ]
+                                                                                                                        ]
+                                                                                                                      ]
+                                                                                                                    ]
+                                                                                                                  ]
+                                                                                                                ]
+                                                                                                              ]
+                                                                                                            ]
+                                                                                                          ]
+                                                                                                        ]
+                                                                                                      ]
+                                                                                                    ]
+                                                                                                  ]
+                                                                                                ]
+                                                                                              ]
+                                                                                            ]
+                                                                                          ]
+                                                                                        ]
+                                                                                      ]
+                                                                                    ]
+                                                                                  ]
+                                                                                ]
+                                                                              ]
+                                                                            ]
+                                                                          ]
+                                                                        ]
+                                                                      ]
+                                                                    ]
+                                                                  ]
+                                                                ]
+                                                              ]
+                                                            ]
+                                                          ]
+                                                        ]
+                                                      ]
+                                                    ]
+                                                  ]
+                                                ]
+                                              ]
+                                            ]
+                                          ]
+                                        ]
+                                      ]
+                                    ]
+                                  ]
+                                ]
+                              ]
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "doc-depth-default-past",
+      "description": "One more.",
+      "parts": [
+        [
+          "---\na: ",
+          1
+        ],
+        [
+          "[",
+          64
+        ],
+        [
+          "]",
+          64
+        ],
+        [
+          "\n---\n",
+          1
+        ]
+      ],
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 140,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "too-deep",
+        "metadata_size": 132,
+        "body_size": 0
+      }
+    },
+    {
+      "id": "doc-depth-yaml-bomb",
+      "description": "Far deeper than any stack: refused by depth, not by exhausting the reader.",
+      "parts": [
+        [
+          "---\na: ",
+          1
+        ],
+        [
+          "[",
+          200000
+        ],
+        [
+          "]",
+          200000
+        ],
+        [
+          "\n---\n",
+          1
+        ]
+      ],
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 400012,
+        "body_line": 4,
+        "format": "yaml",
+        "error": "too-deep",
+        "metadata_size": 400004,
+        "body_size": 0
+      }
+    },
+    {
+      "id": "doc-depth-json-bomb",
+      "description": "In JSON.",
+      "parts": [
+        [
+          "---\n#!json\n{\"a\": ",
+          1
+        ],
+        [
+          "[",
+          200000
+        ],
+        [
+          "]",
+          200000
+        ],
+        [
+          "}\n---\n",
+          1
+        ]
+      ],
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 400023,
+        "body_line": 5,
+        "format": "json",
+        "error": "too-deep",
+        "metadata_size": 400015,
+        "body_size": 0
+      }
+    },
+    {
+      "id": "doc-depth-toml-bomb",
+      "description": "In TOML.",
+      "parts": [
+        [
+          "---\n#!toml\na = ",
+          1
+        ],
+        [
+          "[",
+          200000
+        ],
+        [
+          "]",
+          200000
+        ],
+        [
+          "\n---\n",
+          1
+        ]
+      ],
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 400020,
+        "body_line": 5,
+        "format": "toml",
+        "error": "too-deep",
+        "metadata_size": 400012,
+        "body_size": 0
+      }
+    },
+    {
+      "id": "doc-same-yaml",
+      "description": "One manifest in YAML ...",
+      "text": "---\nname: same\npriority: 420\nrequires: [engineering]\nenv:\n  MODE: read-only\n---\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 80,
+        "body_line": 8,
+        "format": "yaml",
+        "metadata": "name: same\npriority: 420\nrequires: [engineering]\nenv:\n  MODE: read-only\n",
+        "body": "",
+        "data": {
+          "name": "same",
+          "priority": 420,
+          "requires": [
+            "engineering"
+          ],
+          "env": {
+            "MODE": "read-only"
+          }
+        }
+      }
+    },
+    {
+      "id": "doc-same-toml",
+      "description": "... in TOML ...",
+      "text": "---\n#!toml\nname = \"same\"\npriority = 420\nrequires = [\"engineering\"]\n[env]\nMODE = \"read-only\"\n---\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 96,
+        "body_line": 9,
+        "format": "toml",
+        "metadata": "#!toml\nname = \"same\"\npriority = 420\nrequires = [\"engineering\"]\n[env]\nMODE = \"read-only\"\n",
+        "body": "",
+        "data": {
+          "name": "same",
+          "priority": 420,
+          "requires": [
+            "engineering"
+          ],
+          "env": {
+            "MODE": "read-only"
+          }
+        }
+      }
+    },
+    {
+      "id": "doc-same-json",
+      "description": "... and in JSON read the same.",
+      "text": "---\n#!json\n{\"name\": \"same\", \"priority\": 420, \"requires\": [\"engineering\"], \"env\": {\"MODE\": \"read-only\"}}\n---\n",
+      "expect": {
+        "case": "mapping",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 108,
+        "body_line": 5,
+        "format": "json",
+        "metadata": "#!json\n{\"name\": \"same\", \"priority\": 420, \"requires\": [\"engineering\"], \"env\": {\"MODE\": \"read-only\"}}\n",
+        "body": "",
+        "data": {
+          "name": "same",
+          "priority": 420,
+          "requires": [
+            "engineering"
+          ],
+          "env": {
+            "MODE": "read-only"
+          }
+        }
+      }
+    },
+    {
+      "id": "doc-toml-date",
+      "description": "The data model holds in every format: a TOML date is refused.",
+      "text": "---\n#!toml\nwhen = 2026-11-05\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 33,
+        "body_line": 5,
+        "format": "toml",
+        "error": "datetime-value",
+        "metadata": "#!toml\nwhen = 2026-11-05\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "doc-json-duplicate",
+      "description": "A duplicate JSON key.",
+      "text": "---\n#!json\n{\"a\": 1, \"a\": 2}\n---\n",
+      "expect": {
+        "case": "does-not-parse",
+        "metadata_offset": 4,
+        "metadata_line": 2,
+        "body_offset": 32,
+        "body_line": 5,
+        "format": "json",
+        "error": "duplicate-key",
+        "metadata": "#!json\n{\"a\": 1, \"a\": 2}\n",
+        "body": ""
+      }
+    },
+    {
+      "id": "context-file-plain",
+      "description": "A context file with no front matter is all context.",
+      "context_file": "# Glossary\n",
+      "expect": {
+        "text": "# Glossary\n"
+      }
+    },
+    {
+      "id": "context-file-closed",
+      "description": "A closed block is dropped.",
+      "context_file": "---\ntitle: x\n---\n# Glossary\n",
+      "expect": {
+        "text": "# Glossary\n"
+      }
+    },
+    {
+      "id": "context-file-closed-dots",
+      "description": "Closed by '...'.",
+      "context_file": "---\ntitle: x\n...\n# Glossary\n",
+      "expect": {
+        "text": "# Glossary\n"
+      }
+    },
+    {
+      "id": "context-file-closed-crlf",
+      "description": "With CRLF, the text keeping its line ends.",
+      "context_file": "---\r\ntitle: x\r\n---\r\n# G\r\n",
+      "expect": {
+        "text": "# G\r\n"
+      }
+    },
+    {
+      "id": "context-file-closed-blanks",
+      "description": "With blanks after the fences.",
+      "context_file": "--- \ntitle: x\n---\t\n# Glossary\n",
+      "expect": {
+        "text": "# Glossary\n"
+      }
+    },
+    {
+      "id": "context-file-bom",
+      "description": "A byte-order mark goes with the block.",
+      "context_file": "﻿---\ntitle: x\n---\n# Glossary\n",
+      "expect": {
+        "text": "# Glossary\n"
+      }
+    },
+    {
+      "id": "context-file-bom-no-block",
+      "description": "And with a file that has none.",
+      "context_file": "﻿# Glossary\n",
+      "expect": {
+        "text": "# Glossary\n"
+      }
+    },
+    {
+      "id": "context-file-unterminated",
+      "description": "Unclosed: no front matter, so it stays context, as text.",
+      "context_file": "---\ntitle: x\n# Glossary\n",
+      "expect": {
+        "text": "---\ntitle: x\n# Glossary\n"
+      }
+    },
+    {
+      "id": "context-file-unread-bad-yaml",
+      "description": "A closed block is dropped unread, whatever it holds.",
+      "context_file": "---\ntitle: [x\n---\n# Glossary\n",
+      "expect": {
+        "text": "# Glossary\n"
+      }
+    },
+    {
+      "id": "context-file-unread-unknown-format",
+      "description": "An unknown format, in a context file, is not a refusal.",
+      "context_file": "---\n#!ini\nx=1\n---\n# Glossary\n",
+      "expect": {
+        "text": "# Glossary\n"
+      }
+    },
+    {
+      "id": "context-file-unread-not-a-mapping",
+      "description": "Nor a scalar.",
+      "context_file": "---\njust text\n---\n# Glossary\n",
+      "expect": {
+        "text": "# Glossary\n"
+      }
+    },
+    {
+      "id": "context-file-thematic-break",
+      "description": "A Markdown rule on the first line is read as a fence, as everywhere.",
+      "context_file": "---\ntext\n---\nmore\n",
+      "expect": {
+        "text": "more\n"
+      }
+    },
+    {
+      "id": "context-file-too-large",
+      "description": "Past its bound a block is refused, never cut.",
+      "context_file": "---\ntitle: a long block\n---\n# Glossary\n",
+      "limits": {
+        "max_bytes": 8
+      },
+      "expect": {
+        "error": "too-large"
+      }
+    },
+    {
+      "id": "overlay-md-with-body",
+      "description": "OVERLAY.md with a body: the manifest, and the body as context.",
+      "files": {
+        "OVERLAY.md": "---\nname: x\n---\nBody.\n"
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {
+          "name": "x"
+        },
+        "context": [
+          "OVERLAY.md"
+        ],
+        "context_ignored": [],
+        "issues": [],
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-cfg-only",
+      "description": "overlay.cfg stays readable, TOML by default, CONTEXT.md its context.",
+      "files": {
+        "overlay.cfg": "name = \"x\"\n",
+        "CONTEXT.md": "Text.\n"
+      },
+      "expect": {
+        "manifest_file": "overlay.cfg",
+        "manifest": {
+          "name": "x"
+        },
+        "context": [
+          "CONTEXT.md"
+        ],
+        "context_ignored": [],
+        "issues": [],
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-cfg-yaml",
+      "description": "overlay.cfg keeps its own default: YAML in it still needs a format line.",
+      "files": {
+        "overlay.cfg": "name: x\n"
+      },
+      "expect": {
+        "error": "parse-error"
+      }
+    },
+    {
+      "id": "overlay-no-manifest",
+      "description": "No manifest at all: the empty mapping, and the defaults.",
+      "files": {
+        "CONTEXT.md": "Text.\n",
+        "bin/x": "x"
+      },
+      "expect": {
+        "manifest_file": null,
+        "manifest": {},
+        "context": [
+          "CONTEXT.md"
+        ],
+        "context_ignored": [],
+        "issues": [],
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-both",
+      "description": "Both manifests: refused, never merged.",
+      "files": {
+        "OVERLAY.md": "---\nname: a\n---\n",
+        "overlay.cfg": "name = \"a\"\n"
+      },
+      "expect": {
+        "error": "two-manifests"
+      }
+    },
+    {
+      "id": "overlay-both-even-empty",
+      "description": "Even when OVERLAY.md is empty.",
+      "files": {
+        "OVERLAY.md": "",
+        "overlay.cfg": ""
+      },
+      "expect": {
+        "error": "two-manifests"
+      }
+    },
+    {
+      "id": "overlay-both-no-front-matter",
+      "description": "Even when it holds only text.",
+      "files": {
+        "OVERLAY.md": "# Notes\n",
+        "overlay.cfg": ""
+      },
+      "expect": {
+        "error": "two-manifests"
+      }
+    },
+    {
+      "id": "overlay-body-instead-of-context",
+      "description": "A body is the context instead: CONTEXT.md is ignored and reported.",
+      "files": {
+        "OVERLAY.md": "---\nname: x\n---\nBody.\n",
+        "CONTEXT.md": "Text.\n"
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {
+          "name": "x"
+        },
+        "context": [
+          "OVERLAY.md"
+        ],
+        "context_ignored": [
+          "CONTEXT.md"
+        ],
+        "issues": [],
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-no-fence-is-all-body",
+      "description": "With no fence the whole file is the body.",
+      "files": {
+        "OVERLAY.md": "# Notes\n",
+        "CONTEXT.md": "Text.\n"
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {},
+        "context": [
+          "OVERLAY.md"
+        ],
+        "context_ignored": [
+          "CONTEXT.md"
+        ],
+        "issues": [],
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-white-body-keeps-context",
+      "description": "A body of white space is none: CONTEXT.md stays.",
+      "files": {
+        "OVERLAY.md": "---\nname: x\n---\n \t\r\n\n",
+        "CONTEXT.md": "Text.\n"
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {
+          "name": "x"
+        },
+        "context": [
+          "CONTEXT.md"
+        ],
+        "context_ignored": [],
+        "issues": [],
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-no-body-keeps-context",
+      "description": "No body at all.",
+      "files": {
+        "OVERLAY.md": "---\nname: x\n---\n",
+        "CONTEXT.md": "Text.\n"
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {
+          "name": "x"
+        },
+        "context": [
+          "CONTEXT.md"
+        ],
+        "context_ignored": [],
+        "issues": [],
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-empty-file-keeps-context",
+      "description": "An empty OVERLAY.md.",
+      "files": {
+        "OVERLAY.md": "",
+        "CONTEXT.md": "Text.\n"
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {},
+        "context": [
+          "CONTEXT.md"
+        ],
+        "context_ignored": [],
+        "issues": [],
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-white-file-keeps-context",
+      "description": "A file of white space alone, with no fence.",
+      "files": {
+        "OVERLAY.md": " \n\t\r\n",
+        "CONTEXT.md": "Text.\n"
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {},
+        "context": [
+          "CONTEXT.md"
+        ],
+        "context_ignored": [],
+        "issues": [],
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-nbsp-is-a-body",
+      "description": "White space is space, tab, CR and LF: a no-break space is a body.",
+      "files": {
+        "OVERLAY.md": "---\nname: x\n---\n \n",
+        "CONTEXT.md": "Text.\n"
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {
+          "name": "x"
+        },
+        "context": [
+          "OVERLAY.md"
+        ],
+        "context_ignored": [
+          "CONTEXT.md"
+        ],
+        "issues": [],
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-form-feed-is-a-body",
+      "description": "So is a form feed.",
+      "files": {
+        "OVERLAY.md": "---\nname: x\n---\n\f\n",
+        "CONTEXT.md": "Text.\n"
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {
+          "name": "x"
+        },
+        "context": [
+          "OVERLAY.md"
+        ],
+        "context_ignored": [
+          "CONTEXT.md"
+        ],
+        "issues": [],
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-bom-is-a-body",
+      "description": "So is a byte-order mark after the closing line.",
+      "files": {
+        "OVERLAY.md": "---\nname: x\n---\n﻿",
+        "CONTEXT.md": "Text.\n"
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {
+          "name": "x"
+        },
+        "context": [
+          "OVERLAY.md"
+        ],
+        "context_ignored": [
+          "CONTEXT.md"
+        ],
+        "issues": [],
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-default-off",
+      "description": "[defaults] context = false turns the body off as it would CONTEXT.md: neither is context, and nothing is ignored.",
+      "files": {
+        "OVERLAY.md": "---\ndefaults: {context: false}\n---\nBody.\n",
+        "CONTEXT.md": "Text.\n"
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {
+          "defaults": {
+            "context": false
+          }
+        },
+        "context": [],
+        "context_ignored": [],
+        "issues": [],
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-default-off-listed-context",
+      "description": "With the body off, CONTEXT.md named in context applies.",
+      "files": {
+        "OVERLAY.md": "---\ndefaults: {context: false}\ncontext: [CONTEXT.md]\n---\nBody.\n",
+        "CONTEXT.md": "Text.\n"
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {
+          "defaults": {
+            "context": false
+          },
+          "context": [
+            "CONTEXT.md"
+          ]
+        },
+        "context": [
+          "CONTEXT.md"
+        ],
+        "context_ignored": [],
+        "issues": [],
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-default-off-listed-body",
+      "description": "Naming OVERLAY.md in context names its body.",
+      "files": {
+        "OVERLAY.md": "---\ndefaults: {context: false}\ncontext: [OVERLAY.md]\n---\nBody.\n",
+        "CONTEXT.md": "Text.\n"
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {
+          "defaults": {
+            "context": false
+          },
+          "context": [
+            "OVERLAY.md"
+          ]
+        },
+        "context": [
+          "OVERLAY.md"
+        ],
+        "context_ignored": [
+          "CONTEXT.md"
+        ],
+        "issues": [],
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-listed-context-beside-body",
+      "description": "A body is the context: CONTEXT.md named in context is ignored and reported too.",
+      "files": {
+        "OVERLAY.md": "---\ncontext: [kb/a.md, CONTEXT.md]\n---\nBody.\n",
+        "CONTEXT.md": "Text.\n",
+        "kb/a.md": "A.\n"
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {
+          "context": [
+            "kb/a.md",
+            "CONTEXT.md"
+          ]
+        },
+        "context": [
+          "OVERLAY.md",
+          "kb/a.md"
+        ],
+        "context_ignored": [
+          "CONTEXT.md"
+        ],
+        "issues": [],
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-listed-body-position",
+      "description": "Naming OVERLAY.md places the body, as naming CONTEXT.md places that.",
+      "files": {
+        "OVERLAY.md": "---\ncontext: [kb/a.md, OVERLAY.md]\n---\nBody.\n",
+        "kb/a.md": "A.\n"
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {
+          "context": [
+            "kb/a.md",
+            "OVERLAY.md"
+          ]
+        },
+        "context": [
+          "kb/a.md",
+          "OVERLAY.md"
+        ],
+        "context_ignored": [],
+        "issues": [],
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-listed-after-body",
+      "description": "Other entries follow the body.",
+      "files": {
+        "OVERLAY.md": "---\ncontext: [kb/a.md]\n---\nBody.\n",
+        "kb/a.md": "A.\n"
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {
+          "context": [
+            "kb/a.md"
+          ]
+        },
+        "context": [
+          "OVERLAY.md",
+          "kb/a.md"
+        ],
+        "context_ignored": [],
+        "issues": [],
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-harness-context-ignored",
+      "description": "A harness's context does not bring CONTEXT.md back beside a body.",
+      "files": {
+        "OVERLAY.md": "---\nharness:\n  codex:\n    context: [CONTEXT.md, kb/a.md]\n---\nBody.\n",
+        "CONTEXT.md": "Text.\n",
+        "kb/a.md": "A.\n"
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {
+          "harness": {
+            "codex": {
+              "context": [
+                "CONTEXT.md",
+                "kb/a.md"
+              ]
+            }
+          }
+        },
+        "context": [
+          "OVERLAY.md"
+        ],
+        "context_ignored": [
+          "CONTEXT.md"
+        ],
+        "issues": [],
+        "harness_context": {
+          "codex": [
+            "kb/a.md"
+          ]
+        },
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-harness-context-kept",
+      "description": "With no body it does.",
+      "files": {
+        "OVERLAY.md": "---\nharness:\n  codex:\n    context: [CONTEXT.md]\n---\n",
+        "CONTEXT.md": "Text.\n"
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {
+          "harness": {
+            "codex": {
+              "context": [
+                "CONTEXT.md"
+              ]
+            }
+          }
+        },
+        "context": [
+          "CONTEXT.md"
+        ],
+        "context_ignored": [],
+        "issues": [],
+        "harness_context": {
+          "codex": [
+            "CONTEXT.md"
+          ]
+        },
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-lower-case-is-no-manifest",
+      "description": "Names match exactly: overlay.md is a file like any other.",
+      "files": {
+        "overlay.md": "---\nname: x\n---\nBody.\n",
+        "CONTEXT.md": "Text.\n"
+      },
+      "expect": {
+        "manifest_file": null,
+        "manifest": {},
+        "context": [
+          "CONTEXT.md"
+        ],
+        "context_ignored": [],
+        "issues": [],
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-mixed-case-is-no-manifest",
+      "description": "So is Overlay.md, beside a real manifest.",
+      "files": {
+        "Overlay.md": "---\nname: y\n---\n",
+        "overlay.cfg": "name = \"x\"\n"
+      },
+      "expect": {
+        "manifest_file": "overlay.cfg",
+        "manifest": {
+          "name": "x"
+        },
+        "context": [],
+        "context_ignored": [],
+        "issues": [],
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-nested-is-no-manifest",
+      "description": "Only at the root.",
+      "files": {
+        "kb/OVERLAY.md": "---\nname: x\n---\nBody.\n",
+        "CONTEXT.md": "Text.\n"
+      },
+      "expect": {
+        "manifest_file": null,
+        "manifest": {},
+        "context": [
+          "CONTEXT.md"
+        ],
+        "context_ignored": [],
+        "issues": [],
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-unterminated-refused",
+      "description": "A gate refuses what a viewer would show.",
+      "files": {
+        "OVERLAY.md": "---\nname: x\nBody.\n",
+        "CONTEXT.md": "Text.\n"
+      },
+      "expect": {
+        "error": "unterminated-front-matter",
+        "line": 1
+      }
+    },
+    {
+      "id": "overlay-parse-refused",
+      "description": "So with metadata that does not parse.",
+      "files": {
+        "OVERLAY.md": "---\nname: [x\n---\nBody.\n"
+      },
+      "expect": {
+        "error": "parse-error"
+      }
+    },
+    {
+      "id": "overlay-scalar-refused",
+      "description": "With metadata that is no mapping.",
+      "files": {
+        "OVERLAY.md": "---\njust text\n---\nBody.\n"
+      },
+      "expect": {
+        "error": "not-a-mapping",
+        "line": 2
+      }
+    },
+    {
+      "id": "overlay-unknown-format-refused",
+      "description": "With an unknown format.",
+      "files": {
+        "OVERLAY.md": "---\n#!ini\nname=x\n---\nBody.\n"
+      },
+      "expect": {
+        "error": "unsupported-format",
+        "line": 2
+      }
+    },
+    {
+      "id": "overlay-anchor-refused",
+      "description": "With what the restricted YAML refuses.",
+      "files": {
+        "OVERLAY.md": "---\nname: &n x\n---\nBody.\n"
+      },
+      "expect": {
+        "error": "yaml-anchor",
+        "line": 2
+      }
+    },
+    {
+      "id": "overlay-too-large-refused",
+      "description": "With a block past the bound.",
+      "files": {
+        "OVERLAY.md": "---\nname: a-long-name\n---\nBody.\n"
+      },
+      "limits": {
+        "max_bytes": 8
+      },
+      "expect": {
+        "error": "too-large",
+        "line": 1
+      }
+    },
+    {
+      "id": "overlay-body-invalid-utf8",
+      "description": "A body that is context must be UTF-8.",
+      "files": {
+        "OVERLAY.md": {
+          "base64": "LS0tCm5hbWU6IHgKLS0tCv8K"
+        }
+      },
+      "expect": {
+        "error": "invalid-utf8",
+        "line": 4
+      }
+    },
+    {
+      "id": "overlay-body-off-invalid-utf8",
+      "description": "A body that is not context is not read.",
+      "files": {
+        "OVERLAY.md": {
+          "base64": "LS0tCmRlZmF1bHRzOiB7Y29udGV4dDogZmFsc2V9Ci0tLQr/Cg=="
+        }
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {
+          "defaults": {
+            "context": false
+          }
+        },
+        "context": [],
+        "context_ignored": [],
+        "issues": [],
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-cfg-context-body-unread",
+      "description": "CONTEXT.md is judged by overlay.cfg's rules as before.",
+      "files": {
+        "overlay.cfg": "context = [\"CONTEXT.md\", \"kb/a.md\"]\n",
+        "CONTEXT.md": "Text.\n",
+        "kb/a.md": "A.\n"
+      },
+      "expect": {
+        "manifest_file": "overlay.cfg",
+        "manifest": {
+          "context": [
+            "CONTEXT.md",
+            "kb/a.md"
+          ]
+        },
+        "context": [
+          "CONTEXT.md",
+          "kb/a.md"
+        ],
+        "context_ignored": [],
+        "issues": [],
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-strict-typing",
+      "description": "The fields are held to the same schema in front matter: a quoted number is no integer.",
+      "files": {
+        "OVERLAY.md": "---\npriority: '5'\n---\n"
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {
+          "priority": "5"
+        },
+        "context": [],
+        "context_ignored": [],
+        "issues": [
+          "/priority"
+        ],
+        "applies": false
+      }
+    },
+    {
+      "id": "overlay-strict-typing-float",
+      "description": "Nor is a float of equal value.",
+      "files": {
+        "OVERLAY.md": "---\npriority: 5.0\n---\n"
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {
+          "priority": 5.0
+        },
+        "context": [],
+        "context_ignored": [],
+        "issues": [
+          "/priority"
+        ],
+        "applies": false
+      }
+    },
+    {
+      "id": "overlay-about-applies",
+      "description": "A problem under about is reported and does not block, as in overlay.cfg.",
+      "files": {
+        "OVERLAY.md": "---\nname: release-notes\nabout:\n  summary: One line.\n  tags: [Not-A-Tag]\n---\nBody.\n"
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {
+          "name": "release-notes",
+          "about": {
+            "summary": "One line.",
+            "tags": [
+              "Not-A-Tag"
+            ]
+          }
+        },
+        "context": [
+          "OVERLAY.md"
+        ],
+        "context_ignored": [],
+        "issues": [
+          "/about/tags/0"
+        ],
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-all-fields-format",
+      "description": "Every field reads in front matter, in any format.",
+      "files": {
+        "OVERLAY.md": "---\n#!toml\nname = \"x\"\nskills = [\"k\"]\n[env]\nA = \"1\"\n[about]\nsummary = \"One line.\"\n---\nBody.\n",
+        "skills/k/SKILL.md": "---\nname: k\n---\n"
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {
+          "name": "x",
+          "skills": [
+            "k"
+          ],
+          "env": {
+            "A": "1"
+          },
+          "about": {
+            "summary": "One line."
+          }
+        },
+        "context": [
+          "OVERLAY.md"
+        ],
+        "context_ignored": [],
+        "issues": [],
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-malformed-refused",
+      "description": "Almost a fence: a gate refuses rather than read no manifest and all of it as context.",
+      "files": {
+        "OVERLAY.md": "--- # manifest\ndefaults: {setup: false}\n---\nBody.\n",
+        "setup.sh": "echo\n"
+      },
+      "expect": {
+        "error": "malformed-fence",
+        "line": 1
+      }
+    },
+    {
+      "id": "overlay-malformed-blank-first",
+      "description": "A blank first line.",
+      "files": {
+        "OVERLAY.md": "\n---\ndefaults: {setup: false}\n---\nBody.\n"
+      },
+      "expect": {
+        "error": "malformed-fence",
+        "line": 1
+      }
+    },
+    {
+      "id": "overlay-rules-names-overlay-md",
+      "description": "A manifest is never a rules file.",
+      "files": {
+        "OVERLAY.md": "---\nrules: [OVERLAY.md]\n---\nBody.\n"
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {
+          "rules": [
+            "OVERLAY.md"
+          ]
+        },
+        "context": [
+          "OVERLAY.md"
+        ],
+        "context_ignored": [],
+        "issues": [
+          "/rules/0"
+        ],
+        "applies": false
+      }
+    },
+    {
+      "id": "overlay-body-past-context-bound",
+      "description": "A body that is context is bounded where it is used.",
+      "files": {
+        "OVERLAY.md": "---\nname: x\n---\nBody.\nBody.\nBody.\nBody.\nBody.\nBody.\nBody.\nBody.\nBody.\nBody.\nBody.\nBody.\nBody.\nBody.\nBody.\nBody.\nBody.\nBody.\nBody.\nBody.\n"
+      },
+      "limits": {
+        "max_context_bytes": 64
+      },
+      "expect": {
+        "error": "too-large",
+        "line": 4
+      }
+    },
+    {
+      "id": "overlay-body-within-context-bound",
+      "description": "Within it.",
+      "files": {
+        "OVERLAY.md": "---\nname: x\n---\nBody.\nBody.\nBody.\nBody.\nBody.\nBody.\nBody.\nBody.\nBody.\nBody.\n"
+      },
+      "limits": {
+        "max_context_bytes": 64
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {
+          "name": "x"
+        },
+        "context": [
+          "OVERLAY.md"
+        ],
+        "context_ignored": [],
+        "issues": [],
+        "applies": true
+      }
+    },
+    {
+      "id": "overlay-harness-body-invalid-utf8",
+      "description": "A body a harness's context names must be UTF-8 too.",
+      "files": {
+        "OVERLAY.md": {
+          "base64": "LS0tCmRlZmF1bHRzOiB7Y29udGV4dDogZmFsc2V9Cmhhcm5lc3M6IHtjb2RleDoge2NvbnRleHQ6IFtPVkVSTEFZLm1kXX19Ci0tLQr/Cg=="
+        }
+      },
+      "expect": {
+        "error": "invalid-utf8",
+        "line": 5
+      }
+    },
+    {
+      "id": "overlay-digest-unchanged-lf",
+      "description": "OVERLAY.md is a tree member like any file: its digest is of its bytes ...",
+      "files": {
+        "OVERLAY.md": "---\nname: x\n---\nBody.\n"
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {
+          "name": "x"
+        },
+        "context": [
+          "OVERLAY.md"
+        ],
+        "context_ignored": [],
+        "issues": [],
+        "applies": true,
+        "digest": "sha256:6594ecc41f6faab966d28db2da3a6589a35c50961ab243c31201720a8c8cee58"
+      }
+    },
+    {
+      "id": "overlay-digest-unchanged-crlf",
+      "description": "... so CRLF gives another digest, ...",
+      "files": {
+        "OVERLAY.md": "---\r\nname: x\r\n---\r\nBody.\r\n"
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {
+          "name": "x"
+        },
+        "context": [
+          "OVERLAY.md"
+        ],
+        "context_ignored": [],
+        "issues": [],
+        "applies": true,
+        "digest": "sha256:739cadb47b765e73f914b378f10b57e1a1f8eba9397d812a624bc8c69e2d7734"
+      }
+    },
+    {
+      "id": "overlay-digest-unchanged-bom",
+      "description": "... and so does a byte-order mark, though all three read alike.",
+      "files": {
+        "OVERLAY.md": "﻿---\nname: x\n---\nBody.\n"
+      },
+      "expect": {
+        "manifest_file": "OVERLAY.md",
+        "manifest": {
+          "name": "x"
+        },
+        "context": [
+          "OVERLAY.md"
+        ],
+        "context_ignored": [],
+        "issues": [],
+        "applies": true,
+        "digest": "sha256:39b95a2059e68dc2a47c431e91806c6acc68e3099ab33dd06f0dd4935debf0e7"
+      }
+    }
+  ]
+}

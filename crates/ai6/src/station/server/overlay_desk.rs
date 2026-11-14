@@ -119,7 +119,7 @@ pub(super) fn report(
     delivered: &Delivered,
 ) {
     for reported in &delivered.weakenings {
-        let id = &reported.weakening.id;
+        let id = reported.weakening.id.as_str();
         let subject = &reported.weakening.subject;
         eprintln!(
             "ai6: Mission {mission_id:?}: overlay {:?} is weakened: {id} {subject}",
@@ -131,7 +131,7 @@ pub(super) fn report(
                     .station(state.station_id.clone())
                     .mission(mission_id)
                     .detail("overlay", reported.overlay.clone())
-                    .detail("weakening", id.clone())
+                    .detail("weakening", id)
                     .detail("subject", subject.clone());
             record(state, mission_id, &event);
         }

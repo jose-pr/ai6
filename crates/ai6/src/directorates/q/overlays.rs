@@ -61,26 +61,6 @@ pub fn hooks_asked(manifest: &Document, files: &OverlayTree) -> Option<String> {
     })
 }
 
-/// A setting an overlay's delivery reports each time it is issued, weaker than the default or
-/// one the host found: an AOS non-default setting (`unpinned`, `env-script`, ...) or one of the
-/// host's own (`read-only-not-enforced`, `skill-collision`, `context-ignored`). Never a value.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Weakening {
-    /// The identifier.
-    pub id: String,
-    /// What it is about: a variable, a path, an overlay or a site; empty for `unpinned`.
-    pub subject: String,
-}
-
-impl From<&NonDefaultSetting> for Weakening {
-    fn from(setting: &NonDefaultSetting) -> Self {
-        Self {
-            id: setting.id.as_str().to_owned(),
-            subject: setting.subject.clone(),
-        }
-    }
-}
-
 /// Where an overlay comes from.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -347,7 +327,7 @@ pub struct IssuedOverlays {
     /// one wins a conflict.
     pub overlays: Vec<IssuedOverlay>,
     /// What is reported each time they are issued: `unpinned` for each overlay with no pin.
-    pub weakenings: Vec<Weakening>,
+    pub weakenings: Vec<NonDefaultSetting>,
 }
 
 fn identities(
@@ -418,10 +398,9 @@ pub fn issue_overlays(
             if !allow_unpinned {
                 return Err(OverlayRefusal::Unpinned(identity));
             }
-            issued.weakenings.push(Weakening {
-                id: "unpinned".to_owned(),
-                subject: identity.clone(),
-            });
+            issued
+                .weakenings
+                .push(NonDefaultSetting::host("unpinned", identity.clone()));
         }
         issued.overlays.push(IssuedOverlay {
             manifest: available[&identity].clone(),

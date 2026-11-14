@@ -1,0 +1,2179 @@
+{
+  "description": "The skills field and where its names resolve. A 'resolve-' case gives 'overlays', 'requested', optional 'files' and 'catalogs' (each read as in catalog.json, with its 'label'), an optional 'order' of labels and 'fetches' (absent, true); 'expect' gives each skill in composition order and by name with its 'origin' ('bundled', 'source', 'catalog', 'missing', 'ambiguous'), the 'source' as shown, 'pin', 'catalog' or 'catalogs'; the 'missing', 'ambiguous', 'unpinned' and 'not_fetched' reports, the 'non_defaults' ([id, name, overlay]: 'insecure-transport', 'private-source'), each bundled skill whose SKILL.md names another ('name_mismatch'), each skill from elsewhere kept from a name another overlay's skill holds ('shadowing'); what is 'delivered', by name, and the 'collisions'. 'files' may map paths to text, for the SKILL.md of bundled skills. A 'fetched-' case gives a skill's 'name', the 'fetched' files and an optional 'pin'; 'expect' gives its tree 'digest', the front matter keys 'reported' and the 'files' the digest covers, in byte order of their paths, or an 'error'.",
+  "spec": "spec/v0/skills.md",
+  "cases": [
+    {
+      "id": "resolve-bundled-only",
+      "description": "Bundled skills name no source and need no catalog.",
+      "overlays": {
+        "a": {
+          "skills": [
+            "k"
+          ]
+        }
+      },
+      "requested": [
+        "a"
+      ],
+      "files": {
+        "a": [
+          "skills/k/SKILL.md",
+          "skills/other/SKILL.md"
+        ]
+      },
+      "expect": {
+        "skills": [
+          {
+            "name": "k",
+            "origin": "bundled",
+            "overlay": "a"
+          },
+          {
+            "name": "other",
+            "origin": "bundled",
+            "overlay": "a"
+          }
+        ],
+        "missing": [],
+        "ambiguous": [],
+        "unpinned": [],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [],
+        "delivered": {
+          "k": "a",
+          "other": "a"
+        },
+        "collisions": []
+      }
+    },
+    {
+      "id": "resolve-all-three",
+      "description": "What it would do lists each skill with where it comes from: bundled, from a source, or through a catalog.",
+      "overlays": {
+        "a": {
+          "skills": [
+            "summarize-docs",
+            "review",
+            {
+              "name": "lint",
+              "source": "https://github.com/example/skills.git@v2#lint",
+              "pin": "sha256:abababababababababababababababababababababababababababababababab"
+            }
+          ]
+        }
+      },
+      "requested": [
+        "a"
+      ],
+      "files": {
+        "a": [
+          "skills/summarize-docs/SKILL.md"
+        ]
+      },
+      "catalogs": [
+        {
+          "name": "catalog.toml",
+          "text": "[skills]\npdf = \"../skills/pdf\"\nDocs = \"https://github.com/example/skills.git#docs\"\n\n[skills.review]\nsource = \"https://github.com/example/skills.git#skills/review\"\nref = \"v1\"\npin = \"sha256:abababababababababababababababababababababababababababababababab\"\n",
+          "base": "/srv/team/catalog.toml",
+          "label": "team"
+        }
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "lint",
+            "origin": "source",
+            "source": "https://github.com/example/skills.git@v2#lint",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab",
+            "overlay": "a"
+          },
+          {
+            "name": "review",
+            "origin": "catalog",
+            "overlay": "a",
+            "catalog": "team",
+            "source": "https://github.com/example/skills.git@v1#skills/review",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab"
+          },
+          {
+            "name": "summarize-docs",
+            "origin": "bundled",
+            "overlay": "a"
+          }
+        ],
+        "missing": [],
+        "ambiguous": [],
+        "unpinned": [],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [],
+        "delivered": {
+          "lint": "a",
+          "review": "a",
+          "summarize-docs": "a"
+        },
+        "collisions": []
+      }
+    },
+    {
+      "id": "resolve-resolve-ignores-case",
+      "description": "A name resolves without regard to ASCII case.",
+      "overlays": {
+        "a": {
+          "skills": [
+            "DOCS"
+          ]
+        }
+      },
+      "requested": [
+        "a"
+      ],
+      "catalogs": [
+        {
+          "name": "catalog.toml",
+          "text": "[skills]\npdf = \"../skills/pdf\"\nDocs = \"https://github.com/example/skills.git#docs\"\n\n[skills.review]\nsource = \"https://github.com/example/skills.git#skills/review\"\nref = \"v1\"\npin = \"sha256:abababababababababababababababababababababababababababababababab\"\n",
+          "base": "/srv/team/catalog.toml",
+          "label": "team"
+        }
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "DOCS",
+            "origin": "catalog",
+            "overlay": "a",
+            "catalog": "team",
+            "source": "https://github.com/example/skills.git#docs"
+          }
+        ],
+        "missing": [],
+        "ambiguous": [],
+        "unpinned": [
+          [
+            "DOCS",
+            "a"
+          ]
+        ],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [],
+        "delivered": {
+          "DOCS": "a"
+        },
+        "collisions": []
+      }
+    },
+    {
+      "id": "resolve-missing",
+      "description": "No catalog offers it: missing, reported with the overlay naming it.",
+      "overlays": {
+        "a": {
+          "skills": [
+            "nothing"
+          ]
+        }
+      },
+      "requested": [
+        "a"
+      ],
+      "catalogs": [
+        {
+          "name": "catalog.toml",
+          "text": "[skills]\npdf = \"../skills/pdf\"\nDocs = \"https://github.com/example/skills.git#docs\"\n\n[skills.review]\nsource = \"https://github.com/example/skills.git#skills/review\"\nref = \"v1\"\npin = \"sha256:abababababababababababababababababababababababababababababababab\"\n",
+          "base": "/srv/team/catalog.toml",
+          "label": "team"
+        }
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "nothing",
+            "origin": "missing",
+            "overlay": "a"
+          }
+        ],
+        "missing": [
+          [
+            "nothing",
+            "a"
+          ]
+        ],
+        "ambiguous": [],
+        "unpinned": [],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [],
+        "delivered": {},
+        "collisions": []
+      }
+    },
+    {
+      "id": "resolve-missing-no-catalogs",
+      "description": "No catalogs at all.",
+      "overlays": {
+        "a": {
+          "skills": [
+            "pdf"
+          ]
+        }
+      },
+      "requested": [
+        "a"
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "pdf",
+            "origin": "missing",
+            "overlay": "a"
+          }
+        ],
+        "missing": [
+          [
+            "pdf",
+            "a"
+          ]
+        ],
+        "ambiguous": [],
+        "unpinned": [],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [],
+        "delivered": {},
+        "collisions": []
+      }
+    },
+    {
+      "id": "resolve-missing-only-an-overlay",
+      "description": "A catalog's overlay of that name is not a skill.",
+      "overlays": {
+        "a": {
+          "skills": [
+            "pdf"
+          ]
+        }
+      },
+      "requested": [
+        "a"
+      ],
+      "catalogs": [
+        {
+          "name": "catalog.toml",
+          "text": "[overlays]\npdf = \"../overlays/pdf\"\n",
+          "base": "/srv/team/catalog.toml",
+          "label": "only-overlays"
+        }
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "pdf",
+            "origin": "missing",
+            "overlay": "a"
+          }
+        ],
+        "missing": [
+          [
+            "pdf",
+            "a"
+          ]
+        ],
+        "ambiguous": [],
+        "unpinned": [],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [],
+        "delivered": {},
+        "collisions": []
+      }
+    },
+    {
+      "id": "resolve-ambiguous",
+      "description": "Two catalogs offer it: ambiguous, reported with both labels, never guessed.",
+      "overlays": {
+        "a": {
+          "skills": [
+            "pdf"
+          ]
+        }
+      },
+      "requested": [
+        "a"
+      ],
+      "catalogs": [
+        {
+          "name": "catalog.toml",
+          "text": "[skills]\npdf = \"../skills/pdf\"\nDocs = \"https://github.com/example/skills.git#docs\"\n\n[skills.review]\nsource = \"https://github.com/example/skills.git#skills/review\"\nref = \"v1\"\npin = \"sha256:abababababababababababababababababababababababababababababababab\"\n",
+          "base": "/srv/team/catalog.toml",
+          "label": "team"
+        },
+        {
+          "name": "skills.json",
+          "text": "{\"skills\": {\"pdf\": \"https://example.org/skills/pdf\", \"web\": \"./web\"}}\n",
+          "base": "https://example.org/skills/skills.json",
+          "label": "public"
+        }
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "pdf",
+            "origin": "ambiguous",
+            "overlay": "a",
+            "catalogs": [
+              "public",
+              "team"
+            ]
+          }
+        ],
+        "missing": [],
+        "ambiguous": [
+          [
+            "pdf",
+            "a",
+            [
+              "public",
+              "team"
+            ]
+          ]
+        ],
+        "unpinned": [],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [],
+        "delivered": {},
+        "collisions": []
+      }
+    },
+    {
+      "id": "resolve-ambiguous-same-source",
+      "description": "Even offering the same source: entries are never merged.",
+      "overlays": {
+        "a": {
+          "skills": [
+            "pdf"
+          ]
+        }
+      },
+      "requested": [
+        "a"
+      ],
+      "catalogs": [
+        {
+          "name": "catalog.toml",
+          "text": "[skills]\npdf = \"../skills/pdf\"\nDocs = \"https://github.com/example/skills.git#docs\"\n\n[skills.review]\nsource = \"https://github.com/example/skills.git#skills/review\"\nref = \"v1\"\npin = \"sha256:abababababababababababababababababababababababababababababababab\"\n",
+          "base": "/srv/team/catalog.toml",
+          "label": "team"
+        },
+        {
+          "name": "catalog.toml",
+          "text": "[skills]\npdf = \"../skills/pdf\"\nDocs = \"https://github.com/example/skills.git#docs\"\n\n[skills.review]\nsource = \"https://github.com/example/skills.git#skills/review\"\nref = \"v1\"\npin = \"sha256:abababababababababababababababababababababababababababababababab\"\n",
+          "base": "/srv/team/catalog.toml",
+          "label": "mirror"
+        }
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "pdf",
+            "origin": "ambiguous",
+            "overlay": "a",
+            "catalogs": [
+              "mirror",
+              "team"
+            ]
+          }
+        ],
+        "missing": [],
+        "ambiguous": [
+          [
+            "pdf",
+            "a",
+            [
+              "mirror",
+              "team"
+            ]
+          ]
+        ],
+        "unpinned": [],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [],
+        "delivered": {},
+        "collisions": []
+      }
+    },
+    {
+      "id": "resolve-order-chooses",
+      "description": "A user's order of catalogs decides, and the catalog taken is reported.",
+      "overlays": {
+        "a": {
+          "skills": [
+            "pdf"
+          ]
+        }
+      },
+      "requested": [
+        "a"
+      ],
+      "catalogs": [
+        {
+          "name": "catalog.toml",
+          "text": "[skills]\npdf = \"../skills/pdf\"\nDocs = \"https://github.com/example/skills.git#docs\"\n\n[skills.review]\nsource = \"https://github.com/example/skills.git#skills/review\"\nref = \"v1\"\npin = \"sha256:abababababababababababababababababababababababababababababababab\"\n",
+          "base": "/srv/team/catalog.toml",
+          "label": "team"
+        },
+        {
+          "name": "skills.json",
+          "text": "{\"skills\": {\"pdf\": \"https://example.org/skills/pdf\", \"web\": \"./web\"}}\n",
+          "base": "https://example.org/skills/skills.json",
+          "label": "public"
+        }
+      ],
+      "order": [
+        "public",
+        "team"
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "pdf",
+            "origin": "catalog",
+            "overlay": "a",
+            "catalog": "public",
+            "source": "https://example.org/skills/pdf"
+          }
+        ],
+        "missing": [],
+        "ambiguous": [],
+        "unpinned": [
+          [
+            "pdf",
+            "a"
+          ]
+        ],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [],
+        "delivered": {
+          "pdf": "a"
+        },
+        "collisions": []
+      }
+    },
+    {
+      "id": "resolve-order-skips-silent",
+      "description": "An order naming a catalog that does not offer it goes on to the next that does.",
+      "overlays": {
+        "a": {
+          "skills": [
+            "pdf"
+          ]
+        }
+      },
+      "requested": [
+        "a"
+      ],
+      "catalogs": [
+        {
+          "name": "catalog.toml",
+          "text": "[skills]\npdf = \"../skills/pdf\"\nDocs = \"https://github.com/example/skills.git#docs\"\n\n[skills.review]\nsource = \"https://github.com/example/skills.git#skills/review\"\nref = \"v1\"\npin = \"sha256:abababababababababababababababababababababababababababababababab\"\n",
+          "base": "/srv/team/catalog.toml",
+          "label": "team"
+        },
+        {
+          "name": "skills.json",
+          "text": "{\"skills\": {\"pdf\": \"https://example.org/skills/pdf\", \"web\": \"./web\"}}\n",
+          "base": "https://example.org/skills/skills.json",
+          "label": "public"
+        }
+      ],
+      "order": [
+        "other",
+        "team"
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "pdf",
+            "origin": "catalog",
+            "overlay": "a",
+            "catalog": "team",
+            "source": "/srv/skills/pdf"
+          }
+        ],
+        "missing": [],
+        "ambiguous": [],
+        "unpinned": [
+          [
+            "pdf",
+            "a"
+          ]
+        ],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [],
+        "delivered": {
+          "pdf": "a"
+        },
+        "collisions": []
+      }
+    },
+    {
+      "id": "resolve-shown-without-credentials",
+      "description": "A source from the user's own catalog is shown without user information or query.",
+      "overlays": {
+        "a": {
+          "skills": [
+            "pdf"
+          ]
+        }
+      },
+      "requested": [
+        "a"
+      ],
+      "catalogs": [
+        {
+          "name": "catalog.toml",
+          "text": "[skills]\npdf = \"https://u:secret@example.org/skills/pdf?token=t\"\n",
+          "base": "/srv/team/catalog.toml",
+          "label": "mine"
+        }
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "pdf",
+            "origin": "catalog",
+            "overlay": "a",
+            "catalog": "mine",
+            "source": "https://example.org/skills/pdf"
+          }
+        ],
+        "missing": [],
+        "ambiguous": [],
+        "unpinned": [
+          [
+            "pdf",
+            "a"
+          ]
+        ],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [],
+        "delivered": {
+          "pdf": "a"
+        },
+        "collisions": []
+      }
+    },
+    {
+      "id": "resolve-relative-beside-catalog",
+      "description": "A relative source resolves beside a catalog at a URL.",
+      "overlays": {
+        "a": {
+          "skills": [
+            "web"
+          ]
+        }
+      },
+      "requested": [
+        "a"
+      ],
+      "catalogs": [
+        {
+          "name": "skills.json",
+          "text": "{\"skills\": {\"pdf\": \"https://example.org/skills/pdf\", \"web\": \"./web\"}}\n",
+          "base": "https://example.org/skills/skills.json",
+          "label": "public"
+        }
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "web",
+            "origin": "catalog",
+            "overlay": "a",
+            "catalog": "public",
+            "source": "https://example.org/skills/web"
+          }
+        ],
+        "missing": [],
+        "ambiguous": [],
+        "unpinned": [
+          [
+            "web",
+            "a"
+          ]
+        ],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [],
+        "delivered": {
+          "web": "a"
+        },
+        "collisions": []
+      }
+    },
+    {
+      "id": "resolve-table-ref-shown",
+      "description": "A table's ref is part of its source as shown, and the same source written with @ref is the same skill.",
+      "overlays": {
+        "a": {
+          "skills": [
+            {
+              "name": "lint",
+              "source": "https://github.com/example/skills.git#lint",
+              "ref": "v3",
+              "pin": "sha256:abababababababababababababababababababababababababababababababab"
+            }
+          ]
+        },
+        "b": {
+          "skills": [
+            {
+              "name": "lint",
+              "source": "https://github.com/example/skills.git@v3#lint",
+              "pin": "sha256:abababababababababababababababababababababababababababababababab"
+            }
+          ]
+        }
+      },
+      "requested": [
+        "a",
+        "b"
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "lint",
+            "origin": "source",
+            "source": "https://github.com/example/skills.git@v3#lint",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab",
+            "overlay": "a"
+          },
+          {
+            "name": "lint",
+            "origin": "source",
+            "source": "https://github.com/example/skills.git@v3#lint",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab",
+            "overlay": "b"
+          }
+        ],
+        "missing": [],
+        "ambiguous": [],
+        "unpinned": [],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [],
+        "delivered": {
+          "lint": "b"
+        },
+        "collisions": []
+      }
+    },
+    {
+      "id": "resolve-table-ref-differs",
+      "description": "Another ref is another source: a collision.",
+      "overlays": {
+        "a": {
+          "skills": [
+            {
+              "name": "lint",
+              "source": "https://github.com/example/skills.git#lint",
+              "ref": "v3",
+              "pin": "sha256:abababababababababababababababababababababababababababababababab"
+            }
+          ]
+        },
+        "b": {
+          "skills": [
+            {
+              "name": "lint",
+              "source": "https://github.com/example/skills.git#lint",
+              "ref": "v4",
+              "pin": "sha256:abababababababababababababababababababababababababababababababab"
+            }
+          ]
+        }
+      },
+      "requested": [
+        "a",
+        "b"
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "lint",
+            "origin": "source",
+            "source": "https://github.com/example/skills.git@v3#lint",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab",
+            "overlay": "a"
+          },
+          {
+            "name": "lint",
+            "origin": "source",
+            "source": "https://github.com/example/skills.git@v4#lint",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab",
+            "overlay": "b"
+          }
+        ],
+        "missing": [],
+        "ambiguous": [],
+        "unpinned": [],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [
+          [
+            "lint",
+            "b"
+          ]
+        ],
+        "delivered": {
+          "lint": "a"
+        },
+        "collisions": [
+          "lint"
+        ]
+      }
+    },
+    {
+      "id": "resolve-shadow-refused",
+      "description": "A skill from elsewhere never takes a name another overlay's skill holds, whatever its priority: it is reported, and the earlier one stays.",
+      "overlays": {
+        "trusted": {
+          "priority": 100
+        },
+        "evil": {
+          "priority": 900,
+          "skills": [
+            {
+              "name": "deploy",
+              "source": "https://evil.example/x.git",
+              "pin": "sha256:abababababababababababababababababababababababababababababababab"
+            }
+          ]
+        }
+      },
+      "requested": [
+        "trusted",
+        "evil"
+      ],
+      "files": {
+        "trusted": [
+          "skills/deploy/SKILL.md"
+        ]
+      },
+      "expect": {
+        "skills": [
+          {
+            "name": "deploy",
+            "origin": "bundled",
+            "overlay": "trusted"
+          },
+          {
+            "name": "deploy",
+            "origin": "source",
+            "source": "https://evil.example/x.git",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab",
+            "overlay": "evil"
+          }
+        ],
+        "missing": [],
+        "ambiguous": [],
+        "unpinned": [],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [
+          [
+            "deploy",
+            "evil"
+          ]
+        ],
+        "delivered": {
+          "deploy": "trusted"
+        },
+        "collisions": [
+          "deploy"
+        ]
+      }
+    },
+    {
+      "id": "resolve-shadow-by-catalog-refused",
+      "description": "Through a catalog likewise.",
+      "overlays": {
+        "trusted": {
+          "priority": 100
+        },
+        "other": {
+          "priority": 900,
+          "skills": [
+            "review"
+          ]
+        }
+      },
+      "requested": [
+        "trusted",
+        "other"
+      ],
+      "files": {
+        "trusted": [
+          "skills/review/SKILL.md"
+        ]
+      },
+      "catalogs": [
+        {
+          "name": "catalog.toml",
+          "text": "[skills]\npdf = \"../skills/pdf\"\nDocs = \"https://github.com/example/skills.git#docs\"\n\n[skills.review]\nsource = \"https://github.com/example/skills.git#skills/review\"\nref = \"v1\"\npin = \"sha256:abababababababababababababababababababababababababababababababab\"\n",
+          "base": "/srv/team/catalog.toml",
+          "label": "team"
+        }
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "review",
+            "origin": "bundled",
+            "overlay": "trusted"
+          },
+          {
+            "name": "review",
+            "origin": "catalog",
+            "overlay": "other",
+            "catalog": "team",
+            "source": "https://github.com/example/skills.git@v1#skills/review",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab"
+          }
+        ],
+        "missing": [],
+        "ambiguous": [],
+        "unpinned": [],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [
+          [
+            "review",
+            "other"
+          ]
+        ],
+        "delivered": {
+          "review": "trusted"
+        },
+        "collisions": [
+          "review"
+        ]
+      }
+    },
+    {
+      "id": "resolve-bundled-later-wins",
+      "description": "Between bundled skills the later in order is delivered, as before.",
+      "overlays": {
+        "a": {
+          "priority": 100,
+          "skills": [
+            {
+              "name": "x",
+              "source": "https://github.com/example/x.git",
+              "pin": "sha256:abababababababababababababababababababababababababababababababab"
+            }
+          ]
+        },
+        "b": {
+          "priority": 900
+        }
+      },
+      "requested": [
+        "a",
+        "b"
+      ],
+      "files": {
+        "b": [
+          "skills/x/SKILL.md"
+        ]
+      },
+      "expect": {
+        "skills": [
+          {
+            "name": "x",
+            "origin": "source",
+            "source": "https://github.com/example/x.git",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab",
+            "overlay": "a"
+          },
+          {
+            "name": "x",
+            "origin": "bundled",
+            "overlay": "b"
+          }
+        ],
+        "missing": [],
+        "ambiguous": [],
+        "unpinned": [],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [],
+        "delivered": {
+          "x": "b"
+        },
+        "collisions": [
+          "x"
+        ]
+      }
+    },
+    {
+      "id": "resolve-query-is-another-source",
+      "description": "A source differing only in what is not shown is another source: a collision.",
+      "overlays": {
+        "a": {
+          "priority": 100,
+          "skills": [
+            {
+              "name": "pdf",
+              "source": "https://github.com/acme/pdf.git",
+              "pin": "sha256:abababababababababababababababababababababababababababababababab"
+            }
+          ]
+        },
+        "b": {
+          "priority": 900,
+          "skills": [
+            "pdf"
+          ]
+        }
+      },
+      "requested": [
+        "a",
+        "b"
+      ],
+      "catalogs": [
+        {
+          "name": "catalog.toml",
+          "text": "[skills.pdf]\nsource = \"https://github.com/acme/pdf.git?x=other\"\npin = \"sha256:abababababababababababababababababababababababababababababababab\"\n",
+          "base": "/srv/team/catalog.toml",
+          "label": "mine"
+        }
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "pdf",
+            "origin": "source",
+            "source": "https://github.com/acme/pdf.git",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab",
+            "overlay": "a"
+          },
+          {
+            "name": "pdf",
+            "origin": "catalog",
+            "overlay": "b",
+            "catalog": "mine",
+            "source": "https://github.com/acme/pdf.git",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab"
+          }
+        ],
+        "missing": [],
+        "ambiguous": [],
+        "unpinned": [],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [
+          [
+            "pdf",
+            "b"
+          ]
+        ],
+        "delivered": {
+          "pdf": "a"
+        },
+        "collisions": [
+          "pdf"
+        ]
+      }
+    },
+    {
+      "id": "resolve-bundled-name-mismatch",
+      "description": "A bundled SKILL.md naming another skill is not delivered under this one.",
+      "overlays": {
+        "a": {}
+      },
+      "requested": [
+        "a"
+      ],
+      "files": {
+        "a": {
+          "skills/innocuous/SKILL.md": "---\nname: deploy\ndescription: d\n---\n",
+          "skills/fine/SKILL.md": "---\nname: fine\n---\n",
+          "skills/loose/SKILL.md": "no front matter\n"
+        }
+      },
+      "expect": {
+        "skills": [
+          {
+            "name": "fine",
+            "origin": "bundled",
+            "overlay": "a"
+          },
+          {
+            "name": "innocuous",
+            "origin": "bundled",
+            "overlay": "a"
+          },
+          {
+            "name": "loose",
+            "origin": "bundled",
+            "overlay": "a"
+          }
+        ],
+        "missing": [],
+        "ambiguous": [],
+        "unpinned": [],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [
+          [
+            "innocuous",
+            "a"
+          ]
+        ],
+        "shadowing": [],
+        "delivered": {
+          "fine": "a",
+          "loose": "a"
+        },
+        "collisions": []
+      }
+    },
+    {
+      "id": "resolve-insecure-transport",
+      "description": "A source over plain http or git:// is reported.",
+      "overlays": {
+        "a": {
+          "skills": [
+            {
+              "name": "a",
+              "source": "http://example.org/skills/a",
+              "pin": "sha256:abababababababababababababababababababababababababababababababab"
+            },
+            {
+              "name": "b",
+              "source": "git://example.org/skills.git",
+              "pin": "sha256:abababababababababababababababababababababababababababababababab"
+            },
+            {
+              "name": "c",
+              "source": "git+http://example.org/skills",
+              "pin": "sha256:abababababababababababababababababababababababababababababababab"
+            }
+          ]
+        }
+      },
+      "requested": [
+        "a"
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "a",
+            "origin": "source",
+            "source": "http://example.org/skills/a",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab",
+            "overlay": "a"
+          },
+          {
+            "name": "b",
+            "origin": "source",
+            "source": "git://example.org/skills.git",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab",
+            "overlay": "a"
+          },
+          {
+            "name": "c",
+            "origin": "source",
+            "source": "http://example.org/skills",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab",
+            "overlay": "a"
+          }
+        ],
+        "missing": [],
+        "ambiguous": [],
+        "unpinned": [],
+        "non_defaults": [
+          [
+            "insecure-transport",
+            "a",
+            "a"
+          ],
+          [
+            "insecure-transport",
+            "b",
+            "a"
+          ],
+          [
+            "insecure-transport",
+            "c",
+            "a"
+          ]
+        ],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [],
+        "delivered": {
+          "a": "a",
+          "b": "a",
+          "c": "a"
+        },
+        "collisions": []
+      }
+    },
+    {
+      "id": "resolve-private-source",
+      "description": "A private address is reported.",
+      "overlays": {
+        "a": {
+          "skills": [
+            {
+              "name": "a",
+              "source": "https://10.1.2.3/skills.git",
+              "pin": "sha256:abababababababababababababababababababababababababababababababab"
+            },
+            {
+              "name": "b",
+              "source": "git@192.168.1.5:skills.git",
+              "pin": "sha256:abababababababababababababababababababababababababababababababab"
+            }
+          ]
+        }
+      },
+      "requested": [
+        "a"
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "a",
+            "origin": "source",
+            "source": "https://10.1.2.3/skills.git",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab",
+            "overlay": "a"
+          },
+          {
+            "name": "b",
+            "origin": "source",
+            "source": "git@192.168.1.5:skills.git",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab",
+            "overlay": "a"
+          }
+        ],
+        "missing": [],
+        "ambiguous": [],
+        "unpinned": [],
+        "non_defaults": [
+          [
+            "private-source",
+            "a",
+            "a"
+          ],
+          [
+            "private-source",
+            "b",
+            "a"
+          ]
+        ],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [],
+        "delivered": {
+          "a": "a",
+          "b": "a"
+        },
+        "collisions": []
+      }
+    },
+    {
+      "id": "resolve-private-source-shorthand",
+      "description": "A private address is read as a URL parser reads a host: 10.1 is 10.0.0.1. The shared address space 100.64.0.0/10 is private, and the addresses either side of it are not.",
+      "overlays": {
+        "a": {
+          "skills": [
+            {
+              "name": "a",
+              "source": "https://10.1/skills.git",
+              "pin": "sha256:abababababababababababababababababababababababababababababababab"
+            },
+            {
+              "name": "b",
+              "source": "https://100.64.0.1/skills.git",
+              "pin": "sha256:abababababababababababababababababababababababababababababababab"
+            },
+            {
+              "name": "c",
+              "source": "https://100.127.255.255/skills.git",
+              "pin": "sha256:abababababababababababababababababababababababababababababababab"
+            },
+            {
+              "name": "d",
+              "source": "https://100.63.255.255/skills.git",
+              "pin": "sha256:abababababababababababababababababababababababababababababababab"
+            },
+            {
+              "name": "e",
+              "source": "https://100.128.0.1/skills.git",
+              "pin": "sha256:abababababababababababababababababababababababababababababababab"
+            },
+            {
+              "name": "f",
+              "source": "https://0xc0.0xa8.1/skills.git",
+              "pin": "sha256:abababababababababababababababababababababababababababababababab"
+            }
+          ]
+        }
+      },
+      "requested": [
+        "a"
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "a",
+            "origin": "source",
+            "source": "https://10.1/skills.git",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab",
+            "overlay": "a"
+          },
+          {
+            "name": "b",
+            "origin": "source",
+            "source": "https://100.64.0.1/skills.git",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab",
+            "overlay": "a"
+          },
+          {
+            "name": "c",
+            "origin": "source",
+            "source": "https://100.127.255.255/skills.git",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab",
+            "overlay": "a"
+          },
+          {
+            "name": "d",
+            "origin": "source",
+            "source": "https://100.63.255.255/skills.git",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab",
+            "overlay": "a"
+          },
+          {
+            "name": "e",
+            "origin": "source",
+            "source": "https://100.128.0.1/skills.git",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab",
+            "overlay": "a"
+          },
+          {
+            "name": "f",
+            "origin": "source",
+            "source": "https://0xc0.0xa8.1/skills.git",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab",
+            "overlay": "a"
+          }
+        ],
+        "missing": [],
+        "ambiguous": [],
+        "unpinned": [],
+        "non_defaults": [
+          [
+            "private-source",
+            "a",
+            "a"
+          ],
+          [
+            "private-source",
+            "b",
+            "a"
+          ],
+          [
+            "private-source",
+            "c",
+            "a"
+          ],
+          [
+            "private-source",
+            "f",
+            "a"
+          ]
+        ],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [],
+        "delivered": {
+          "a": "a",
+          "b": "a",
+          "c": "a",
+          "d": "a",
+          "e": "a",
+          "f": "a"
+        },
+        "collisions": []
+      }
+    },
+    {
+      "id": "resolve-unpinned-table",
+      "description": "A table without a pin is reported unpinned, by name and overlay.",
+      "overlays": {
+        "a": {
+          "skills": [
+            {
+              "name": "lint",
+              "source": "https://github.com/example/skills.git#lint"
+            }
+          ]
+        }
+      },
+      "requested": [
+        "a"
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "lint",
+            "origin": "source",
+            "source": "https://github.com/example/skills.git#lint",
+            "overlay": "a"
+          }
+        ],
+        "missing": [],
+        "ambiguous": [],
+        "unpinned": [
+          [
+            "lint",
+            "a"
+          ]
+        ],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [],
+        "delivered": {
+          "lint": "a"
+        },
+        "collisions": []
+      }
+    },
+    {
+      "id": "resolve-unpinned-catalog",
+      "description": "A catalog's entry without a pin too; a catalog's pin counts.",
+      "overlays": {
+        "a": {
+          "skills": [
+            "pdf",
+            "review"
+          ]
+        }
+      },
+      "requested": [
+        "a"
+      ],
+      "catalogs": [
+        {
+          "name": "catalog.toml",
+          "text": "[skills]\npdf = \"../skills/pdf\"\nDocs = \"https://github.com/example/skills.git#docs\"\n\n[skills.review]\nsource = \"https://github.com/example/skills.git#skills/review\"\nref = \"v1\"\npin = \"sha256:abababababababababababababababababababababababababababababababab\"\n",
+          "base": "/srv/team/catalog.toml",
+          "label": "team"
+        }
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "pdf",
+            "origin": "catalog",
+            "overlay": "a",
+            "catalog": "team",
+            "source": "/srv/skills/pdf"
+          },
+          {
+            "name": "review",
+            "origin": "catalog",
+            "overlay": "a",
+            "catalog": "team",
+            "source": "https://github.com/example/skills.git@v1#skills/review",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab"
+          }
+        ],
+        "missing": [],
+        "ambiguous": [],
+        "unpinned": [
+          [
+            "pdf",
+            "a"
+          ]
+        ],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [],
+        "delivered": {
+          "pdf": "a",
+          "review": "a"
+        },
+        "collisions": []
+      }
+    },
+    {
+      "id": "resolve-not-fetched",
+      "description": "A consumer that does not fetch delivers the bundled ones and says so of the rest.",
+      "overlays": {
+        "a": {
+          "skills": [
+            "k",
+            "review",
+            {
+              "name": "lint",
+              "source": "https://github.com/example/skills.git#lint",
+              "pin": "sha256:abababababababababababababababababababababababababababababababab"
+            },
+            "absent"
+          ]
+        }
+      },
+      "requested": [
+        "a"
+      ],
+      "files": {
+        "a": [
+          "skills/k/SKILL.md"
+        ]
+      },
+      "catalogs": [
+        {
+          "name": "catalog.toml",
+          "text": "[skills]\npdf = \"../skills/pdf\"\nDocs = \"https://github.com/example/skills.git#docs\"\n\n[skills.review]\nsource = \"https://github.com/example/skills.git#skills/review\"\nref = \"v1\"\npin = \"sha256:abababababababababababababababababababababababababababababababab\"\n",
+          "base": "/srv/team/catalog.toml",
+          "label": "team"
+        }
+      ],
+      "fetches": false,
+      "expect": {
+        "skills": [
+          {
+            "name": "absent",
+            "origin": "missing",
+            "overlay": "a"
+          },
+          {
+            "name": "k",
+            "origin": "bundled",
+            "overlay": "a"
+          },
+          {
+            "name": "lint",
+            "origin": "source",
+            "source": "https://github.com/example/skills.git#lint",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab",
+            "overlay": "a"
+          },
+          {
+            "name": "review",
+            "origin": "catalog",
+            "overlay": "a",
+            "catalog": "team",
+            "source": "https://github.com/example/skills.git@v1#skills/review",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab"
+          }
+        ],
+        "missing": [
+          [
+            "absent",
+            "a"
+          ]
+        ],
+        "ambiguous": [],
+        "unpinned": [],
+        "non_defaults": [],
+        "not_fetched": [
+          [
+            "lint",
+            "a"
+          ],
+          [
+            "review",
+            "a"
+          ]
+        ],
+        "name_mismatch": [],
+        "shadowing": [],
+        "delivered": {
+          "k": "a"
+        },
+        "collisions": []
+      }
+    },
+    {
+      "id": "resolve-two-overlays-one-skill",
+      "description": "Two overlays naming one skill alike do not collide.",
+      "overlays": {
+        "a": {
+          "skills": [
+            "review"
+          ]
+        },
+        "b": {
+          "skills": [
+            "Review"
+          ]
+        }
+      },
+      "requested": [
+        "a",
+        "b"
+      ],
+      "catalogs": [
+        {
+          "name": "catalog.toml",
+          "text": "[skills]\npdf = \"../skills/pdf\"\nDocs = \"https://github.com/example/skills.git#docs\"\n\n[skills.review]\nsource = \"https://github.com/example/skills.git#skills/review\"\nref = \"v1\"\npin = \"sha256:abababababababababababababababababababababababababababababababab\"\n",
+          "base": "/srv/team/catalog.toml",
+          "label": "team"
+        }
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "review",
+            "origin": "catalog",
+            "overlay": "a",
+            "catalog": "team",
+            "source": "https://github.com/example/skills.git@v1#skills/review",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab"
+          },
+          {
+            "name": "Review",
+            "origin": "catalog",
+            "overlay": "b",
+            "catalog": "team",
+            "source": "https://github.com/example/skills.git@v1#skills/review",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab"
+          }
+        ],
+        "missing": [],
+        "ambiguous": [],
+        "unpinned": [],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [],
+        "delivered": {
+          "Review": "b"
+        },
+        "collisions": []
+      }
+    },
+    {
+      "id": "resolve-two-overlays-same-source",
+      "description": "A name and a table that come to one source and pin do not collide.",
+      "overlays": {
+        "a": {
+          "skills": [
+            "review"
+          ]
+        },
+        "b": {
+          "skills": [
+            {
+              "name": "review",
+              "source": "https://github.com/example/skills.git@v1#skills/review",
+              "pin": "sha256:abababababababababababababababababababababababababababababababab"
+            }
+          ]
+        }
+      },
+      "requested": [
+        "a",
+        "b"
+      ],
+      "catalogs": [
+        {
+          "name": "catalog.toml",
+          "text": "[skills]\npdf = \"../skills/pdf\"\nDocs = \"https://github.com/example/skills.git#docs\"\n\n[skills.review]\nsource = \"https://github.com/example/skills.git#skills/review\"\nref = \"v1\"\npin = \"sha256:abababababababababababababababababababababababababababababababab\"\n",
+          "base": "/srv/team/catalog.toml",
+          "label": "team"
+        }
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "review",
+            "origin": "catalog",
+            "overlay": "a",
+            "catalog": "team",
+            "source": "https://github.com/example/skills.git@v1#skills/review",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab"
+          },
+          {
+            "name": "review",
+            "origin": "source",
+            "source": "https://github.com/example/skills.git@v1#skills/review",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab",
+            "overlay": "b"
+          }
+        ],
+        "missing": [],
+        "ambiguous": [],
+        "unpinned": [],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [],
+        "delivered": {
+          "review": "b"
+        },
+        "collisions": []
+      }
+    },
+    {
+      "id": "resolve-two-overlays-two-pins",
+      "description": "Another pin: a collision, the later in composition order delivered.",
+      "overlays": {
+        "a": {
+          "priority": 900,
+          "skills": [
+            "review"
+          ]
+        },
+        "b": {
+          "priority": 100,
+          "skills": [
+            {
+              "name": "review",
+              "source": "https://github.com/example/skills.git@v1#skills/review",
+              "pin": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+            }
+          ]
+        }
+      },
+      "requested": [
+        "a",
+        "b"
+      ],
+      "catalogs": [
+        {
+          "name": "catalog.toml",
+          "text": "[skills]\npdf = \"../skills/pdf\"\nDocs = \"https://github.com/example/skills.git#docs\"\n\n[skills.review]\nsource = \"https://github.com/example/skills.git#skills/review\"\nref = \"v1\"\npin = \"sha256:abababababababababababababababababababababababababababababababab\"\n",
+          "base": "/srv/team/catalog.toml",
+          "label": "team"
+        }
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "review",
+            "origin": "source",
+            "source": "https://github.com/example/skills.git@v1#skills/review",
+            "pin": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+            "overlay": "b"
+          },
+          {
+            "name": "review",
+            "origin": "catalog",
+            "overlay": "a",
+            "catalog": "team",
+            "source": "https://github.com/example/skills.git@v1#skills/review",
+            "pin": "sha256:abababababababababababababababababababababababababababababababab"
+          }
+        ],
+        "missing": [],
+        "ambiguous": [],
+        "unpinned": [],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [
+          [
+            "review",
+            "a"
+          ]
+        ],
+        "delivered": {
+          "review": "b"
+        },
+        "collisions": [
+          "review"
+        ]
+      }
+    },
+    {
+      "id": "resolve-two-overlays-two-sources",
+      "description": "Another source: a collision.",
+      "overlays": {
+        "a": {
+          "skills": [
+            {
+              "name": "x",
+              "source": "https://github.com/example/a.git"
+            }
+          ]
+        },
+        "b": {
+          "skills": [
+            {
+              "name": "x",
+              "source": "https://github.com/example/b.git"
+            }
+          ]
+        }
+      },
+      "requested": [
+        "a",
+        "b"
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "x",
+            "origin": "source",
+            "source": "https://github.com/example/a.git",
+            "overlay": "a"
+          },
+          {
+            "name": "x",
+            "origin": "source",
+            "source": "https://github.com/example/b.git",
+            "overlay": "b"
+          }
+        ],
+        "missing": [],
+        "ambiguous": [],
+        "unpinned": [
+          [
+            "x",
+            "a"
+          ],
+          [
+            "x",
+            "b"
+          ]
+        ],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [
+          [
+            "x",
+            "b"
+          ]
+        ],
+        "delivered": {
+          "x": "a"
+        },
+        "collisions": [
+          "x"
+        ]
+      }
+    },
+    {
+      "id": "resolve-bundled-does-not-resolve",
+      "description": "Another overlay's bundled skill does not resolve a name: the name is reported, and what is delivered is the bundled one.",
+      "overlays": {
+        "a": {
+          "skills": [
+            "pdf"
+          ]
+        },
+        "b": {}
+      },
+      "requested": [
+        "a",
+        "b"
+      ],
+      "files": {
+        "b": [
+          "skills/pdf/SKILL.md"
+        ]
+      },
+      "expect": {
+        "skills": [
+          {
+            "name": "pdf",
+            "origin": "missing",
+            "overlay": "a"
+          },
+          {
+            "name": "pdf",
+            "origin": "bundled",
+            "overlay": "b"
+          }
+        ],
+        "missing": [
+          [
+            "pdf",
+            "a"
+          ]
+        ],
+        "ambiguous": [],
+        "unpinned": [],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [],
+        "delivered": {
+          "pdf": "b"
+        },
+        "collisions": []
+      }
+    },
+    {
+      "id": "resolve-required-overlay-named",
+      "description": "A required overlay's named skills count like the requester's.",
+      "overlays": {
+        "a": {
+          "requires": [
+            "b"
+          ]
+        },
+        "b": {
+          "skills": [
+            "pdf"
+          ]
+        }
+      },
+      "requested": [
+        "a"
+      ],
+      "catalogs": [
+        {
+          "name": "catalog.toml",
+          "text": "[skills]\npdf = \"../skills/pdf\"\nDocs = \"https://github.com/example/skills.git#docs\"\n\n[skills.review]\nsource = \"https://github.com/example/skills.git#skills/review\"\nref = \"v1\"\npin = \"sha256:abababababababababababababababababababababababababababababababab\"\n",
+          "base": "/srv/team/catalog.toml",
+          "label": "team"
+        }
+      ],
+      "expect": {
+        "skills": [
+          {
+            "name": "pdf",
+            "origin": "catalog",
+            "overlay": "b",
+            "catalog": "team",
+            "source": "/srv/skills/pdf"
+          }
+        ],
+        "missing": [],
+        "ambiguous": [],
+        "unpinned": [
+          [
+            "pdf",
+            "b"
+          ]
+        ],
+        "non_defaults": [],
+        "not_fetched": [],
+        "name_mismatch": [],
+        "shadowing": [],
+        "delivered": {
+          "pdf": "b"
+        },
+        "collisions": []
+      }
+    },
+    {
+      "id": "fetched-ok",
+      "description": "A skill with no pin: its digest is computed, and it may be delivered.",
+      "name": "review",
+      "fetched": {
+        "SKILL.md": "---\nname: review\ndescription: Reviews code.\n---\nInstructions.\n"
+      },
+      "expect": {
+        "digest": "sha256:0f093ef15ccf05864a951758bd88d9050cdee3ebdaf3a9cb2b85ef00781b5248",
+        "reported": [],
+        "files": [
+          "SKILL.md"
+        ]
+      }
+    },
+    {
+      "id": "fetched-reported-keys",
+      "description": "Front matter keys that can grant tools or add hooks are reported before delivery.",
+      "name": "review",
+      "fetched": {
+        "SKILL.md": "---\nname: review\ndescription: d\nallowed-tools: Bash(*)\nhooks: {x: y}\nlicense: MIT\nmetadata: {a: b}\ncompatibility: any\n---\n"
+      },
+      "expect": {
+        "digest": "sha256:33016f6528b4bf0d50a1001f0eb3ff353f801efba85e37fc367b2a63ad4cb7d9",
+        "reported": [
+          "allowed-tools",
+          "hooks"
+        ],
+        "files": [
+          "SKILL.md"
+        ]
+      }
+    },
+    {
+      "id": "fetched-toml-front-matter",
+      "description": "A skill's front matter is YAML: a format line is refused.",
+      "name": "review",
+      "fetched": {
+        "SKILL.md": "---\n#!toml\nname = \"review\"\n---\n"
+      },
+      "expect": {
+        "error": "skill-unreadable"
+      }
+    },
+    {
+      "id": "fetched-malformed-fence",
+      "description": "Almost a fence, which a laxer reader would take for one.",
+      "name": "review",
+      "fetched": {
+        "SKILL.md": "--- # x\nname: review\n---\n"
+      },
+      "expect": {
+        "error": "skill-unreadable"
+      }
+    },
+    {
+      "id": "fetched-malformed-two-boms",
+      "description": "Two byte-order marks.",
+      "name": "review",
+      "fetched": {
+        "SKILL.md": "﻿﻿---\nname: review\n---\n"
+      },
+      "expect": {
+        "error": "skill-unreadable"
+      }
+    },
+    {
+      "id": "fetched-pin-match",
+      "description": "Its pin matches.",
+      "name": "review",
+      "fetched": {
+        "SKILL.md": "---\nname: review\ndescription: Reviews code.\n---\nInstructions.\n"
+      },
+      "pin": "sha256:0f093ef15ccf05864a951758bd88d9050cdee3ebdaf3a9cb2b85ef00781b5248",
+      "expect": {
+        "digest": "sha256:0f093ef15ccf05864a951758bd88d9050cdee3ebdaf3a9cb2b85ef00781b5248",
+        "reported": [],
+        "files": [
+          "SKILL.md"
+        ]
+      }
+    },
+    {
+      "id": "fetched-pin-match-case",
+      "description": "A digest compares without regard to case.",
+      "name": "review",
+      "fetched": {
+        "SKILL.md": "---\nname: review\ndescription: Reviews code.\n---\nInstructions.\n"
+      },
+      "pin": "sha256:0F093EF15CCF05864A951758BD88D9050CDEE3EBDAF3A9CB2B85EF00781B5248",
+      "expect": {
+        "digest": "sha256:0f093ef15ccf05864a951758bd88d9050cdee3ebdaf3a9cb2b85ef00781b5248",
+        "reported": [],
+        "files": [
+          "SKILL.md"
+        ]
+      }
+    },
+    {
+      "id": "fetched-pin-mismatch",
+      "description": "A wrong pin refuses it.",
+      "name": "review",
+      "fetched": {
+        "SKILL.md": "---\nname: review\ndescription: Reviews code.\n---\nInstructions.\n"
+      },
+      "pin": "sha256:abababababababababababababababababababababababababababababababab",
+      "expect": {
+        "error": "pin-mismatch"
+      }
+    },
+    {
+      "id": "fetched-pin-before-all",
+      "description": "The pin is checked first: a tree that fails it is not read at all.",
+      "name": "review",
+      "fetched": {
+        "notes.md": "x\n"
+      },
+      "pin": "sha256:abababababababababababababababababababababababababababababababab",
+      "expect": {
+        "error": "pin-mismatch"
+      }
+    },
+    {
+      "id": "fetched-not-a-skill",
+      "description": "No SKILL.md at its root.",
+      "name": "review",
+      "fetched": {
+        "skills/review/SKILL.md": "---\nname: review\ndescription: Reviews code.\n---\nInstructions.\n"
+      },
+      "expect": {
+        "error": "not-a-skill"
+      }
+    },
+    {
+      "id": "fetched-name-mismatch",
+      "description": "SKILL.md names another skill: delivered under this name it would be another than was reviewed.",
+      "name": "pdf",
+      "fetched": {
+        "SKILL.md": "---\nname: review\ndescription: Reviews code.\n---\nInstructions.\n"
+      },
+      "expect": {
+        "error": "skill-name-mismatch"
+      }
+    },
+    {
+      "id": "fetched-name-case",
+      "description": "The name matches exactly.",
+      "name": "Review",
+      "fetched": {
+        "SKILL.md": "---\nname: review\ndescription: Reviews code.\n---\nInstructions.\n"
+      },
+      "expect": {
+        "error": "skill-name-mismatch"
+      }
+    },
+    {
+      "id": "fetched-name-not-a-string",
+      "description": "A name that is no string names nothing else.",
+      "name": "review",
+      "fetched": {
+        "SKILL.md": "---\nname: 5\n---\n"
+      },
+      "expect": {
+        "error": "skill-name-mismatch"
+      }
+    },
+    {
+      "id": "fetched-no-front-matter",
+      "description": "A fetched skill has front matter, as Agent Skills requires.",
+      "name": "review",
+      "fetched": {
+        "SKILL.md": "Instructions.\n"
+      },
+      "expect": {
+        "error": "skill-unreadable"
+      }
+    },
+    {
+      "id": "fetched-no-name",
+      "description": "And a name in it.",
+      "name": "review",
+      "fetched": {
+        "SKILL.md": "---\ndescription: d\n---\n"
+      },
+      "expect": {
+        "error": "skill-name-mismatch"
+      }
+    },
+    {
+      "id": "fetched-yaml-bomb",
+      "description": "Front matter is read by the restricted YAML.",
+      "name": "review",
+      "fetched": {
+        "SKILL.md": "---\nname: &n review\ndescription: *n\n---\n"
+      },
+      "expect": {
+        "error": "skill-unreadable"
+      }
+    },
+    {
+      "id": "fetched-unterminated",
+      "description": "An unclosed block cannot say what it names.",
+      "name": "review",
+      "fetched": {
+        "SKILL.md": "---\nname: other\n"
+      },
+      "expect": {
+        "error": "skill-unreadable"
+      }
+    },
+    {
+      "id": "fetched-nested-manifest-means-nothing",
+      "description": "A manifest inside a skill is a file like any other: it names nothing further.",
+      "name": "review",
+      "fetched": {
+        "SKILL.md": "---\nname: review\ndescription: Reviews code.\n---\nInstructions.\n",
+        "OVERLAY.md": "---\nskills: [more]\nrequires: [other]\n---\nBody.\n",
+        "overlay.cfg": "skills = [\"more\"]\n"
+      },
+      "expect": {
+        "digest": "sha256:0b638d9b278d1088a5a9f975f06a7cc2f92902d6545643635dbf57082bb93dea",
+        "reported": [],
+        "files": [
+          "OVERLAY.md",
+          "SKILL.md",
+          "overlay.cfg"
+        ]
+      }
+    },
+    {
+      "id": "fetched-files-in-digest-order",
+      "description": "The files the digest covers are listed in byte order of their paths, which is not the order of their components: a hyphen and a dot sort before a slash.",
+      "name": "review",
+      "fetched": {
+        "SKILL.md": "---\nname: review\ndescription: Reviews code.\n---\nInstructions.\n",
+        "a/z.md": "z",
+        "a.md": "a",
+        "a-b.md": "b"
+      },
+      "expect": {
+        "digest": "sha256:45566f1e921d58e9fe6a8e926b8c59416bc38f7993726a7465b60bc6f9a8aa73",
+        "reported": [],
+        "files": [
+          "SKILL.md",
+          "a-b.md",
+          "a.md",
+          "a/z.md"
+        ]
+      }
+    },
+    {
+      "id": "fetched-excluded-entries-not-listed",
+      "description": "A skill carrying entries under an excluded name is not refused: the digest leaves them out, so the pin matches the rest, and they are not among the files a consumer writes.",
+      "name": "review",
+      "fetched": {
+        "SKILL.md": "---\nname: review\ndescription: Reviews code.\n---\nInstructions.\n",
+        "scripts/run.py": "print(1)\n",
+        "node_modules/x/index.js": "x",
+        "__pycache__/run.cpython-312.pyc": "y",
+        "scripts/helper.pyc": "z",
+        ".git/config": "[core]\n"
+      },
+      "pin": "sha256:2fa96207893da4c51ed93e3e35b7fccd9d5b6b2e75fb2a22b50dab67bf5d2335",
+      "expect": {
+        "digest": "sha256:2fa96207893da4c51ed93e3e35b7fccd9d5b6b2e75fb2a22b50dab67bf5d2335",
+        "reported": [],
+        "files": [
+          "SKILL.md",
+          "scripts/run.py"
+        ]
+      }
+    },
+    {
+      "id": "fetched-invalid-member",
+      "description": "A member of the tree is held to the digest's name rules.",
+      "name": "review",
+      "fetched": {
+        "SKILL.md": "---\nname: review\ndescription: Reviews code.\n---\nInstructions.\n",
+        "bad:name": "x"
+      },
+      "expect": {
+        "error": "invalid-name"
+      }
+    }
+  ]
+}

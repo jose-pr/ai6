@@ -3935,7 +3935,7 @@
     },
     {
       "id": "hooks-match-reason-unknown",
-      "description": "A harness's own reason (startup) is not one of the run reasons.",
+      "description": "A harness's own reason (startup) is not one of the session reasons.",
       "document": {
         "hooks": {
           "session-start": {
@@ -4593,6 +4593,181 @@
         "valid": false,
         "at": "/priority",
         "applies": false
+      }
+    },
+    {
+      "id": "options-valid",
+      "description": "Options of each type, with a default, sensitive, and described.",
+      "document": {
+        "options": {
+          "depth": {
+            "type": "string",
+            "default": "normal",
+            "description": "How deep a review goes."
+          },
+          "retries": {
+            "type": "integer",
+            "default": 3
+          },
+          "strict": {
+            "type": "boolean",
+            "default": false
+          },
+          "token": {
+            "type": "string",
+            "sensitive": true
+          },
+          "open": {
+            "type": "string",
+            "sensitive": false
+          }
+        }
+      },
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "options-sensitive-default",
+      "description": "A sensitive option has no default: the manifest is public.",
+      "document": {
+        "options": {
+          "token": {
+            "type": "string",
+            "sensitive": true,
+            "default": "abc"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/options/token/default"
+      }
+    },
+    {
+      "id": "options-default-type",
+      "description": "A default is of the declared type.",
+      "document": {
+        "options": {
+          "retries": {
+            "type": "integer",
+            "default": "3"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/options/retries/default"
+      }
+    },
+    {
+      "id": "options-boolean-is-no-integer",
+      "description": "A boolean default is no integer.",
+      "document": {
+        "options": {
+          "retries": {
+            "type": "integer",
+            "default": true
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/options/retries/default"
+      }
+    },
+    {
+      "id": "options-float-is-no-integer",
+      "description": "A float of whole value is no integer.",
+      "document": {
+        "options": {
+          "retries": {
+            "type": "integer",
+            "default": 3.0
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/options/retries/default"
+      }
+    },
+    {
+      "id": "options-type-required",
+      "description": "An option names its type.",
+      "document": {
+        "options": {
+          "depth": {
+            "default": "x"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/options/depth"
+      }
+    },
+    {
+      "id": "options-unknown-type",
+      "description": "A type is string, integer or boolean.",
+      "document": {
+        "options": {
+          "depth": {
+            "type": "float"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/options/depth/type"
+      }
+    },
+    {
+      "id": "options-unknown-key",
+      "description": "An option has these keys and no other.",
+      "document": {
+        "options": {
+          "depth": {
+            "type": "string",
+            "choices": [
+              "a"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/options/depth"
+      }
+    },
+    {
+      "id": "options-reserved-name",
+      "description": "An option is named as a variable is, and AOS_* is the consumer's.",
+      "document": {
+        "options": {
+          "AOS_OVERLAY_ROOT": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/options"
+      }
+    },
+    {
+      "id": "options-bad-name",
+      "description": "An option's name is a name.",
+      "document": {
+        "options": {
+          "1st": {
+            "type": "string"
+          }
+        }
+      },
+      "expect": {
+        "valid": false,
+        "at": "/options"
       }
     }
   ]

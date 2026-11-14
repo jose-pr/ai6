@@ -4559,7 +4559,7 @@ and applies only the secrets: see "Credentials" under the Station daemon.
 Overlays in the Agent Overlay Spec's format (AOS `0.1.0-draft`). Reading, validating, digesting,
 resolving, composing, and the environment, setup and dependencies an overlay asks for, are the
 `coqui-aos` crate's (`coqui_aos::{read_overlay, validate, tree_digest, compose, effective, ...}`,
-the vectors in `tests/fixtures/aos-vectors/` run against it by `tests/aos_vectors`); this module is the
+the vectors in `tests/fixtures/aos-vectors/` run against it by `tests/aos_vectors.rs` with coqui-aos's own runner, behind its `test-support` feature); this module is the
 host's part. Nothing here runs a script, installs a package, starts a server or reads the network: a
 Station's own `station::overlays` (not public) fetches overlays to its store under
 `<state_dir>/overlays`, places them on a Theater and prepares them, and hands the handler
@@ -4567,7 +4567,6 @@ Station's own `station::overlays` (not public) fetches overlays to its store und
 
 ```rust
 pub fn hooks_asked(manifest: &Document, files: &OverlayTree) -> Option<String>;   // [hooks], or a root hook script: read_overlay refuses it
-pub struct Weakening { pub id: String, pub subject: String }   // Ord; From<&coqui_aos::NonDefaultSetting>; also the host's own ids
 #[non_exhaustive] pub enum OverlayFrom { Source(Source), Path(PathBuf) }
 pub struct OverlayRecord;   // [overlay.<name>]
 impl OverlayRecord {
@@ -4582,7 +4581,7 @@ pub fn read_overlay(root: &Path, limits: &OverlayLimits) -> Result<ReadOverlay, 
 #[non_exhaustive] pub enum OverlayRefusal { InvalidName { list, name }, Unknown { list, name },
     Missing { by, name }, Cycle(Vec<String>), Unpinned(String) }   // Display, Error
 pub struct IssuedOverlay { pub identity: String, pub record: OverlayRecord, pub manifest: Document }
-pub struct IssuedOverlays { pub install_order: Vec<String>, pub overlays: Vec<IssuedOverlay>, pub weakenings: Vec<Weakening> }
+pub struct IssuedOverlays { pub install_order: Vec<String>, pub overlays: Vec<IssuedOverlay>, pub weakenings: Vec<coqui_aos::NonDefaultSetting> }   // the host's own ids through NonDefaultSetting::host
 pub fn issue_overlays(loadout: &[String], operation: &[String],
     records: &BTreeMap<String, OverlayRecord>, manifests: &BTreeMap<String, Document>,
     allow_unpinned: bool) -> Result<IssuedOverlays, OverlayRefusal>;

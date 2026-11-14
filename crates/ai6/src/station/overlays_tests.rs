@@ -516,8 +516,10 @@ fn a_skill_of_the_same_name_is_the_later_overlays_and_the_collision_is_reported(
         delivered
             .weakenings
             .iter()
-            .any(|reported| reported.weakening.id == "skill-collision"
-                && reported.weakening.subject.contains("early")),
+            .any(
+                |reported| reported.weakening.id.as_str() == "skill-collision"
+                    && reported.weakening.subject.contains("early")
+            ),
         "{:?}",
         delivered.weakenings
     );
@@ -574,7 +576,8 @@ fn an_overlay_with_no_pin_is_refused_unless_allowed_and_is_reported_when_it_is()
         delivered
             .weakenings
             .iter()
-            .any(|reported| reported.weakening.id == "unpinned" && reported.overlay == "tools"),
+            .any(|reported| reported.weakening.id.as_str() == "unpinned"
+                && reported.overlay == "tools"),
         "{:?}",
         delivered.weakenings
     );
@@ -1088,7 +1091,7 @@ fn a_context_md_beside_an_overlay_md_body_is_reported_and_not_delivered() {
             .weakenings
             .iter()
             .any(|reported| reported.overlay == "tools"
-                && reported.weakening.id == "context-ignored"
+                && reported.weakening.id.as_str() == "context-ignored"
                 && reported.weakening.subject == "CONTEXT.md")
     );
 }
@@ -1138,7 +1141,7 @@ fn an_overlay_without_a_body_still_delivers_context_md_unreported() {
         !delivered
             .weakenings
             .iter()
-            .any(|reported| reported.weakening.id == "context-ignored")
+            .any(|reported| reported.weakening.id.as_str() == "context-ignored")
     );
 }
 #[test]

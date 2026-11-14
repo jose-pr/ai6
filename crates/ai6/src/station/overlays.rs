@@ -18,17 +18,18 @@ use serde_json::Value as Data;
 
 use coqui_aos::Step as PrepStep;
 use coqui_aos::{
-    Change, Dependency, Digest, Document, Environment, Facts, FailStep, OverlayTree, Phase,
-    Runtime, ScriptRun, SetupRecord, SetupRun, Source, SourceKind, StdFs, TreeEntry,
-    check_requirements, composed_environment, context_file_text, context_ignored, context_of,
-    default_on, digest_entries, effective, env_files_of, harness_context_of, is_reserved_variable,
-    is_sensitive_variable, normalize_name, preparation, read_env_script_output, root_variable,
-    rules_of, skills_of, state_variable, tree_digest, valid_relative_path,
+    Change, Dependency, Digest, Document, Environment, Facts, FailStep, NonDefaultSetting,
+    OverlayTree, Phase, Runtime, ScriptRun, SetupRecord, SetupRun, Source, SourceKind, StdFs,
+    TreeEntry, check_requirements, composed_environment, context_file_text, context_ignored,
+    context_of, default_on, digest_entries, effective, env_files_of, harness_context_of,
+    is_reserved_variable, is_sensitive_variable, normalize_name, preparation,
+    read_env_script_output, root_variable, rules_of, skills_of, state_variable, tree_digest,
+    valid_relative_path,
 };
 
 use crate::directorates::q::overlays::{
-    IssuedDigest, IssuedOverlay, OverlayFrom, OverlayRecord, ReadOverlay, Weakening,
-    issue_overlays, read_overlay, skill_description,
+    IssuedDigest, IssuedOverlay, OverlayFrom, OverlayRecord, ReadOverlay, issue_overlays,
+    read_overlay, skill_description,
 };
 use crate::directorates::q::provision::RequiredProgram;
 use crate::directorates::q::transport::kit::{ProcessInput, run_process};
@@ -50,7 +51,7 @@ type Tools = BTreeMap<String, Found>;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Reported {
     pub(crate) overlay: String,
-    pub(crate) weakening: Weakening,
+    pub(crate) weakening: NonDefaultSetting,
 }
 
 /// What a Run is issued, checked and stored, before anything is placed where it runs.
@@ -1001,10 +1002,7 @@ impl Prepared {
         if !site.protection_holds() {
             weakenings.extend(self.overlays.iter().map(|ready| Reported {
                 overlay: ready.issued.identity.clone(),
-                weakening: Weakening {
-                    id: "read-only-not-enforced".to_owned(),
-                    subject: site.name(),
-                },
+                weakening: NonDefaultSetting::host("read-only-not-enforced", site.name()),
             }));
         }
         let empty = BTreeMap::new();
@@ -1159,7 +1157,7 @@ impl Prepared {
                     })
                     .map(|setting| Reported {
                         overlay: identity.clone(),
-                        weakening: Weakening::from(setting),
+                        weakening: setting.clone(),
                     }),
             );
             let mut ignored = Vec::new();
@@ -1400,10 +1398,7 @@ impl Prepared {
                     .into_iter()
                     .map(|file| Reported {
                         overlay: identity.clone(),
-                        weakening: Weakening {
-                            id: "context-ignored".to_owned(),
-                            subject: file,
-                        },
+                        weakening: NonDefaultSetting::host("context-ignored", file),
                     }),
             );
             let files: Vec<String> = rules_of(manifest, &tree)
@@ -1477,10 +1472,10 @@ impl Prepared {
                 if let Some(earlier) = chosen.insert(key.clone(), skill) {
                     weakenings.push(Reported {
                         overlay: identity.clone(),
-                        weakening: Weakening {
-                            id: "skill-collision".to_owned(),
-                            subject: format!("{} of {}", earlier.name, earlier.overlay),
-                        },
+                        weakening: NonDefaultSetting::host(
+                            "skill-collision",
+                            format!("{} of {}", earlier.name, earlier.overlay),
+                        ),
                     });
                 } else {
                     order.push(key);
@@ -2138,10 +2133,7 @@ impl Prepared {
             if is_sensitive_variable(&name) {
                 weakenings.push(Reported {
                     overlay: identity.to_owned(),
-                    weakening: Weakening {
-                        id: "env-sensitive".to_owned(),
-                        subject: name.clone(),
-                    },
+                    weakening: NonDefaultSetting::host("env-sensitive", name.clone()),
                 });
             }
             env.set(&name, value, false);

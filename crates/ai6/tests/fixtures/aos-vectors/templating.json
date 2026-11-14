@@ -1,0 +1,646 @@
+{
+  "description": "Templating: the consumer replaces ${NAME} in the context it assembles and in the body of each bundled skill it serves, and nowhere else. 'kind' is context (a context file's bytes) or skill (a SKILL.md). 'manifest' holds the overlay's options, 'facts' the consumer's values: root, state, name, scope and project, each when it has one, and 'options', the values the user configured. 'text' or 'base64' is the file; 'expect' is its text as the agent receives it, or an error class.",
+  "spec": "spec/v0/harness.md#templating",
+  "cases": [
+    {
+      "id": "known-names",
+      "description": "Each of the five names is replaced by the value the consumer holds for this overlay.",
+      "kind": "context",
+      "facts": {
+        "root": "/home/u/overlays/team-review",
+        "state": "/home/u/.local/state/aos/team-review",
+        "name": "team-review",
+        "scope": "user",
+        "project": "/work/app"
+      },
+      "text": "root ${AOS_OVERLAY_ROOT}\nstate ${AOS_OVERLAY_STATE}\nname ${AOS_OVERLAY_NAME}\nscope ${AOS_OVERLAY_SCOPE}\nproject ${AOS_PROJECT_ROOT}\n",
+      "expect": {
+        "text": "root /home/u/overlays/team-review\nstate /home/u/.local/state/aos/team-review\nname team-review\nscope user\nproject /work/app\n"
+      }
+    },
+    {
+      "id": "known-name-in-prose",
+      "description": "A name is replaced wherever it stands, every time: in a code span, in the middle of a path.",
+      "kind": "context",
+      "facts": {
+        "root": "/home/u/overlays/team-review",
+        "state": "/home/u/.local/state/aos/team-review",
+        "name": "team-review",
+        "scope": "user",
+        "project": "/work/app"
+      },
+      "text": "Read `${AOS_OVERLAY_ROOT}/kb/review.md`, then ${AOS_OVERLAY_ROOT}/kb/style.md.",
+      "expect": {
+        "text": "Read `/home/u/overlays/team-review/kb/review.md`, then /home/u/overlays/team-review/kb/style.md."
+      }
+    },
+    {
+      "id": "name-without-a-value-left",
+      "description": "A name the consumer has no value for, here no state directory and no project, is left as written.",
+      "kind": "context",
+      "facts": {
+        "root": "/o/team-review",
+        "name": "team-review",
+        "scope": "user"
+      },
+      "text": "${AOS_OVERLAY_STATE} and ${AOS_PROJECT_ROOT} and ${AOS_OVERLAY_NAME}",
+      "expect": {
+        "text": "${AOS_OVERLAY_STATE} and ${AOS_PROJECT_ROOT} and team-review"
+      }
+    },
+    {
+      "id": "unknown-name-left",
+      "description": "A name that is none of the five and no option is left as written: an environment variable, a root variable.",
+      "kind": "context",
+      "facts": {
+        "root": "/home/u/overlays/team-review",
+        "state": "/home/u/.local/state/aos/team-review",
+        "name": "team-review",
+        "scope": "user",
+        "project": "/work/app"
+      },
+      "text": "${HOME} ${PATH} ${TEAM_REVIEW_OVERLAY_ROOT} ${ENGINEERING_OVERLAY_ROOT}/kb/a.md",
+      "expect": {
+        "text": "${HOME} ${PATH} ${TEAM_REVIEW_OVERLAY_ROOT} ${ENGINEERING_OVERLAY_ROOT}/kb/a.md"
+      }
+    },
+    {
+      "id": "only-the-plain-form",
+      "description": "Only ${NAME} is replaced: no operator, no space, no other case, no bare $NAME and no unclosed brace.",
+      "kind": "context",
+      "facts": {
+        "root": "/home/u/overlays/team-review",
+        "state": "/home/u/.local/state/aos/team-review",
+        "name": "team-review",
+        "scope": "user",
+        "project": "/work/app"
+      },
+      "text": "$AOS_OVERLAY_ROOT ${AOS_OVERLAY_ROOT:-x} ${AOS_OVERLAY_ROOT-x} ${#AOS_OVERLAY_NAME} ${ AOS_OVERLAY_ROOT } ${aos_overlay_root} ${AOS_OVERLAY_ROOT",
+      "expect": {
+        "text": "$AOS_OVERLAY_ROOT ${AOS_OVERLAY_ROOT:-x} ${AOS_OVERLAY_ROOT-x} ${#AOS_OVERLAY_NAME} ${ AOS_OVERLAY_ROOT } ${aos_overlay_root} ${AOS_OVERLAY_ROOT"
+      }
+    },
+    {
+      "id": "nothing-runs",
+      "description": "$(...), $((...)) and backticks are characters, as in an env value.",
+      "kind": "context",
+      "facts": {
+        "root": "/home/u/overlays/team-review",
+        "state": "/home/u/.local/state/aos/team-review",
+        "name": "team-review",
+        "scope": "user",
+        "project": "/work/app"
+      },
+      "text": "$(id -u) $((1+1)) `${AOS_OVERLAY_NAME}`",
+      "expect": {
+        "text": "$(id -u) $((1+1)) `team-review`"
+      }
+    },
+    {
+      "id": "escape",
+      "description": "$${ is a literal ${, so the text that follows is not a placeholder and stays as written.",
+      "kind": "context",
+      "facts": {
+        "root": "/home/u/overlays/team-review",
+        "state": "/home/u/.local/state/aos/team-review",
+        "name": "team-review",
+        "scope": "user",
+        "project": "/work/app"
+      },
+      "text": "Write $${AOS_OVERLAY_ROOT} to name the root, and $${HOME} for a shell's.",
+      "expect": {
+        "text": "Write ${AOS_OVERLAY_ROOT} to name the root, and ${HOME} for a shell's."
+      }
+    },
+    {
+      "id": "escape-is-only-before-a-brace",
+      "description": "$$ that is not followed by { is itself, unlike in an env value, so prose with $$ is unchanged.",
+      "kind": "context",
+      "facts": {
+        "root": "/home/u/overlays/team-review",
+        "state": "/home/u/.local/state/aos/team-review",
+        "name": "team-review",
+        "scope": "user",
+        "project": "/work/app"
+      },
+      "text": "Costs $$5, the shell's pid is $$, and $$ ${AOS_OVERLAY_NAME}",
+      "expect": {
+        "text": "Costs $$5, the shell's pid is $$, and $$ team-review"
+      }
+    },
+    {
+      "id": "escape-reads-left-to-right",
+      "description": "$$${ is a $ and then the escape $${, and in $${${X}} the escape comes first and the rest is a placeholder.",
+      "kind": "context",
+      "facts": {
+        "root": "/home/u/overlays/team-review",
+        "state": "/home/u/.local/state/aos/team-review",
+        "name": "team-review",
+        "scope": "user",
+        "project": "/work/app"
+      },
+      "text": "$$${AOS_OVERLAY_NAME} $${${AOS_OVERLAY_NAME}}",
+      "expect": {
+        "text": "$${AOS_OVERLAY_NAME} ${team-review}"
+      }
+    },
+    {
+      "id": "value-is-not-read-again",
+      "description": "A value is inserted as it is: a placeholder or an escape inside it is never read.",
+      "kind": "context",
+      "facts": {
+        "root": "/r/${AOS_OVERLAY_NAME}/$${x}",
+        "scope": "${AOS_OVERLAY_ROOT}",
+        "name": "n"
+      },
+      "text": "${AOS_OVERLAY_ROOT} ${AOS_OVERLAY_SCOPE}",
+      "expect": {
+        "text": "/r/${AOS_OVERLAY_NAME}/$${x} ${AOS_OVERLAY_ROOT}"
+      }
+    },
+    {
+      "id": "windows-root-as-given",
+      "description": "The path is inserted as the consumer gives it, backslashes included.",
+      "kind": "context",
+      "facts": {
+        "root": "C:\\Users\\u\\tools\\team"
+      },
+      "text": "${AOS_OVERLAY_ROOT}\\kb",
+      "expect": {
+        "text": "C:\\Users\\u\\tools\\team\\kb"
+      }
+    },
+    {
+      "id": "option-default",
+      "description": "A declared option with no configured value is replaced by its default, as text.",
+      "kind": "context",
+      "manifest": {
+        "options": {
+          "depth": {
+            "type": "string",
+            "default": "normal"
+          },
+          "retries": {
+            "type": "integer",
+            "default": 3
+          },
+          "strict": {
+            "type": "boolean"
+          },
+          "token": {
+            "type": "string",
+            "sensitive": true
+          },
+          "region": {
+            "type": "string"
+          }
+        }
+      },
+      "facts": {
+        "root": "/home/u/overlays/team-review",
+        "state": "/home/u/.local/state/aos/team-review",
+        "name": "team-review",
+        "scope": "user",
+        "project": "/work/app"
+      },
+      "text": "depth ${depth}, retries ${retries}",
+      "expect": {
+        "text": "depth normal, retries 3"
+      }
+    },
+    {
+      "id": "option-with-a-value",
+      "description": "A configured value wins over the default; an integer is written in decimal and a boolean as true or false.",
+      "kind": "context",
+      "manifest": {
+        "options": {
+          "depth": {
+            "type": "string",
+            "default": "normal"
+          },
+          "retries": {
+            "type": "integer",
+            "default": 3
+          },
+          "strict": {
+            "type": "boolean"
+          },
+          "token": {
+            "type": "string",
+            "sensitive": true
+          },
+          "region": {
+            "type": "string"
+          }
+        }
+      },
+      "facts": {
+        "root": "/home/u/overlays/team-review",
+        "state": "/home/u/.local/state/aos/team-review",
+        "name": "team-review",
+        "scope": "user",
+        "project": "/work/app",
+        "options": {
+          "depth": "deep",
+          "retries": 0,
+          "strict": false,
+          "region": "eu-west"
+        }
+      },
+      "text": "depth ${depth}, retries ${retries}, strict ${strict}, region ${region}",
+      "expect": {
+        "text": "depth deep, retries 0, strict false, region eu-west"
+      }
+    },
+    {
+      "id": "option-true",
+      "description": "A boolean is written true.",
+      "kind": "context",
+      "manifest": {
+        "options": {
+          "depth": {
+            "type": "string",
+            "default": "normal"
+          },
+          "retries": {
+            "type": "integer",
+            "default": 3
+          },
+          "strict": {
+            "type": "boolean"
+          },
+          "token": {
+            "type": "string",
+            "sensitive": true
+          },
+          "region": {
+            "type": "string"
+          }
+        }
+      },
+      "facts": {
+        "root": "/home/u/overlays/team-review",
+        "state": "/home/u/.local/state/aos/team-review",
+        "name": "team-review",
+        "scope": "user",
+        "project": "/work/app",
+        "options": {
+          "strict": true
+        }
+      },
+      "text": "${strict}",
+      "expect": {
+        "text": "true"
+      }
+    },
+    {
+      "id": "option-without-value-or-default",
+      "description": "An option with no configured value and no default has no value, and is left as written.",
+      "kind": "context",
+      "manifest": {
+        "options": {
+          "depth": {
+            "type": "string",
+            "default": "normal"
+          },
+          "retries": {
+            "type": "integer",
+            "default": 3
+          },
+          "strict": {
+            "type": "boolean"
+          },
+          "token": {
+            "type": "string",
+            "sensitive": true
+          },
+          "region": {
+            "type": "string"
+          }
+        }
+      },
+      "facts": {
+        "root": "/home/u/overlays/team-review",
+        "state": "/home/u/.local/state/aos/team-review",
+        "name": "team-review",
+        "scope": "user",
+        "project": "/work/app"
+      },
+      "text": "${region} and ${strict}",
+      "expect": {
+        "text": "${region} and ${strict}"
+      }
+    },
+    {
+      "id": "option-not-declared-left",
+      "description": "A value configured for a name the overlay does not declare is ignored, and its placeholder stays as written.",
+      "kind": "context",
+      "manifest": {
+        "options": {
+          "depth": {
+            "type": "string",
+            "default": "normal"
+          },
+          "retries": {
+            "type": "integer",
+            "default": 3
+          },
+          "strict": {
+            "type": "boolean"
+          },
+          "token": {
+            "type": "string",
+            "sensitive": true
+          },
+          "region": {
+            "type": "string"
+          }
+        }
+      },
+      "facts": {
+        "root": "/home/u/overlays/team-review",
+        "state": "/home/u/.local/state/aos/team-review",
+        "name": "team-review",
+        "scope": "user",
+        "project": "/work/app",
+        "options": {
+          "mood": "calm"
+        }
+      },
+      "text": "${mood}",
+      "expect": {
+        "text": "${mood}"
+      }
+    },
+    {
+      "id": "sensitive-option-kept-out",
+      "description": "A sensitive option is never put in context, though the user configured it: its placeholder stays as written.",
+      "kind": "context",
+      "manifest": {
+        "options": {
+          "depth": {
+            "type": "string",
+            "default": "normal"
+          },
+          "retries": {
+            "type": "integer",
+            "default": 3
+          },
+          "strict": {
+            "type": "boolean"
+          },
+          "token": {
+            "type": "string",
+            "sensitive": true
+          },
+          "region": {
+            "type": "string"
+          }
+        }
+      },
+      "facts": {
+        "root": "/home/u/overlays/team-review",
+        "state": "/home/u/.local/state/aos/team-review",
+        "name": "team-review",
+        "scope": "user",
+        "project": "/work/app",
+        "options": {
+          "token": "s3cr3t",
+          "depth": "normal"
+        }
+      },
+      "text": "token ${token}, depth ${depth}",
+      "expect": {
+        "text": "token ${token}, depth normal"
+      }
+    },
+    {
+      "id": "sensitive-option-kept-out-of-a-skill",
+      "description": "A sensitive option is kept out of a skill body as it is of context.",
+      "kind": "skill",
+      "manifest": {
+        "options": {
+          "depth": {
+            "type": "string",
+            "default": "normal"
+          },
+          "retries": {
+            "type": "integer",
+            "default": 3
+          },
+          "strict": {
+            "type": "boolean"
+          },
+          "token": {
+            "type": "string",
+            "sensitive": true
+          },
+          "region": {
+            "type": "string"
+          }
+        }
+      },
+      "facts": {
+        "root": "/home/u/overlays/team-review",
+        "state": "/home/u/.local/state/aos/team-review",
+        "name": "team-review",
+        "scope": "user",
+        "project": "/work/app",
+        "options": {
+          "token": "s3cr3t"
+        }
+      },
+      "text": "---\nname: s\n---\nUse ${token}.\n",
+      "expect": {
+        "text": "---\nname: s\n---\nUse ${token}.\n"
+      }
+    },
+    {
+      "id": "option-of-the-wrong-type",
+      "description": "A configured value that is not of the declared type is refused, never converted.",
+      "kind": "context",
+      "manifest": {
+        "options": {
+          "depth": {
+            "type": "string",
+            "default": "normal"
+          },
+          "retries": {
+            "type": "integer",
+            "default": 3
+          },
+          "strict": {
+            "type": "boolean"
+          },
+          "token": {
+            "type": "string",
+            "sensitive": true
+          },
+          "region": {
+            "type": "string"
+          }
+        }
+      },
+      "facts": {
+        "root": "/home/u/overlays/team-review",
+        "state": "/home/u/.local/state/aos/team-review",
+        "name": "team-review",
+        "scope": "user",
+        "project": "/work/app",
+        "options": {
+          "retries": "3"
+        }
+      },
+      "text": "${retries}",
+      "expect": {
+        "error": "invalid-option"
+      }
+    },
+    {
+      "id": "boolean-is-no-integer",
+      "description": "A boolean is not an integer.",
+      "kind": "context",
+      "manifest": {
+        "options": {
+          "depth": {
+            "type": "string",
+            "default": "normal"
+          },
+          "retries": {
+            "type": "integer",
+            "default": 3
+          },
+          "strict": {
+            "type": "boolean"
+          },
+          "token": {
+            "type": "string",
+            "sensitive": true
+          },
+          "region": {
+            "type": "string"
+          }
+        }
+      },
+      "facts": {
+        "root": "/home/u/overlays/team-review",
+        "state": "/home/u/.local/state/aos/team-review",
+        "name": "team-review",
+        "scope": "user",
+        "project": "/work/app",
+        "options": {
+          "retries": true
+        }
+      },
+      "text": "${retries}",
+      "expect": {
+        "error": "invalid-option"
+      }
+    },
+    {
+      "id": "option-value-is-not-read-again",
+      "description": "A configured value holding a placeholder is inserted as it is.",
+      "kind": "context",
+      "manifest": {
+        "options": {
+          "depth": {
+            "type": "string",
+            "default": "normal"
+          },
+          "retries": {
+            "type": "integer",
+            "default": 3
+          },
+          "strict": {
+            "type": "boolean"
+          },
+          "token": {
+            "type": "string",
+            "sensitive": true
+          },
+          "region": {
+            "type": "string"
+          }
+        }
+      },
+      "facts": {
+        "root": "/home/u/overlays/team-review",
+        "state": "/home/u/.local/state/aos/team-review",
+        "name": "team-review",
+        "scope": "user",
+        "project": "/work/app",
+        "options": {
+          "depth": "${AOS_OVERLAY_NAME}"
+        }
+      },
+      "text": "${depth}",
+      "expect": {
+        "text": "${AOS_OVERLAY_NAME}"
+      }
+    },
+    {
+      "id": "context-drops-front-matter",
+      "description": "A context file's front matter is dropped before the body is templated, so a placeholder in it is never read.",
+      "kind": "context",
+      "facts": {
+        "root": "/home/u/overlays/team-review",
+        "state": "/home/u/.local/state/aos/team-review",
+        "name": "team-review",
+        "scope": "user",
+        "project": "/work/app"
+      },
+      "text": "---\nnote: ${AOS_OVERLAY_ROOT}\n---\nroot ${AOS_OVERLAY_ROOT}\n",
+      "expect": {
+        "text": "root /home/u/overlays/team-review\n"
+      }
+    },
+    {
+      "id": "skill-front-matter-as-written",
+      "description": "A skill's front matter reaches the harness exactly as written; only the body is templated.",
+      "kind": "skill",
+      "facts": {
+        "root": "/home/u/overlays/team-review",
+        "state": "/home/u/.local/state/aos/team-review",
+        "name": "team-review",
+        "scope": "user",
+        "project": "/work/app"
+      },
+      "text": "---\nname: review\ndescription: Reviews ${AOS_OVERLAY_NAME}\n---\nSee ${AOS_OVERLAY_ROOT}/kb/review.md\n",
+      "expect": {
+        "text": "---\nname: review\ndescription: Reviews ${AOS_OVERLAY_NAME}\n---\nSee /home/u/overlays/team-review/kb/review.md\n"
+      }
+    },
+    {
+      "id": "skill-without-front-matter",
+      "description": "A skill file with no front matter is all body.",
+      "kind": "skill",
+      "facts": {
+        "root": "/home/u/overlays/team-review",
+        "state": "/home/u/.local/state/aos/team-review",
+        "name": "team-review",
+        "scope": "user",
+        "project": "/work/app"
+      },
+      "text": "See ${AOS_OVERLAY_ROOT} and $${AOS_OVERLAY_ROOT}\n",
+      "expect": {
+        "text": "See /home/u/overlays/team-review and ${AOS_OVERLAY_ROOT}\n"
+      }
+    },
+    {
+      "id": "non-utf8-text",
+      "description": "Text that is not UTF-8 is refused, as context is.",
+      "kind": "context",
+      "facts": {
+        "root": "/home/u/overlays/team-review",
+        "state": "/home/u/.local/state/aos/team-review",
+        "name": "team-review",
+        "scope": "user",
+        "project": "/work/app"
+      },
+      "expect": {
+        "error": "invalid-utf8"
+      },
+      "base64": "/w=="
+    }
+  ]
+}

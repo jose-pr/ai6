@@ -163,10 +163,7 @@ fn an_unpinned_overlay_is_refused_unless_allowed_and_then_reported() {
     let issued = request(true).unwrap();
     assert_eq!(
         issued.weakenings,
-        [Weakening {
-            id: "unpinned".into(),
-            subject: "docs".into()
-        }]
+        [NonDefaultSetting::host("unpinned", "docs")]
     );
 }
 
