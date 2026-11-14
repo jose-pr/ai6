@@ -141,7 +141,7 @@ enum AttachPhase {
   /// The Run closed: nothing more will come.
   ended,
 
-  /// The socket ended while the Run had not closed; [AttachSession.reconnect] resumes.
+  /// The socket ended while the Run had not closed; [Attachment.reconnect] resumes.
   dropped,
 
   /// The gateway refused the attachment or it was withdrawn; trying again would not help.
@@ -153,8 +153,8 @@ enum AttachPhase {
 
 /// One person's attachment to a Run: its history, then its live frames, with what the person
 /// may send. It keeps the last `seq` it saw, so a reconnect asks only for what it missed.
-class AttachSession extends ChangeNotifier {
-  AttachSession({
+class Attachment extends ChangeNotifier {
+  Attachment({
     required this.token,
     required this.target,
     required AttachChannel Function() connect,
@@ -174,7 +174,7 @@ class AttachSession extends ChangeNotifier {
   /// Everything the Run showed that this view draws, oldest first.
   final List<AttachFrame> frames = [];
 
-  /// The last frame this session has, so a reconnect asks for those after it.
+  /// The last frame this attachment has, so a reconnect asks for those after it.
   int lastSeq = 0;
 
   /// The client ID the gateway gave this attachment.
@@ -234,7 +234,7 @@ class AttachSession extends ChangeNotifier {
     );
   }
 
-  /// Opens the socket again from the last frame this session saw.
+  /// Opens the socket again from the last frame this attachment saw.
   void reconnect() => connect();
 
   void _receive(AttachChannel channel, String message) {

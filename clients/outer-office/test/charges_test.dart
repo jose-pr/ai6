@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:outer_office/charges/attach_session.dart';
+import 'package:outer_office/charges/attachment.dart';
 import 'package:outer_office/charges/charges_page.dart';
 import 'package:outer_office/charges/charges_model.dart';
 import 'package:outer_office/main.dart';

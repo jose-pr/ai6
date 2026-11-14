@@ -1,7 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../theme/oo_tokens.dart';
-import 'attach_session.dart';
+import 'attachment.dart';
 
 /// A live view of a Run a person is attached to: its history, then what it shows as it shows
 /// it, with a box to type to it, the answers to what it asks, and, when [canInterrupt], a way
@@ -32,7 +32,7 @@ class AttachView extends StatefulWidget {
 }
 
 class _AttachViewState extends State<AttachView> {
-  late final AttachSession _session = AttachSession(
+  late final Attachment _attachment = Attachment(
     token: widget.token,
     target: widget.target,
     connect: widget.connect,
@@ -42,7 +42,7 @@ class _AttachViewState extends State<AttachView> {
 
   @override
   void dispose() {
-    _session.dispose();
+    _attachment.dispose();
     _prompt.dispose();
     _scroll.dispose();
     super.dispose();
@@ -51,15 +51,15 @@ class _AttachViewState extends State<AttachView> {
   void _send() {
     final text = _prompt.text;
     if (text.trim().isEmpty) return;
-    _session.prompt(text);
+    _attachment.prompt(text);
     _prompt.clear();
   }
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: _session,
+    listenable: _attachment,
     builder: (context, _) {
-      final session = _session;
+      final attachment = _attachment;
       final tokens = OoTokens.of(context);
       final text = Theme.of(context).textTheme;
       return Column(
@@ -71,29 +71,31 @@ class _AttachViewState extends State<AttachView> {
               children: [
                 Expanded(
                   child: Text(
-                    _status(session),
+                    _status(attachment),
                     key: const ValueKey('attach-status'),
                     style: text.labelLarge?.copyWith(color: tokens.muted),
                   ),
                 ),
-                if (session.phase == AttachPhase.dropped)
+                if (attachment.phase == AttachPhase.dropped)
                   TextButton.icon(
                     key: const ValueKey('attach-reconnect'),
-                    onPressed: session.reconnect,
+                    onPressed: attachment.reconnect,
                     icon: const Icon(Icons.refresh, size: 18),
                     label: const Text('Reconnect'),
                   ),
                 if (widget.canInterrupt)
                   TextButton.icon(
                     key: const ValueKey('attach-interrupt'),
-                    onPressed: session.attached ? session.interrupt : null,
+                    onPressed: attachment.attached
+                        ? attachment.interrupt
+                        : null,
                     icon: const Icon(Icons.stop_circle_outlined, size: 18),
                     label: const Text('Interrupt'),
                   ),
               ],
             ),
           ),
-          if (session.refusal case final refusal?)
+          if (attachment.refusal case final refusal?)
             Padding(
               padding: const EdgeInsets.only(bottom: 6),
               child: Text(
@@ -105,9 +107,9 @@ class _AttachViewState extends State<AttachView> {
           Expanded(
             child: ListView.builder(
               controller: _scroll,
-              itemCount: session.frames.length,
+              itemCount: attachment.frames.length,
               itemBuilder: (context, index) =>
-                  _FrameRow(session.frames[index], session),
+                  _FrameRow(attachment.frames[index], attachment),
             ),
           ),
           const SizedBox(height: 8),
@@ -117,7 +119,7 @@ class _AttachViewState extends State<AttachView> {
                 child: TextField(
                   key: const ValueKey('attach-prompt'),
                   controller: _prompt,
-                  enabled: session.attached,
+                  enabled: attachment.attached,
                   minLines: 1,
                   maxLines: 4,
                   decoration: const InputDecoration(
@@ -130,7 +132,7 @@ class _AttachViewState extends State<AttachView> {
               const SizedBox(width: 8),
               FilledButton(
                 key: const ValueKey('attach-send'),
-                onPressed: session.attached ? _send : null,
+                onPressed: attachment.attached ? _send : null,
                 child: const Text('Send'),
               ),
             ],
@@ -140,10 +142,10 @@ class _AttachViewState extends State<AttachView> {
     },
   );
 
-  String _status(AttachSession session) => switch (session.phase) {
+  String _status(Attachment attachment) => switch (attachment.phase) {
     AttachPhase.connecting => 'Connecting to ${widget.target.label}',
     AttachPhase.replaying => 'Replaying what ${widget.target.label} showed',
-    AttachPhase.live => session.busy ? 'Taking a turn' : 'Idle',
+    AttachPhase.live => attachment.busy ? 'Taking a turn' : 'Idle',
     AttachPhase.ended => 'This Run has closed',
     AttachPhase.dropped => 'Disconnected',
     AttachPhase.refused => 'Not attached',
@@ -152,10 +154,10 @@ class _AttachViewState extends State<AttachView> {
 }
 
 class _FrameRow extends StatelessWidget {
-  const _FrameRow(this.frame, this.session);
+  const _FrameRow(this.frame, this.attachment);
 
   final AttachFrame frame;
-  final AttachSession session;
+  final Attachment attachment;
 
   @override
   Widget build(BuildContext context) {
@@ -202,7 +204,7 @@ class _FrameRow extends StatelessWidget {
               : 'Turn ended by ${frame.text('by')}',
         );
       case 'permission':
-        return _Permission(frame, session);
+        return _Permission(frame, attachment);
       case 'answered':
         final reason = frame.text('reason');
         return line(
@@ -241,19 +243,19 @@ class _FrameRow extends StatelessWidget {
 
 /// An agent's request for permission: its options, until one is answered; then who answered.
 class _Permission extends StatelessWidget {
-  const _Permission(this.frame, this.session);
+  const _Permission(this.frame, this.attachment);
 
   final AttachFrame frame;
-  final AttachSession session;
+  final Attachment attachment;
 
   @override
   Widget build(BuildContext context) {
     final tokens = OoTokens.of(context);
     final text = Theme.of(context).textTheme;
     final request = frame.text('request');
-    final answer = session.answers[request];
+    final answer = attachment.answers[request];
     final detail = frame.text('detail');
-    final enabled = answer == null && session.attached;
+    final enabled = answer == null && attachment.attached;
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
       child: Padding(
@@ -275,11 +277,11 @@ class _Permission extends StatelessWidget {
               spacing: 8,
               runSpacing: 4,
               children: [
-                for (final option in AttachSession.optionsOf(frame))
+                for (final option in Attachment.optionsOf(frame))
                   OutlinedButton(
                     key: ValueKey('permission-$request-${option.id}'),
                     onPressed: enabled
-                        ? () => session.answer(request, option.id)
+                        ? () => attachment.answer(request, option.id)
                         : null,
                     child: Text(option.label),
                   ),

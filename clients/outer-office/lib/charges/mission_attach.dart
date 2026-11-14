@@ -1,7 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../main.dart';
-import 'attach_session.dart';
+import 'attachment.dart';
 import 'attach_view.dart';
 
 /// The Mission states in which a Run may be live to attach to.

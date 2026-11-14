@@ -10,7 +10,7 @@ import '../main.dart';
 import '../routes/oo_route.dart';
 import '../theme/oo_theme.dart';
 import '../theme/oo_icon.dart';
-import '../charges/attach_session.dart';
+import '../charges/attachment.dart';
 import '../charges/mission_attach.dart';
 import 'mission_outcome.dart';
 import 'mission_rename.dart';

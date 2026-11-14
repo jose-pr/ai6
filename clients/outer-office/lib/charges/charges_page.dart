@@ -10,7 +10,7 @@ import '../shell/oo_freshness.dart';
 import '../shell/oo_shell.dart' show OoPage;
 import '../theme/oo_icon.dart';
 import '../theme/oo_tokens.dart';
-import 'attach_session.dart';
+import 'attachment.dart';
 import 'attach_view.dart';
 import 'charges_model.dart';
 
