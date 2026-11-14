@@ -3088,12 +3088,20 @@ pub fn ai6::directorates::q::login_admin::AdminError::from(core::io::error::Erro
 impl core::error::Error for ai6::directorates::q::login_admin::AdminError
 impl core::fmt::Display for ai6::directorates::q::login_admin::AdminError
 pub fn ai6::directorates::q::login_admin::AdminError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub fn ai6::directorates::q::login_admin::add_login(&ai6::directorates::q::sealing::Vault, &str, &ai6::directorates::registry::accounts::AccountRef, &ai6::Account, &std::path::Path, &[ai6::directorates::q::sealing::Recipient], bool, f64) -> core::result::Result<u64, ai6::directorates::q::login_admin::AdminError>
+pub struct ai6::directorates::q::login_admin::Commands<'a>
+pub ai6::directorates::q::login_admin::Commands::renewer: &'a dyn ai6::directorates::q::logins::LoginRenewer
+pub ai6::directorates::q::login_admin::Commands::scratch: &'a std::path::Path
+pub ai6::directorates::q::login_admin::Commands::timeout: core::time::Duration
+pub struct ai6::directorates::q::login_admin::Source<'a>
+pub ai6::directorates::q::login_admin::Source::from: &'a std::path::Path
+pub ai6::directorates::q::login_admin::Source::replace: bool
+pub ai6::directorates::q::login_admin::Source::stations: &'a [ai6::directorates::q::sealing::Recipient]
+pub fn ai6::directorates::q::login_admin::add_login(&ai6::directorates::q::sealing::Vault, &str, &ai6::directorates::registry::accounts::AccountRef, &ai6::Account, ai6::directorates::q::login_admin::Source<'_>, f64) -> core::result::Result<u64, ai6::directorates::q::login_admin::AdminError>
 pub fn ai6::directorates::q::login_admin::add_station(&ai6::directorates::q::sealing::Vault, &str, &ai6::directorates::registry::accounts::AccountRef, &ai6::directorates::q::sealing::Recipient, f64) -> core::result::Result<u64, ai6::directorates::q::login_admin::AdminError>
-pub fn ai6::directorates::q::login_admin::apply_requests(&ai6::directorates::q::sealing::Vault, &[(ai6::directorates::registry::accounts::AccountRef, &ai6::Account)], &dyn ai6::directorates::q::logins::LoginRenewer, &std::path::Path, core::time::Duration, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::q::logins::LoginNotice>>
+pub fn ai6::directorates::q::login_admin::apply_requests(&ai6::directorates::q::sealing::Vault, &[(ai6::directorates::registry::accounts::AccountRef, &ai6::Account)], ai6::directorates::q::login_admin::Commands<'_>, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::q::logins::LoginNotice>>
 pub fn ai6::directorates::q::login_admin::forget_login(&dyn ai6::directorates::registry::backend::RegistryBackend, &str, &str, &ai6::directorates::registry::accounts::AccountRef, f64) -> core::result::Result<(), ai6::directorates::q::login_admin::AdminError>
 pub fn ai6::directorates::q::login_admin::remove_station(&ai6::directorates::q::sealing::Vault, &str, &ai6::directorates::registry::accounts::AccountRef, &str, f64) -> core::result::Result<u64, ai6::directorates::q::login_admin::AdminError>
-pub fn ai6::directorates::q::login_admin::sign_out_and_forget(&ai6::directorates::q::sealing::Vault, &dyn ai6::directorates::q::logins::LoginRenewer, &str, &ai6::directorates::registry::accounts::AccountRef, &ai6::Account, &std::path::Path, core::time::Duration, f64) -> core::result::Result<(), ai6::directorates::q::login_admin::AdminError>
+pub fn ai6::directorates::q::login_admin::sign_out_and_forget(&ai6::directorates::q::sealing::Vault, ai6::directorates::q::login_admin::Commands<'_>, &str, &ai6::directorates::registry::accounts::AccountRef, &ai6::Account, f64) -> core::result::Result<(), ai6::directorates::q::login_admin::AdminError>
 pub mod ai6::directorates::q::login_standing
 pub fn ai6::directorates::q::login_standing::add_login_command(&ai6::directorates::registry::accounts::AccountRef, &str) -> alloc::string::String
 pub fn ai6::directorates::q::login_standing::audit_first(&dyn ai6::directorates::registry::backend::RegistryBackend, &str, &str, &str, &str, core::option::Option<alloc::string::String>, f64) -> core::io::error::Result<()>
