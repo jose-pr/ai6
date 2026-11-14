@@ -16,6 +16,7 @@ impl guatiao::library::kind::parts::ProviderDecl for ai6_agent_acp::AcpHandler
 pub const ai6_agent_acp::AcpHandler::KINDS: &'static [&'static str]
 pub fn ai6_agent_acp::AcpHandler::provider(guatiao::library::raw::host::Host, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::library::kind::parts::ProviderParts, guatiao::value::error::ValueError>
 pub struct ai6_agent_acp::AcpSettings
+pub ai6_agent_acp::AcpSettings::abort_wait_ms: u64
 pub ai6_agent_acp::AcpSettings::args: alloc::vec::Vec<alloc::string::String>
 pub ai6_agent_acp::AcpSettings::close_grace_ms: u64
 pub ai6_agent_acp::AcpSettings::command: core::option::Option<alloc::string::String>

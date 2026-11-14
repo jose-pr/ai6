@@ -3190,7 +3190,7 @@ pub ai6::directorates::q::overlays::IssuedOverlay::record: ai6::directorates::q:
 pub struct ai6::directorates::q::overlays::IssuedOverlays
 pub ai6::directorates::q::overlays::IssuedOverlays::install_order: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::q::overlays::IssuedOverlays::overlays: alloc::vec::Vec<ai6::directorates::q::overlays::IssuedOverlay>
-pub ai6::directorates::q::overlays::IssuedOverlays::weakenings: alloc::vec::Vec<ai6::directorates::q::overlays::Weakening>
+pub ai6::directorates::q::overlays::IssuedOverlays::weakenings: alloc::vec::Vec<coqui_aos::apply::NonDefaultSetting>
 pub struct ai6::directorates::q::overlays::OverlayRecord
 impl ai6::directorates::q::overlays::OverlayRecord
 pub fn ai6::directorates::q::overlays::OverlayRecord::from(&self) -> &ai6::directorates::q::overlays::OverlayFrom
@@ -3213,11 +3213,6 @@ pub struct ai6::directorates::q::overlays::SkillSummary
 pub ai6::directorates::q::overlays::SkillSummary::argument_hint: core::option::Option<alloc::string::String>
 pub ai6::directorates::q::overlays::SkillSummary::description: alloc::string::String
 pub ai6::directorates::q::overlays::SkillSummary::user_invocable: bool
-pub struct ai6::directorates::q::overlays::Weakening
-pub ai6::directorates::q::overlays::Weakening::id: alloc::string::String
-pub ai6::directorates::q::overlays::Weakening::subject: alloc::string::String
-impl core::convert::From<&coqui_aos::apply::NonDefaultSetting> for ai6::directorates::q::overlays::Weakening
-pub fn ai6::directorates::q::overlays::Weakening::from(&coqui_aos::apply::NonDefaultSetting) -> Self
 pub const ai6::directorates::q::overlays::SKILL_INERT_KEYS: [&str; 12]
 pub fn ai6::directorates::q::overlays::check_skill(&std::path::Path, &str, bool, &str, ai6::bounds::Limit) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::directorates::q::overlays::hooks_asked(&coqui_aos::read::Document, &coqui_aos::defaults::OverlayTree) -> core::option::Option<alloc::string::String>
@@ -8640,6 +8635,7 @@ pub fn ai6::directorates::section_00::acp::AcpFacade::new(alloc::sync::Arc<dyn a
 pub fn ai6::directorates::section_00::acp::AcpFacade::serve(&self, impl agent_client_protocol::component::ConnectTo<agent_client_protocol::role::acp::Agent> + 'static) -> std::thread::join_handle::JoinHandle<()>
 pub fn ai6::directorates::section_00::acp::AcpFacade::with_auth(self, ai6::directorates::section_00::acp::FacadeAuth) -> Self
 pub struct ai6::directorates::section_00::acp::AcpOptions
+pub ai6::directorates::section_00::acp::AcpOptions::abort_wait_ms: u64
 pub ai6::directorates::section_00::acp::AcpOptions::authenticate: core::option::Option<coqui_acp::client::Authenticate>
 pub ai6::directorates::section_00::acp::AcpOptions::close_grace_ms: u64
 pub ai6::directorates::section_00::acp::AcpOptions::close_on_drop: bool
