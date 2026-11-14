@@ -173,7 +173,9 @@ with the first answer deciding, and Interrupt only for a person who holds the ac
 detaches, and a dropped socket offers Reconnect from the last frame), Decisions (what the charge said at each
 wake and, for an Operation's, the Reports it assessed) and Logbook. A Mission's detail has the same Live Run
 view under `mission.control`. The list reads `GET /v1/user/charges`, which also says which controls the person
-holds; the logbook needs `charge.converse`.
+holds; the logbook needs `charge.converse`. A charge whose last turn ended failed, or whose lease lapsed so
+that no Station holds it, is in the attention bell and on Overview (`GET /v1/user/attention`), and
+Moneypenny's `charges` tool says what each charge last did and offers its page.
 
 The gateway resolves the person's token again for every prompt, answer and interrupt, and looks again
 every `[attach] recheck_every` seconds (and when the sign-in ends, if that is sooner) at whether it

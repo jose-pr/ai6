@@ -97,7 +97,8 @@ or on `config:reports`.
 | Route | Answers |
 | --- | --- |
 | `POST /v1/reports` | `{"scope", "title", "text", "kind", "severity", "priority", "deadline", "information_from", "sub_source", "classification", "handling", "compartments", "tearline", "links"}`; `201` with the Report |
-| `GET /v1/reports?scope=S` or `?mission=ID` | `{"reports": [...], "priorities": [...], "classifications": [...]}`: the Reports most urgent first, with `state`, `kind` and `limit` to narrow, and the deployment's lists an assessment and the markings choose from |
+| `GET /v1/reports?scope=S` or `?mission=ID` | `{"reports": [...], "priorities": [...], "classifications": [...], "handlings": [...]}`: the Reports most urgent first, with `state`, `kind` and `limit` to narrow, and the deployment's lists an assessment and the markings choose from (the handling marks narrowest first) |
+| `GET /v1/user/reports/unassessed[?operation_id=G]` | The open Reports of every scope the person reads (their Operations, their Stations and M's), each with its Reports page `link`, and which scopes were read, which the person may not read and which could not be read (`coverage`, `complete`); Moneypenny's `reports` tool reads it |
 | `GET /v1/reports/{id}` | The Report, or its tearline; `403` with `report` (its ID and markings) when that is all the person may see; `404` for a scope they may not read |
 | `PUT /v1/reports/{id}/markings` | `{"classification", "handling", "compartments", "tearline"}`, replacing all four |
 | `PUT /v1/reports/{id}/assessment` | `{"assessment", "reason", ...}`: assesses an open Report ([Assessing](#assessing)); needs `mission.control` on its Operation (`station.configure` for a Station's or M's) and reading its content. `404` for a scope the person may not read, `403` without the action or the content, `409` for a Report that is not open, `400` for anything out of bounds |
@@ -169,7 +170,9 @@ row per Report across them, most urgent first. Its table has the app's usual sor
 and filters by Operation, state, who filed it (a Source, an Agent, a charge or a person),
 classification, kind and priority; **Needs assessment**, **Assessed** and **Closed** are one click.
 A view is a link (`/reports?state=open&operation=G`), and a scope the person cannot read is said in a
-line above the list, so a short list is not taken for a whole one. M's own Reports are not listed.
+line above the list, so a short list is not taken for a whole one. M's own Reports are listed for a person
+who holds `station.read` on `config:reports` (the profile says so under `reports`), and assessed with
+`station.configure` there.
 
 Selecting a row shows the Report beside the list (under it on a narrow screen): its title and text
 with what renders as nothing spelled out, a note that an Agent's or a Source's words are reported and
@@ -185,7 +188,10 @@ An open Report has **Assess this Report**, which asks for how it is assessed (`m
 for a Source item none, since the Station that polls the Source queues its brief; the other Report
 to pick; the question and the deadline; what it waits for), a note that is kept as the assessor's
 comment, and optionally the credibility, the priority from the deployment's list, and the likelihood
-with its confidence. An assessed or closed Report has **Reopen this Report**, which asks why. Both
+with its confidence. An **Awaiting an answer** assessment may also name how far the question goes, as
+**May go as far as**: the deployment's handling marks up to the Report's own, since a question may not go
+further than the Report may.
+An assessed or closed Report has **Reopen this Report**, which asks why. Both
 need `mission.control` on the Operation (`station.configure` on a Station) and are shown disabled
 with that said when the person lacks it; a refusal of the gateway (permission, a handling mark, the
 desk's clearance) is shown in its own words and leaves the dialog open. **Source standing** opens a
@@ -194,8 +200,12 @@ source's reliability, how it was earned and the closed Reports behind it, each o
 A Mission's page has a **Reports** section: those it was begun for or resolves, and those its Agents
 filed while it ran, each opening on this page. It is shown to whoever reads the Operation.
 
-The attention bell and the Overview do not count unassessed Reports: Universal Exports' attention
-summary (`GET /v1/user/attention`) has no Reports section.
+The attention bell and the Overview count unassessed Reports: Universal Exports' attention summary
+(`GET /v1/user/attention`) has a Reports section that reads each scope the person may read through the
+same listing the page uses, so a compartment's crossing is audited as there, and says which scopes it
+read, which are not the person's to see (M's are left unmentioned unless the person holds them) and which
+could not be read. Each item opens the Reports page on that Report. Moneypenny lists the same Reports
+with her `reports` tool and offers the page to assess them; she assesses nothing herself.
 
 ## What files them
 

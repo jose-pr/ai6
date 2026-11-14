@@ -217,6 +217,9 @@ says so. When the person signs out, her tools stop working.
 | --- | --- |
 | `compartments` | The compartments you may read: what each grants, what it covers and who is read in, leaving out what you may not see |
 | `attention` | What needs your attention, the answer the Overview page gives: each item current, historical (a refusal a later revision replaced) or unverified, with its link, the scope checked and when, and what could not be checked or is not visible to you |
+| `reports` | The Reports waiting for an assessment in every scope you read, each with its Reports page link and which scopes were read, are not yours or could not be read; assessing happens on the page |
+| `charges` | The charges you may see: who keeps each, where it runs, whether a Station holds its lease, when it last woke, what its last turn recorded and how it ended, with the Charges page link |
+| `config_refusals` | Why a Station refused a configuration: the Station, the revision, its reason, whether it still holds, and the record editor on that Station's own records, where a change is reviewed and saved |
 | `board` | Stations (health, running and capacity, resources, Theaters, the Headquarters Station) and every visible Run |
 | `missions`, `mission` | Missions with their Runs, runs, brief and usage; `mission` also the issues it is linked to and what it posted |
 | `source_item`, `source_items` | An Operation's tracker items as they are now: one with its state, labels, assignees, latest comments (each author's role and date) and the Missions linked to it; or the items its sources find, by title |
@@ -1167,6 +1170,14 @@ would say is dark), with its link, the scope checked and when, and the sources t
 be read or are not the person's to see. She never says everything is clear while one is missing.
 `[unex.timeline] attention_items` and `attention_history` bound the list and how far back a past
 condition is listed.
+
+The summary also lists the Reports still waiting for an assessment, a charge whose last turn ended
+failed and a charge whose lease lapsed (`charge_failed`, `charge_lapsed`: no Station holds it). Each
+opens its page: Reports on that Report, Charges on that charge. A refusal item names its revision and
+offers the record editor on that Station's records (the Roster page's `station_id`), where a change is
+reviewed and saved; "Why did this Station refuse its configuration?" is answered from her
+`config_refusals` tool with the refusal, its revision and the Station, and she offers that editor and
+changes nothing herself.
 
 ### Her own window on the web
 
