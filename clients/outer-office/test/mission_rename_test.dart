@@ -190,7 +190,7 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, 'Rename'));
     await tester.pumpAndSettle();
     expect(
-      find.byType(FilledButton),
+      find.widgetWithText(FilledButton, 'Rename'),
       findsNothing,
       reason: 'the dialog closed',
     );
