@@ -11,6 +11,7 @@ mod attention;
 mod attention_tests;
 #[cfg(test)]
 mod board_tests;
+mod charges;
 mod compartments;
 mod controls;
 #[cfg(test)]
@@ -2051,6 +2052,8 @@ impl Gateway {
                 "/v1/user/assistant/memory/{id}/versions",
                 get(moneypenny::memory::versions),
             )
+            .route("/v1/user/charges", get(charges::list))
+            .route("/v1/user/charges/{scope}", get(charges::show))
             .route("/v1/user/attach", get(run_attach::socket))
             .route("/v1/station/hub/next", get(run_attach::next))
             .route("/v1/station/hub/frames", post(run_attach::frames))
