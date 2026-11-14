@@ -1197,6 +1197,7 @@ pub fn ai6::SqlProvider::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt:
 pub ai6::directorates::m::config::StationRuntime::accounts: ai6::station::limits::AccountLimits
 pub ai6::directorates::m::config::StationRuntime::api: ai6::station::limits::ApiLimits
 pub ai6::directorates::m::config::StationRuntime::approvals: ai6::station::limits::ApprovalLimits
+pub ai6::directorates::m::config::StationRuntime::attach: ai6::station::limits::AttachLimits
 pub ai6::directorates::m::config::StationRuntime::audit: ai6::station::limits::AuditLimits
 pub ai6::directorates::m::config::StationRuntime::blocked_after: core::option::Option<f64>
 pub ai6::directorates::m::config::StationRuntime::detached: ai6::station::limits::DetachedLimits
@@ -1245,6 +1246,7 @@ pub ai6::directorates::m::config::UnexRecord::accounts: core::option::Option<all
 pub ai6::directorates::m::config::UnexRecord::accounts_config: core::option::Option<ai6::directorates::m::config::ProviderConfig>
 pub ai6::directorates::m::config::UnexRecord::assistant: bool
 pub ai6::directorates::m::config::UnexRecord::assistant_agent: alloc::string::String
+pub ai6::directorates::m::config::UnexRecord::attach: ai6::directorates::m::unex_limits::UnexAttachLimits
 pub ai6::directorates::m::config::UnexRecord::authenticators: alloc::vec::Vec<ai6::directorates::m::config::SignInProvider>
 pub ai6::directorates::m::config::UnexRecord::authorizer: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::config::UnexRecord::authorizer_config: core::option::Option<ai6::directorates::m::config::ProviderConfig>
@@ -2670,6 +2672,15 @@ pub ai6::directorates::m::unex_limits::TextLimits::roster_key_bytes: ai6::bounds
 pub ai6::directorates::m::unex_limits::TextLimits::roster_target_bytes: ai6::bounds::Limit
 impl core::default::Default for ai6::directorates::m::unex_limits::TextLimits
 pub fn ai6::directorates::m::unex_limits::TextLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::unex_limits::UnexAttachLimits
+pub ai6::directorates::m::unex_limits::UnexAttachLimits::backlog: u64
+pub ai6::directorates::m::unex_limits::UnexAttachLimits::clients: ai6::bounds::Limit
+pub ai6::directorates::m::unex_limits::UnexAttachLimits::hello_timeout: ai6::bounds::Seconds
+pub ai6::directorates::m::unex_limits::UnexAttachLimits::max_wait: ai6::bounds::Seconds
+pub ai6::directorates::m::unex_limits::UnexAttachLimits::prompt_bytes: ai6::bounds::Limit
+pub ai6::directorates::m::unex_limits::UnexAttachLimits::queue: ai6::bounds::Limit
+impl core::default::Default for ai6::directorates::m::unex_limits::UnexAttachLimits
+pub fn ai6::directorates::m::unex_limits::UnexAttachLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::unex_limits::UnexGatewayLimits
 pub ai6::directorates::m::unex_limits::UnexGatewayLimits::access_token_max_ttl: ai6::bounds::TimeLimit
 pub ai6::directorates::m::unex_limits::UnexGatewayLimits::access_token_ttl: ai6::bounds::Seconds
@@ -2695,6 +2706,7 @@ pub ai6::directorates::m::unex_limits::UnexGatewayLimits::write_lease_ttl: ai6::
 impl core::default::Default for ai6::directorates::m::unex_limits::UnexGatewayLimits
 pub fn ai6::directorates::m::unex_limits::UnexGatewayLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::unex_limits::UnexLimits
+pub ai6::directorates::m::unex_limits::UnexLimits::attach: ai6::directorates::m::unex_limits::UnexAttachLimits
 pub ai6::directorates::m::unex_limits::UnexLimits::controls: ai6::directorates::m::unex_limits::ControlLimits
 pub ai6::directorates::m::unex_limits::UnexLimits::gateway: ai6::directorates::m::unex_limits::UnexGatewayLimits
 pub ai6::directorates::m::unex_limits::UnexLimits::login: ai6::directorates::m::unex_limits::LoginTable
@@ -9121,6 +9133,72 @@ pub fn ai6::directorates::section_00::gate::web_fetch_gate_with(&str, &[alloc::s
 pub type ai6::directorates::section_00::gate::Answers = alloc::vec::Vec<(alloc::string::String, core::option::Option<alloc::string::String>)>
 pub type ai6::directorates::section_00::gate::GitOutput = (bool, alloc::string::String)
 pub type ai6::directorates::section_00::gate::Resolver<'a> = (dyn core::ops::function::Fn(&str) -> core::io::error::Result<alloc::vec::Vec<core::net::ip_addr::IpAddr>> + 'a)
+pub mod ai6::directorates::section_00::hub
+#[non_exhaustive] pub enum ai6::directorates::section_00::hub::HubError
+pub ai6::directorates::section_00::hub::HubError::Failed(alloc::string::String)
+pub ai6::directorates::section_00::hub::HubError::NoRequest
+pub ai6::directorates::section_00::hub::HubError::NoRun
+pub ai6::directorates::section_00::hub::HubError::NotAnOption
+pub ai6::directorates::section_00::hub::HubError::NotAttached
+pub ai6::directorates::section_00::hub::HubError::QueueFull
+pub ai6::directorates::section_00::hub::HubError::TooManyClients
+impl core::error::Error for ai6::directorates::section_00::hub::HubError
+impl core::fmt::Display for ai6::directorates::section_00::hub::HubError
+pub fn ai6::directorates::section_00::hub::HubError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::directorates::section_00::hub::HubOp
+pub ai6::directorates::section_00::hub::HubOp::Answer
+pub ai6::directorates::section_00::hub::HubOp::Answer::option: alloc::string::String
+pub ai6::directorates::section_00::hub::HubOp::Answer::request: u64
+pub ai6::directorates::section_00::hub::HubOp::Attach
+pub ai6::directorates::section_00::hub::HubOp::Attach::after: core::option::Option<u64>
+pub ai6::directorates::section_00::hub::HubOp::Detach
+pub ai6::directorates::section_00::hub::HubOp::Interrupt
+pub ai6::directorates::section_00::hub::HubOp::Prompt
+pub ai6::directorates::section_00::hub::HubOp::Prompt::text: alloc::string::String
+#[non_exhaustive] pub enum ai6::directorates::section_00::hub::RunTarget
+pub ai6::directorates::section_00::hub::RunTarget::Charge
+pub ai6::directorates::section_00::hub::RunTarget::Charge::scope: alloc::string::String
+pub ai6::directorates::section_00::hub::RunTarget::Mission
+pub ai6::directorates::section_00::hub::RunTarget::Mission::mission: alloc::string::String
+pub ai6::directorates::section_00::hub::RunTarget::Mission::operation: alloc::string::String
+impl ai6::directorates::section_00::hub::RunTarget
+pub fn ai6::directorates::section_00::hub::RunTarget::key(&self) -> alloc::string::String
+impl core::fmt::Display for ai6::directorates::section_00::hub::RunTarget
+pub fn ai6::directorates::section_00::hub::RunTarget::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::directorates::section_00::hub::Attachment
+pub ai6::directorates::section_00::hub::Attachment::attached: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::directorates::section_00::hub::Attachment::live: std::sync::mpsc::Receiver<ai6::directorates::section_00::hub::HubFrame>
+pub ai6::directorates::section_00::hub::Attachment::replay: alloc::vec::Vec<ai6::directorates::section_00::hub::HubFrame>
+impl ai6::directorates::section_00::hub::Attachment
+pub fn ai6::directorates::section_00::hub::Attachment::new(alloc::vec::Vec<ai6::directorates::section_00::hub::HubFrame>, std::sync::mpsc::Receiver<ai6::directorates::section_00::hub::HubFrame>, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> Self
+#[non_exhaustive] pub struct ai6::directorates::section_00::hub::HubCommand
+pub ai6::directorates::section_00::hub::HubCommand::client: alloc::string::String
+pub ai6::directorates::section_00::hub::HubCommand::op: ai6::directorates::section_00::hub::HubOp
+pub ai6::directorates::section_00::hub::HubCommand::person: alloc::string::String
+pub ai6::directorates::section_00::hub::HubCommand::target: ai6::directorates::section_00::hub::RunTarget
+impl ai6::directorates::section_00::hub::HubCommand
+pub fn ai6::directorates::section_00::hub::HubCommand::new(ai6::directorates::section_00::hub::RunTarget, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, ai6::directorates::section_00::hub::HubOp) -> Self
+#[non_exhaustive] pub struct ai6::directorates::section_00::hub::HubDelivery
+pub ai6::directorates::section_00::hub::HubDelivery::frames: alloc::vec::Vec<ai6::directorates::section_00::hub::HubFrame>
+pub ai6::directorates::section_00::hub::HubDelivery::station: alloc::string::String
+pub ai6::directorates::section_00::hub::HubDelivery::target: ai6::directorates::section_00::hub::RunTarget
+impl ai6::directorates::section_00::hub::HubDelivery
+pub fn ai6::directorates::section_00::hub::HubDelivery::new(impl core::convert::Into<alloc::string::String>, ai6::directorates::section_00::hub::RunTarget, alloc::vec::Vec<ai6::directorates::section_00::hub::HubFrame>) -> Self
+#[non_exhaustive] pub struct ai6::directorates::section_00::hub::HubFrame
+pub ai6::directorates::section_00::hub::HubFrame::at: f64
+pub ai6::directorates::section_00::hub::HubFrame::client: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::hub::HubFrame::data: serde_json::value::Value
+pub ai6::directorates::section_00::hub::HubFrame::kind: alloc::string::String
+pub ai6::directorates::section_00::hub::HubFrame::seq: u64
+impl ai6::directorates::section_00::hub::HubFrame
+pub fn ai6::directorates::section_00::hub::HubFrame::new(impl core::convert::Into<alloc::string::String>, f64, serde_json::value::Value) -> Self
+pub fn ai6::directorates::section_00::hub::HubFrame::to(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub trait ai6::directorates::section_00::hub::RunHub: core::marker::Send + core::marker::Sync
+pub fn ai6::directorates::section_00::hub::RunHub::answer(&self, &ai6::directorates::section_00::hub::RunTarget, &str, &str, u64, &str) -> core::result::Result<(), ai6::directorates::section_00::hub::HubError>
+pub fn ai6::directorates::section_00::hub::RunHub::attach(&self, &ai6::directorates::section_00::hub::RunTarget, &str, &str, core::option::Option<u64>) -> core::result::Result<ai6::directorates::section_00::hub::Attachment, ai6::directorates::section_00::hub::HubError>
+pub fn ai6::directorates::section_00::hub::RunHub::detach(&self, &ai6::directorates::section_00::hub::RunTarget, &str)
+pub fn ai6::directorates::section_00::hub::RunHub::interrupt(&self, &ai6::directorates::section_00::hub::RunTarget, &str, &str) -> core::result::Result<(), ai6::directorates::section_00::hub::HubError>
+pub fn ai6::directorates::section_00::hub::RunHub::prompt(&self, &ai6::directorates::section_00::hub::RunTarget, &str, &str, &str) -> core::result::Result<(), ai6::directorates::section_00::hub::HubError>
 pub mod ai6::directorates::section_00::listing
 pub struct ai6::directorates::section_00::listing::Harness
 impl ai6::directorates::section_00::listing::Harness
@@ -9268,6 +9346,18 @@ pub ai6::station::limits::ApprovalLimits::kind_bytes: ai6::bounds::Limit
 pub ai6::station::limits::ApprovalLimits::target_bytes: ai6::bounds::Limit
 impl core::default::Default for ai6::station::limits::ApprovalLimits
 pub fn ai6::station::limits::ApprovalLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::station::limits::AttachLimits
+pub ai6::station::limits::AttachLimits::call_margin: ai6::bounds::Seconds
+pub ai6::station::limits::AttachLimits::clients: ai6::bounds::Limit
+pub ai6::station::limits::AttachLimits::command_wait: ai6::bounds::Seconds
+pub ai6::station::limits::AttachLimits::delivery_attempts: ai6::bounds::Limit
+pub ai6::station::limits::AttachLimits::delivery_frames: ai6::bounds::Limit
+pub ai6::station::limits::AttachLimits::history_frames: ai6::bounds::Limit
+pub ai6::station::limits::AttachLimits::permission_wait: ai6::bounds::TimeLimit
+pub ai6::station::limits::AttachLimits::retry_delay: ai6::bounds::Seconds
+pub ai6::station::limits::AttachLimits::waiting_prompts: ai6::bounds::Limit
+impl core::default::Default for ai6::station::limits::AttachLimits
+pub fn ai6::station::limits::AttachLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::station::limits::AuditLimits
 pub ai6::station::limits::AuditLimits::names_detail_chars: ai6::bounds::Limit
 pub ai6::station::limits::AuditLimits::target_bytes: ai6::bounds::Limit
@@ -9424,6 +9514,7 @@ pub fn ai6::station::limits::SourceLimits::default() -> Self
 pub ai6::station::limits::StationLimits::accounts: ai6::station::limits::AccountLimits
 pub ai6::station::limits::StationLimits::api: ai6::station::limits::ApiLimits
 pub ai6::station::limits::StationLimits::approvals: ai6::station::limits::ApprovalLimits
+pub ai6::station::limits::StationLimits::attach: ai6::station::limits::AttachLimits
 pub ai6::station::limits::StationLimits::audit: ai6::station::limits::AuditLimits
 pub ai6::station::limits::StationLimits::detached: ai6::station::limits::DetachedLimits
 pub ai6::station::limits::StationLimits::green_ink: ai6::station::limits::GreenInkLimits
@@ -14091,6 +14182,7 @@ pub fn ai6::directorates::registry::logbook::StationReport::worst(&self) -> core
 pub ai6::StationRuntime::accounts: ai6::station::limits::AccountLimits
 pub ai6::StationRuntime::api: ai6::station::limits::ApiLimits
 pub ai6::StationRuntime::approvals: ai6::station::limits::ApprovalLimits
+pub ai6::StationRuntime::attach: ai6::station::limits::AttachLimits
 pub ai6::StationRuntime::audit: ai6::station::limits::AuditLimits
 pub ai6::StationRuntime::blocked_after: core::option::Option<f64>
 pub ai6::StationRuntime::detached: ai6::station::limits::DetachedLimits
@@ -14358,6 +14450,15 @@ pub fn ai6::directorates::q::transport::TransportClient::probe(&self) -> core::r
 pub fn ai6::directorates::q::transport::TransportClient::read_file(&self, &ai6::directorates::q::transport::ReadSpec) -> core::result::Result<ai6::directorates::q::transport::FileData, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::transport::TransportClient::run(&self, &ai6::directorates::q::transport::RunSpec) -> core::result::Result<ai6::directorates::q::transport::Output, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::q::transport::TransportClient::write_file(&self, &ai6::directorates::q::transport::WriteSpec) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+#[non_exhaustive] pub struct ai6::UnexAttachLimits
+pub ai6::UnexAttachLimits::backlog: u64
+pub ai6::UnexAttachLimits::clients: ai6::bounds::Limit
+pub ai6::UnexAttachLimits::hello_timeout: ai6::bounds::Seconds
+pub ai6::UnexAttachLimits::max_wait: ai6::bounds::Seconds
+pub ai6::UnexAttachLimits::prompt_bytes: ai6::bounds::Limit
+pub ai6::UnexAttachLimits::queue: ai6::bounds::Limit
+impl core::default::Default for ai6::directorates::m::unex_limits::UnexAttachLimits
+pub fn ai6::directorates::m::unex_limits::UnexAttachLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::UnexGatewayLimits
 pub ai6::UnexGatewayLimits::access_token_max_ttl: ai6::bounds::TimeLimit
 pub ai6::UnexGatewayLimits::access_token_ttl: ai6::bounds::Seconds
@@ -14383,6 +14484,7 @@ pub ai6::UnexGatewayLimits::write_lease_ttl: ai6::bounds::Seconds
 impl core::default::Default for ai6::directorates::m::unex_limits::UnexGatewayLimits
 pub fn ai6::directorates::m::unex_limits::UnexGatewayLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::UnexLimits
+pub ai6::UnexLimits::attach: ai6::directorates::m::unex_limits::UnexAttachLimits
 pub ai6::UnexLimits::controls: ai6::directorates::m::unex_limits::ControlLimits
 pub ai6::UnexLimits::gateway: ai6::directorates::m::unex_limits::UnexGatewayLimits
 pub ai6::UnexLimits::login: ai6::directorates::m::unex_limits::LoginTable
@@ -14399,6 +14501,7 @@ pub ai6::UnexRecord::accounts: core::option::Option<alloc::string::String>
 pub ai6::UnexRecord::accounts_config: core::option::Option<ai6::directorates::m::config::ProviderConfig>
 pub ai6::UnexRecord::assistant: bool
 pub ai6::UnexRecord::assistant_agent: alloc::string::String
+pub ai6::UnexRecord::attach: ai6::directorates::m::unex_limits::UnexAttachLimits
 pub ai6::UnexRecord::authenticators: alloc::vec::Vec<ai6::directorates::m::config::SignInProvider>
 pub ai6::UnexRecord::authorizer: core::option::Option<alloc::string::String>
 pub ai6::UnexRecord::authorizer_config: core::option::Option<ai6::directorates::m::config::ProviderConfig>
