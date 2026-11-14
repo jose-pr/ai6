@@ -441,20 +441,21 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    testWidgets('Missions offers the first Mission where the person may', (
-      tester,
-    ) async {
-      await open(
-        tester,
-        empty(actions: const ['mission.read', 'mission.create']),
-        '/missions',
-      );
-      expect(find.text('No Missions yet'), findsOneWidget);
-      expect(find.textContaining('one brief of work'), findsWidgets);
-      await tester.tap(find.text('New Mission'));
-      await tester.pumpAndSettle();
-      expect(find.byType(AlertDialog), findsOneWidget);
-    });
+    testWidgets(
+      'Missions has no form to start one: only a draft with Moneypenny',
+      (tester) async {
+        await open(
+          tester,
+          empty(actions: const ['mission.read', 'mission.create']),
+          '/missions',
+        );
+        expect(find.text('No Missions yet'), findsOneWidget);
+        expect(find.textContaining('one brief of work'), findsWidgets);
+        // Without her in this app there is nothing to open, and never a dialog.
+        expect(find.text('New Mission'), findsNothing);
+        expect(find.byType(AlertDialog), findsNothing);
+      },
+    );
 
     testWidgets('Missions says who can when the person may not', (
       tester,

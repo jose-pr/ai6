@@ -161,7 +161,11 @@ class _MissionDraftCardState extends State<MissionDraftCard> {
     final word = standing?.state ?? 'queued';
     if (standing != null && standing.settled && _reportFor != word) {
       _reportFor = word;
-      _report = widget.reads.finalReport(operation, mission);
+      // A result not written yet is read again when the board next hears of a change.
+      _report = widget.reads.finalReport(operation, mission).then((text) {
+        if (text == null || text.isEmpty) _reportFor = null;
+        return text;
+      });
     }
     final open = widget.onOpen;
     final link = widget.proposal['opens'] as String?;

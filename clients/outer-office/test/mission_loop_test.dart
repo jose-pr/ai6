@@ -254,6 +254,46 @@ void main() {
     });
   });
 
+  group('the card follows the board', () {
+    for (final (name, size) in const [
+      ('desktop', Size(1200, 800)),
+      ('phone', Size(390, 800)),
+    ]) {
+      testWidgets('a result written after the Mission settled appears on the '
+          'next change of the board at $name width', (tester) async {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final reads = FakeReads();
+        addTearDown(reads.dispose);
+        await show(
+          tester,
+          reads,
+          proposal(
+            status: 'done',
+            result: 'AI6 answered 200',
+            receipt: {
+              'page': 'missions',
+              'operation_id': 'G',
+              'mission_id': 'm-9',
+            },
+          ),
+        );
+        reads.stand('m-9', const MissionStanding('done'));
+        await tester.pumpAndSettle();
+        expect(find.text('Mission done'), findsOneWidget);
+        expect(find.byKey(const Key('draft-result')), findsNothing);
+
+        reads
+          ..report = 'The build is fixed.'
+          ..notifyListeners();
+        await tester.pumpAndSettle();
+        expect(find.text('The build is fixed.'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      });
+    }
+  });
+
   group('in the chat panel', () {
     testWidgets('a reconnect shows the settled draft with its receipt, and a '
         'proposal frame settles the pending one', (tester) async {

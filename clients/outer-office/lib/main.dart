@@ -3814,32 +3814,6 @@ class MissionBoard extends ChangeNotifier
           )
           .firstOrNull;
 
-  Future<String> createMission({
-    required String operationId,
-    required String title,
-    required String prompt,
-  }) async {
-    if (demo) {
-      throw StateError('Mission creation is unavailable in preview mode.');
-    }
-    final token = accessToken;
-    if (token == null) throw StateError('Sign in before creating a Mission.');
-    final response = await _client.post(
-      apiOrigin.resolve('/v1/user/operations/$operationId/missions'),
-      headers: {
-        'authorization': 'Bearer $token',
-        'content-type': 'application/json',
-      },
-      body: jsonEncode({'title': title, 'prompt': prompt}),
-    );
-    if (response.statusCode != 202) {
-      throw StateError('The gateway refused the Mission brief.');
-    }
-    final body = jsonDecode(response.body) as Map<String, dynamic>;
-    await refresh();
-    return body['mission_id'] as String;
-  }
-
   Future<void> login(String name, String secret) async {
     await _login({'name': name, 'secret': secret});
   }
@@ -5949,220 +5923,224 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
   void _tab(OoRoute route, String tab) =>
       widget.onRoute(route.withField('tab', tab));
 
-  Widget _pageBody(
-    BuildContext context,
-    OoRoute route,
-    List<OoPage> pages,
-  ) => AnimatedBuilder(
-    animation: Listenable.merge([widget.board, ?widget.chat]),
-    builder: (context, _) {
-      final board = widget.board;
-      final onRoute = widget.onRoute;
-      return switch (route.page) {
-        OoPage.overview || OoPage.memory || OoPage.pages => OverviewPage(
-          board: board,
-          pages: pages,
-          onOpen: _open,
-          activityEvery: board.limits.refresh.overview,
-          onRoute: _openRoute,
-          assistant: widget.chat?.controller,
-          chatOpen: switch (widget.chat?.layout) {
-            ChatLayout.docked || ChatLayout.expanded => true,
-            _ => false,
-          },
-          onFocusChat: () => widget.chat?.focusComposer(),
-          onAsk: (text) {
-            widget.chat?.open();
-            widget.chat?.controller.ask(
-              text,
-              route: const OoRoute(OoPage.overview),
-            );
-          },
-        ),
-        OoPage.operations => OperationsPage(
-          board: board,
-          route: route,
-          onRoute: onRoute,
-          pages: pages,
-        ),
-        OoPage.missions => MissionsPage(
-          board: board,
-          route: route,
-          onRoute: onRoute,
-          desktopWindows: widget.desktopWindows,
-          pages: pages,
-          onCreateMission: (operationId) =>
-              _showCreateMission(context, operationId, board),
-          onDraftMission: board.demo || widget.chat == null
-              ? null
-              : (operationId) {
-                  widget.chat?.open();
-                  widget.chat?.controller.ask(
-                    'I want to start a new Mission in Operation $operationId. '
-                    'Draft it for me: ask only for what you cannot find out, '
-                    'then propose it.',
+  Widget _pageBody(BuildContext context, OoRoute route, List<OoPage> pages) =>
+      AnimatedBuilder(
+        animation: Listenable.merge([widget.board, ?widget.chat]),
+        builder: (context, _) {
+          final board = widget.board;
+          final onRoute = widget.onRoute;
+          return switch (route.page) {
+            OoPage.overview || OoPage.memory || OoPage.pages => OverviewPage(
+              board: board,
+              pages: pages,
+              onOpen: _open,
+              activityEvery: board.limits.refresh.overview,
+              onRoute: _openRoute,
+              assistant: widget.chat?.controller,
+              chatOpen: switch (widget.chat?.layout) {
+                ChatLayout.docked || ChatLayout.expanded => true,
+                _ => false,
+              },
+              onFocusChat: () => widget.chat?.focusComposer(),
+              onAsk: (text) {
+                widget.chat?.open();
+                widget.chat?.controller.ask(
+                  text,
+                  route: const OoRoute(OoPage.overview),
+                );
+              },
+            ),
+            OoPage.operations => OperationsPage(
+              board: board,
+              route: route,
+              onRoute: onRoute,
+              pages: pages,
+            ),
+            OoPage.missions => MissionsPage(
+              board: board,
+              route: route,
+              onRoute: onRoute,
+              desktopWindows: widget.desktopWindows,
+              pages: pages,
+              onDraftMission: _draftMission(route),
+            ),
+            OoPage.runs => RunsPage(
+              board: board,
+              route: route,
+              onRoute: onRoute,
+              onOpen: (run) => _openRun(context, run),
+            ),
+            OoPage.agents => OoTabs(
+              empty: 'No Agents are available to this account.',
+              selected: route['tab'],
+              onSelect: (tab) => _tab(route, tab),
+              tabs: [
+                if (_canReadRoles)
+                  (
+                    'agents',
+                    'Agents',
+                    AgentsPage(board: board, route: route, onRoute: onRoute),
+                  ),
+                if (_canReadRoles)
+                  (
+                    'roles',
+                    'Roles',
+                    AgentRolesPage(
+                      board: board,
+                      route: route,
+                      onRoute: onRoute,
+                    ),
+                  ),
+              ],
+            ),
+            OoPage.stations => OoTabs(
+              empty: 'No Stations are available to this account.',
+              selected: route['tab'],
+              onSelect: (tab) => _tab(route, tab),
+              tabs: [
+                ('overview', 'Stations', _stationsTab(context, route)),
+                (
+                  'theaters',
+                  'Theaters',
+                  _TheatersTab(
+                    board: board.stationBoard,
+                    stationId: route['station_id'],
+                    theaterId: route['theater_id'],
+                  ),
+                ),
+                if (board.demo || board.readableStations.isNotEmpty)
+                  (
+                    'settings',
+                    'Settings',
+                    StationSettingsPage(
+                      board: board,
+                      route: route,
+                      onRoute: onRoute,
+                    ),
+                  ),
+                if (board.previewOperations.isNotEmpty)
+                  (
+                    'placement',
+                    'Placement',
+                    ListView(children: [_PlacementPanel(board: board)]),
+                  ),
+              ],
+            ),
+            OoPage.greenInk => OoTabs(
+              empty: 'No green ink is available to this account.',
+              selected: route['tab'],
+              onSelect: (tab) => _tab(route, tab),
+              tabs: [
+                if (board.greenInkOperations.isNotEmpty)
+                  (
+                    'inbox',
+                    'Inbox',
+                    GreenInkPage(board: board, route: route, onRoute: onRoute),
+                  ),
+                if (board.greenInkOperations.isNotEmpty)
+                  (
+                    'expired',
+                    'Expired',
+                    ExpiredGreenInkPage(
+                      board: board,
+                      route: route,
+                      onRoute: onRoute,
+                    ),
+                  ),
+                if (board.classAuthorizationOperations.isNotEmpty)
+                  (
+                    'classes',
+                    'Class authorisations',
+                    ClassAuthorizationsPage(
+                      board: board,
+                      route: route,
+                      onRoute: onRoute,
+                    ),
+                  ),
+              ],
+            ),
+            OoPage.briefings => OoTabs(
+              empty: 'No briefings are available to this account.',
+              selected: route['tab'],
+              onSelect: (tab) => _tab(route, tab),
+              tabs: [
+                (
+                  'proposals',
+                  'Mission proposals',
+                  MissionProposalsPage(
+                    board: board,
                     route: route,
-                  );
-                },
-        ),
-        OoPage.runs => RunsPage(
-          board: board,
-          route: route,
-          onRoute: onRoute,
-          onOpen: (run) => _openRun(context, run),
-        ),
-        OoPage.agents => OoTabs(
-          empty: 'No Agents are available to this account.',
-          selected: route['tab'],
-          onSelect: (tab) => _tab(route, tab),
-          tabs: [
-            if (_canReadRoles)
-              (
-                'agents',
-                'Agents',
-                AgentsPage(board: board, route: route, onRoute: onRoute),
-              ),
-            if (_canReadRoles)
-              (
-                'roles',
-                'Roles',
-                AgentRolesPage(board: board, route: route, onRoute: onRoute),
-              ),
-          ],
-        ),
-        OoPage.stations => OoTabs(
-          empty: 'No Stations are available to this account.',
-          selected: route['tab'],
-          onSelect: (tab) => _tab(route, tab),
-          tabs: [
-            ('overview', 'Stations', _stationsTab(context, route)),
-            (
-              'theaters',
-              'Theaters',
-              _TheatersTab(
-                board: board.stationBoard,
-                stationId: route['station_id'],
-                theaterId: route['theater_id'],
-              ),
-            ),
-            if (board.demo || board.readableStations.isNotEmpty)
-              (
-                'settings',
-                'Settings',
-                StationSettingsPage(
-                  board: board,
-                  route: route,
-                  onRoute: onRoute,
+                    onRoute: onRoute,
+                  ),
                 ),
-              ),
-            if (board.previewOperations.isNotEmpty)
-              (
-                'placement',
-                'Placement',
-                ListView(children: [_PlacementPanel(board: board)]),
-              ),
-          ],
-        ),
-        OoPage.greenInk => OoTabs(
-          empty: 'No green ink is available to this account.',
-          selected: route['tab'],
-          onSelect: (tab) => _tab(route, tab),
-          tabs: [
-            if (board.greenInkOperations.isNotEmpty)
-              (
-                'inbox',
-                'Inbox',
-                GreenInkPage(board: board, route: route, onRoute: onRoute),
-              ),
-            if (board.greenInkOperations.isNotEmpty)
-              (
-                'expired',
-                'Expired',
-                ExpiredGreenInkPage(
-                  board: board,
-                  route: route,
-                  onRoute: onRoute,
+                (
+                  'held',
+                  'Held briefs',
+                  HeldBriefsPage(board: board, route: route, onRoute: onRoute),
                 ),
-              ),
-            if (board.classAuthorizationOperations.isNotEmpty)
-              (
-                'classes',
-                'Class authorisations',
-                ClassAuthorizationsPage(
-                  board: board,
-                  route: route,
-                  onRoute: onRoute,
-                ),
-              ),
-          ],
-        ),
-        OoPage.briefings => OoTabs(
-          empty: 'No briefings are available to this account.',
-          selected: route['tab'],
-          onSelect: (tab) => _tab(route, tab),
-          tabs: [
-            (
-              'proposals',
-              'Mission proposals',
-              MissionProposalsPage(
-                board: board,
-                route: route,
-                onRoute: onRoute,
-              ),
+              ],
             ),
-            (
-              'held',
-              'Held briefs',
-              HeldBriefsPage(board: board, route: route, onRoute: onRoute),
+            OoPage.roster => RosterPage(
+              board: board,
+              route: route,
+              onRoute: onRoute,
             ),
-          ],
-        ),
-        OoPage.roster => RosterPage(
-          board: board,
-          route: route,
-          onRoute: onRoute,
-        ),
-        OoPage.pools => AccountPoolsPage(
-          board: board,
-          route: route,
-          onRoute: onRoute,
-          refreshEvery: board.limits.refresh.pools,
-        ),
-        OoPage.charges => ChargesPage(
-          board: board,
-          route: route,
-          onRoute: onRoute,
-          refreshEvery: board.limits.refresh.slow,
-        ),
-        OoPage.reports => ReportsPage(
-          board: board,
-          route: route,
-          onRoute: onRoute,
-        ),
-        OoPage.timeline => OperationTimelinePage(
-          board: board,
-          route: route,
-          onRoute: onRoute,
-          refreshEvery: board.limits.refresh.timeline,
-        ),
-        OoPage.audit => AuditLogPage(
-          board: board,
-          route: route,
-          onRoute: onRoute,
-        ),
-        OoPage.access => AccessPage(
-          board: board,
-          route: route,
-          onRoute: onRoute,
-        ),
-        OoPage.compartments => CompartmentsPage(
-          board: board,
-          route: route,
-          onRoute: onRoute,
-        ),
-      };
-    },
-  );
+            OoPage.pools => AccountPoolsPage(
+              board: board,
+              route: route,
+              onRoute: onRoute,
+              refreshEvery: board.limits.refresh.pools,
+            ),
+            OoPage.charges => ChargesPage(
+              board: board,
+              route: route,
+              onRoute: onRoute,
+              refreshEvery: board.limits.refresh.slow,
+            ),
+            OoPage.reports => ReportsPage(
+              board: board,
+              route: route,
+              onRoute: onRoute,
+            ),
+            OoPage.timeline => OperationTimelinePage(
+              board: board,
+              route: route,
+              onRoute: onRoute,
+              refreshEvery: board.limits.refresh.timeline,
+            ),
+            OoPage.audit => AuditLogPage(
+              board: board,
+              route: route,
+              onRoute: onRoute,
+            ),
+            OoPage.access => AccessPage(
+              board: board,
+              route: route,
+              onRoute: onRoute,
+            ),
+            OoPage.compartments => CompartmentsPage(
+              board: board,
+              route: route,
+              onRoute: onRoute,
+            ),
+          };
+        },
+      );
+
+  /// Opens the conversation on a Mission draft for an Operation; null where there is no
+  /// Moneypenny to draft with.
+  ValueChanged<String>? _draftMission(OoRoute route) =>
+      widget.board.demo || widget.chat == null
+      ? null
+      : (operationId) {
+          widget.chat?.open();
+          widget.chat?.controller.ask(
+            'I want to start a new Mission in Operation $operationId. '
+            'Draft it for me: ask only for what you cannot find out, '
+            'then propose it.',
+            route: route,
+          );
+        };
 
   Widget _stationsTab(BuildContext context, OoRoute route) {
     final stationBoard = widget.board.stationBoard;
@@ -6191,8 +6169,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
               ? 'No Station to show. A Station is a machine running ai6 serve: once one checks '
                     'in that you may see, it appears here.'
               : 'Station $stationId is not on this board.',
-          onCreateMission: (operationId) =>
-              _showCreateMission(context, operationId, widget.board),
+          onDraftMission: _draftMission(widget.route),
           canCreateMission: (operationId) =>
               !widget.board.demo && widget.board.canCreateMission(operationId),
         ),
@@ -7814,122 +7791,4 @@ class _PlacementResult extends StatelessWidget {
       ],
     ),
   );
-}
-
-Future<void> _showCreateMission(
-  BuildContext context,
-  String operationId,
-  MissionBoard board,
-) async {
-  final title = TextEditingController();
-  final prompt = TextEditingController();
-  var submitting = false;
-  try {
-    final result = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          title: Text('New Mission · ${OperationNames.of(operationId)}'),
-          content: SizedBox(
-            width: 520,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: title,
-                  enabled: !submitting,
-                  maxLength: InputSettings.field(
-                    board.limits.inputs.missionTitleChars,
-                  ),
-                  onChanged: (_) => setState(() {}),
-                  decoration: const InputDecoration(labelText: 'Mission title'),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: prompt,
-                  enabled: !submitting,
-                  minLines: 5,
-                  maxLines: 10,
-                  maxLength: InputSettings.field(
-                    board.limits.inputs.missionPromptChars,
-                  ),
-                  onChanged: (_) => setState(() {}),
-                  decoration: const InputDecoration(
-                    labelText: 'Instructions for the agent',
-                    alignLabelWithHint: true,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: submitting ? null : () => Navigator.pop(dialogContext),
-              child: const Text('Cancel'),
-            ),
-            FilledButton.icon(
-              onPressed:
-                  submitting ||
-                      title.text.trim().isEmpty ||
-                      prompt.text.trim().isEmpty
-                  ? null
-                  : () async {
-                      setState(() => submitting = true);
-                      try {
-                        final missionId = await board.createMission(
-                          operationId: operationId,
-                          title: title.text.trim(),
-                          prompt: prompt.text.trim(),
-                        );
-                        if (dialogContext.mounted) {
-                          Navigator.pop(dialogContext, missionId);
-                        }
-                      } on Object {
-                        if (dialogContext.mounted) {
-                          setState(() => submitting = false);
-                          ScaffoldMessenger.of(dialogContext).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Could not queue the Mission. Check access and try again.',
-                              ),
-                            ),
-                          );
-                        }
-                      }
-                    },
-              icon: submitting
-                  ? const SizedBox.square(
-                      dimension: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.send),
-              label: const Text('Queue Mission'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (result != null && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Mission $result queued for Operation ${OperationNames.of(operationId)}.',
-          ),
-        ),
-      );
-    }
-  } on Object {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Could not queue the Mission. Check access and try again.',
-          ),
-        ),
-      );
-    }
-  } finally {
-    title.dispose();
-    prompt.dispose();
-  }
 }

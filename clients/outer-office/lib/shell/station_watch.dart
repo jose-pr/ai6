@@ -18,7 +18,7 @@ class StationOverview extends StatelessWidget {
     required this.board,
     required this.stations,
     required this.empty,
-    required this.onCreateMission,
+    this.onDraftMission,
     required this.canCreateMission,
     required this.onRoute,
     this.detailed = false,
@@ -32,7 +32,9 @@ class StationOverview extends StatelessWidget {
 
   /// What shows when [stations] has none.
   final String empty;
-  final ValueChanged<String> onCreateMission;
+
+  /// Drafts a Mission in an Operation with Moneypenny; none without her.
+  final ValueChanged<String>? onDraftMission;
   final bool Function(String operationId) canCreateMission;
   final ValueChanged<OoRoute> onRoute;
   final bool detailed;
@@ -70,7 +72,7 @@ class StationOverview extends StatelessWidget {
                     child: StationCard(
                       station: station,
                       board: board,
-                      onCreateMission: onCreateMission,
+                      onDraftMission: onDraftMission,
                       canCreateMission: canCreateMission,
                       onRoute: onRoute,
                       detailed: detailed,
@@ -112,7 +114,7 @@ class StationCard extends StatelessWidget {
   const StationCard({
     required this.station,
     required this.board,
-    required this.onCreateMission,
+    this.onDraftMission,
     required this.canCreateMission,
     required this.onRoute,
     this.detailed = false,
@@ -121,7 +123,9 @@ class StationCard extends StatelessWidget {
 
   final StationSummary station;
   final MissionBoard board;
-  final ValueChanged<String> onCreateMission;
+
+  /// Drafts a Mission in an Operation with Moneypenny; none without her.
+  final ValueChanged<String>? onDraftMission;
   final bool Function(String operationId) canCreateMission;
   final ValueChanged<OoRoute> onRoute;
   final bool detailed;
@@ -321,15 +325,15 @@ class StationCard extends StatelessWidget {
                       ),
                       visualDensity: VisualDensity.compact,
                     ),
-                    if (canCreateMission(operation))
+                    if (onDraftMission != null && canCreateMission(operation))
                       ActionChip(
                         label: Text(
                           'New Mission in ${OperationNames.of(operation)}',
                         ),
                         avatar: const Icon(Icons.add, size: 16),
                         tooltip:
-                            'Start a Mission in ${OperationNames.of(operation)}',
-                        onPressed: () => onCreateMission(operation),
+                            'Draft a Mission in ${OperationNames.of(operation)} with Moneypenny',
+                        onPressed: () => onDraftMission!(operation),
                         visualDensity: VisualDensity.compact,
                       ),
                   ],
