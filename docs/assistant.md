@@ -1179,6 +1179,20 @@ reviewed and saved; "Why did this Station refuse its configuration?" is answered
 `config_refusals` tool with the refusal, its revision and the Station, and she offers that editor and
 changes nothing herself.
 
+### Talking to a Run instead of her
+
+The chat panel has a **Talking to** picker under its header: Moneypenny first, then each charge the
+person holds `charge.converse` on (listed as the Charges page names them) and each Mission with a live
+Run under `mission.control` (as the Missions board names them). It lists nothing the person lacks the
+action for, and is absent when there is nothing to choose. Choosing a Run attaches to it in the panel,
+drawn as her chat is (the same bubbles, the tool calls of a turn folded into one row, quiet notices, the
+same box with Interrupt where the chat has Stop; a permission request is a card answered in place); the
+header names the Run and its Agent's codename stands in for her portrait. Her conversation stays under
+it, so choosing Moneypenny again detaches from the Run, which goes on, and returns to her conversation
+with the draft, the scroll and the scope as they were. A refusal from the gateway shows under the
+conversation. The Charges page's Live tab and a Mission's Live Run each have **Open in chat**, which opens
+the panel on that Run; the Run is read and answered nowhere else.
+
 ### Her own window on the web
 
 **Pop out** on the web opens a browser window at the app's own address with `?oo_window=chat`,

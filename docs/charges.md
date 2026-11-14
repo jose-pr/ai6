@@ -168,14 +168,15 @@ client of it, and Outer Office and other apps can be others.
 **Outer Office** shows charges on its Charges page (Machines in the rail): one card for M's, each Operation's
 and each Station's with its Run's state (running while a Station holds its lease, stopped while none does),
 the Agent and its route, the Station it runs on, when it last woke and what that turn recorded. Its detail
-has a Live tab (the attachment above, drawn as Moneypenny's chat is, with the same message bubbles, tool
-folding, notices and box: the history, other people's messages named and one's own as "You", the Agent's
-messages under its codename, a turn's tool calls folded into one "Sources checked" row, a permission request
-as a card answered in place with the first answer deciding, and Interrupt where the chat has Stop, only for a
-person who holds the action; leaving the tab detaches, and a dropped socket offers Reconnect from the last
-frame), Decisions (what the charge said at each
-wake and, for an Operation's, the Reports it assessed) and Logbook. A Mission's detail has the same Live Run
-view under `mission.control`. The list reads `GET /v1/user/charges`, which also says which controls the person
+has a Live tab (an **Open in chat** button that opens the chat panel talking to the charge's Run; the
+panel also lists every charge one may converse with under **Talking to**. The attachment above is drawn as
+Moneypenny's chat is, with the same message bubbles, tool folding, notices and box: the history, other
+people's messages named and one's own as "You", the Agent's messages under its codename, a turn's tool calls
+folded into one "Sources checked" row, a permission request as a card answered in place with the first
+answer deciding, and Interrupt where the chat has Stop, only for a person who holds the action; talking to
+Moneypenny again detaches, and a dropped socket offers Reconnect from the last frame), Decisions (what the charge said at each
+wake and, for an Operation's, the Reports it assessed) and Logbook. A Mission's detail has a Live Run row with the same **Open in chat**
+under `mission.control`. The list reads `GET /v1/user/charges`, which also says which controls the person
 holds; the logbook needs `charge.converse`. A charge whose last turn ended failed, or whose lease lapsed so
 that no Station holds it, is in the attention bell and on Overview (`GET /v1/user/attention`), and
 Moneypenny's `charges` tool says what each charge last did and offers its page.
