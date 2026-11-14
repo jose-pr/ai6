@@ -10,6 +10,8 @@ import '../main.dart';
 import '../routes/oo_route.dart';
 import '../theme/oo_theme.dart';
 import '../theme/oo_icon.dart';
+import '../charges/attach_session.dart';
+import '../charges/mission_attach.dart';
 import 'mission_outcome.dart';
 import 'mission_rename.dart';
 import 'mission_pending.dart';
@@ -32,8 +34,12 @@ class MissionDetail extends StatelessWidget {
     required this.onRoute,
     required this.onOpenRun,
     required this.onClose,
+    this.attachConnect,
     super.key,
   });
+
+  /// Opens the attach socket of the live Run section; tests give a fake one.
+  final AttachChannel Function()? attachConnect;
 
   final MissionBoard board;
   final MissionGroup mission;
@@ -161,6 +167,14 @@ class MissionDetail extends StatelessWidget {
               operationId: operationId,
               missionId: mission.missionId,
             ),
+          MissionAttachSection(
+            key: ValueKey(('live', operationId, mission.missionId)),
+            board: board,
+            operationId: operationId,
+            missionId: mission.missionId,
+            state: mission.state,
+            connect: attachConnect,
+          ),
           MissionOutcomeSection(
             board: board,
             operationId: operationId,

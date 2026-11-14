@@ -25,6 +25,12 @@ enum OoPage {
     OoIconName.runs,
     'Each Run is one run of an Agent on a Mission.',
   ),
+  charges(
+    'charges',
+    'Charges',
+    OoIconName.runs,
+    "M's, each Operation's and each Station's standing Run: its state, where it runs, and a way to talk to it.",
+  ),
   agents(
     'agents',
     'Agents',
@@ -128,7 +134,7 @@ enum OoRailGroup {
     OoPage.access,
     OoPage.compartments,
   ]),
-  machines('Machines', [OoPage.stations]),
+  machines('Machines', [OoPage.stations, OoPage.charges]),
   record('Record', [OoPage.timeline, OoPage.audit]);
 
   const OoRailGroup(this.label, this.pages);

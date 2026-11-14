@@ -212,6 +212,12 @@ const _fields = <OoPage, List<_Field>>{
   ],
   OoPage.pages: [_Field('page_id', _Kind.identifier)],
   OoPage.compartments: [_Field('compartment_id', _Kind.identifier)],
+  OoPage.charges: [
+    _Field('charge', _Kind.oneOf, ['m']),
+    _Field('operation_id', _Kind.identifier),
+    _Field('station_id', _Kind.identifier),
+    _Field('tab', _Kind.oneOf, ['live', 'decisions', 'logbook']),
+  ],
 };
 
 /// Whether [rune] is a control character (Unicode category Cc), as Rust's `char::is_control`.

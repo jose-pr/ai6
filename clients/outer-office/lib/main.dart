@@ -43,6 +43,8 @@ import 'issues/linked_issues.dart';
 import 'keys/keys_section.dart';
 import 'pools/pools_page.dart';
 import 'reviews/mission_reviews.dart';
+import 'charges/charges_model.dart';
+import 'charges/charges_page.dart';
 import 'reports/reports_model.dart';
 import 'reports/reports_page.dart';
 import 'roster/found_libraries.dart';
@@ -1743,6 +1745,55 @@ class MissionBoard extends ChangeNotifier
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
+  /// Every charge this account may see: its Run's state, who keeps it and where it runs.
+  Future<List<ChargeSummary>> loadCharges() async {
+    if (demo) return _demoCharges;
+    final response = await _userRequest('GET', '/v1/user/charges');
+    if (response.statusCode != 200) {
+      throw GatewayRefused(
+        response.statusCode,
+        'The gateway refused the Charges list.',
+      );
+    }
+    return [
+      for (final charge in jsonDecode(response.body) as List<dynamic>)
+        ChargeSummary.fromJson(charge as Map<String, dynamic>),
+    ];
+  }
+
+  /// One charge with its logbook, for a person who may converse with it.
+  Future<ChargeSummary> loadCharge(String scope) async {
+    if (demo) {
+      return _demoCharges.firstWhere((charge) => charge.scope == scope);
+    }
+    final response = await _userRequest(
+      'GET',
+      '/v1/user/charges/${Uri.encodeComponent(scope)}',
+    );
+    if (response.statusCode != 200) {
+      throw GatewayRefused(
+        response.statusCode,
+        'The gateway refused the logbook of $scope.',
+      );
+    }
+    return ChargeSummary.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
+  static const _demoCharges = [
+    ChargeSummary(
+      scope: 'm',
+      agent: 'M',
+      handler: 'claude',
+      held: true,
+      turnsLastHour: 2,
+      canConverse: false,
+      canInterrupt: false,
+      station: 'station-control-01',
+    ),
+  ];
+
   /// Every Report of every scope this account reads.
   Future<ReportsListing> loadReports() async {
     if (demo) return _demoReports;
@@ -2074,6 +2125,24 @@ class MissionBoard extends ChangeNotifier
 
   /// Operations whose account pools this account may read (`pool.read`).
   List<String> get poolOperations => _operationsWith('pool.read');
+
+  /// Whether the person may see any charge: M's (`config.read` on charges), an Operation's
+  /// (`mission.read`) or a Station's (`station.read`), or may converse with one.
+  bool get canOpenCharges =>
+      demo ||
+      (userSession?.config['charges']?.contains('config.read') ?? false) ||
+      (userSession?.operations.any(
+            (operation) =>
+                operation.actions.contains('mission.read') ||
+                operation.actions.contains('charge.converse'),
+          ) ??
+          false) ||
+      (userSession?.stations.any(
+            (station) =>
+                station.actions.contains('station.read') ||
+                station.actions.contains('charge.converse'),
+          ) ??
+          false);
 
   /// Whether Moneypenny is on this deployment, once the profile has said so.
   bool get moneypennyServed => demo || (userSession?.moneypenny ?? false);
@@ -5831,6 +5900,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
     OoPage.runs,
     if (_canReadRoles) OoPage.agents,
     OoPage.stations,
+    if (board.canOpenCharges) OoPage.charges,
     if (board.greenInkOperations.isNotEmpty ||
         board.classAuthorizationOperations.isNotEmpty)
       OoPage.greenInk,
@@ -6057,6 +6127,12 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
           route: route,
           onRoute: onRoute,
           refreshEvery: board.limits.refresh.pools,
+        ),
+        OoPage.charges => ChargesPage(
+          board: board,
+          route: route,
+          onRoute: onRoute,
+          refreshEvery: board.limits.refresh.slow,
         ),
         OoPage.reports => ReportsPage(
           board: board,

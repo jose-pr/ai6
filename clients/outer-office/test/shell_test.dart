@@ -83,7 +83,7 @@ void main() {
     await demoAt(tester, const Size(1000, 800));
     final rail = tester.widget<OoRail>(find.byType(OoRail));
     expect(rail.extended, isFalse);
-    expect(rail.pages, hasLength(13));
+    expect(rail.pages, hasLength(14));
     expect(tester.getSize(find.byType(OoRail)).width, OoRail.compactWidth);
     for (final page in railPages) {
       expect(navLabel(page), findsOneWidget, reason: page);
@@ -106,7 +106,7 @@ void main() {
         of: find.byType(NavigationDrawer),
         matching: find.byType(NavigationDrawerDestination),
       ),
-      findsNWidgets(13),
+      findsNWidgets(14),
     );
     await tester.tap(navLabel('Runs'));
     await tester.pumpAndSettle();

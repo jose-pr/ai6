@@ -119,7 +119,7 @@ void main() {
     testWidgets('1024 is icons, each label on hover and to a screen reader', (
       tester,
     ) async {
-      await demoAt(tester, compact);
+      await demoAt(tester, const Size(1024, 900));
       expect(tester.getSize(find.byType(OoRail)).width, OoRail.compactWidth);
       expect(find.text('WORK'), findsNothing);
       for (final page in OoRailGroup.values.expand((group) => group.pages)) {

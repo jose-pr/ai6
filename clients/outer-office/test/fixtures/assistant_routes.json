@@ -68,6 +68,10 @@
     {"json": {"page": "compartments", "compartment_id": "KESTREL"}, "uri": "app:/compartments?compartment_id=KESTREL"},
     {"json": {"page": "pages"}, "uri": "app:/pages"},
     {"json": {"page": "pages", "page_id": "page-0f3a"}, "uri": "app:/pages?page_id=page-0f3a"},
+    {"json": {"page": "charges"}, "uri": "app:/charges"},
+    {"json": {"page": "charges", "charge": "m", "tab": "logbook"}, "uri": "app:/charges?charge=m&tab=logbook"},
+    {"json": {"page": "charges", "operation_id": "G", "tab": "live"}, "uri": "app:/charges?operation_id=G&tab=live"},
+    {"json": {"page": "charges", "station_id": "worker", "tab": "decisions"}, "uri": "app:/charges?station_id=worker&tab=decisions"},
     {"json": {"page": "missions", "reviews": "show"}, "uri": "app:/missions?reviews=show"},
     {"json": {"page": "runs", "text": "retry"}, "uri": "app:/runs?text=retry"},
     {

@@ -64,6 +64,7 @@ const REPORT_SORTS: &[&str] = &[
 const ACCESS_SORTS: &[&str] = &[
     "priority", "subject", "scope", "role", "name", "groups", "status",
 ];
+const CHARGE_TABS: &[&str] = &["live", "decisions", "logbook"];
 const STATION_TABS: &[&str] = &["overview", "theaters", "settings", "placement"];
 const AGENT_TABS: &[&str] = &["agents", "roles"];
 const GREEN_INK_TABS: &[&str] = &["inbox", "classes"];
@@ -128,10 +129,11 @@ pub(crate) enum Page {
     Memory,
     Compartments,
     Pages,
+    Charges,
 }
 
 impl Page {
-    const ALL: [Self; 17] = [
+    const ALL: [Self; 18] = [
         Self::Overview,
         Self::Operations,
         Self::Missions,
@@ -149,6 +151,7 @@ impl Page {
         Self::Compartments,
         Self::Memory,
         Self::Pages,
+        Self::Charges,
     ];
 
     /// The page's name in both forms.
@@ -171,6 +174,7 @@ impl Page {
             Self::Compartments => "compartments",
             Self::Memory => "memory",
             Self::Pages => "pages",
+            Self::Charges => "charges",
         }
     }
 
@@ -291,6 +295,12 @@ impl Page {
             ],
             Self::Compartments => &[("compartment_id", Identifier)],
             Self::Pages => &[("page_id", Identifier)],
+            Self::Charges => &[
+                ("charge", OneOf(&["m"])),
+                ("operation_id", Identifier),
+                ("station_id", Identifier),
+                ("tab", OneOf(CHARGE_TABS)),
+            ],
         }
     }
 
