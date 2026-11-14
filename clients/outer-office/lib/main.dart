@@ -67,6 +67,7 @@ import 'operations/operation_tree.dart';
 import 'shell/operations_page.dart';
 import 'shell/missions_board.dart';
 import 'shell/missions_page.dart';
+import 'shell/new_mission_page.dart';
 import 'shell/oo_empty.dart';
 import 'shell/oo_freshness.dart';
 import 'shell/oo_link.dart';
@@ -3819,6 +3820,36 @@ class MissionBoard extends ChangeNotifier
           )
           .firstOrNull;
 
+  /// Queues a Mission of [operationId] from a brief, as the person writes it; answers its ID.
+  /// The gateway answers `202`, and the board is read again so the Mission shows.
+  Future<String> createMission({
+    required String operationId,
+    required String title,
+    required String prompt,
+  }) async {
+    if (demo) {
+      throw StateError('Mission creation is unavailable in preview mode.');
+    }
+    final token = accessToken;
+    if (token == null) throw StateError('Sign in before creating a Mission.');
+    final response = await _client.post(
+      apiOrigin.resolve(
+        '/v1/user/operations/${Uri.encodeComponent(operationId)}/missions',
+      ),
+      headers: {
+        'authorization': 'Bearer $token',
+        'content-type': 'application/json',
+      },
+      body: jsonEncode({'title': title, 'prompt': prompt}),
+    );
+    if (response.statusCode != 202) {
+      throw StateError('The gateway refused the Mission brief.');
+    }
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    await refresh();
+    return body['mission_id'] as String;
+  }
+
   Future<void> login(String name, String secret) async {
     await _login({'name': name, 'secret': secret});
   }
@@ -5892,6 +5923,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
     if (board.proposalOperations.isNotEmpty) OoPage.briefings,
     if (board.reportScopes.isNotEmpty) OoPage.reports,
     if (board.canReadAnyRecords) OoPage.roster,
+    if (board.proposalOperations.isNotEmpty) OoPage.newMission,
     if (board.poolOperations.isNotEmpty) OoPage.pools,
     if (board.timelineOperations.isNotEmpty) OoPage.timeline,
     if (board.demo || board.canReadAudit) OoPage.audit,
@@ -5974,6 +6006,12 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
               desktopWindows: widget.desktopWindows,
               pages: pages,
               onDraftMission: _draftMission(route),
+            ),
+            OoPage.newMission => NewMissionPage(
+              board: board,
+              route: route,
+              onRoute: onRoute,
+              onDraft: _draftMission(route),
             ),
             OoPage.runs => RunsPage(
               board: board,
@@ -6180,7 +6218,6 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
               ? 'No Station to show. A Station is a machine running ai6 serve: once one checks '
                     'in that you may see, it appears here.'
               : 'Station $stationId is not on this board.',
-          onDraftMission: _draftMission(widget.route),
           canCreateMission: (operationId) =>
               !widget.board.demo && widget.board.canCreateMission(operationId),
         ),
@@ -6542,7 +6579,7 @@ class _MissionProposalsPageState extends State<MissionProposalsPage> {
         !operations.contains(operationId)) {
       return Center(
         child: Text(
-          'Operation $operationId does not grant this account Mission creation.',
+          'Operation ${OperationNames.of(operationId)} does not grant this account Mission creation.',
         ),
       );
     }
@@ -6639,7 +6676,7 @@ class _MissionProposalsPageState extends State<MissionProposalsPage> {
                                 ? 'No pending Mission proposals. An Agent proposes a Mission '
                                       'here, and it runs only once you approve it.'
                                 : 'No pending Mission proposal $itemId in Operation '
-                                      '$operationId.',
+                                      '${OperationNames.of('$operationId')}.',
                           ),
                         );
                       }
@@ -7247,7 +7284,7 @@ class _AgentRolesPageState extends State<AgentRolesPage> {
         !operations.contains(operationId)) {
       return Center(
         child: Text(
-          'Operation $operationId does not grant this account Agent role access.',
+          'Operation ${OperationNames.of(operationId)} does not grant this account Agent role access.',
         ),
       );
     }
@@ -7317,7 +7354,7 @@ class _AgentRolesPageState extends State<AgentRolesPage> {
                             roleId == null
                                 ? 'No Agent roles are configured.'
                                 : 'Role $roleId is not configured in Operation '
-                                      '$operationId.',
+                                      '${OperationNames.of('$operationId')}.',
                           ),
                         );
                       }

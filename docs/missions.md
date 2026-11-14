@@ -106,7 +106,10 @@ curl -f -X POST "$UNEX_URL/v1/user/operations/G/missions" \
   -d '{"title":"Fix the flaky watchdog test","prompt":"Investigate the intermittent failure."}'
 ```
 
-Outer Office's Operations view offers the same action. The AI6 daemon claims the brief
+Outer Office makes the same call from its **New Mission** page (`/new_mission?operation_id=G`), opened
+from the Missions page, its empty queue and a Station's card for a person who holds `mission.create`: the
+Operation, the title and the instructions, where it would run, and **Queue Mission**, which opens the
+Mission on the board. Where Moneypenny is served the page also has **Draft with Moneypenny**. The AI6 daemon claims the brief
 from the shared file-backed Registry, then resolves the Agent role, Operation
 cover, Station capacity and provider handler before it starts a Run.
 

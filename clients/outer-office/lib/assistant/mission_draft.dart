@@ -18,6 +18,44 @@ class DraftPlacement {
   final List<String> reasons;
 }
 
+/// Where a Mission would run now, as a line under a brief: the best place, why others were
+/// ruled out, or nothing when the person may not preview it. Shared by the chat draft and the
+/// New Mission page.
+class PlacementLine extends StatelessWidget {
+  const PlacementLine(this.placement, {super.key});
+
+  final Future<DraftPlacement?>? placement;
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<DraftPlacement?>(
+    future: placement,
+    builder: (context, snapshot) {
+      final muted = TextStyle(color: OoTokens.of(context).muted);
+      final placement = snapshot.data;
+      if (snapshot.connectionState != ConnectionState.done) {
+        return Text('Checking where it would run…', style: muted);
+      }
+      if (placement == null) return const SizedBox.shrink();
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            placement.best == null
+                ? 'Nowhere can take it now.'
+                : 'Would run on ${placement.best}.',
+            key: const ValueKey('draft-placement'),
+          ),
+          for (final reason in placement.reasons)
+            Text(
+              reason,
+              style: muted.merge(Theme.of(context).textTheme.bodySmall),
+            ),
+        ],
+      );
+    },
+  );
+}
+
 /// How a Mission stands on the board.
 class MissionStanding {
   const MissionStanding(this.state, {this.reason});
@@ -124,34 +162,6 @@ class _MissionDraftCardState extends State<MissionDraftCard> {
       'Title: ${_title.text.trim()}\nBrief: ${_brief.text.trim()}',
     );
   }
-
-  Widget _placementLine(BuildContext context) => FutureBuilder<DraftPlacement?>(
-    future: _placement,
-    builder: (context, snapshot) {
-      final muted = TextStyle(color: OoTokens.of(context).muted);
-      final placement = snapshot.data;
-      if (snapshot.connectionState != ConnectionState.done) {
-        return Text('Checking where it would run…', style: muted);
-      }
-      if (placement == null) return const SizedBox.shrink();
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            placement.best == null
-                ? 'Nowhere can take it now.'
-                : 'Would run on ${placement.best}.',
-            key: const ValueKey('draft-placement'),
-          ),
-          for (final reason in placement.reasons)
-            Text(
-              reason,
-              style: muted.merge(Theme.of(context).textTheme.bodySmall),
-            ),
-        ],
-      );
-    },
-  );
 
   /// The receipt: the Mission the confirmed request queued, how it stands, and its result.
   Widget _receipt(BuildContext context, Map<String, Object?> receipt) {
@@ -271,7 +281,7 @@ class _MissionDraftCardState extends State<MissionDraftCard> {
                     isDense: true,
                   ),
                 ),
-                _placementLine(context),
+                PlacementLine(_placement),
                 Text(
                   _edited
                       ? 'Your edits are not part of the proposal: ask Moneypenny to draft it again with them.'

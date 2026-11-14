@@ -18,7 +18,6 @@ class StationOverview extends StatelessWidget {
     required this.board,
     required this.stations,
     required this.empty,
-    this.onDraftMission,
     required this.canCreateMission,
     required this.onRoute,
     this.detailed = false,
@@ -33,8 +32,6 @@ class StationOverview extends StatelessWidget {
   /// What shows when [stations] has none.
   final String empty;
 
-  /// Drafts a Mission in an Operation with Moneypenny; none without her.
-  final ValueChanged<String>? onDraftMission;
   final bool Function(String operationId) canCreateMission;
   final ValueChanged<OoRoute> onRoute;
   final bool detailed;
@@ -72,7 +69,6 @@ class StationOverview extends StatelessWidget {
                     child: StationCard(
                       station: station,
                       board: board,
-                      onDraftMission: onDraftMission,
                       canCreateMission: canCreateMission,
                       onRoute: onRoute,
                       detailed: detailed,
@@ -114,7 +110,6 @@ class StationCard extends StatelessWidget {
   const StationCard({
     required this.station,
     required this.board,
-    this.onDraftMission,
     required this.canCreateMission,
     required this.onRoute,
     this.detailed = false,
@@ -124,8 +119,6 @@ class StationCard extends StatelessWidget {
   final StationSummary station;
   final MissionBoard board;
 
-  /// Drafts a Mission in an Operation with Moneypenny; none without her.
-  final ValueChanged<String>? onDraftMission;
   final bool Function(String operationId) canCreateMission;
   final ValueChanged<OoRoute> onRoute;
   final bool detailed;
@@ -325,15 +318,18 @@ class StationCard extends StatelessWidget {
                       ),
                       visualDensity: VisualDensity.compact,
                     ),
-                    if (onDraftMission != null && canCreateMission(operation))
+                    if (canCreateMission(operation))
                       ActionChip(
                         label: Text(
                           'New Mission in ${OperationNames.of(operation)}',
                         ),
                         avatar: const Icon(Icons.add, size: 16),
                         tooltip:
-                            'Draft a Mission in ${OperationNames.of(operation)} with Moneypenny',
-                        onPressed: () => onDraftMission!(operation),
+                            'Start a Mission in ${OperationNames.of(operation)}',
+                        onPressed: () => onRoute(
+                          const OoRoute(OoPage.newMission)
+                              .withField('operation_id', operation),
+                        ),
                         visualDensity: VisualDensity.compact,
                       ),
                   ],

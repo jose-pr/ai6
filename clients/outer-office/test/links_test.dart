@@ -442,7 +442,7 @@ void main() {
     }
 
     testWidgets(
-      'Missions has no form to start one: only a draft with Moneypenny',
+      'Missions offers the New Mission page, with no Moneypenny needed',
       (tester) async {
         await open(
           tester,
@@ -451,8 +451,11 @@ void main() {
         );
         expect(find.text('No Missions yet'), findsOneWidget);
         expect(find.textContaining('one brief of work'), findsWidgets);
-        // Without her in this app there is nothing to open, and never a dialog.
-        expect(find.text('New Mission'), findsNothing);
+        expect(find.text('Draft with Moneypenny'), findsNothing);
+        expect(find.byType(AlertDialog), findsNothing);
+        await tester.tap(find.text('New Mission'));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('new-mission-queue')), findsOneWidget);
         expect(find.byType(AlertDialog), findsNothing);
       },
     );

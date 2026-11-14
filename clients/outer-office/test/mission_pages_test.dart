@@ -47,6 +47,7 @@ void main() {
     Future<void> pumpEmpty(
       WidgetTester tester, {
       ValueChanged<String>? onDraft,
+      ValueChanged<String>? onCreate,
       String? operation,
     }) async {
       await tester.pumpWidget(
@@ -54,6 +55,7 @@ void main() {
           home: Scaffold(
             body: EmptyBoard(
               operations: const ['G', 'L', 'Q'],
+              onCreate: onCreate,
               onDraft: onDraft,
               operation: operation,
             ),
@@ -75,32 +77,46 @@ void main() {
       },
     );
 
-    testWidgets('the empty queue offers New Mission, a draft with Moneypenny, '
-        'for the picked Operation', (tester) async {
+    testWidgets(
+      'the empty queue offers New Mission, and a draft with Moneypenny '
+      'beside it, for the picked Operation',
+      (tester) async {
+        final b = board();
+        addTearDown(b.dispose);
+        final created = <String>[];
+        final drafted = <String>[];
+        await pumpEmpty(
+          tester,
+          onCreate: created.add,
+          onDraft: drafted.add,
+          operation: 'L',
+        );
+        expect(find.text('No Missions yet'), findsOneWidget);
+        expect(find.text('New Mission'), findsOneWidget);
+        // The picker starts on the Operation the page is filtered to, by its name.
+        expect(find.widgetWithText(TextField, 'LineupMux'), findsOneWidget);
+        await tester.tap(find.text('New Mission'));
+        expect(created, ['L']);
+        expect(drafted, isEmpty);
+        await tester.tap(find.text('Draft with Moneypenny'));
+        expect(drafted, ['L']);
+
+        await tester.tap(find.byKey(const Key('new-mission-operation')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Guatiao').last);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('New Mission'));
+        expect(created, ['L', 'G']);
+      },
+    );
+
+    testWidgets('without Moneypenny the form is the only way in, and a person '
+        'who may not start one is told who can', (tester) async {
       final b = board();
       addTearDown(b.dispose);
-      final drafted = <String>[];
-      await pumpEmpty(tester, onDraft: drafted.add, operation: 'L');
-      expect(find.text('No Missions yet'), findsOneWidget);
+      await pumpEmpty(tester, onCreate: (_) {});
       expect(find.text('New Mission'), findsOneWidget);
-      // The picker starts on the Operation the page is filtered to, by its name.
-      expect(find.widgetWithText(TextField, 'LineupMux'), findsOneWidget);
       expect(find.text('Draft with Moneypenny'), findsNothing);
-      await tester.tap(find.text('New Mission'));
-      expect(drafted, ['L']);
-
-      await tester.tap(find.byKey(const Key('new-mission-operation')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Guatiao').last);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('New Mission'));
-      expect(drafted, ['L', 'G']);
-    });
-
-    testWidgets('without Moneypenny there is no button, and a person who '
-        'may not start one is told who can', (tester) async {
-      final b = board();
-      addTearDown(b.dispose);
       await pumpEmpty(tester);
       expect(find.text('New Mission'), findsNothing);
 

@@ -94,6 +94,15 @@ enum OoPage {
     'Need-to-know access to other Operations: what each grants, and who is read in.',
   ),
 
+  /// The brief of a new Mission; opened from the Missions page and a Station's card, not the
+  /// rail.
+  newMission(
+    'new_mission',
+    'New Mission',
+    OoIconName.newMission,
+    'Write the brief, see where it would run, and queue it.',
+  ),
+
   /// Her memory of the person; opened from her chat, not the rail.
   memory('memory', "Moneypenny's memory", OoIconName.moneypenny, ''),
 

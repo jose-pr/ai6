@@ -15,6 +15,7 @@ import '../widgets/oo_data_table.dart' show OoTablePreferences;
 import 'oo_empty.dart';
 import 'oo_freshness.dart';
 import 'oo_shell.dart';
+import 'operation_names.dart';
 
 /// The Mission queue: the Missions a Missions route selects, newest update first unless the
 /// route sorts, each row saying its state, where it runs and when the board last heard of it.
@@ -34,8 +35,8 @@ class MissionsPage extends StatefulWidget {
     super.key,
   });
 
-  /// Asks Moneypenny to draft a Mission in an Operation, the one way in from this page;
-  /// without her the empty board says who may start one but offers no button.
+  /// Asks Moneypenny to draft a Mission in an Operation, the second way in beside the New
+  /// Mission page; without her there is no such button.
   final ValueChanged<String>? onDraftMission;
 
   final MissionBoard board;
@@ -172,7 +173,7 @@ class _MissionsPageState extends State<MissionsPage> {
     if (missionId != null && selected == null) {
       return EmptyFilter(
         text:
-            'Mission $missionId of Operation ${route['operation_id']} is not on this '
+            'Mission $missionId of Operation ${OperationNames.of('${route['operation_id']}')} is not on this '
             'board.',
       );
     }
@@ -206,6 +207,21 @@ class _MissionsPageState extends State<MissionsPage> {
       ],
     );
   }
+
+  /// The Operations the person may start a Mission in, when they may open the page for it.
+  List<String> get _creatable =>
+      board.demo || !widget.pages.contains(OoPage.newMission)
+      ? const []
+      : [
+          for (final operation
+              in board.userSession?.operations ?? const <UserOperationAccess>[])
+            if (board.canCreateMission(operation.operationId))
+              operation.operationId,
+        ];
+
+  void _openNewMission(String operation) => widget.onRoute(
+    const OoRoute(OoPage.newMission).withField('operation_id', operation),
+  );
 
   Widget _queue(
     BuildContext context,
@@ -241,6 +257,25 @@ class _MissionsPageState extends State<MissionsPage> {
         SliverToBoxAdapter(
           child: OoFilterBar(route: listRoute, onRoute: widget.onRoute),
         ),
+        if (_creatable.isNotEmpty && missions.isNotEmpty)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 4),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.icon(
+                  key: const ValueKey('missions-new'),
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('New Mission'),
+                  onPressed: () => _openNewMission(
+                    _creatable.contains(listRoute['operation_id'])
+                        ? listRoute['operation_id']!
+                        : _creatable.first,
+                  ),
+                ),
+              ),
+            ),
+          ),
         if (MediaQuery.sizeOf(context).width >= OoBreakpoints.compact)
           SliverToBoxAdapter(
             child: Padding(
@@ -304,6 +339,7 @@ class _MissionsPageState extends State<MissionsPage> {
                         if (board.canCreateMission(operation.operationId))
                           operation.operationId,
                     ],
+              onCreate: _openNewMission,
               onDraft: widget.onDraftMission,
               operation: listRoute['operation_id'],
             ),

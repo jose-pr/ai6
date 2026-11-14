@@ -1032,11 +1032,12 @@ class _LiveRunTerminalState extends State<_LiveRunTerminal> {
 }
 
 /// The board with no Mission on it: what a Mission is, and, for an Operation the person
-/// picks among those they may start one in, a way to start the first: a draft with
-/// Moneypenny. Or who can, if they may not.
+/// picks among those they may start one in, a way to start the first: the New Mission page,
+/// or a draft with Moneypenny. Or who can, if they may not.
 class EmptyBoard extends StatefulWidget {
   const EmptyBoard({
     this.operations = const [],
+    this.onCreate,
     this.onDraft,
     this.operation,
     super.key,
@@ -1044,6 +1045,9 @@ class EmptyBoard extends StatefulWidget {
 
   /// The Operations the person may start a Mission in.
   final List<String> operations;
+
+  /// Opens the New Mission page on the Operation; without it there is no button.
+  final ValueChanged<String>? onCreate;
 
   /// Asks Moneypenny to draft a Mission in the Operation; without it there is no button.
   final ValueChanged<String>? onDraft;
@@ -1068,6 +1072,7 @@ class _EmptyBoardState extends State<EmptyBoard> {
   @override
   Widget build(BuildContext context) {
     final operation = _operation;
+    final onCreate = widget.onCreate;
     final onDraft = widget.onDraft;
     return OoEmptyState(
       icon: OoIconName.missions,
@@ -1078,7 +1083,7 @@ class _EmptyBoardState extends State<EmptyBoard> {
                 'account cannot start one; a controller grants mission.create on an Operation.'
           : 'A Mission is one brief of work under an Operation. Start the first, and its '
                 'Runs show here.',
-      controls: operation == null || onDraft == null
+      controls: operation == null || (onCreate == null && onDraft == null)
           ? null
           : DropdownMenu<String>(
               key: const ValueKey('new-mission-operation'),
@@ -1092,8 +1097,12 @@ class _EmptyBoardState extends State<EmptyBoard> {
               onSelected: (id) => setState(() => _picked = id),
             ),
       actions: [
+        if (operation != null && onCreate != null)
+          ('New Mission', () => onCreate(operation)),
+      ],
+      secondary: [
         if (operation != null && onDraft != null)
-          ('New Mission', () => onDraft(operation)),
+          ('Draft with Moneypenny', () => onDraft(operation)),
       ],
       link: const ('See Stations', OoRoute(OoPage.stations)),
     );

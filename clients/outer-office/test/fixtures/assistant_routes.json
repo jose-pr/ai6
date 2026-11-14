@@ -50,6 +50,8 @@
       "uri": "app:/briefings?tab=held&operation_id=G&item_id=G%2Fissue%204"
     },
     {"json": {"page": "roster", "kind": "agent", "key": "008"}, "uri": "app:/roster?kind=agent&key=008"},
+    {"json": {"page": "new_mission", "operation_id": "G"}, "uri": "app:/new_mission?operation_id=G"},
+    {"json": {"page": "new_mission"}, "uri": "app:/new_mission"},
     {"json": {"page": "roster", "kind": "station", "station_id": "worker"}, "uri": "app:/roster?kind=station&station_id=worker"},
     {"json": {"page": "pools", "operation_id": "G", "pool": "claude-max"}, "uri": "app:/pools?operation_id=G&pool=claude-max"},
     {"json": {"page": "pools", "mission_id": "G-42"}, "uri": "app:/pools?mission_id=G-42"},

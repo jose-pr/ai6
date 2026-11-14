@@ -207,6 +207,7 @@ const _fields = <OoPage, List<_Field>>{
     _Field('sort', _Kind.oneOf, _accessSorts),
     _Field('order', _Kind.oneOf, _orders),
   ],
+  OoPage.newMission: [_Field('operation_id', _Kind.identifier)],
   OoPage.memory: [
     _Field('scope', _Kind.oneOf, ['global']),
     _Field('operation_id', _Kind.identifier),
