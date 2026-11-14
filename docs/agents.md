@@ -1222,9 +1222,10 @@ overlays = ["rust"]
   (YAML unless a `#!` format line names another format) and its body is the overlay's context. An
   overlay with both files is refused (`two-manifests`).
 - **Hooks.** A later AOS edition runs an overlay's hooks (a `[hooks]` table, or a `hook.<ext>`
-  script at the root), and a `pre-tool` hook can deny a call. This AI6 runs none, so an overlay that
-  asks for one is refused, naming the table or the file, rather than run with weaker guards than its
-  author wrote.
+  script at the root) in the session's environment, and a `pre-tool` hook answers deny, ask or allow
+  (an allow may rewrite the call's input; deny beats ask, ask beats allow). This AI6 runs none, so an
+  overlay that asks for one is refused, naming the table or the file, rather than run without the
+  checks its author wrote.
 - **`ai6 overlay pin DIR`** reads an overlay as a Station does, running nothing: it prints each
   file with its SHA-256 and the `pin`. It exits non-zero, printing no pin, when the manifest
   does not read or validate against the files, or a skill fails the `SKILL.md` checks. Problems
