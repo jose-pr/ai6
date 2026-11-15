@@ -283,7 +283,7 @@ async fn m_looks_at_a_charge_whose_lease_lapsed_or_whose_turn_did_not_run() {
     assert!(survey.stuck.is_empty(), "{:?}", survey.stuck);
 }
 
-// ---- Phase 3: the tools a charge fixes its area with ----
+// ---- The tools a charge fixes its area with ----
 
 use serde_json::json;
 
