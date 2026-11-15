@@ -165,80 +165,73 @@ fn an_inline_or_environment_secret_is_reported_as_a_weakening() {
 }
 
 #[test]
-fn registry_limits_in_the_file_bound_the_registry_it_opens() {
-    let dir = tempfile::tempdir().unwrap();
-    for location in ["registry", "sqlite:registry.db"] {
-        let path = write(
-            dir.path(),
-            "ai6.cfg",
-            &format!(
-                "[registry]\nlocation = {location:?}\nsqlite_busy_timeout = 5\n\
-                 [registry.limits.runs]\nrecords = 2\n"
-            ),
-        );
-        let located = Bootstrap::find(Some(&path)).unwrap();
-        let registry = located.value.registry.clone();
-        assert_eq!(registry.limits.runs.records, ai6::Limit::at(2));
-        assert_eq!(registry.sqlite_busy_timeout().as_secs(), 5);
-        let options = ai6::SqlOptions::for_lease(registry.headquarters_lease())
-            .with_busy_timeout(registry.sqlite_busy_timeout())
-            .with_limits(registry.limits.clone());
-        let opened = ai6::directorates::registry::backend::open_with(
-            &located.registry_location().unwrap(),
-            &options,
-        )
-        .unwrap();
-        let ttl = std::time::Duration::from_secs(60);
-        for (id, mission) in [("s-1", "mission-1"), ("s-2", "mission-2")] {
-            opened
-                .open_run(ai6::NewRun::new(id, mission, "station-a"), ttl)
-                .unwrap();
-        }
-        let refused = opened
-            .open_run(ai6::NewRun::new("s-3", "mission-3", "station-a"), ttl)
-            .unwrap_err();
+fn limits_in_the_file_are_refused_naming_the_record_that_replaced_them() {
+    for text in [
+        "[registry]\nlocation = \"registry\"\n[registry.limits.runs]\nrecords = 2\n",
+        "[provider]\nloadout_bytes = 2097152\n",
+        "[provider]\nreplace_retry = 9\n",
+    ] {
+        let refused = read(text).unwrap_err();
         assert!(
-            refused.to_string().contains("too many Run records"),
-            "{location}: {refused}"
+            refused.contains("the `registry` record"),
+            "{text:?}: {refused}"
         );
-        assert!(located.weakenings().is_empty(), "tighter than the defaults");
     }
+    let json = Bootstrap::read(&write(
+        tempfile::tempdir().unwrap().path(),
+        "ai6.json",
+        "{\"registry\": {\"limits\": {\"cables\": {\"max_ttl\": null}}}}",
+    ))
+    .unwrap_err();
+    assert!(json.to_string().contains("the `registry` record"), "{json}");
+    let kept = read(
+        "[provider]\nlocation = \"configuration\"\npassword = { provider = \"env\", key = \"X\" }\n\
+         poll = 3\n[registry]\nlocation = \"registry\"\nheadquarters_lease = 30\n\
+         sqlite_busy_timeout = 60\n",
+    )
+    .unwrap();
+    assert_eq!(kept.registry.sqlite_busy_timeout().as_secs(), 60);
+    assert_eq!(
+        kept.registry.headquarters_lease().as_secs(),
+        30,
+        "the bootstrap keeps what a host needs to reach the Registry"
+    );
 }
 
 #[test]
-fn an_unbounded_or_larger_limit_is_reported_as_a_weakening() {
+fn a_station_whose_file_holds_registry_limits_does_not_start() {
     let dir = tempfile::tempdir().unwrap();
     let path = write(
         dir.path(),
         "ai6.cfg",
-        "[provider]\nloadout_bytes = 2097152\n[registry]\nsqlite_busy_timeout = 60\n\
-         [registry.limits.runs]\nrecords = \"none\"\n",
+        "[registry.limits.runs]\nrecords = 2\n",
+    );
+    let output = ai6()
+        .args(["serve", "--listen", "127.0.0.1:0", "--config"])
+        .arg(&path)
+        .arg("--state-dir")
+        .arg(dir.path().join("state"))
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(!output.status.success(), "{said}");
+    assert!(said.contains("the `registry` record"), "{said}");
+    assert!(said.contains("[registry.limits]"), "{said}");
+}
+
+#[test]
+fn a_weaker_sqlite_wait_is_reported_as_a_weakening() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write(
+        dir.path(),
+        "ai6.cfg",
+        "[registry]\nsqlite_busy_timeout = 60\n",
     );
     let located = Bootstrap::find(Some(&path)).unwrap();
     assert_eq!(
-        located.value.registry.limits.runs.records,
-        ai6::Limit::UNBOUNDED
-    );
-    assert_eq!(
         located.weakenings(),
-        [
-            "registry.limits.runs.records none is looser than the default 100000",
-            "registry.sqlite_busy_timeout 60 is looser than the default 30",
-            "provider.loadout_bytes 2097152 is looser than the default 1048576",
-        ]
+        ["registry.sqlite_busy_timeout 60 is looser than the default 30"]
     );
-    let json = Bootstrap::read(&write(
-        dir.path(),
-        "ai6.json",
-        "{\"registry\": {\"limits\": {\"cables\": {\"max_ttl\": null}}}}",
-    ))
-    .unwrap();
-    assert_eq!(
-        json.registry.limits.cables.max_ttl,
-        ai6::TimeLimit::UNBOUNDED
-    );
-    assert!(read("[registry.limits.runs]\nrecords = -1\n").is_err());
-    assert!(read("[registry.limits.runs]\nrecordz = 1\n").is_err());
 }
 
 #[test]

@@ -557,14 +557,14 @@ impl FileRegistry {
 
     fn read_charge(&self, scope: &str) -> io::Result<Option<ChargeRecord>> {
         match fs::read(self.charge_path(scope)) {
-            Ok(bytes) => parse_record(&bytes, &self.limits.charges).map(Some),
+            Ok(bytes) => parse_record(&bytes, &self.current_limits().charges).map(Some),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(error) => Err(error),
         }
     }
 
     fn write_charge(&self, record: &ChargeRecord) -> io::Result<()> {
-        let text = record_json(record, &self.limits.charges)?;
+        let text = record_json(record, &self.current_limits().charges)?;
         self.write_atomic(&self.charge_path(&record.scope), text.as_bytes())
     }
 
@@ -592,7 +592,7 @@ impl ChargeStore for FileRegistry {
         ttl: Duration,
     ) -> Result<ChargeRecord, ChargeError> {
         validate_scope(scope)?;
-        let limits = &self.limits.charges;
+        let limits = &self.current_limits().charges;
         let _lock = self.lock()?;
         let existing = self.read_charge(scope)?;
         if existing.is_none()
@@ -614,7 +614,7 @@ impl ChargeStore for FileRegistry {
         renew: Option<Duration>,
         update: ChargeUpdate,
     ) -> Result<ChargeRecord, ChargeError> {
-        let limits = self.limits.charges.clone();
+        let limits = self.current_limits().charges.clone();
         self.change_charge(scope, |record, now| {
             apply(record, (station, fence), renew, update, now, &limits)
         })
@@ -627,7 +627,7 @@ impl ChargeStore for FileRegistry {
         by: &str,
         note: &str,
     ) -> Result<ChargeControl, ChargeError> {
-        let limits = self.limits.charges.clone();
+        let limits = self.current_limits().charges.clone();
         self.change_charge(scope, |record, now| {
             add_control(record, by, note, now, &limits)
         })
@@ -651,7 +651,10 @@ impl ChargeStore for FileRegistry {
             if path.extension().is_none_or(|extension| extension != "json") {
                 continue;
             }
-            records.push(parse_record(&fs::read(&path)?, &self.limits.charges)?);
+            records.push(parse_record(
+                &fs::read(&path)?,
+                &self.current_limits().charges,
+            )?);
         }
         records.sort_by(|left, right| left.scope.cmp(&right.scope));
         Ok(records)

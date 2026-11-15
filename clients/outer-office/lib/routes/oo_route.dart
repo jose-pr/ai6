@@ -169,6 +169,7 @@ const _fields = <OoPage, List<_Field>>{
       'cables',
       'station',
       'unex',
+      'registry',
     ]),
     _Field('key', _Kind.identifier),
     _Field('station_id', _Kind.identifier),

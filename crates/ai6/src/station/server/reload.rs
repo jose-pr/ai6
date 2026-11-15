@@ -51,6 +51,8 @@ struct Live {
     /// The roster revision refused last, and why.
     refused: Option<(ConfigRevision, String)>,
     needs_restart: BTreeSet<&'static str>,
+    /// The `registry` record the Station's Registry applies now.
+    registry: crate::directorates::m::config::RegistryRecord,
     /// The last failure to read the configuration, logged once.
     unavailable: Option<String>,
 }
@@ -67,6 +69,7 @@ impl LiveConfig {
         catalog: Option<Option<Arc<LoadoutCatalog>>>,
     ) -> Self {
         let revision = started.revision;
+        let registry = started.settings.registry.clone();
         Self {
             source: Some(source),
             station: station.to_owned(),
@@ -75,6 +78,7 @@ impl LiveConfig {
                 roster: Some(roster),
                 catalog,
                 revision: Some(revision),
+                registry,
                 ..Live::default()
             }),
         }
@@ -294,6 +298,7 @@ fn poll_provider(state: &DaemonState) -> (bool, bool) {
             if live.catalog.is_some() {
                 live.catalog = Some(loadouts);
             }
+            apply_registry(state, &mut live, &snapshot.settings.registry);
             live.roster = Some(Arc::new(snapshot.roster));
             live.revision = Some(snapshot.revision);
             live.refused = None;
@@ -313,6 +318,25 @@ fn poll_provider(state: &DaemonState) -> (bool, bool) {
             refuse(state, &reason);
             (false, false)
         }
+    }
+}
+
+/// Gives the Station's Registry the limits of `record` when they are not the ones it applies,
+/// and logs each one looser than its default. A lower limit refuses new writes past it and
+/// removes nothing stored.
+fn apply_registry(
+    state: &DaemonState,
+    live: &mut Live,
+    record: &crate::directorates::m::config::RegistryRecord,
+) {
+    if &live.registry == record {
+        return;
+    }
+    record.apply_to(state.intake.as_ref());
+    live.registry = record.clone();
+    eprintln!("ai6: Registry limits applied");
+    for weakened in record.weakenings() {
+        eprintln!("ai6: {weakened}");
     }
 }
 
@@ -661,6 +685,144 @@ mod tests {
         #[cfg(feature = "postgres")]
         match crate::directorates::registry::suite::PostgresStore::new() {
             Some(store) => an_edit_in_a_shared_sql_roster_reaches_every_station(&store.location()),
+            None => eprintln!(
+                "skipped the PostgreSQL run: {} is not set",
+                crate::directorates::registry::suite::POSTGRES_URL_ENV
+            ),
+        }
+    }
+
+    /// The Registry's limits are the `registry` record: a Station applies each revision of it
+    /// at its next poll, a lower limit refuses what is written after it and keeps what is
+    /// stored, and no record means the defaults.
+    fn a_changed_registry_record_changes_a_running_registry(
+        registry: Arc<dyn crate::directorates::registry::backend::RegistryBackend>,
+        source: Arc<dyn ConfigProvider>,
+        root: &Path,
+        set: &dyn Fn(Option<serde_json::Value>),
+    ) {
+        use crate::directorates::registry::limits::RegistryLimits;
+        use crate::directorates::registry::runs::NewRun;
+
+        let ttl = Duration::from_secs(60);
+        let open = |id: &str| registry.open_run(NewRun::new(id, id, "station-a"), ttl);
+        let mut state = test_state(root, "", "");
+        state.intake = registry.clone();
+        live(&mut state, root, source, false);
+        assert_eq!(*registry.limits(), RegistryLimits::default());
+        open("run-1").unwrap();
+        open("run-2").unwrap();
+
+        set(Some(
+            serde_json::json!({ "limits": { "runs": { "records": 2 } } }),
+        ));
+        assert_eq!(
+            registry.limits().runs.records,
+            RegistryLimits::default().runs.records,
+            "nothing changes before the poll"
+        );
+        assert!(poll(&state));
+        assert_eq!(registry.limits().runs.records, crate::bounds::Limit::at(2));
+        let refused = open("run-3").unwrap_err();
+        assert!(
+            refused.to_string().contains("too many Run records"),
+            "{refused}"
+        );
+
+        set(Some(
+            serde_json::json!({ "limits": { "runs": { "records": 1 } } }),
+        ));
+        assert!(poll(&state));
+        assert_eq!(
+            registry.runs().unwrap().len(),
+            2,
+            "a lower limit keeps what is stored"
+        );
+        assert!(
+            open("run-3").is_err(),
+            "and refuses what is written past it"
+        );
+
+        set(Some(
+            serde_json::json!({ "limits": { "runs": { "records": 10 } } }),
+        ));
+        assert!(poll(&state));
+        open("run-3").unwrap();
+        assert_eq!(registry.runs().unwrap().len(), 3);
+
+        set(None);
+        assert!(poll(&state));
+        assert_eq!(*registry.limits(), RegistryLimits::default());
+        assert!(!poll(&state), "nothing changed since");
+    }
+
+    #[test]
+    fn a_changed_registry_record_changes_a_running_file_registry_at_the_next_poll() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("registry.toml");
+        a_changed_registry_record_changes_a_running_registry(
+            Arc::new(crate::directorates::registry::store::FileRegistry::open(
+                root.path().join("registry"),
+            )),
+            Arc::new(FileProvider::new(root.path())),
+            root.path(),
+            &|record| match record {
+                Some(record) => {
+                    let text = crate::directorates::m::config::json_to_toml(record).unwrap();
+                    fs::write(&path, toml::to_string(&text).unwrap()).unwrap();
+                }
+                None => fs::remove_file(&path).unwrap(),
+            },
+        );
+    }
+
+    #[cfg(any(feature = "sqlite", feature = "postgres"))]
+    fn a_changed_registry_record_changes_a_running_sql_registry(location: &str) {
+        use crate::directorates::m::config::{ConfigRecord, ConfigScope, SqlProvider};
+        use crate::directorates::registry::sql::SqlRegistry;
+
+        let admin = SqlProvider::open(location).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        a_changed_registry_record_changes_a_running_registry(
+            Arc::new(SqlRegistry::open(location).unwrap()),
+            Arc::new(SqlProvider::open(location).unwrap()),
+            root.path(),
+            &|record| {
+                let global = ConfigScope::Global;
+                match record {
+                    Some(record) => {
+                        admin
+                            .put(
+                                ConfigRecord::Registry,
+                                &global,
+                                ConfigRecord::SINGLETON_KEY,
+                                &record,
+                            )
+                            .unwrap();
+                    }
+                    None => {
+                        admin
+                            .remove(ConfigRecord::Registry, &global, ConfigRecord::SINGLETON_KEY)
+                            .unwrap();
+                    }
+                }
+            },
+        );
+    }
+
+    #[test]
+    #[cfg(any(feature = "sqlite", feature = "postgres"))]
+    fn a_changed_registry_record_changes_a_running_sql_registry_at_the_next_poll() {
+        #[cfg(feature = "sqlite")]
+        {
+            let store = crate::directorates::registry::suite::SqliteStore::new();
+            a_changed_registry_record_changes_a_running_sql_registry(&store.location());
+        }
+        #[cfg(feature = "postgres")]
+        match crate::directorates::registry::suite::PostgresStore::new() {
+            Some(store) => {
+                a_changed_registry_record_changes_a_running_sql_registry(&store.location())
+            }
             None => eprintln!(
                 "skipped the PostgreSQL run: {} is not set",
                 crate::directorates::registry::suite::POSTGRES_URL_ENV

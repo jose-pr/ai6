@@ -608,7 +608,7 @@ impl SleeperStore for FileRegistry {
     ) -> io::Result<()> {
         sleeper.validate().map_err(invalid_data)?;
         sleeper
-            .check_size(&self.limits.sleepers)
+            .check_size(&self.current_limits().sleepers)
             .map_err(invalid_data)?;
         let _lock = self.lock()?;
         let replaced = self.sleeper_authorization(operation, name)?;

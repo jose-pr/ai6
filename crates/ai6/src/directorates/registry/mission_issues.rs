@@ -1479,7 +1479,7 @@ fn read_all<T: for<'de> Deserialize<'de>>(directory: &std::path::Path) -> io::Re
 impl MissionIssueStore for FileRegistry {
     fn link_issue(&self, link: &IssueLink) -> io::Result<IssueLink> {
         let _lock = self.lock()?;
-        link_issue_in(&mut FileTables(self), link, &self.limits.issues)
+        link_issue_in(&mut FileTables(self), link, &self.current_limits().issues)
     }
 
     fn issue_links(&self, mission_id: &str) -> io::Result<Vec<IssueLink>> {
@@ -1520,7 +1520,7 @@ impl MissionIssueStore for FileRegistry {
 
     fn queue_outbox(&self, entry: &OutboxEntry) -> io::Result<OutboxEntry> {
         let _lock = self.lock()?;
-        queue_in(&mut FileTables(self), entry, &self.limits.issues)
+        queue_in(&mut FileTables(self), entry, &self.current_limits().issues)
     }
 
     fn outbox_entry(&self, id: &str) -> io::Result<Option<OutboxEntry>> {
@@ -1567,7 +1567,11 @@ impl MissionIssueStore for FileRegistry {
 
     fn propose_issues(&self, proposal: &IssueProposal) -> io::Result<IssueProposal> {
         let _lock = self.lock()?;
-        propose_in(&mut FileTables(self), proposal, &self.limits.issues)
+        propose_in(
+            &mut FileTables(self),
+            proposal,
+            &self.current_limits().issues,
+        )
     }
 
     fn issue_proposal(&self, id: &str) -> io::Result<Option<IssueProposal>> {
@@ -1622,7 +1626,7 @@ impl MissionIssueStore for FileRegistry {
             item,
             url,
             snapshot,
-            &self.limits.issues,
+            &self.current_limits().issues,
         )
     }
 
@@ -1660,7 +1664,7 @@ impl MissionIssueStore for FileRegistry {
 
     fn store_issue_reply(&self, reply: &IssueReply) -> io::Result<bool> {
         let _lock = self.lock()?;
-        store_reply_in(&mut FileTables(self), reply, &self.limits.issues)
+        store_reply_in(&mut FileTables(self), reply, &self.current_limits().issues)
     }
 
     fn issue_replies(&self, mission_id: &str) -> io::Result<Vec<IssueReply>> {

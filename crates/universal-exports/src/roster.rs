@@ -108,13 +108,14 @@ struct Family {
 
 /// The route kinds gated by `config.read` and `config.manage` on `config:<family>`, and the
 /// family each names.
-pub(crate) const CONFIG_KINDS: [(&str, ConfigRecord); 14] = [
+pub(crate) const CONFIG_KINDS: [(&str, ConfigRecord); 15] = [
     ("station", ConfigRecord::Station),
     ("plugins", ConfigRecord::Plugin),
     ("tls", ConfigRecord::Tls),
     ("cables", ConfigRecord::Cables),
     ("unex", ConfigRecord::Unex),
     ("charges", ConfigRecord::Charge),
+    ("registry", ConfigRecord::Registry),
     ("theaters", ConfigRecord::Theater),
     ("loadouts", ConfigRecord::Loadout),
     ("sandboxes", ConfigRecord::Sandbox),
@@ -1714,6 +1715,126 @@ mod tests {
             .send()
             .await
             .unwrap()
+    }
+
+    #[cfg(feature = "cli")]
+    #[tokio::test]
+    async fn the_registry_record_is_listed_set_and_audited_under_its_own_action() {
+        use ai6::{ConfigProvider, SqlProvider};
+
+        let roles = CONFIG_ROLES.replace("config:charge", "config:registry");
+        let directory = tempfile::tempdir().unwrap();
+        let location = format!("sqlite:{}", directory.path().join("roster.db").display());
+        let source = Arc::new(SqlProvider::open(&location).unwrap());
+        // A Station reads the same database through a handle of its own.
+        let station = SqlProvider::open(&location).unwrap();
+        let served = served_with_roster(&roles, Some(source.clone())).await;
+
+        for (token, held) in [
+            (&served.operator, json!(["config.read", "config.manage"])),
+            (&served.viewer, json!(["config.read"])),
+        ] {
+            let profile: serde_json::Value =
+                call(&served, token, reqwest::Method::GET, "profile", None)
+                    .await
+                    .json()
+                    .await
+                    .unwrap();
+            assert_eq!(profile["config"]["registry"], held);
+        }
+        let form: serde_json::Value = call(
+            &served,
+            &served.viewer,
+            reqwest::Method::GET,
+            "roster/registry/schema",
+            None,
+        )
+        .await
+        .json()
+        .await
+        .unwrap();
+        assert!(form["schema"]["properties"]["limits"].is_object(), "{form}");
+        assert_eq!(form["key"]["fixed"], "settings");
+
+        let before = station.revision("").unwrap();
+        let denied = call(
+            &served,
+            &served.viewer,
+            reqwest::Method::PUT,
+            "roster/registry/settings",
+            Some(json!({"limits": {"runs": {"records": 50}}})),
+        )
+        .await;
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+        let denied = denied.text().await.unwrap();
+        assert!(
+            denied.contains("registry family needs config.manage"),
+            "{denied}"
+        );
+        assert_eq!(station.revision("").unwrap(), before, "nothing was stored");
+
+        let set = call(
+            &served,
+            &served.operator,
+            reqwest::Method::PUT,
+            "roster/registry/settings",
+            Some(json!({"limits": {"runs": {"records": 50}}, "provider": {"replace_retry": 5}})),
+        )
+        .await;
+        assert_eq!(set.status(), StatusCode::OK);
+        let set: serde_json::Value = set.json().await.unwrap();
+        assert_eq!(
+            set["revision"],
+            station.revision("").unwrap().get().to_string()
+        );
+        let record = station.load("").unwrap().settings.registry;
+        assert_eq!(record.limits.runs.records, ai6::Limit::at(50));
+        assert_eq!(record.provider.replace_retry, ai6::TimeLimit::secs(5));
+
+        let listed: serde_json::Value = call(
+            &served,
+            &served.viewer,
+            reqwest::Method::GET,
+            "roster/registry",
+            None,
+        )
+        .await
+        .json()
+        .await
+        .unwrap();
+        assert_eq!(listed["kind"], "registry");
+        assert_eq!(listed["records"][0]["key"], "settings");
+        assert_eq!(
+            listed["records"][0]["definition"]["limits"]["runs"]["records"],
+            50
+        );
+        let updates = audits(&served, "roster.update");
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].resource.as_deref(), Some("config:registry"));
+        assert_eq!(updates[0].target, "registry settings");
+
+        let refused = call(
+            &served,
+            &served.operator,
+            reqwest::Method::PUT,
+            "roster/registry/settings",
+            Some(json!({"limits": {"runs": {"recordz": 1}}})),
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(audits(&served, "roster.refused").len(), 1);
+        assert_eq!(
+            station
+                .load("")
+                .unwrap()
+                .settings
+                .registry
+                .limits
+                .runs
+                .records,
+            ai6::Limit::at(50),
+            "a refused record changes nothing"
+        );
     }
 
     #[cfg(feature = "cli")]

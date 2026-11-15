@@ -83,12 +83,13 @@ impl SqlRegistry {
         at: Option<f64>,
         change: impl FnOnce(&mut RunRecord, &mut Tx<'_>, f64) -> Result<(), RunError>,
     ) -> Result<RunRecord, RunError> {
-        validate_run_id(id, &self.limits.runs)?;
+        validate_run_id(id, &self.current_limits().runs)?;
         self.write(|tx, revision| {
-            let mut record = run_in(tx, id, &self.limits.runs)?.ok_or(RunError::NotFound)?;
+            let mut record =
+                run_in(tx, id, &self.current_limits().runs)?.ok_or(RunError::NotFound)?;
             let now = when(tx, at)?;
             change(&mut record, tx, now)?;
-            put_run(tx, &record, revision, &self.limits.runs)?;
+            put_run(tx, &record, revision, &self.current_limits().runs)?;
             Ok(record)
         })
     }
@@ -99,10 +100,10 @@ impl SqlRegistry {
         ttl: Duration,
         at: Option<f64>,
     ) -> Result<RunRecord, RunError> {
-        validate_new_run(&new, &self.limits.runs)?;
+        validate_new_run(&new, &self.current_limits().runs)?;
         self.write(|tx, revision| {
-            if run_in(tx, &new.run_id, &self.limits.runs)?.is_some()
-                || records(tx, Some(&new.mission_id), &self.limits.runs)?
+            if run_in(tx, &new.run_id, &self.current_limits().runs)?.is_some()
+                || records(tx, Some(&new.mission_id), &self.current_limits().runs)?
                     .iter()
                     .any(|record| same_run(record, &new))
             {
@@ -111,12 +112,12 @@ impl SqlRegistry {
             let count = tx
                 .query_opt("SELECT count(*) FROM ai6_runs", &[])?
                 .map_or(Ok(0), |row| row.int(0))?;
-            if !self.limits.runs.records.allows(count + 1) {
+            if !self.current_limits().runs.records.allows(count + 1) {
                 return Err(io::Error::other("too many Run records").into());
             }
             let now = when(tx, at)?;
             let record = opened(new, ttl, now, term(tx)?);
-            put_run(tx, &record, revision, &self.limits.runs)?;
+            put_run(tx, &record, revision, &self.current_limits().runs)?;
             Ok(record)
         })
     }
@@ -151,7 +152,7 @@ impl SqlRegistry {
                 now,
                 renew,
                 update,
-                &self.limits.runs,
+                &self.current_limits().runs,
             )
         })
     }
@@ -163,7 +164,13 @@ impl SqlRegistry {
         at: Option<f64>,
     ) -> Result<RunRecord, RunError> {
         self.change_run(id, at, |record, tx, now| {
-            lose(record, reason, now, || term(tx), &self.limits.runs)
+            lose(
+                record,
+                reason,
+                now,
+                || term(tx),
+                &self.current_limits().runs,
+            )
         })
     }
 
@@ -218,18 +225,18 @@ impl RunStore for SqlRegistry {
     }
 
     fn run(&self, id: &str) -> io::Result<Option<RunRecord>> {
-        validate_run_id(id, &self.limits.runs)?;
-        self.read(|tx| run_in(tx, id, &self.limits.runs))
+        validate_run_id(id, &self.current_limits().runs)?;
+        self.read(|tx| run_in(tx, id, &self.current_limits().runs))
     }
 
     fn mission_exposure(&self, mission_id: &str) -> io::Result<Vec<Exposure>> {
         Ok(merged_exposure(self.read(|tx| {
-            records(tx, Some(mission_id), &self.limits.runs)
+            records(tx, Some(mission_id), &self.current_limits().runs)
         })?))
     }
 
     fn runs(&self) -> io::Result<Vec<RunRecord>> {
-        self.read(|tx| records(tx, None, &self.limits.runs))
+        self.read(|tx| records(tx, None, &self.current_limits().runs))
     }
 
     fn take_run(&self, id: &str, station: &str, ttl: Duration) -> Result<RunRecord, RunError> {
@@ -262,7 +269,7 @@ impl RunStore for SqlRegistry {
 
     fn latest_run(&self, mission_id: &str) -> io::Result<Option<RunRecord>> {
         Ok(latest(self.read(|tx| {
-            records(tx, Some(mission_id), &self.limits.runs)
+            records(tx, Some(mission_id), &self.current_limits().runs)
         })?))
     }
 
@@ -272,16 +279,16 @@ impl RunStore for SqlRegistry {
         mission_id: &str,
         verdict: &MissionVerdict,
     ) -> Result<RunRecord, RunError> {
-        validate_verdict(verdict, &self.limits.runs)?;
+        validate_verdict(verdict, &self.current_limits().runs)?;
         self.write(|tx, revision| {
             let mut record = latest(
-                records(tx, Some(mission_id), &self.limits.runs)?
+                records(tx, Some(mission_id), &self.current_limits().runs)?
                     .into_iter()
                     .filter(|record| record.operation.as_deref() == Some(operation)),
             )
             .ok_or(RunError::NotFound)?;
             apply_verdict(&mut record, verdict.clone())?;
-            put_run(tx, &record, revision, &self.limits.runs)?;
+            put_run(tx, &record, revision, &self.current_limits().runs)?;
             Ok(record)
         })
     }
@@ -292,16 +299,16 @@ impl RunStore for SqlRegistry {
         mission_id: &str,
         recommendation: &MissionVerdict,
     ) -> Result<RunRecord, RunError> {
-        validate_verdict(recommendation, &self.limits.runs)?;
+        validate_verdict(recommendation, &self.current_limits().runs)?;
         self.write(|tx, revision| {
             let mut record = latest(
-                records(tx, Some(mission_id), &self.limits.runs)?
+                records(tx, Some(mission_id), &self.current_limits().runs)?
                     .into_iter()
                     .filter(|record| record.operation.as_deref() == Some(operation)),
             )
             .ok_or(RunError::NotFound)?;
             apply_recommendation(&mut record, recommendation.clone())?;
-            put_run(tx, &record, revision, &self.limits.runs)?;
+            put_run(tx, &record, revision, &self.current_limits().runs)?;
             Ok(record)
         })
     }
@@ -314,19 +321,19 @@ impl RunStore for SqlRegistry {
     ) -> Result<RunRecord, RunError> {
         self.write(|tx, revision| {
             let mut record = latest(
-                records(tx, Some(mission_id), &self.limits.runs)?
+                records(tx, Some(mission_id), &self.current_limits().runs)?
                     .into_iter()
                     .filter(|record| record.operation.as_deref() == Some(operation)),
             )
             .ok_or(RunError::NotFound)?;
             apply_probe_request(&mut record, at)?;
-            put_run(tx, &record, revision, &self.limits.runs)?;
+            put_run(tx, &record, revision, &self.current_limits().runs)?;
             Ok(record)
         })
     }
 
     fn file_final_report(&self, report: &FinalReport) -> io::Result<()> {
-        validate_final_report(report, &self.limits.runs)?;
+        validate_final_report(report, &self.current_limits().runs)?;
         let text = to_json(report)?;
         self.write(|tx, revision| {
             tx.execute(
@@ -345,7 +352,7 @@ impl RunStore for SqlRegistry {
     }
 
     fn final_report(&self, run_id: &str) -> io::Result<Option<FinalReport>> {
-        validate_run_id(run_id, &self.limits.runs)?;
+        validate_run_id(run_id, &self.current_limits().runs)?;
         self.read(|tx| {
             tx.query_opt(
                 "SELECT record FROM ai6_final_reports WHERE run_id = $1",

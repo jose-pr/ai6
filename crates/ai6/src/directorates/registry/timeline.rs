@@ -220,13 +220,18 @@ impl TimelineStore for FileRegistry {
             let Ok(metadata) = fs::metadata(&path) else {
                 continue;
             };
-            if !self.limits.timeline.record_bytes.allows(metadata.len()) {
+            if !self
+                .current_limits()
+                .timeline
+                .record_bytes
+                .allows(metadata.len())
+            {
                 continue;
             }
             let Ok(bytes) = fs::read(&path) else {
                 continue;
             };
-            if let Some(event) = TimelineEvent::from_record(&bytes, &self.limits.timeline)
+            if let Some(event) = TimelineEvent::from_record(&bytes, &self.current_limits().timeline)
                 && event.operation == operation
             {
                 events.push(event);
@@ -241,7 +246,7 @@ pub(super) fn record_event_locked(
     registry: &FileRegistry,
     event: &TimelineEvent,
 ) -> io::Result<()> {
-    let limits = &registry.limits.timeline;
+    let limits = &registry.current_limits().timeline;
     let root = registry.root();
     let bytes = event.to_record(limits)?;
     fs::create_dir_all(root.join("timeline"))?;

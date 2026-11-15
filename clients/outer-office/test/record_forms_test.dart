@@ -235,6 +235,7 @@ const _allFamilies = <String, List<String>>{
   'cables': ['config.read', 'config.manage'],
   'station': ['config.read', 'config.manage'],
   'unex': ['config.read', 'config.manage'],
+  'registry': ['config.read', 'config.manage'],
 };
 
 MissionBoard _signedIn(
@@ -366,7 +367,7 @@ const _kinds = {
 void main() {
   group('the model', () {
     test('every kind of record fits its form and lays out', () {
-      for (final kind in [..._kinds.keys, 'roster']) {
+      for (final kind in [..._kinds.keys, 'roster', 'registry']) {
         final model = _model(kind);
         expect(model.layout(), isNotEmpty, reason: kind);
         model.dispose();
@@ -1200,6 +1201,26 @@ void main() {
       await tester.pumpAndSettle();
       expect(roster.records['station/settings'], {
         'max_concurrent_missions': 8,
+      });
+    });
+
+    testWidgets('the Registry limits form saves the registry record', (
+      tester,
+    ) async {
+      final roster = FakeRoster();
+      final board = _signedIn(roster);
+      await _open(tester, board, 'Roster');
+      await _rosterKind(tester, 'Registry limits');
+      await tester.tap(find.text('Add'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('record-form-key')), findsNothing);
+      await _type(tester, 'limits.runs.records', '50');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(roster.records['registry/settings'], {
+        'limits': {
+          'runs': {'records': 50},
+        },
       });
     });
 

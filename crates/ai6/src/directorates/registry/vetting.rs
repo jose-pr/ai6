@@ -337,10 +337,11 @@ impl FileRegistry {
     }
 
     fn held_by(&self, operation: &str, key: &str) -> io::Result<Option<HeldBrief>> {
-        Ok(
-            read_held(&self.held_path(key), self.limits.held_record_bytes())?
-                .filter(|held| held.operation == operation && held.brief.key() == key),
-        )
+        Ok(read_held(
+            &self.held_path(key),
+            self.current_limits().held_record_bytes(),
+        )?
+        .filter(|held| held.operation == operation && held.brief.key() == key))
     }
 
     fn remove_held(&self, key: &str) -> io::Result<()> {
@@ -376,12 +377,17 @@ impl VettingStore for FileRegistry {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error),
         };
-        let held_here = held_records(&self.root.join("held"), &self.limits)?
+        let held_here = held_records(&self.root.join("held"), &self.current_limits())?
             .iter()
             .filter(|held| held.operation == operation && held.brief.key() != key)
             .count();
-        if !self.limits.held.per_operation.allows(held_here + 1) {
-            return Err(too_many_held(operation, &self.limits.held));
+        if !self
+            .current_limits()
+            .held
+            .per_operation
+            .allows(held_here + 1)
+        {
+            return Err(too_many_held(operation, &self.current_limits().held));
         }
         let held = HeldBrief {
             operation: operation.to_owned(),
@@ -391,7 +397,11 @@ impl VettingStore for FileRegistry {
         };
         held.validate()?;
         let bytes = serde_json::to_vec_pretty(&held).map_err(io::Error::other)?;
-        if !self.limits.held_record_bytes().allows(bytes.len()) {
+        if !self
+            .current_limits()
+            .held_record_bytes()
+            .allows(bytes.len())
+        {
             return Err(invalid_data("held brief exceeds the size limit"));
         }
         // Held first and the queued copy removed after, so a crash in between holds it twice, which
@@ -403,8 +413,8 @@ impl VettingStore for FileRegistry {
 
     fn held_briefs(&self, operation: &str, limit: usize) -> io::Result<Vec<HeldBrief>> {
         validate_registry_key(operation)?;
-        check_limit(limit, &self.limits.held)?;
-        let mut held = held_records(&self.root.join("held"), &self.limits)?
+        check_limit(limit, &self.current_limits().held)?;
+        let mut held = held_records(&self.root.join("held"), &self.current_limits())?
             .into_iter()
             .filter(|held| held.operation == operation)
             .collect::<Vec<_>>();
@@ -420,7 +430,7 @@ impl VettingStore for FileRegistry {
     fn release_held(&self, operation: &str, key: &str, by: &str, at: f64) -> io::Result<Brief> {
         validate_registry_key(operation)?;
         validate_registry_key(key)?;
-        check_actor(by, "", &self.limits.held)?;
+        check_actor(by, "", &self.current_limits().held)?;
         let _lock = self.lock()?;
         if self.decided(key).is_some() {
             self.remove_held(key)?;
@@ -429,7 +439,7 @@ impl VettingStore for FileRegistry {
         let Some(held) = self.held_by(operation, key)? else {
             // Released already: the brief is queued with a clearance for what it is.
             if let Some(brief) = read_brief(&self.queued_path(key))?
-                && read_clearance(&self.clearance_path(key), &self.limits.held)?
+                && read_clearance(&self.clearance_path(key), &self.current_limits().held)?
                     .is_some_and(|clearance| !clearance.kinds_for(&brief).is_empty())
             {
                 return Ok(brief);
@@ -442,7 +452,7 @@ impl VettingStore for FileRegistry {
         let kinds = held.vetting.kinds().into_iter().collect::<Vec<_>>();
         let digest = content_digest(&held.brief);
         let clearance = merge_clearance(
-            read_clearance(&self.clearance_path(key), &self.limits.held)?,
+            read_clearance(&self.clearance_path(key), &self.current_limits().held)?,
             &digest,
             &kinds,
             by,
@@ -467,7 +477,7 @@ impl VettingStore for FileRegistry {
     ) -> io::Result<Brief> {
         validate_registry_key(operation)?;
         validate_registry_key(key)?;
-        check_actor(by, reason, &self.limits.held)?;
+        check_actor(by, reason, &self.current_limits().held)?;
         let _lock = self.lock()?;
         match self.decided(key) {
             Some("failed") if refused(&self.root, key) => {
@@ -511,7 +521,7 @@ impl VettingStore for FileRegistry {
     ) -> io::Result<Brief> {
         validate_registry_key(operation)?;
         validate_registry_key(key)?;
-        check_actor(by, note, &self.limits.held)?;
+        check_actor(by, note, &self.current_limits().held)?;
         let _lock = self.lock()?;
         match self.decided(key) {
             Some("failed") => {
@@ -570,7 +580,7 @@ impl VettingStore for FileRegistry {
 
     fn clearance(&self, key: &str) -> io::Result<Option<Clearance>> {
         validate_registry_key(key)?;
-        read_clearance(&self.clearance_path(key), &self.limits.held)
+        read_clearance(&self.clearance_path(key), &self.current_limits().held)
     }
 
     fn clear_brief(
@@ -582,7 +592,7 @@ impl VettingStore for FileRegistry {
         at: f64,
     ) -> io::Result<Option<Clearance>> {
         validate_registry_key(key)?;
-        check_actor(by, "", &self.limits.held)?;
+        check_actor(by, "", &self.current_limits().held)?;
         let _lock = self.lock()?;
         let brief = read_brief(&self.queued_path(key))?
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no such brief is queued"))?;
@@ -590,7 +600,7 @@ impl VettingStore for FileRegistry {
             return Ok(None);
         }
         let clearance = merge_clearance(
-            read_clearance(&self.clearance_path(key), &self.limits.held)?,
+            read_clearance(&self.clearance_path(key), &self.current_limits().held)?,
             digest,
             kinds,
             by,
@@ -611,14 +621,14 @@ impl VettingStore for FileRegistry {
     ) -> io::Result<Brief> {
         validate_registry_key(operation)?;
         validate_registry_key(proposal_id)?;
-        check_actor(by, "", &self.limits.held)?;
+        check_actor(by, "", &self.current_limits().held)?;
         let _lock = self.lock()?;
         let brief = self.promote_locked(operation, proposal_id, received_by)?;
         let key = brief.key();
         if self.queued_path(&key).is_file() {
             let digest = content_digest(&brief);
             let clearance = merge_clearance(
-                read_clearance(&self.clearance_path(&key), &self.limits.held)?,
+                read_clearance(&self.clearance_path(&key), &self.current_limits().held)?,
                 &digest,
                 kinds,
                 by,

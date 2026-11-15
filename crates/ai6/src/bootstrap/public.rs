@@ -155,8 +155,6 @@ location = "postgres://user:{PLANTED}@db/registry"
 password = {{ provider = "file", key = "{PLANTED}" }}
 headquarters_lease = 60
 
-[registry.limits.runs]
-records = 100000
 
 [unex]
 url = "http://{PLANTED}.internal:7082"

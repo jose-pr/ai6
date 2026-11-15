@@ -444,7 +444,7 @@ impl<'a> Round<'a> {
             .collect::<Vec<_>>();
         match state
             .intake
-            .held_briefs(&operation.id, held_results(state.intake.limits()))
+            .held_briefs(&operation.id, held_results(&state.intake.limits()))
         {
             Ok(held) => work.extend(
                 held.iter()
@@ -528,7 +528,7 @@ impl<'a> Round<'a> {
             };
             let held = match state
                 .intake
-                .held_briefs(&operation.id, held_results(state.intake.limits()))
+                .held_briefs(&operation.id, held_results(&state.intake.limits()))
             {
                 Ok(held) => held,
                 Err(error) => {

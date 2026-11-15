@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 use super::{
-    ConfigDefinitions, ConfigLimits, ConfigProvider, ConfigRecord, ConfigRevision, ConfigScope,
-    ConfigSnapshot, Layer, assemble, check_placement, conflict, merged,
+    ConfigDefinitions, ConfigProvider, ConfigRecord, ConfigRevision, ConfigScope, ConfigSnapshot,
+    Layer, assemble, check_placement, conflict, merged, provider_limits,
 };
 use crate::bootstrap::format::{self, EXTENSIONS, Format};
 use crate::directorates::m::roster::{RosterError, RosterErrorKind, error, error_of};
@@ -31,7 +31,6 @@ const STATIONS_DIR: &str = "stations";
 #[derive(Debug, Clone)]
 pub struct FileProvider {
     root: PathBuf,
-    limits: ConfigLimits,
 }
 
 /// The family files of one directory: each family file's stem, the path found, if any.
@@ -40,17 +39,7 @@ type Found = BTreeMap<&'static str, PathBuf>;
 impl FileProvider {
     /// The configuration in `root`. Nothing is read until the provider is asked.
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self {
-            root: root.into(),
-            limits: ConfigLimits::default(),
-        }
-    }
-
-    /// The same provider, reading documents within `limits`.
-    #[must_use]
-    pub fn with_limits(mut self, limits: ConfigLimits) -> Self {
-        self.limits = limits;
-        self
+        Self { root: root.into() }
     }
 
     /// The configuration directory.
@@ -412,18 +401,18 @@ impl ConfigProvider for FileProvider {
         match scope {
             ConfigScope::Global => {
                 let base = Some(self.root.as_path());
-                assemble(revision, &layer, base, &source, &self.limits)?;
+                assemble(revision, &layer, base, &source)?;
                 for station in self.scopes()? {
                     if station != ConfigScope::Global {
                         let view = merged(&layer, &self.layer(&station)?);
-                        assemble(revision, &view, base, &source, &self.limits)?;
+                        assemble(revision, &view, base, &source)?;
                     }
                 }
             }
             ConfigScope::Station(_) => {
                 let view = merged(&self.layer(&ConfigScope::Global)?, &layer);
                 let base = Some(self.root.as_path());
-                assemble(revision, &view, base, &source, &self.limits)?;
+                assemble(revision, &view, base, &source)?;
             }
         }
         let text = fs::read_to_string(&path).map_err(|failure| unavailable(&path, &failure))?;
@@ -437,7 +426,11 @@ impl ConfigProvider for FileProvider {
             return Err(conflict(record, key));
         }
         match edited {
-            Some(edited) => replace_file(&path, edited.as_bytes(), self.limits.replace_retry),
+            Some(edited) => replace_file(
+                &path,
+                edited.as_bytes(),
+                provider_limits(&self.layer(&ConfigScope::Global)?)?.replace_retry,
+            ),
             None => fs::remove_file(&path),
         }
         .map_err(|failure| unavailable(&path, &failure))?;
@@ -458,13 +451,7 @@ impl ConfigProvider for FileProvider {
         } else {
             merged(&global, &self.layer(&ConfigScope::of_station(station))?)
         };
-        assemble(
-            revision,
-            &view,
-            Some(&self.root),
-            &self.root.display(),
-            &self.limits,
-        )
+        assemble(revision, &view, Some(&self.root), &self.root.display())
     }
 
     fn changes_since(

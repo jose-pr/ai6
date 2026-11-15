@@ -260,7 +260,7 @@ impl FileRegistry {
 
     fn read_sealed(&self, name: &str) -> io::Result<Option<SealedRecord>> {
         match fs::read(self.sealed_dir().join(file_name(name))) {
-            Ok(bytes) => parse_sealed(&bytes, &self.limits.accounts).map(Some),
+            Ok(bytes) => parse_sealed(&bytes, &self.current_limits().accounts).map(Some),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(error) => Err(error),
         }
@@ -304,7 +304,7 @@ impl SealedStore for FileRegistry {
                 .extension()
                 .is_some_and(|extension| extension == "json")
             {
-                let record = parse_sealed(&fs::read(&path)?, &self.limits.accounts)?;
+                let record = parse_sealed(&fs::read(&path)?, &self.current_limits().accounts)?;
                 revisions.insert(record.name, record.revision);
             }
         }
@@ -332,7 +332,7 @@ impl SealedStore for FileRegistry {
         };
         self.write_atomic(
             &self.sealed_dir().join(file_name(name)),
-            &sealed_bytes(&record, &self.limits.accounts)?,
+            &sealed_bytes(&record, &self.current_limits().accounts)?,
         )?;
         Ok(revision)
     }

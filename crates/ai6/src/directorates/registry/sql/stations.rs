@@ -43,7 +43,7 @@ impl StationStore for SqlRegistry {
                 station,
                 info,
                 tx.now()?,
-                &self.limits.stations,
+                &self.current_limits().stations,
             )?)
             .map_err(|_| invalid_data("station record is not UTF-8"))?;
             tx.execute(
@@ -60,23 +60,28 @@ impl StationStore for SqlRegistry {
         let (rows, now) = self.read(|tx| {
             let rows = tx.query(
                 "SELECT record FROM ai6_stations ORDER BY station LIMIT $1",
-                &[row_limit(self.limits.stations.records)
+                &[row_limit(self.current_limits().stations.records)
                     .saturating_add(1)
                     .into()],
             )?;
             Ok::<_, io::Error>((rows, tx.now()?))
         })?;
-        if !self.limits.stations.records.allows(rows.len()) {
+        if !self.current_limits().stations.records.allows(rows.len()) {
             return Err(invalid_data(format!(
                 "Registry has more than {} station records",
-                self.limits.stations.records
+                self.current_limits().stations.records
             )));
         }
         let window = within.as_secs_f64();
         let mut stations = Vec::with_capacity(rows.len());
         for row in rows {
             let text = row.text(0)?;
-            if !self.limits.stations.record_bytes.allows(text.len()) {
+            if !self
+                .current_limits()
+                .stations
+                .record_bytes
+                .allows(text.len())
+            {
                 continue;
             }
             let Ok(file) = serde_json::from_str::<StationRecordFile>(&text) else {
@@ -119,7 +124,7 @@ impl StationStore for SqlRegistry {
     }
 
     fn set_station_settings(&self, station: &str, settings: &StationSettings) -> io::Result<()> {
-        check_settings(station, settings, &self.limits.stations)?;
+        check_settings(station, settings, &self.current_limits().stations)?;
         let limits = settings.resource_limits();
         self.write(|tx, revision| {
             tx.execute(

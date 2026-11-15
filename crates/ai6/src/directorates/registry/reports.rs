@@ -1262,7 +1262,7 @@ impl FileRegistry {
         for entry in entries {
             if let Ok(bytes) = fs::read(entry?.path())
                 && let Ok(source) = serde_json::from_slice::<ReportSource>(&bytes)
-                && source.validate(&self.limits.reports).is_ok()
+                && source.validate(&self.current_limits().reports).is_ok()
             {
                 sources.push(source);
             }
@@ -1282,7 +1282,7 @@ impl FileRegistry {
                 let path = entry?.path();
                 // A record is kept where its own scope and ID put it, and nowhere else.
                 if let Ok(bytes) = fs::read(&path)
-                    && let Ok(report) = parse_report(&bytes, &self.limits.reports)
+                    && let Ok(report) = parse_report(&bytes, &self.current_limits().reports)
                     && directory.file_name().and_then(|name| name.to_str())
                         == Some(report.scope.directory().as_str())
                     && path.file_stem().and_then(|stem| stem.to_str()) == Some(&report.id)
@@ -1297,7 +1297,7 @@ impl FileRegistry {
 
 impl ReportStore for FileRegistry {
     fn file_report(&self, report: &Report) -> io::Result<()> {
-        let limits = &self.limits.reports;
+        let limits = &self.current_limits().reports;
         report.validate(limits)?;
         let bytes = report_bytes(report, limits)?;
         let _lock = self.lock()?;
@@ -1347,13 +1347,13 @@ impl ReportStore for FileRegistry {
             .collect();
         let sources = self.read_sources()?;
         order_reports(&filter.priorities, &sources, &mut found);
-        found.truncate(filter.page(&self.limits.reports));
+        found.truncate(filter.page(&self.current_limits().reports));
         Ok(found)
     }
 
     fn change_report(&self, id: &str, change: ReportChange<'_>) -> io::Result<Report> {
         validate_registry_key(id)?;
-        let limits = &self.limits.reports;
+        let limits = &self.current_limits().reports;
         let _lock = self.lock()?;
         let (path, stored) = self
             .read_reports(None)?
@@ -1366,7 +1366,7 @@ impl ReportStore for FileRegistry {
     }
 
     fn report_source(&self, key: &str) -> io::Result<ReportSource> {
-        ReportSource::new(key).validate(&self.limits.reports)?;
+        ReportSource::new(key).validate(&self.current_limits().reports)?;
         Ok(self
             .read_sources()?
             .into_iter()
@@ -1375,7 +1375,7 @@ impl ReportStore for FileRegistry {
     }
 
     fn put_report_source(&self, source: &ReportSource) -> io::Result<()> {
-        source.validate(&self.limits.reports)?;
+        source.validate(&self.current_limits().reports)?;
         let bytes = serde_json::to_vec(source).map_err(io::Error::other)?;
         let _lock = self.lock()?;
         let directory = self.report_sources_root();
@@ -1397,7 +1397,7 @@ impl ReportStore for FileRegistry {
             let path = entry?.path();
             if let Ok(bytes) = fs::read(&path)
                 && let Ok(clearance) = serde_json::from_slice::<ReportClearance>(&bytes)
-                && clearance.validate(&self.limits.reports).is_ok()
+                && clearance.validate(&self.current_limits().reports).is_ok()
                 && path.file_stem().and_then(|stem| stem.to_str())
                     == Some(station_key(&clearance.subject).as_str())
             {
@@ -1409,7 +1409,7 @@ impl ReportStore for FileRegistry {
     }
 
     fn put_report_clearance(&self, clearance: &ReportClearance) -> io::Result<()> {
-        clearance.validate(&self.limits.reports)?;
+        clearance.validate(&self.current_limits().reports)?;
         let bytes = serde_json::to_vec(clearance).map_err(io::Error::other)?;
         let _lock = self.lock()?;
         let directory = self.report_clearances_root();

@@ -50,13 +50,21 @@ pub use super::vetting::VettingStore;
 
 /// The bounds a Registry applies to what it keeps and accepts.
 pub trait Limited {
-    /// The Registry's [`RegistryLimits`], as it was opened with.
-    fn limits(&self) -> &RegistryLimits;
+    /// The [`RegistryLimits`] in force now.
+    fn limits(&self) -> Arc<RegistryLimits>;
+
+    /// Replaces the limits for every operation that starts after this call, on this handle and
+    /// its clones. A lower limit refuses new writes past it and removes nothing already stored.
+    fn set_limits(&self, limits: RegistryLimits);
 }
 
 impl Limited for FileRegistry {
-    fn limits(&self) -> &RegistryLimits {
-        &self.limits
+    fn limits(&self) -> Arc<RegistryLimits> {
+        self.limits.get()
+    }
+
+    fn set_limits(&self, limits: RegistryLimits) {
+        self.limits.set(limits);
     }
 }
 

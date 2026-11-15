@@ -70,7 +70,7 @@ impl SqlRegistry {
         change: impl FnOnce(&mut AccountState),
     ) -> io::Result<()> {
         validate_ref(account)?;
-        let limits = &self.limits.accounts;
+        let limits = &self.current_limits().accounts;
         self.write(|tx, revision| {
             let mut state = account_in(tx, account, limits)?;
             change(&mut state);
@@ -106,7 +106,7 @@ impl AccountStore for SqlRegistry {
         for account in &accounts {
             validate_ref(account)?;
         }
-        let limits = &self.limits.accounts;
+        let limits = &self.current_limits().accounts;
         self.write(|tx, revision| {
             let (chosen, changed) = claim_among(all_accounts(tx, limits)?, request, now, limits);
             for state in &changed {
@@ -117,7 +117,7 @@ impl AccountStore for SqlRegistry {
     }
 
     fn release_account(&self, station: &str, mission: &str) -> io::Result<bool> {
-        let limits = &self.limits.accounts;
+        let limits = &self.current_limits().accounts;
         self.write(|tx, revision| {
             let mut released = false;
             for mut state in all_accounts(tx, limits)? {
@@ -137,7 +137,7 @@ impl AccountStore for SqlRegistry {
         ttl: Duration,
         now: f64,
     ) -> io::Result<()> {
-        let limits = &self.limits.accounts;
+        let limits = &self.current_limits().accounts;
         self.write(|tx, revision| {
             for mut state in all_accounts(tx, limits)? {
                 if renew_in(&mut state, station, missions, ttl, now) {
@@ -149,7 +149,7 @@ impl AccountStore for SqlRegistry {
     }
 
     fn report_quota(&self, account: &AccountRef, windows: &[QuotaWindow]) -> io::Result<()> {
-        let limits = &self.limits.accounts;
+        let limits = &self.current_limits().accounts;
         self.update_account(account, |state| report_in(state, windows, limits))
     }
 
@@ -168,12 +168,12 @@ impl AccountStore for SqlRegistry {
     }
 
     fn record_account_usage(&self, account: &AccountRef, tokens: u64, now: i64) -> io::Result<()> {
-        let limits = &self.limits.accounts;
+        let limits = &self.current_limits().accounts;
         self.update_account(account, |state| add_tokens(state, tokens, now, limits))
     }
 
     fn accounts(&self) -> io::Result<Vec<AccountState>> {
-        self.read(|tx| all_accounts(tx, &self.limits.accounts))
+        self.read(|tx| all_accounts(tx, &self.current_limits().accounts))
     }
 
     fn change_login(

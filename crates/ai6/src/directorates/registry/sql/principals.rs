@@ -10,7 +10,7 @@ use crate::directorates::registry::store::invalid_data;
 
 impl PrincipalStore for SqlRegistry {
     fn note_principal(&self, seen: &PrincipalRecord) -> io::Result<bool> {
-        let limits = &self.limits.principals;
+        let limits = &self.current_limits().principals;
         seen.validate(limits)?;
         self.write(|tx, revision| {
             let existing = tx
@@ -51,7 +51,7 @@ impl PrincipalStore for SqlRegistry {
                 &[id.into()],
             )
         })?;
-        row.map(|row| parse_principal(row.text(0)?.as_bytes(), &self.limits.principals))
+        row.map(|row| parse_principal(row.text(0)?.as_bytes(), &self.current_limits().principals))
             .transpose()
     }
 
@@ -59,7 +59,9 @@ impl PrincipalStore for SqlRegistry {
         let rows = self.read(|tx| tx.query("SELECT record FROM ai6_principals", &[]))?;
         let mut people = Vec::with_capacity(rows.len());
         for row in rows {
-            if let Ok(person) = parse_principal(row.text(0)?.as_bytes(), &self.limits.principals) {
+            if let Ok(person) =
+                parse_principal(row.text(0)?.as_bytes(), &self.current_limits().principals)
+            {
                 people.push(person);
             }
         }

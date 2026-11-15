@@ -73,6 +73,7 @@ const _tables = {
   'tls': 'tls',
   'cables': 'cables',
   'station': 'station',
+  'registry': 'registry',
   'unex': 'unex',
 };
 
@@ -97,6 +98,7 @@ const _recordNames = {
   'tls': 'TLS policy',
   'cables': 'Cable relay',
   'station': 'Station settings',
+  'registry': 'Registry limits',
   'unex': 'Universal Exports settings',
 };
 

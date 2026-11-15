@@ -33,7 +33,7 @@ fn conversation_of(row: &Row) -> io::Result<AssistantConversation> {
 
 impl AssistantLogStore for SqlRegistry {
     fn log_assistant_entry(&self, entry: &AssistantLogEntry) -> io::Result<()> {
-        let text = entry_text(entry, &self.limits.assistant_log)?;
+        let text = entry_text(entry, &self.current_limits().assistant_log)?;
         self.write(|tx, revision| {
             tx.execute(
                 "INSERT INTO ai6_assistant_log \
@@ -63,9 +63,10 @@ impl AssistantLogStore for SqlRegistry {
         })?;
         let mut entries = Vec::with_capacity(rows.len());
         for row in rows {
-            if let Some(entry) =
-                AssistantLogEntry::from_record(row.text(0)?.as_bytes(), &self.limits.assistant_log)
-                && entry.conversation == conversation
+            if let Some(entry) = AssistantLogEntry::from_record(
+                row.text(0)?.as_bytes(),
+                &self.current_limits().assistant_log,
+            ) && entry.conversation == conversation
             {
                 entries.push(entry);
             }
@@ -129,7 +130,7 @@ fn context_of(row: &Row) -> io::Result<RunContext> {
 impl RunContextStore for SqlRegistry {
     fn file_run_context(&self, context: &RunContext) -> io::Result<()> {
         context.validate()?;
-        let limits = &self.limits.contexts;
+        let limits = &self.current_limits().contexts;
         let context = context.clone().cut_to(limits.context_bytes);
         let record = to_json(&context)?;
         self.write(|tx, revision| {

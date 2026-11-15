@@ -163,7 +163,7 @@ impl FileRegistry {
 
     fn read_api_key(&self, id: &str) -> io::Result<Option<ApiKeyRecord>> {
         match fs::read(self.api_key_path(id)) {
-            Ok(bytes) => parse_api_key(&bytes, &self.limits.api_keys).map(Some),
+            Ok(bytes) => parse_api_key(&bytes, &self.current_limits().api_keys).map(Some),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(error) => Err(error),
         }
@@ -172,7 +172,7 @@ impl FileRegistry {
 
 impl ApiKeyStore for FileRegistry {
     fn put_api_key(&self, key: &ApiKeyRecord) -> io::Result<()> {
-        let limits = &self.limits.api_keys;
+        let limits = &self.current_limits().api_keys;
         key.validate(limits)?;
         let bytes = api_key_bytes(key, limits)?;
         let _lock = self.lock()?;
@@ -198,7 +198,7 @@ impl ApiKeyStore for FileRegistry {
         for entry in entries {
             let path = entry?.path();
             if let Ok(bytes) = fs::read(&path)
-                && let Ok(key) = parse_api_key(&bytes, &self.limits.api_keys)
+                && let Ok(key) = parse_api_key(&bytes, &self.current_limits().api_keys)
                 && path.file_stem().and_then(|stem| stem.to_str()) == Some(key.id.as_str())
                 && owner.is_none_or(|owner| key.owner == owner)
             {
@@ -233,7 +233,7 @@ impl ApiKeyStore for FileRegistry {
             return Ok(false);
         }
         key.last_used_at = Some(at);
-        let bytes = api_key_bytes(&key, &self.limits.api_keys)?;
+        let bytes = api_key_bytes(&key, &self.current_limits().api_keys)?;
         self.write_atomic(&self.api_key_path(id), &bytes)?;
         Ok(true)
     }

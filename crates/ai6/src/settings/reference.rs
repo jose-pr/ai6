@@ -411,8 +411,11 @@ mod tests {
             let table = table(section).unwrap();
             assert!(table.contains(row), "{row}\n{table}");
         };
-        shown_in("registry.limits.accounts", "| `record_bytes` | 256 KiB |");
-        shown_in("registry.limits.accounts", "| `claims` | 1,024 |");
+        shown_in(
+            "record.registry.limits.accounts",
+            "| `record_bytes` | 256 KiB |",
+        );
+        shown_in("record.registry.limits.accounts", "| `claims` | 1,024 |");
         shown_in("record.station.scheduler", "| `interval` | 0.5 |");
         shown_in(
             "record.station.accounts",

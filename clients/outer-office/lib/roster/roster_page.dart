@@ -172,6 +172,7 @@ const _kinds = {
   'tls': 'TLS policy',
   'cables': 'Cable relay',
   'station': 'Station settings',
+  'registry': 'Registry limits',
   'unex': 'Universal Exports settings',
 };
 
@@ -196,6 +197,7 @@ const stationScopedKinds = {
 /// rather than by the roster's actions.
 const rosterConfigKinds = {
   'charges',
+  'registry',
   'theaters',
   'loadouts',
   'sandboxes',
@@ -243,6 +245,7 @@ const _routeKinds = {
   'tls': 'tls',
   'cables': 'cables',
   'station': 'station',
+  'registry': 'registry',
   'unex': 'unex',
 };
 

@@ -283,7 +283,7 @@ impl FileRegistry {
 
 impl LogbookStore for FileRegistry {
     fn file_station_report(&self, report: &StationReport) -> io::Result<()> {
-        let limits = &self.limits.logbook;
+        let limits = &self.current_limits().logbook;
         report.validate(limits)?;
         let _lock = self.lock()?;
         let path = self.logbook_path(&report.station);
@@ -295,7 +295,7 @@ impl LogbookStore for FileRegistry {
 
     fn logbook(&self, station: &str) -> io::Result<Vec<StationReport>> {
         validate_station_id(station)?;
-        read_logbook(&self.logbook_path(station), &self.limits.logbook)
+        read_logbook(&self.logbook_path(station), &self.current_limits().logbook)
     }
 }
 

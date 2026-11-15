@@ -1,6 +1,6 @@
 //! Every setting a person writes, read from the one declaration on its struct.
 //!
-//! A section is named by a dotted path: `provider`, `registry.limits.runs` and `oo.chat` are
+//! A section is named by a dotted path: `provider`, `registry` and `oo.chat` are
 //! sections of `ai6.cfg`, and `record.station.scheduler` or `record.operation.issues` are parts
 //! of a record kind. `ai6 config schema [SECTION]` prints one, and [`reference`](mod@reference) writes the tables
 //! of the narrative docs and what Outer Office reads from the same schemas.
@@ -14,7 +14,7 @@ use crate::bootstrap::Bootstrap;
 use crate::directorates::m::assistant::AssistantSettings;
 use crate::directorates::m::charges::ChargeDefinition;
 use crate::directorates::m::compartments::CompartmentSettings;
-use crate::directorates::m::config::{StationRuntime, UnexRecord};
+use crate::directorates::m::config::{RegistryRecord, StationRuntime, UnexRecord};
 use crate::directorates::m::cover::CoverDefinition;
 use crate::directorates::m::review::ReviewPolicy;
 use crate::directorates::m::roster::{
@@ -45,6 +45,7 @@ fn roots() -> Vec<(&'static str, Value)> {
         ("record.compartment", json_of::<CompartmentSettings>()),
         ("record.review", json_of::<ReviewPolicy>()),
         ("record.charge", json_of::<ChargeDefinition>()),
+        ("record.registry", json_of::<RegistryRecord>()),
     ];
     #[cfg(feature = "daemon")]
     roots.push((
@@ -140,7 +141,13 @@ mod tests {
     #[test]
     fn a_section_is_found_by_its_path_and_lists_with_its_title() {
         assert!(schema("provider").unwrap()["properties"]["poll"].is_object());
-        assert!(schema("registry.limits.runs").unwrap()["properties"]["records"].is_object());
+        assert!(
+            schema("record.registry.limits.runs").unwrap()["properties"]["records"].is_object()
+        );
+        assert!(
+            schema("registry.limits.runs").is_none(),
+            "a bootstrap file holds no limits"
+        );
         assert!(schema("record.station").unwrap()["properties"]["scheduler"].is_object());
         assert!(schema("record.station.scheduler").unwrap()["properties"]["check_in"].is_object());
         assert!(schema("record.unex.gateway").unwrap()["properties"]["frame_bytes"].is_object());
@@ -154,7 +161,7 @@ mod tests {
         let names: Vec<&str> = sections.iter().map(|(name, _)| name.as_str()).collect();
         for name in [
             "provider",
-            "registry.limits.cables",
+            "record.registry.limits.cables",
             "unex.pages",
             "station.plugins",
             "record.station.runner",

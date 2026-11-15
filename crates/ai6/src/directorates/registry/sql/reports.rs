@@ -60,7 +60,7 @@ fn put(tx: &mut Tx<'_>, report: &Report, text: String, revision: i64) -> io::Res
 
 impl ReportStore for SqlRegistry {
     fn file_report(&self, report: &Report) -> io::Result<()> {
-        let limits = &self.limits.reports;
+        let limits = &self.current_limits().reports;
         report.validate(limits)?;
         let text = String::from_utf8(report_bytes(report, limits)?).map_err(io::Error::other)?;
         let scope = report.scope.to_string();
@@ -122,7 +122,7 @@ impl ReportStore for SqlRegistry {
     }
 
     fn reports(&self, filter: &ReportFilter) -> io::Result<Vec<Report>> {
-        let limits = &self.limits.reports;
+        let limits = &self.current_limits().reports;
         let mut clauses: Vec<String> = Vec::new();
         let mut params: Vec<Value> = Vec::new();
         let mut bind = |clause: &str, value: Value| {
@@ -188,7 +188,7 @@ impl ReportStore for SqlRegistry {
 
     fn change_report(&self, id: &str, change: ReportChange<'_>) -> io::Result<Report> {
         validate_registry_key(id)?;
-        let limits = &self.limits.reports;
+        let limits = &self.current_limits().reports;
         self.write(|tx, revision| {
             let stored = tx
                 .query_opt("SELECT record FROM ai6_reports WHERE id = $1", &[id.into()])?
@@ -203,7 +203,7 @@ impl ReportStore for SqlRegistry {
     }
 
     fn report_source(&self, key: &str) -> io::Result<ReportSource> {
-        ReportSource::new(key).validate(&self.limits.reports)?;
+        ReportSource::new(key).validate(&self.current_limits().reports)?;
         let found = self.read(|tx| {
             tx.query_opt(
                 "SELECT record FROM ai6_report_sources WHERE source_key = $1",
@@ -218,7 +218,7 @@ impl ReportStore for SqlRegistry {
     }
 
     fn put_report_source(&self, source: &ReportSource) -> io::Result<()> {
-        source.validate(&self.limits.reports)?;
+        source.validate(&self.current_limits().reports)?;
         let text = to_json(source)?;
         self.write(|tx, revision| {
             tx.execute(
@@ -240,7 +240,7 @@ impl ReportStore for SqlRegistry {
     }
 
     fn report_clearances(&self) -> io::Result<Vec<ReportClearance>> {
-        let limits = &self.limits.reports;
+        let limits = &self.current_limits().reports;
         let rows = self.read(|tx| {
             tx.query(
                 "SELECT record FROM ai6_report_clearances ORDER BY subject",
@@ -259,7 +259,7 @@ impl ReportStore for SqlRegistry {
     }
 
     fn put_report_clearance(&self, clearance: &ReportClearance) -> io::Result<()> {
-        clearance.validate(&self.limits.reports)?;
+        clearance.validate(&self.current_limits().reports)?;
         let text = to_json(clearance)?;
         self.write(|tx, revision| {
             tx.execute(

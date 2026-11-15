@@ -123,7 +123,7 @@ pub trait QuarantineStore {
 impl QuarantineStore for FileRegistry {
     fn quarantine_agent(&self, record: &Quarantine) -> io::Result<Quarantine> {
         validate_quarantine(record)?;
-        let limits = &self.limits.quarantine;
+        let limits = &self.current_limits().quarantine;
         let _lock = self.lock()?;
         let path = self.quarantine_path(&record.agent, record.operation.as_deref());
         if let Some(existing) = read_record(&path, limits)? {
@@ -165,7 +165,7 @@ impl QuarantineStore for FileRegistry {
             if path
                 .extension()
                 .is_some_and(|extension| extension == "json")
-                && let Some(record) = read_record(&path, &self.limits.quarantine)?
+                && let Some(record) = read_record(&path, &self.current_limits().quarantine)?
             {
                 records.push(record);
             }
@@ -189,7 +189,7 @@ impl QuarantineStore for FileRegistry {
             .quarantine_dir()
             .join("incidents")
             .join(format!("{}.json", safe_component(agent)));
-        let limits = &self.limits.quarantine;
+        let limits = &self.current_limits().quarantine;
         let mut history: Vec<Incident> = match fs::read(&path) {
             Ok(bytes) if limits.history_bytes().allows(bytes.len()) => {
                 serde_json::from_slice(&bytes)

@@ -339,7 +339,7 @@ fn entry_files(dir: &Path) -> io::Result<Vec<Stored>> {
 
 impl AssistantLogStore for FileRegistry {
     fn log_assistant_entry(&self, entry: &AssistantLogEntry) -> io::Result<()> {
-        let bytes = entry.to_record(&self.limits.assistant_log)?;
+        let bytes = entry.to_record(&self.current_limits().assistant_log)?;
         let dir = self
             .assistant_log_root()
             .join(conversation_key(&entry.conversation));
@@ -360,7 +360,8 @@ impl AssistantLogStore for FileRegistry {
             let Ok(bytes) = fs::read(&stored.path) else {
                 continue;
             };
-            if let Some(entry) = AssistantLogEntry::from_record(&bytes, &self.limits.assistant_log)
+            if let Some(entry) =
+                AssistantLogEntry::from_record(&bytes, &self.current_limits().assistant_log)
                 && entry.conversation == conversation
             {
                 entries.push(entry);
@@ -374,7 +375,7 @@ impl AssistantLogStore for FileRegistry {
         &self,
         person: Option<&str>,
     ) -> io::Result<Vec<AssistantConversation>> {
-        let limits = &self.limits.assistant_log;
+        let limits = &self.current_limits().assistant_log;
         let read = |stored: &Stored| {
             fs::read(&stored.path)
                 .ok()

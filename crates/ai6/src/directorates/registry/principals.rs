@@ -185,7 +185,7 @@ impl FileRegistry {
 
     fn read_principal(&self, id: &str) -> io::Result<Option<PrincipalRecord>> {
         match fs::read(self.principal_path(id)) {
-            Ok(bytes) => parse_principal(&bytes, &self.limits.principals).map(Some),
+            Ok(bytes) => parse_principal(&bytes, &self.current_limits().principals).map(Some),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(error) => Err(error),
         }
@@ -194,7 +194,7 @@ impl FileRegistry {
 
 impl PrincipalStore for FileRegistry {
     fn note_principal(&self, seen: &PrincipalRecord) -> io::Result<bool> {
-        let limits = &self.limits.principals;
+        let limits = &self.current_limits().principals;
         seen.validate(limits)?;
         let _lock = self.lock()?;
         let existing = self.read_principal(&seen.id)?;
@@ -228,7 +228,7 @@ impl PrincipalStore for FileRegistry {
         for entry in entries {
             let path = entry?.path();
             if let Ok(bytes) = fs::read(&path)
-                && let Ok(person) = parse_principal(&bytes, &self.limits.principals)
+                && let Ok(person) = parse_principal(&bytes, &self.current_limits().principals)
                 && path.file_stem().and_then(|stem| stem.to_str())
                     == Some(PrincipalRecord::key(&person.id).as_str())
             {

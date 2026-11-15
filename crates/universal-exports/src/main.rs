@@ -84,7 +84,7 @@ fn settings(cli: &Cli) -> Result<Settings, String> {
     Ok(Settings { located, state_dir })
 }
 
-/// SQL options from `[registry]` (timeouts, limits) and the password `secret` refers to.
+/// SQL options from `[registry]` (timeouts) and the password `secret` refers to.
 fn sql_options(
     settings: &Settings,
     secret: Option<&ai6::bootstrap::SecretRef>,
@@ -92,8 +92,7 @@ fn sql_options(
 ) -> Result<ai6::SqlOptions, String> {
     let registry = &settings.located.value.registry;
     let options = ai6::SqlOptions::for_lease(registry.headquarters_lease())
-        .with_busy_timeout(registry.sqlite_busy_timeout())
-        .with_limits(registry.limits.clone());
+        .with_busy_timeout(registry.sqlite_busy_timeout());
     match secret {
         Some(secret) => {
             let password = secret
@@ -117,12 +116,10 @@ fn open_provider(settings: &Settings) -> Result<Arc<dyn ConfigProvider>, String>
         settings.located.value.provider.password.as_ref(),
         "provider",
     )?;
-    let provider = ai6::directorates::m::config::open_with(
-        &location,
-        &options,
-        settings.located.value.provider.limits(),
-    )
-    .map_err(|error| format!("the configuration provider at {shown} cannot be opened: {error}"))?;
+    let provider =
+        ai6::directorates::m::config::open_with(&location, &options).map_err(|error| {
+            format!("the configuration provider at {shown} cannot be opened: {error}")
+        })?;
     for weakening in ai6::directorates::registry::sql::weakenings(&location) {
         eprintln!("universal-exports: warning: the configuration provider at {shown}: {weakening}");
     }
@@ -207,6 +204,12 @@ async fn run(cli: Cli) -> Result<(), String> {
             ai6::directorates::registry::sql::redact(&registry_location)
         );
     }
+    // The Registry opens with the defaults and takes the `registry` record, now and at each poll.
+    snapshot.settings.registry.apply_to(registry.as_ref());
+    for weakening in snapshot.settings.registry.weakenings() {
+        eprintln!("universal-exports: warning: {weakening}");
+    }
+    let followed_registry = registry.clone();
     let host_chiefs = settings.located.value.unex.access.chief.clone();
     for subject in &host_chiefs {
         subject.parse::<ai6::Subject>().map_err(|_| {
@@ -325,7 +328,13 @@ async fn run(cli: Cli) -> Result<(), String> {
     };
     let poll = settings.located.value.provider.poll();
     if !poll.is_zero() {
-        tokio::spawn(follow_policy(provider, live, snapshot.clone(), poll));
+        tokio::spawn(follow_policy(
+            provider,
+            live,
+            followed_registry,
+            snapshot.clone(),
+            poll,
+        ));
     }
     match tls {
         Some(config) => {
@@ -386,16 +395,18 @@ fn own_tls(settings: &Settings) -> Result<Option<std::sync::Arc<rustls::ServerCo
 }
 
 /// Reads the provider every `every` and applies a changed `access` or `operation_access`
-/// record; a changed record of a family only a restart applies (`unex`, `plugin`) is logged as
-/// needing one. A configuration the provider refuses keeps the policy in force, and the access
+/// record, and gives `registry` the limits of a changed `registry` record; a changed record of a
+/// family only a restart applies (`unex`, `plugin`) is logged as needing one. A configuration the provider refuses keeps the policy in force, and the access
 /// admin shows why.
 async fn follow_policy(
     provider: Arc<dyn ConfigProvider>,
     live: Arc<LiveAccess>,
+    registry: Arc<dyn ai6::RegistryBackend>,
     started: ai6::ConfigSnapshot,
     every: Duration,
 ) {
     let mut since = started.revision;
+    let mut limits = started.settings.registry.clone();
     let started = Arc::new(started);
     let mut refused = None;
     let mut restart: Vec<ai6::ConfigRecord> = Vec::new();
@@ -418,14 +429,26 @@ async fn follow_policy(
                     })
                     .collect();
                 live.apply(&snapshot);
-                Ok(Some((snapshot.revision, changed)))
+                Ok(Some((
+                    snapshot.revision,
+                    changed,
+                    snapshot.settings.registry,
+                )))
             })
             .await
         };
         match outcome {
-            Ok(Ok(Some((revision, changed)))) => {
+            Ok(Ok(Some((revision, changed, record)))) => {
                 since = revision;
                 refused = None;
+                if record != limits {
+                    record.apply_to(registry.as_ref());
+                    eprintln!("universal-exports: Registry limits applied");
+                    for weakening in record.weakenings() {
+                        eprintln!("universal-exports: warning: {weakening}");
+                    }
+                    limits = record;
+                }
                 eprintln!(
                     "universal-exports: configuration revision {} applied",
                     revision.get()

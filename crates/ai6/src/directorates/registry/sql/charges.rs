@@ -48,10 +48,11 @@ impl SqlRegistry {
     ) -> Result<(T, ChargeRecord), ChargeError> {
         validate_scope(scope)?;
         self.write(|tx, revision| {
-            let mut record = charge_in(tx, scope, &self.limits)?.ok_or(ChargeError::NotFound)?;
+            let mut record =
+                charge_in(tx, scope, &self.current_limits())?.ok_or(ChargeError::NotFound)?;
             let now = tx.now()?;
             let done = change(&mut record, now)?;
-            put_charge(tx, &record, revision, &self.limits)?;
+            put_charge(tx, &record, revision, &self.current_limits())?;
             Ok((done, record))
         })
     }
@@ -67,12 +68,12 @@ impl ChargeStore for SqlRegistry {
     ) -> Result<ChargeRecord, ChargeError> {
         validate_scope(scope)?;
         self.write(|tx, revision| {
-            let existing = charge_in(tx, scope, &self.limits)?;
+            let existing = charge_in(tx, scope, &self.current_limits())?;
             if existing.is_none() {
                 let count = tx
                     .query_opt("SELECT count(*) FROM ai6_charges", &[])?
                     .map_or(Ok(0), |row| row.int(0))?;
-                if !self.limits.charges.records.allows(count + 1) {
+                if !self.current_limits().charges.records.allows(count + 1) {
                     return Err(io::Error::other("too many charge records").into());
                 }
             }
@@ -82,9 +83,9 @@ impl ChargeStore for SqlRegistry {
                 (scope, agent, station),
                 ttl,
                 now,
-                &self.limits.charges,
+                &self.current_limits().charges,
             )?;
-            put_charge(tx, &record, revision, &self.limits)?;
+            put_charge(tx, &record, revision, &self.current_limits())?;
             Ok(record)
         })
     }
@@ -97,7 +98,7 @@ impl ChargeStore for SqlRegistry {
         renew: Option<Duration>,
         update: ChargeUpdate,
     ) -> Result<ChargeRecord, ChargeError> {
-        let limits = self.limits.charges.clone();
+        let limits = self.current_limits().charges.clone();
         self.change_charge(scope, |record, now| {
             apply(record, (station, fence), renew, update, now, &limits)
         })
@@ -110,7 +111,7 @@ impl ChargeStore for SqlRegistry {
         by: &str,
         note: &str,
     ) -> Result<ChargeControl, ChargeError> {
-        let limits = self.limits.charges.clone();
+        let limits = self.current_limits().charges.clone();
         self.change_charge(scope, |record, now| {
             add_control(record, by, note, now, &limits)
         })
@@ -119,14 +120,14 @@ impl ChargeStore for SqlRegistry {
 
     fn charge(&self, scope: &str) -> io::Result<Option<ChargeRecord>> {
         validate_scope(scope)?;
-        self.read(|tx| charge_in(tx, scope, &self.limits))
+        self.read(|tx| charge_in(tx, scope, &self.current_limits()))
     }
 
     fn charges(&self) -> io::Result<Vec<ChargeRecord>> {
         self.read(|tx| {
             tx.query("SELECT record FROM ai6_charges ORDER BY scope", &[])?
                 .into_iter()
-                .map(|row| parse_record(row.text(0)?.as_bytes(), &self.limits.charges))
+                .map(|row| parse_record(row.text(0)?.as_bytes(), &self.current_limits().charges))
                 .collect()
         })
     }

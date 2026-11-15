@@ -917,8 +917,8 @@ fn station_in(located: &Located<Bootstrap>, state_dir: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// Opens the configuration provider at `location` within the bootstrap file's `[provider]`
-/// limits, connecting a SQL one with its `[registry]` timeouts and `[provider]` password.
+/// Opens the configuration provider at `location`, connecting a SQL one with its `[registry]`
+/// timeouts and `[provider]` password.
 fn open_provider(
     location: &str,
     bootstrap: &Bootstrap,
@@ -930,12 +930,11 @@ fn open_provider(
     )?;
     let shown = ai6::directorates::registry::sql::redact(location);
     let provider =
-        ai6::directorates::m::config::open_with(location, &options, bootstrap.provider.limits())
-            .map_err(|error| {
-                let message =
-                    format!("the configuration provider at {shown} cannot be opened: {error}");
-                OpenFailure::of(message, &error)
-            })?;
+        ai6::directorates::m::config::open_with(location, &options).map_err(|error| {
+            let message =
+                format!("the configuration provider at {shown} cannot be opened: {error}");
+            OpenFailure::of(message, &error)
+        })?;
     warn_weakenings("configuration provider", location);
     Ok(provider)
 }
@@ -983,8 +982,7 @@ fn open_registry(
         &located.value.registry,
         located.registry_password(),
         "Registry",
-    )?
-    .with_limits(located.value.registry.limits.clone());
+    )?;
     let registry =
         ai6::directorates::registry::backend::open_with(&location, &options).map_err(|error| {
             let location = ai6::directorates::registry::sql::redact(&location);

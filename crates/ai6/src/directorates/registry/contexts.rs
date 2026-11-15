@@ -270,7 +270,7 @@ fn read_content(record: &Path, limits: &ContextLimits) -> io::Result<String> {
 impl RunContextStore for FileRegistry {
     fn file_run_context(&self, context: &RunContext) -> io::Result<()> {
         context.validate()?;
-        let limits = &self.limits.contexts;
+        let limits = &self.current_limits().contexts;
         let context = context.clone().cut_to(limits.context_bytes);
         let root = self.contexts_root();
         let record = root.join(format!("{}.json", run_key(&context.run)));
@@ -302,7 +302,7 @@ impl RunContextStore for FileRegistry {
         if record.run != run {
             return Ok(None);
         }
-        record.content = read_content(&path, &self.limits.contexts)?;
+        record.content = read_content(&path, &self.current_limits().contexts)?;
         Ok(Some(record))
     }
 
@@ -312,7 +312,7 @@ impl RunContextStore for FileRegistry {
             if record.conversation() != Some(conversation) {
                 continue;
             }
-            record.content = read_content(&path, &self.limits.contexts)?;
+            record.content = read_content(&path, &self.current_limits().contexts)?;
             found.push(record);
         }
         found.sort_by(|a, b| a.filed_at.total_cmp(&b.filed_at));

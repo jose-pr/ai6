@@ -10,8 +10,8 @@ use crate::directorates::registry::store::{invalid_data, validate_registry_key};
 
 impl ApiKeyStore for SqlRegistry {
     fn put_api_key(&self, key: &ApiKeyRecord) -> io::Result<()> {
-        key.validate(&self.limits.api_keys)?;
-        let text = String::from_utf8(api_key_bytes(key, &self.limits.api_keys)?)
+        key.validate(&self.current_limits().api_keys)?;
+        let text = String::from_utf8(api_key_bytes(key, &self.current_limits().api_keys)?)
             .map_err(io::Error::other)?;
         self.write(|tx, revision| {
             let exists = tx
@@ -24,7 +24,7 @@ impl ApiKeyStore for SqlRegistry {
                 let count = tx
                     .query_opt("SELECT count(*) FROM ai6_api_keys", &[])?
                     .map_or(Ok(0), |row| row.int(0))?;
-                if !self.limits.api_keys.keys.allows(count + 1) {
+                if !self.current_limits().api_keys.keys.allows(count + 1) {
                     return Err(invalid_data("too many API keys"));
                 }
             }
@@ -52,7 +52,7 @@ impl ApiKeyStore for SqlRegistry {
                 &[id.into()],
             )
         })?;
-        row.map(|row| parse_api_key(row.text(0)?.as_bytes(), &self.limits.api_keys))
+        row.map(|row| parse_api_key(row.text(0)?.as_bytes(), &self.current_limits().api_keys))
             .transpose()
     }
 
@@ -66,7 +66,8 @@ impl ApiKeyStore for SqlRegistry {
         })?;
         let mut keys = Vec::with_capacity(rows.len());
         for row in rows {
-            if let Ok(key) = parse_api_key(row.text(0)?.as_bytes(), &self.limits.api_keys) {
+            if let Ok(key) = parse_api_key(row.text(0)?.as_bytes(), &self.current_limits().api_keys)
+            {
                 keys.push(key);
             }
         }
@@ -88,7 +89,7 @@ impl ApiKeyStore for SqlRegistry {
             else {
                 return Ok(None);
             };
-            let key = parse_api_key(row.text(0)?.as_bytes(), &self.limits.api_keys)?;
+            let key = parse_api_key(row.text(0)?.as_bytes(), &self.current_limits().api_keys)?;
             tx.execute("DELETE FROM ai6_api_keys WHERE id = $1", &[id.into()])?;
             Ok(Some(key))
         })
@@ -104,12 +105,12 @@ impl ApiKeyStore for SqlRegistry {
             else {
                 return Ok(false);
             };
-            let mut key = parse_api_key(row.text(0)?.as_bytes(), &self.limits.api_keys)?;
+            let mut key = parse_api_key(row.text(0)?.as_bytes(), &self.current_limits().api_keys)?;
             if !touches(&key, at, within) {
                 return Ok(false);
             }
             key.last_used_at = Some(at);
-            let text = String::from_utf8(api_key_bytes(&key, &self.limits.api_keys)?)
+            let text = String::from_utf8(api_key_bytes(&key, &self.current_limits().api_keys)?)
                 .map_err(io::Error::other)?;
             tx.execute(
                 "UPDATE ai6_api_keys SET record = $1, revision = $2 WHERE id = $3",

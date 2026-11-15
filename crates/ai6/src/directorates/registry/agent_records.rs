@@ -481,7 +481,7 @@ impl FileRegistry {
         &self,
         report: &AgentOutcomeReport,
     ) -> io::Result<AgentRecord> {
-        let limits = &self.limits.agents;
+        let limits = &self.current_limits().agents;
         report.validate(limits)?;
         let path = self.agent_record_path(&report.agent);
         let mut record = read_record(&path, &report.agent, limits)?
@@ -495,13 +495,17 @@ impl FileRegistry {
 
 impl AgentRecordStore for FileRegistry {
     fn record_agent_outcome(&self, report: &AgentOutcomeReport) -> io::Result<AgentRecord> {
-        report.validate(&self.limits.agents)?;
+        report.validate(&self.current_limits().agents)?;
         let _lock = self.lock()?;
         self.count_outcome_locked(report)
     }
 
     fn agent_record(&self, agent: &str) -> io::Result<Option<AgentRecord>> {
-        read_record(&self.agent_record_path(agent), agent, &self.limits.agents)
+        read_record(
+            &self.agent_record_path(agent),
+            agent,
+            &self.current_limits().agents,
+        )
     }
 
     fn agent_records(&self) -> io::Result<Vec<AgentRecord>> {
@@ -517,7 +521,7 @@ impl AgentRecordStore for FileRegistry {
                 continue;
             }
             if let Ok(bytes) = fs::read(&path)
-                && let Ok(record) = parse_record(&bytes, &self.limits.agents)
+                && let Ok(record) = parse_record(&bytes, &self.current_limits().agents)
                 && path.file_stem().and_then(|stem| stem.to_str())
                     == Some(safe_component(&record.agent).as_str())
             {

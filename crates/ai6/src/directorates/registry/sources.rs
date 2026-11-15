@@ -481,7 +481,7 @@ impl SourceStore for FileRegistry {
         item: &SourceItem,
         received_by: &str,
     ) -> io::Result<Ingest> {
-        let mut brief = source_brief(operation, provider, item, &self.limits.sources);
+        let mut brief = source_brief(operation, provider, item, &self.current_limits().sources);
         brief.validate()?;
         let _lock = self.lock()?;
         brief.enter_as(self.allot_locked(&source_entry(operation, provider, item))?);
@@ -524,7 +524,13 @@ impl SourceStore for FileRegistry {
                 Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
                 Err(error) => return Err(error),
             };
-            for entry in entries.take(self.limits.briefs.records.or_max().saturating_mul(4)) {
+            for entry in entries.take(
+                self.current_limits()
+                    .briefs
+                    .records
+                    .or_max()
+                    .saturating_mul(4),
+            ) {
                 let name = entry?.file_name().to_string_lossy().into_owned();
                 let Some(key) = name.strip_suffix(".json") else {
                     continue;
@@ -535,7 +541,7 @@ impl SourceStore for FileRegistry {
                 if self.report_attempts(state, key)?.is_some_and(|mark| {
                     mark.reported
                         || !self
-                            .limits
+                            .current_limits()
                             .sources
                             .report_attempts
                             .allows(mark.attempts.saturating_add(1))

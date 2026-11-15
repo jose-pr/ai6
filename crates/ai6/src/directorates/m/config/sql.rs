@@ -6,8 +6,8 @@ use std::fmt;
 use std::io;
 
 use super::{
-    ConfigDefinitions, ConfigLimits, ConfigProvider, ConfigRecord, ConfigRevision, ConfigScope,
-    ConfigSnapshot, Layer, assemble, check_placement, conflict, merged,
+    ConfigDefinitions, ConfigProvider, ConfigRecord, ConfigRevision, ConfigScope, ConfigSnapshot,
+    Layer, assemble, check_placement, conflict, merged,
 };
 use crate::directorates::m::roster::{RosterError, RosterErrorKind, error, error_of};
 use crate::directorates::registry::sql::SqlOptions;
@@ -84,11 +84,7 @@ fn revision_of(number: i64) -> Result<ConfigRevision, RosterError> {
 }
 
 /// `station`'s view (`""`: global only), checked and built.
-fn snapshot(
-    records: &Records,
-    station: &str,
-    limits: &ConfigLimits,
-) -> Result<ConfigSnapshot, RosterError> {
+fn snapshot(records: &Records, station: &str) -> Result<ConfigSnapshot, RosterError> {
     let layers = layers(records)?;
     let global = layers
         .get(&ConfigScope::Global)
@@ -98,7 +94,7 @@ fn snapshot(
         Some(own) if !station.is_empty() => merged(&global, own),
         _ => global,
     };
-    assemble(revision_of(records.revision)?, &view, None, &SOURCE, limits)
+    assemble(revision_of(records.revision)?, &view, None, &SOURCE)
 }
 
 fn failed(reason: io::Error) -> RosterError {
@@ -119,7 +115,6 @@ fn failed(reason: io::Error) -> RosterError {
 /// own. The database can be the Registry's.
 pub struct SqlProvider {
     db: Database,
-    limits: ConfigLimits,
 }
 
 impl fmt::Debug for SqlProvider {
@@ -156,15 +151,7 @@ impl SqlProvider {
         })?;
         Ok(Self {
             db: Database::open(location, options)?,
-            limits: ConfigLimits::default(),
         })
-    }
-
-    /// The same provider, reading documents within `limits`.
-    #[must_use]
-    pub fn with_limits(mut self, limits: ConfigLimits) -> Self {
-        self.limits = limits;
-        self
     }
 
     /// Applies `change` and checks every view at `scope` it touches, all in one
@@ -186,7 +173,6 @@ impl SqlProvider {
         change: impl FnOnce(&mut Tx<'_>, i64) -> io::Result<bool> + Send,
     ) -> Result<Option<ConfigRevision>, RosterError> {
         let scope = scope.clone();
-        let limits = self.limits.clone();
         let outcome = self.db.write(Clock::Config, move |tx, revision| {
             if !change(tx, revision)? {
                 return Err(io::Error::new(io::ErrorKind::NotFound, "unchanged"));
@@ -209,11 +195,7 @@ impl SqlProvider {
             };
             let mut revision = None;
             for station in stations {
-                revision = Some(
-                    snapshot(&records, &station, &limits)
-                        .map_err(invalid)?
-                        .revision,
-                );
+                revision = Some(snapshot(&records, &station).map_err(invalid)?.revision);
             }
             if !keep {
                 return Err(io::Error::new(io::ErrorKind::NotFound, "checked"));
@@ -275,11 +257,7 @@ impl SqlProvider {
 
 impl ConfigProvider for SqlProvider {
     fn load(&self, station: &str) -> Result<ConfigSnapshot, RosterError> {
-        snapshot(
-            &self.db.read(records).map_err(failed)?,
-            station,
-            &self.limits,
-        )
+        snapshot(&self.db.read(records).map_err(failed)?, station)
     }
 
     fn changes_since(
@@ -966,5 +944,76 @@ mod tests {
     #[test]
     fn an_assistant_row_gives_a_sql_roster_its_settings() {
         run(an_assistant_row_gives_the_roster_its_settings);
+    }
+
+    fn the_registry_record_sets_what_the_provider_reads(location: &str) {
+        let provider = SqlProvider::open(location).unwrap();
+        assert_eq!(
+            provider.load("").unwrap().settings.limits,
+            crate::ConfigLimits::default()
+        );
+        provider
+            .put(
+                ConfigRecord::Registry,
+                &GLOBAL,
+                ConfigRecord::SINGLETON_KEY,
+                &json!({"provider": {"loadout_bytes": 4096}, "limits": {"runs": {"records": 7}}}),
+            )
+            .unwrap();
+        let held = provider.load("").unwrap().settings;
+        assert_eq!(held.limits.loadout_bytes, crate::bounds::Limit::at(4096));
+        assert_eq!(
+            held.registry.limits.runs.records,
+            crate::bounds::Limit::at(7)
+        );
+
+        // A loadout document larger than the stored limit is refused when it is written.
+        let paths: Vec<String> = (0..600).map(|n| format!("/usr/share/p{n}")).collect();
+        let refused = provider
+            .put(
+                ConfigRecord::Sandbox,
+                &GLOBAL,
+                "wide",
+                &json!({"read_only": paths}),
+            )
+            .unwrap_err();
+        assert!(refused.to_string().contains("loadouts"), "{refused}");
+        assert!(
+            provider
+                .definitions(ConfigRecord::Sandbox, &GLOBAL)
+                .unwrap()
+                .records
+                .is_empty(),
+            "nothing was stored"
+        );
+
+        // A record that is not a registry record is refused, naming it.
+        let refused = provider
+            .put(
+                ConfigRecord::Registry,
+                &GLOBAL,
+                ConfigRecord::SINGLETON_KEY,
+                &json!({"limits": {"nothing": 1}}),
+            )
+            .unwrap_err();
+        assert!(refused.to_string().contains("registry"), "{refused}");
+        assert_eq!(
+            provider.load("").unwrap().settings.limits.loadout_bytes,
+            crate::bounds::Limit::at(4096),
+            "the stored record stands"
+        );
+
+        provider
+            .remove(ConfigRecord::Registry, &GLOBAL, ConfigRecord::SINGLETON_KEY)
+            .unwrap();
+        assert_eq!(
+            provider.load("").unwrap().settings.limits,
+            crate::ConfigLimits::default()
+        );
+    }
+
+    #[test]
+    fn the_registry_record_sets_what_a_sql_provider_reads_on_every_database() {
+        run(the_registry_record_sets_what_the_provider_reads);
     }
 }

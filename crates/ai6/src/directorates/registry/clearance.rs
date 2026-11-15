@@ -269,7 +269,7 @@ impl FileRegistry {
 
 impl ClearanceStore for FileRegistry {
     fn put_clearance_grant(&self, grant: &ClearanceGrant) -> io::Result<()> {
-        let limits = &self.limits.clearance;
+        let limits = &self.current_limits().clearance;
         grant.validate(limits)?;
         let bytes = grant_bytes(grant, limits)?;
         let _lock = self.lock()?;
@@ -285,7 +285,7 @@ impl ClearanceStore for FileRegistry {
         expected: Option<&ClearanceGrant>,
         grant: &ClearanceGrant,
     ) -> io::Result<bool> {
-        let limits = &self.limits.clearance;
+        let limits = &self.current_limits().clearance;
         grant.validate(limits)?;
         let bytes = grant_bytes(grant, limits)?;
         let _lock = self.lock()?;
@@ -308,7 +308,7 @@ impl ClearanceStore for FileRegistry {
             &self.grant_path(operation, agent),
             operation,
             agent,
-            &self.limits.clearance,
+            &self.current_limits().clearance,
         )
     }
 
@@ -323,7 +323,7 @@ impl ClearanceStore for FileRegistry {
         for entry in entries {
             let path = entry?.path();
             if let Ok(bytes) = fs::read(&path)
-                && let Ok(grant) = parse_grant(&bytes, &self.limits.clearance)
+                && let Ok(grant) = parse_grant(&bytes, &self.current_limits().clearance)
                 && grant.operation == operation
                 && path.file_stem().and_then(|stem| stem.to_str())
                     == Some(safe_component(&grant.agent).as_str())
@@ -359,8 +359,13 @@ impl ClearanceStore for FileRegistry {
                 else {
                     continue;
                 };
-                if let Some(read) =
-                    read_grant(&path, &operation_key, agent, &self.limits.clearance).transpose()
+                if let Some(read) = read_grant(
+                    &path,
+                    &operation_key,
+                    agent,
+                    &self.current_limits().clearance,
+                )
+                .transpose()
                 {
                     reads.insert((operation_key.clone(), agent.to_owned()), read);
                 }
@@ -378,7 +383,7 @@ impl ClearanceStore for FileRegistry {
             &path,
             &expected.operation,
             &expected.agent,
-            &self.limits.clearance,
+            &self.current_limits().clearance,
         )?
         .as_ref()
             != Some(expected)
@@ -398,7 +403,8 @@ impl ClearanceStore for FileRegistry {
         validate_registry_key(agent)?;
         let _lock = self.lock()?;
         let path = self.grant_path(operation, agent);
-        let Some(grant) = read_grant(&path, operation, agent, &self.limits.clearance)? else {
+        let Some(grant) = read_grant(&path, operation, agent, &self.current_limits().clearance)?
+        else {
             return Ok(None);
         };
         fs::remove_file(&path)?;
@@ -428,7 +434,8 @@ impl FileRegistry {
         for operation in operations {
             let path = self.grant_path(&operation, agent);
             // An unreadable grant is removed too: it could be a raise.
-            let raise = match read_grant(&path, &operation, agent, &self.limits.clearance) {
+            let raise = match read_grant(&path, &operation, agent, &self.current_limits().clearance)
+            {
                 Ok(grant) => grant.is_some_and(|grant| grant.raises()),
                 Err(_) => path.is_file(),
             };

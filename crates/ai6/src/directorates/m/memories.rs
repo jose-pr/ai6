@@ -518,7 +518,7 @@ pub fn write_entry(
     // is always the caller.
     let mut next = next;
     next.header.updated_by = caller.by();
-    next.validate(store.memory_limits())
+    next.validate(&store.memory_limits())
         .map_err(MemoryRefusal::Invalid)?;
     let id = next.header.id.clone();
     caller

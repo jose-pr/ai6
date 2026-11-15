@@ -433,7 +433,7 @@ impl From<io::Error> for MemoryError {
 /// Memories: the entries of each scope.
 pub trait MemoryStore {
     /// The bounds it holds entries to.
-    fn memory_limits(&self) -> &MemoryLimits;
+    fn memory_limits(&self) -> MemoryLimits;
 
     /// Keeps `entry` and answers it as stored. With `base` `None` it is new, at revision 1: an ID
     /// already taken is [`MemoryError::Changed`]. With `base` it replaces the entry of its ID in
@@ -721,7 +721,7 @@ impl FileRegistry {
 
     /// Keeps `previous` as a prior version and drops the oldest past `[..] versions`.
     fn keep_version(&self, previous: &MemoryEntry) -> io::Result<()> {
-        let keep = self.limits.memories.versions;
+        let keep = self.current_limits().memories.versions;
         let dir = self.versions_dir(&previous.header.scope, &previous.header.id);
         if keep.allows(1u64) {
             let bytes = serde_json::to_vec(previous).map_err(io::Error::other)?;
@@ -768,8 +768,8 @@ fn entry_files(dir: &Path) -> io::Result<Vec<PathBuf>> {
 }
 
 impl MemoryStore for FileRegistry {
-    fn memory_limits(&self) -> &MemoryLimits {
-        &self.limits.memories
+    fn memory_limits(&self) -> MemoryLimits {
+        self.current_limits().memories.clone()
     }
 
     fn write_memory(
@@ -777,7 +777,7 @@ impl MemoryStore for FileRegistry {
         mut entry: MemoryEntry,
         base: Option<u64>,
     ) -> Result<MemoryEntry, MemoryError> {
-        let limits = &self.limits.memories;
+        let limits = &self.current_limits().memories;
         entry.validate(limits).map_err(MemoryError::Invalid)?;
         entry.header.bytes = entry.size();
         let _lock = self.lock()?;
@@ -888,7 +888,7 @@ impl MemoryStore for FileRegistry {
     }
 
     fn propose_memory(&self, proposal: &MemoryProposal) -> Result<(), MemoryError> {
-        let limits = &self.limits.memories;
+        let limits = &self.current_limits().memories;
         proposal.validate(limits).map_err(MemoryError::Invalid)?;
         let bytes = serde_json::to_vec(proposal).map_err(io::Error::other)?;
         let _lock = self.lock()?;

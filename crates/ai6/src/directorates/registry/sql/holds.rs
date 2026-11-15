@@ -9,9 +9,9 @@ use crate::directorates::registry::store::{invalid_data, validate_registry_key};
 
 impl HoldStore for SqlRegistry {
     fn put_hold(&self, hold: &RosterHold) -> io::Result<()> {
-        hold.validate(&self.limits.holds)?;
-        let text =
-            String::from_utf8(hold_bytes(hold, &self.limits.holds)?).map_err(io::Error::other)?;
+        hold.validate(&self.current_limits().holds)?;
+        let text = String::from_utf8(hold_bytes(hold, &self.current_limits().holds)?)
+            .map_err(io::Error::other)?;
         let route = RosterHold::route_key(hold.route.as_ref());
         self.write(|tx, revision| {
             let exists = tx
@@ -29,7 +29,7 @@ impl HoldStore for SqlRegistry {
                 let count = tx
                     .query_opt("SELECT count(*) FROM ai6_roster_holds", &[])?
                     .map_or(Ok(0), |row| row.int(0))?;
-                if !self.limits.holds.holds.allows(count + 1) {
+                if !self.current_limits().holds.holds.allows(count + 1) {
                     return Err(invalid_data("too many holds"));
                 }
             }
@@ -59,7 +59,7 @@ impl HoldStore for SqlRegistry {
         })?;
         let mut holds = Vec::with_capacity(rows.len());
         for row in rows {
-            if let Ok(hold) = parse_hold(row.text(0)?.as_bytes(), &self.limits.holds) {
+            if let Ok(hold) = parse_hold(row.text(0)?.as_bytes(), &self.current_limits().holds) {
                 holds.push(hold);
             }
         }
@@ -90,7 +90,7 @@ impl HoldStore for SqlRegistry {
             else {
                 return Ok(None);
             };
-            let hold = parse_hold(row.text(0)?.as_bytes(), &self.limits.holds)?;
+            let hold = parse_hold(row.text(0)?.as_bytes(), &self.current_limits().holds)?;
             tx.execute(
                 "DELETE FROM ai6_roster_holds WHERE operation = $1 AND agent = $2 AND route = $3",
                 &[operation.into(), agent.into(), route.as_str().into()],

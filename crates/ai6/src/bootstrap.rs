@@ -34,12 +34,9 @@ use rustls_pki_types::CertificateDer;
 use rustls_pki_types::pem::PemObject;
 use zeroize::Zeroizing;
 
-use crate::bounds::Limit;
 use crate::bounds::Seconds;
-use crate::directorates::m::config::ConfigLimits;
 use crate::directorates::q::secret_kind::{self, SecretFields, SecretSource};
 use crate::directorates::registry::bona_fides::{KeepVerified, PluginProfile};
-use crate::directorates::registry::limits::RegistryLimits;
 
 use self::format::Format;
 
@@ -352,9 +349,10 @@ fn is_variable_name(name: &str) -> bool {
         && characters.all(|c| c == '_' || c.is_ascii_alphanumeric())
 }
 
-/// `[provider]`: where the configuration provider is, and how much of a document it reads.
+/// `[provider]`: where the configuration provider is and how it is opened. Its limits on what it
+/// reads are the `registry` record's `provider` table.
 #[non_exhaustive]
-#[derive(Debug, Clone, ToValue, FromValue, Schema)]
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema)]
 #[map(deny_unknown_fields)]
 pub struct ProviderSettings {
     /// A configuration directory, `sqlite:PATH` or a `postgres://` URL. Default: the
@@ -383,43 +381,6 @@ pub struct ProviderSettings {
     /// wrong password) exits at once whatever this says.
     #[schema(title = "How long to keep trying to open", format = "seconds")]
     pub retry_for: Option<Seconds>,
-    /// Bytes of the loadout document (`loadout`, `sandbox`, `mcp`, `overlay`, `secret`,
-    /// `secret_provider` and `pool` records together).
-    #[schema(title = "Loadout document", format = "bytes")]
-    #[map(default = ConfigLimits::default().loadout_bytes)]
-    pub loadout_bytes: Limit,
-    /// Characters of one text value in the loadout document.
-    #[schema(title = "One loadout value, in characters")]
-    #[map(default = ConfigLimits::default().loadout_value_chars)]
-    pub loadout_value_chars: Limit,
-    /// Bytes of the access policy (the `access` record).
-    #[schema(title = "Access policy", format = "bytes")]
-    #[map(default = ConfigLimits::default().access_policy_bytes)]
-    pub access_policy_bytes: Limit,
-    /// Seconds a directory provider's replacement of a family file waits for a reader that has the
-    /// file open.
-    #[schema(title = "Wait for a reader of a family file")]
-    #[map(default = ConfigLimits::default().replace_retry)]
-    pub replace_retry: crate::bounds::TimeLimit,
-}
-
-impl Default for ProviderSettings {
-    fn default() -> Self {
-        let limits = ConfigLimits::default();
-        Self {
-            location: None,
-            password: None,
-            poll: None,
-            retry_first: None,
-            retry_factor: None,
-            retry_longest: None,
-            retry_for: None,
-            loadout_bytes: limits.loadout_bytes,
-            loadout_value_chars: limits.loadout_value_chars,
-            access_policy_bytes: limits.access_policy_bytes,
-            replace_retry: limits.replace_retry,
-        }
-    }
 }
 
 /// How a Station keeps trying to open its configuration provider and Registry at start.
@@ -478,7 +439,8 @@ impl StartRetry {
     }
 }
 
-/// `[registry]`: where the shared Registry is, and how much it keeps.
+/// `[registry]`: where the shared Registry is and how it is opened. What it keeps and accepts is the
+/// `registry` record.
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, ToValue, FromValue, Schema)]
 #[map(deny_unknown_fields)]
@@ -499,10 +461,6 @@ pub struct RegistrySettings {
     /// Seconds a SQLite connection waits for another's lock. Default: 30.
     #[schema(title = "SQLite lock wait")]
     pub sqlite_busy_timeout: Option<Seconds>,
-    /// `[registry.limits]`: what the Registry keeps and accepts.
-    #[schema(title = "What the Registry keeps and accepts")]
-    #[map(default)]
-    pub limits: RegistryLimits,
 }
 
 /// `[station.identity]`: where this host keeps its certificate identity and pinned peers.
@@ -878,7 +836,7 @@ impl Located<Bootstrap> {
                 self.proxy_secret_min_bytes()
             ));
         }
-        weakened.extend(limit_weakenings(&self.value.registry, &self.value.provider));
+        weakened.extend(limit_weakenings(&self.value.registry));
         if self.value.unex.liaison.plain_beyond_loopback == Some(true) {
             weakened.push(
                 "[unex.liaison] plain_beyond_loopback: the link listener may serve ws:// with no \
@@ -1002,6 +960,56 @@ impl SearchPath {
     }
 }
 
+/// The `[provider]` keys that are the `registry` record's `provider` table now.
+const MOVED_PROVIDER_KEYS: [&str; 4] = [
+    "loadout_bytes",
+    "loadout_value_chars",
+    "access_policy_bytes",
+    "replace_retry",
+];
+
+/// Refuses a file that still holds the limits the `registry` record replaces, naming the record.
+/// A file that cannot be read or parsed passes: [`read_file`] reports that.
+fn refuse_moved_limits(path: &Path) -> Result<(), BootstrapError> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Ok(());
+    };
+    let Ok(document) = format::parse(path, &text) else {
+        return Ok(());
+    };
+    let Ok(document) = serde_json::to_value(guatiao_serde::Serializable::from(&document)) else {
+        return Ok(());
+    };
+    let mut moved = Vec::new();
+    if document
+        .get("registry")
+        .is_some_and(|registry| registry.get("limits").is_some())
+    {
+        moved.push("[registry.limits] is the `limits` of the `registry` record".to_owned());
+    }
+    if let Some(provider) = document.get("provider") {
+        for key in MOVED_PROVIDER_KEYS {
+            if provider.get(key).is_some() {
+                moved.push(format!(
+                    "[provider] {key} is `{key}` in the `provider` table of the `registry` record"
+                ));
+            }
+        }
+    }
+    if moved.is_empty() {
+        return Ok(());
+    }
+    Err(BootstrapError::invalid(
+        path,
+        format!(
+            "{}; the Registry's and the configuration provider's limits are a record in the \
+             configuration provider, applied while the program runs: remove them from this file \
+             and set the `registry` record (`ai6ctl apply`, or Outer Office's Registry limits)",
+            moved.join("; ")
+        ),
+    ))
+}
+
 /// Reads a bootstrap document of type `T` from `path`, in the format its extension names.
 ///
 /// # Errors
@@ -1110,16 +1118,6 @@ impl ProviderSettings {
             self.retry_for.map(|s| s.0),
         )
     }
-
-    /// The limits the configuration provider reads documents within.
-    pub fn limits(&self) -> ConfigLimits {
-        ConfigLimits {
-            loadout_bytes: self.loadout_bytes,
-            loadout_value_chars: self.loadout_value_chars,
-            access_policy_bytes: self.access_policy_bytes,
-            replace_retry: self.replace_retry,
-        }
-    }
 }
 
 impl RegistrySettings {
@@ -1151,9 +1149,9 @@ impl RegistrySettings {
 /// disk or a busy CI runner must not turn into a refused write.
 pub(crate) const DEFAULT_SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// One line per limit of `[registry]` and `[provider]` looser than its default.
-fn limit_weakenings(registry: &RegistrySettings, provider: &ProviderSettings) -> Vec<String> {
-    let mut weakened = registry.limits.weakenings();
+/// The line for a `[registry] sqlite_busy_timeout` looser than its default.
+fn limit_weakenings(registry: &RegistrySettings) -> Vec<String> {
+    let mut weakened = Vec::new();
     if registry.sqlite_busy_timeout() > DEFAULT_SQLITE_BUSY_TIMEOUT {
         weakened.push(format!(
             "registry.sqlite_busy_timeout {} is looser than the default {}",
@@ -1161,7 +1159,6 @@ fn limit_weakenings(registry: &RegistrySettings, provider: &ProviderSettings) ->
             DEFAULT_SQLITE_BUSY_TIMEOUT.as_secs_f64()
         ));
     }
-    weakened.extend(provider.limits().weakenings());
     weakened
 }
 
@@ -1211,6 +1208,7 @@ impl Bootstrap {
     ///
     /// As [`read_file`]; and `InvalidData` when `[unex] url` is empty.
     pub fn read(path: &Path) -> Result<Self, BootstrapError> {
+        refuse_moved_limits(path)?;
         let mut value: Self = read_file(path)?;
         let dir = path.parent().unwrap_or(Path::new("."));
         value.provider.resolve(dir);
@@ -1346,7 +1344,7 @@ impl Located<Bootstrap> {
             "Universal Exports token",
             self.value.unex.station_token.as_ref(),
         );
-        weakened.extend(limit_weakenings(&self.value.registry, &self.value.provider));
+        weakened.extend(limit_weakenings(&self.value.registry));
         if self.value.unex.ca_file.is_some() {
             weakened.push(
                 "[unex] ca_file trusts its certificates for Universal Exports besides the public \
@@ -1509,16 +1507,18 @@ mod tests {
     }
 
     #[test]
-    fn no_report_clearance_or_marking_list_is_a_bootstrap_setting() {
+    fn no_report_clearance_or_marking_list_is_a_registry_limit() {
         // Who is cleared for what, and the marking lists, are the Registry's and the roster's.
-        let reports = crate::settings::schema("registry.limits.reports").unwrap();
+        let reports = crate::settings::schema("record.registry.limits.reports").unwrap();
         let keys = reports["properties"].as_object().unwrap();
         for key in ["clearances", "classifications", "handlings", "priorities"] {
-            assert!(!keys.contains_key(key), "{key} is a bootstrap setting");
-            let dir = tempfile::tempdir().unwrap();
-            let path = dir.path().join(FILE_NAME);
-            std::fs::write(&path, format!("[registry.limits.reports]\n{key} = []\n")).unwrap();
-            assert!(Bootstrap::find(Some(&path)).is_err(), "{key} is accepted");
+            assert!(!keys.contains_key(key), "{key} is a registry limit");
+            let record = serde_json::json!({ "limits": { "reports": { key: [] } } });
+            assert!(
+                crate::directorates::m::records::from_json::<crate::RegistryRecord>(&record)
+                    .is_err(),
+                "{key} is accepted"
+            );
         }
         assert!(
             crate::settings::schema("reports").is_none(),
@@ -1527,32 +1527,60 @@ mod tests {
     }
 
     #[test]
-    fn how_long_a_replacement_waits_is_read_and_is_no_weakening() {
-        let default = located("");
-        assert_eq!(
-            default.value.provider.limits().replace_retry,
-            crate::bounds::TimeLimit::secs(2)
+    fn a_file_holding_the_limits_the_registry_record_replaced_is_refused_naming_it() {
+        for text in [
+            "[registry.limits.runs]\nrecords = 5\n",
+            "[provider]\nloadout_bytes = 5\n",
+            "[provider]\nlocation = \"x\"\nreplace_retry = 9\n",
+            "[provider]\naccess_policy_bytes = \"none\"\n[registry.limits.held]\nresults = 100\n",
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join(FILE_NAME);
+            std::fs::write(&path, text).unwrap();
+            let refusal = Bootstrap::find(Some(&path)).unwrap_err().to_string();
+            assert!(
+                refusal.contains("the `registry` record"),
+                "{text:?}: {refusal}"
+            );
+        }
+        let kept = located(
+            "[provider]\nlocation = \"x\"\npoll = 3\n[registry]\nheadquarters_lease = 30\n",
         );
-        let set = located("[provider]\nreplace_retry = 9\n");
-        assert_eq!(
-            set.value.provider.limits().replace_retry,
-            crate::bounds::TimeLimit::secs(9)
-        );
-        assert!(set.value.provider.limits().weakenings().is_empty());
+        assert!(kept.value.provider.location.is_some());
     }
 
     #[test]
-    fn the_gateway_reports_its_loosened_limits() {
-        let located = located(
-            "[provider]\naccess_policy_bytes = \"none\"\n[registry.limits.held]\nresults = 100\n",
-        );
-        assert_eq!(located.value.registry.limits.held.results, Limit::at(100));
+    fn how_long_a_replacement_waits_is_a_record_setting_and_is_no_weakening() {
+        let record = |value: serde_json::Value| {
+            crate::directorates::m::records::from_json::<crate::RegistryRecord>(&value).unwrap()
+        };
         assert_eq!(
-            located.unex_weakenings(),
-            ["provider.access_policy_bytes none is looser than the default 1048576"]
+            record(serde_json::json!({})).provider.replace_retry,
+            crate::bounds::TimeLimit::secs(2)
         );
+        let set = record(serde_json::json!({ "provider": { "replace_retry": 9 } }));
+        assert_eq!(
+            set.provider.replace_retry,
+            crate::bounds::TimeLimit::secs(9)
+        );
+        assert!(set.weakenings().is_empty());
     }
 
+    #[test]
+    fn the_record_reports_its_loosened_limits() {
+        let record = crate::directorates::m::records::from_json::<crate::RegistryRecord>(
+            &serde_json::json!({
+                "provider": { "access_policy_bytes": null },
+                "limits": { "held": { "results": 100 } },
+            }),
+        )
+        .unwrap();
+        assert_eq!(record.limits.held.results, crate::bounds::Limit::at(100));
+        assert_eq!(
+            record.weakenings(),
+            ["registry.provider.access_policy_bytes none is looser than the default 1048576"]
+        );
+    }
     #[test]
     fn the_gateway_reads_the_proxy_secret_floor_and_reports_a_lower_one() {
         let default = located("");
@@ -1625,9 +1653,14 @@ mod tests {
         let schema = schema_of::<Bootstrap>();
         let mut found = Vec::new();
         writable("", &schema, &mut found);
-        // [registry.limits] alone holds about a hundred; a walk that stopped early finds nothing.
-        assert!(found.len() > 150, "the walk reached {}", found.len());
+        assert!(found.len() > 50, "the walk reached {}", found.len());
+        // The Registry's limits alone are about a hundred; a walk that stopped early finds nothing.
+        let mut registry = Vec::new();
+        let registry_schema = schema_of::<crate::RegistryRecord>();
+        writable("", &registry_schema, &mut registry);
+        assert!(registry.len() > 100, "the walk reached {}", registry.len());
         assert_eq!(undeclared::<Bootstrap>(), Vec::<String>::new());
+        assert_eq!(undeclared::<crate::RegistryRecord>(), Vec::<String>::new());
         assert_eq!(undeclared::<StationRuntime>(), Vec::<String>::new());
         assert_eq!(undeclared::<UnexRecord>(), Vec::<String>::new());
         assert_eq!(undeclared::<AssistantSettings>(), Vec::<String>::new());

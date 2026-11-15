@@ -11390,5 +11390,3769 @@
       "description": "",
       "fixed": "settings"
     }
+  },
+  "registry": {
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "limits": {
+          "type": "object",
+          "properties": {
+            "accounts": {
+              "type": "object",
+              "properties": {
+                "record_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Largest account record",
+                  "description": "Bytes of one account's record.",
+                  "default": 262144
+                },
+                "claims": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Live claims per account",
+                  "description": "Live claims on one account; past it the oldest is dropped.",
+                  "default": 1024
+                },
+                "windows": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Quota windows per account",
+                  "description": "Quota windows kept per account.",
+                  "default": 8
+                },
+                "kept_days": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295,
+                  "title": "Days of token counts per account",
+                  "description": "Days of token counts kept per account.",
+                  "default": 8
+                },
+                "sealed_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Largest sealed value",
+                  "description": "Bytes of one sealed value's record, every Station's copy together.",
+                  "default": 4194304
+                }
+              },
+              "additionalProperties": false,
+              "title": "Pool accounts",
+              "description": "`[registry.limits.accounts]`: pool accounts.",
+              "default": {
+                "record_bytes": 262144,
+                "claims": 1024,
+                "windows": 8,
+                "kept_days": 8,
+                "sealed_bytes": 4194304
+              }
+            },
+            "agents": {
+              "type": "object",
+              "properties": {
+                "record_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Largest Agent record",
+                  "description": "Bytes of one Agent record.",
+                  "default": 1048576
+                },
+                "operations": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Operations per Agent record",
+                  "description": "Operations one Agent record tallies.",
+                  "default": 128
+                },
+                "clearances": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Clearances per Operation of an Agent record",
+                  "description": "Clearances one Operation of an Agent record tallies.",
+                  "default": 8
+                },
+                "counted": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Mission outcomes remembered per Agent",
+                  "description": "Mission outcomes remembered per Agent, so a repeated report is counted once.",
+                  "default": 256
+                },
+                "model_history": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Model changes kept per Agent",
+                  "description": "Model changes kept per Agent.",
+                  "default": 16
+                },
+                "key_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest outcome report key",
+                  "description": "Bytes of an outcome report's key.",
+                  "default": 512
+                },
+                "agent_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest Agent, Operation or model in a report",
+                  "description": "Bytes of an outcome report's Agent, Operation and model.",
+                  "default": 256
+                }
+              },
+              "additionalProperties": false,
+              "title": "Agent records",
+              "description": "`[registry.limits.agents]`: Agent records.",
+              "default": {
+                "record_bytes": 1048576,
+                "operations": 128,
+                "clearances": 8,
+                "counted": 256,
+                "model_history": 16,
+                "key_bytes": 512,
+                "agent_bytes": 256
+              }
+            },
+            "agent_roles": {
+              "type": "object",
+              "properties": {
+                "record_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Largest Agent role record",
+                  "description": "Bytes of one Agent role record.",
+                  "default": 32768
+                },
+                "records": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Agent roles per Operation",
+                  "description": "Agent roles per Operation.",
+                  "default": 256
+                }
+              },
+              "additionalProperties": false,
+              "title": "Agent roles of an Operation",
+              "description": "`[registry.limits.agent_roles]`: Agent roles of an Operation.",
+              "default": {
+                "record_bytes": 32768,
+                "records": 256
+              }
+            },
+            "api_keys": {
+              "type": "object",
+              "properties": {
+                "record_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Largest key record",
+                  "description": "Bytes of one key's record.",
+                  "default": 16384
+                },
+                "keys": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Keys kept",
+                  "description": "Personal API keys kept.",
+                  "default": 100000
+                },
+                "scopes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Scopes on a key",
+                  "description": "Scopes on one key.",
+                  "default": 256
+                },
+                "text_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest key name or scope",
+                  "description": "Bytes of a key's name, owner and each scope.",
+                  "default": 512
+                }
+              },
+              "additionalProperties": false,
+              "title": "Personal API keys",
+              "description": "`[registry.limits.api_keys]`: personal API keys.",
+              "default": {
+                "record_bytes": 16384,
+                "keys": 100000,
+                "scopes": 256,
+                "text_bytes": 512
+              }
+            },
+            "approvals": {
+              "type": "object",
+              "properties": {
+                "record_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Largest approval record",
+                  "description": "Bytes of one approval record.",
+                  "default": 16384
+                },
+                "pending": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Pending approval requests",
+                  "description": "Pending approval requests.",
+                  "default": 1000
+                },
+                "class_authorizations": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Class authorizations",
+                  "description": "Class authorizations.",
+                  "default": 1000
+                },
+                "mission_requests": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Requests per Mission",
+                  "description": "Requests one Mission may have.",
+                  "default": 64
+                },
+                "reason_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest request reason",
+                  "description": "Bytes of a request's reason.",
+                  "default": 2048
+                },
+                "note_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest decision note",
+                  "description": "Bytes of a decision's note.",
+                  "default": 1024
+                },
+                "signer_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest signer name",
+                  "description": "Bytes of a signer's name.",
+                  "default": 256
+                },
+                "idempotency_key_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest idempotency key",
+                  "description": "Bytes of a request's idempotency key.",
+                  "default": 256
+                },
+                "class_entries": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Entries per class authorization",
+                  "description": "Step kinds, Agents, roles and proposed roles each class authorization may name.",
+                  "default": 64
+                },
+                "pattern_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest target pattern",
+                  "description": "Bytes of a class authorization's target pattern.",
+                  "default": 256
+                },
+                "name_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest name in a class authorization",
+                  "description": "Bytes of each Agent or role a class authorization names.",
+                  "default": 128
+                },
+                "expired_listed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Expired requests listed",
+                  "description": "Expired requests one list shows, the newest first.",
+                  "default": 200
+                },
+                "links": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Links per request",
+                  "description": "Links one request may carry.",
+                  "default": 8
+                },
+                "link_label_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest link label",
+                  "description": "Bytes of a link's label.",
+                  "default": 128
+                },
+                "link_url_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest link address",
+                  "description": "Bytes of a link's address.",
+                  "default": 1024
+                }
+              },
+              "additionalProperties": false,
+              "title": "Green ink requests and class authorizations",
+              "description": "`[registry.limits.approvals]`: green ink requests and class authorizations.",
+              "default": {
+                "record_bytes": 16384,
+                "pending": 1000,
+                "class_authorizations": 1000,
+                "mission_requests": 64,
+                "reason_bytes": 2048,
+                "note_bytes": 1024,
+                "signer_bytes": 256,
+                "idempotency_key_bytes": 256,
+                "class_entries": 64,
+                "pattern_bytes": 256,
+                "name_bytes": 128,
+                "expired_listed": 200,
+                "links": 8,
+                "link_label_bytes": 128,
+                "link_url_bytes": 1024
+              }
+            },
+            "assistant_log": {
+              "type": "object",
+              "properties": {
+                "entry_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Largest log entry",
+                  "description": "Bytes of one entry of the log; a longer one is kept without its data and with its text cut, and says how large it was.",
+                  "default": 1048576
+                }
+              },
+              "additionalProperties": false,
+              "title": "Moneypenny's conversation log",
+              "description": "`[registry.limits.assistant_log]`: Moneypenny's conversation log.",
+              "default": {
+                "entry_bytes": 1048576
+              }
+            },
+            "audit": {
+              "type": "object",
+              "properties": {
+                "record_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Largest audit record",
+                  "description": "Bytes of one audit record.",
+                  "default": 16384
+                },
+                "records": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Audit records kept",
+                  "description": "Audit records kept.",
+                  "default": 10000
+                },
+                "results": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Most records in one listing",
+                  "description": "Records one listing may ask for.",
+                  "default": 500
+                }
+              },
+              "additionalProperties": false,
+              "title": "Audit records",
+              "description": "`[registry.limits.audit]`: audit records.",
+              "default": {
+                "record_bytes": 16384,
+                "records": 10000,
+                "results": 500
+              }
+            },
+            "briefs": {
+              "type": "object",
+              "properties": {
+                "record_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Largest brief",
+                  "description": "Bytes of one brief.",
+                  "default": 1048576
+                },
+                "records": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Queued briefs",
+                  "description": "Queued briefs.",
+                  "default": 1000
+                },
+                "provenance_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest brief provenance",
+                  "description": "Bytes of a brief's provenance.",
+                  "default": 16384
+                },
+                "handle_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest Mission handle",
+                  "description": "Bytes of a Mission's handle: a longer one AI6 gives keeps its start and adds a short hash, and a rename to a longer one is refused. It names a Git branch, so it stays under 240 bytes whatever this says.",
+                  "default": 120
+                },
+                "cancel_settle_after": {
+                  "type": "number",
+                  "minimum": 0,
+                  "format": "seconds",
+                  "title": "Settle an unconfirmed cancel after",
+                  "description": "Seconds after a cancel was asked for before the Headquarters Station settles a claimed brief its Station has not finished: filed as failed, its lease released.",
+                  "default": 300.0
+                }
+              },
+              "additionalProperties": false,
+              "title": "The brief queue",
+              "description": "`[registry.limits.briefs]`: the brief queue.",
+              "default": {
+                "record_bytes": 1048576,
+                "records": 1000,
+                "provenance_bytes": 16384,
+                "handle_bytes": 120,
+                "cancel_settle_after": 300.0
+              }
+            },
+            "cables": {
+              "type": "object",
+              "properties": {
+                "record_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Largest Cable record",
+                  "description": "Bytes of one Cable record.",
+                  "default": 2097152
+                },
+                "records": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Cable records kept",
+                  "description": "Cable records the Registry holds.",
+                  "default": 10000
+                },
+                "body_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest Cable body",
+                  "description": "UTF-8 bytes of a Cable's body the Registry stores.",
+                  "default": 16384
+                },
+                "max_ttl": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "format": "seconds"
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "seconds",
+                  "title": "Longest a Cable lives",
+                  "description": "Seconds a Cable the Registry stores may live.",
+                  "default": 86400.0
+                },
+                "page": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Cables in one read",
+                  "description": "Cables one read of an inbox or of the held Cables takes.",
+                  "default": 1000
+                }
+              },
+              "additionalProperties": false,
+              "title": "Cables",
+              "description": "`[registry.limits.cables]`: Cables.",
+              "default": {
+                "record_bytes": 2097152,
+                "records": 10000,
+                "body_bytes": 16384,
+                "max_ttl": 86400.0,
+                "page": 1000
+              }
+            },
+            "clearance": {
+              "type": "object",
+              "properties": {
+                "record_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Largest clearance grant",
+                  "description": "Bytes of one clearance grant.",
+                  "default": 16384
+                },
+                "grants": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Clearance grants",
+                  "description": "Clearance grants.",
+                  "default": 10000
+                },
+                "text_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest signer, approval, model or reason",
+                  "description": "Bytes of a grant's signer, approval, model and reason.",
+                  "default": 512
+                }
+              },
+              "additionalProperties": false,
+              "title": "Clearance grants",
+              "description": "`[registry.limits.clearance]`: clearance grants.",
+              "default": {
+                "record_bytes": 16384,
+                "grants": 10000,
+                "text_bytes": 512
+              }
+            },
+            "contexts": {
+              "type": "object",
+              "properties": {
+                "context_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Largest Run context",
+                  "description": "Bytes of one Run's context kept; a longer one keeps its newest part and says how large it was.",
+                  "default": 8388608
+                },
+                "records": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Run contexts kept",
+                  "description": "Run contexts kept; the oldest filed go first.",
+                  "default": 2000
+                }
+              },
+              "additionalProperties": false,
+              "title": "Run contexts",
+              "description": "`[registry.limits.contexts]`: each Run's harness context.",
+              "default": {
+                "context_bytes": 8388608,
+                "records": 2000
+              }
+            },
+            "files": {
+              "type": "object",
+              "properties": {
+                "rename_retry": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "format": "seconds"
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "seconds",
+                  "title": "Retry replacing a held file for",
+                  "description": "Seconds a record write retries replacing a file another process holds open.",
+                  "default": 2.0
+                },
+                "lock_wait": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "format": "seconds"
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "seconds",
+                  "title": "Wait for the directory lock",
+                  "description": "Seconds a write waits for the Registry's directory lock.",
+                  "default": 30.0
+                }
+              },
+              "additionalProperties": false,
+              "title": "The file Registry's own waits",
+              "description": "`[registry.limits.files]`: the file Registry's own waits.",
+              "default": {
+                "rename_retry": 2.0,
+                "lock_wait": 30.0
+              }
+            },
+            "held": {
+              "type": "object",
+              "properties": {
+                "per_operation": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Held briefs per Operation",
+                  "description": "Briefs one Operation may hold.",
+                  "default": 1000
+                },
+                "records": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Held briefs in all",
+                  "description": "Briefs held across the Registry.",
+                  "default": 10000
+                },
+                "results": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Most held briefs in one listing",
+                  "description": "Held briefs one listing may ask for.",
+                  "default": 500
+                },
+                "clearance_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Largest stored clearance",
+                  "description": "Bytes of a stored clearance, the finding kinds a brief was released from.",
+                  "default": 4096
+                },
+                "reason_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest refusal reason",
+                  "description": "Bytes of the reason a held brief is refused for.",
+                  "default": 1024
+                },
+                "actor_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest name of who decided",
+                  "description": "Bytes of who released or refused a held brief.",
+                  "default": 256
+                }
+              },
+              "additionalProperties": false,
+              "title": "Briefs held by vetting",
+              "description": "`[registry.limits.held]`: briefs held by vetting.",
+              "default": {
+                "per_operation": 1000,
+                "records": 10000,
+                "results": 500,
+                "clearance_bytes": 4096,
+                "reason_bytes": 1024,
+                "actor_bytes": 256
+              }
+            },
+            "holds": {
+              "type": "object",
+              "properties": {
+                "record_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Largest hold",
+                  "description": "Bytes of one hold.",
+                  "default": 16384
+                },
+                "holds": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Holds",
+                  "description": "Holds.",
+                  "default": 10000
+                },
+                "text_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest reason, holder or route name",
+                  "description": "Bytes of a hold's reason, holder and route names.",
+                  "default": 2048
+                }
+              },
+              "additionalProperties": false,
+              "title": "Holds",
+              "description": "`[registry.limits.holds]`: Agents and routes held out of use.",
+              "default": {
+                "record_bytes": 16384,
+                "holds": 10000,
+                "text_bytes": 2048
+              }
+            },
+            "issues": {
+              "type": "object",
+              "properties": {
+                "links_per_mission": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Linked issues per Mission",
+                  "description": "Linked issues one Mission holds at once; unlinked ones do not count.",
+                  "default": 32
+                },
+                "outbox_records": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Outbox entries kept",
+                  "description": "Outbox entries kept; settled ones are dropped oldest first.",
+                  "default": 1000
+                },
+                "entry_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Largest outbox entry",
+                  "description": "Bytes of one outbox entry's text and payload.",
+                  "default": 131072
+                },
+                "replies_per_mission": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Stored replies per Mission",
+                  "description": "Replies from a linked issue one Mission stores; delivered ones make room first.",
+                  "default": 200
+                },
+                "reply_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest stored reply",
+                  "description": "Bytes of one stored reply, cut past it.",
+                  "default": 65536
+                }
+              },
+              "additionalProperties": false,
+              "title": "Linked issues and the outbox",
+              "description": "`[registry.limits.issues]`: linked issues and the outbox.",
+              "default": {
+                "links_per_mission": 32,
+                "outbox_records": 1000,
+                "entry_bytes": 131072,
+                "replies_per_mission": 200,
+                "reply_bytes": 65536
+              }
+            },
+            "logbook": {
+              "type": "object",
+              "properties": {
+                "entries": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Reports per logbook",
+                  "description": "Reports kept per logbook, and handed to the next round.",
+                  "default": 20
+                },
+                "summary_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest report summary",
+                  "description": "Bytes of a report's summary.",
+                  "default": 4096
+                },
+                "findings": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Findings per report",
+                  "description": "Findings per report.",
+                  "default": 32
+                },
+                "finding_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest finding",
+                  "description": "Bytes of one finding.",
+                  "default": 1024
+                }
+              },
+              "additionalProperties": false,
+              "title": "Station logbooks",
+              "description": "`[registry.limits.logbook]`: Station logbooks.",
+              "default": {
+                "entries": 20,
+                "summary_bytes": 4096,
+                "findings": 32,
+                "finding_bytes": 1024
+              }
+            },
+            "principals": {
+              "type": "object",
+              "properties": {
+                "record_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Largest person record",
+                  "description": "Bytes of one person's record.",
+                  "default": 16384
+                },
+                "principals": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "People kept",
+                  "description": "People kept.",
+                  "default": 1000000
+                },
+                "groups": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Groups on a person",
+                  "description": "Groups kept on one person.",
+                  "default": 1024
+                },
+                "text_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest ID, name or group",
+                  "description": "Bytes of a person's ID, names and each group.",
+                  "default": 512
+                },
+                "refresh": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "format": "seconds"
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "seconds",
+                  "title": "Sighting refresh",
+                  "description": "How old a person's last sighting may be before another sign-in writes it again; a changed name or group is written at once.",
+                  "default": 300.0
+                }
+              },
+              "additionalProperties": false,
+              "title": "People seen signing in",
+              "description": "`[registry.limits.principals]`: the people seen signing in.",
+              "default": {
+                "record_bytes": 16384,
+                "principals": 1000000,
+                "groups": 1024,
+                "text_bytes": 512,
+                "refresh": 300.0
+              }
+            },
+            "memories": {
+              "type": "object",
+              "properties": {
+                "content_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest entry",
+                  "description": "Bytes of one entry's content.",
+                  "default": 262144
+                },
+                "entries": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Entries in a scope",
+                  "description": "Entries in one scope.",
+                  "default": 1024
+                },
+                "scope_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "All the entries of a scope",
+                  "description": "Bytes of every entry's name, summary and content in one scope.",
+                  "default": 8388608
+                },
+                "versions": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Prior versions of an entry",
+                  "description": "Prior versions kept of one entry; forgetting the entry removes them. `0` keeps none.",
+                  "default": 8
+                },
+                "summary_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest summary",
+                  "description": "Bytes of an entry's one-line summary.",
+                  "default": 1024
+                },
+                "name_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest name or author",
+                  "description": "Bytes of an entry's name, or of who wrote it.",
+                  "default": 256
+                },
+                "compartments": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Compartments on an entry",
+                  "description": "Compartments on one entry, each at most `name_bytes`.",
+                  "default": 16
+                },
+                "index_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Words of an entry in the text index",
+                  "description": "Bytes of an entry's distinct words a database's text index holds. A word past it is found only by a search that matched another word of the entry, and PostgreSQL refuses an index of 1 MiB or more for one entry.",
+                  "default": 524288
+                },
+                "search_results": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Entries a search answers",
+                  "description": "Entries one search answers.",
+                  "default": 50
+                },
+                "query_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest search",
+                  "description": "Bytes of what one search asks for.",
+                  "default": 4096
+                },
+                "proposals": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Proposals waiting in a scope",
+                  "description": "Agents' proposals waiting for a person in one scope.",
+                  "default": 64
+                }
+              },
+              "additionalProperties": false,
+              "title": "Memory entries",
+              "description": "`[registry.limits.memories]`: memory entries, per scope.",
+              "default": {
+                "content_bytes": 262144,
+                "entries": 1024,
+                "scope_bytes": 8388608,
+                "versions": 8,
+                "summary_bytes": 1024,
+                "name_bytes": 256,
+                "compartments": 16,
+                "index_bytes": 524288,
+                "search_results": 50,
+                "query_bytes": 4096,
+                "proposals": 64
+              }
+            },
+            "proposals": {
+              "type": "object",
+              "properties": {
+                "record_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Largest Mission proposal",
+                  "description": "Bytes of one Mission proposal.",
+                  "default": 1048576
+                },
+                "records": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Pending proposals per Operation",
+                  "description": "Pending Mission proposals per Operation.",
+                  "default": 1000
+                },
+                "results": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Most proposals in one listing",
+                  "description": "Proposals one listing may ask for.",
+                  "default": 500
+                },
+                "idempotency_key_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest idempotency key",
+                  "description": "Bytes of a proposal's idempotency key.",
+                  "default": 256
+                }
+              },
+              "additionalProperties": false,
+              "title": "Mission proposals",
+              "description": "`[registry.limits.proposals]`: Mission proposals.",
+              "default": {
+                "record_bytes": 1048576,
+                "records": 1000,
+                "results": 500,
+                "idempotency_key_bytes": 256
+              }
+            },
+            "quarantine": {
+              "type": "object",
+              "properties": {
+                "record_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Largest quarantine record",
+                  "description": "Bytes of one quarantine record.",
+                  "default": 16384
+                },
+                "records": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Quarantine records",
+                  "description": "Quarantine records.",
+                  "default": 10000
+                },
+                "incidents": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Incidents per Agent",
+                  "description": "Incidents kept per Agent.",
+                  "default": 256
+                },
+                "keep_incidents": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "format": "seconds"
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "seconds",
+                  "title": "Keep an incident for",
+                  "description": "Seconds an incident is kept.",
+                  "default": 604800.0
+                }
+              },
+              "additionalProperties": false,
+              "title": "Quarantines and their incidents",
+              "description": "`[registry.limits.quarantine]`: quarantines and their incidents.",
+              "default": {
+                "record_bytes": 16384,
+                "records": 10000,
+                "incidents": 256,
+                "keep_incidents": 604800.0
+              }
+            },
+            "reports": {
+              "type": "object",
+              "properties": {
+                "record_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Largest Report",
+                  "description": "Bytes of one Report record.",
+                  "default": 65536
+                },
+                "reports": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Reports kept",
+                  "description": "Reports kept.",
+                  "default": 100000
+                },
+                "text_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest Report text",
+                  "description": "Bytes of a Report's text.",
+                  "default": 16384
+                },
+                "name_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest title or name",
+                  "description": "Bytes of a Report's kind and title, and of each name on it: filer, links, compartments.",
+                  "default": 256
+                },
+                "links": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Links on a Report",
+                  "description": "Links on one Report.",
+                  "default": 64
+                },
+                "page": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Reports in one list",
+                  "description": "Reports one list returns.",
+                  "default": 1000
+                },
+                "per_run": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Reports per Run in the window",
+                  "description": "Reports one Agent Run may file in the window.",
+                  "default": 20
+                },
+                "per_operation": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Agent Reports per scope in the window",
+                  "description": "Reports Agents together may file against one scope in the window.",
+                  "default": 200
+                },
+                "window": {
+                  "type": "number",
+                  "minimum": 0,
+                  "format": "seconds",
+                  "title": "Rate window",
+                  "description": "Seconds the two counts above look back over.",
+                  "default": 3600.0
+                },
+                "keep_closed": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "format": "seconds"
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "seconds",
+                  "title": "Keep a closed Report for",
+                  "description": "Seconds a closed Report is kept; `null` keeps it for good.",
+                  "default": "none"
+                }
+              },
+              "additionalProperties": false,
+              "title": "Reports",
+              "description": "`[registry.limits.reports]`: Reports.",
+              "default": {
+                "record_bytes": 65536,
+                "reports": 100000,
+                "text_bytes": 16384,
+                "name_bytes": 256,
+                "links": 64,
+                "page": 1000,
+                "per_run": 20,
+                "per_operation": 200,
+                "window": 3600.0,
+                "keep_closed": "none"
+              }
+            },
+            "runs": {
+              "type": "object",
+              "properties": {
+                "record_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Largest Run record",
+                  "description": "Bytes of one Run record.",
+                  "default": 65536
+                },
+                "records": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Run records",
+                  "description": "Run records.",
+                  "default": 100000
+                },
+                "id_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest Run ID",
+                  "description": "Bytes of a Run ID.",
+                  "default": 128
+                },
+                "exposures": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Exposures per Run",
+                  "description": "Exposures recorded per Run.",
+                  "default": 32
+                },
+                "exposure_source_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest exposure source",
+                  "description": "Bytes of an exposure's source.",
+                  "default": 128
+                },
+                "recent_events": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Recent event lines per Run",
+                  "description": "Recent event lines kept per Run.",
+                  "default": 20
+                },
+                "recent_event_chars": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Longest recent event line",
+                  "description": "Characters kept of each recent event line and of a lost Run's reason.",
+                  "default": 300
+                },
+                "exposure_sources": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Sources of exposure per brief",
+                  "description": "Sources of exposure one Run's brief records; the rest are not kept.",
+                  "default": 32
+                },
+                "final_report_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest final report",
+                  "description": "Bytes kept of an Agent's final message for its Mission's outcome; a longer one is cut and says so.",
+                  "default": 65536
+                },
+                "verdict_note_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest verdict note",
+                  "description": "Bytes of the note a person gives with a verdict on a Mission's outcome.",
+                  "default": 4096
+                },
+                "amendment_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest redispatch amendment",
+                  "description": "Bytes of what a redispatch adds to the next run's task.",
+                  "default": 8192
+                },
+                "deliverables": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Deliverables per attempt",
+                  "description": "Deliverables kept on one run.",
+                  "default": 32
+                },
+                "evidence_entries": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Probe findings per attempt",
+                  "description": "Probe findings kept on one run; the oldest go first.",
+                  "default": 64
+                },
+                "evidence_detail_chars": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Longest probe finding",
+                  "description": "Characters kept of a probe finding's detail.",
+                  "default": 300
+                },
+                "start_entries": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Starts per Run",
+                  "description": "Starts kept on one Run; the oldest go first.",
+                  "default": 32
+                },
+                "prompt_excerpt_chars": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Longest prompt excerpt",
+                  "description": "Characters kept of the prompt a start gave; its whole length and digest are kept too.",
+                  "default": 200
+                }
+              },
+              "additionalProperties": false,
+              "title": "Run records",
+              "description": "`[registry.limits.runs]`: Run records.",
+              "default": {
+                "record_bytes": 65536,
+                "records": 100000,
+                "id_bytes": 128,
+                "exposures": 32,
+                "exposure_source_bytes": 128,
+                "recent_events": 20,
+                "recent_event_chars": 300,
+                "exposure_sources": 32,
+                "final_report_bytes": 65536,
+                "verdict_note_bytes": 4096,
+                "amendment_bytes": 8192,
+                "deliverables": 32,
+                "evidence_entries": 64,
+                "evidence_detail_chars": 300,
+                "start_entries": 32,
+                "prompt_excerpt_chars": 200
+              }
+            },
+            "sleepers": {
+              "type": "object",
+              "properties": {
+                "catch_up": {
+                  "anyOf": [
+                    {
+                      "anyOf": [
+                        {
+                          "type": "number",
+                          "minimum": 0,
+                          "format": "seconds"
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "none"
+                          ],
+                          "x-enum-labels": {
+                            "none": "No limit"
+                          }
+                        }
+                      ],
+                      "format": "seconds"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "A missed window still fires within",
+                  "description": "Seconds a missed window may be late and still fire, once; an older one is skipped and recorded. `none` keeps no limit. Default: the window's own period, the time since the window before it."
+                },
+                "prompt_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest Sleeper prompt",
+                  "description": "Bytes of a Sleeper's prompt.",
+                  "default": 16384
+                },
+                "lookback_days": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295,
+                  "title": "Days searched back for a window",
+                  "description": "Days a schedule is searched back for its latest window.",
+                  "default": 366
+                },
+                "skipped_events": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Skipped windows named one by one",
+                  "description": "Skipped windows the timeline names one by one when a later window comes; any older ones are one event.",
+                  "default": 64
+                }
+              },
+              "additionalProperties": false,
+              "title": "Sleepers",
+              "description": "`[registry.limits.sleepers]`: Sleepers.",
+              "default": {
+                "prompt_bytes": 16384,
+                "lookback_days": 366,
+                "skipped_events": 64
+              }
+            },
+            "sources": {
+              "type": "object",
+              "properties": {
+                "item_text_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest Source item text",
+                  "description": "Bytes of a Source item's text.",
+                  "default": 65536
+                },
+                "report_attempts": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Tries to report a finished brief",
+                  "description": "Times reporting a finished brief to its Source is tried before it is dropped.",
+                  "default": 5
+                },
+                "name_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest name beside a Mission ID",
+                  "description": "Bytes of the name a brief shows beside its Mission ID.",
+                  "default": 256
+                }
+              },
+              "additionalProperties": false,
+              "title": "Source items and reports",
+              "description": "`[registry.limits.sources]`: Source items and reports.",
+              "default": {
+                "item_text_bytes": 65536,
+                "report_attempts": 5,
+                "name_bytes": 256
+              }
+            },
+            "stations": {
+              "type": "object",
+              "properties": {
+                "record_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Largest Station record",
+                  "description": "Bytes of one Station record.",
+                  "default": 1048576
+                },
+                "records": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Station records",
+                  "description": "Station records.",
+                  "default": 1000
+                },
+                "settings_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Largest Station settings record",
+                  "description": "Bytes of a Station's settings record.",
+                  "default": 4096
+                },
+                "mission_capacity": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Most Missions a Station may run at once",
+                  "description": "Missions a Station's settings may let it run at once.",
+                  "default": 1024
+                },
+                "gone_dark_after": {
+                  "type": "number",
+                  "minimum": 0,
+                  "format": "seconds",
+                  "title": "A Station goes dark after",
+                  "description": "Seconds after its last check-in that a Station counts as dark.",
+                  "default": 180.0
+                }
+              },
+              "additionalProperties": false,
+              "title": "Station records",
+              "description": "`[registry.limits.stations]`: Station records.",
+              "default": {
+                "record_bytes": 1048576,
+                "records": 1000,
+                "settings_bytes": 4096,
+                "mission_capacity": 1024,
+                "gone_dark_after": 180.0
+              }
+            },
+            "timeline": {
+              "type": "object",
+              "properties": {
+                "records": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Events kept",
+                  "description": "Events kept; the oldest are dropped past it.",
+                  "default": 10000
+                },
+                "record_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Largest event",
+                  "description": "Bytes of one event.",
+                  "default": 8192
+                },
+                "id_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest event ID",
+                  "description": "Bytes of an event's ID.",
+                  "default": 128
+                },
+                "name_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest kind, action or detail key",
+                  "description": "Bytes of an event's kind, action and detail keys.",
+                  "default": 64
+                },
+                "text_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest event text",
+                  "description": "Bytes of an event's Operation, Station, Mission, Run, actor and detail values.",
+                  "default": 256
+                },
+                "detail_entries": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Details per event",
+                  "description": "Detail entries per event.",
+                  "default": 8
+                }
+              },
+              "additionalProperties": false,
+              "title": "The activity timeline",
+              "description": "`[registry.limits.timeline]`: the activity timeline.",
+              "default": {
+                "records": 10000,
+                "record_bytes": 8192,
+                "id_bytes": 128,
+                "name_bytes": 64,
+                "text_bytes": 256,
+                "detail_entries": 8
+              }
+            },
+            "tokens": {
+              "type": "object",
+              "properties": {
+                "record_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Largest access token record",
+                  "description": "Bytes of one access token record.",
+                  "default": 16384
+                }
+              },
+              "additionalProperties": false,
+              "title": "Access tokens",
+              "description": "`[registry.limits.tokens]`: access tokens.",
+              "default": {
+                "record_bytes": 16384
+              }
+            },
+            "usage": {
+              "type": "object",
+              "properties": {
+                "ledger_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Largest usage ledger",
+                  "description": "Bytes of one Mission's usage ledger.",
+                  "default": 1048576
+                },
+                "kept_days": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295,
+                  "title": "Days of usage kept",
+                  "description": "Days of usage kept.",
+                  "default": 8
+                }
+              },
+              "additionalProperties": false,
+              "title": "The usage ledger",
+              "description": "`[registry.limits.usage]`: the usage ledger.",
+              "default": {
+                "ledger_bytes": 1048576,
+                "kept_days": 8
+              }
+            },
+            "charges": {
+              "type": "object",
+              "properties": {
+                "records": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Charge records",
+                  "description": "Charge records the Registry keeps.",
+                  "default": 1024
+                },
+                "record_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Largest charge record",
+                  "description": "Bytes of one charge's record.",
+                  "default": 1048576
+                },
+                "logbook": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Logbook entries per charge",
+                  "description": "Logbook entries kept per charge, and handed to a fresh Run; past it the oldest go.",
+                  "default": 100
+                },
+                "entry_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest logbook entry",
+                  "description": "Bytes of one logbook entry's text, or of a control's note; a longer entry is cut.",
+                  "default": 2048
+                },
+                "seen": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Events remembered per charge",
+                  "description": "Events a charge remembers being told of, so it is not told twice; past it the oldest go.",
+                  "default": 1024
+                },
+                "controls": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Controls waiting per charge",
+                  "description": "Controls waiting for a charge's Station; past it a control is refused.",
+                  "default": 32
+                }
+              },
+              "additionalProperties": false,
+              "title": "Charge records",
+              "description": "`[registry.limits.charges]`: charge records.",
+              "default": {
+                "records": 1024,
+                "record_bytes": 1048576,
+                "logbook": 100,
+                "entry_bytes": 2048,
+                "seen": 1024,
+                "controls": 32
+              }
+            }
+          },
+          "additionalProperties": false,
+          "title": "What the Registry keeps and accepts",
+          "description": "`[registry.limits]`: what the Registry keeps and accepts, one table per record family.",
+          "default": {
+            "accounts": {
+              "record_bytes": 262144,
+              "claims": 1024,
+              "windows": 8,
+              "kept_days": 8,
+              "sealed_bytes": 4194304
+            },
+            "agents": {
+              "record_bytes": 1048576,
+              "operations": 128,
+              "clearances": 8,
+              "counted": 256,
+              "model_history": 16,
+              "key_bytes": 512,
+              "agent_bytes": 256
+            },
+            "agent_roles": {
+              "record_bytes": 32768,
+              "records": 256
+            },
+            "api_keys": {
+              "record_bytes": 16384,
+              "keys": 100000,
+              "scopes": 256,
+              "text_bytes": 512
+            },
+            "approvals": {
+              "record_bytes": 16384,
+              "pending": 1000,
+              "class_authorizations": 1000,
+              "mission_requests": 64,
+              "reason_bytes": 2048,
+              "note_bytes": 1024,
+              "signer_bytes": 256,
+              "idempotency_key_bytes": 256,
+              "class_entries": 64,
+              "pattern_bytes": 256,
+              "name_bytes": 128,
+              "expired_listed": 200,
+              "links": 8,
+              "link_label_bytes": 128,
+              "link_url_bytes": 1024
+            },
+            "assistant_log": {
+              "entry_bytes": 1048576
+            },
+            "audit": {
+              "record_bytes": 16384,
+              "records": 10000,
+              "results": 500
+            },
+            "briefs": {
+              "record_bytes": 1048576,
+              "records": 1000,
+              "provenance_bytes": 16384,
+              "handle_bytes": 120,
+              "cancel_settle_after": 300.0
+            },
+            "cables": {
+              "record_bytes": 2097152,
+              "records": 10000,
+              "body_bytes": 16384,
+              "max_ttl": 86400.0,
+              "page": 1000
+            },
+            "clearance": {
+              "record_bytes": 16384,
+              "grants": 10000,
+              "text_bytes": 512
+            },
+            "contexts": {
+              "context_bytes": 8388608,
+              "records": 2000
+            },
+            "files": {
+              "rename_retry": 2.0,
+              "lock_wait": 30.0
+            },
+            "held": {
+              "per_operation": 1000,
+              "records": 10000,
+              "results": 500,
+              "clearance_bytes": 4096,
+              "reason_bytes": 1024,
+              "actor_bytes": 256
+            },
+            "holds": {
+              "record_bytes": 16384,
+              "holds": 10000,
+              "text_bytes": 2048
+            },
+            "issues": {
+              "links_per_mission": 32,
+              "outbox_records": 1000,
+              "entry_bytes": 131072,
+              "replies_per_mission": 200,
+              "reply_bytes": 65536
+            },
+            "logbook": {
+              "entries": 20,
+              "summary_bytes": 4096,
+              "findings": 32,
+              "finding_bytes": 1024
+            },
+            "principals": {
+              "record_bytes": 16384,
+              "principals": 1000000,
+              "groups": 1024,
+              "text_bytes": 512,
+              "refresh": 300.0
+            },
+            "memories": {
+              "content_bytes": 262144,
+              "entries": 1024,
+              "scope_bytes": 8388608,
+              "versions": 8,
+              "summary_bytes": 1024,
+              "name_bytes": 256,
+              "compartments": 16,
+              "index_bytes": 524288,
+              "search_results": 50,
+              "query_bytes": 4096,
+              "proposals": 64
+            },
+            "proposals": {
+              "record_bytes": 1048576,
+              "records": 1000,
+              "results": 500,
+              "idempotency_key_bytes": 256
+            },
+            "quarantine": {
+              "record_bytes": 16384,
+              "records": 10000,
+              "incidents": 256,
+              "keep_incidents": 604800.0
+            },
+            "reports": {
+              "record_bytes": 65536,
+              "reports": 100000,
+              "text_bytes": 16384,
+              "name_bytes": 256,
+              "links": 64,
+              "page": 1000,
+              "per_run": 20,
+              "per_operation": 200,
+              "window": 3600.0,
+              "keep_closed": "none"
+            },
+            "runs": {
+              "record_bytes": 65536,
+              "records": 100000,
+              "id_bytes": 128,
+              "exposures": 32,
+              "exposure_source_bytes": 128,
+              "recent_events": 20,
+              "recent_event_chars": 300,
+              "exposure_sources": 32,
+              "final_report_bytes": 65536,
+              "verdict_note_bytes": 4096,
+              "amendment_bytes": 8192,
+              "deliverables": 32,
+              "evidence_entries": 64,
+              "evidence_detail_chars": 300,
+              "start_entries": 32,
+              "prompt_excerpt_chars": 200
+            },
+            "sleepers": {
+              "prompt_bytes": 16384,
+              "lookback_days": 366,
+              "skipped_events": 64
+            },
+            "sources": {
+              "item_text_bytes": 65536,
+              "report_attempts": 5,
+              "name_bytes": 256
+            },
+            "stations": {
+              "record_bytes": 1048576,
+              "records": 1000,
+              "settings_bytes": 4096,
+              "mission_capacity": 1024,
+              "gone_dark_after": 180.0
+            },
+            "timeline": {
+              "records": 10000,
+              "record_bytes": 8192,
+              "id_bytes": 128,
+              "name_bytes": 64,
+              "text_bytes": 256,
+              "detail_entries": 8
+            },
+            "tokens": {
+              "record_bytes": 16384
+            },
+            "usage": {
+              "ledger_bytes": 1048576,
+              "kept_days": 8
+            },
+            "charges": {
+              "records": 1024,
+              "record_bytes": 1048576,
+              "logbook": 100,
+              "entry_bytes": 2048,
+              "seen": 1024,
+              "controls": 32
+            }
+          }
+        },
+        "provider": {
+          "type": "object",
+          "properties": {
+            "loadout_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Loadout document",
+              "description": "Bytes of the loadout document (`loadout`, `sandbox`, `mcp`, `overlay`, `secret`, `secret_provider` and `pool` records together).",
+              "default": 1048576
+            },
+            "loadout_value_chars": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "One loadout value, in characters",
+              "description": "Characters of one text value in a loadout document.",
+              "default": 4096
+            },
+            "access_policy_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Access policy",
+              "description": "Bytes of the access policy (the `access` record).",
+              "default": 1048576
+            },
+            "replace_retry": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "format": "seconds"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "seconds",
+              "title": "Wait for a reader of a family file",
+              "description": "Seconds a directory provider's replacement of a family file waits for a reader that has the file open.",
+              "default": 2.0
+            }
+          },
+          "additionalProperties": false,
+          "title": "What the configuration provider reads",
+          "description": "`[registry.provider]`: how much of a document the configuration provider reads.",
+          "default": {
+            "loadout_bytes": 1048576,
+            "loadout_value_chars": 4096,
+            "access_policy_bytes": 1048576,
+            "replace_retry": 2.0
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "form": {},
+    "key": {
+      "title": "Registry limits",
+      "description": "",
+      "fixed": "settings"
+    }
   }
 }

@@ -43,7 +43,7 @@ impl SealedStore for SqlRegistry {
 
     fn sealed_value(&self, name: &str) -> io::Result<Option<SealedRecord>> {
         validate_name(name)?;
-        let limits = &self.limits.accounts;
+        let limits = &self.current_limits().accounts;
         self.read(|tx| {
             tx.query_opt(
                 "SELECT record FROM ai6_sealed_values WHERE name = $1",
@@ -55,7 +55,7 @@ impl SealedStore for SqlRegistry {
     }
 
     fn sealed_revisions(&self) -> io::Result<BTreeMap<String, u64>> {
-        let limits = &self.limits.accounts;
+        let limits = &self.current_limits().accounts;
         self.read(|tx| {
             tx.query("SELECT record FROM ai6_sealed_values", &[])?
                 .into_iter()
@@ -76,7 +76,7 @@ impl SealedStore for SqlRegistry {
         now: f64,
     ) -> Result<u64, SealedWriteError> {
         validate_name(name)?;
-        let limits = &self.limits.accounts;
+        let limits = &self.current_limits().accounts;
         self.write(|tx, clock| {
             let held = tx
                 .query_opt(

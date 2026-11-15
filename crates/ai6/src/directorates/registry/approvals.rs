@@ -650,7 +650,12 @@ impl FileRegistry {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error),
         };
-        if !self.limits.approvals.record_bytes.allows(bytes.len()) {
+        if !self
+            .current_limits()
+            .approvals
+            .record_bytes
+            .allows(bytes.len())
+        {
             return Err(invalid_data("green ink record exceeds the size limit"));
         }
         serde_json::from_slice(&bytes)
@@ -660,7 +665,12 @@ impl FileRegistry {
 
     fn write_json(&self, path: &Path, value: &impl Serialize) -> io::Result<()> {
         let bytes = serde_json::to_vec(value).map_err(io::Error::other)?;
-        if !self.limits.approvals.record_bytes.allows(bytes.len()) {
+        if !self
+            .current_limits()
+            .approvals
+            .record_bytes
+            .allows(bytes.len())
+        {
             return Err(invalid_data("green ink record exceeds the size limit"));
         }
         self.write_atomic(path, &bytes)
@@ -748,7 +758,7 @@ impl FileRegistry {
         if ids.contains(&request.id) {
             return Ok(());
         }
-        let most = self.limits.approvals.mission_requests;
+        let most = self.current_limits().approvals.mission_requests;
         if !most.allows(ids.len() + 1) {
             return Err(invalid_data(format!(
                 "the Mission has made {most} green ink requests"
@@ -937,13 +947,13 @@ pub trait ApprovalStore {
 
 impl ApprovalStore for FileRegistry {
     fn request_approval(&self, request: &ApprovalRequest) -> io::Result<ApprovalStatus> {
-        request.validate(&self.limits.approvals)?;
+        request.validate(&self.current_limits().approvals)?;
         let _lock = self.lock()?;
         if let Some(status) = self.status_locked(&request.operation, &request.id, 0.0)? {
             return Ok(status);
         }
         let pending = self.approvals_dir("pending", &request.operation);
-        let most = self.limits.approvals.pending;
+        let most = self.current_limits().approvals.pending;
         if !most.allows(count_json(&pending)? + 1) {
             return Err(invalid_data(format!(
                 "the Operation has {most} requests waiting for green ink"
@@ -1032,7 +1042,7 @@ impl ApprovalStore for FileRegistry {
     fn decide_approval(&self, operation: &str, id: &str, ruling: &Ruling) -> io::Result<Approval> {
         validate_registry_key(operation)?;
         validate_registry_key(id)?;
-        validate_ruling(ruling, &self.limits.approvals)?;
+        validate_ruling(ruling, &self.current_limits().approvals)?;
         let _lock = self.lock()?;
         match self.status_locked(operation, id, ruling.at)? {
             None => Err(io::Error::new(
@@ -1062,7 +1072,7 @@ impl ApprovalStore for FileRegistry {
     ) -> io::Result<Approval> {
         validate_registry_key(operation)?;
         validate_registry_key(id)?;
-        validate_note(revocation.note.as_deref(), &self.limits.approvals)?;
+        validate_note(revocation.note.as_deref(), &self.current_limits().approvals)?;
         let _lock = self.lock()?;
         let path = self
             .approvals_dir("decided", operation)
@@ -1102,7 +1112,7 @@ impl ApprovalStore for FileRegistry {
         Ok(newest_expired(
             expired,
             since,
-            self.limits.approvals.expired_listed,
+            self.current_limits().approvals.expired_listed,
         ))
     }
 
@@ -1115,11 +1125,11 @@ impl ApprovalStore for FileRegistry {
     ) -> io::Result<ApprovalRequest> {
         validate_registry_key(operation)?;
         validate_registry_key(id)?;
-        validate_rearming(rearming, expires_at, &self.limits.approvals)?;
+        validate_rearming(rearming, expires_at, &self.current_limits().approvals)?;
         let _lock = self.lock()?;
         let approval = expired_undecided(self.status_locked(operation, id, rearming.at)?)?;
         let pending = self.approvals_dir("pending", operation);
-        let most = self.limits.approvals.pending;
+        let most = self.current_limits().approvals.pending;
         if !most.allows(count_json(&pending)? + 1) {
             return Err(invalid_data(format!(
                 "the Operation has {most} requests waiting for green ink"
@@ -1193,7 +1203,7 @@ impl ApprovalStore for FileRegistry {
         clearance: &str,
         now: f64,
     ) -> io::Result<Option<Approval>> {
-        request.validate(&self.limits.approvals)?;
+        request.validate(&self.current_limits().approvals)?;
         let _lock = self.lock()?;
         if self
             .status_locked(&request.operation, &request.id, 0.0)?
@@ -1231,7 +1241,7 @@ impl ApprovalStore for FileRegistry {
     }
 
     fn put_class_authorization(&self, record: &ClassAuthorization) -> io::Result<()> {
-        record.validate(&self.limits.approvals)?;
+        record.validate(&self.current_limits().approvals)?;
         let _lock = self.lock()?;
         let directory = self.class_dir(&record.operation);
         let path = directory.join(format!("{}.json", record.id));
@@ -1241,7 +1251,7 @@ impl ApprovalStore for FileRegistry {
                 "the class authorisation identity is taken",
             ));
         }
-        let most = self.limits.approvals.class_authorizations;
+        let most = self.current_limits().approvals.class_authorizations;
         if !most.allows(count_json(&directory)? + 1) {
             return Err(invalid_data(format!(
                 "the Operation holds {most} class authorisations"

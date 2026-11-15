@@ -1,11 +1,14 @@
-//! How much the Registry keeps and accepts: [`RegistryLimits`], read from `[registry.limits]`
-//! in the bootstrap file, one table per record family. Each default is the value the
-//! Registry applies when the file says nothing.
+//! How much the Registry keeps and accepts: [`RegistryLimits`], the `limits` of the `registry`
+//! configuration record, one table per record family. Each default is the value the Registry
+//! applies when the record says nothing; a Registry applies a changed record at the next poll
+//! ([`LiveLimits`]).
 //!
 //! Counts and sizes are [`Limit`]s and ages are [`TimeLimit`]s: `null` (or `"none"` in TOML)
 //! takes the bound away. A record refused for its size or a family refused for its count
 //! fails the write with `InvalidData` (or `InvalidInput` for a request), as without
-//! settings.
+//! a record.
+
+use std::sync::{Arc, PoisonError, RwLock};
 
 use guatiao::{FromValue, Schema, ToValue};
 
@@ -13,6 +16,33 @@ use crate::bounds::{Limit, Seconds, TimeLimit};
 
 const KIB: u64 = 1024;
 const MIB: u64 = 1024 * 1024;
+
+/// The [`RegistryLimits`] a Registry applies now. Every clone shares one cell, and
+/// [`set`](Self::set) replaces the whole set at once, so an operation that read it keeps one
+/// consistent set to its end and the next operation reads the new one.
+#[derive(Clone, Debug, Default)]
+pub struct LiveLimits(Arc<RwLock<Arc<RegistryLimits>>>);
+
+impl LiveLimits {
+    /// A cell holding `limits`.
+    pub fn new(limits: RegistryLimits) -> Self {
+        Self(Arc::new(RwLock::new(Arc::new(limits))))
+    }
+
+    /// The limits in force now.
+    pub fn get(&self) -> Arc<RegistryLimits> {
+        self.0
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Replaces the limits for every operation that starts after this call. What is already
+    /// stored is neither read again nor removed.
+    pub fn set(&self, limits: RegistryLimits) {
+        *self.0.write().unwrap_or_else(PoisonError::into_inner) = Arc::new(limits);
+    }
+}
 
 /// `[registry.limits]`: every bound the Registry applies, one table per record family.
 #[non_exhaustive]

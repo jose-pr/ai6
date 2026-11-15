@@ -868,7 +868,7 @@ pub struct CableRelay {
 
 impl CableRelay {
     /// The limits of the Registry the relay stores Cables in.
-    pub fn limits(&self) -> &crate::directorates::registry::limits::RegistryLimits {
+    pub fn limits(&self) -> Arc<crate::directorates::registry::limits::RegistryLimits> {
         self.registry.limits()
     }
 

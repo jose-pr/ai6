@@ -832,13 +832,13 @@ impl FileRegistry {
             }
             Err(error) => return Err(error),
         };
-        parse_state(&bytes, &self.limits.accounts)
+        parse_state(&bytes, &self.current_limits().accounts)
     }
 
     fn write_account(&self, state: &AccountState) -> io::Result<()> {
         self.write_atomic(
             &self.account_path(&state.account),
-            &state_bytes(state, &self.limits.accounts)?,
+            &state_bytes(state, &self.current_limits().accounts)?,
         )
     }
 
@@ -901,7 +901,12 @@ impl AccountStore for FileRegistry {
             validate_ref(&AccountRef::new(&request.pool, &candidate.account))?;
         }
         let _lock = self.lock()?;
-        let (chosen, changed) = claim_among(self.accounts()?, request, now, &self.limits.accounts);
+        let (chosen, changed) = claim_among(
+            self.accounts()?,
+            request,
+            now,
+            &self.current_limits().accounts,
+        );
         for state in &changed {
             self.write_account(state)?;
         }
@@ -938,7 +943,7 @@ impl AccountStore for FileRegistry {
 
     fn report_quota(&self, account: &AccountRef, windows: &[QuotaWindow]) -> io::Result<()> {
         self.update_account(account, |state| {
-            report_in(state, windows, &self.limits.accounts)
+            report_in(state, windows, &self.current_limits().accounts)
         })
     }
 
@@ -958,7 +963,7 @@ impl AccountStore for FileRegistry {
 
     fn record_account_usage(&self, account: &AccountRef, tokens: u64, now: i64) -> io::Result<()> {
         self.update_account(account, |state| {
-            add_tokens(state, tokens, now, &self.limits.accounts)
+            add_tokens(state, tokens, now, &self.current_limits().accounts)
         })
     }
 
@@ -980,7 +985,10 @@ impl AccountStore for FileRegistry {
                     .extension()
                     .is_some_and(|extension| extension == "json")
                 {
-                    states.push(parse_state(&fs::read(&path)?, &self.limits.accounts)?);
+                    states.push(parse_state(
+                        &fs::read(&path)?,
+                        &self.current_limits().accounts,
+                    )?);
                 }
             }
         }

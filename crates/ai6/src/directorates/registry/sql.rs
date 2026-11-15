@@ -56,7 +56,7 @@ use zeroize::Zeroizing;
 use db::{Clock, Database, Location, Tx};
 
 use super::backend::Limited;
-use super::limits::RegistryLimits;
+use super::limits::{LiveLimits, RegistryLimits};
 use crate::bounds::Limit;
 
 /// How a SQL Registry or roster connects to PostgreSQL: a password kept out of the location,
@@ -348,7 +348,7 @@ pub(crate) fn postgres_admin(location: &str, sql: &str) -> io::Result<()> {
 #[derive(Debug)]
 pub struct SqlRegistry {
     db: Database,
-    limits: Arc<RegistryLimits>,
+    limits: LiveLimits,
 }
 
 impl SqlRegistry {
@@ -380,7 +380,7 @@ impl SqlRegistry {
         })?;
         Ok(Self {
             db: Database::open(location, options)?,
-            limits: Arc::new(options.limits.clone()),
+            limits: LiveLimits::new(options.limits.clone()),
         })
     }
 
@@ -410,9 +410,20 @@ impl SqlRegistry {
     }
 }
 
+impl SqlRegistry {
+    /// The limits in force now.
+    fn current_limits(&self) -> Arc<RegistryLimits> {
+        self.limits.get()
+    }
+}
+
 impl Limited for SqlRegistry {
-    fn limits(&self) -> &RegistryLimits {
-        &self.limits
+    fn limits(&self) -> Arc<RegistryLimits> {
+        self.limits.get()
+    }
+
+    fn set_limits(&self, limits: RegistryLimits) {
+        self.limits.set(limits);
     }
 }
 

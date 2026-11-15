@@ -91,6 +91,7 @@ const ROSTER_KINDS: &[&str] = &[
     "cables",
     "station",
     "unex",
+    "registry",
 ];
 const MEMORY_SCOPES: &[&str] = &["global"];
 

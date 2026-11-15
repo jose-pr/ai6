@@ -182,7 +182,7 @@ impl FileRegistry {
 
 impl HoldStore for FileRegistry {
     fn put_hold(&self, hold: &RosterHold) -> io::Result<()> {
-        let limits = &self.limits.holds;
+        let limits = &self.current_limits().holds;
         hold.validate(limits)?;
         let bytes = hold_bytes(hold, limits)?;
         let _lock = self.lock()?;
@@ -204,7 +204,7 @@ impl HoldStore for FileRegistry {
         for entry in entries {
             let path = entry?.path();
             if let Ok(bytes) = fs::read(&path)
-                && let Ok(hold) = parse_hold(&bytes, &self.limits.holds)
+                && let Ok(hold) = parse_hold(&bytes, &self.current_limits().holds)
                 && hold.operation == operation
                 && path.file_stem().and_then(|stem| stem.to_str())
                     == Some(
@@ -243,7 +243,7 @@ impl HoldStore for FileRegistry {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error),
         };
-        let hold = parse_hold(&bytes, &self.limits.holds)?;
+        let hold = parse_hold(&bytes, &self.current_limits().holds)?;
         fs::remove_file(&path)?;
         Ok(Some(hold))
     }

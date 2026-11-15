@@ -66,7 +66,7 @@ impl SqlRegistry {
     /// Keeps `entry`'s words where its backend looks for them, in the transaction writing it.
     fn set_search_words(&self, tx: &mut Tx<'_>, entry: &MemoryEntry) -> io::Result<()> {
         let id = entry.header.id.as_str();
-        let words = index_words(entry, self.limits.memories.index_bytes);
+        let words = index_words(entry, self.current_limits().memories.index_bytes);
         match self.db.dialect() {
             #[cfg(feature = "sqlite")]
             Dialect::Sqlite => {
@@ -138,7 +138,7 @@ impl SqlRegistry {
         previous: &MemoryEntry,
         revision: i64,
     ) -> io::Result<()> {
-        let keep = self.limits.memories.versions;
+        let keep = self.current_limits().memories.versions;
         let id = previous.header.id.as_str();
         if keep.allows(1u64) {
             tx.execute(
@@ -170,8 +170,8 @@ impl SqlRegistry {
 }
 
 impl MemoryStore for SqlRegistry {
-    fn memory_limits(&self) -> &MemoryLimits {
-        &self.limits.memories
+    fn memory_limits(&self) -> MemoryLimits {
+        self.current_limits().memories.clone()
     }
 
     fn write_memory(
@@ -179,7 +179,7 @@ impl MemoryStore for SqlRegistry {
         mut entry: MemoryEntry,
         base: Option<u64>,
     ) -> Result<MemoryEntry, MemoryError> {
-        let limits = self.limits.memories.clone();
+        let limits = self.current_limits().memories.clone();
         entry.validate(&limits).map_err(MemoryError::Invalid)?;
         entry.header.bytes = entry.size();
         self.write(|tx, revision| {
@@ -333,7 +333,7 @@ impl MemoryStore for SqlRegistry {
     }
 
     fn propose_memory(&self, proposal: &MemoryProposal) -> Result<(), MemoryError> {
-        let limits = self.limits.memories.clone();
+        let limits = self.current_limits().memories.clone();
         proposal.validate(&limits).map_err(MemoryError::Invalid)?;
         let record = to_json(proposal)?;
         self.write(|tx, revision| {

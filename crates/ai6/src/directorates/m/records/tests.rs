@@ -899,7 +899,6 @@ fn loaded(definitions: Vec<(ConfigRecord, Value)>) -> crate::ConfigSnapshot {
         &layer,
         None,
         &"the fixture",
-        &crate::ConfigLimits::default(),
     )
     .unwrap()
 }
@@ -1057,6 +1056,7 @@ fn the_app_s_copy_of_the_forms_is_current() {
         ("plugins", ConfigRecord::Plugin),
         ("tls", ConfigRecord::Tls),
         ("cables", ConfigRecord::Cables),
+        ("registry", ConfigRecord::Registry),
     ]
     .into_iter()
     .map(|(kind, record)| {

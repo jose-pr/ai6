@@ -47,6 +47,7 @@ use crate::directorates::m::theaters::Theaters;
 use crate::directorates::q::LoadoutCatalog;
 use crate::directorates::registry::bona_fides::PinSet;
 use crate::directorates::registry::cables::CableConfig;
+use crate::directorates::registry::limits::RegistryLimits;
 use crate::station::limits;
 
 /// The families of record a configuration provider holds.
@@ -118,12 +119,16 @@ pub enum ConfigRecord {
     /// A charge ([`ChargeDefinition`](crate::ChargeDefinition)): the keys of a `[charge.<scope>]`
     /// table, keyed by its scope (`m`, `operation:<codename>`, `station:<id>`); global only.
     Charge,
+    /// The Registry's limits and the configuration provider's ([`RegistryRecord`]): the whole
+    /// `registry` file; a singleton, global only.
+    Registry,
 }
 
 impl ConfigRecord {
     /// Every family, in the order a snapshot is built.
-    pub const ALL: [Self; 24] = [
+    pub const ALL: [Self; 25] = [
         Self::Roster,
+        Self::Registry,
         Self::Operation,
         Self::Agent,
         Self::Role,
@@ -183,6 +188,7 @@ impl ConfigRecord {
             Self::Compartment => "compartment",
             Self::Review => "review",
             Self::Charge => "charge",
+            Self::Registry => "registry",
         }
     }
 
@@ -215,6 +221,7 @@ impl ConfigRecord {
             Self::Compartment => "compartments",
             Self::Review => "reviews",
             Self::Charge => "charges",
+            Self::Registry => "registry",
         }
     }
 
@@ -229,6 +236,7 @@ impl ConfigRecord {
                 | Self::Access
                 | Self::Unex
                 | Self::Roster
+                | Self::Registry
         )
     }
 
@@ -406,21 +414,30 @@ impl ConfigRevision {
     }
 }
 
-/// How much the configuration provider reads of a document: `[provider]` in the bootstrap
-/// file. Each default is the value the provider applies when the file says nothing; `null`
-/// (or `"none"` in TOML) takes the bound away.
+/// How much the configuration provider reads of a document: `[registry.provider]`, the
+/// `provider` table of the `registry` record. Each default is the value the provider applies
+/// when the record says nothing; `null` (or `"none"` in TOML) takes the bound away.
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq, guatiao::ToValue)]
+#[derive(Debug, Clone, PartialEq, Eq, guatiao::ToValue, guatiao::FromValue, guatiao::Schema)]
+#[map(deny_unknown_fields)]
 pub struct ConfigLimits {
     /// Bytes of the loadout document (`loadout`, `sandbox`, `mcp`, `overlay`, `secret`,
     /// `secret_provider` and `pool` records together).
+    #[schema(title = "Loadout document", format = "bytes")]
+    #[map(default = ConfigLimits::default().loadout_bytes)]
     pub loadout_bytes: Limit,
     /// Characters of one text value in a loadout document.
+    #[schema(title = "One loadout value, in characters")]
+    #[map(default = ConfigLimits::default().loadout_value_chars)]
     pub loadout_value_chars: Limit,
     /// Bytes of the access policy (the `access` record).
+    #[schema(title = "Access policy", format = "bytes")]
+    #[map(default = ConfigLimits::default().access_policy_bytes)]
     pub access_policy_bytes: Limit,
-    /// How long a directory provider's replacement of a family file waits for a reader that has
+    /// Seconds a directory provider's replacement of a family file waits for a reader that has
     /// the file open.
+    #[schema(title = "Wait for a reader of a family file")]
+    #[map(default = ConfigLimits::default().replace_retry)]
     pub replace_retry: crate::bounds::TimeLimit,
 }
 
@@ -447,8 +464,73 @@ impl ConfigLimits {
         if let Some(table) = current.as_object_mut() {
             table.remove("replace_retry");
         }
-        crate::bounds::looser("provider", &current, &default, &[])
+        crate::bounds::looser("registry.provider", &current, &default, &[])
     }
+}
+
+/// The Registry's limits and the configuration provider's, the `registry` record.
+///
+/// A Registry opens with the defaults and applies this record at each poll; a lower limit
+/// refuses new writes past it and removes nothing already stored.
+#[non_exhaustive]
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    guatiao::ToValue,
+    guatiao::FromValue,
+    guatiao::Schema,
+    guatiao_intake::Form,
+)]
+#[map(deny_unknown_fields)]
+pub struct RegistryRecord {
+    /// `[registry.limits]`: what the Registry keeps and accepts, one table per record family.
+    #[schema(title = "What the Registry keeps and accepts")]
+    #[map(default)]
+    pub limits: RegistryLimits,
+    /// `[registry.provider]`: how much of a document the configuration provider reads.
+    #[schema(title = "What the configuration provider reads")]
+    #[map(default)]
+    pub provider: ConfigLimits,
+}
+
+impl RegistryRecord {
+    /// One line per limit looser than its default, for the log when a record is applied.
+    pub fn weakenings(&self) -> Vec<String> {
+        let mut weakened = self.limits.weakenings();
+        weakened.extend(self.provider.weakenings());
+        weakened
+    }
+
+    /// Gives `registry` these limits for every operation that starts after this call.
+    pub fn apply_to(&self, registry: &dyn crate::directorates::registry::backend::Limited) {
+        registry.set_limits(self.limits.clone());
+    }
+}
+
+/// The provider's limits as the global records of `view` set them: the `registry` record's
+/// `provider` table, else the defaults.
+///
+/// # Errors
+///
+/// A [`RosterErrorKind::Invalid`] naming the key the record is refused at.
+pub(crate) fn provider_limits(view: &Layer) -> Result<ConfigLimits, RosterError> {
+    registry_record(view).map(|record| record.provider)
+}
+
+/// The `registry` record of `view`, else the defaults.
+fn registry_record(view: &Layer) -> Result<RegistryRecord, RosterError> {
+    view.get(&ConfigRecord::Registry)
+        .and_then(|records| records.values().next())
+        .map_or_else(
+            || Ok(RegistryRecord::default()),
+            |definition| {
+                records::from_json::<RegistryRecord>(definition)
+                    .map_err(|reason| error(format!("registry: {reason}")))
+            },
+        )
 }
 
 /// What a snapshot holds besides the roster, resolved for one Station.
@@ -477,7 +559,9 @@ pub struct Settings {
     pub unex: UnexRecord,
     /// Need-to-know access across Operations (the `compartment` records).
     pub compartments: Compartments,
-    /// The limits the provider read these settings within.
+    /// The Registry's limits and the provider's (the `registry` record).
+    pub registry: RegistryRecord,
+    /// The limits the provider read these settings within (`registry.provider`).
     pub limits: ConfigLimits,
 }
 
@@ -1492,8 +1576,9 @@ pub fn references_to(
 
 /// The families in the order an import stores them, so each refers only to records already
 /// stored: roles before the Agents that hold them, Agents before the Operations that name them.
-pub const IMPORT_ORDER: [ConfigRecord; 24] = [
+pub const IMPORT_ORDER: [ConfigRecord; 25] = [
     ConfigRecord::Roster,
+    ConfigRecord::Registry,
     ConfigRecord::Role,
     ConfigRecord::Cover,
     ConfigRecord::Assistant,
@@ -1856,7 +1941,6 @@ pub fn open(location: &str) -> io::Result<Arc<dyn ConfigProvider>> {
     return open_with(
         location,
         &crate::directorates::registry::sql::SqlOptions::default(),
-        ConfigLimits::default(),
     );
     #[cfg(not(any(feature = "sqlite", feature = "postgres")))]
     if crate::bootstrap::is_sql_location(location) {
@@ -1869,8 +1953,7 @@ pub fn open(location: &str) -> io::Result<Arc<dyn ConfigProvider>> {
     }
 }
 
-/// As [`open`], connecting a SQL provider with `options` (password, timeouts) and reading
-/// documents within `limits`.
+/// As [`open`], connecting a SQL provider with `options` (password, timeouts).
 ///
 /// # Errors
 ///
@@ -1879,14 +1962,11 @@ pub fn open(location: &str) -> io::Result<Arc<dyn ConfigProvider>> {
 pub fn open_with(
     location: &str,
     options: &crate::directorates::registry::sql::SqlOptions,
-    limits: ConfigLimits,
 ) -> io::Result<Arc<dyn ConfigProvider>> {
     if crate::bootstrap::is_sql_location(location) {
-        Ok(Arc::new(
-            SqlProvider::open_with(location, options)?.with_limits(limits),
-        ))
+        Ok(Arc::new(SqlProvider::open_with(location, options)?))
     } else {
-        Ok(Arc::new(FileProvider::new(location).with_limits(limits)))
+        Ok(Arc::new(FileProvider::new(location)))
     }
 }
 
@@ -1933,8 +2013,9 @@ pub(crate) fn assemble(
     view: &Layer,
     base: Option<&Path>,
     source: &dyn fmt::Display,
-    limits: &ConfigLimits,
 ) -> Result<ConfigSnapshot, RosterError> {
+    let registry = registry_record(view).map_err(|reason| error(format!("{source}: {reason}")))?;
+    let limits = &registry.provider;
     let family = |record: ConfigRecord| -> Vec<(String, serde_json::Value)> {
         view.get(&record)
             .map(|records| {
@@ -2115,7 +2196,8 @@ pub(crate) fn assemble(
             operation_access,
             unex,
             compartments,
-            limits: limits.clone(),
+            registry: registry.clone(),
+            limits: registry.provider.clone(),
         },
         fingerprints,
     })

@@ -910,8 +910,10 @@ impl FileRegistry {
 
     fn headquarters_term(&self) -> io::Result<u64> {
         let path = self.root.join("headquarters").join("lease.json");
-        Ok(read_headquarters(&path, self.limits.stations.record_bytes)?
-            .map_or(0, |lease| lease.term()))
+        Ok(
+            read_headquarters(&path, self.current_limits().stations.record_bytes)?
+                .map_or(0, |lease| lease.term()),
+        )
     }
 
     pub(crate) fn open_run_at(
@@ -920,7 +922,7 @@ impl FileRegistry {
         ttl: Duration,
         now: f64,
     ) -> Result<RunRecord, RunError> {
-        validate_new_run(&new, &self.limits.runs)?;
+        validate_new_run(&new, &self.current_limits().runs)?;
         let _lock = self.lock()?;
         let path = self.run_path(&new.run_id);
         if path.exists()
@@ -931,9 +933,13 @@ impl FileRegistry {
         {
             return Err(RunError::Exists);
         }
-        if fs::read_dir(self.root.join("runs"))
-            .is_ok_and(|entries| !self.limits.runs.records.allows(entries.count() + 1))
-        {
+        if fs::read_dir(self.root.join("runs")).is_ok_and(|entries| {
+            !self
+                .current_limits()
+                .runs
+                .records
+                .allows(entries.count() + 1)
+        }) {
             return Err(io::Error::other("too many Run records").into());
         }
         let record = opened(new, ttl, now, self.headquarters_term()?);
@@ -948,11 +954,11 @@ impl FileRegistry {
         ttl: Duration,
         now: f64,
     ) -> Result<RunRecord, RunError> {
-        validate_run_id(id, &self.limits.runs)?;
+        validate_run_id(id, &self.current_limits().runs)?;
         super::store::validate_station_id(station)?;
         let _lock = self.lock()?;
         let path = self.run_path(id);
-        let mut record = read_run(&path, &self.limits.runs)?.ok_or(RunError::NotFound)?;
+        let mut record = read_run(&path, &self.current_limits().runs)?.ok_or(RunError::NotFound)?;
         take(&mut record, station, ttl, now, || self.headquarters_term())?;
         self.write_run(&path, &record)?;
         Ok(record)
@@ -967,10 +973,10 @@ impl FileRegistry {
         renew: Option<Duration>,
         update: RunUpdate,
     ) -> Result<RunRecord, RunError> {
-        validate_run_id(id, &self.limits.runs)?;
+        validate_run_id(id, &self.current_limits().runs)?;
         let _lock = self.lock()?;
         let path = self.run_path(id);
-        let mut record = read_run(&path, &self.limits.runs)?.ok_or(RunError::NotFound)?;
+        let mut record = read_run(&path, &self.current_limits().runs)?.ok_or(RunError::NotFound)?;
         apply_fenced(
             &mut record,
             station,
@@ -978,7 +984,7 @@ impl FileRegistry {
             now,
             renew,
             update,
-            &self.limits.runs,
+            &self.current_limits().runs,
         )?;
         self.write_run(&path, &record)?;
         Ok(record)
@@ -990,16 +996,16 @@ impl FileRegistry {
         reason: &str,
         now: f64,
     ) -> Result<RunRecord, RunError> {
-        validate_run_id(id, &self.limits.runs)?;
+        validate_run_id(id, &self.current_limits().runs)?;
         let _lock = self.lock()?;
         let path = self.run_path(id);
-        let mut record = read_run(&path, &self.limits.runs)?.ok_or(RunError::NotFound)?;
+        let mut record = read_run(&path, &self.current_limits().runs)?.ok_or(RunError::NotFound)?;
         lose(
             &mut record,
             reason,
             now,
             || self.headquarters_term(),
-            &self.limits.runs,
+            &self.current_limits().runs,
         )?;
         self.write_run(&path, &record)?;
         Ok(record)
@@ -1482,9 +1488,9 @@ impl RunStore for FileRegistry {
     }
 
     fn run(&self, id: &str) -> io::Result<Option<RunRecord>> {
-        validate_run_id(id, &self.limits.runs)?;
+        validate_run_id(id, &self.current_limits().runs)?;
         let _lock = self.lock()?;
-        read_run(&self.run_path(id), &self.limits.runs)
+        read_run(&self.run_path(id), &self.current_limits().runs)
     }
 
     fn mission_exposure(&self, mission_id: &str) -> io::Result<Vec<Exposure>> {
@@ -1549,7 +1555,7 @@ impl RunStore for FileRegistry {
         mission_id: &str,
         verdict: &MissionVerdict,
     ) -> Result<RunRecord, RunError> {
-        validate_verdict(verdict, &self.limits.runs)?;
+        validate_verdict(verdict, &self.current_limits().runs)?;
         let _lock = self.lock()?;
         let mut record = latest(self.runs_locked()?.into_iter().filter(|record| {
             record.mission_id == mission_id && record.operation.as_deref() == Some(operation)
@@ -1566,7 +1572,7 @@ impl RunStore for FileRegistry {
         mission_id: &str,
         recommendation: &MissionVerdict,
     ) -> Result<RunRecord, RunError> {
-        validate_verdict(recommendation, &self.limits.runs)?;
+        validate_verdict(recommendation, &self.current_limits().runs)?;
         let _lock = self.lock()?;
         let mut record = latest(self.runs_locked()?.into_iter().filter(|record| {
             record.mission_id == mission_id && record.operation.as_deref() == Some(operation)
@@ -1594,14 +1600,14 @@ impl RunStore for FileRegistry {
     }
 
     fn file_final_report(&self, report: &FinalReport) -> io::Result<()> {
-        validate_final_report(report, &self.limits.runs)?;
+        validate_final_report(report, &self.current_limits().runs)?;
         let bytes = serde_json::to_vec(report).map_err(io::Error::other)?;
         let _lock = self.lock()?;
         self.write_atomic(&self.final_report_path(&report.run_id), &bytes)
     }
 
     fn final_report(&self, run_id: &str) -> io::Result<Option<FinalReport>> {
-        validate_run_id(run_id, &self.limits.runs)?;
+        validate_run_id(run_id, &self.current_limits().runs)?;
         let _lock = self.lock()?;
         match fs::read(self.final_report_path(run_id)) {
             Ok(bytes) => serde_json::from_slice(&bytes)
@@ -1631,7 +1637,7 @@ impl FileRegistry {
             if path
                 .extension()
                 .is_some_and(|extension| extension == "json")
-                && let Some(record) = read_run(&path, &self.limits.runs)?
+                && let Some(record) = read_run(&path, &self.current_limits().runs)?
             {
                 records.push(record);
             }
@@ -1676,7 +1682,7 @@ pub(super) fn run_json(record: &RunRecord, limits: &RunLimits) -> io::Result<Vec
 
 impl FileRegistry {
     fn write_run(&self, path: &std::path::Path, record: &RunRecord) -> io::Result<()> {
-        self.write_atomic(path, &run_json(record, &self.limits.runs)?)
+        self.write_atomic(path, &run_json(record, &self.current_limits().runs)?)
     }
 }
 

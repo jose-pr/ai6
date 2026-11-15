@@ -164,6 +164,9 @@ impl ConfigRecord {
             )),
             Self::Assistant => built::<AssistantSettings>(the_one("Moneypenny's settings")),
             Self::Roster => built::<RosterSettings>(the_one("Roster settings")),
+            Self::Registry => built::<crate::directorates::m::config::RegistryRecord>(the_one(
+                "Registry limits",
+            )),
             Self::Compartment => built::<CompartmentSettings>(named(
                 "Codeword",
                 "What this compartment is known by, such as KESTREL. It cannot be changed later.",

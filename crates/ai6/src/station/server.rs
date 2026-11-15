@@ -888,6 +888,14 @@ where
             state_dir.join("registry"),
         )),
     };
+    // A Registry opens with the defaults; a record that says the same changes nothing, and one
+    // that differs applies before the first request.
+    if started.settings.registry != crate::directorates::m::config::RegistryRecord::default() {
+        started.settings.registry.apply_to(intake.as_ref());
+        for weakened in started.settings.registry.weakenings() {
+            eprintln!("ai6: {weakened}");
+        }
+    }
     let sealing_dir = config
         .station
         .sealing_dir

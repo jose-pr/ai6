@@ -208,7 +208,11 @@ impl SqlTables<'_, '_> {
 impl MissionIssueStore for SqlRegistry {
     fn link_issue(&self, link: &IssueLink) -> io::Result<IssueLink> {
         self.write(|tx, revision| {
-            link_issue_in(&mut SqlTables { tx, revision }, link, &self.limits.issues)
+            link_issue_in(
+                &mut SqlTables { tx, revision },
+                link,
+                &self.current_limits().issues,
+            )
         })
     }
 
@@ -266,14 +270,18 @@ impl MissionIssueStore for SqlRegistry {
                 item,
                 url,
                 snapshot,
-                &self.limits.issues,
+                &self.current_limits().issues,
             )
         })
     }
 
     fn queue_outbox(&self, entry: &OutboxEntry) -> io::Result<OutboxEntry> {
         self.write(|tx, revision| {
-            queue_in(&mut SqlTables { tx, revision }, entry, &self.limits.issues)
+            queue_in(
+                &mut SqlTables { tx, revision },
+                entry,
+                &self.current_limits().issues,
+            )
         })
     }
 
@@ -325,7 +333,7 @@ impl MissionIssueStore for SqlRegistry {
             propose_in(
                 &mut SqlTables { tx, revision },
                 proposal,
-                &self.limits.issues,
+                &self.current_limits().issues,
             )
         })
     }
@@ -411,7 +419,11 @@ impl MissionIssueStore for SqlRegistry {
 
     fn store_issue_reply(&self, reply: &IssueReply) -> io::Result<bool> {
         self.write(|tx, revision| {
-            store_reply_in(&mut SqlTables { tx, revision }, reply, &self.limits.issues)
+            store_reply_in(
+                &mut SqlTables { tx, revision },
+                reply,
+                &self.current_limits().issues,
+            )
         })
     }
 

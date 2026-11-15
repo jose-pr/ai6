@@ -71,7 +71,7 @@ impl UsageStore for FileRegistry {
     ) -> io::Result<MissionUsage> {
         let _lock = self.lock()?;
         let path = self.usage_path(operation, mission);
-        let limits = &self.limits.usage;
+        let limits = &self.current_limits().usage;
         let mut usage = read_ledger(&path, limits)?.unwrap_or_default();
         add_usage(&mut usage, run, delta, now, limits);
         let bytes = serde_json::to_vec(&usage).map_err(io::Error::other)?;
@@ -84,7 +84,10 @@ impl UsageStore for FileRegistry {
         operation: Option<&str>,
         mission: &str,
     ) -> io::Result<Option<MissionUsage>> {
-        read_ledger(&self.usage_path(operation, mission), &self.limits.usage)
+        read_ledger(
+            &self.usage_path(operation, mission),
+            &self.current_limits().usage,
+        )
     }
 
     fn operation_cost_on_day(&self, operation: Option<&str>, now: i64) -> io::Result<u64> {
@@ -103,7 +106,7 @@ impl UsageStore for FileRegistry {
             if path.extension().is_none_or(|extension| extension != "json") {
                 continue;
             }
-            if let Some(usage) = read_ledger(&path, &self.limits.usage)? {
+            if let Some(usage) = read_ledger(&path, &self.current_limits().usage)? {
                 total = total.saturating_add(cost_on_day(&usage, now));
             }
         }
