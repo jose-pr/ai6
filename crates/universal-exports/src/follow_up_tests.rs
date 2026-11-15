@@ -218,3 +218,46 @@ async fn a_mission_is_created_with_the_deliverables_it_owes_or_refused_for_a_mal
         assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
     }
 }
+
+#[tokio::test]
+async fn a_requested_handle_is_taken_and_a_taken_or_malformed_one_is_refused() {
+    let served = served_with(ROLES).await;
+    let asking = |handle: &str| json!({"title": "Retake", "prompt": "Again.", "handle": handle});
+
+    let (status, created) = create(&served, &served.operator, asking("G-retake-31")).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{created}");
+    assert_eq!(created["handle"], "G-retake-31");
+    let queued = served.registry.list_new().unwrap();
+    assert_eq!(queued[0].shown_handle(), "G-retake-31");
+    assert_eq!(queued[0].key(), created["mission_id"].as_str().unwrap());
+
+    // The Operation's counter is untouched by a handle chosen by hand.
+    let (_, numbered) = create(
+        &served,
+        &served.operator,
+        json!({"title": "Next", "prompt": "Go."}),
+    )
+    .await;
+    assert_eq!(numbered["handle"], "G-1");
+
+    for taken in ["G-retake-31", "g-RETAKE-31", "G-1"] {
+        let (status, refused) = create(&served, &served.operator, asking(taken)).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{taken}: {refused}");
+    }
+    for malformed in ["", "a b", "-lead", "a.b"] {
+        let (status, refused) = create(&served, &served.operator, asking(malformed)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{malformed:?}: {refused}");
+    }
+    // A Mission numbered by its ticket cannot also choose its handle.
+    let (status, _) = create(
+        &served,
+        &served.operator,
+        json!({
+            "title": "Both", "prompt": "No.", "handle": "G-both",
+            "create_issue": { "tracker": "gh" },
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(served.registry.list_new().unwrap().len(), 2);
+}

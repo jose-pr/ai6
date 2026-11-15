@@ -2653,6 +2653,7 @@ async fn create_user_mission(
         !text.trim().is_empty() && text.len() <= 256 && !text.chars().any(char::is_control)
     };
     if (request.issue.is_some() && request.create_issue.is_some())
+        || (request.handle.is_some() && (request.issue.is_some() || request.create_issue.is_some()))
         || request
             .issue
             .as_ref()
@@ -2738,12 +2739,21 @@ async fn create_user_mission(
     let book = registry.clone();
     let entry = match &request.issue {
         Some(issue) => MissionEntry::follow_up(operation_id.as_str(), &issue.tracker, &issue.item),
-        None => MissionEntry::person(Some(operation_id.as_str())),
+        None => match &request.handle {
+            Some(handle) => MissionEntry::person_named(Some(operation_id.as_str()), handle),
+            None => MissionEntry::person(Some(operation_id.as_str())),
+        },
     };
     let entered = tokio::task::spawn_blocking(move || book.allot_mission_id(&entry))
         .await
         .map_err(|_| ApiError::internal())?
         .map_err(|error| match (&request.issue, error.kind()) {
+            _ if request.handle.is_some() && error.kind() == std::io::ErrorKind::InvalidInput => {
+                ApiError::invalid(error.to_string())
+            }
+            _ if request.handle.is_some() && error.kind() == std::io::ErrorKind::AlreadyExists => {
+                ApiError::refused(StatusCode::CONFLICT, error.to_string())
+            }
             (Some(issue), std::io::ErrorKind::NotFound) => ApiError::invalid(format!(
                 "item {:?} of {:?} has no Mission in Operation {operation_id}: only an item AI6 \
                  has taken in can be followed up",
@@ -5316,6 +5326,11 @@ struct CreateUserMissionRequest {
     /// What the Mission is to deliver, each `kind` or `kind:target`, beyond its role's.
     #[serde(default)]
     deliverables: Vec<String>,
+    /// The handle the Mission is to have, in place of the Operation's next number. It follows
+    /// the rename rules and is refused when any Mission was ever given it; it cannot be asked
+    /// for beside `issue` or `create_issue`, which number the Mission by the item.
+    #[serde(default)]
+    handle: Option<String>,
 }
 
 /// The item a Mission follows up.

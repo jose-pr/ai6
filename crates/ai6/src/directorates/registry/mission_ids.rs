@@ -114,7 +114,10 @@ pub struct MissionEntry {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum EntryKind {
-    Person,
+    Person {
+        /// The handle the person asked for, in place of the Operation's next number.
+        requested: Option<String>,
+    },
     Proposal {
         id: String,
     },
@@ -144,7 +147,19 @@ impl MissionEntry {
     /// A person's brief, from `ai6ctl`, the app or Moneypenny: `<operation>-<n>`. Each entry is
     /// a new Mission.
     pub fn person(operation: Option<&str>) -> Self {
-        Self::of(operation, EntryKind::Person)
+        Self::of(operation, EntryKind::Person { requested: None })
+    }
+
+    /// A person's brief that asks for its Mission's handle: `handle` as given, in place of the
+    /// Operation's next number. Allotting is refused when the handle is malformed or any
+    /// Mission, current or former, was ever given it.
+    pub fn person_named(operation: Option<&str>, handle: &str) -> Self {
+        Self::of(
+            operation,
+            EntryKind::Person {
+                requested: Some(handle.to_owned()),
+            },
+        )
     }
 
     /// The Mission an approved proposal becomes: `<operation>-<n>`, the same one however often
@@ -237,7 +252,7 @@ impl MissionEntry {
     pub(super) fn book_name(&self) -> Option<String> {
         let operation = self.operation.as_deref().unwrap_or_default();
         let parts: Vec<&str> = match &self.kind {
-            EntryKind::Person | EntryKind::FollowUp { .. } => return None,
+            EntryKind::Person { .. } | EntryKind::FollowUp { .. } => return None,
             EntryKind::Proposal { id } => vec!["proposal", operation, id],
             EntryKind::Review { id } => vec!["review", operation, id],
             EntryKind::Sleeper { name, window } => vec!["sleeper", operation, name, window],
@@ -265,7 +280,7 @@ impl MissionEntry {
         let label = self.label();
         let number = number.unwrap_or_default();
         match &self.kind {
-            EntryKind::Person
+            EntryKind::Person { .. }
             | EntryKind::Proposal { .. }
             | EntryKind::Review { .. }
             | EntryKind::FollowUp { .. } => format!("{label}-{number}"),
@@ -365,6 +380,21 @@ pub(super) fn allot(
 ) -> io::Result<MissionHandle> {
     if let EntryKind::FollowUp { instance, item } = &entry.kind {
         return follow_up(book, entry.operation.as_deref(), (instance, item), limits);
+    }
+    if let EntryKind::Person {
+        requested: Some(handle),
+    } = &entry.kind
+    {
+        check_handle(handle, limits)?;
+        if taken(book, handle)? {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("handle {handle} is taken by another Mission"),
+            ));
+        }
+        let mission = MissionHandle::new(new_uid(), handle.clone());
+        book.issue(&mission, None)?;
+        return Ok(mission);
     }
     let name = entry.book_name();
     if let Some(name) = &name
@@ -496,6 +526,7 @@ mod tests {
         a_rename_keeps_the_uid_and_every_handle_finds_it,
         a_rename_reaches_the_brief_in_every_state,
         a_taken_or_malformed_handle_is_refused,
+        a_requested_handle_is_taken_and_a_taken_one_refused,
         a_former_handle_is_never_given_again,
         a_renamed_item_keeps_its_new_handle_when_polled_again,
         run_handles_follow_the_current_handle_only_for_new_runs,
@@ -1273,6 +1304,58 @@ mod tests {
             &unreported[0].brief,
             "github"
         ));
+    }
+
+    fn a_requested_handle_is_taken_and_a_taken_one_refused(store: &dyn Store) {
+        let registry = store.handle();
+        let named = registry
+            .enter_brief(
+                &brief("one"),
+                &MissionEntry::person_named(Some("G"), "G-retake"),
+            )
+            .unwrap();
+        assert_eq!(named.handle.as_deref(), Some("G-retake"));
+        assert_eq!(
+            registry
+                .resolve_mission("g-RETAKE")
+                .unwrap()
+                .unwrap()
+                .mission_id,
+            named.key()
+        );
+        // The counter is untouched: the next unnamed Mission is the Operation's first.
+        let numbered = registry
+            .enter_brief(&brief("two"), &MissionEntry::person(Some("G")))
+            .unwrap();
+        assert_eq!(numbered.handle.as_deref(), Some("G-1"));
+        // A taken handle, in any case, is refused, and so is a former one after a rename.
+        registry.rename_mission(&named.key(), "G-renamed").unwrap();
+        for taken in ["G-renamed", "g-RENAMED", "G-retake", "G-1"] {
+            let error = registry
+                .enter_brief(
+                    &brief("three"),
+                    &MissionEntry::person_named(Some("G"), taken),
+                )
+                .unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::AlreadyExists, "{taken}");
+        }
+        let long = "y".repeat(DEFAULT_ID_BYTES + 1);
+        for malformed in [
+            "",
+            "a b",
+            "-lead",
+            "a.b",
+            long.as_str(),
+            named.key().as_str(),
+        ] {
+            let error = registry
+                .enter_brief(
+                    &brief("four"),
+                    &MissionEntry::person_named(Some("G"), malformed),
+                )
+                .unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidInput, "{malformed:?}");
+        }
     }
 
     fn a_taken_or_malformed_handle_is_refused(store: &dyn Store) {
