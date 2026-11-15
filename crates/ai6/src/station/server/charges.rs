@@ -1077,7 +1077,7 @@ async fn run_turn(state: &DaemonState, live: &Arc<Live>, events: Vec<ChargeEvent
     }
     if !outcome.ran {
         update = update.log(ChargeLogEntry::new(
-            "turn",
+            "turn-refused",
             format!(
                 "woke for {} but took no turn: {}",
                 kinds.join(", "),

@@ -82,7 +82,8 @@ impl Default for ChargeLimits {
 pub struct ChargeLogEntry {
     /// When it was written, as Unix seconds.
     pub at: f64,
-    /// What it records: `turn`, `started`, `resumed`, `fresh`, `quota`, `station`, `agent`.
+    /// What it records: `turn`, `turn-refused` (a wake whose turn did not run), `started`,
+    /// `resumed`, `fresh`, `quota`, `station`, `agent`.
     pub kind: String,
     /// What happened, in a line or a few. A turn's quotes what the charge said, which may quote
     /// untrusted input.

@@ -322,14 +322,7 @@ fn judge(
                 stuck(
                     condition,
                     since,
-                    format!(
-                        "it has been {condition} for {}s{}",
-                        quiet(since) as u64,
-                        view.reason
-                            .as_deref()
-                            .map(|reason| format!(" ({reason})"))
-                            .unwrap_or_default()
-                    ),
+                    format!("it has been {condition} for {}s", quiet(since) as u64),
                 )
             })
         }
@@ -345,13 +338,9 @@ fn judge(
                     "run-lost",
                     since,
                     format!(
-                        "it stands {} but no Run holds it for {}s{}",
+                        "it stands {} but no Run holds it for {}s",
                         view.state,
-                        quiet(since) as u64,
-                        view.reason
-                            .as_deref()
-                            .map(|reason| format!(": {reason}"))
-                            .unwrap_or_default()
+                        quiet(since) as u64
                     ),
                 )
             })
@@ -395,8 +384,8 @@ fn charges_stuck(state: &DaemonState, charge: &Charge, now: f64) -> Vec<Stuck> {
                 .logbook
                 .iter()
                 .rev()
-                .find(|entry| entry.kind == "turn")
-                .filter(|entry| entry.text.contains("took no turn"))?;
+                .find(|entry| entry.kind == "turn" || entry.kind == "turn-refused")
+                .filter(|entry| entry.kind == "turn-refused")?;
             let since = failed.at;
             (now - since >= after).then(|| Stuck {
                 condition: "charge-failing",
