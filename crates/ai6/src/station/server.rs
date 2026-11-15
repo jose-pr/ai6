@@ -1064,6 +1064,7 @@ where
     let _ = tokio::task::spawn_blocking(move || {
         reload::declare(&declaring);
         logins::recover(&declaring);
+        charges::area::heal_at_start(&declaring);
     })
     .await;
     let scheduler = tokio::spawn(scheduler_loop(state.clone()));

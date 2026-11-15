@@ -20,10 +20,11 @@ use crate::directorates::q::safehouse::SafeHouseCheckpoint;
 
 use super::accounts::AccountRef;
 
+use super::backend::RegistryBackend;
 use super::limits::RunLimits;
 use super::mission_ids::{new_uid, run_handle};
 use super::products::CUT_MARKER;
-use super::store::{FileRegistry, invalid_data, read_headquarters, unix_time};
+use super::store::{AuditRecord, FileRegistry, invalid_data, read_headquarters, unix_time};
 use crate::bounds::Limit;
 
 /// Where a Run stands, as far as the Registry knows.
@@ -1287,6 +1288,84 @@ pub(super) fn settle_results(
         .collect()
 }
 
+/// Ends the earlier Runs of each Mission whose latest Run is closed in an end state while they
+/// still report work (`working`, `verifying`, `queued`), as `abandoned`, so none of them is shown
+/// as open work. A Mission waiting in the queue is not over and is left alone, as is one whose
+/// latest Run `in_area` refuses. Each Mission is audited as `run.heal` under `actor` before its
+/// records change. Answers the Runs changed.
+#[cfg_attr(not(feature = "daemon"), allow(dead_code))]
+pub(crate) fn heal_superseded(
+    registry: &dyn RegistryBackend,
+    records: &[RunRecord],
+    queued: impl Fn(&str) -> bool,
+    in_area: impl Fn(&RunRecord) -> bool,
+    actor: &str,
+    resource: &str,
+    at: f64,
+) -> usize {
+    let mut latest: std::collections::BTreeMap<&str, &RunRecord> = Default::default();
+    for record in records {
+        match latest.get(record.mission_id.as_str()) {
+            Some(held) if held.number >= record.number => {}
+            _ => {
+                latest.insert(record.mission_id.as_str(), record);
+            }
+        }
+    }
+    let stale: std::collections::BTreeSet<&str> = records
+        .iter()
+        .filter(|record| {
+            latest
+                .get(record.mission_id.as_str())
+                .is_some_and(|last| record.number < last.number)
+                && record.status.is_closed()
+                && record
+                    .result
+                    .as_ref()
+                    .is_none_or(|held| !ends_result(&held.state))
+        })
+        .map(|record| record.mission_id.as_str())
+        .collect();
+    let mut healed = 0;
+    for (mission, last) in latest {
+        let Some(result) = last
+            .result
+            .as_ref()
+            .filter(|result| ends_result(&result.state) && last.status.is_closed())
+        else {
+            continue;
+        };
+        let stale = stale.contains(mission);
+        if !stale || queued(mission) || !in_area(last) {
+            continue;
+        }
+        let audit = AuditRecord {
+            id: format!("run.heal-{}", uuid::Uuid::new_v4().simple()),
+            actor: actor.to_owned(),
+            action: "run.heal".to_owned(),
+            operation: last.operation.clone().unwrap_or_default(),
+            resource: Some(resource.to_owned()),
+            target: mission.to_owned(),
+            at,
+        };
+        if let Err(error) = registry.record_audit(&audit) {
+            eprintln!(
+                "ai6: Mission {mission:?}: its Run records were not healed, since the audit record was not written: {error}"
+            );
+            continue;
+        }
+        let earlier =
+            RunResult::new("abandoned").with_reason(Some(RunResult::SUPERSEDED.to_owned()));
+        match registry.settle_results(mission, result, &earlier) {
+            Ok(changed) => healed += changed,
+            Err(error) => {
+                eprintln!("ai6: Mission {mission:?}: its Run records were not healed: {error}");
+            }
+        }
+    }
+    healed
+}
+
 /// Checks a verdict's bounds before it is stored.
 pub(super) fn validate_verdict(verdict: &MissionVerdict, limits: &RunLimits) -> io::Result<()> {
     let invalid = |message: String| io::Error::new(io::ErrorKind::InvalidInput, message);
@@ -1801,6 +1880,7 @@ mod tests {
         only_a_lapsed_run_is_lost_and_its_holder_is_fenced_out,
         a_lost_run_reports_its_mission_queued_not_working,
         settling_results_ends_every_closed_run_still_reporting_work,
+        healing_ends_the_earlier_runs_of_a_mission_whose_latest_run_ended,
         the_holder_records_launch_recent_events_and_checkpoints_within_bounds,
         the_latest_run_is_the_highest_run,
         unsafe_ids_are_rejected_before_touching_the_filesystem,
@@ -2316,6 +2396,72 @@ mod tests {
                 .unwrap(),
             0
         );
+    }
+
+    fn healing_ends_the_earlier_runs_of_a_mission_whose_latest_run_ended(store: &dyn Store) {
+        let registry = store.handle();
+        for (id, mission, number, state) in [
+            ("h-1", "mission-1", 1, "verifying"),
+            ("h-2", "mission-1", 2, "verifying"),
+            ("h-3", "mission-1", 3, "done"),
+            // Its latest Run is still verifying, so nothing is over.
+            ("w-1", "mission-2", 1, "verifying"),
+            ("w-2", "mission-2", 2, "verifying"),
+            // Waiting in the queue again.
+            ("q-1", "mission-3", 1, "verifying"),
+            ("q-2", "mission-3", 2, "done"),
+        ] {
+            let opened = registry
+                .open_run_at(
+                    NewRun::new(id, mission, "station-a").with_number(number, None),
+                    TTL,
+                    NOW,
+                )
+                .unwrap();
+            registry
+                .write_fenced(
+                    id,
+                    "station-a",
+                    opened.fence,
+                    NOW,
+                    None,
+                    RunUpdate::default()
+                        .result(RunResult::new(state))
+                        .status(RunStatus::Ended),
+                )
+                .unwrap();
+        }
+        let heal = |registry: &dyn RegistryBackend| {
+            heal_superseded(
+                registry,
+                &registry.runs().unwrap(),
+                |mission| mission == "mission-3",
+                |_| true,
+                "station:a",
+                "station:a",
+                NOW,
+            )
+        };
+        assert_eq!(heal(&*registry), 2);
+        let state = |id: &str| registry.run(id).unwrap().unwrap().result.unwrap();
+        for id in ["h-1", "h-2"] {
+            let result = state(id);
+            assert_eq!(result.state, "abandoned");
+            assert_eq!(result.reason.as_deref(), Some("superseded"));
+        }
+        assert_eq!(state("h-3").state, "done");
+        assert_eq!(state("w-1").state, "verifying");
+        assert_eq!(state("q-1").state, "verifying");
+        let audits = registry.audit_records().unwrap();
+        assert_eq!(
+            audits
+                .iter()
+                .filter(|entry| entry.action == "run.heal" && entry.target == "mission-1")
+                .count(),
+            1
+        );
+        // Healed once, nothing remains to heal.
+        assert_eq!(heal(&*registry), 0);
     }
 
     fn status_changes_are_fenced_and_an_ended_run_is_closed(store: &dyn Store) {

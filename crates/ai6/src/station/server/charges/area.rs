@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use super::super::DaemonState;
 use crate::directorates::m::charges::{Charge, ChargeScope};
 use crate::directorates::registry::reports::{ReportFilter, ReportScope, ReportState};
-use crate::directorates::registry::runs::{RunRecord, RunStatus};
+use crate::directorates::registry::runs::{RunRecord, RunStatus, heal_superseded};
 use crate::directorates::registry::store::Brief;
 
 /// The states a Mission is over in.
@@ -184,6 +184,45 @@ pub(in crate::station::server) fn run_view(
     })
 }
 
+/// [`heal_superseded`] for the Runs of one read, audited under `actor`.
+fn heal(
+    state: &DaemonState,
+    records: &[RunRecord],
+    queued: impl Fn(&str) -> bool,
+    in_area: impl Fn(&RunRecord) -> bool,
+    actor: &str,
+) -> usize {
+    heal_superseded(
+        state.intake.as_ref(),
+        records,
+        queued,
+        in_area,
+        actor,
+        &format!("station:{}", state.station_id),
+        state.clock.now() as f64,
+    )
+}
+
+/// [`heal_superseded`] over every Run of the Registry, once when the Station starts. Blocks.
+pub(in crate::station::server) fn heal_at_start(state: &DaemonState) {
+    let (records, queue) = match (state.intake.runs(), state.intake.list_new()) {
+        (Ok(records), Ok(queue)) => (records, queue),
+        (Err(error), _) | (_, Err(error)) => {
+            eprintln!("ai6: Run records were not checked for stale results: {error}");
+            return;
+        }
+    };
+    let waiting: std::collections::BTreeSet<String> =
+        queue.iter().map(|brief| brief.key().to_owned()).collect();
+    heal(
+        state,
+        &records,
+        |mission| waiting.contains(mission),
+        |_| true,
+        &format!("station:{}", state.station_id),
+    );
+}
+
 /// The Missions of `scope` that are not over, from the Run records and the queue. Blocks.
 pub(in crate::station::server) fn missions(
     state: &DaemonState,
@@ -195,8 +234,18 @@ pub(in crate::station::server) fn missions(
         .iter()
         .map(|brief| (brief.key().to_owned(), brief))
         .collect();
+    let records = state.intake.runs()?;
+    // The same read that finds the latest Runs finds the Missions that ended while an earlier
+    // Run still reports work.
+    heal(
+        state,
+        &records,
+        |mission| queued.contains_key(mission),
+        |run| in_scope(scope, run.operation.as_deref(), Some(run.station.as_str())),
+        &format!("charge:{scope}"),
+    );
     let mut latest: BTreeMap<String, RunRecord> = BTreeMap::new();
-    for record in state.intake.runs()? {
+    for record in records {
         match latest.get(&record.mission_id) {
             Some(held) if held.number >= record.number => {}
             _ => {

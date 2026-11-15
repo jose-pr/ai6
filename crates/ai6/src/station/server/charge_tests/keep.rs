@@ -1057,3 +1057,76 @@ async fn m_is_told_of_a_charge_whose_last_turn_did_not_run_from_a_field_not_pros
         survey.stuck
     );
 }
+
+/// Opens a closed Run `number` of `mission` that reports `result`.
+fn closed_run(state: &DaemonState, station: &str, mission: &str, number: u32, result: &str) {
+    let id = format!("{mission}-{number}");
+    let opened = state
+        .intake
+        .open_run(
+            NewRun::new(id.as_str(), mission, station)
+                .with_operation("OP")
+                .with_number(number, None),
+            Duration::from_secs(600),
+        )
+        .unwrap();
+    state
+        .intake
+        .update_run(
+            &id,
+            station,
+            opened.fence,
+            RunUpdate::default()
+                .result(RunResult::new(result))
+                .status(RunStatus::Ended),
+        )
+        .unwrap();
+}
+
+fn result_of(state: &DaemonState, mission: &str, number: u32) -> String {
+    state
+        .intake
+        .run(&format!("{mission}-{number}"))
+        .unwrap()
+        .unwrap()
+        .result
+        .unwrap()
+        .state
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_ended_mission_whose_earlier_runs_report_work_is_healed_at_start_and_by_the_survey() {
+    let root = tempfile::tempdir().unwrap();
+    let (tag, station) = ("h1", "stn-h1");
+    let state = kit(root.path(), tag, station, ("", true), "");
+    for number in [1, 2] {
+        closed_run(&state, station, "heal-start", number, "verifying");
+    }
+    closed_run(&state, station, "heal-start", 3, "done");
+
+    let starting = state.clone();
+    off_the_workers(move || charges::area::heal_at_start(&starting)).await;
+    assert_eq!(result_of(&state, "heal-start", 1), "abandoned");
+    assert_eq!(result_of(&state, "heal-start", 2), "abandoned");
+    assert_eq!(result_of(&state, "heal-start", 3), "done");
+    assert_eq!(
+        audit_actions(&state, &format!("station:{station}"), "run.heal").len(),
+        1
+    );
+
+    // A Mission that ended before the survey is healed by it, and shown as nothing open.
+    for number in [1, 2] {
+        closed_run(&state, station, "heal-survey", number, "verifying");
+    }
+    closed_run(&state, station, "heal-survey", 3, "done");
+    let m = state.roster.charges().get("m").cloned().unwrap();
+    let looking = state.clone();
+    let survey = off_the_workers(move || {
+        charges::area::survey(&looking, &m, &mut BTreeMap::new(), unix_now())
+    })
+    .await;
+    assert!(survey.missions.is_empty(), "{:?}", survey.missions);
+    assert_eq!(result_of(&state, "heal-survey", 1), "abandoned");
+    assert_eq!(result_of(&state, "heal-survey", 2), "abandoned");
+    assert_eq!(audit_actions(&state, "charge:m", "run.heal").len(), 1);
+}
