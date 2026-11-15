@@ -132,6 +132,10 @@ pub struct Settings {
     #[schema(title = "Link type")]
     #[map(default = "Relates".to_owned())]
     link_type: String,
+    /// The page people read the issues on as a board; the project's boards page when unset (none
+    /// for an instance that reads by JQL alone). `https`.
+    #[schema(title = "Board address")]
+    board_url: Option<String>,
 }
 
 /// What the project's create metadata said, kept with the capabilities.
@@ -196,6 +200,9 @@ impl Jira {
         let loopback = matches!(site.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
         if site.scheme() != "https" && !(site.scheme() == "http" && loopback) {
             return Err("site must be https (http only on a loopback address)".to_owned());
+        }
+        if let Some(board) = &settings.board_url {
+            https_page(board).map_err(|e| format!("board_url: {e}"))?;
         }
         for (name, zero) in [
             ("request_timeout_secs", settings.request_timeout_secs == 0),
@@ -682,6 +689,22 @@ impl Source for Jira {
             }
         }
         Ok(SourceBatch { items, cursor })
+    }
+
+    fn board_url(&self) -> Result<Option<String>, ProviderError> {
+        if let Some(board) = &self.settings.board_url {
+            return Ok(Some(board.clone()));
+        }
+        let Some(project) = self.settings.project.as_deref() else {
+            return Ok(None);
+        };
+        let site = self.site.as_str().trim_end_matches('/');
+        Ok(
+            (self.site.scheme() == "https").then(|| match self.settings.deployment {
+                Deployment::Cloud => format!("{site}/jira/software/projects/{project}/boards"),
+                Deployment::Server => format!("{site}/projects/{project}"),
+            }),
+        )
     }
 }
 
@@ -1291,6 +1314,19 @@ fn jql_minute(updated: &str) -> Option<String> {
     valid.then(|| format!("{date} {time}"))
 }
 
+/// Checks that a configured page is a plain `https` address with a host and no credentials.
+fn https_page(text: &str) -> Result<(), String> {
+    let url = Url::parse(text).map_err(|error| error.to_string())?;
+    if url.scheme() != "https"
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return Err("must be an https address without credentials".to_owned());
+    }
+    Ok(())
+}
+
 fn failure(message: &str) -> ProviderError {
     ProviderError::new(Status::GUATIAO_ERR_INTERNAL, message)
 }
@@ -1307,6 +1343,45 @@ mod tests {
         fn from_settings(text: &str) -> Result<Self, String> {
             Jira::new(ai6::provider_settings::settings_from_text(text)?)
         }
+    }
+
+    #[test]
+    fn the_board_is_the_projects_page_unless_the_settings_name_another() {
+        let board = |text: &str| Jira::from_settings(text).unwrap().board_url().unwrap();
+        let cloud =
+            "site = \"https://example.atlassian.net/\"\nproject = \"OPS\"\nauth = \"bearer\"";
+        assert_eq!(
+            board(cloud).as_deref(),
+            Some("https://example.atlassian.net/jira/software/projects/OPS/boards")
+        );
+        assert_eq!(
+            board(&format!("{cloud}\ndeployment = \"server\"")).as_deref(),
+            Some("https://example.atlassian.net/projects/OPS")
+        );
+        assert_eq!(
+            board(&format!(
+                "{cloud}\nboard_url = \"https://example.atlassian.net/b/7\""
+            ))
+            .as_deref(),
+            Some("https://example.atlassian.net/b/7")
+        );
+        assert_eq!(
+            board(
+                "site = \"https://example.atlassian.net\"\nauth = \"bearer\"\njql = \"labels = ready\""
+            ),
+            None,
+            "a query alone names no project"
+        );
+        assert_eq!(
+            board("site = \"http://127.0.0.1:9\"\nproject = \"OPS\"\nauth = \"bearer\""),
+            None
+        );
+        assert!(
+            Jira::from_settings(&format!(
+                "{cloud}\nboard_url = \"http://example.atlassian.net/b\""
+            ))
+            .is_err()
+        );
     }
 
     #[test]

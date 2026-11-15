@@ -98,6 +98,10 @@ pub struct Settings {
     #[schema(title = "Remember the project for", format = "seconds")]
     #[map(default = 600)]
     capability_ttl_secs: u64,
+    /// The page people read the issues on as a board; the project's issue boards when unset.
+    /// `https`.
+    #[schema(title = "Board address")]
+    board_url: Option<String>,
 }
 
 /// GitLab issues as an AI6 Source and Tracker.
@@ -151,6 +155,9 @@ impl Gitlab {
         let loopback = matches!(api.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
         if api.scheme() != "https" && !(api.scheme() == "http" && loopback) {
             return Err("api_url must be https (http only on a loopback address)".to_owned());
+        }
+        if let Some(board) = &settings.board_url {
+            https_page(board).map_err(|e| format!("board_url: {e}"))?;
         }
         for (name, zero) in [
             ("request_timeout_secs", settings.request_timeout_secs == 0),
@@ -618,6 +625,14 @@ impl Source for Gitlab {
             .max();
         Ok(SourceBatch { items, cursor })
     }
+
+    fn board_url(&self) -> Result<Option<String>, ProviderError> {
+        Ok(self.settings.board_url.clone().or_else(|| {
+            self.web_project()
+                .filter(|web| web.starts_with("https://"))
+                .map(|web| format!("{web}/-/boards"))
+        }))
+    }
 }
 
 impl Tracker for Gitlab {
@@ -1050,6 +1065,19 @@ fn same_origin(candidate: &str, api: &Url) -> bool {
     Url::parse(candidate).is_ok_and(|url| url.origin() == api.origin())
 }
 
+/// Checks that a configured page is a plain `https` address with a host and no credentials.
+fn https_page(text: &str) -> Result<(), String> {
+    let url = Url::parse(text).map_err(|error| error.to_string())?;
+    if url.scheme() != "https"
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return Err("must be an https address without credentials".to_owned());
+    }
+    Ok(())
+}
+
 fn failure(message: &str) -> ProviderError {
     ProviderError::new(Status::GUATIAO_ERR_INTERNAL, message)
 }
@@ -1093,6 +1121,52 @@ mod tests {
         );
         assert!(
             Gitlab::from_settings("project = \"g/p\"\napi_url = \"http://127.0.0.1:9\"").is_ok()
+        );
+    }
+
+    #[test]
+    fn the_board_is_the_projects_boards_unless_the_settings_name_another() {
+        let board = |text: &str| Gitlab::from_settings(text).unwrap().board_url().unwrap();
+        assert_eq!(
+            board("project = \"g/sub/p\"").as_deref(),
+            Some("https://gitlab.com/g/sub/p/-/boards")
+        );
+        assert_eq!(
+            board(
+                "project = \"g/p\"
+api_url = \"https://git.example.com/gitlab/api/v4/\""
+            )
+            .as_deref(),
+            Some("https://git.example.com/gitlab/g/p/-/boards")
+        );
+        assert_eq!(
+            board(
+                "project = \"g/p\"
+board_url = \"https://gitlab.com/groups/g/-/boards/9\""
+            )
+            .as_deref(),
+            Some("https://gitlab.com/groups/g/-/boards/9")
+        );
+        assert_eq!(
+            board(
+                "project = \"g/p\"
+api_url = \"http://127.0.0.1:9/api/v4\""
+            ),
+            None
+        );
+        assert_eq!(
+            board(
+                "project = \"g/p\"
+api_url = \"https://proxy.example/gl\""
+            ),
+            None
+        );
+        assert!(
+            Gitlab::from_settings(
+                "project = \"g/p\"
+board_url = \"http://gitlab.com/g\""
+            )
+            .is_err()
         );
     }
 

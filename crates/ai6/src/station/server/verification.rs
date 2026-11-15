@@ -271,6 +271,7 @@ fn comment(
             query: None,
             comments: most,
             items: 0,
+            boards: false,
         };
         let worker = state.clone();
         let answered = probes::within(wait, move || {

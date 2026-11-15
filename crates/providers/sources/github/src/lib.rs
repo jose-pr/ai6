@@ -100,6 +100,10 @@ pub struct Settings {
     #[schema(title = "Remember the repository for", format = "seconds")]
     #[map(default = 600)]
     capability_ttl_secs: u64,
+    /// The page people read the issues on as a board, such as a Projects board; the repository's
+    /// own issues page when unset. `https`.
+    #[schema(title = "Board address")]
+    board_url: Option<String>,
 }
 
 /// GitHub issues as an AI6 Source and Tracker.
@@ -153,6 +157,9 @@ impl Github {
         if api.scheme() != "https" && !(api.scheme() == "http" && loopback) {
             return Err("api_url must be https (http only on a loopback address)".to_owned());
         }
+        if let Some(board) = &settings.board_url {
+            https_page(board).map_err(|e| format!("board_url: {e}"))?;
+        }
         for (name, zero) in [
             ("request_timeout_secs", settings.request_timeout_secs == 0),
             ("page_size", settings.page_size == 0),
@@ -176,6 +183,24 @@ impl Github {
             agent,
             capabilities: Mutex::new(None),
         })
+    }
+
+    /// The repository's issues page on the web, from the API address: github.com for the public
+    /// API, the host of a GitHub Enterprise `.../api/v3` root; none for any other root.
+    fn issues_page(&self) -> Option<String> {
+        let origin = match self.api.path().trim_end_matches('/') {
+            "" if self.api.host_str() == Some("api.github.com") => "https://github.com".to_owned(),
+            "/api/v3" => {
+                format!("{}://{}", self.api.scheme(), self.api.host_str()?)
+                    + &self
+                        .api
+                        .port()
+                        .map(|port| format!(":{port}"))
+                        .unwrap_or_default()
+            }
+            _ => return None,
+        };
+        (self.api.scheme() == "https").then(|| format!("{origin}/{}/issues", self.settings.repo))
     }
 
     fn endpoint(&self, path: &str) -> String {
@@ -496,6 +521,14 @@ impl Source for Github {
             .chain(request.cursor)
             .max();
         Ok(SourceBatch { items, cursor })
+    }
+
+    fn board_url(&self) -> Result<Option<String>, ProviderError> {
+        Ok(self
+            .settings
+            .board_url
+            .clone()
+            .or_else(|| self.issues_page()))
     }
 }
 
@@ -924,6 +957,19 @@ fn same_origin(candidate: &str, api: &Url) -> bool {
     Url::parse(candidate).is_ok_and(|url| url.origin() == api.origin())
 }
 
+/// Checks that a configured page is a plain `https` address with a host and no credentials.
+fn https_page(text: &str) -> Result<(), String> {
+    let url = Url::parse(text).map_err(|error| error.to_string())?;
+    if url.scheme() != "https"
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return Err("must be an https address without credentials".to_owned());
+    }
+    Ok(())
+}
+
 fn failure(message: &str) -> ProviderError {
     ProviderError::new(Status::GUATIAO_ERR_INTERNAL, message)
 }
@@ -972,6 +1018,56 @@ mod tests {
         assert!(Github::from_settings("repo = \"o/../r\"").is_err());
         assert!(Github::from_settings("repo = \"o/r\"\napi_url = \"http://example.com\"").is_err());
         assert!(Github::from_settings("repo = \"o/r\"\napi_url = \"http://127.0.0.1:9\"").is_ok());
+    }
+
+    #[test]
+    fn the_board_is_the_issues_page_unless_the_settings_name_another() {
+        let board = |text: &str| Github::from_settings(text).unwrap().board_url().unwrap();
+        assert_eq!(
+            board("repo = \"o/r\"").as_deref(),
+            Some("https://github.com/o/r/issues")
+        );
+        assert_eq!(
+            board(
+                "repo = \"o/r\"
+api_url = \"https://ghe.example:8443/api/v3/\""
+            )
+            .as_deref(),
+            Some("https://ghe.example:8443/o/r/issues")
+        );
+        assert_eq!(
+            board(
+                "repo = \"o/r\"
+board_url = \"https://github.com/orgs/o/projects/3\""
+            )
+            .as_deref(),
+            Some("https://github.com/orgs/o/projects/3")
+        );
+        assert_eq!(
+            board(
+                "repo = \"o/r\"
+api_url = \"https://proxy.example/github\""
+            ),
+            None,
+            "a root that is not GitHub's names no web page"
+        );
+        assert_eq!(
+            board(
+                "repo = \"o/r\"
+api_url = \"http://127.0.0.1:9\""
+            ),
+            None
+        );
+        for bad in ["http://github.com/o", "nope", "https://u:p@github.com/o"] {
+            assert!(
+                Github::from_settings(&format!(
+                    "repo = \"o/r\"
+board_url = \"{bad}\""
+                ))
+                .is_err(),
+                "{bad}"
+            );
+        }
     }
 
     #[test]

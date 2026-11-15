@@ -3484,6 +3484,9 @@ pub struct SourceBatch { pub items: Vec<SourceItem>, pub cursor: Option<String> 
 #[guatiao::kind(name = "ai6_source")]
 pub trait Source: Send + Sync {
     fn poll(&self, request: SourcePoll) -> Result<SourceBatch, ProviderError>;
+    // The page where people read this instance's issues as a board, from its own settings with no
+    // request to the tracker; None names none (the default body). An optional slot of the kind.
+    fn board_url(&self) -> Result<Option<String>, ProviderError> { Ok(None) }
 }
 pub const SOURCE_BRIEF_PREFIX: &str = "source:";
 
@@ -3583,14 +3586,16 @@ pub trait Tracker: Send + Sync {
 Plugins::trackers() -> Vec<ProviderInfo>;  Plugins::tracker(provider, config: Option<&Value>) -> Result<Box<dyn Tracker>, PluginBuildError>
 // A live read Universal Exports asks the Headquarters Station for (serde, deny_unknown_fields):
 pub struct SourceRead { pub id, operation: String, pub tracker, item, query: Option<String>,
-    pub comments: u32, pub items: u32 }   // no item: lists what the sources find
+    pub comments: u32, pub items: u32,
+    pub boards: bool }   // no item: lists what the sources find; `boards` asks for each instance's board instead
 pub struct SourceReadItem { pub tracker, id, title: String, pub state: Option<String>,
     pub labels, assignees: Vec<String>, pub url: Option<String>, pub updated: String,
     pub author, body: Option<String> }   // text untrusted
 pub struct SourceReadComment { pub author, role /* ai6|answers|other */, at, body: String }
 impl SourceReadComment { pub fn of(reply: Reply) -> Self; }
 pub struct SourceReadAnswer { pub item: Option<SourceReadItem>, pub comments: Vec<SourceReadComment>,
-    pub items: Vec<SourceReadItem>, pub error: Option<String> }
+    pub items: Vec<SourceReadItem>, pub boards: Vec<SourceBoard>, pub error: Option<String> }
+pub struct SourceBoard { pub tracker, provider, url: String }   // `url` is https; one per instance whose provider names a board
 ```
 
 `Reply::permitted` is the provider's judgement that the author may answer for the issue (its

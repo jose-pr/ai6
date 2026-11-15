@@ -5,11 +5,12 @@
 use crate::directorates::m::roster::Roster;
 use crate::directorates::registry::sources::SourcePoll;
 use crate::directorates::registry::tracker::{
-    ReplyPoll, SourceRead, SourceReadAnswer, SourceReadComment, SourceReadItem, Tracker,
+    ReplyPoll, SourceBoard, SourceRead, SourceReadAnswer, SourceReadComment, SourceReadItem,
+    Tracker,
 };
 use crate::station::issues::TrackerBuilder;
 use crate::station::limits::SourceLimits;
-use crate::station::sources::{SourceBuilder, source_setups};
+use crate::station::sources::{SourceBuilder, SourceSetup, source_setups};
 
 /// Answers `read` through the Operation's providers, which `build` and `build_tracker` make
 /// from each instance's settings. What cannot be read is the answer's `error`, never a panic.
@@ -37,6 +38,9 @@ pub(crate) fn answer(
             Some(name) => format!("Operation {} has no source {name}", read.operation),
             None => format!("Operation {} has no source", read.operation),
         });
+    }
+    if read.boards {
+        return boards(&setups, build);
     }
     match &read.item {
         Some(item) => {
@@ -89,6 +93,26 @@ pub(crate) fn answer(
     }
 }
 
+/// The board each of `setups` names. An instance whose provider names none has no entry; one
+/// that cannot be built is the answer's `error`, and the others are still answered.
+fn boards(setups: &[SourceSetup], build: &SourceBuilder<'_>) -> SourceReadAnswer {
+    let mut answer = SourceReadAnswer::default();
+    for setup in setups {
+        let named = build(&setup.provider, &setup.settings)
+            .and_then(|source| source.board_url().map_err(|error| error.to_string()));
+        match named {
+            Ok(Some(url)) => answer.boards.push(SourceBoard {
+                tracker: setup.name.clone(),
+                provider: setup.provider.clone(),
+                url,
+            }),
+            Ok(None) => {}
+            Err(error) => answer.error = Some(format!("source {}: {error}", setup.name)),
+        }
+    }
+    answer
+}
+
 /// One item of instance `name` and its latest `most` comments.
 fn one(tracker: &dyn Tracker, name: &str, item: &str, most: u32) -> SourceReadAnswer {
     let issue = match tracker.issue(item.to_owned()) {
@@ -136,6 +160,7 @@ fn one(tracker: &dyn Tracker, name: &str, item: &str, most: u32) -> SourceReadAn
         }),
         comments,
         items: Vec::new(),
+        boards: Vec::new(),
         error,
     }
 }

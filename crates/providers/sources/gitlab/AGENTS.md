@@ -21,6 +21,7 @@ impl Gitlab {
 impl TryFrom<Settings> for Gitlab { /* same validation; BAD_VALUE on refusal */ }
 impl ai6::Source for Gitlab {
     fn poll(&self, request: SourcePoll) -> Result<SourceBatch, ProviderError>;
+    fn board_url(&self) -> Result<Option<String>, ProviderError>;   // no request; see Settings `board_url`
 }
 impl ai6::Tracker for Gitlab {
     fn capabilities(&self, item: Option<String>) -> Result<TrackerCapabilities, ProviderError>;
@@ -54,6 +55,7 @@ as the value of `Settings` (the provider's `config`).
 | `reply_authors` | `[]` | usernames besides the issue's author and the members below whose comments may answer a question |
 | `reply_min_access` | 30 | the least project access level that may answer: 10 Guest, 15 Planner, 20 Reporter, 30 Developer, 40 Maintainer, 50 Owner |
 | `capability_ttl_secs` | 600 | how long the project's labels and settings are remembered |
+| `board_url` | the project's `.../-/boards` | an `https` page where people read the issues as a board; the `board_url` the provider answers (none for an `api_url` that does not end `/api/v4`) |
 
 Unknown keys are refused. `provider`, `intake` and `interval_secs` are read by the Station and
 never reach the provider, nor do the Station's own keys (`status_labels`, `status_transitions`,

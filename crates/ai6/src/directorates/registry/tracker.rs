@@ -275,6 +275,22 @@ pub struct SourceRead {
     pub comments: u32,
     /// The most items to list.
     pub items: u32,
+    /// Asks for each instance's board page instead of any item: `boards` of the answer, from
+    /// the providers' own settings, with no request to a tracker.
+    #[serde(default)]
+    pub boards: bool,
+}
+
+/// The board of one tracker instance, as its Source provider names it.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SourceBoard {
+    /// The instance (the key under `sources`).
+    pub tracker: String,
+    /// The provider serving it.
+    pub provider: String,
+    /// The `https` page where people read its issues as a board.
+    pub url: String,
 }
 
 /// One item as a [`SourceRead`] answers it. Its text is untrusted.
@@ -338,6 +354,9 @@ pub struct SourceReadAnswer {
     /// The items listed, for a list.
     #[serde(default)]
     pub items: Vec<SourceReadItem>,
+    /// The boards of the instances asked about, for a read that asked for them.
+    #[serde(default)]
+    pub boards: Vec<SourceBoard>,
     /// Why nothing was read, in a sentence.
     #[serde(default)]
     pub error: Option<String>,

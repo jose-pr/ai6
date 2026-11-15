@@ -78,6 +78,12 @@ pub trait Source: Send + Sync {
     /// Returns the items that changed since `request.cursor` and match the filters the
     /// provider was configured with. Blocks for the duration of the network exchange.
     fn poll(&self, request: SourcePoll) -> Result<SourceBatch, ProviderError>;
+
+    /// The page where people read this instance's issues as a board, from its own settings and
+    /// with no request to the tracker; `None` when the provider names none.
+    fn board_url(&self) -> Result<Option<String>, ProviderError> {
+        Ok(None)
+    }
 }
 
 /// What happened to one item when it was offered to the Registry.
@@ -713,7 +719,7 @@ mod tests {
     // A changed required signature affects every built source provider.
     #[test]
     fn floor_hashes_are_pinned() {
-        assert_eq!(SourceVtable::FLOOR_HASH, 1796254243);
+        assert_eq!(SourceVtable::FLOOR_HASH, 2685550442);
     }
 
     fn an_item_becomes_one_brief_and_changes_update_it(store: &dyn Store) {

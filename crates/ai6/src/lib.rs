@@ -246,9 +246,9 @@ pub use directorates::registry::store::{
 };
 pub use directorates::registry::timeline::TimelineEvent;
 pub use directorates::registry::tracker::{
-    IssueSpec, PostedComment, Reply, ReplyBatch, ReplyPoll, SourceRead, SourceReadAnswer,
-    SourceReadComment, SourceReadItem, Tracker, TrackerCapabilities, TrackerIssue, TrackerLink,
-    TrackerPost, TrackerUpdate, settings_from_table,
+    IssueSpec, PostedComment, Reply, ReplyBatch, ReplyPoll, SourceBoard, SourceRead,
+    SourceReadAnswer, SourceReadComment, SourceReadItem, Tracker, TrackerCapabilities,
+    TrackerIssue, TrackerLink, TrackerPost, TrackerUpdate, settings_from_table,
 };
 pub use directorates::registry::vetting::{Clearance, HeldBrief};
 pub use directorates::section_00::agent::{

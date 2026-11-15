@@ -21,6 +21,7 @@ impl Github {
 impl TryFrom<Settings> for Github { /* same validation; BAD_VALUE on refusal */ }
 impl ai6::Source for Github {
     fn poll(&self, request: SourcePoll) -> Result<SourceBatch, ProviderError>;
+    fn board_url(&self) -> Result<Option<String>, ProviderError>;   // no request; see Settings `board_url`
 }
 impl ai6::Tracker for Github {
     fn capabilities(&self, item: Option<String>) -> Result<TrackerCapabilities, ProviderError>;
@@ -55,6 +56,7 @@ as the value of `Settings` (the provider's `config`).
 | `reply_authors` | `[]` | logins besides the issue's author and the associations below whose comments may answer a question |
 | `reply_associations` | `["OWNER", "MEMBER", "COLLABORATOR"]` | `author_association` values that may answer |
 | `capability_ttl_secs` | 600 | how long the repository's labels and settings are remembered |
+| `board_url` | the repository's issues page | an `https` page where people read the issues as a board (a Projects board); `board_url` the provider answers (GitHub's own site by default, or the host of a GitHub Enterprise `api_url` ending `/api/v3`; none for another root) |
 
 Unknown keys are refused. `provider`, `intake` and `interval_secs` are read by the Station and
 never reach the provider, nor do the Station's own keys (`status_labels`, `status_transitions`,

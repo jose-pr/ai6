@@ -126,6 +126,7 @@ fn read(item: Option<&str>, query: Option<&str>) -> SourceRead {
         query: query.map(str::to_owned),
         comments: 3,
         items: 10,
+        boards: false,
     }
 }
 
@@ -228,4 +229,66 @@ fn an_unknown_operation_or_source_is_an_answer_not_a_panic() {
             .unwrap()
             .contains("no source jira")
     );
+}
+
+/// A source that names a board, as a configured provider would.
+struct Boarded;
+
+impl Source for Boarded {
+    fn poll(&self, _: SourcePoll) -> Result<SourceBatch, ProviderError> {
+        unreachable!("a board read polls nothing")
+    }
+
+    fn board_url(&self) -> Result<Option<String>, ProviderError> {
+        Ok(Some("https://board.example/o/r".to_owned()))
+    }
+}
+
+#[test]
+fn a_board_read_asks_each_provider_for_its_page_and_no_tracker() {
+    let (_dir, roster) = roster();
+    let build =
+        |_: &str, _: &toml::Table| -> Result<Box<dyn Source>, String> { Ok(Box::new(Boarded)) };
+    let build_tracker = |_: &str, _: &toml::Table| -> Result<Box<dyn Tracker>, String> {
+        unreachable!("a board read touches no tracker")
+    };
+    let mut ask = read(None, None);
+    ask.boards = true;
+    let found = answer(
+        &ask,
+        &roster,
+        &SourceLimits::default(),
+        &build,
+        &build_tracker,
+    );
+    assert_eq!(found.error, None);
+    assert_eq!(found.boards.len(), 1);
+    assert_eq!(
+        (
+            found.boards[0].tracker.as_str(),
+            found.boards[0].provider.as_str(),
+            found.boards[0].url.as_str()
+        ),
+        ("gh", "github", "https://board.example/o/r")
+    );
+}
+
+#[test]
+fn a_provider_with_no_board_has_no_entry() {
+    let (_dir, roster) = roster();
+    let build =
+        |_: &str, _: &toml::Table| -> Result<Box<dyn Source>, String> { Ok(Box::new(Three)) };
+    let build_tracker = |_: &str, _: &toml::Table| -> Result<Box<dyn Tracker>, String> {
+        unreachable!("a board read touches no tracker")
+    };
+    let mut ask = read(None, None);
+    ask.boards = true;
+    let found = answer(
+        &ask,
+        &roster,
+        &SourceLimits::default(),
+        &build,
+        &build_tracker,
+    );
+    assert!(found.boards.is_empty() && found.error.is_none());
 }

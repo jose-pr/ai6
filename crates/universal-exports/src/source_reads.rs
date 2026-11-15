@@ -157,6 +157,7 @@ fn read_of(gateway: &Gateway, operation: &OperationId) -> SourceRead {
         query: None,
         comments: bound(limits.source_comments),
         items: bound(limits.source_items),
+        boards: false,
     }
 }
 

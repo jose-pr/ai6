@@ -21,6 +21,7 @@ impl Jira {
 impl TryFrom<Settings> for Jira { /* same validation; BAD_VALUE on refusal */ }
 impl ai6::Source for Jira {
     fn poll(&self, request: SourcePoll) -> Result<SourceBatch, ProviderError>;
+    fn board_url(&self) -> Result<Option<String>, ProviderError>;   // no request; see Settings `board_url`
 }
 impl ai6::Tracker for Jira {
     fn capabilities(&self, item: Option<String>) -> Result<TrackerCapabilities, ProviderError>;
@@ -60,6 +61,7 @@ as the value of `Settings` (the provider's `config`).
 | `subtask_type` | the project's first sub-task type | the type of a created child |
 | `capability_ttl_secs` | 600 | how long the project's issue types and priorities are remembered |
 | `link_type` | `Relates` | the issue link type that ties a child to a parent it cannot sit under |
+| `board_url` | Cloud: the project's boards page; Server: `.../projects/KEY`; none without a `project` | an `https` page where people read the issues as a board; the `board_url` the provider answers |
 
 Unknown keys are refused. `provider`, `intake` and `interval_secs` are read by the Station and
 never reach the provider, nor do the Station's own keys (`status_labels`, `status_transitions`,
