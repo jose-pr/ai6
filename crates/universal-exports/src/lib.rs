@@ -62,7 +62,7 @@ mod unstarted_tests;
 mod verdicts;
 
 use core::future::Future;
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -1059,24 +1059,32 @@ impl Gateway {
                 .unwrap_or_default(),
             None => Vec::new(),
         };
-        // A later run may resume the provider's Run: the board lists it once, as the
-        // latest run stands.
-        let mut latest = HashMap::<String, ai6::RunRecord>::new();
+        // A Mission is listed once, by its latest Run: a Run a later one supersedes (a resume or
+        // a redispatch) is history, whatever state it last reported, and its live frames are
+        // dropped with it.
+        let mut latest = HashMap::<String, (ai6::RunRecord, String)>::new();
+        let mut superseded = HashSet::<String>::new();
         for record in recorded {
             let Some(provider) = record.provider_id.clone() else {
                 continue;
             };
-            if latest
-                .get(&provider)
-                .is_none_or(|held| held.number <= record.number)
-            {
-                latest.insert(provider, record);
+            match latest.get_mut(&record.mission_id) {
+                Some(held) if held.0.number > record.number => {
+                    superseded.insert(provider);
+                }
+                Some(held) => {
+                    superseded.insert(std::mem::replace(held, (record, provider)).1);
+                }
+                None => {
+                    latest.insert(record.mission_id.clone(), (record, provider));
+                }
             }
         }
-        let mut recorded: Vec<(ai6::RunRecord, String)> = latest
-            .into_iter()
-            .map(|(provider, record)| (record, provider))
-            .collect();
+        for (_, provider) in latest.values() {
+            superseded.remove(provider);
+        }
+        live.retain(|provider, _| !superseded.contains(provider));
+        let mut recorded: Vec<(ai6::RunRecord, String)> = latest.into_values().collect();
         recorded.sort_by(|(left, _), (right, _)| {
             record_updated_at(right)
                 .partial_cmp(&record_updated_at(left))

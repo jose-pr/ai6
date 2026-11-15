@@ -228,3 +228,51 @@ async fn a_recorded_mission_is_not_also_listed_as_pending() {
     assert_eq!(states(&missions, "m-ended"), ["done"]);
     assert_eq!(listed("m-new"), 1);
 }
+
+#[tokio::test]
+async fn a_mission_is_listed_once_by_its_latest_run_not_by_a_superseded_one() {
+    let served = served().await;
+    for (id, number, state) in [
+        ("old-1", 1, "verifying"),
+        ("old-2", 2, "verifying"),
+        ("old-3", 3, "done"),
+    ] {
+        let opened = served
+            .registry
+            .open_run(
+                NewRun::new(id, "m-redispatched", "worker")
+                    .with_operation("G")
+                    .with_provider_id(format!("run-{id}"))
+                    .with_number(number, None),
+                Duration::from_secs(60),
+            )
+            .unwrap();
+        served
+            .registry
+            .update_run(
+                &opened.id,
+                "worker",
+                opened.fence,
+                RunUpdate::default()
+                    .result(RunResult::new(state))
+                    .status(RunStatus::Ended),
+            )
+            .unwrap();
+    }
+    let again = restarted(&served).await;
+
+    let board: Value = get(&again.base, &served.viewer, "/v1/board")
+        .await
+        .json()
+        .await
+        .unwrap();
+    let rows: Vec<&Value> = board
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|run| run["mission_id"] == "m-redispatched")
+        .collect();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0]["state"], "done");
+    assert_eq!(rows[0]["run_id"], "run-old-3");
+}
