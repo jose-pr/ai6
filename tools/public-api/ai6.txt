@@ -872,8 +872,14 @@ pub ai6::directorates::m::charges::ChargeDefinition::max_waiting_events: ai6::bo
 pub ai6::directorates::m::charges::ChargeDefinition::operation: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::charges::ChargeDefinition::poll_frozen_after: ai6::bounds::TimeLimit
 pub ai6::directorates::m::charges::ChargeDefinition::stall_after: ai6::bounds::TimeLimit
+pub ai6::directorates::m::charges::ChargeDefinition::stuck_blocked_after: ai6::bounds::TimeLimit
+pub ai6::directorates::m::charges::ChargeDefinition::stuck_charge_after: ai6::bounds::TimeLimit
+pub ai6::directorates::m::charges::ChargeDefinition::stuck_queued_after: ai6::bounds::TimeLimit
+pub ai6::directorates::m::charges::ChargeDefinition::stuck_run_lost_after: ai6::bounds::TimeLimit
+pub ai6::directorates::m::charges::ChargeDefinition::stuck_verifying_after: ai6::bounds::TimeLimit
 pub ai6::directorates::m::charges::ChargeDefinition::turn_timeout: ai6::bounds::TimeLimit
 pub ai6::directorates::m::charges::ChargeDefinition::wake_every: ai6::bounds::TimeLimit
+pub ai6::directorates::m::charges::ChargeDefinition::wake_every_idle: ai6::bounds::TimeLimit
 impl ai6::directorates::m::charges::ChargeDefinition
 pub const ai6::directorates::m::charges::ChargeDefinition::DEFAULTS: Self
 pub fn ai6::directorates::m::charges::ChargeDefinition::cable_operation<'a>(&'a self, &'a ai6::directorates::m::charges::ChargeScope) -> core::option::Option<&'a str>
@@ -5451,6 +5457,7 @@ pub fn ai6::directorates::registry::backend::RunStore::renew_run(&self, &str, &s
 pub fn ai6::directorates::registry::backend::RunStore::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::directorates::registry::backend::RunStore::run(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::runs::RunRecord>>
 pub fn ai6::directorates::registry::backend::RunStore::runs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::runs::RunRecord>>
+pub fn ai6::directorates::registry::backend::RunStore::settle_results(&self, &str, &ai6::directorates::registry::runs::RunResult, &ai6::directorates::registry::runs::RunResult) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::backend::RunStore::take_run(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::directorates::registry::backend::RunStore::update_run(&self, &str, &str, u64, ai6::directorates::registry::runs::RunUpdate) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 impl ai6::directorates::registry::runs::RunStore for ai6::directorates::registry::sql::SqlRegistry
@@ -5466,6 +5473,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::renew_run(&self, &str, &st
 pub fn ai6::directorates::registry::sql::SqlRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::run(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::runs::RunRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::runs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::runs::RunRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::settle_results(&self, &str, &ai6::directorates::registry::runs::RunResult, &ai6::directorates::registry::runs::RunResult) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::sql::SqlRegistry::take_run(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::update_run(&self, &str, &str, u64, ai6::directorates::registry::runs::RunUpdate) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 impl ai6::directorates::registry::runs::RunStore for ai6::directorates::registry::store::FileRegistry
@@ -5481,6 +5489,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::renew_run(&self, &str, 
 pub fn ai6::directorates::registry::store::FileRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::directorates::registry::store::FileRegistry::run(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::runs::RunRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::runs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::runs::RunRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::settle_results(&self, &str, &ai6::directorates::registry::runs::RunResult, &ai6::directorates::registry::runs::RunResult) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::store::FileRegistry::take_run(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::directorates::registry::store::FileRegistry::update_run(&self, &str, &str, u64, ai6::directorates::registry::runs::RunUpdate) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub trait ai6::directorates::registry::backend::SealedStore
@@ -7394,6 +7403,8 @@ pub ai6::directorates::registry::runs::RunResult::reason: core::option::Option<a
 pub ai6::directorates::registry::runs::RunResult::state: alloc::string::String
 impl ai6::directorates::registry::runs::RunResult
 pub const ai6::directorates::registry::runs::RunResult::HANDED_OFF: &'static str
+pub const ai6::directorates::registry::runs::RunResult::REDISPATCHED: &'static str
+pub const ai6::directorates::registry::runs::RunResult::SUPERSEDED: &'static str
 pub fn ai6::directorates::registry::runs::RunResult::new(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::runs::RunResult::with_denied_tools(self, usize) -> Self
 pub fn ai6::directorates::registry::runs::RunResult::with_reason(self, core::option::Option<alloc::string::String>) -> Self
@@ -7420,6 +7431,7 @@ pub fn ai6::directorates::registry::runs::RunUpdate::recent(self, alloc::vec::Ve
 pub fn ai6::directorates::registry::runs::RunUpdate::result(self, ai6::directorates::registry::runs::RunResult) -> Self
 pub fn ai6::directorates::registry::runs::RunUpdate::started(self, ai6::directorates::registry::runs::RunStart) -> Self
 pub fn ai6::directorates::registry::runs::RunUpdate::status(self, ai6::directorates::registry::runs::RunStatus) -> Self
+pub const ai6::directorates::registry::runs::LOST_REASON: &str
 pub trait ai6::directorates::registry::runs::RunStore
 pub fn ai6::directorates::registry::runs::RunStore::file_final_report(&self, &ai6::directorates::registry::runs::FinalReport) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::runs::RunStore::final_report(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::runs::FinalReport>>
@@ -7433,6 +7445,7 @@ pub fn ai6::directorates::registry::runs::RunStore::renew_run(&self, &str, &str,
 pub fn ai6::directorates::registry::runs::RunStore::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::directorates::registry::runs::RunStore::run(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::runs::RunRecord>>
 pub fn ai6::directorates::registry::runs::RunStore::runs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::runs::RunRecord>>
+pub fn ai6::directorates::registry::runs::RunStore::settle_results(&self, &str, &ai6::directorates::registry::runs::RunResult, &ai6::directorates::registry::runs::RunResult) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::runs::RunStore::take_run(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::directorates::registry::runs::RunStore::update_run(&self, &str, &str, u64, ai6::directorates::registry::runs::RunUpdate) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 impl ai6::directorates::registry::runs::RunStore for ai6::directorates::registry::sql::SqlRegistry
@@ -7448,6 +7461,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::renew_run(&self, &str, &st
 pub fn ai6::directorates::registry::sql::SqlRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::run(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::runs::RunRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::runs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::runs::RunRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::settle_results(&self, &str, &ai6::directorates::registry::runs::RunResult, &ai6::directorates::registry::runs::RunResult) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::sql::SqlRegistry::take_run(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::update_run(&self, &str, &str, u64, ai6::directorates::registry::runs::RunUpdate) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 impl ai6::directorates::registry::runs::RunStore for ai6::directorates::registry::store::FileRegistry
@@ -7463,6 +7477,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::renew_run(&self, &str, 
 pub fn ai6::directorates::registry::store::FileRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::directorates::registry::store::FileRegistry::run(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::runs::RunRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::runs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::runs::RunRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::settle_results(&self, &str, &ai6::directorates::registry::runs::RunResult, &ai6::directorates::registry::runs::RunResult) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::store::FileRegistry::take_run(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::directorates::registry::store::FileRegistry::update_run(&self, &str, &str, u64, ai6::directorates::registry::runs::RunUpdate) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub mod ai6::directorates::registry::sealed
@@ -7853,6 +7868,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::renew_run(&self, &str, &st
 pub fn ai6::directorates::registry::sql::SqlRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::run(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::runs::RunRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::runs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::runs::RunRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::settle_results(&self, &str, &ai6::directorates::registry::runs::RunResult, &ai6::directorates::registry::runs::RunResult) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::sql::SqlRegistry::take_run(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::update_run(&self, &str, &str, u64, ai6::directorates::registry::runs::RunUpdate) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 impl ai6::directorates::registry::sealed::SealedStore for ai6::directorates::registry::sql::SqlRegistry
@@ -8154,6 +8170,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::renew_run(&self, &str, 
 pub fn ai6::directorates::registry::store::FileRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::directorates::registry::store::FileRegistry::run(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::runs::RunRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::runs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::runs::RunRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::settle_results(&self, &str, &ai6::directorates::registry::runs::RunResult, &ai6::directorates::registry::runs::RunResult) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::store::FileRegistry::take_run(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::directorates::registry::store::FileRegistry::update_run(&self, &str, &str, u64, ai6::directorates::registry::runs::RunUpdate) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 impl ai6::directorates::registry::sealed::SealedStore for ai6::directorates::registry::store::FileRegistry
@@ -11704,8 +11721,14 @@ pub ai6::ChargeDefinition::max_waiting_events: ai6::bounds::Limit
 pub ai6::ChargeDefinition::operation: core::option::Option<alloc::string::String>
 pub ai6::ChargeDefinition::poll_frozen_after: ai6::bounds::TimeLimit
 pub ai6::ChargeDefinition::stall_after: ai6::bounds::TimeLimit
+pub ai6::ChargeDefinition::stuck_blocked_after: ai6::bounds::TimeLimit
+pub ai6::ChargeDefinition::stuck_charge_after: ai6::bounds::TimeLimit
+pub ai6::ChargeDefinition::stuck_queued_after: ai6::bounds::TimeLimit
+pub ai6::ChargeDefinition::stuck_run_lost_after: ai6::bounds::TimeLimit
+pub ai6::ChargeDefinition::stuck_verifying_after: ai6::bounds::TimeLimit
 pub ai6::ChargeDefinition::turn_timeout: ai6::bounds::TimeLimit
 pub ai6::ChargeDefinition::wake_every: ai6::bounds::TimeLimit
+pub ai6::ChargeDefinition::wake_every_idle: ai6::bounds::TimeLimit
 impl ai6::directorates::m::charges::ChargeDefinition
 pub const ai6::directorates::m::charges::ChargeDefinition::DEFAULTS: Self
 pub fn ai6::directorates::m::charges::ChargeDefinition::cable_operation<'a>(&'a self, &'a ai6::directorates::m::charges::ChargeScope) -> core::option::Option<&'a str>
@@ -12214,6 +12237,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::renew_run(&self, &str, 
 pub fn ai6::directorates::registry::store::FileRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::directorates::registry::store::FileRegistry::run(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::runs::RunRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::runs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::runs::RunRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::settle_results(&self, &str, &ai6::directorates::registry::runs::RunResult, &ai6::directorates::registry::runs::RunResult) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::store::FileRegistry::take_run(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::directorates::registry::store::FileRegistry::update_run(&self, &str, &str, u64, ai6::directorates::registry::runs::RunUpdate) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 impl ai6::directorates::registry::sealed::SealedStore for ai6::directorates::registry::store::FileRegistry
@@ -13558,6 +13582,8 @@ pub ai6::RunResult::reason: core::option::Option<alloc::string::String>
 pub ai6::RunResult::state: alloc::string::String
 impl ai6::directorates::registry::runs::RunResult
 pub const ai6::directorates::registry::runs::RunResult::HANDED_OFF: &'static str
+pub const ai6::directorates::registry::runs::RunResult::REDISPATCHED: &'static str
+pub const ai6::directorates::registry::runs::RunResult::SUPERSEDED: &'static str
 pub fn ai6::directorates::registry::runs::RunResult::new(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::runs::RunResult::with_denied_tools(self, usize) -> Self
 pub fn ai6::directorates::registry::runs::RunResult::with_reason(self, core::option::Option<alloc::string::String>) -> Self
@@ -14117,6 +14143,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::renew_run(&self, &str, &st
 pub fn ai6::directorates::registry::sql::SqlRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::run(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::runs::RunRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::runs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::runs::RunRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::settle_results(&self, &str, &ai6::directorates::registry::runs::RunResult, &ai6::directorates::registry::runs::RunResult) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::sql::SqlRegistry::take_run(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::update_run(&self, &str, &str, u64, ai6::directorates::registry::runs::RunUpdate) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 impl ai6::directorates::registry::sealed::SealedStore for ai6::directorates::registry::sql::SqlRegistry
@@ -15463,6 +15490,7 @@ pub fn ai6::RunStore::renew_run(&self, &str, &str, u64, core::time::Duration) ->
 pub fn ai6::RunStore::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::RunStore::run(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::runs::RunRecord>>
 pub fn ai6::RunStore::runs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::runs::RunRecord>>
+pub fn ai6::RunStore::settle_results(&self, &str, &ai6::directorates::registry::runs::RunResult, &ai6::directorates::registry::runs::RunResult) -> core::io::error::Result<usize>
 pub fn ai6::RunStore::take_run(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::RunStore::update_run(&self, &str, &str, u64, ai6::directorates::registry::runs::RunUpdate) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 impl ai6::directorates::registry::runs::RunStore for ai6::directorates::registry::sql::SqlRegistry
@@ -15478,6 +15506,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::renew_run(&self, &str, &st
 pub fn ai6::directorates::registry::sql::SqlRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::run(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::runs::RunRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::runs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::runs::RunRecord>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::settle_results(&self, &str, &ai6::directorates::registry::runs::RunResult, &ai6::directorates::registry::runs::RunResult) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::sql::SqlRegistry::take_run(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::update_run(&self, &str, &str, u64, ai6::directorates::registry::runs::RunUpdate) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 impl ai6::directorates::registry::runs::RunStore for ai6::directorates::registry::store::FileRegistry
@@ -15493,6 +15522,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::renew_run(&self, &str, 
 pub fn ai6::directorates::registry::store::FileRegistry::request_probe(&self, &str, &str, f64) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::directorates::registry::store::FileRegistry::run(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::runs::RunRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::runs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::runs::RunRecord>>
+pub fn ai6::directorates::registry::store::FileRegistry::settle_results(&self, &str, &ai6::directorates::registry::runs::RunResult, &ai6::directorates::registry::runs::RunResult) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::store::FileRegistry::take_run(&self, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::directorates::registry::store::FileRegistry::update_run(&self, &str, &str, u64, ai6::directorates::registry::runs::RunUpdate) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub trait ai6::SafeHouseProvider: core::marker::Send + core::marker::Sync
