@@ -9,10 +9,10 @@ use super::{SqlRegistry, from_json, to_json};
 use crate::directorates::medical::exposure::Exposure;
 use crate::directorates::registry::limits::RunLimits;
 use crate::directorates::registry::runs::{
-    FinalReport, MissionVerdict, NewRun, RunError, RunRecord, RunStore, RunUpdate, apply_fenced,
-    apply_probe_request, apply_recommendation, apply_verdict, latest, lose, merged_exposure,
-    opened, parse_run, run_json, same_run, take, validate_final_report, validate_new_run,
-    validate_run_id, validate_verdict,
+    FinalReport, MissionVerdict, NewRun, RunError, RunRecord, RunResult, RunStore, RunUpdate,
+    apply_fenced, apply_probe_request, apply_recommendation, apply_verdict, latest, lose,
+    merged_exposure, opened, parse_run, run_json, same_run, settle_results, take,
+    validate_final_report, validate_new_run, validate_run_id, validate_verdict,
 };
 use crate::directorates::registry::store::{invalid_data, validate_station_id};
 
@@ -265,6 +265,22 @@ impl RunStore for SqlRegistry {
 
     fn lose_run(&self, id: &str, reason: &str) -> Result<RunRecord, RunError> {
         self.lose_run_when(id, reason, None)
+    }
+
+    fn settle_results(
+        &self,
+        mission_id: &str,
+        latest: &RunResult,
+        earlier: &RunResult,
+    ) -> io::Result<usize> {
+        self.write(|tx, revision| {
+            let all = records(tx, Some(mission_id), &self.limits.runs)?;
+            let changed = settle_results(all, latest, earlier, &self.limits.runs);
+            for record in &changed {
+                put_run(tx, record, revision, &self.limits.runs)?;
+            }
+            Ok::<_, io::Error>(changed.len())
+        })
     }
 
     fn latest_run(&self, mission_id: &str) -> io::Result<Option<RunRecord>> {

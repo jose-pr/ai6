@@ -10,7 +10,7 @@ use super::{
 use crate::directorates::m::approvals::NO_APPROVAL_REASON;
 use crate::directorates::m::mission::{Mission, MissionState};
 use crate::directorates::registry::approvals::{ApprovalStatus, Decision};
-use crate::directorates::registry::runs::{FinalReport, MissionVerdict, OutcomeVerdict};
+use crate::directorates::registry::runs::{FinalReport, MissionVerdict, OutcomeVerdict, RunResult};
 
 /// The event kind that holds a Mission for a person's verdict.
 pub(super) const HELD_EVENT: &str = "held";
@@ -173,6 +173,19 @@ fn settle(state: &DaemonState, mission_id: &str, verdict: &MissionVerdict) {
     };
     publish_finished_event(state, mission_id, event, Some(finished));
     file_settled(state, mission_id);
+    // Redispatched runs before this one reported `verifying` and kept doing so.
+    let latest = if verdict.verdict == OutcomeVerdict::Confirmed {
+        RunResult::new("done")
+    } else {
+        RunResult::new("failed").with_reason(Some(verdict.by.clone()))
+    };
+    if let Err(error) = state.intake.settle_results(
+        mission_id,
+        &latest,
+        &RunResult::new("abandoned").with_reason(Some(RunResult::SUPERSEDED.to_owned())),
+    ) {
+        eprintln!("ai6: Mission {mission_id:?}: its Run records were not settled: {error}");
+    }
 }
 
 /// Missions a verdict settled whose brief the Registry could not be told about yet.

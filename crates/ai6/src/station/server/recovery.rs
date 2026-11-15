@@ -1361,6 +1361,11 @@ mod tests {
                 && reason.contains("own host"),
             "{reason}"
         );
+        // The lost Run no longer reports work: its Mission is queued for another run.
+        assert_eq!(
+            lost.result.as_ref().map(|r| r.state.as_str()),
+            Some("queued")
+        );
         let lease = b.intake.leases().unwrap().pop().unwrap();
         assert_eq!((lease.station(), lease.number()), ("station-b", 2));
         assert!(!lease.meta().contains_key(ADOPT_KEY));
@@ -1405,6 +1410,38 @@ mod tests {
     }
 
     /// Pops `mission_id`'s events on `state` until it completes, and answers its ticks.
+    #[tokio::test]
+    async fn a_run_lost_with_its_station_is_filed_failed_when_its_operation_says_so() {
+        let root = tempfile::tempdir().unwrap();
+        let registry = root.path().join("registry");
+        let operation = "on_lost = \"fail\"
+";
+        let agents = "[agent.007]
+handler = \"mock-agent\"
+";
+        let a = station(root.path(), "station-a", &registry, operation, agents, None);
+        let b = station(root.path(), "station-b", &registry, operation, agents, None);
+        let mission_id = submit(a.intake.as_ref(), &format!("fail-{}", std::process::id()));
+        publish_station_check_in(&a);
+        publish_station_check_in(&b);
+        assert!(schedule_intake_once(&a));
+        schedule_queued_once(&a).await;
+        wait_for_state(&a, &mission_id, MissionState::Blocked).await;
+        let first = run_hold(&a, &mission_id).unwrap();
+
+        go_dark(&a, &mission_id);
+        publish_station_check_in(&b);
+        assert!(schedule_intake_once(&b));
+        let lost = b.intake.run(&first.id).unwrap().unwrap();
+        assert_eq!(lost.status, RunStatus::Lost);
+        // Filed failed: the Run reports it, not `working` or `queued` for a run that will not come.
+        assert_eq!(
+            lost.result.as_ref().map(|r| r.state.as_str()),
+            Some("failed")
+        );
+        assert!(b.intake.leases().unwrap().is_empty());
+    }
+
     async fn finish(state: &DaemonState, mission_id: &str) -> Vec<u32> {
         let mut events = Vec::new();
         until("the Run completes", || {

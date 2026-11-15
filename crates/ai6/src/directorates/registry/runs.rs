@@ -558,6 +558,12 @@ impl RunResult {
     /// The reason of a run another replaced after a limit: no outcome of its Agent's.
     pub const HANDED_OFF: &'static str = "handed-off";
 
+    /// The reason of a run a later one replaced after the Mission's outcome was decided.
+    pub const SUPERSEDED: &'static str = "superseded";
+
+    /// The reason of a run its Mission's verdict sent back for another run.
+    pub const REDISPATCHED: &'static str = "redispatched";
+
     /// A result in `state`.
     pub fn new(state: impl Into<String>) -> Self {
         Self {
@@ -1223,7 +1229,62 @@ pub(super) fn lose(
             .collect(),
     );
     record.fence = term()?.max(record.fence + 1);
+    // The Run reports nothing more, and its Mission is queued for another run until the
+    // Operation's `on_lost` files it failed.
+    record.result = Some(RunResult {
+        state: "queued".to_owned(),
+        reason: Some(LOST_REASON.to_owned()),
+        denied_tools: 0,
+    });
     Ok(())
+}
+
+/// The reason a lost Run's result carries; the Run's `lost` field says why it was lost.
+pub const LOST_REASON: &str = "lost";
+
+/// Whether a Run result's state is one nothing more is reported in.
+fn ends_result(state: &str) -> bool {
+    matches!(state, "done" | "failed" | "abandoned" | "blown")
+}
+
+/// Gives each closed Run of a Mission that still reports a state which is not an end a result
+/// of its own: `latest` for the highest run, `earlier` for those before it. Answers the
+/// records changed.
+pub(super) fn settle_results(
+    records: Vec<RunRecord>,
+    latest: &RunResult,
+    earlier: &RunResult,
+    limits: &RunLimits,
+) -> Vec<RunRecord> {
+    let last = records.iter().map(|record| record.number).max();
+    let cut = |text: &str| -> String {
+        text.chars()
+            .take(limits.recent_event_chars.or_max())
+            .collect()
+    };
+    records
+        .into_iter()
+        .filter(|record| {
+            record.status.is_closed()
+                && record
+                    .result
+                    .as_ref()
+                    .is_none_or(|result| !ends_result(&result.state))
+        })
+        .map(|mut record| {
+            let result = if Some(record.number) == last {
+                latest
+            } else {
+                earlier
+            };
+            record.result = Some(RunResult {
+                state: cut(&result.state),
+                reason: result.reason.as_deref().map(cut),
+                denied_tools: record.result.as_ref().map_or(0, |held| held.denied_tools),
+            });
+            record
+        })
+        .collect()
 }
 
 /// Checks a verdict's bounds before it is stored.
@@ -1417,6 +1478,24 @@ pub trait RunStore {
     /// `NotFound`, `Ended` for a closed Run, `HeldBy` while its lease is live, or `Io`.
     fn lose_run(&self, id: &str, reason: &str) -> Result<RunRecord, RunError>;
 
+    /// Settles the results of a Mission's closed Runs that still report a state which is not an
+    /// end (`working`, `verifying`, `queued`): the highest run is given `latest`, those before it
+    /// `earlier`. A Run another Station holds is left alone, since it is not closed. Answers how
+    /// many records changed.
+    ///
+    /// Call it when the Mission itself is ended or queued again, so that no Run of it reports
+    /// work that is over.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Run records cannot be read or written.
+    fn settle_results(
+        &self,
+        mission_id: &str,
+        latest: &RunResult,
+        earlier: &RunResult,
+    ) -> io::Result<usize>;
+
     /// The latest run at a Mission: the Run record with the highest run number.
     ///
     /// # Errors
@@ -1539,6 +1618,25 @@ impl RunStore for FileRegistry {
 
     fn lose_run(&self, id: &str, reason: &str) -> Result<RunRecord, RunError> {
         self.lose_run_at(id, reason, unix_time()?)
+    }
+
+    fn settle_results(
+        &self,
+        mission_id: &str,
+        latest: &RunResult,
+        earlier: &RunResult,
+    ) -> io::Result<usize> {
+        let _lock = self.lock()?;
+        let records = self
+            .runs_locked()?
+            .into_iter()
+            .filter(|record| record.mission_id == mission_id)
+            .collect();
+        let changed = settle_results(records, latest, earlier, &self.limits.runs);
+        for record in &changed {
+            self.write_run(&self.run_path(&record.id), record)?;
+        }
+        Ok(changed.len())
     }
 
     fn latest_run(&self, mission_id: &str) -> io::Result<Option<RunRecord>> {
@@ -1701,6 +1799,8 @@ mod tests {
         status_changes_are_fenced_and_an_ended_run_is_closed,
         a_run_keeps_its_agent_times_and_the_result_of_its_last_write,
         only_a_lapsed_run_is_lost_and_its_holder_is_fenced_out,
+        a_lost_run_reports_its_mission_queued_not_working,
+        settling_results_ends_every_closed_run_still_reporting_work,
         the_holder_records_launch_recent_events_and_checkpoints_within_bounds,
         the_latest_run_is_the_highest_run,
         unsafe_ids_are_rejected_before_touching_the_filesystem,
@@ -2112,6 +2212,109 @@ mod tests {
             read.launch.unwrap().agent.as_deref(),
             Some("007"),
             "the Agent is stored with the launch"
+        );
+    }
+
+    fn a_lost_run_reports_its_mission_queued_not_working(store: &dyn Store) {
+        let registry = store.handle();
+        let opened = registry.open_run_at(new_run(), TTL, NOW).unwrap();
+        registry
+            .write_fenced(
+                "s-1",
+                "station-a",
+                opened.fence,
+                NOW,
+                None,
+                RunUpdate::default().result(RunResult::new("working")),
+            )
+            .unwrap();
+        let lost = registry
+            .lose_run_at("s-1", "Station station-a went dark", NOW + 120.0)
+            .unwrap();
+        let result = lost.result.expect("a lost run keeps a result");
+        assert_eq!(result.state, "queued");
+        assert_eq!(result.reason.as_deref(), Some(LOST_REASON));
+        assert_eq!(
+            registry.run("s-1").unwrap().unwrap().result.unwrap().state,
+            "queued"
+        );
+    }
+
+    fn settling_results_ends_every_closed_run_still_reporting_work(store: &dyn Store) {
+        let registry = store.handle();
+        for (id, number, state, status) in [
+            ("s-1", 1, "verifying", RunStatus::Ended),
+            ("s-2", 2, "verifying", RunStatus::Ended),
+            ("s-3", 3, "verifying", RunStatus::Ended),
+            ("o-1", 1, "verifying", RunStatus::Ended),
+        ] {
+            let mission = if id == "o-1" {
+                "mission-2"
+            } else {
+                "mission-1"
+            };
+            let opened = registry
+                .open_run_at(
+                    NewRun::new(id, mission, "station-a").with_number(number, None),
+                    TTL,
+                    NOW,
+                )
+                .unwrap();
+            registry
+                .write_fenced(
+                    id,
+                    "station-a",
+                    opened.fence,
+                    NOW,
+                    None,
+                    RunUpdate::default()
+                        .result(RunResult::new(state))
+                        .status(status),
+                )
+                .unwrap();
+        }
+        // The third run is still working under a live lease: nobody ends it.
+        let live = registry
+            .open_run_at(
+                NewRun::new("s-4", "mission-1", "station-a").with_number(4, None),
+                TTL,
+                NOW,
+            )
+            .unwrap();
+        assert!(live.leased_at(NOW));
+
+        let changed = registry
+            .settle_results(
+                "mission-1",
+                &RunResult::new("done"),
+                &RunResult::new("abandoned").with_reason(Some("superseded".to_owned())),
+            )
+            .unwrap();
+        assert_eq!(changed, 3);
+        let state = |id: &str| {
+            registry
+                .run(id)
+                .unwrap()
+                .unwrap()
+                .result
+                .map(|result| result.state)
+        };
+        assert_eq!(state("s-1").as_deref(), Some("abandoned"));
+        assert_eq!(state("s-2").as_deref(), Some("abandoned"));
+        // The highest run, s-4, is not closed; s-3 is before it.
+        assert_eq!(state("s-3").as_deref(), Some("abandoned"));
+        assert_eq!(state("s-4"), None);
+        // Another Mission is untouched, and settling again changes nothing.
+        assert_eq!(state("o-1").as_deref(), Some("verifying"));
+        assert_eq!(
+            registry
+                .settle_results(
+                    "mission-1",
+                    &RunResult::new("done"),
+                    &RunResult::new("abandoned")
+                )
+                .unwrap(),
+            0
         );
     }
 

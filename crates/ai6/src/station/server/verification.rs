@@ -19,7 +19,7 @@ use crate::directorates::m::theaters::{LOCAL_THEATER, TheaterAccess};
 use crate::directorates::registry::logbook::Severity;
 use crate::directorates::registry::reports::ReportFiler;
 use crate::directorates::registry::runs::{
-    Evidence, MissionVerdict, ProbeResult, RunStatus, RunUpdate,
+    Evidence, MissionVerdict, ProbeResult, RunResult, RunStatus, RunUpdate,
 };
 use crate::directorates::registry::tracker::SourceRead;
 use crate::station::probes;
@@ -461,9 +461,20 @@ pub(super) fn redispatch(state: &DaemonState, mission: &Mission, verdict: &Missi
             &hold.id,
             &state.station_id,
             hold.fence,
-            RunUpdate::default().status(RunStatus::Ended),
+            RunUpdate::default()
+                .result(
+                    RunResult::new("abandoned")
+                        .with_reason(Some(RunResult::REDISPATCHED.to_owned())),
+                )
+                .status(RunStatus::Ended),
         );
     }
+    // Runs before it that were redispatched when this Station was not the one to close them.
+    let _ = state.intake.settle_results(
+        mission_id,
+        &RunResult::new("abandoned").with_reason(Some(RunResult::REDISPATCHED.to_owned())),
+        &RunResult::new("abandoned").with_reason(Some(RunResult::REDISPATCHED.to_owned())),
+    );
     let queued = state
         .missions
         .lock()
@@ -742,6 +753,38 @@ mod tests {
         assert_eq!(second.number, 2);
         assert_eq!(second.predecessor.as_deref(), Some(first.id.as_str()));
         assert!(second.verdict.is_none(), "the next run starts clean");
+        let superseded = state
+            .intake
+            .run(&first.id)
+            .unwrap()
+            .unwrap()
+            .result
+            .unwrap();
+        assert_eq!(
+            (superseded.state.as_str(), superseded.reason.as_deref()),
+            ("abandoned", Some(RunResult::REDISPATCHED)),
+            "a redispatched run no longer reports verifying"
+        );
+
+        // A person then confirms the second run: none of the Mission's runs is left verifying.
+        give(&again, said(OutcomeVerdict::Confirmed, "now it is there"));
+        super::super::verdicts::settle_held(&state);
+        wait_for_state(&state, &again, MissionState::Done).await;
+        let states: Vec<_> = state
+            .intake
+            .runs()
+            .unwrap()
+            .into_iter()
+            .filter(|record| record.mission_id == again)
+            .map(|record| record.result.map(|result| result.state))
+            .collect();
+        assert_eq!(states.len(), 2);
+        assert!(
+            states
+                .iter()
+                .all(|found| !matches!(found.as_deref(), Some("verifying") | None)),
+            "{states:?}"
+        );
         stop(&state);
     }
 

@@ -185,10 +185,27 @@ pub(super) fn attempt_failed(state: &DaemonState, brief: &Brief, outcome: &serde
 
 /// [`run_failed`] for a brief a recovered lease filed, when its Station was lost.
 pub(super) fn recovered_failed(state: &DaemonState, key: &str) {
-    if let Ok(Some(filed)) = state.intake.filed_brief(key)
-        && let Some(outcome) = &filed.outcome
-    {
-        attempt_failed(state, &filed.brief, outcome);
+    if let Ok(Some(filed)) = state.intake.filed_brief(key) {
+        // The Mission is failed, so no Run of it may go on reporting work or a retry.
+        settle_failed_runs(state, &filed.brief.key(), filed.outcome.as_ref());
+        if let Some(outcome) = &filed.outcome {
+            attempt_failed(state, &filed.brief, outcome);
+        }
+    }
+}
+
+/// Gives the Runs of a Mission the Registry filed failed the results that say so: the latest
+/// `failed` with the outcome's reason, the earlier ones `abandoned`.
+fn settle_failed_runs(state: &DaemonState, mission_id: &str, outcome: Option<&serde_json::Value>) {
+    let reason = outcome
+        .and_then(|outcome| outcome["reason"].as_str())
+        .map(str::to_owned);
+    if let Err(error) = state.intake.settle_results(
+        mission_id,
+        &RunResult::new("failed").with_reason(reason),
+        &RunResult::new("abandoned").with_reason(Some(SUPERSEDED.to_owned())),
+    ) {
+        eprintln!("ai6: Mission {mission_id:?}: its Run records were not settled: {error}");
     }
 }
 
