@@ -95,6 +95,7 @@ impl Authenticator for TestViewer {
                 Verdict::Valid(Lookup {
                     by: "id".to_owned(),
                     value: value.clone(),
+                    ..Default::default()
                 })
             }))
     }

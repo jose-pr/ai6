@@ -71,6 +71,7 @@ impl Authenticator for People {
             (Some(name @ ("operator" | "viewer")), Some("secret")) => Verdict::Valid(Lookup {
                 by: "name".to_owned(),
                 value: format!("{name}-007"),
+                ..Default::default()
             }),
             _ => Verdict::Invalid,
         })

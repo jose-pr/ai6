@@ -1346,10 +1346,16 @@ pub(crate) async fn check(
             None
         } else {
             let by = by.to_owned();
-            tokio::task::spawn_blocking(move || directory.lookup(Lookup { by, value }))
-                .await
-                .map_err(|_| internal())?
-                .map_err(|_| internal())?
+            tokio::task::spawn_blocking(move || {
+                directory.lookup(Lookup {
+                    by,
+                    value,
+                    ..Default::default()
+                })
+            })
+            .await
+            .map_err(|_| internal())?
+            .map_err(|_| internal())?
         }
     };
     let subject_person = looked.unwrap_or_else(|| match subject.kind() {

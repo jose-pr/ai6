@@ -30,6 +30,7 @@ impl Authenticator for People {
                 Verdict::Valid(Lookup {
                     by: "name".to_owned(),
                     value: name,
+                    ..Default::default()
                 })
             }
             _ => Verdict::Invalid,
@@ -67,6 +68,7 @@ impl Authenticator for External {
                 Verdict::Valid(Lookup {
                     by: "name".to_owned(),
                     value: name,
+                    ..Default::default()
                 })
             }
             _ => Verdict::Unknown,
@@ -113,6 +115,7 @@ impl Authenticator for Keys {
                 Some(held) => Verdict::Valid(Lookup {
                     by: "id".to_owned(),
                     value: held.id.clone(),
+                    ..Default::default()
                 }),
                 None => Verdict::Unknown,
             },
@@ -185,6 +188,7 @@ impl Accounts for Keys {
         });
         Ok(PutOutcome {
             secret: Some(secret),
+            ..Default::default()
         })
     }
 

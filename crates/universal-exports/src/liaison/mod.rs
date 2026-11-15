@@ -396,6 +396,7 @@ impl Liaison {
                 .lookup(ai6::Lookup {
                     by: by.to_owned(),
                     value: value.to_owned(),
+                    ..Default::default()
                 })
                 .ok()
                 .flatten()

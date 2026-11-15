@@ -408,6 +408,7 @@ mod tests {
                     Ok(Verdict::Valid(Lookup {
                         by: "name".to_owned(),
                         value: "007".to_owned(),
+                        ..Default::default()
                     }))
                 } else {
                     Ok(Verdict::Invalid)

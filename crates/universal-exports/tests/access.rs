@@ -62,6 +62,7 @@ impl Authenticator for Table {
                 Verdict::Valid(Lookup {
                     by: "name".to_owned(),
                     value: name,
+                    ..Default::default()
                 })
             }
             _ => Verdict::Invalid,

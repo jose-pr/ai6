@@ -3725,6 +3725,7 @@ async fn proxy_person(
     let lookup = Lookup {
         by: proxy.lookup_by.clone(),
         value: value.to_owned(),
+        ..Default::default()
     };
     tokio::task::spawn_blocking(move || directory.lookup(lookup))
         .await
@@ -3795,6 +3796,7 @@ async fn resumed_token(
         directory.lookup(Lookup {
             by: "id".to_owned(),
             value: person_id,
+            ..Default::default()
         })
     })
     .await
@@ -4192,6 +4194,7 @@ async fn person_by_id(gateway: &Gateway, person_id: String) -> Result<Person, Ap
         directory.lookup(Lookup {
             by: "id".to_owned(),
             value: person_id,
+            ..Default::default()
         })
     })
     .await
@@ -7273,6 +7276,7 @@ mod tests {
                     Verdict::Valid(Lookup {
                         by: "name".to_owned(),
                         value: "alice".to_owned(),
+                        ..Default::default()
                     })
                 } else {
                     Verdict::Invalid
@@ -8666,6 +8670,7 @@ mod tests {
                         Ok(Verdict::Valid(Lookup {
                             by: "name".to_owned(),
                             value: attempt.name.unwrap(),
+                            ..Default::default()
                         }))
                     }
                     _ => Ok(Verdict::Invalid),

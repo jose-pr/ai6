@@ -26,6 +26,7 @@ impl Authenticator for Accounts {
             (Some(name), Some(secret)) if secret == "secret" => Verdict::Valid(Lookup {
                 by: "name".to_owned(),
                 value: name,
+                ..Default::default()
             }),
             _ => Verdict::Invalid,
         })

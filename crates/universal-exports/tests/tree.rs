@@ -24,6 +24,7 @@ impl Authenticator for ByName {
             (Some(name), Some("secret")) => Verdict::Valid(Lookup {
                 by: "name".to_owned(),
                 value: name,
+                ..Default::default()
             }),
             _ => Verdict::Invalid,
         })

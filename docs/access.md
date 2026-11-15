@@ -325,6 +325,10 @@ page_authenticator = "coqui_access_mtls"
 page_authenticator_config = { trust = "ca", ca_file = "people-ca.pem", account = [{ field = "san.email", by = "email" }] }
 ```
 
+Neither provider has a default `account` pick: with none, a certificate is answered by its claims (`by = "claims"`) for a matcher to tie to a directory account, so name the pick as above to keep a certificate naming its account directly.
+
+```
+
 A browser holding certificates offers them when it connects, prompting where it cannot choose.
 A page on an origin of its own (`[unex.pages] origin`) has no sign-in to set the cookie there,
 so the page authenticator or an app's [hand-off](assistant.md#pages-she-publishes) names its

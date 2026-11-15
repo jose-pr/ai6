@@ -23,6 +23,7 @@ impl Authenticator for TestAuthenticator {
             (Some("viewer"), Some("secret")) => Ok(Verdict::Valid(Lookup {
                 by: "name".to_owned(),
                 value: "viewer".to_owned(),
+                ..Default::default()
             })),
             _ => Ok(Verdict::Invalid),
         }

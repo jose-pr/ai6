@@ -24,6 +24,7 @@ impl Authenticator for Everyone {
         Ok(Verdict::Valid(Lookup {
             by: "name".to_owned(),
             value: "m".to_owned(),
+            ..Default::default()
         }))
     }
 }
