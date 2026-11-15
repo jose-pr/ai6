@@ -68,6 +68,7 @@ fn by_name(value: &str) -> Lookup {
     Lookup {
         by: "name".to_owned(),
         value: value.to_owned(),
+        ..Lookup::default()
     }
 }
 

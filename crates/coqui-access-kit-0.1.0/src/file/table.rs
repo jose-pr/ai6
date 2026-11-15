@@ -3,6 +3,7 @@
 use core::cell::Cell;
 use core::fmt;
 use core::marker::PhantomData;
+use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
@@ -13,10 +14,13 @@ use serde::de::{self, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visit
 use serde::ser::{SerializeMap, SerializeSeq, Serializer};
 
 use super::{Stamp, read_bounded, stamp, write_private};
-use crate::table::{Keyed, Revision, Snapshot, SourceError, Table};
+use crate::table::{Keyed, Revision, Snapshot, SourceError, Table, Update};
 
 /// The most a table file may hold unless [`FileTable::max_bytes`] says otherwise: 1 MiB.
 pub const DEFAULT_MAX_BYTES: usize = 1024 * 1024;
+
+/// How many times a file that changes under a read is read again.
+const READS: usize = 8;
 
 /// A format refused a document. It carries nothing of the document, which may hold secrets.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -107,6 +111,12 @@ pub trait Codec: Send + Sync {
 /// A missing file is an empty table. Every read compares the file's [`Stamp`], so a write by
 /// another process is a new revision; a file that is unreadable, oversized or invalid is an
 /// error, never a stale answer. Errors never contain file contents.
+///
+/// A read-modify-write (`put`, `remove`, `update`) holds an exclusive operating-system lock
+/// on a file beside the table, `<path>.lock`, from the read to the write, in this process and
+/// in any other that uses it, so no update is lost and `update` computes its change from the
+/// records it replaces. The lock file is left in place and holds nothing. Reads take no lock:
+/// the file is replaced whole.
 pub struct FileTable<T, C> {
     path: PathBuf,
     section: String,
@@ -161,6 +171,25 @@ impl<T, C> FileTable<T, C> {
     pub fn path(&self) -> &Path {
         &self.path
     }
+
+    /// Takes the exclusive lock beside the table; it is held until the file returned drops.
+    fn lock(&self) -> Result<File, SourceError> {
+        let mut beside = self.path.as_os_str().to_owned();
+        beside.push(".lock");
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options
+            .open(beside)
+            .map_err(|_| SourceError::unavailable("the table's lock file cannot be opened"))?;
+        file.lock()
+            .map_err(|_| SourceError::unavailable("the table cannot be locked"))?;
+        Ok(file)
+    }
 }
 
 impl<T: Walk + FromWalk, C: Codec> FileTable<T, C> {
@@ -197,22 +226,29 @@ impl<T: Walk + FromWalk, C: Codec> FileTable<T, C> {
     }
 
     /// Reads the file and notes a new revision when it is not the one last seen.
+    ///
+    /// A file replaced while it is being read is read again, a few times: the replacement is
+    /// whole, so the next read is a consistent newer version, and only a file that keeps
+    /// changing is an error.
     fn read(&self, state: &mut State) -> Result<Vec<T>, SourceError> {
-        let before = stamp(&self.path).map_err(SourceError::unavailable)?;
-        let records =
-            match read_bounded(&self.path, self.max_bytes).map_err(SourceError::unavailable)? {
-                None => Vec::new(),
-                Some(text) => self.decode(&text)?,
-            };
-        let after = stamp(&self.path).map_err(SourceError::unavailable)?;
-        if before != after {
-            return Err(SourceError::unavailable("file changed while it was read"));
+        for _ in 0..READS {
+            let before = stamp(&self.path).map_err(SourceError::unavailable)?;
+            let records =
+                match read_bounded(&self.path, self.max_bytes).map_err(SourceError::unavailable)? {
+                    None => Vec::new(),
+                    Some(text) => self.decode(&text)?,
+                };
+            let after = stamp(&self.path).map_err(SourceError::unavailable)?;
+            if before != after {
+                continue;
+            }
+            if after != state.stamp {
+                state.stamp = after;
+                state.revision += 1;
+            }
+            return Ok(records);
         }
-        if after != state.stamp {
-            state.stamp = after;
-            state.revision += 1;
-        }
-        Ok(records)
+        Err(SourceError::unavailable("file changed while it was read"))
     }
 
     fn write(&self, state: &mut State, records: &[T]) -> Result<(), SourceError> {
@@ -246,8 +282,17 @@ where
     }
 
     fn put(&self, record: T) -> Result<(), SourceError> {
+        let mut record = Some(record);
+        self.update(&mut |_| Ok(record.take()))
+    }
+
+    fn update(&self, make: &mut Update<'_, T>) -> Result<(), SourceError> {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let _lock = self.lock()?;
         let mut records = self.read(&mut state)?;
+        let Some(record) = make(&records)? else {
+            return Ok(());
+        };
         match records.iter().position(|had| had.key() == record.key()) {
             Some(at) => records[at] = record,
             None => records.push(record),
@@ -257,6 +302,7 @@ where
 
     fn remove(&self, key: &str) -> Result<bool, SourceError> {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let _lock = self.lock()?;
         let mut records = self.read(&mut state)?;
         let before = records.len();
         records.retain(|record| record.key() != key);

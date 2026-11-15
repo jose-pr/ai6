@@ -6,7 +6,7 @@
 //! ```json
 //! { "source": { "file": { "path": "peers.toml", "format": "toml" } },
 //!   "waiting": { "file": { "path": "peers.toml.waiting", "format": "toml" } },
-//!   "max_records": 10000,
+//!   "max_records": 10000, "max_pins": 4,
 //!   "waiting_per_source": 1, "waiting_total": 16, "waiting_rerecord_secs": 60 }
 //! ```
 //!
@@ -38,8 +38,9 @@ use coqui_access_kit::file::Source;
 use coqui_access_kit::pick::Pick;
 use coqui_access_kit::{Keyed, MemoryTable, RecordLimits, Table};
 use coqui_access_mtls::{
-    DEFAULT_MAX_CHAIN, DEFAULT_MAX_RECORDS, DEFAULT_WAITING_PER_SOURCE, DEFAULT_WAITING_RERECORD,
-    DEFAULT_WAITING_TOTAL, MtlsAccounts, PeerRecord, TrustMode, Unaccepted, default_account,
+    DEFAULT_MAX_CHAIN, DEFAULT_MAX_PINS, DEFAULT_MAX_RECORDS, DEFAULT_WAITING_PER_SOURCE,
+    DEFAULT_WAITING_RERECORD, DEFAULT_WAITING_TOTAL, MtlsAccounts, PeerRecord, TrustMode,
+    Unaccepted, default_account,
 };
 use coqui_peer::WaitingLimits;
 use coqui_peer_tls::CaPolicy;
@@ -59,6 +60,9 @@ pub struct MtlsAccountsConfig {
     /// The most peers the table may hold.
     #[map(default = DEFAULT_MAX_RECORDS as u32)]
     pub max_records: u32,
+    /// The most pins, certificate fingerprints and public keys together, one peer may hold.
+    #[map(default = DEFAULT_MAX_PINS as u32)]
+    pub max_pins: u32,
     /// How large a record's fields may be: `groups`, `field_bytes`, `email_bytes`,
     /// `display_name_bytes`, each a number or `none` for no bound.
     #[map(default)]
@@ -88,8 +92,8 @@ pub struct MtlsAccountsConfig {
     /// Whether an IP address written as a DNS name matches an `ip:` glob. Default `true`.
     #[map(default = true)]
     pub ip_in_dns: bool,
-    /// How a CA-trusted certificate names its account: picks tried in order. Default its
-    /// `fingerprint`, by `certificate`.
+    /// How a CA-trusted certificate names its account: picks tried in order. Default none: the
+    /// certificate is answered by its claims, for the consumer's matcher to decide.
     #[map(default = default_account())]
     pub account: Vec<Pick>,
     /// The most certificates a client may send, leaf included; `none` for no bound.
@@ -150,6 +154,7 @@ impl TryFrom<MtlsAccountsConfig> for MtlsAccountsProvider {
             .waiting(open::<Unaccepted>(waiting_source.as_ref(), "waiting")?);
         builder = builder
             .max_records(config.max_records as usize)
+            .max_pins(config.max_pins as usize)
             .record_limits(config.record_limits);
         let mut limits = WaitingLimits::default();
         limits.per_source = config.waiting_per_source as usize;
@@ -307,6 +312,51 @@ mod tests {
         )
         .unwrap();
         assert!(MtlsAccountsProvider::try_from(config(&path)).is_err());
+    }
+
+    #[test]
+    fn pins_of_both_kinds_are_written_and_read_in_a_toml_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("peers.toml");
+        let provider = MtlsAccountsProvider::try_from(config(&path)).unwrap();
+        let key = format!("key:sha256:{}", "ab".repeat(32));
+        provider
+            .put(AccountPut {
+                name: "alice".to_owned(),
+                secret: Some(key),
+                ..AccountPut::default()
+            })
+            .unwrap();
+        provider.put(fingerprinted("alice")).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("kind = \"key\""), "{text}");
+        assert!(text.contains("certificate = \"sha256:"), "{text}");
+        // A second provider over the file reads both, and the bound is its own setting.
+        assert!(MtlsAccountsProvider::try_from(config(&path)).is_ok());
+        let tight = MtlsAccountsProvider::try_from(MtlsAccountsConfig {
+            max_pins: 1,
+            ..config(&path)
+        })
+        .is_err();
+        assert!(tight, "two pins past a bound of one");
+    }
+
+    #[test]
+    fn two_providers_over_one_waiting_file_share_the_places_in_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("peers.toml");
+        let (first, second) = (
+            MtlsAccountsProvider::try_from(config(&path)).unwrap(),
+            MtlsAccountsProvider::try_from(config(&path)).unwrap(),
+        );
+        let from = |certificate: &str| shown(certificate);
+        let one = Identity::generate().unwrap().fingerprint().to_string();
+        let other = Identity::generate().unwrap().fingerprint().to_string();
+        first.authenticate(from(&one)).unwrap();
+        // The same address, through the other provider: its one place is taken in the file.
+        second.authenticate(from(&other)).unwrap();
+        assert_eq!(first.waiting().unwrap().len(), 1);
+        assert_eq!(second.waiting().unwrap().len(), 1);
     }
 
     #[test]

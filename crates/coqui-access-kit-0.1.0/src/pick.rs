@@ -64,6 +64,21 @@ impl Pick {
         self
     }
 
+    /// Whether this pick may be used: what it finds is looked up `by` an attribute the
+    /// directory answers, never `filter` (a raw LDAP filter) or `claims` (a lookup the
+    /// matcher is to template), which only a [`Matcher`](crate::matcher::Matcher) rule makes.
+    ///
+    /// # Errors
+    ///
+    /// When `by` is `filter` or `claims`.
+    pub fn check(&self) -> Result<(), &'static str> {
+        if matches!(self.by.as_str(), "filter" | "claims") {
+            Err("a pick is looked up by an attribute, not by filter or claims")
+        } else {
+            Ok(())
+        }
+    }
+
     /// What this pick finds in `fields`.
     fn find(&self, fields: &BTreeMap<String, Vec<String>>) -> Picked {
         let mut values: Vec<String> = fields.get(&self.field).cloned().unwrap_or_default();
@@ -141,7 +156,7 @@ pub enum Picked {
 /// assert_eq!(found, Picked::Found { by: "name".into(), value: "alice".into() });
 /// ```
 pub fn pick(fields: &BTreeMap<String, Vec<String>>, order: &[Pick]) -> Picked {
-    for each in order {
+    for each in order.iter().filter(|each| each.check().is_ok()) {
         match each.find(fields) {
             Picked::Absent => {}
             decided => return decided,
@@ -164,6 +179,19 @@ mod tests {
                 )
             })
             .collect()
+    }
+
+    #[test]
+    fn a_pick_that_names_a_filter_or_claims_is_refused_and_never_decides() {
+        for by in ["filter", "claims"] {
+            let pick_by = Pick::new("san.upn", by);
+            assert!(pick_by.check().is_err(), "{by}");
+            let entries = fields(&[("san.upn", &["alice"])]);
+            assert_eq!(pick(&entries, &[pick_by]), Picked::Absent, "{by}");
+        }
+        for by in ["name", "email", "id", "address", "certificate"] {
+            assert!(Pick::new("san.upn", by).check().is_ok(), "{by}");
+        }
     }
 
     fn found(by: &str, value: &str) -> Picked {

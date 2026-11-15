@@ -282,6 +282,7 @@ impl Authenticator for Keys {
             Some(record) if record.taken() => Verdict::Valid(Lookup {
                 by: "id".to_owned(),
                 value: record.id,
+                ..Lookup::default()
             }),
             Some(_) => Verdict::Invalid,
         })
@@ -382,7 +383,13 @@ impl Accounts for Keys {
                 if let Some(expires) = account.expires_unix {
                     record.expires_unix = Some(expires);
                 }
-                Ok((record, PutOutcome { secret: made }))
+                Ok((
+                    record,
+                    PutOutcome {
+                        secret: made,
+                        ..PutOutcome::default()
+                    },
+                ))
             })
             .map_err(|reason| reason.writing("key table"))
     }
@@ -490,7 +497,8 @@ mod tests {
         assert!(
             keys.lookup(Lookup {
                 by: "name".to_owned(),
-                value: "relay".to_owned()
+                value: "relay".to_owned(),
+                ..Lookup::default()
             })
             .unwrap()
             .is_none()

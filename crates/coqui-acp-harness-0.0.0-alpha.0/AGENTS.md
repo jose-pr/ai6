@@ -6,7 +6,7 @@ MSRV Rust 1.89. A default build depends on `coqui-acp-api` (for the usage model)
 
 Imports: the root re-exports `acp`'s `AgentInfo`, `ConfigOption`, `Conversation`, `EventSink`, `Harness`, `HarnessError`, `McpServer`, `McpTransport`, `Open`, `OpenRequest`, `OptionValue`, `Settings`, `Takes`, `UsageTracker` and `serve`; `event`'s `Event`, `Outcome`, `PermissionRequest` and `Responder`; `process`'s `ErrorStream`, `Exit`, `Launch`, `LineWriter`, `PlainSpawn`, `Process`, `Spawn`, `Spawned`, `Starter`, `ending_once`, `exit_text`, `line_writer`, `set_starter` and `watch_exit`; and `stream`'s `Answer`, `LineHook`, `Step`, `Stream` and `Waiting`. The root also re-exports `mode`'s `Mode`, and with `kind` `spawner`'s `LocalSpawner` and `ThroughSpawner`. The modules `acp`, `event`, `lines`, `mode`, `process`, `stream` and `version` are public, `spawner` and `provider` with `kind` and `antigravity` with `antigravity`.
 
-No `unsafe` code (`#![forbid(unsafe_code)]`). No process-wide state.
+No `unsafe` code but one Windows module (`#![deny(unsafe_code)]`): `antigravity/ports/win32.rs`, which asks `GetExtendedTcpTable` (with `windows-sys`, feature `antigravity`) for the listening sockets. No process-wide state.
 
 ## Processes (`coqui_acp_harness::process`)
 
@@ -210,6 +210,8 @@ pub fn read_diagnostics(reader: impl Read, max_line: u64, tail: &Mutex<Tail>)   
 | `Notice { severity: Severity, title }` | something for the person outside the conversation |
 | `Compaction { id, summary: Option<String> }` | the conversation was compacted |
 | `Denied(Vec<String>)` | tools the harness refused by its own rules this turn |
+| `Child(Child)` | a child agent (subagent) announced or changed: `Child { id, parent_tool_call, title, task, state: Option<ChildState>, result, model, usage: Option<ChildUsage> }` (`#[non_exhaustive]`, `Child::new(id)`; a field left `None` is unchanged); `ChildState` is `Starting`, `Working`, `Completed`, `Failed`, `Cancelled`; `ChildUsage { total_tokens, tool_uses, duration_ms }`. Becomes a `tool_call_update` of `parent_tool_call` carrying only `_meta[CHILD_META_KEY]` |
+| `InChild { child, parent_tool_call, event }` | an event of a child's own, told as `event` is with `_meta[CHILD_META_KEY] = {id, parentToolCallId}` added to each update |
 | `TurnEnd(TurnEnd)` | `Stopped { stop, result }`, `Failed(String)` or `Limited(LimitHit)` (`coqui_acp_api::usage::LimitHit`: `bucket`, `resets_at`, `retry_after`, `source`, `text`, `observed_at`; 0 is stamped) |
 | `Output(String)` | a line that was not protocol |
 | `Exited(String)` | the harness ended, how, and what it wrote last |
@@ -257,6 +259,8 @@ pub fn directory_admitted(path: &Path, roots: &[PathBuf], network_paths: bool) -
 pub struct EventSink;  pub fn send(&self, event: Event) -> bool     // Clone; waits while the queue is full; false once the session is gone
 pub type NoticeHook = Arc<dyn Fn(NoticeKind, &str) + Send + Sync>;   // NoticeKind: Exited (how it ended, never what it last wrote) | Notice | Fault; one line, no client text
 pub use coqui_acp_api::LIMIT_META_KEY;     // "dev.boriken.coqui.acp/limit", a `LimitHit` as JSON
+pub const CHILD_META_KEY: &str;            // "dev.boriken.coqui.acp/child": {id, parentToolCallId} on a child's own update; a report adds title, task, state (starting|working|completed|failed|cancelled), result, model, usage {totalTokens, toolUses, durationMs}, each only when known
+pub fn updates_of(events: &[Event], version: u8) -> Vec<serde_json::Value>;   // the session/update payloads a connection would send for these events, in order; for tests
 pub const PLAN_ID: &str = "plan";
 ```
 
@@ -329,7 +333,7 @@ pub fn loopback_listeners(owners: &[u32]) -> io::Result<Vec<SocketAddr>>   // en
 pub const BUCKET_PREFIX: &str = "agy:";   // pass to UsageTracker::replace
 ```
 
-`agy acp` serves its language server on two random loopback ports (one plain HTTP, one HTTPS with a self-signed certificate) once a session is open, and answers `POST /exa.language_server_pb.LanguageServerService/GetUserStatus` with body `{}` and no token on both, with `Transfer-Encoding: chunked`. `read` lists the loopback listeners of `owners` (`loopback_listeners`: Windows `netstat.exe -ano` for `TCP` and `TCPv6`, ignoring the State column; Linux `/proc/<pid>/fd` joined with `/proc/net/tcp` and `tcp6`; macOS `/usr/sbin/lsof`; no `unsafe`), asks each by plain HTTP and then by HTTPS (certificate verification off, for a literal loopback address only, which `read` checks), and takes the first answer that reads as agy's status. `owners` are all the agent's processes: the reader does not find them. The port and scheme that answered are remembered and the owner is checked again before every reading; a failed reading forgets the port, so the next looks at every port again. Listing the ports counts against `limits.total` (the tool is ended at the deadline, and on Windows started with no console window).
+`agy acp` serves its language server on two random loopback ports (one plain HTTP, one HTTPS with a self-signed certificate) once a session is open, and answers `POST /exa.language_server_pb.LanguageServerService/GetUserStatus` with body `{}` and no token on both, with `Transfer-Encoding: chunked`. `read` lists the loopback listeners of `owners` (`loopback_listeners`: Windows `GetExtendedTcpTable`, IPv4 and IPv6, in this process and starting no program; Linux `/proc/<pid>/fd` joined with `/proc/net/tcp` and `tcp6`; macOS `/usr/sbin/lsof`), asks each by plain HTTP and then by HTTPS (certificate verification off, for a literal loopback address only, which `read` checks), and takes the first answer that reads as agy's status. `owners` are all the agent's processes: the reader does not find them. The port and scheme that answered are remembered; `read` lists the ports and checks the owner every time, and `read_remembered(models)` (`Option<Vec<Bucket>>`) asks the remembered port without listing and, when it does not answer, forgets it and returns `None`, so a caller that keeps an agent's reader lists once for the agent's life and again only after a failure. A failed reading forgets the port, so the next `read` looks at every port again. Listing the ports counts against `limits.total` (on macOS `lsof` is ended at the deadline).
 
 No redirects, no proxy, the body counted as it is read against `limits.body` (an over-large body is `Malformed`), `limits.connect` for each connection and `limits.total` for the whole reading. An error never holds any of the answer. The answer is read into a struct with only each model's `label`, `modelId` and `quotaInfo`; the account's address, name and picture never become values. Non-200 is `Status`; an unparsable 200, an answer with no model list or a body past the limit is `Malformed`; no listener is `NoPort`, and a remembered port that no longer belongs to `owners` with nothing else answering is `NotOwned`.
 

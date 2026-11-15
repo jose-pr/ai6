@@ -110,6 +110,10 @@ impl<T> Snapshot<T> {
     }
 }
 
+/// What [`Table::update`] is given to decide a change: the records read, and the record to
+/// put, if any.
+pub type Update<'a, T> = dyn FnMut(&[T]) -> Result<Option<T>, SourceError> + 'a;
+
 /// Where a provider's records of type `T` come from, and optionally go to.
 ///
 /// Implementations are free to keep records anywhere. They must be cheap to ask for changes:
@@ -152,6 +156,26 @@ pub trait Table<T>: Send + Sync {
     fn remove(&self, key: &str) -> Result<bool, SourceError> {
         let _ = key;
         Err(SourceError::ReadOnly)
+    }
+
+    /// Reads the records, lets `make` decide from them what to put (`None` puts nothing),
+    /// and puts it.
+    ///
+    /// A table shared with another process overrides this to hold a lock from the read to
+    /// the write, so `make` always sees the records its result replaces into. The default
+    /// is a read and a put with nothing between them, which is as safe as the table's own
+    /// `put`.
+    ///
+    /// # Errors
+    ///
+    /// When the table cannot be read, `make` refuses, or the put fails
+    /// ([`SourceError::ReadOnly`] for a read-only table).
+    fn update(&self, make: &mut Update<'_, T>) -> Result<(), SourceError> {
+        let snapshot = self.load()?;
+        match make(&snapshot.records)? {
+            Some(record) => self.put(record),
+            None => Ok(()),
+        }
     }
 }
 
@@ -224,6 +248,17 @@ impl<T: Keyed + Clone + Send> Table<T> for MemoryTable<T> {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         upsert(&mut state.1, record);
         state.0 += 1;
+        Ok(())
+    }
+
+    fn update(&self, make: &mut Update<'_, T>) -> Result<(), SourceError> {
+        // The table stays locked from the read to the write, so two updates never both
+        // decide from the same records.
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(record) = make(&state.1)? {
+            upsert(&mut state.1, record);
+            state.0 += 1;
+        }
         Ok(())
     }
 
@@ -302,14 +337,24 @@ impl<T: Keyed + Clone> Reloading<T> {
         make: impl FnOnce(&[T]) -> Result<(T, R), SourceError>,
     ) -> Result<R, SourceError> {
         let mut latest = self.latest.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut make = Some(make);
+        let mut made = None;
+        // `make` runs against the records the table read for this update (a file table reads
+        // them under its lock), not against the last snapshot.
+        self.table.update(&mut |records| {
+            (self.validate)(records)?;
+            let Some(make) = make.take() else {
+                return Err(SourceError::invalid("the table asked twice"));
+            };
+            let (record, result) = make(records)?;
+            let mut candidate = records.to_vec();
+            upsert(&mut candidate, record.clone());
+            (self.validate)(&candidate)?;
+            made = Some(result);
+            Ok(Some(record))
+        })?;
         self.refresh(&mut latest)?;
-        let (record, made) = make(&latest.records)?;
-        let mut candidate = latest.records.clone();
-        upsert(&mut candidate, record.clone());
-        (self.validate)(&candidate)?;
-        self.table.put(record)?;
-        self.refresh(&mut latest)?;
-        Ok(made)
+        made.ok_or_else(|| SourceError::invalid("the table did not update"))
     }
 
     /// Removes the record with `key`; `true` when there was one.

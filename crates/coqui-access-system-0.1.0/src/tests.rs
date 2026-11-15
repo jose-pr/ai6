@@ -9,8 +9,26 @@ fn account(uid: Option<u32>, groups: &[&str]) -> os::Account {
         display_name: None,
         groups: groups.iter().map(|group| (*group).to_owned()).collect(),
         uid,
+        home: None,
         disabled: false,
     }
+}
+
+#[test]
+fn a_person_carries_its_uid_and_home_when_the_os_gave_them() {
+    let mut full = account(Some(1234), &["staff"]);
+    full.home = Some("/home/someone".to_owned());
+    let person = full.person();
+    let text = |name: &str| {
+        person
+            .attributes
+            .get(name)
+            .and_then(|value| String::from_value(value).ok())
+    };
+    assert_eq!(text("home").as_deref(), Some("/home/someone"));
+    assert_eq!(text("uid").as_deref(), Some("1234"));
+    let bare = account(None, &[]).person();
+    assert!(bare.attributes.is_empty(), "nothing is invented");
 }
 
 #[test]
@@ -141,12 +159,14 @@ fn an_attempt_without_a_name_and_password_is_unknown_and_an_unknown_name_too() {
         let lookup = Lookup {
             by: "name".to_owned(),
             value: value.to_owned(),
+            ..Lookup::default()
         };
         assert_eq!(accounts.lookup(lookup).unwrap(), None);
     }
     let other = Lookup {
         by: "email".to_owned(),
         value: "a@b".to_owned(),
+        ..Lookup::default()
     };
     assert_eq!(accounts.lookup(other).unwrap(), None);
 }
@@ -165,6 +185,7 @@ fn root_is_not_admitted_by_default_but_is_with_min_uid_zero() {
     let root = || Lookup {
         by: "id".to_owned(),
         value: "0".to_owned(),
+        ..Lookup::default()
     };
     let accounts = SystemAccounts::builder().build().unwrap();
     assert_eq!(accounts.lookup(root()).unwrap(), None);

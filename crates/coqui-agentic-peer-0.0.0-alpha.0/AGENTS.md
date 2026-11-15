@@ -203,7 +203,7 @@ pub struct Discovery { pub candidates: Vec<Candidate>, pub directory: Option<Dir
 pub fn browse(wait: Duration) -> Result<Vec<Candidate>, Error>    // the link only
 pub fn read_descriptors(dir: &Path) -> Descriptors
 pub struct Descriptors { pub candidates: Vec<Candidate>, pub directory: DirectoryCheck }   // non_exhaustive
-pub enum DirectoryCheck { Private, SharedWithOthers, NotChecked }   // non_exhaustive; NotChecked is every non-Unix platform, where the ACLs are not read
+pub enum DirectoryCheck { Private, SharedWithOthers, NotChecked }   // non_exhaustive; SharedWithOthers: group/other-writable, or owned by neither this user nor root (Unix); NotChecked: on Windows any folder but the default under %LOCALAPPDATA% (an override), whose ACLs are not read
 pub fn descriptors_dir() -> Option<PathBuf>
 pub fn candidate_from(record: &Record<'_>) -> Option<Candidate>
 ```
@@ -213,16 +213,25 @@ A record and a descriptor carry `method`, and `to_json` gives it as `"method"`. 
 ## `coqui_agentic_peer::companion`
 
 ```rust
-pub const HOST_NAME: &str = "dev.boriken.coqui_acp_bridge";
 pub const MAX_REQUEST: usize = 65_536;
 pub const MAX_REPLY: usize = 1_048_576;
 pub fn started_by_browser(first_argument: &str) -> bool
-pub fn read_message(input: &mut impl Read) -> io::Result<Option<Vec<u8>>>
+pub fn read_message(input: &mut impl Read) -> io::Result<Option<Vec<u8>>>                    // at most MAX_REQUEST
+pub fn read_message_up_to(input: &mut impl Read, limit: usize) -> io::Result<Option<Vec<u8>>> // for a host that takes longer messages
 pub fn write_message(output: &mut impl Write, message: &[u8]) -> io::Result<()>
 pub fn run(input: &mut impl Read, output: &mut impl Write) -> io::Result<()>
-pub fn install(extensions: &[String]) -> Result<Vec<String>, Error>
-pub fn uninstall() -> Result<(), Error>
+pub enum Browser { Chrome, Chromium, Edge }          // non_exhaustive; Browser::ALL, name()
+Registration::new(name: &str, description: &str, program: impl Into<PathBuf>) -> Result<Registration, Error>   // name: lowercase letters, digits, _ and .
+Registration::{extensions(ids), browsers(&[Browser]), manifest_dir(dir), profile(user_data_dir)}   // the program is the caller's, never this library's
+pub fn install(registration: &Registration) -> Result<Vec<String>, Error>
+pub fn uninstall(name: &str, manifest_dir: Option<&Path>, profiles: &[PathBuf]) -> Result<(), Error>
+pub fn installed(name: &str, manifest_dir: Option<&Path>, profiles: &[PathBuf]) -> Result<Vec<String>, Error>
 ```
+
+There is no default host name: the caller names it. `install` writes the manifest and, on Windows, a registry key per browser under HKCU
+(the manifest in `manifest_dir`, else `%LOCALAPPDATA%\coqui-acp\native`); on Linux and macOS a `NativeMessagingHosts/` file under each browser's
+profile directory that exists, and under each `profile(user_data_dir)` given (what a browser started with `--user-data-dir` reads). `uninstall`
+removes the same places; `installed` lists the ones that exist.
 
 It answers `{ "op": "discover", "seconds": N }`, at most 10 seconds, and nothing else; it carries no agent traffic.
 

@@ -610,6 +610,82 @@ impl PermissionRequest {
     }
 }
 
+/// Where a child agent stands. A harness that does not say leaves it unreported.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ChildState {
+    /// Announced, not yet running.
+    Starting,
+    /// Running.
+    Working,
+    /// Finished with a result.
+    Completed,
+    /// Ended in an error.
+    Failed,
+    /// Stopped before it finished.
+    Cancelled,
+}
+
+impl ChildState {
+    /// The name the `child` metadata gives it.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Starting => "starting",
+            Self::Working => "working",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+/// What a child agent has spent, as far as the harness says.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ChildUsage {
+    /// Tokens in all.
+    pub total_tokens: Option<u64>,
+    /// Tool calls it made.
+    pub tool_uses: Option<u64>,
+    /// How long it ran, in milliseconds.
+    pub duration_ms: Option<u64>,
+}
+
+/// A child agent the running one started (a subagent), announced or changed. A field left `None` is unchanged.
+/// Its own messages and tool calls follow as [`Event::InChild`], when the harness reports them.
+#[derive(Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
+pub struct Child {
+    /// Its id, unique in the session.
+    pub id: String,
+    /// The tool call of the parent that started it.
+    pub parent_tool_call: Option<String>,
+    /// A name for people.
+    pub title: Option<String>,
+    /// What it was asked to do.
+    pub task: Option<String>,
+    /// Where it stands.
+    pub state: Option<ChildState>,
+    /// What it handed back, once it has.
+    pub result: Option<String>,
+    /// The model it runs, when the harness says.
+    pub model: Option<String>,
+    /// What it has spent.
+    pub usage: Option<ChildUsage>,
+}
+
+impl Child {
+    /// A change to the child `id`, with nothing set.
+    #[must_use]
+    pub fn new(id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            ..Self::default()
+        }
+    }
+}
+
 /// What a harness reports. Message ids tie chunks to their message; a harness that gives none gets one from the
 /// driver.
 #[derive(Debug)]
@@ -695,6 +771,17 @@ pub enum Event {
     },
     /// Tools the harness refused by its own rules in this turn, by name.
     Denied(Vec<String>),
+    /// A child agent announced or changed.
+    Child(Child),
+    /// An event of a child agent's own: what `event` becomes is marked as the child's.
+    InChild {
+        /// The child's id.
+        child: String,
+        /// The tool call of the parent that started it, when known.
+        parent_tool_call: Option<String>,
+        /// What the child did.
+        event: Box<Event>,
+    },
     /// The end of a turn.
     TurnEnd(TurnEnd),
     /// A line the harness wrote that was not protocol.

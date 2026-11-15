@@ -412,17 +412,20 @@ pub fn candidate_from(record: &Record<'_>) -> Option<Candidate> {
 /// This user's descriptor directory: only they can write there, so a descriptor is as good as anything else they run.
 #[must_use]
 pub fn descriptors_dir() -> Option<PathBuf> {
-    let var = |name: &str| {
-        std::env::var_os(name)
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-    };
-    if let Some(dir) = var(DESCRIPTORS_ENV) {
-        return Some(dir);
-    }
-    let base = var("LOCALAPPDATA")
-        .or_else(|| var("XDG_RUNTIME_DIR"))
-        .or_else(|| var("HOME").map(|home| home.join(".local").join("state")))?;
+    env_path(DESCRIPTORS_ENV).or_else(default_descriptors_dir)
+}
+
+fn env_path(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+/// Where descriptors go when [`DESCRIPTORS_ENV`] names nothing.
+fn default_descriptors_dir() -> Option<PathBuf> {
+    let base = env_path("LOCALAPPDATA")
+        .or_else(|| env_path("XDG_RUNTIME_DIR"))
+        .or_else(|| env_path("HOME").map(|home| home.join(".local").join("state")))?;
     Some(base.join("coqui-acp").join("agents"))
 }
 
@@ -446,10 +449,12 @@ pub(crate) fn create_private_dir(dir: &Path) -> io::Result<()> {
 pub enum DirectoryCheck {
     /// Nobody but the owner can write to it.
     Private,
-    /// Others can write to it (Unix: group or other write permission). Its descriptors were not read.
+    /// Others can write to it, or another user (not root) owns it. On Unix that is a group or other write permission, or an
+    /// owner who is neither this user nor root. Its descriptors were not read.
     SharedWithOthers,
-    /// This platform's check was not made: on Windows `%LOCALAPPDATA%` belongs to its owner by default, and the ACLs are
-    /// not read. Its descriptors were read.
+    /// This platform's check was not made: on Windows only the default folder under `%LOCALAPPDATA%`, which belongs to its
+    /// owner, is believed, and the ACLs of any other (an override, `COQUI_ACP_DESCRIPTORS`) are not read. Its descriptors were
+    /// read.
     NotChecked,
 }
 
@@ -463,12 +468,44 @@ pub struct Descriptors {
     pub directory: DirectoryCheck,
 }
 
+/// Whether a directory owned by `owner` may hold descriptors for `me`: this user's own, or root's.
+#[cfg(unix)]
+const fn owner_allowed(owner: u32, me: Option<u32>) -> bool {
+    owner == 0 || matches!(me, Some(me) if me == owner)
+}
+
+/// The user id this process runs as, learned from a file it makes (std has no call for it and this crate has no unsafe code).
+/// `None` when none can be made.
+#[cfg(unix)]
+fn current_user() -> Option<u32> {
+    use std::os::unix::fs::{MetadataExt as _, OpenOptionsExt as _};
+    static ME: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
+    *ME.get_or_init(|| {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_nanos());
+        let probe = std::env::temp_dir().join(format!(".coqui-me-{}-{nanos}", std::process::id()));
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&probe)
+            .ok()?;
+        let owner = file.metadata().ok().map(|metadata| metadata.uid());
+        drop(file);
+        let _ = std::fs::remove_file(&probe);
+        owner
+    })
+}
+
 fn check_directory(dir: &Path) -> DirectoryCheck {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt as _;
+        use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
         if let Ok(metadata) = std::fs::metadata(dir) {
-            return if metadata.permissions().mode() & 0o022 == 0 {
+            return if metadata.permissions().mode() & 0o022 == 0
+                && owner_allowed(metadata.uid(), current_user())
+            {
                 DirectoryCheck::Private
             } else {
                 DirectoryCheck::SharedWithOthers
@@ -478,8 +515,11 @@ fn check_directory(dir: &Path) -> DirectoryCheck {
     }
     #[cfg(not(unix))]
     {
-        let _ = dir;
-        DirectoryCheck::NotChecked
+        if default_descriptors_dir().is_some_and(|default| default == dir) {
+            DirectoryCheck::Private
+        } else {
+            DirectoryCheck::NotChecked
+        }
     }
 }
 
@@ -1200,11 +1240,28 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_directory_is_believed_only_when_this_user_or_root_owns_it() {
+        use std::os::unix::fs::MetadataExt as _;
+        assert!(owner_allowed(1000, Some(1000)));
+        assert!(owner_allowed(0, Some(1000)));
+        assert!(!owner_allowed(1001, Some(1000)));
+        assert!(!owner_allowed(1001, None));
+        let me = current_user().expect("a file can be made in the temporary folder");
+        let dir = scratch_directory("owner");
+        assert_eq!(std::fs::metadata(&dir).unwrap().uid(), me);
+        assert_eq!(read_descriptors(&dir).directory, DirectoryCheck::Private);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[cfg(not(unix))]
     #[test]
-    fn a_platform_that_cannot_check_the_directory_says_so() {
+    fn a_folder_that_is_not_the_default_is_not_checked_and_the_default_is_believed() {
         let dir = scratch_directory("unchecked");
         assert_eq!(read_descriptors(&dir).directory, DirectoryCheck::NotChecked);
         std::fs::remove_dir_all(&dir).unwrap();
+        let default = default_descriptors_dir().expect("a default folder");
+        assert_eq!(check_directory(&default), DirectoryCheck::Private);
     }
 }

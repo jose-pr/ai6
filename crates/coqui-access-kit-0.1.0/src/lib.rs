@@ -4,6 +4,8 @@
 //! | --- | --- |
 //! | [`mod@table`] | [`Table`], the typed source a provider reads its records from and writes them to; [`MemoryTable`] built in code; [`Reloading`], a cache that follows a table's changes. |
 //! | [`mod@hash`] | Use these with your own data: [`KeyHash`], [`verify_key`], [`PasswordHasher`], [`verify_password`], [`generate_key`]; self-describing `sha256:` and `$argon2id$` strings. |
+//! | [`mod@matcher`] | [`matcher::Matcher`]: a lookup's claims to a directory account, by templates and LDAP filters with every value escaped. |
+//! | [`mod@pins`] | [`pins::PinSource`], a per-user [`pins::AuthorizedFile`] and a [`pins::TablePins`]: where an account's pinned certificates live. |
 //! | [`mod@pick`] | [`pick::pick`]: which account a credential's named fields (a certificate's SANs, subject, fingerprint) name. |
 //! | [`mod@secret`] | Generate a prefixed 256-bit secret, hash it with optional domain separation, compare in constant time. |
 //! | `file` | Feature `file`: atomic private (`0600`) writes, bounded reads, change stamps, and `FileTable`, a table kept in one file in any serde format the caller supplies. |
@@ -27,7 +29,9 @@ pub mod cache;
 #[cfg_attr(docsrs, doc(cfg(feature = "file")))]
 pub mod file;
 pub mod hash;
+pub mod matcher;
 pub mod pick;
+pub mod pins;
 pub mod record;
 pub mod secret;
 pub mod table;
@@ -40,6 +44,6 @@ pub use hash::{
 };
 pub use record::RecordLimits;
 pub use table::{
-    Keyed, MemoryTable, Reloading, Revision, Snapshot, SourceError, Table, check_field, check_keys,
-    unix_now,
+    Keyed, MemoryTable, Reloading, Revision, Snapshot, SourceError, Table, Update, check_field,
+    check_keys, unix_now,
 };

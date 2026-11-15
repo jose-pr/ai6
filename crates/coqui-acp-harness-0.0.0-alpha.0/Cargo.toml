@@ -1,4 +1,4 @@
-# coqui-acp/crates/coqui-acp-harness at 77f7a9d692844ce256e2c7cbda509ade6917768e, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-harness at af005f0f1b49e0b0ec5dff6a6e9b0bca206d3e83, with what it inherits written out.
 example = [{ name = "spawner_host", required-features = ["kind"] }, { name = "fake_stdio_cli", required-features = ["kind"] }, { name = "stdio_provider", crate-type = ["cdylib"], required-features = ["kind"] }]
 test = [{ name = "spawner", required-features = ["kind"] }, { name = "account", required-features = ["kind"] }, { name = "stdio", required-features = ["kind"] }, { name = "replay", required-features = ["kind"] }, { name = "antigravity", required-features = ["antigravity"] }]
 [package]
@@ -21,7 +21,7 @@ publish = false
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 [features]
-antigravity = ["dep:serde", "dep:time", "dep:ureq"]
+antigravity = ["dep:serde", "dep:time", "dep:ureq", "dep:windows-sys"]
 kind = ["dep:guatiao-serde", "dep:coqui-acp-history"]
 [dependencies]
 [dependencies.coqui-acp-api]
@@ -74,6 +74,11 @@ features = ["std", "process"]
 [target."cfg(windows)".dependencies]
 [target."cfg(windows)".dependencies.win32job]
 version = "2.0.3"
+[target."cfg(windows)".dependencies.windows-sys]
+version = "0.61.2"
+optional = true
+default-features = false
+features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock"]
 [dev-dependencies]
 [dev-dependencies.coqui-acp]
 path = "../coqui-acp"

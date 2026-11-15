@@ -12,8 +12,10 @@ feature and on `coqui-builder` (for `Limit`). The crate holds no `unsafe` code. 
 ## Kinds
 
 All methods are synchronous; a host calls them from a blocking thread. A kind grows by
-appending methods with default bodies after the required ones. The hash of a kind covers its
-required methods only.
+appending methods with default bodies after the required ones. The floor hash of a kind covers
+every method, optional ones too, so appending to a kind that exists changes its hash and
+providers built before are refused: a kind is extended by a new kind, and a model by an
+`Option` field.
 
 ```rust
 #[guatiao::kind(name = "coqui_authenticator")]   // floor hash 0xc9379b44
@@ -40,6 +42,11 @@ pub trait Accounts: Send + Sync {
     fn remove(&self, name: String) -> Result<(), ProviderError>;
     fn waiting(&self) -> Result<Vec<Waiting>, ProviderError>; // default: empty
 }
+
+#[guatiao::kind(name = "coqui_sign_in_policy")]  // floor hash 0xd5850cd8
+pub trait SignInPolicy: Send + Sync {
+    fn decide(&self, context: SignInContext) -> Result<SignInDecision, ProviderError>;
+}
 ```
 
 - `authenticate` returns `Err` only when it could not find out; a host treats that as "could
@@ -49,6 +56,8 @@ pub trait Accounts: Send + Sync {
 - `put` makes an account or changes the one of that name; a field not said is left as it is.
   A provider that makes secrets itself answers with the one it made, once.
 - `remove` returns `GUATIAO_ERR_NOT_FOUND` when no account has that name.
+- `decide` returns `Err` only when it could not find out; a consumer then offers nothing and
+  refuses, never allowing. The contract a consumer follows is the narrative site's sign-in page.
 - A provider offers the kinds it implements: `#[provider(Authenticator, Directory, Accounts,
   crate = ::coqui_access::guatiao)]`.
 - `KIND_PREFIX` is `"coqui_"`: a host scanning libraries keeps those that declare a kind
@@ -61,24 +70,54 @@ fields. Unknown keys are skipped when reading.
 
 | Model | Fields (required first) |
 | --- | --- |
-| `Attempt` | `name?`, `secret?`, `headers: Vec<(String, String)>`, `peer?`, `secure?`, `certificate?`, `certificates?: Vec<Bytes>` (DER, leaf first) |
-| `Lookup` | `by`, `value` — `by` is `id`, `name` or `email` (a provider may add more) |
+| `Attempt` | `name?`, `secret?`, `headers: Vec<(String, String)>`, `peer?`, `secure?`, `certificate?`, `certificates?: Vec<Bytes>` (DER, leaf first), `method?` (the `methods` word the credential is presented as; `None` is the provider's default) |
+| `Lookup` | `by`, `value`, `claims?` — `by` is `id`, `name`, `email`, `filter` (an LDAP filter) or `claims` (the authenticator names no account; a matcher decides from `claims`); a provider may add more |
+| `Claims` | `values: BTreeMap<String, Vec<String>>` (empty is not written), `certificate?: Bytes` (the leaf as DER); `get(name) -> &[String]`; `Debug` shows counts |
 | `Verdict` | enum tagged by `kind`: `Unknown`, `Invalid`, `Valid(Lookup)` |
 | `Person` | `id`, `name`, `groups`, `attributes: BTreeMap<String, Value>`, `display_name?`, `email?` |
 | `AuthorizationRequest` | `person`, `action`, `resource`, `ancestors: Vec<String>` (the resources `resource` sits under, nearest first; empty by default and then not written) |
 | `AuthorizationDecision` | `allowed`, `limits: BTreeMap<String, Value>` |
-| `Description` | `name?`, `takes?` (one of `takes::PASSWORD`, `KEY`, `REQUEST`) |
+| `Description` | `name?`, `takes?` (one of `takes::PASSWORD`, `KEY`, `REQUEST`, `OTP`) |
 | `AccountInfo` | `id`, `name`, `groups`, `disabled?`, `made_unix?`, `expires_unix?` |
-| `AccountPut` | `name`, `secret?`, `groups?`, `disabled?`, `expires_unix?` |
-| `PutOutcome` | `secret?` |
+| `AccountPut` | `name`, `secret?`, `groups?`, `disabled?`, `expires_unix?`, `display_name?` (the label an enrolment shows; providers keeping none ignore it) |
+| `PutOutcome` | `secret?`, `codes?: Vec<String>` (one-time recovery codes, said once) |
 | `Waiting` | `shown`, `peer?`, `seen_unix?` |
+| `Factor` | `method`, `provider?` (the id that accepted the step), `person?` (the `Person::id` it named; `Debug` hides it) |
+| `SignInContext` | `purpose`, `done: Vec<Factor>`, `address?` (the client's IP as text, no port; `None` when unknown), `client?`, `service?`, `time_unix?`, `person?`, `attributes` (empty is not written) |
+| `Offer` | `method`, `providers: Vec<String>` (empty is any provider taking the method; empty is not written) |
+| `SignInDecision` | `complete`, `methods: Vec<Offer>`, `rule?`, `limits` (empty is not written) |
 
 `headers` are ordered pairs; a header sent twice appears twice; match names case-insensitively.
 `Attempt::certificate` is a fingerprint the transport verified the peer holds the key of, in
 the canonical text `coqui-peer-tls` writes (`sha256:<hex>`); `Attempt::certificates` is that
 certificate and the intermediates the client sent, as DER, leaf first. `Debug` shows only
-their count. `Debug` of `Attempt`, `Lookup`,
-`Person`, `AccountPut` and `PutOutcome` shows no secret and no identity value.
+their count. `Debug` of `Attempt`, `Lookup`, `Person`, `AccountPut`, `PutOutcome` and
+`SignInContext` shows no secret, code, address or identity value (an `Attempt`'s `method` and a
+context's `purpose`, `client` and `service` are words and are shown).
+
+## Claims
+
+What an authenticator obtained, in full, for a matcher (`coqui_access_kit::matcher`) to tie to a
+directory account; the credential's claim is never the account or its groups. The names an
+authenticator that reads a certificate uses: `subject.dn`, `subject.cn` and the other
+`subject.<attribute>` (`o`, `ou`, `c`, `st`, `l`, `dc`, `uid`, `email`, `serialnumber`), `issuer.dn`
+and `issuer.<attribute>`, `serial.hex`, `serial.reversed` (the same bytes last first), `san.upn`,
+`san.email`, `san.dns`, `san.uri`, `san.ip`, `fingerprint` and `spki` (both `sha256:<hex>`),
+`not_before` and `not_after` (Unix seconds); a name it has nothing for is absent. A password
+authenticator names the account in `by`/`value` and has no claims.
+
+## Words (`methods`, `purposes`, `clients`)
+
+```rust
+pub mod methods { pub const PASSWORD, CERTIFICATE, PROXY, KEY, TOTP, RECOVERY_CODE: &str;
+                  pub const NEEDS_ACCOUNT: &[&str]; }     // [TOTP, RECOVERY_CODE]
+pub mod purposes { pub const SIGN_IN, RESUME, ENROL: &str; }   // "sign_in" | "resume" | "enrol"
+pub mod clients  { pub const BROWSER, APP, API: &str; }         // "browser" | "app" | "api"
+pub mod takes    { /* PASSWORD, KEY, REQUEST, */ pub const OTP: &str; }   // "otp"
+```
+
+- A method in `NEEDS_ACCOUNT` checks a code against an account an earlier step already named, so
+  nothing offers it before one has. A policy may use words of its own beside these.
 
 ## Subjects
 
@@ -125,7 +164,10 @@ impl From<u32> for Limit; impl From<Option<u32>> for Limit;
 ## Errors (`coqui_access::error`)
 
 `bad_value`, `not_found`, `unsupported`, `internal`: each `fn(&str) -> ProviderError` with the
-matching Guatiao status. Messages never hold credentials.
+matching Guatiao status. Messages never hold credentials. `ambiguous() -> ProviderError` is what a
+directory answers when one lookup finds more than one account (`bad_value` with the message
+`AMBIGUOUS`); `is_ambiguous(&ProviderError) -> bool` tells it from any other refusal, and a matcher
+refuses the sign-in on it.
 
 ## Gotchas
 

@@ -13,8 +13,8 @@ mod os;
 
 use core::fmt;
 
-use coqui_access::guatiao::Provider;
 use coqui_access::guatiao::library::ProviderError;
+use coqui_access::guatiao::{Provider, ToValue};
 use coqui_access::{
     Attempt, Authenticator, Description, Directory, Lookup, Person, Verdict, error, takes,
 };
@@ -255,14 +255,27 @@ impl os::Account {
                     .any(|group| config.groups.iter().any(|allowed| allowed == group)))
     }
 
+    /// The person, with `uid` and `home` as attributes where the OS has them: what a
+    /// per-user pin file is found and trusted by.
     fn person(self) -> Person {
+        let mut attributes = Person::default().attributes;
+        if let Some(uid) = self.uid
+            && let Ok(value) = uid.to_string().to_value()
+        {
+            attributes.insert("uid".to_owned(), value);
+        }
+        if let Some(home) = &self.home
+            && let Ok(value) = home.to_value()
+        {
+            attributes.insert("home".to_owned(), value);
+        }
         Person {
             id: self.id,
             name: self.name,
             display_name: self.display_name,
             email: None,
             groups: self.groups,
-            attributes: Default::default(),
+            attributes,
         }
     }
 }
@@ -278,6 +291,7 @@ impl Authenticator for SystemAccounts {
         let lookup = Lookup {
             by: "name".to_owned(),
             value: name,
+            ..Lookup::default()
         };
         let Some(account) = self.admitted(&lookup)? else {
             return Ok(Verdict::Unknown);
@@ -290,6 +304,7 @@ impl Authenticator for SystemAccounts {
                 Verdict::Valid(Lookup {
                     by: "id".to_owned(),
                     value: account.id,
+                    ..Lookup::default()
                 })
             } else {
                 Verdict::Invalid

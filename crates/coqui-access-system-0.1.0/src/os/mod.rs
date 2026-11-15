@@ -34,6 +34,8 @@ pub(crate) struct Account {
     pub(crate) groups: Vec<String>,
     /// The uid, on Unix.
     pub(crate) uid: Option<u32>,
+    /// The home directory, on Unix.
+    pub(crate) home: Option<String>,
     /// Disabled by the OS (Windows `UF_ACCOUNTDISABLE`).
     pub(crate) disabled: bool,
 }

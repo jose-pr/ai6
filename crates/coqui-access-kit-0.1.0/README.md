@@ -87,6 +87,8 @@ combination, `Argon2Params::new` and making a hash do.
 | `table` | `Table<T>`, `Keyed`, `Snapshot`, `Revision`, `SourceError`, `MemoryTable`, `Reloading`, `check_keys`. |
 | `hash` | `KeyHash`, `Argon2Params`, `verify_key`, `is_key_hash`, `PasswordHasher`, `verify_password`, `is_password_hash`, `generate_key`. |
 | `pick` | `Pick`, `Picked`, `pick`: which account a credential's fields name. |
+| `matcher` | `Matcher`, `MatchRule`: claims to a directory account by templates and LDAP filters (values escaped), the first rule that finds exactly one account winning. |
+| `pins` | `PinSource`, `AuthorizedFile` (a per-user file read as sshd reads `authorized_keys`, through a reader the consumer may supply), `TablePins`: where an account's pinned certificates live. |
 | `secret` | `generate`, `identifier`, `hash`, `hash_bytes`, `same`, `is_hash`. |
 | `cache` | Feature `cache`. `Cached`, `CacheOptions`, `CacheSetting`, `DEFAULT_TTL`, `DEFAULT_NEGATIVE_TTL`, `DEFAULT_MAX_ENTRIES`. |
 | `file` | Feature `file`. `FileTable`, `Codec`, `CodecError`, `Source`, `FileSource`, `DEFAULT_MAX_BYTES`, `write_private`, `read_bounded`, `stamp`, `Stamp`. |

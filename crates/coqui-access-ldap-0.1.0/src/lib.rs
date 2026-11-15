@@ -19,6 +19,10 @@ use coqui_peer_tls::{ClientBuilder, NonDefault, Policy, Roots, Trust};
 use guatiao_builder::Described;
 use ldap3::{LdapConn, LdapConnSettings, Scope, SearchEntry};
 
+/// The account filter a filter lookup is ANDed with unless the configuration says another:
+/// people who are users, which leaves out Active Directory's computer accounts.
+pub const DEFAULT_OBJECT_FILTER: &str = "(&(objectCategory=person)(objectClass=user))";
+
 /// LDAP result code for credentials rejected by a directory.
 const INVALID_CREDENTIALS: u32 = 49;
 
@@ -42,6 +46,19 @@ pub struct LdapAccountsConfig {
     /// LDAP filter with `{name}` for the escaped account name.
     #[map(default = String::from("(sAMAccountName={name})"))]
     pub user_filter: String,
+    /// The filter every account a filter lookup may find matches, which the lookup's filter
+    /// is AND-ed with so it can only narrow it. It must carry every restriction an account
+    /// must meet to sign in here (people, not computer or service accounts; an organisational
+    /// unit; a group): `user_filter` is not applied to a filter lookup, as it is built around
+    /// a name. The default is people, not Active Directory computer accounts.
+    #[map(default = String::from(DEFAULT_OBJECT_FILTER))]
+    pub object_filter: String,
+    /// Whether a lookup `by: "filter"` is answered. Off by default: a filter is built only by
+    /// a matcher's rule, with its values escaped, and a directory with no such rule has no
+    /// reason to take one. Anything that can make a lookup `by: "filter"` with its own text
+    /// can search the directory, so turn this on only where the lookups come from a matcher.
+    #[map(default = false)]
+    pub allow_filter_lookups: bool,
     /// Attribute containing the directory's canonical account name.
     #[map(default = String::from("sAMAccountName"))]
     pub name_attribute: String,
@@ -79,6 +96,8 @@ impl fmt::Debug for LdapAccountsConfig {
                 &self.bind_password.as_ref().map(|_| "[REDACTED]"),
             )
             .field("user_filter", &self.user_filter)
+            .field("object_filter", &self.object_filter)
+            .field("allow_filter_lookups", &self.allow_filter_lookups)
             .field("name_attribute", &self.name_attribute)
             .field("group_attribute", &self.group_attribute)
             .field("group_filter", &self.group_filter)
@@ -191,6 +210,9 @@ impl Ldap {
         if !config.user_filter.contains("{name}") {
             return Err("user_filter must contain {name}".to_owned());
         }
+        if !search::one_group(&config.object_filter) {
+            return Err("object_filter must be one parenthesised filter".to_owned());
+        }
         if config.bind.is_some() != config.bind_password.is_some() {
             return Err("bind and bind_password must be configured together".to_owned());
         }
@@ -245,12 +267,23 @@ impl Ldap {
 
     fn found(&self, connection: &mut LdapConn, name: &str) -> Result<Option<Found>, ProviderError> {
         let filter = search::filter(&self.config.user_filter, "name", name);
+        self.found_by(connection, &filter, false)
+    }
+
+    /// The one account `filter` finds. Several are nobody for a name (as ever), and
+    /// `ambiguous` for a caller's filter, which must be able to tell the two.
+    fn found_by(
+        &self,
+        connection: &mut LdapConn,
+        filter: &str,
+        refuse_several: bool,
+    ) -> Result<Option<Found>, ProviderError> {
         let mut attributes = vec![self.config.name_attribute.as_str(), "userAccountControl"];
         if !self.config.group_attribute.is_empty() {
             attributes.push(&self.config.group_attribute);
         }
         let result = connection
-            .search(&self.config.base, Scope::Subtree, &filter, attributes)
+            .search(&self.config.base, Scope::Subtree, filter, attributes)
             .map_err(|error| {
                 coqui_access::error::internal(&format!("directory search failed: {error}"))
             })?;
@@ -258,7 +291,11 @@ impl Ldap {
             coqui_access::error::internal(&format!("directory search failed: {error}"))
         })?;
         let mut entries = entries.into_iter().map(SearchEntry::construct);
-        let (Some(entry), None) = (entries.next(), entries.next()) else {
+        let (first_entry, second_entry) = (entries.next(), entries.next());
+        if refuse_several && second_entry.is_some() {
+            return Err(coqui_access::error::ambiguous());
+        }
+        let (Some(entry), None) = (first_entry, second_entry) else {
             return Ok(None);
         };
         let first = |attribute: &str| {
@@ -352,6 +389,7 @@ impl Authenticator for Ldap {
             0 => Ok(Verdict::Valid(Lookup {
                 by: "name".to_owned(),
                 value: found.name.unwrap_or(name),
+                ..Lookup::default()
             })),
             INVALID_CREDENTIALS => Ok(Verdict::Invalid),
             _ => Err(coqui_access::error::internal(
@@ -361,8 +399,40 @@ impl Authenticator for Ldap {
     }
 }
 
+impl Ldap {
+    /// The one enabled account a filter finds under the account filter: `ambiguous` for
+    /// several, `None` for none or a disabled one.
+    fn lookup_filter(&self, given: &str) -> Result<Option<Person>, ProviderError> {
+        if !search::one_group(given) {
+            return Err(coqui_access::error::bad_value(
+                "a filter lookup is one parenthesised filter",
+            ));
+        }
+        let filter = search::all_of(&self.config.object_filter, given);
+        let mut connection = self.searching()?;
+        let found = self.found_by(&mut connection, &filter, true);
+        let _ = connection.unbind();
+        Ok(found?.filter(|found| !found.disabled).map(|found| Person {
+            name: found.name.clone().unwrap_or_else(|| found.dn.clone()),
+            id: found.dn,
+            display_name: None,
+            email: None,
+            groups: found.groups,
+            attributes: Default::default(),
+        }))
+    }
+}
+
 impl Directory for Ldap {
     fn lookup(&self, lookup: Lookup) -> Result<Option<Person>, ProviderError> {
+        if lookup.by == "filter" {
+            if !self.config.allow_filter_lookups {
+                return Err(coqui_access::error::unsupported(
+                    "this directory does not take filter lookups",
+                ));
+            }
+            return self.lookup_filter(&lookup.value);
+        }
         if lookup.by != "name" {
             return Ok(None);
         }
@@ -395,6 +465,8 @@ mod tests {
             bind: None,
             bind_password: None,
             user_filter: "(sAMAccountName={name})".to_owned(),
+            object_filter: DEFAULT_OBJECT_FILTER.to_owned(),
+            allow_filter_lookups: true,
             name_attribute: "sAMAccountName".to_owned(),
             group_attribute: "memberOf".to_owned(),
             group_filter: None,
@@ -468,6 +540,69 @@ mod tests {
                     .starts_with("ca_file")
             );
         }
+    }
+
+    #[test]
+    fn filter_lookups_are_off_unless_the_directory_is_set_to_take_them() {
+        let mut off = config("ldaps://directory.example.org");
+        off.allow_filter_lookups = false;
+        let accounts = LdapAccounts::new(off).unwrap();
+        let refused = accounts
+            .lookup(Lookup {
+                by: "filter".to_owned(),
+                value: "(uid=*)".to_owned(),
+                ..Lookup::default()
+            })
+            .unwrap_err();
+        assert_eq!(
+            refused.status,
+            coqui_access::guatiao::Status::GUATIAO_ERR_UNSUPPORTED
+        );
+        // A configuration that says nothing of it is off, and its account filter is people.
+        let mut partial = Partial::<LdapAccountsConfig>::new();
+        partial.set("url", "ldaps://directory.example.org").unwrap();
+        partial.set("base", "DC=example,DC=org").unwrap();
+        let said_nothing = partial.build().unwrap();
+        assert!(!said_nothing.allow_filter_lookups);
+        assert_eq!(
+            said_nothing.object_filter,
+            "(&(objectCategory=person)(objectClass=user))"
+        );
+    }
+
+    #[test]
+    fn a_filter_lookup_is_refused_unless_it_is_one_filter_and_other_kinds_are_not_found() {
+        let accounts = LdapAccounts::new(config("ldaps://directory.example.org")).unwrap();
+        for bad in ["uid=1", "(a=1)(b=2)", "(a=1", ""] {
+            let refused = accounts
+                .lookup(Lookup {
+                    by: "filter".to_owned(),
+                    value: bad.to_owned(),
+                    ..Lookup::default()
+                })
+                .unwrap_err();
+            assert_eq!(
+                refused.status,
+                coqui_access::guatiao::Status::GUATIAO_ERR_BAD_VALUE,
+                "{bad}"
+            );
+            assert!(!coqui_access::error::is_ambiguous(&refused), "{bad}");
+        }
+        let other = accounts
+            .lookup(Lookup {
+                by: "email".to_owned(),
+                value: "x".to_owned(),
+                ..Lookup::default()
+            })
+            .unwrap();
+        assert!(other.is_none());
+        let mut object = config("ldaps://directory.example.org");
+        object.object_filter = "objectClass=user".to_owned();
+        assert!(
+            LdapAccounts::new(object)
+                .unwrap_err()
+                .contains("object_filter")
+        );
     }
 
     #[test]

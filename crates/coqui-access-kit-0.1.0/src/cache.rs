@@ -188,7 +188,7 @@ type DecisionKey = (String, String, Vec<String>, String, String, Vec<String>);
 /// }
 ///
 /// let cached = Cached::new(Arc::new(One), CacheOptions::default());
-/// let alice = Lookup { by: "name".into(), value: "alice".into() };
+/// let alice = Lookup { by: "name".into(), value: "alice".into(), ..Lookup::default() };
 /// assert_eq!(cached.lookup(alice.clone()).unwrap().unwrap().id, "1");
 /// cached.invalidate(&alice);
 /// ```

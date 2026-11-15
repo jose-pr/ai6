@@ -1,4 +1,4 @@
-# coqui-acp/crates/coqui-acp-history at 77f7a9d692844ce256e2c7cbda509ade6917768e, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-history at af005f0f1b49e0b0ec5dff6a6e9b0bca206d3e83, with what it inherits written out.
 bin = [{ name = "coqui-acp-history", path = "src/main.rs", required-features = ["cli"] }]
 [package]
 name = "coqui-acp-history"

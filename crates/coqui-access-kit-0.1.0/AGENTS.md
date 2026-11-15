@@ -43,7 +43,8 @@ pub fn is_hash(value: &str) -> bool;
 pub const IP_FIELD: &str = "san.ip"; pub const DNS_IP_FIELD: &str = "san.dns.ip";
 pub struct Pick { pub field: String, pub by: String, pub domain: Option<String>, pub ip_in_dns: bool }
     // non_exhaustive; coqui_builder::Describe, ip_in_dns defaulting to true
-impl Pick { pub fn new(field, by) -> Self; pub fn domain(self, impl Into<String>) -> Self; pub fn ip_in_dns(self, bool) -> Self; }
+impl Pick { pub fn new(field, by) -> Self; pub fn domain(self, impl Into<String>) -> Self; pub fn ip_in_dns(self, bool) -> Self;
+            pub fn check(&self) -> Result<(), &'static str>; }   // Err for a `by` of "filter" or "claims"; pick() ignores such a pick
 pub enum Picked { Absent, Ambiguous, Found { by: String, value: String } }   // non_exhaustive
 pub fn pick(fields: &BTreeMap<String, Vec<String>>, order: &[Pick]) -> Picked;
 ```
@@ -56,6 +57,103 @@ pub fn pick(fields: &BTreeMap<String, Vec<String>>, order: &[Pick]) -> Picked;
 - `san.ip` also reads `san.dns.ip` (a DNS name that is an IP literal) unless `ip_in_dns` is
   false; addresses compare in one spelling (IPv6 compressed, IPv4-mapped as IPv4), so the
   same address in both kinds of name is one value.
+
+## Matching claims to an account (`coqui_access_kit::matcher`)
+
+```rust
+pub const MAX_CANDIDATES: usize = 16;
+pub struct MatchRule { pub by: String, pub template: String, pub pins: Option<String>, pub domain: Option<String> }
+    // non_exhaustive; Describe, deny_unknown_fields; MatchRule::new(by, template), .pins(source_name), .domain(realm)
+pub fn default_rules() -> Vec<MatchRule>;    // name {san.upn}; email {san.email}; not the common name
+pub struct MatcherConfig { pub rule: Vec<MatchRule> }   // non_exhaustive; Describe; Default = default_rules(); an empty list matches nobody
+pub struct MatcherError;                                 // Display, Error, From -> ProviderError (bad value); never quotes a template
+pub enum Match { Found(Person), NotFound, Ambiguous }    // non_exhaustive
+pub struct Matched { pub result: Match, pub notes: Vec<String> }
+pub struct MatcherBuilder;   // Matcher::builder(config).pin_source(name, Arc<dyn PinSource>).build()
+pub struct Matcher;          // Default = the default rules
+impl Matcher {
+    pub fn new(config: MatcherConfig) -> Result<Self, MatcherError>;
+    pub fn builder(config: MatcherConfig) -> MatcherBuilder;
+    pub fn resolve(&self, lookup: &Lookup, directory: &dyn Directory) -> Result<Matched, ProviderError>;
+}
+pub fn escape_filter_value(value: &str) -> String;
+```
+
+- A `Lookup` with `by: "claims"` and claims is matched; with no claims, `NotFound`; `by: "filter"`
+  (raw text handed in) is `NotFound` and never reaches the directory; any other `by` is looked up as
+  it is. Rules are tried in order. A rule renders its template once per
+  combination of the values of the claims it names (at most `MAX_CANDIDATES`, else an `Err`) and
+  asks the directory for each: a claim that is missing, or whose value is empty, or whose `domain`
+  has no `@`, makes no candidate. `by` is `name`, `email` or `id` (the lookup `{by, value}`) or
+  `filter` (`{by: "filter", value: <filter>}`, a directory that supports it, such as ldap).
+- A rule using `local` must name `domain` (a realm: only claim values ending `@<domain>`, any case,
+  count for it) or `pins`; `Matcher::new` refuses it otherwise, as it does a `domain` without `local`,
+  or one that is empty or holds `@` or whitespace. Stripping the realm loses what ties a name to it.
+- Templates: `{claim}` and `{claim|filter|...}` (`lower`, `upper`, `local` = before the last `@`,
+  `domain` = after), `{{` and `}}` for braces, claim names lowercase words with `.`, `_`, `-`. A
+  template names at least one claim. A `filter` template is one balanced parenthesised group.
+- **In a `filter` rule every substituted value is escaped** with `escape_filter_value`: `*`, `(`,
+  `)`, `\`, NUL, controls and every byte of a non-ASCII character become `\xx` (lowercase hex).
+  The template's own text is the filter's structure and is never escaped. Names, emails and ids are
+  substituted as they are.
+- A rule that finds the same account (`Person::id`) through several candidates found one. Exactly one
+  account ends the walk with `Found`; more than one, or a directory answering `error::ambiguous`,
+  ends it with `Ambiguous`; none goes on to the next rule. A directory `Err` is returned, never
+  skipped. A rule with `pins` asks the named source about the one account it found and counts
+  `PinCheck::Holds` as a find; `Absent` and `Refused` (whose reason is added to `notes`) go on.
+- `build`/`new` refuse: a `by` other than the four, an unmatched brace, a claim name or filter that
+  is not valid, a template naming no claim (it would be one account for everybody), a `filter`
+  that is not one group, a rule naming a pin source that was not given.
+
+## Pin sources (`coqui_access_kit::pins`)
+
+```rust
+pub struct PinSet { pub fingerprint: Option<String>, pub key: Option<String> }  // non_exhaustive; `sha256:<hex>` lowercase
+impl PinSet { pub fn from_claims(&Claims) -> Self; pub fn is_empty(&self) -> bool; }   // claims `fingerprint`, `spki`
+pub enum PinCheck { Holds, Absent, Refused(String) }     // non_exhaustive
+pub trait PinSource: Send + Sync { fn check(&self, person: &Person, pins: &PinSet) -> Result<PinCheck, ProviderError>; }
+pub fn pin_matches(text: &str, wanted: &PinSet) -> Option<bool>;   // None: not a pin line
+pub struct AccountPin { pub name: String, pub pin: String }        // non_exhaustive; Keyed; Debug redacted
+pub struct TablePins;   // PinSource over a Table<AccountPin>: TablePins::new(Arc<dyn Table<AccountPin>>) -> Result<Self, SourceError>
+// pins::authorized
+pub const MAX_FILE_BYTES: u64 = 64 * 1024;  pub const MAX_PIN_LINES: usize = 1024;
+pub enum FileRead { Text(String), Missing }               // non_exhaustive
+pub struct ReadFailure;                                    // new(reason), reason(); Error
+pub trait PinFileReader: Send + Sync { fn read(&self, account: &Person, path: &Path) -> Result<FileRead, ReadFailure>; }
+pub struct DirectReader;                                   // the default reader; Clone, Default; DirectReader::new(), .timeout(Duration) (default READ_TIMEOUT 2 s), .max_waiting(usize) (default MOST_WAITING 8)
+pub const READ_TIMEOUT: Duration = 2 s;  pub const MOST_WAITING: usize = 8;
+pub struct AuthorizedFile;   // AuthorizedFile::new(path_template) -> Result<Self, TemplateError>; .reader(Arc<dyn PinFileReader>); PinSource
+```
+
+- A source is asked about **one account a rule already named**, never to scan. It answers
+  `Holds`, `Absent`, or `Refused(reason)` (counted as no pins and reported); `Err` is "could not
+  find out" and ends the match with that error.
+- **`AuthorizedFile`**: the file is one pin per line, `sha256:<hex>` (fingerprint) or
+  `spki-sha256:<hex>` (public key), then optional whitespace and a comment; blank lines and lines
+  starting `#` are ignored; a line that is not a pin is skipped and, when no pin is held, counted in
+  the refusal reason; more than `MAX_PIN_LINES` lines is a refusal. The path template takes `{home}`
+  (the person's `home` attribute, absolute), `{name}` and `{id}` (each one safe path component: not
+  empty, `.`, `..`, with no `/`, `\` or control character, else a refusal before any read); the
+  rendered path must be absolute with no `..`. A missing `home` is a refusal; a file that is not
+  there is `Absent`.
+- **The reader contract.** The reader is the only thing that touches the file system. It receives the
+  account (with `home` and `uid` attributes as the directory gave them) and the rendered path, and
+  returns the text, `Missing`, or a `ReadFailure` with the reason it would not. The library parses what
+  a reader returns and reports a refusal as no pins; it does not repeat any check it cannot see. A
+  consumer whose process cannot read homes (it reads through a helper running as root) supplies its
+  own reader and makes the checks below wherever it has access.
+- **`DirectReader`** (Unix; elsewhere it refuses everything): needs the account's `uid` and `home`
+  attributes and a path under the home. It walks from the real home down one component at a time with
+  `symlink_metadata`: no component (the file included) may be a symlink or on another device than the
+  home, directories must be directories, and the home, each directory and the file must be owned by the
+  uid or root and not writable by group or others. It then opens the file with `O_NOFOLLOW |
+  O_NONBLOCK` (the `libc` constants, Unix only), and checks the opened file again: a regular file, the
+  same device and inode the walk saw, at most `MAX_FILE_BYTES`. The whole walk and read runs on a thread
+  the reader waits for at most its `timeout` (a file system that never answers is a refusal "timed out");
+  the thread stays stuck until the file system answers; one read waits per account (a hung home stops that account only), at most `max_waiting` (8) in all per
+  reader, before further reads are refused unseen; the place is given back by a drop guard, even on a panic. A directory above the file swapped by its owner
+  between the walk and the open is the gap no portable call closes.
+- `MtlsAccounts` implements `PinSource` over its own records (`coqui-access-mtls`).
 
 ## Record limits (`coqui_access_kit::record`; `RecordLimits` re-exported at the root)
 
@@ -130,9 +228,12 @@ impl<T, C> FileTable<T, C> {
 }
 impl<T: Keyed + Clone + Send + Walk + FromWalk, C: Codec> Table<T> for FileTable<T, C>;
 pub struct Source<F> { pub file: Option<FileSource<F>> }             // coqui_builder::Describe, F: Describe
-pub struct FileSource<F> { pub path: String, pub format: F }         // coqui_builder::Describe; format required
+pub struct FileSource<F> { pub path: String, pub format: F, pub max_bytes: Option<u32> }
+    // coqui_builder::Describe; format required; max_bytes absent is the provider's default (DEFAULT_MAX_BYTES unless it sizes one)
 impl<F> Source<F> {
     pub fn file(path: impl Into<String>, format: F) -> Self;
+    pub fn max_bytes(self, max: u32) -> Self;                        // the file's bound, in bytes
+    pub fn max_bytes_unless_set(self, max: u32) -> Self;             // a provider's sized default; the configuration wins
     pub fn sibling(&self, suffix: &str) -> Self where F: Clone;      // "<path>.<suffix>", same format
     pub fn open<T>(&self, section: &str) -> Result<Arc<dyn Table<T>>, SourceError>
         where F: Codec + Clone + 'static, T: Keyed + Clone + Send + Walk + FromWalk + 'static;
@@ -157,7 +258,12 @@ pub fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String>;
   unknown top-level key, a refused record or a document the codec refuses is a `SourceError`
   in the kit's own words (`file has an unknown top-level key`, `a record in the file is
   invalid`, `file is not a valid <name> table`): a codec's error, which may quote the
-  document, is never shown. Atomic within one process; across processes the last writer wins.
+  document, is never shown. A read-modify-write (`put`, `remove`, `update`) holds an exclusive
+  operating-system lock (`File::lock`, Rust 1.89) on a file beside the table, `<path>.lock`, from the
+  read to the write, in this and every other process: no update is lost, and `update` computes its
+  change from the records it replaces. The lock file is created with the table's owner-only mode and
+  left in place. Reads take no lock (the file is replaced whole). On a filesystem whose locks are
+  advisory or unsupported (some network mounts) the guarantee is the filesystem's.
 - A codec reads with `seed.deserialize(..)` and should refuse trailing text (serde_json's
   `Deserializer::end`). Through a self-describing format's `deserialize_any` a byte string is
   only what the codec's `Presentation` spells; the providers' records hold no bytes.
@@ -180,7 +286,9 @@ pub trait Table<T>: Send + Sync {
     fn changes_since(&self, since: Revision) -> Result<Option<Snapshot<T>>, SourceError>;  // default: load + compare
     fn put(&self, record: T) -> Result<(), SourceError>;        // default Err(ReadOnly); same key replaces
     fn remove(&self, key: &str) -> Result<bool, SourceError>;   // default Err(ReadOnly); true when it was there
+    fn update(&self, make: &mut Update<'_, T>) -> Result<(), SourceError>;   // default: load, make, put
 }
+pub type Update<'a, T> = dyn FnMut(&[T]) -> Result<Option<T>, SourceError> + 'a;   // records read -> the record to put, or None
 pub struct MemoryTable<T>;              // Table<T> for T: Keyed + Clone + Send
 impl<T> MemoryTable<T> { pub fn new() -> Self; pub fn from_records(impl IntoIterator<Item = T>) -> Self; }
 pub struct Reloading<T>;                // Debug
@@ -188,6 +296,7 @@ impl<T: Keyed + Clone> Reloading<T> {
     pub fn new(table: Arc<dyn Table<T>>, validate: impl Fn(&[T]) -> Result<(), SourceError> + Send + Sync + 'static) -> Result<Self, SourceError>;
     pub fn read<R>(&self, read: impl FnOnce(&[T]) -> R) -> Result<R, SourceError>;
     pub fn put_with<R>(&self, make: impl FnOnce(&[T]) -> Result<(T, R), SourceError>) -> Result<R, SourceError>;
+        // `make` runs against the records the table read for this update (through `Table::update`)
     pub fn remove(&self, key: &str) -> Result<bool, SourceError>;
 }
 pub fn check_keys<T: Keyed>(records: &[T], max: usize) -> Result<(), SourceError>;
@@ -202,7 +311,10 @@ pub fn unix_now() -> i64;                                    // whole seconds si
 - `Reloading` calls `changes_since` on every use, so it must be cheap. Every snapshot is
   checked with `validate`; a table that has become unreadable or invalid is an error, never a
   stale answer. `put_with` validates the records as they would be with the new one before
-  putting it, so a refused change leaves the table alone. It is atomic within one process only.
+  putting it, so a refused change leaves the table alone. `make` is run through `Table::update`,
+  against the records the table read for that update: a `FileTable` reads them under its lock, so
+  `put_with` is atomic across processes sharing the file; `MemoryTable::update` holds its own lock from the
+  read to the write; a table that does not override `update` is atomic within the one `Reloading` only.
 - `check_keys` refuses more than `max` records or a repeated key; providers call it first.
 - A provider maps a table error with `reading` where it only reads (a table it cannot read
   means "could not find out", never "no") and with `writing` where it puts, removes or opens

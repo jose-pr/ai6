@@ -2,7 +2,7 @@ use guatiao::library::ProviderError;
 
 use crate::model::{
     AccountInfo, AccountPut, Attempt, AuthorizationDecision, AuthorizationRequest, Description,
-    Lookup, Person, PutOutcome, Verdict, Waiting,
+    Lookup, Person, PutOutcome, SignInContext, SignInDecision, Verdict, Waiting,
 };
 
 /// Checks credentials and returns only a [`Lookup`] reference.
@@ -65,4 +65,16 @@ pub trait Accounts: Send + Sync {
     fn waiting(&self) -> Result<Vec<Waiting>, ProviderError> {
         Ok(Vec::new())
     }
+}
+
+/// Decides which methods a sign-in may use and what it still needs, from where and how it
+/// is made.
+///
+/// The consumer asks before any credential is checked (what to offer), again for each
+/// method presented, and again once a step has named someone. `Err` means the provider
+/// could not find out; a consumer then offers nothing and refuses, never allowing.
+#[guatiao::kind(name = "coqui_sign_in_policy")]
+pub trait SignInPolicy: Send + Sync {
+    /// The methods that may be presented next, or that the sign-in is complete.
+    fn decide(&self, context: SignInContext) -> Result<SignInDecision, ProviderError>;
 }

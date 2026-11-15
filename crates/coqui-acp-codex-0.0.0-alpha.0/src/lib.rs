@@ -6,6 +6,7 @@ extern crate alloc;
 
 pub mod accounts;
 mod agent;
+mod children;
 #[cfg(feature = "history")]
 #[cfg_attr(docsrs, doc(cfg(feature = "history")))]
 pub mod history;

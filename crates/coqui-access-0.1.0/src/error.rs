@@ -26,3 +26,18 @@ pub fn bad_value(message: &str) -> ProviderError {
 pub fn internal(message: &str) -> ProviderError {
     ProviderError::new(Status::GUATIAO_ERR_INTERNAL, message)
 }
+
+/// What a directory answers when one lookup finds more than one account (a filter that
+/// matches two): a matcher refuses the sign-in rather than choose. A `bad_value` carrying
+/// [`AMBIGUOUS`], so no kind has to change for it.
+pub fn ambiguous() -> ProviderError {
+    ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, AMBIGUOUS)
+}
+
+/// The message of [`ambiguous`].
+pub const AMBIGUOUS: &str = "the lookup finds more than one account";
+
+/// Whether `error` is [`ambiguous`].
+pub fn is_ambiguous(error: &ProviderError) -> bool {
+    error.status == Status::GUATIAO_ERR_BAD_VALUE && error.message() == AMBIGUOUS
+}

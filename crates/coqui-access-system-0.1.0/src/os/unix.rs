@@ -67,6 +67,7 @@ fn account(user: User) -> Option<Account> {
         display_name,
         groups,
         uid: Some(user.uid()),
+        home: user.home_dir().to_str().map(str::to_owned),
         disabled: false,
     })
 }

@@ -31,6 +31,10 @@ pub struct FileSource<F> {
     pub path: String,
     /// How the file is written.
     pub format: F,
+    /// The most the file may hold, in bytes, read or written; absent is the provider's
+    /// default, which is [`DEFAULT_MAX_BYTES`](super::DEFAULT_MAX_BYTES) unless it sizes one
+    /// from its record limit.
+    pub max_bytes: Option<u32>,
 }
 
 impl<F> Source<F> {
@@ -40,8 +44,28 @@ impl<F> Source<F> {
             file: Some(FileSource {
                 path: path.into(),
                 format,
+                max_bytes: None,
             }),
         }
+    }
+
+    /// This source with a size bound, in bytes, for the file.
+    #[must_use]
+    pub fn max_bytes(mut self, max: u32) -> Self {
+        if let Some(file) = &mut self.file {
+            file.max_bytes = Some(max);
+        }
+        self
+    }
+
+    /// This source with `max` as the size bound, unless one is set: a provider sizes the
+    /// default from the number of records it allows.
+    #[must_use]
+    pub fn max_bytes_unless_set(mut self, max: u32) -> Self {
+        if let Some(file) = &mut self.file {
+            file.max_bytes.get_or_insert(max);
+        }
+        self
     }
 
     /// The same kind of source beside this one, for a second table: a file source becomes
@@ -55,6 +79,7 @@ impl<F> Source<F> {
             file: self.file.as_ref().map(|file| FileSource {
                 path: format!("{}.{suffix}", file.path),
                 format: file.format.clone(),
+                max_bytes: file.max_bytes,
             }),
         }
     }
@@ -70,11 +95,13 @@ impl<F> Source<F> {
         T: Keyed + Clone + Send + Walk + FromWalk + 'static,
     {
         match &self.file {
-            Some(file) if !file.path.trim().is_empty() => Ok(Arc::new(FileTable::new(
-                &file.path,
-                section,
-                file.format.clone(),
-            ))),
+            Some(file) if !file.path.trim().is_empty() => {
+                let table = FileTable::new(&file.path, section, file.format.clone());
+                Ok(Arc::new(match file.max_bytes {
+                    Some(max) => table.max_bytes(max as usize),
+                    None => table,
+                }))
+            }
             Some(_) => Err(SourceError::invalid("source.file.path must name the file")),
             None => Err(SourceError::invalid("source must name a source kind: file")),
         }

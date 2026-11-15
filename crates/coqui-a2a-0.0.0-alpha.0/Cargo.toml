@@ -1,4 +1,4 @@
-# coqui-a2a/crates/coqui-a2a at a11a466c12b8c07ea8864e4159939a48b1fa457a, with what it inherits written out.
+# coqui-a2a/crates/coqui-a2a at 43050fc4d078fc0112e4b4a9e329ff028b91d32d, with what it inherits written out.
 bin = [{ name = "coqui-a2a", path = "src/main.rs", required-features = ["cli"] }]
 [package]
 name = "coqui-a2a"
@@ -27,10 +27,10 @@ cli = ["loopback", "dep:clap", "dep:coqui-peer", "dep:coqui-peer-webcrypto", "de
 serde_json = "1"
 [dependencies.coqui-agentic-peer]
 git = "https://github.com/Boriken-Dev/coqui-agentic-peer"
-rev = "8dad1766ba1b925f2bee9ebd403805e42e6afc47"
+rev = "f45938e8cede85a2a2e00afedea1b4944f7c8a67"
 [dependencies.coqui-transport]
 git = "https://github.com/Boriken-Dev/coqui-transport"
-rev = "1283116a22de6a8918faa3d0ebd78b8b6777ff0a"
+rev = "2601da58de9cac8f635060e4746864e9b238c6c5"
 default-features = false
 [dependencies.serde]
 version = "1"
@@ -77,7 +77,7 @@ rev = "9146f55dd9fb9be8d6d96f43e17bc7a057ba0681"
 optional = true
 [dependencies.coqui-transport-web]
 git = "https://github.com/Boriken-Dev/coqui-transport-web"
-rev = "c8df84264ff8e60907f5cedf269104e91d5add22"
+rev = "df5be67b3a18e23b2d0073eb0f795a49a4221c93"
 features = ["websocket"]
 optional = true
 [dependencies.coqui-peer]
@@ -99,14 +99,14 @@ proptest = "1"
 url = "2.5"
 [dev-dependencies.coqui-acp]
 git = "https://github.com/Boriken-Dev/coqui-acp"
-rev = "c15c0ff96d4bf8b8f56aae671a6ab73f8319825a"
+rev = "af005f0f1b49e0b0ec5dff6a6e9b0bca206d3e83"
 [dev-dependencies.coqui-peer-webcrypto]
 git = "https://github.com/Boriken-Dev/coqui-peer-webcrypto"
 rev = "9146f55dd9fb9be8d6d96f43e17bc7a057ba0681"
 features = ["pin"]
 [dev-dependencies.coqui-transport-web]
 git = "https://github.com/Boriken-Dev/coqui-transport-web"
-rev = "c8df84264ff8e60907f5cedf269104e91d5add22"
+rev = "df5be67b3a18e23b2d0073eb0f795a49a4221c93"
 features = ["websocket"]
 [lints]
 [lints.rust]

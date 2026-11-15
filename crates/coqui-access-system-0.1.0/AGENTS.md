@@ -79,8 +79,10 @@ impl Directory for SystemAccounts;       // by "id" or "name"
   `\` or `@` is not looked up.
 - `lookup` by `id` (uid text of digits only, or a SID string naming a user) or `name`; any
   other `by`, an empty value or one holding NUL, an unadmitted or disabled account is `None`.
-  `Person { id, name, display_name, groups }`: the GECOS name's first field or the Windows
-  full name; groups by name, the primary group first on Unix.
+  `Person { id, name, display_name, groups, attributes }`: the GECOS name's first field or the Windows
+  full name; groups by name, the primary group first on Unix. On Unix `attributes` holds `uid` (decimal
+  text) and `home` (the account's home directory), which a per-user pin file is found and trusted by;
+  on Windows it is empty.
 
 ## Gotchas
 

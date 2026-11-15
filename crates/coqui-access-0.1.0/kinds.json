@@ -148,6 +148,30 @@
           "doc": "What was shown lately and is nobody's yet, and could be accepted as somebody's with\n[`put`](Accounts::put): a peer certificate nobody has accepted. Empty for a\nprovider that keeps no such thing."
         }
       ]
+    },
+    {
+      "name": "coqui_sign_in_policy",
+      "floor_hash": 3582266584,
+      "object": false,
+      "doc": "Decides which methods a sign-in may use and what it still needs, from where and how it\nis made.\n\nThe consumer asks before any credential is checked (what to offer), again for each\nmethod presented, and again once a step has named someone. `Err` means the provider\ncould not find out; a consumer then offers nothing and refuses, never allowing.",
+      "slots": [
+        {
+          "name": "decide",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "context",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "The methods that may be presented next, or that the sign-in is complete."
+        }
+      ]
     }
   ]
 }

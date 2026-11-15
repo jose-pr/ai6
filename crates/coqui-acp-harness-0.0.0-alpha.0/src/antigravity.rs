@@ -7,8 +7,8 @@
 //! `reported` [`Bucket`]s: one for each distinct reset time, in permille.
 //!
 //! The request carries no secret and the answer's account details are never kept, so the only proof
-//! that a port is agy's is that its owner is one of the agent's own processes, which is checked
-//! again before every reading. Plain HTTP is asked first; HTTPS is asked with certificate
+//! that a port is agy's is that its owner is one of the agent's own processes, which is checked when
+//! the port is found and again whenever a request to it fails. Plain HTTP is asked first; HTTPS is asked with certificate
 //! verification off, for a literal loopback address only.
 
 use alloc::string::String;
@@ -209,6 +209,31 @@ impl AgyQuota {
         self.read_at(owners, models, crate::acp::now())
     }
 
+    /// Reads the quota from the port that answered last, without listing any process's ports: `None` when there is none
+    /// or it does not answer now, and then the port is forgotten so that [`read`](Self::read) looks at every port again.
+    ///
+    /// An agent keeps its port for its life, so the listing is for the first reading and for after a failure.
+    pub fn read_remembered(&mut self, models: &[AcpModel]) -> Option<Vec<Bucket>> {
+        let (address, scheme) = self.endpoint?;
+        if let Some((at, held)) = &self.last
+            && at.elapsed() < self.limits.min_interval
+        {
+            return Some(held.clone());
+        }
+        let deadline = Instant::now().checked_add(self.limits.total);
+        if let Ok(read) = self.fetch(address, scheme, deadline) {
+            return Some(self.keep(&read, models, crate::acp::now()));
+        }
+        self.endpoint = None;
+        None
+    }
+
+    fn keep(&mut self, read: &[status::Model], models: &[AcpModel], now: i64) -> Vec<Bucket> {
+        let buckets = status::buckets(read, models, now, &mut self.windows, &mut self.unmatched);
+        self.last = Some((Instant::now(), buckets.clone()));
+        buckets
+    }
+
     pub(crate) fn read_at(
         &mut self,
         owners: &[u32],
@@ -234,15 +259,7 @@ impl AgyQuota {
             match self.fetch(address, scheme, deadline) {
                 Ok(models_read) => {
                     self.endpoint = Some((address, scheme));
-                    let buckets = status::buckets(
-                        &models_read,
-                        models,
-                        now,
-                        &mut self.windows,
-                        &mut self.unmatched,
-                    );
-                    self.last = Some((Instant::now(), buckets.clone()));
-                    return Ok(buckets);
+                    return Ok(self.keep(&models_read, models, now));
                 }
                 Err(error) => {
                     // The next reading looks at every port again.

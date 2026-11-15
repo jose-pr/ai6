@@ -103,6 +103,8 @@ pub fn git_patch(path: &str, change: FileChange, hunks: &str) -> String
 | --- | --- |
 | `item/agentMessage/delta`, `item/completed` `agentMessage` | `MessageChunk` by item id, `MessageEnd`; text not streamed is told whole |
 | `item/reasoning/summaryTextDelta`, `textDelta`, `item/completed` `reasoning` | `ThoughtChunk`, `ThoughtEnd` |
+| `collabAgentToolCall` items | `Tool` (`spawnAgent`, `wait`, `closeAgent`, ...) and a `Child` for each thread in `receiverThreadIds` or `agentsStates`, named by its thread id: a spawn gives title, task, model and `Starting`; `agentsStates[thread].status` gives the state (`running`, `completed`, `errored`, `interrupted`/`shutdown`) and its `message` the result. A call that was accepted is never `Completed` by itself. Codex sends a child's own messages on its own thread, which the parser leaves out, so a Codex child has no progress. Built from the app-server schema, not a recording |
+| `subAgentActivity` items | `Child` named by `agentPath`, `Working` on `started`, `Completed`, `Cancelled` on `interrupted` |
 | `commandExecution` items, `item/commandExecution/outputDelta` | `Tool` (`exec_command`, execute, its terminal) and `Terminal`: the command, output, exit code; `declined` fails |
 | `fileChange` items | `Tool` (`apply_patch`, edit) with a diff per change, its `patch` a git patch of Codex's hunks |
 | `mcpToolCall`, `dynamicToolCall` | `Tool` named `mcp__<server>__<tool>`, its result or error text as a `ToolChunk` |

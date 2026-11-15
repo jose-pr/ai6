@@ -23,6 +23,17 @@ mod shape;
 mod usage;
 
 pub use connection::serve;
+
+/// The `session/update` payloads of `events` in ACP `version` (1 or 2), as a connection sends them, in order. For a test that
+/// checks what a client receives from a harness's recorded output.
+#[must_use]
+pub fn updates_of(events: &[crate::event::Event], version: u8) -> Vec<serde_json::Value> {
+    let mut shapes = shape::Shapes::new(version, usize::MAX);
+    events
+        .iter()
+        .flat_map(|event| shapes.updates(event))
+        .collect()
+}
 pub use usage::UsageTracker;
 #[cfg(feature = "antigravity")]
 pub(crate) use usage::now;
@@ -136,6 +147,12 @@ pub fn directory_admitted(
 /// The `_meta` key of a turn's answer, or of a version 2 `idle`, that says a quota refused the turn: a
 /// [`LimitHit`](coqui_acp_api::LimitHit) as JSON.
 pub use coqui_acp_api::LIMIT_META_KEY;
+
+/// The `_meta` key of a `session/update` that belongs to a child agent (a subagent) or reports one:
+/// `{id, parentToolCallId}`, and on a report of the child itself also `title`, `task`, `state` (`starting`, `working`,
+/// `completed`, `failed` or `cancelled`), `result`, `model` and `usage` (`totalTokens`, `toolUses`, `durationMs`),
+/// each only when known. A client that does not know the key shows the update as the parent's.
+pub const CHILD_META_KEY: &str = "dev.boriken.coqui.acp/child";
 
 /// The id of the plan of a session in version 2, where plans have ids; a harness has one plan per session.
 pub const PLAN_ID: &str = "plan";

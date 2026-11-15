@@ -12,8 +12,6 @@ use serde_json::{Value, json};
 use crate::Error;
 use crate::discovery::{self, Candidate};
 
-/// The name an extension passes to `connectNative` or `sendNativeMessage`.
-pub const HOST_NAME: &str = "dev.boriken.coqui_acp_bridge";
 /// A message from the browser. All it ever says is short, so anything longer is not a browser speaking this.
 pub const MAX_REQUEST: usize = 64 * 1024;
 /// The browser's limit on one message to it.
@@ -33,6 +31,15 @@ pub fn started_by_browser(first_argument: &str) -> bool {
 /// # Errors
 /// When it is longer than [`MAX_REQUEST`], or the stream fails or ends inside it.
 pub fn read_message(input: &mut impl Read) -> io::Result<Option<Vec<u8>>> {
+    read_message_up_to(input, MAX_REQUEST)
+}
+
+/// [`read_message`] for a host that takes longer messages than a question: `limit` bytes at most, checked before anything is
+/// allocated.
+///
+/// # Errors
+/// When it is longer than `limit`, or the stream fails or ends inside it.
+pub fn read_message_up_to(input: &mut impl Read, limit: usize) -> io::Result<Option<Vec<u8>>> {
     let mut length = [0_u8; 4];
     match input.read_exact(&mut length) {
         Ok(()) => {}
@@ -40,7 +47,7 @@ pub fn read_message(input: &mut impl Read) -> io::Result<Option<Vec<u8>>> {
         Err(error) => return Err(error),
     }
     let length = usize::try_from(u32::from_ne_bytes(length)).unwrap_or(usize::MAX);
-    if length > MAX_REQUEST {
+    if length > limit {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "a message is too long",
@@ -108,26 +115,145 @@ fn valid_extension_id(id: &str) -> bool {
     id.len() == 32 && id.bytes().all(|byte| (b'a'..=b'p').contains(&byte))
 }
 
-fn manifest(program: &Path, extensions: &[String]) -> Value {
-    let origins: Vec<String> = extensions
+/// What Chrome accepts as a native host's name: lowercase letters, digits, underscores and single dots between them.
+fn valid_host_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && !name.starts_with('.')
+        && !name.ends_with('.')
+        && !name.contains("..")
+        && name.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'.')
+        })
+}
+
+/// A Chromium browser whose native host registrations [`install`] writes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Browser {
+    /// Google Chrome, and Chrome for Testing where it reads the same place.
+    Chrome,
+    /// Chromium.
+    Chromium,
+    /// Microsoft Edge.
+    Edge,
+}
+
+impl Browser {
+    /// Every browser, in the order [`install`] writes them.
+    pub const ALL: [Self; 3] = [Self::Chrome, Self::Chromium, Self::Edge];
+
+    /// The name the command line spells it by.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Chrome => "chrome",
+            Self::Chromium => "chromium",
+            Self::Edge => "edge",
+        }
+    }
+
+    const fn windows_key(self) -> &'static str {
+        match self {
+            Self::Chrome => r"HKCU\Software\Google\Chrome\NativeMessagingHosts",
+            Self::Chromium => r"HKCU\Software\Chromium\NativeMessagingHosts",
+            Self::Edge => r"HKCU\Software\Microsoft\Edge\NativeMessagingHosts",
+        }
+    }
+
+    const fn unix_profile(self) -> &'static str {
+        match (self, cfg!(target_os = "macos")) {
+            (Self::Chrome, true) => "Library/Application Support/Google/Chrome",
+            (Self::Chromium, true) => "Library/Application Support/Chromium",
+            (Self::Edge, true) => "Library/Application Support/Microsoft Edge",
+            (Self::Chrome, false) => ".config/google-chrome",
+            (Self::Chromium, false) => ".config/chromium",
+            (Self::Edge, false) => ".config/microsoft-edge",
+        }
+    }
+}
+
+/// A native messaging host to register: its name, the program the browser starts, and who may start it.
+#[derive(Clone, Debug)]
+#[must_use]
+pub struct Registration {
+    name: String,
+    description: String,
+    program: PathBuf,
+    extensions: Vec<String>,
+    browsers: Vec<Browser>,
+    manifest_dir: Option<PathBuf>,
+    profiles: Vec<PathBuf>,
+}
+
+impl Registration {
+    /// A registration of `program` as the native host `name` (what an extension passes to `connectNative`), for every browser.
+    ///
+    /// # Errors
+    /// [`Error::Discovery`] when `name` is not one Chrome accepts.
+    pub fn new(name: &str, description: &str, program: impl Into<PathBuf>) -> Result<Self, Error> {
+        if !valid_host_name(name) {
+            return Err(Error::Discovery(
+                "a native host's name is lowercase letters, digits, underscores and dots"
+                    .to_owned(),
+            ));
+        }
+        Ok(Self {
+            name: name.to_owned(),
+            description: description.to_owned(),
+            program: program.into(),
+            extensions: Vec::new(),
+            browsers: Browser::ALL.to_vec(),
+            manifest_dir: None,
+            profiles: Vec::new(),
+        })
+    }
+
+    /// The extensions that may start it, by id.
+    pub fn extensions(mut self, ids: impl IntoIterator<Item = String>) -> Self {
+        self.extensions = ids.into_iter().collect();
+        self
+    }
+
+    /// Only these browsers; none given means every one.
+    pub fn browsers(mut self, browsers: &[Browser]) -> Self {
+        self.browsers = if browsers.is_empty() {
+            Browser::ALL.to_vec()
+        } else {
+            browsers.to_vec()
+        };
+        self
+    }
+
+    /// Where the manifest file is kept on Windows, which names it in the registry: a directory of the program's own. Without it
+    /// the library's own folder under the local application data is used.
+    pub fn manifest_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.manifest_dir = Some(dir.into());
+        self
+    }
+
+    /// A browser's user-data directory to register in too, as `DIR/NativeMessagingHosts`: where Chromium on Linux and macOS
+    /// looks when it is started with `--user-data-dir`. Created if absent.
+    pub fn profile(mut self, user_data_dir: impl Into<PathBuf>) -> Self {
+        self.profiles.push(user_data_dir.into());
+        self
+    }
+}
+
+fn manifest(registration: &Registration) -> Value {
+    let origins: Vec<String> = registration
+        .extensions
         .iter()
         .map(|id| format!("chrome-extension://{id}/"))
         .collect();
     json!({
-        "name": HOST_NAME,
-        "description": "Finds Agent Client Protocol agents on this machine and the local network",
-        "path": program,
+        "name": registration.name,
+        "description": registration.description,
+        "path": registration.program,
         "type": "stdio",
         "allowed_origins": origins,
     })
 }
-
-/// The registry keys Chromium browsers read a native host from on Windows.
-const WINDOWS_KEYS: [&str; 3] = [
-    r"HKCU\Software\Google\Chrome\NativeMessagingHosts",
-    r"HKCU\Software\Chromium\NativeMessagingHosts",
-    r"HKCU\Software\Microsoft\Edge\NativeMessagingHosts",
-];
 
 fn home() -> Option<PathBuf> {
     std::env::var_os("HOME")
@@ -136,39 +262,30 @@ fn home() -> Option<PathBuf> {
 }
 
 /// The per-user directories native host manifests go in, for the browsers that have a profile here.
-fn unix_directories() -> Vec<PathBuf> {
+fn unix_directories(browsers: &[Browser]) -> Vec<PathBuf> {
     let Some(home) = home() else {
         return Vec::new();
     };
-    let browsers: &[&str] = if cfg!(target_os = "macos") {
-        &[
-            "Library/Application Support/Google/Chrome",
-            "Library/Application Support/Chromium",
-            "Library/Application Support/Microsoft Edge",
-        ]
-    } else {
-        &[
-            ".config/google-chrome",
-            ".config/chromium",
-            ".config/microsoft-edge",
-        ]
-    };
     browsers
         .iter()
-        .map(|browser| home.join(browser))
+        .map(|browser| home.join(browser.unix_profile()))
         .filter(|profile| profile.is_dir())
         .map(|profile| profile.join("NativeMessagingHosts"))
         .collect()
 }
 
-fn windows_manifest() -> Result<PathBuf, Error> {
-    let base = std::env::var_os("LOCALAPPDATA")
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| Error::Discovery("LOCALAPPDATA is not set".to_owned()))?;
-    Ok(PathBuf::from(base)
+fn windows_manifest(name: &str, dir: Option<&Path>) -> Result<PathBuf, Error> {
+    let base = match dir {
+        Some(dir) => dir.to_owned(),
+        None => PathBuf::from(
+            std::env::var_os("LOCALAPPDATA")
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| Error::Discovery("LOCALAPPDATA is not set".to_owned()))?,
+        )
         .join("coqui-acp")
-        .join("native")
-        .join(format!("{HOST_NAME}.json")))
+        .join("native"),
+    };
+    Ok(base.join(format!("{name}.json")))
 }
 
 fn reg(arguments: &[&str]) -> Result<bool, Error> {
@@ -179,11 +296,13 @@ fn reg(arguments: &[&str]) -> Result<bool, Error> {
     Ok(output.status.success())
 }
 
-/// Lets `extensions` start this program as a native host, for this user. Returns what it wrote.
+/// Lets the registration's extensions start its program as a native host, for this user. Returns what it wrote: the manifest
+/// and, on Windows, each registry key.
 ///
 /// # Errors
 /// [`Error::Discovery`] for a malformed extension id, no browser profile to install into, or a file or the registry refusing.
-pub fn install(extensions: &[String]) -> Result<Vec<String>, Error> {
+pub fn install(registration: &Registration) -> Result<Vec<String>, Error> {
+    let extensions = &registration.extensions;
     if extensions.is_empty() || !extensions.iter().all(|id| valid_extension_id(id)) {
         return Err(Error::Discovery(
             "an extension id is 32 letters from a to p".to_owned(),
@@ -191,27 +310,33 @@ pub fn install(extensions: &[String]) -> Result<Vec<String>, Error> {
     }
     let fail =
         |error: io::Error| Error::Discovery(format!("the manifest could not be written: {error}"));
-    let program = std::env::current_exe().map_err(fail)?;
-    let text = serde_json::to_string_pretty(&manifest(&program, extensions))
+    let text = serde_json::to_string_pretty(&manifest(registration))
         .map_err(|error| Error::Discovery(error.to_string()))?;
     let mut wrote = Vec::new();
+    let name = &registration.name;
     if cfg!(windows) {
-        let path = windows_manifest()?;
+        let path = windows_manifest(name, registration.manifest_dir.as_deref())?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(fail)?;
         }
         std::fs::write(&path, &text).map_err(fail)?;
         let value = path.to_string_lossy().into_owned();
         wrote.push(value.clone());
-        for key in WINDOWS_KEYS {
-            let key = format!(r"{key}\{HOST_NAME}");
+        for browser in &registration.browsers {
+            let key = format!(r"{}\{name}", browser.windows_key());
             if !reg(&["add", &key, "/ve", "/t", "REG_SZ", "/d", &value, "/f"])? {
                 return Err(Error::Discovery(format!("the registry refused {key}")));
             }
             wrote.push(key);
         }
     } else {
-        let directories = unix_directories();
+        let mut directories = unix_directories(&registration.browsers);
+        directories.extend(
+            registration
+                .profiles
+                .iter()
+                .map(|profile| profile.join("NativeMessagingHosts")),
+        );
         if directories.is_empty() {
             return Err(Error::Discovery(
                 "no Chrome, Chromium or Edge profile for this user".to_owned(),
@@ -219,7 +344,7 @@ pub fn install(extensions: &[String]) -> Result<Vec<String>, Error> {
         }
         for directory in directories {
             std::fs::create_dir_all(&directory).map_err(fail)?;
-            let path = directory.join(format!("{HOST_NAME}.json"));
+            let path = directory.join(format!("{name}.json"));
             std::fs::write(&path, &text).map_err(fail)?;
             wrote.push(path.to_string_lossy().into_owned());
         }
@@ -227,11 +352,20 @@ pub fn install(extensions: &[String]) -> Result<Vec<String>, Error> {
     Ok(wrote)
 }
 
-/// Removes what [`install`] wrote. What is already gone is not a failure.
+/// Removes what [`install`] wrote for `name`, from every browser and every given profile. What is already gone is not a failure.
 ///
 /// # Errors
 /// [`Error::Discovery`] when a file exists and cannot be removed, or `reg` cannot run.
-pub fn uninstall() -> Result<(), Error> {
+pub fn uninstall(
+    name: &str,
+    manifest_dir: Option<&Path>,
+    profiles: &[PathBuf],
+) -> Result<(), Error> {
+    if !valid_host_name(name) {
+        return Err(Error::Discovery(
+            "a native host's name is lowercase letters, digits, underscores and dots".to_owned(),
+        ));
+    }
     let remove = |path: &Path| match std::fs::remove_file(path) {
         Err(error) if error.kind() != io::ErrorKind::NotFound => Err(Error::Discovery(format!(
             "the manifest could not be removed: {error}"
@@ -239,17 +373,65 @@ pub fn uninstall() -> Result<(), Error> {
         _ => Ok(()),
     };
     if cfg!(windows) {
-        for key in WINDOWS_KEYS {
-            let key = format!(r"{key}\{HOST_NAME}");
+        for browser in Browser::ALL {
+            let key = format!(r"{}\{name}", browser.windows_key());
             let _ = reg(&["delete", &key, "/f"])?;
         }
-        remove(&windows_manifest()?)
+        remove(&windows_manifest(name, manifest_dir)?)
     } else {
-        for directory in unix_directories() {
-            remove(&directory.join(format!("{HOST_NAME}.json")))?;
+        for directory in unix_directories(&Browser::ALL) {
+            remove(&directory.join(format!("{name}.json")))?;
+        }
+        for profile in profiles {
+            remove(
+                &profile
+                    .join("NativeMessagingHosts")
+                    .join(format!("{name}.json")),
+            )?;
         }
         Ok(())
     }
+}
+
+/// Where `name` is registered now: each manifest file or registry key that exists, with what it points at.
+///
+/// # Errors
+/// [`Error::Discovery`] when `reg` cannot run.
+pub fn installed(
+    name: &str,
+    manifest_dir: Option<&Path>,
+    profiles: &[PathBuf],
+) -> Result<Vec<String>, Error> {
+    let mut found = Vec::new();
+    if cfg!(windows) {
+        for browser in Browser::ALL {
+            let key = format!(r"{}\{name}", browser.windows_key());
+            if reg(&["query", &key])? {
+                found.push(key);
+            }
+        }
+        let path = windows_manifest(name, manifest_dir)?;
+        if path.is_file() {
+            found.push(path.to_string_lossy().into_owned());
+        }
+    } else {
+        let mut files: Vec<PathBuf> = unix_directories(&Browser::ALL)
+            .into_iter()
+            .map(|directory| directory.join(format!("{name}.json")))
+            .collect();
+        files.extend(profiles.iter().map(|profile| {
+            profile
+                .join("NativeMessagingHosts")
+                .join(format!("{name}.json"))
+        }));
+        found.extend(
+            files
+                .into_iter()
+                .filter(|file| file.is_file())
+                .map(|file| file.to_string_lossy().into_owned()),
+        );
+    }
+    Ok(found)
 }
 
 #[cfg(test)]
@@ -333,9 +515,103 @@ mod tests {
         assert!(valid_extension_id(&"a".repeat(32)));
         assert!(!valid_extension_id(&"z".repeat(32)));
         assert!(!valid_extension_id("abc"));
-        assert!(install(&["../../x".to_owned()]).is_err());
-        assert!(install(&[]).is_err());
+        let registration = |name: &str| Registration::new(name, "x", "/bin/x");
+        assert!(
+            install(
+                &registration("dev.example.host")
+                    .unwrap()
+                    .extensions(["../../x".to_owned()])
+            )
+            .is_err()
+        );
+        assert!(install(&registration("dev.example.host").unwrap()).is_err());
         assert!(started_by_browser("chrome-extension://abc/"));
         assert!(!started_by_browser("serve"));
+    }
+    #[test]
+    fn a_longer_limit_is_the_callers_and_is_still_checked_first() {
+        let big = vec![b'x'; MAX_REQUEST + 10];
+        let mut input = Cursor::new(framed(&big));
+        assert!(read_message(&mut input).is_err());
+        let mut input = Cursor::new(framed(&big));
+        assert_eq!(
+            read_message_up_to(&mut input, MAX_REQUEST + 10)
+                .unwrap()
+                .unwrap()
+                .len(),
+            big.len()
+        );
+        let mut input = Cursor::new(u32::MAX.to_ne_bytes().to_vec());
+        assert!(read_message_up_to(&mut input, 4 << 20).is_err());
+    }
+
+    #[test]
+    fn a_host_name_is_one_chrome_accepts_and_the_manifest_carries_it() {
+        for bad in ["", "Dev.x", ".x", "x.", "a..b", "a-b", "a b", "a/b"] {
+            assert!(Registration::new(bad, "d", "/p").is_err(), "{bad}");
+        }
+        let registration = Registration::new("dev.example.host", "A host", "/opt/host")
+            .unwrap()
+            .extensions(["a".repeat(32)]);
+        let manifest = manifest(&registration);
+        assert_eq!(manifest["name"], "dev.example.host");
+        assert_eq!(manifest["type"], "stdio");
+        assert_eq!(manifest["path"], "/opt/host");
+        assert_eq!(
+            manifest["allowed_origins"],
+            json!([format!("chrome-extension://{}/", "a".repeat(32))])
+        );
+        assert!(uninstall("Bad Name", None, &[]).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_profile_directory_is_installed_into_and_taken_out_again() {
+        let dir = std::env::temp_dir().join(format!("companion-profile-{}", std::process::id()));
+        let registration = Registration::new("dev.example.profiled", "A host", "/opt/host")
+            .unwrap()
+            .extensions(["a".repeat(32)])
+            .browsers(&[])
+            .profile(&dir);
+        let wrote = install(&registration).unwrap();
+        let file = dir
+            .join("NativeMessagingHosts")
+            .join("dev.example.profiled.json");
+        assert!(wrote.contains(&file.to_string_lossy().into_owned()));
+        assert!(file.is_file());
+        let profiles = [dir.clone()];
+        assert!(
+            !installed("dev.example.profiled", None, &profiles)
+                .unwrap()
+                .is_empty()
+        );
+        uninstall("dev.example.profiled", None, &profiles).unwrap();
+        assert!(!file.exists());
+        assert!(
+            installed("dev.example.profiled", None, &profiles)
+                .unwrap()
+                .is_empty()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[cfg(windows)]
+    #[test]
+    fn the_registry_keys_of_a_test_name_are_written_and_removed() {
+        let name = format!("dev.example.test_{}", std::process::id());
+        let dir = std::env::temp_dir().join(format!("companion-manifest-{}", std::process::id()));
+        let registration = Registration::new(&name, "A host", r"C:\opt\host.exe")
+            .unwrap()
+            .extensions(["a".repeat(32)])
+            .browsers(&[Browser::Edge])
+            .manifest_dir(&dir);
+        let outcome = std::panic::catch_unwind(|| {
+            let wrote = install(&registration).unwrap();
+            assert_eq!(wrote.len(), 2, "{wrote:?}");
+            assert_eq!(installed(&name, Some(&dir), &[]).unwrap().len(), 2);
+        });
+        uninstall(&name, Some(&dir), &[]).unwrap();
+        assert!(installed(&name, Some(&dir), &[]).unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+        outcome.unwrap();
     }
 }

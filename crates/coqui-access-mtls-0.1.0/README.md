@@ -23,6 +23,12 @@ subject's CN, the fingerprint.
   source (an IPv4 address or an IPv6 /64), 16 in all, the same certificate from one source
   written down at most once a minute; each bound is an option.
 - **Any spelling** - `sha256:<hex>`, bare hex, colon-separated hex or grouped base32.
+- **Claims** - a certificate is answered with everything it said (subject and issuer names,
+  serial, UPN, email, DNS, URI and IP SANs, fingerprint, public key hash and the DER), and with no
+  `account` picks as `by: "claims"`, for the consumer's matcher to tie to a directory account.
+- **Pinned by fingerprint or by public key** - a key pin (`key:sha256:<hex>` of the
+  SubjectPublicKeyInfo) keeps signing in a certificate renewed on the same key, as a smartcard's
+  is; an account holds several pins, up to `max_pins` (4), and one is removed alone.
 - **CA trust** - `TrustMode::Ca` or `PinnedOrCa` with a `CaPolicy` (CA file, subject and SAN
   globs), and `account` picks over the certificate's fields; an IP written as a DNS name
   counts as an IP by default.
@@ -64,8 +70,9 @@ The loadable plugin (provider id `coqui_access_mtls`) is configured with a `sour
 | Item | Purpose |
 | --- | --- |
 | `MtlsAccounts` | The provider: `builder()` and the three kinds. |
-| `MtlsAccountsBuilder` | Options: `table`, `waiting`, `max_records`, `waiting_limits`, `record_limits`; `build`. |
+| `MtlsAccountsBuilder` | Options: `table`, `waiting`, `max_records`, `max_pins`, `waiting_limits`, `record_limits`; `build`. |
 | `PeerRecord`, `Unaccepted` | The records the two tables keep; guatiao value traits. |
+| `Pin` | One thing an account pins: a `fingerprint` or a `key`; `key_of_certificate`, `parse`, `text`. |
 
 ## Development
 

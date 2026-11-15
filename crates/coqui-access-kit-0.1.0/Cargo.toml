@@ -1,4 +1,4 @@
-# coqui-access/crates/coqui-access-kit at ce68969a397073dcef0a37fb00a83888b767e273, with what it inherits written out.
+# coqui-access/crates/coqui-access-kit at d7f0f377e1b5d9bfb399e628592419a8ce0ed96d, with what it inherits written out.
 [package]
 name = "coqui-access-kit"
 description = "Building blocks for access providers: typed tables, key and password hashing, generated secrets and private atomic files"
@@ -48,6 +48,11 @@ version = "0.11.1"
 default-features = false
 [dependencies.subtle]
 version = "2.6"
+[target]
+[target."cfg(unix)"]
+[target."cfg(unix)".dependencies]
+[target."cfg(unix)".dependencies.libc]
+version = "0.2"
 [features]
 default = []
 file = ["dep:guatiao-serde", "dep:serde"]

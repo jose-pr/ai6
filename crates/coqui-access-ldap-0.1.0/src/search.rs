@@ -4,20 +4,37 @@ use std::net::IpAddr;
 /// Active Directory's matching rule for nested group membership.
 pub const IN_CHAIN: &str = "(member:1.2.840.113556.1.4.1941:={dn})";
 
-/// Escapes the RFC 4515 filter metacharacters in a user value.
+/// Escapes a value for a filter (RFC 4515): the metacharacters, controls and every byte of
+/// a non-ASCII character as `\xx`. The matcher's own function, so one rule escapes everywhere.
 pub fn escaped(value: &str) -> String {
-    let mut output = String::with_capacity(value.len());
-    for character in value.chars() {
+    coqui_access_kit::matcher::escape_filter_value(value)
+}
+
+/// `(&<account filter><given filter>)`: a filter a caller supplied can only narrow the
+/// accounts the provider is configured to read.
+pub fn all_of(account_filter: &str, given: &str) -> String {
+    format!("(&{account_filter}{given})")
+}
+
+/// Whether `filter` is one balanced parenthesised group: `(...)` whose first parenthesis
+/// closes at the end. Escaped values hold no parenthesis, so this is the shape of a filter
+/// the matcher wrote.
+pub fn one_group(filter: &str) -> bool {
+    let mut depth = 0_i32;
+    for (at, character) in filter.char_indices() {
+        if at == 0 && character != '(' {
+            return false;
+        }
         match character {
-            '\\' => output.push_str("\\5c"),
-            '*' => output.push_str("\\2a"),
-            '(' => output.push_str("\\28"),
-            ')' => output.push_str("\\29"),
-            '\0' => output.push_str("\\00"),
-            character => output.push(character),
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            _ => {}
+        }
+        if depth < 0 || (depth == 0 && at + character.len_utf8() != filter.len()) {
+            return false;
         }
     }
-    output
+    depth == 0 && !filter.is_empty()
 }
 
 /// Substitutes an escaped value for each `{field}` in an LDAP filter.
@@ -84,6 +101,26 @@ mod tests {
             filter(IN_CHAIN, "dn", "CN=Ana (first),OU=People"),
             "(member:1.2.840.113556.1.4.1941:=CN=Ana \\28first\\29,OU=People)"
         );
+    }
+
+    #[test]
+    fn a_given_filter_is_anded_with_the_account_filter_and_must_be_one_group() {
+        assert_eq!(
+            all_of("(objectClass=user)", "(altSecurityIdentities=X509:x)"),
+            "(&(objectClass=user)(altSecurityIdentities=X509:x))"
+        );
+        assert!(one_group("(a=1)"));
+        assert!(one_group("(&(a=1)(|(b=2)(c=3)))"));
+        for bad in ["", "a=1", "(a=1", "(a=1))", "(a=1)(b=2)", ")(", "(a=1)x"] {
+            assert!(!one_group(bad), "{bad}");
+        }
+        // A value escaped by the matcher holds no parenthesis, so it cannot unbalance this.
+        assert!(one_group("(a=\\29\\28)"));
+    }
+
+    #[test]
+    fn escaping_is_the_matchers_and_covers_controls_and_non_ascii() {
+        assert_eq!(escaped("caf\u{e9}\t"), "caf\\c3\\a9\\09");
     }
 
     #[test]

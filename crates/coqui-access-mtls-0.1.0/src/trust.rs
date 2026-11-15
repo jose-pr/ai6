@@ -32,10 +32,11 @@ impl TrustMode {
     }
 }
 
-/// The account a CA-trusted certificate names by default: its own fingerprint, looked up by
-/// `certificate`.
+/// The picks a CA-trusted certificate names its account by unless told otherwise: none. It
+/// is then answered by its claims (`Lookup { by: "claims", .. }`), and the consumer's
+/// matcher ties it to a directory account.
 pub fn default_account() -> Vec<Pick> {
-    vec![Pick::new("fingerprint", "certificate")]
+    Vec::new()
 }
 
 /// Checks a chain against the CA and picks the account it names; `None` when the CA does not
@@ -64,8 +65,16 @@ pub(crate) fn by_ca(
     let Ok(fields) = CertificateFields::parse(leaf.as_ref()) else {
         return Ok(None);
     };
+    let claims = coqui_access_claims::of_certificate(leaf.as_ref());
+    if account.is_empty() {
+        return Ok(Some(Verdict::Valid(Lookup {
+            by: "claims".to_owned(),
+            value: fields.fingerprint.canonical(),
+            claims,
+        })));
+    }
     Ok(Some(match pick(&fields.to_map(), account) {
-        Picked::Found { by, value } => Verdict::Valid(Lookup { by, value }),
+        Picked::Found { by, value } => Verdict::Valid(Lookup { by, value, claims }),
         Picked::Ambiguous => Verdict::Invalid,
         _ => Verdict::Unknown,
     }))

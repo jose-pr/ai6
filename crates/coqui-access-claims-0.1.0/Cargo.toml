@@ -1,0 +1,29 @@
+# coqui-access/crates/coqui-access-claims at d7f0f377e1b5d9bfb399e628592419a8ce0ed96d, with what it inherits written out.
+[package]
+name = "coqui-access-claims"
+description = "The claims a client certificate carries, for providers that read one and a matcher that reads them"
+readme = "README.md"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MPL-2.0"
+repository = "https://github.com/Boriken-Dev/coqui-access"
+publish = false
+exclude = [".*", "*.local.*"]
+[dependencies]
+[dependencies.coqui-access]
+path = "crates/coqui-access"
+[dependencies.coqui-peer-tls]
+git = "https://github.com/Boriken-Dev/coqui-peer-tls"
+rev = "7cbd7ee208595c055d74eed79a4dafcd0175883d"
+features = ["fields"]
+[dependencies.data-encoding]
+version = "2.11"
+[dependencies.sha2]
+version = "0.11.1"
+default-features = false
+[dependencies.x509-parser]
+version = "0.18"
+[dev-dependencies]
+[dev-dependencies.rcgen]
+version = "0.14"

@@ -9,9 +9,9 @@ use base64::Engine as _;
 use coqui_acp_api::LimitHit;
 use serde_json::{Map, Value, json};
 
-use super::{ConfigOption, LIMIT_META_KEY, PLAN_ID};
+use super::{CHILD_META_KEY, ConfigOption, LIMIT_META_KEY, PLAN_ID};
 use crate::event::{
-    Command, Content, Diff, Event, FileChange, PlanEntry, Terminal, ToolCall, ToolContent,
+    Child, Command, Content, Diff, Event, FileChange, PlanEntry, Terminal, ToolCall, ToolContent,
     ToolStatus, Usage,
 };
 
@@ -78,6 +78,30 @@ impl Shapes {
             }
             Event::ThoughtEnd { message } if v2 => vec![ended("agent_thought", message)],
             Event::Tool(call) => self.tool(call),
+            Event::Child(child) => vec![child_update(child)],
+            Event::InChild {
+                child,
+                parent_tool_call,
+                event,
+            } => {
+                let mut updates = self.updates(event);
+                for update in &mut updates {
+                    let mut mark = Map::new();
+                    mark.insert("id".into(), json!(child));
+                    if let Some(parent) = parent_tool_call {
+                        mark.insert("parentToolCallId".into(), json!(parent));
+                    }
+                    if let Some(meta) = update.as_object_mut().map(|update| {
+                        update
+                            .entry("_meta")
+                            .or_insert_with(|| Value::Object(Map::new()))
+                    }) && let Some(meta) = meta.as_object_mut()
+                    {
+                        meta.insert(CHILD_META_KEY.into(), Value::Object(mark));
+                    }
+                }
+                updates
+            }
             Event::ToolChunk { id, content } => self.tool_chunk(id, content),
             Event::Terminal(terminal) => self.terminal(terminal),
             Event::Plan(entries) => vec![plan(entries, v2)],
@@ -399,6 +423,46 @@ pub(crate) fn turn_usage(usage: &Usage) -> Value {
     })
 }
 
+/// The update that reports a child agent: a change to the parent's tool call that carries only the child's `_meta`.
+fn child_update(child: &Child) -> Value {
+    let mut mark = Map::new();
+    mark.insert("id".into(), json!(child.id));
+    if let Some(parent) = &child.parent_tool_call {
+        mark.insert("parentToolCallId".into(), json!(parent));
+    }
+    for (key, value) in [
+        ("title", &child.title),
+        ("task", &child.task),
+        ("result", &child.result),
+        ("model", &child.model),
+    ] {
+        if let Some(value) = value {
+            mark.insert(key.into(), json!(value));
+        }
+    }
+    if let Some(state) = child.state {
+        mark.insert("state".into(), json!(state.as_str()));
+    }
+    if let Some(usage) = &child.usage {
+        let mut counts = Map::new();
+        for (key, value) in [
+            ("totalTokens", usage.total_tokens),
+            ("toolUses", usage.tool_uses),
+            ("durationMs", usage.duration_ms),
+        ] {
+            if let Some(value) = value {
+                counts.insert(key.into(), json!(value));
+            }
+        }
+        mark.insert("usage".into(), Value::Object(counts));
+    }
+    let carrier = child.parent_tool_call.as_ref().unwrap_or(&child.id);
+    let mut update =
+        json!({"sessionUpdate": "tool_call_update", "toolCallId": carrier, "_meta": {}});
+    update["_meta"][CHILD_META_KEY] = Value::Object(mark);
+    update
+}
+
 /// The `_meta` that says a quota refused a turn.
 pub(crate) fn limit_meta(limit: &LimitHit) -> Value {
     json!({ LIMIT_META_KEY: serde_json::to_value(limit).unwrap_or(Value::Null) })
@@ -444,6 +508,43 @@ pub(crate) fn config_options(options: &[ConfigOption], version: u8) -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_child_report_and_a_childs_own_update_carry_the_child_meta() {
+        use crate::event::{Child, ChildState, ChildUsage, Event, ToolCall};
+        let mut shapes = super::Shapes::new(2, 8);
+        let mut child = Child::new("c1");
+        child.parent_tool_call = Some("c1".into());
+        child.title = Some("Alpha".into());
+        child.state = Some(ChildState::Working);
+        child.usage = Some(ChildUsage {
+            total_tokens: Some(7),
+            ..ChildUsage::default()
+        });
+        let reported = shapes.updates(&Event::Child(child));
+        let mark = &reported[0]["_meta"][super::CHILD_META_KEY];
+        assert_eq!(reported[0]["sessionUpdate"], "tool_call_update");
+        assert_eq!(reported[0]["toolCallId"], "c1");
+        assert_eq!(mark["id"], "c1");
+        assert_eq!(mark["title"], "Alpha");
+        assert_eq!(mark["state"], "working");
+        assert_eq!(mark["usage"]["totalTokens"], 7);
+        assert!(mark.get("result").is_none());
+
+        let inside = shapes.updates(&Event::InChild {
+            child: "c1".into(),
+            parent_tool_call: Some("c1".into()),
+            event: Box::new(Event::Tool(ToolCall::new("inner"))),
+        });
+        assert!(!inside.is_empty());
+        for update in inside {
+            assert_eq!(update["_meta"][super::CHILD_META_KEY]["id"], "c1");
+            assert_eq!(
+                update["_meta"][super::CHILD_META_KEY]["parentToolCallId"],
+                "c1"
+            );
+        }
+    }
+
     #[test]
     fn usage_of_another_thread_changes_neither_the_context_nor_the_turns_usage() {
         let mut shapes = super::Shapes::new(2, 8);

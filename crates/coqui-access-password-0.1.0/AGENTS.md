@@ -45,9 +45,11 @@ with `PasswordHasher::hash`.
 - `build` loads the table and checks it: at most `max_accounts` records, unique names and ids,
   valid Argon2id hashes, at most 256 groups of 256 bytes each. A table that later becomes
   unreadable or invalid makes calls fail rather than serve stale accounts.
-- `authenticate` needs `name` and `secret`; otherwise `Unknown`. Wrong password, unknown name
-  and disabled account are all `Invalid`; the valid result is `Lookup { by: "id", value: id }`.
-  An unknown name is verified against a dummy hash made with the same costs.
+- `authenticate` needs `name` and `secret`; otherwise `Unknown`. A name the table holds with a
+  wrong password, or a disabled account, is `Invalid`; a name it does not hold is `Unknown`, so an
+  authenticator listed after it is still asked. The valid result is
+  `Lookup { by: "id", value: id }`. An unknown name is verified against a dummy hash made with
+  the same costs, so timing does not tell the cases apart.
 - `lookup` finds enabled accounts only.
 - `put`: `name` required; `secret` is a password of 1 to 4096 bytes; a new account needs a
   password, an existing one keeps its hash unless a password is given; `groups` and

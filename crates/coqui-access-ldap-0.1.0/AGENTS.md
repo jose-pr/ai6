@@ -19,6 +19,8 @@ pub struct LdapAccountsConfig {            // coqui_builder::Describe; the provi
     pub bind: Option<String>,             // service account DN
     pub bind_password: Option<Secret<String>>,   // coqui_builder::Secret: wiped on drop, shown as `***`; set together with bind
     pub user_filter: String,              // default "(sAMAccountName={name})"; must contain {name}
+    pub object_filter: String,            // default "(&(objectCategory=person)(objectClass=user))"; one parenthesised group; ANDed into every filter lookup
+    pub allow_filter_lookups: bool,       // default false; whether a lookup by "filter" is answered
     pub name_attribute: String,           // default "sAMAccountName"
     pub group_attribute: String,          // default "memberOf"; empty disables direct groups
     pub group_filter: Option<String>,     // template with {dn}
@@ -48,13 +50,25 @@ impl Directory for LdapAccounts { /* by "name" only */ }
 - `authenticate`: unknown account `Unknown`; disabled account (AD `userAccountControl` bit 2),
   empty password or rejected credentials `Invalid`; success is `Lookup { by: "name", value:
   canonical name }`. Other directory failures are errors.
-- `lookup` returns `Person { id: DN, name, groups }`; disabled accounts are `None`.
+- `lookup` returns `Person { id: DN, name, groups }`; disabled accounts are `None`. `by: "name"` uses
+  `user_filter`. `by: "filter"` is answered only when `allow_filter_lookups` is true (else
+  `GUATIAO_ERR_UNSUPPORTED`); it takes an LDAP filter that is one parenthesised group (else
+  `GUATIAO_ERR_BAD_VALUE`) and searches `base`, subtree, with `(&<object_filter><filter>)`: no
+  account, or a disabled one, is `None`; more than one is `error::ambiguous()`. The filter is the
+  caller's (a matcher's, whose values are escaped), so anything that can make a lookup `by: "filter"`
+  with its own text can search the directory: turn the setting on only where filter lookups come
+  from a matcher's rules.
+- **`object_filter` must carry every restriction an account must meet to sign in** (people, an
+  organisational unit, a group): `user_filter` is built around a name and is not applied to a filter
+  lookup. The default, `(&(objectCategory=person)(objectClass=user))`, is people, which leaves out
+  Active Directory's computer accounts. Any other `by` is `None`.
 - Debug output redacts the URL and bind password.
 
 ## `search` module
 
-`IN_CHAIN`, `escaped(value)`, `filter(template, field, value)`, `group_name(dn)`,
-`disabled(flags)`, `in_the_clear(url, start_tls)`.
+`IN_CHAIN`, `escaped(value)` (coqui-access-kit's `escape_filter_value`: metacharacters, controls and
+every byte of a non-ASCII character as `\xx`), `filter(template, field, value)`, `all_of(account_filter,
+given)`, `one_group(filter)`, `group_name(dn)`, `disabled(flags)`, `in_the_clear(url, start_tls)`.
 
 ## Live test
 

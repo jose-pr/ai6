@@ -46,7 +46,7 @@ pub const REJECT_NETWORK_RULE: &str = "reject_network_rule";
 pub struct ParserLimits {
     /// The longest title made from a command or a query, in bytes. Default 256.
     pub max_title_bytes: usize,
-    /// The most of a command a question's description tells, in bytes, marked when cut. Default 16 KiB.
+    /// The most of a command a question's description tells, or of a subagent's task or result, in bytes. Default 16 KiB.
     pub max_told_bytes: usize,
     /// The messages remembered as streamed, so their whole copy is not told again. Default 64.
     pub max_streamed: usize,
@@ -756,6 +756,16 @@ impl Parser {
                     call.output = Some(json!({"status": "completed"}));
                 }
                 vec![Event::Tool(call)]
+            }
+            "collabAgentToolCall" => crate::children::collab(
+                item,
+                &id,
+                done,
+                self.limits.max_title_bytes,
+                self.limits.max_told_bytes,
+            ),
+            "subAgentActivity" if done => {
+                crate::children::activity(item, self.limits.max_title_bytes)
             }
             "contextCompaction" if done => vec![Event::Compaction { id, summary: None }],
             _ => Vec::new(),

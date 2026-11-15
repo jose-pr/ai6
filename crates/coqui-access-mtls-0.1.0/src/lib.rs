@@ -11,6 +11,7 @@
 #![warn(missing_debug_implementations)]
 #![warn(missing_docs)]
 
+mod pin;
 mod trust;
 
 use std::borrow::Cow;
@@ -34,10 +35,16 @@ use coqui_access_kit::{
 use coqui_peer::{WaitingLimits, WaitingQueue};
 use coqui_peer_tls::{CaPolicy, Digest, PeerId, Policy, Trust};
 
+use pin::{Kind, Normal};
+
+pub use pin::{Pin, PinError};
 pub use trust::{TrustMode, default_account};
 
 /// The most peers a table may hold unless the builder says otherwise.
 pub const DEFAULT_MAX_RECORDS: usize = 10_000;
+/// The most pins (fingerprints and keys together) one account may hold unless the builder
+/// says otherwise.
+pub const DEFAULT_MAX_PINS: usize = 4;
 /// The most certificates a client may send, leaf included, unless the builder says
 /// otherwise.
 pub const DEFAULT_MAX_CHAIN: Limit = Limit::at(8);
@@ -72,10 +79,15 @@ pub struct PeerRecord {
     pub id: String,
     /// The peer's name; unique in the table.
     pub name: String,
-    /// The SHA-256 fingerprint of its certificate: written in its canonical form, read in any
-    /// spelling `coqui-peer-tls` reads.
+    /// The SHA-256 fingerprint of a certificate it pins: written in its canonical form, read
+    /// in any spelling `coqui-peer-tls` reads. Absent for an account pinned by other means.
     #[map(as_text)]
-    pub certificate: PeerId,
+    pub certificate: Option<PeerId>,
+    /// Further pins, each naming its `kind` (`fingerprint` or `key`): with `certificate`,
+    /// everything the account is known by. A certificate renewed on the same key keeps a
+    /// `key` pin. An account holds at least one pin and at most the provider's `max_pins`.
+    #[map(default, skip_serializing_if = Vec::is_empty)]
+    pub pins: Vec<Pin>,
     /// Email address.
     pub email: Option<String>,
     /// Directory groups.
@@ -94,7 +106,23 @@ impl PeerRecord {
         Self {
             id: id.into(),
             name: name.into(),
-            certificate: *certificate,
+            certificate: Some(*certificate),
+            pins: Vec::new(),
+            email: None,
+            groups: Vec::new(),
+            disabled: false,
+            made_unix: None,
+        }
+    }
+
+    /// An enabled peer with no groups, accepted by `pin`: a public key, say, so a renewed
+    /// certificate on the same key signs in.
+    pub fn keyed(id: impl Into<String>, name: impl Into<String>, pin: Pin) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            certificate: None,
+            pins: vec![pin],
             email: None,
             groups: Vec::new(),
             disabled: false,
@@ -123,8 +151,69 @@ impl PeerRecord {
         self
     }
 
-    fn is(&self, fingerprint: &PeerId) -> bool {
-        self.certificate == *fingerprint
+    /// Every pin the peer holds, in one spelling; `None` when one is not valid.
+    fn held(&self) -> Option<Vec<Normal>> {
+        self.certificate
+            .iter()
+            .map(|id| Some(Normal::of_fingerprint(id)))
+            .chain(self.pins.iter().map(Pin::normal))
+            .collect()
+    }
+
+    fn holds(&self, pin: &Normal) -> bool {
+        self.held().is_some_and(|held| held.contains(pin))
+    }
+
+    fn pin_count(&self) -> usize {
+        usize::from(self.certificate.is_some()) + self.pins.len()
+    }
+
+    /// Adds a pin the peer does not hold yet, unless it holds `most` already.
+    fn add_pin(&mut self, pin: &Pin, most: usize) -> Result<(), SourceError> {
+        let normal = pin
+            .normal()
+            .ok_or_else(|| SourceError::invalid("that is not a certificate pin"))?;
+        if self.holds(&normal) {
+            return Ok(());
+        }
+        if self.pin_count() >= most {
+            return Err(SourceError::invalid(
+                "that peer holds as many pins as the provider allows",
+            ));
+        }
+        match (normal.kind, self.certificate) {
+            (Kind::Fingerprint, None) => {
+                self.certificate = pin.value.parse::<PeerId>().ok();
+            }
+            _ => self.pins.push(Pin {
+                kind: pin.kind.clone(),
+                value: normal.value,
+            }),
+        }
+        Ok(())
+    }
+
+    /// Takes one pin away, never the last one: a peer nothing could sign in as is removed.
+    fn remove_pin(&mut self, pin: &Pin) -> Result<(), SourceError> {
+        let normal = pin
+            .normal()
+            .ok_or_else(|| SourceError::invalid("that is not a certificate pin"))?;
+        if !self.holds(&normal) {
+            return Err(SourceError::invalid("that peer does not hold that pin"));
+        }
+        if self.pin_count() == 1 {
+            return Err(SourceError::invalid(
+                "that is the peer's last pin; remove the peer instead",
+            ));
+        }
+        let own = self.certificate.as_ref().map(Normal::of_fingerprint);
+        if own.as_ref() == Some(&normal) {
+            self.certificate = None;
+        } else {
+            self.pins
+                .retain(|held| held.normal().as_ref() != Some(&normal));
+        }
+        Ok(())
     }
 }
 
@@ -140,7 +229,11 @@ impl fmt::Debug for PeerRecord {
             .debug_struct("PeerRecord")
             .field("id", &"[REDACTED]")
             .field("name", &"[REDACTED]")
-            .field("certificate", &"[REDACTED]")
+            .field(
+                "certificate",
+                &self.certificate.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("pins", &self.pins.len())
             .field("email", &self.email.as_ref().map(|_| "[REDACTED]"))
             .field("groups", &self.groups.len())
             .field("disabled", &self.disabled)
@@ -189,6 +282,7 @@ pub struct MtlsAccountsBuilder {
     table: Option<Arc<dyn Table<PeerRecord>>>,
     waiting: Option<Arc<dyn Table<Unaccepted>>>,
     max_records: usize,
+    max_pins: usize,
     limits: RecordLimits,
     waiting_limits: WaitingLimits,
     trust: TrustMode,
@@ -203,6 +297,7 @@ impl fmt::Debug for MtlsAccountsBuilder {
         formatter
             .debug_struct("MtlsAccountsBuilder")
             .field("max_records", &self.max_records)
+            .field("max_pins", &self.max_pins)
             .field("waiting_limits", &self.waiting_limits)
             .field("trust", &self.trust)
             .field("max_chain", &self.max_chain)
@@ -273,6 +368,14 @@ impl MtlsAccountsBuilder {
         self
     }
 
+    /// The most pins, fingerprints and keys together, one peer may hold. Default
+    /// [`DEFAULT_MAX_PINS`].
+    #[must_use]
+    pub fn max_pins(mut self, max: usize) -> Self {
+        self.max_pins = max;
+        self
+    }
+
     /// How large a peer's fields may be. Default [`RecordLimits::DEFAULT`].
     #[must_use]
     pub fn record_limits(mut self, limits: RecordLimits) -> Self {
@@ -297,6 +400,11 @@ impl MtlsAccountsBuilder {
     /// Returns an error when the table cannot be loaded or holds an invalid or duplicated
     /// peer, or the trust needs a CA and none is given.
     pub fn build(self) -> Result<MtlsAccounts, SourceError> {
+        if self.account.iter().any(|pick| pick.check().is_err()) {
+            return Err(SourceError::invalid(
+                "an account pick is looked up by an attribute, not by filter or claims",
+            ));
+        }
         let ca = match (self.trust.uses_ca(), self.ca) {
             (true, Some(ca)) => Some(Trust::Ca(ca)),
             (true, None) => {
@@ -309,7 +417,7 @@ impl MtlsAccountsBuilder {
         let table = self
             .table
             .unwrap_or_else(|| Arc::new(MemoryTable::<PeerRecord>::new()));
-        let (max, limits) = (self.max_records, self.limits);
+        let (max, limits, max_pins) = (self.max_records, self.limits, self.max_pins);
         let waiting_table = self
             .waiting
             .unwrap_or_else(|| Arc::new(MemoryTable::<Unaccepted>::new()));
@@ -326,8 +434,11 @@ impl MtlsAccountsBuilder {
             queue.remember(had.fingerprint, source_of(had.peer.as_deref()), at);
         }
         Ok(MtlsAccounts {
-            peers: Reloading::new(table, move |records| validate(records, max, &limits))?,
+            peers: Reloading::new(table, move |records| {
+                validate(records, max, max_pins, &limits)
+            })?,
             limits,
+            max_pins,
             waiting_table,
             queue: Mutex::new(queue),
             trust: self.trust,
@@ -366,6 +477,7 @@ pub struct MtlsAccounts {
     /// written.
     queue: Mutex<WaitingQueue>,
     limits: RecordLimits,
+    max_pins: usize,
     trust: TrustMode,
     ca: Option<Trust>,
     account: Vec<Pick>,
@@ -392,6 +504,7 @@ impl MtlsAccounts {
             table: None,
             waiting: None,
             max_records: DEFAULT_MAX_RECORDS,
+            max_pins: DEFAULT_MAX_PINS,
             limits: RecordLimits::DEFAULT,
             trust: TrustMode::Pinned,
             ca: None,
@@ -404,35 +517,45 @@ impl MtlsAccounts {
 
     /// Writes a fingerprint nobody accepted down as waiting, when coqui-peer's
     /// [`WaitingQueue`] admits it: one already waiting stays as it is.
+    ///
+    /// The decision is made inside the waiting table's own update, from the entries it holds
+    /// then (a file table is locked for it), with a queue built from them. So entries another
+    /// provider or process wrote count against their source and the total, and two racing
+    /// providers cannot both take the last place.
     fn wait(&self, fingerprint: &PeerId, from: Option<String>) {
-        let mut queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
-        let waits = self.waits();
-        if waits.iter().any(|had| had.fingerprint == *fingerprint) {
-            return;
-        }
-        let admission = queue.admit(
-            *fingerprint,
-            source_of(from.as_deref()),
-            waits.len(),
-            Instant::now(),
-        );
-        if !admission.record {
-            return;
-        }
+        let queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
+        let limits = queue.limits();
+        let source = source_of(from.as_deref());
+        let mut evict = Vec::new();
         // Whether it could be written is not the peer's to be told.
-        for old in &admission.evict {
+        let _ = self.waiting_table.update(&mut |waits| {
+            if waits.iter().any(|had| had.fingerprint == *fingerprint) {
+                return Ok(None);
+            }
+            let (now, now_unix) = (Instant::now(), unix_now());
+            let mut fresh = WaitingQueue::new(limits);
+            for had in waits {
+                let age = Duration::from_secs(u64::try_from(now_unix - had.seen_unix).unwrap_or(0));
+                let at = now.checked_sub(age).unwrap_or(now);
+                fresh.remember(had.fingerprint, source_of(had.peer.as_deref()), at);
+            }
+            let admission = fresh.admit(*fingerprint, source, waits.len(), now);
+            if !admission.record {
+                return Ok(None);
+            }
+            evict = admission.evict;
+            Ok(Some(Unaccepted::new(fingerprint, from.clone(), now_unix)))
+        });
+        for old in &evict {
             let _ = self.waiting_table.remove(&old.canonical());
         }
-        let _ = self
-            .waiting_table
-            .put(Unaccepted::new(fingerprint, from, unix_now()));
     }
 
     /// MtlsAccounts that are accepted wait no more.
-    fn waited(&self, accepted: &[PeerId]) {
+    fn waited(&self, accepted: &[Normal]) {
         let mut queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
         for had in self.waits() {
-            if accepted.contains(&had.fingerprint) {
+            if accepted.contains(&Normal::of_fingerprint(&had.fingerprint)) {
                 queue.forget(&had.fingerprint);
                 let _ = self.waiting_table.remove(&had.fingerprint.canonical());
             }
@@ -465,15 +588,17 @@ impl Authenticator for MtlsAccounts {
             .and_then(|text| text.parse::<PeerId>().ok())
             .or_else(|| chain.first().map(|leaf| PeerId::of(leaf.as_ref())))
             .filter(|fingerprint| fingerprint.digest() == Digest::Sha256);
-        if self.trust.pins()
-            && let Some(fingerprint) = &fingerprint
-        {
+        if self.trust.pins() {
+            let by_fingerprint = fingerprint.as_ref().map(Normal::of_fingerprint);
+            let by_key = key_of_leaf(&attempt, chain).and_then(|pin| pin.normal());
             let found = self
                 .peers
                 .read(|records| {
-                    records
+                    // The certificate itself outranks its key, should two accounts pin them.
+                    by_fingerprint
                         .iter()
-                        .find(|peer| peer.is(fingerprint))
+                        .chain(&by_key)
+                        .find_map(|pin| records.iter().find(|peer| peer.holds(pin)))
                         .map(|peer| (peer.id.clone(), peer.disabled))
                 })
                 .map_err(|reason| reason.reading("peer table"))?;
@@ -483,6 +608,9 @@ impl Authenticator for MtlsAccounts {
                     return Ok(Verdict::Valid(Lookup {
                         by: "id".to_owned(),
                         value: id,
+                        claims: chain
+                            .first()
+                            .and_then(|leaf| coqui_access_claims::of_certificate(leaf.as_ref())),
                     }));
                 }
                 None => {}
@@ -513,7 +641,11 @@ impl Authenticator for MtlsAccounts {
 impl Directory for MtlsAccounts {
     fn lookup(&self, lookup: Lookup) -> Result<Option<Person>, ProviderError> {
         let by_certificate = if lookup.by == "certificate" {
-            lookup.value.parse::<PeerId>().ok()
+            lookup
+                .value
+                .parse::<PeerId>()
+                .ok()
+                .map(|id| Normal::of_fingerprint(&id))
         } else {
             None
         };
@@ -527,7 +659,7 @@ impl Directory for MtlsAccounts {
                                 "id" => peer.id == lookup.value,
                                 "name" => peer.name == lookup.value,
                                 "certificate" => {
-                                    by_certificate.as_ref().is_some_and(|own| peer.is(own))
+                                    by_certificate.as_ref().is_some_and(|own| peer.holds(own))
                                 }
                                 "email" => peer.email.as_deref() == Some(&lookup.value),
                                 _ => false,
@@ -565,9 +697,13 @@ impl Accounts for MtlsAccounts {
             .map_err(|reason| reason.reading("peer table"))
     }
 
-    /// Accepts a fingerprint under a name, or changes what is said of a peer there is. The
-    /// secret of a peer is its certificate fingerprint in any spelling `coqui-peer-tls` reads;
-    /// saying it again moves the account to another certificate.
+    /// Accepts a pin under a name, or changes what is said of a peer there is.
+    ///
+    /// The `secret` of a peer is a pin: a certificate fingerprint in any spelling
+    /// `coqui-peer-tls` reads, or `key:sha256:<hex>` for a public key. For a new name it is
+    /// the peer's first pin; for a peer there is it is one more, up to `max_pins`, and saying
+    /// one the peer holds changes nothing. `remove:` before a pin takes that pin away alone,
+    /// never the last one.
     fn put(&self, account: AccountPut) -> Result<PutOutcome, ProviderError> {
         if !self.limits.allows_field(&account.name) {
             return Err(error::bad_value("a peer has a name"));
@@ -575,52 +711,56 @@ impl Accounts for MtlsAccounts {
         if account.expires_unix.is_some() {
             return Err(error::bad_value("peers do not expire"));
         }
-        let fingerprint = account
+        let change = account
             .secret
             .as_deref()
-            .map(str::parse::<PeerId>)
+            .map(|text| match text.strip_prefix(REMOVE_PREFIX) {
+                Some(pin) => Pin::parse(pin).map(Change::Remove),
+                None => Pin::parse(text).map(Change::Add),
+            })
             .transpose()
-            .map_err(|_| error::bad_value("that is not a certificate fingerprint"))?
-            .filter(|fingerprint| fingerprint.digest() == Digest::Sha256);
-        if account.secret.is_some() && fingerprint.is_none() {
-            return Err(error::bad_value(
-                "a peer is identified by a SHA-256 fingerprint",
-            ));
-        }
+            .map_err(|_| error::bad_value("that is not a certificate fingerprint or key pin"))?;
         let accepted = self
             .peers
             .put_with(|records| {
-                if let Some(fingerprint) = &fingerprint
-                    && records
+                if let Some(Change::Add(pin)) = &change {
+                    let normal = pin
+                        .normal()
+                        .ok_or_else(|| SourceError::invalid("that is not a certificate pin"))?;
+                    if records
                         .iter()
-                        .any(|peer| peer.is(fingerprint) && peer.name != account.name)
-                {
-                    return Err(SourceError::invalid(
-                        "that certificate belongs to another peer",
-                    ));
+                        .any(|peer| peer.holds(&normal) && peer.name != account.name)
+                    {
+                        return Err(SourceError::invalid(
+                            "that certificate belongs to another peer",
+                        ));
+                    }
                 }
                 let mut peer = match (
                     records.iter().find(|peer| peer.name == account.name),
-                    &fingerprint,
+                    &change,
                 ) {
                     (Some(peer), _) => peer.clone(),
-                    (None, Some(fingerprint)) => {
-                        let mut peer = PeerRecord::new(
-                            secret::identifier().map_err(SourceError::unavailable)?,
-                            account.name.clone(),
-                            fingerprint,
-                        );
-                        peer.made_unix = Some(unix_now());
-                        peer
-                    }
-                    (None, None) => {
+                    (None, Some(Change::Add(_))) => PeerRecord {
+                        id: secret::identifier().map_err(SourceError::unavailable)?,
+                        name: account.name.clone(),
+                        certificate: None,
+                        pins: Vec::new(),
+                        email: None,
+                        groups: Vec::new(),
+                        disabled: false,
+                        made_unix: Some(unix_now()),
+                    },
+                    _ => {
                         return Err(SourceError::invalid(
-                            "a new peer is accepted by its certificate fingerprint",
+                            "a new peer is accepted by a certificate pin",
                         ));
                     }
                 };
-                if let Some(fingerprint) = &fingerprint {
-                    peer.certificate = *fingerprint;
+                match &change {
+                    Some(Change::Add(pin)) => peer.add_pin(pin, self.max_pins)?,
+                    Some(Change::Remove(pin)) => peer.remove_pin(pin)?,
+                    None => {}
                 }
                 if let Some(groups) = account.groups {
                     peer.groups = groups;
@@ -632,7 +772,8 @@ impl Accounts for MtlsAccounts {
                     .iter()
                     .filter(|other| other.name != peer.name)
                     .chain(std::iter::once(&peer))
-                    .map(|other| other.certificate)
+                    .filter_map(PeerRecord::held)
+                    .flatten()
                     .collect::<Vec<_>>();
                 Ok((peer, accepted))
             })
@@ -676,13 +817,99 @@ fn source_of(peer: Option<&str>) -> Option<SocketAddr> {
         .or_else(|| peer.parse().ok().map(|address| SocketAddr::new(address, 0)))
 }
 
-fn validate(peers: &[PeerRecord], max: usize, limits: &RecordLimits) -> Result<(), SourceError> {
+/// The records as a source of pins for a matcher: an enabled record named like the person
+/// holds the fingerprint or the public key the certificate presented.
+impl coqui_access_kit::pins::PinSource for MtlsAccounts {
+    fn check(
+        &self,
+        person: &Person,
+        pins: &coqui_access_kit::pins::PinSet,
+    ) -> Result<coqui_access_kit::pins::PinCheck, ProviderError> {
+        use coqui_access_kit::pins::PinCheck;
+        let wanted: Vec<Normal> = pins
+            .fingerprint
+            .as_deref()
+            .and_then(|text| text.parse::<PeerId>().ok())
+            .map(|id| Normal::of_fingerprint(&id))
+            .into_iter()
+            .chain(pins.key.as_ref().and_then(|value| {
+                Pin {
+                    kind: Pin::KEY.to_owned(),
+                    value: value.clone(),
+                }
+                .normal()
+            }))
+            .collect();
+        let held = self
+            .peers
+            .read(|records| {
+                records.iter().any(|peer| {
+                    peer.name == person.name
+                        && !peer.disabled
+                        && wanted.iter().any(|pin| peer.holds(pin))
+                })
+            })
+            .map_err(|reason| reason.reading("peer table"))?;
+        Ok(if held {
+            PinCheck::Holds
+        } else {
+            PinCheck::Absent
+        })
+    }
+}
+
+/// What a `secret` asks of a peer's pins.
+enum Change {
+    Add(Pin),
+    Remove(Pin),
+}
+
+/// Before a pin in a `secret`: take that pin away from the peer.
+const REMOVE_PREFIX: &str = "remove:";
+
+/// The public key pin of the certificate the transport proved the client holds the key of:
+/// the first of the chain, and only when the attempt is `secure` and its fingerprint, if
+/// it carries one, is that certificate's.
+fn key_of_leaf(attempt: &Attempt, chain: &[coqui_access::guatiao::Bytes]) -> Option<Pin> {
+    let leaf = chain.first()?;
+    if attempt.secure != Some(true) {
+        return None;
+    }
+    if let Some(text) = &attempt.certificate
+        && text.parse::<PeerId>().ok() != Some(PeerId::of(leaf.as_ref()))
+    {
+        return None;
+    }
+    Pin::key_of_certificate(leaf.as_ref())
+}
+
+fn validate(
+    peers: &[PeerRecord],
+    max: usize,
+    max_pins: usize,
+    limits: &RecordLimits,
+) -> Result<(), SourceError> {
     check_keys(peers, max)?;
     let mut ids = BTreeSet::new();
-    let mut certificates = BTreeSet::new();
+    let mut pinned = BTreeSet::new();
     for peer in peers {
-        let fingerprint = peer.certificate;
-        if fingerprint.digest() != Digest::Sha256 {
+        let Some(held) = peer.held() else {
+            return Err(SourceError::invalid(
+                "a peer is pinned by a SHA-256 fingerprint or a public key",
+            ));
+        };
+        if held.is_empty()
+            || held.len() > max_pins
+            || held.iter().any(|pin| !pinned.insert(pin.clone()))
+        {
+            return Err(SourceError::invalid(
+                "a peer holds no pin, too many, or a pin another peer or itself holds",
+            ));
+        }
+        if peer
+            .certificate
+            .is_some_and(|id| id.digest() != Digest::Sha256)
+        {
             return Err(SourceError::invalid(
                 "a peer certificate is identified by its SHA-256 fingerprint",
             ));
@@ -690,7 +917,6 @@ fn validate(peers: &[PeerRecord], max: usize, limits: &RecordLimits) -> Result<(
         if !limits.allows_field(&peer.id)
             || !limits.allows_field(&peer.name)
             || !ids.insert(&peer.id)
-            || !certificates.insert(fingerprint)
             || !limits.allows_groups(&peer.groups)
             || peer
                 .email
@@ -783,7 +1009,8 @@ mod tests {
             peers
                 .lookup(Lookup {
                     by: "id".to_owned(),
-                    value: "service-1".to_owned()
+                    value: "service-1".to_owned(),
+                    ..Lookup::default()
                 })
                 .unwrap()
                 .is_none()
@@ -855,6 +1082,71 @@ mod tests {
             peers.authenticate(attempt(Some(&shown))).unwrap();
         }
         assert_eq!(peers.waiting().unwrap().len(), 1);
+    }
+
+    fn from_source(last: u8, certificate: &PeerId) -> Attempt {
+        Attempt {
+            peer: Some(format!("192.0.2.{last}:4000")),
+            certificate: Some(certificate.to_string()),
+            ..Attempt::default()
+        }
+    }
+
+    #[test]
+    fn two_providers_over_one_waiting_table_share_a_sources_place() {
+        let waiting = Arc::new(MemoryTable::<Unaccepted>::new());
+        let build = || {
+            MtlsAccounts::builder()
+                .waiting(waiting.clone())
+                .build()
+                .unwrap()
+        };
+        let (first, second) = (build(), build());
+        first.authenticate(from_source(9, &fingerprint())).unwrap();
+        // The second provider has not seen the first one's entry in memory, only in the table.
+        second.authenticate(from_source(9, &fingerprint())).unwrap();
+        assert_eq!(
+            waiting.load().unwrap().records.len(),
+            1,
+            "one place for 192.0.2.9"
+        );
+    }
+
+    #[test]
+    fn providers_racing_over_one_waiting_table_never_pass_its_total() {
+        let waiting = Arc::new(MemoryTable::<Unaccepted>::new());
+        let limits = {
+            let mut limits = default_waiting_limits();
+            limits.total = 3;
+            limits
+        };
+        let providers: Vec<Arc<MtlsAccounts>> = (0..2)
+            .map(|_| {
+                Arc::new(
+                    MtlsAccounts::builder()
+                        .waiting(waiting.clone())
+                        .waiting_limits(limits)
+                        .build()
+                        .unwrap(),
+                )
+            })
+            .collect();
+        let start = Arc::new(std::sync::Barrier::new(16));
+        let threads: Vec<_> = (0..16u8)
+            .map(|number| {
+                let provider = providers[usize::from(number % 2)].clone();
+                let start = start.clone();
+                let from = from_source(number + 10, &fingerprint());
+                std::thread::spawn(move || {
+                    start.wait();
+                    provider.authenticate(from).unwrap();
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        assert_eq!(waiting.load().unwrap().records.len(), 3);
     }
 
     #[test]

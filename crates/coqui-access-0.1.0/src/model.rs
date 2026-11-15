@@ -12,6 +12,29 @@ pub mod takes {
     /// The request as it arrived, every time: a header a proxy set, or the certificate a
     /// client proved it holds.
     pub const REQUEST: &str = "request";
+    /// A one-time code from an authenticator app, with the account it belongs to, as a
+    /// second step of a sign-in.
+    pub const OTP: &str = "otp";
+}
+
+/// Why a sign-in policy is asked, as [`SignInContext::purpose`] says.
+pub mod purposes {
+    /// A person is signing in.
+    pub const SIGN_IN: &str = "sign_in";
+    /// A session that exists is checked again; `done` holds the steps it was opened with.
+    pub const RESUME: &str = "resume";
+    /// A person sets up or changes a second step of their own.
+    pub const ENROL: &str = "enrol";
+}
+
+/// What kind of client signs in, as [`SignInContext::client`] says.
+pub mod clients {
+    /// A web page.
+    pub const BROWSER: &str = "browser";
+    /// A desktop or mobile application.
+    pub const APP: &str = "app";
+    /// A program using the interface directly.
+    pub const API: &str = "api";
 }
 
 /// What an authenticator or a directory says it is.
@@ -47,6 +70,10 @@ pub struct Attempt {
     /// transport proved the leaf's key. A provider that decides trust or reads names from the
     /// certificate takes them from here.
     pub certificates: Option<Vec<guatiao::Bytes>>,
+    /// The [`methods`](crate::methods) word the consumer presents this credential as, so a
+    /// provider serving two methods (a one-time code and a recovery code) tells them apart.
+    /// `None` is the provider's own default method.
+    pub method: Option<String>,
 }
 
 impl fmt::Debug for Attempt {
@@ -60,6 +87,43 @@ impl fmt::Debug for Attempt {
             .field("secure", &self.secure)
             .field("certificate", &self.certificate.as_ref().map(|_| "…"))
             .field("certificates", &self.certificates.as_ref().map(Vec::len))
+            .field("method", &self.method)
+            .finish()
+    }
+}
+
+/// The identity an authenticator obtained, in full, for a matcher to tie to a directory
+/// account. A claim is what the credential says, not who the person is: the directory
+/// decides the account and its groups.
+///
+/// The names an authenticator that reads a certificate uses: `subject.dn`, `subject.cn` (and
+/// the other `subject.<attribute>`), `issuer.dn`, `serial.hex`, `serial.reversed` (the same
+/// bytes last first), `san.upn`, `san.email`, `san.dns`, `san.uri`, `san.ip`, `fingerprint`
+/// and `spki` (both `sha256:<hex>`), and the leaf in [`certificate`](Claims::certificate).
+/// A name an authenticator has nothing for is absent. `Debug` shows counts only.
+#[derive(Clone, Default, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(crate = ::guatiao)]
+pub struct Claims {
+    /// Each claim and its values, in the order the credential gave them.
+    #[map(default, skip_serializing_if = BTreeMap::is_empty)]
+    pub values: BTreeMap<String, Vec<String>>,
+    /// The credential itself, when it has a form of its own: the leaf certificate as DER.
+    pub certificate: Option<guatiao::Bytes>,
+}
+
+impl Claims {
+    /// The values of `name`; empty when the credential did not give it.
+    pub fn get(&self, name: &str) -> &[String] {
+        self.values.get(name).map_or(&[], Vec::as_slice)
+    }
+}
+
+impl fmt::Debug for Claims {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Claims")
+            .field("values", &self.values.len())
+            .field("certificate", &self.certificate.as_ref().map(|_| "…"))
             .finish()
     }
 }
@@ -68,10 +132,14 @@ impl fmt::Debug for Attempt {
 #[derive(Clone, Default, PartialEq, Eq, ToValue, FromValue, Schema)]
 #[map(crate = ::guatiao)]
 pub struct Lookup {
-    /// Directory attribute to match, such as `id`, `name` or `email`.
+    /// Directory attribute to match, such as `id`, `name` or `email`; `claims` when the
+    /// authenticator names no account itself and the consumer's matcher decides from
+    /// [`claims`](Lookup::claims).
     pub by: String,
-    /// Value to resolve in a configured directory.
+    /// Value to resolve in a configured directory; a label for a log when `by` is `claims`.
     pub value: String,
+    /// What the credential said, in full, when the authenticator has more than a name.
+    pub claims: Option<Claims>,
 }
 
 impl fmt::Debug for Lookup {
@@ -80,6 +148,7 @@ impl fmt::Debug for Lookup {
             .debug_struct("Lookup")
             .field("by", &self.by)
             .field("value", &"…")
+            .field("claims", &self.claims)
             .finish()
     }
 }
@@ -192,6 +261,9 @@ pub struct AccountPut {
     pub disabled: Option<bool>,
     /// When it stops being taken, in seconds since the Unix epoch.
     pub expires_unix: Option<i64>,
+    /// The label an enrolment shows the person (an authenticator app's account line); the
+    /// account's name when absent. Providers that keep no such label ignore it.
+    pub display_name: Option<String>,
 }
 
 impl fmt::Debug for AccountPut {
@@ -203,6 +275,7 @@ impl fmt::Debug for AccountPut {
             .field("groups", &self.groups)
             .field("disabled", &self.disabled)
             .field("expires_unix", &self.expires_unix)
+            .field("display_name", &self.display_name.as_ref().map(|_| "…"))
             .finish()
     }
 }
@@ -214,6 +287,9 @@ pub struct PutOutcome {
     /// The secret the provider made for the account, said this once and kept nowhere as
     /// itself.
     pub secret: Option<String>,
+    /// One-time recovery codes the provider made for the account, said this once and kept
+    /// nowhere as themselves.
+    pub codes: Option<Vec<String>>,
 }
 
 impl fmt::Debug for PutOutcome {
@@ -221,6 +297,7 @@ impl fmt::Debug for PutOutcome {
         formatter
             .debug_struct("PutOutcome")
             .field("secret", &self.secret.as_ref().map(|_| "…"))
+            .field("codes", &self.codes.as_ref().map(Vec::len))
             .finish()
     }
 }
@@ -237,4 +314,101 @@ pub struct Waiting {
     pub peer: Option<String>,
     /// When it last did, in seconds since the Unix epoch.
     pub seen_unix: Option<i64>,
+}
+
+/// One step of a sign-in that already succeeded.
+///
+/// `Debug` shows the method and provider, never who the step named.
+#[derive(Clone, Default, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(crate = ::guatiao)]
+pub struct Factor {
+    /// The [`methods`](crate::methods) word it was presented as.
+    pub method: String,
+    /// The provider that accepted it, by the id the consumer asks it under. A rule that
+    /// names `providers` counts only a factor a listed provider accepted.
+    pub provider: Option<String>,
+    /// The [`Person::id`] the step named. A policy refuses a sign-in whose steps name
+    /// different people; a step that names none (`None`) is not held against it.
+    pub person: Option<String>,
+}
+
+impl fmt::Debug for Factor {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Factor")
+            .field("method", &self.method)
+            .field("provider", &self.provider)
+            .field("person", &self.person.as_ref().map(|_| "…"))
+            .finish()
+    }
+}
+
+/// What a consumer knows when it asks which methods a sign-in may use, and what is still
+/// needed.
+///
+/// `Debug` shows words and counts, never the address or the person.
+#[derive(Clone, Default, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(crate = ::guatiao)]
+pub struct SignInContext {
+    /// Why it is asked: one of [`purposes`](crate::purposes).
+    pub purpose: String,
+    /// The steps already passed; empty when the sign-in has not begun.
+    pub done: Vec<Factor>,
+    /// The client's IP address as the consumer determined it, text without a port; `None`
+    /// when it could not be determined, and never a placeholder such as `0.0.0.0`.
+    pub address: Option<String>,
+    /// What kind of client: one of [`clients`](crate::clients), or the consumer's own word.
+    pub client: Option<String>,
+    /// The consumer's own word for the service signed in to, such as `portal`.
+    pub service: Option<String>,
+    /// When it is asked, in seconds since the Unix epoch.
+    pub time_unix: Option<i64>,
+    /// Who the passed steps named, once one did. `None` before that.
+    pub person: Option<Person>,
+    /// Anything else the consumer says about the sign-in; a policy reads what it knows.
+    #[map(default, skip_serializing_if = BTreeMap::is_empty)]
+    pub attributes: BTreeMap<String, Value>,
+}
+
+impl fmt::Debug for SignInContext {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SignInContext")
+            .field("purpose", &self.purpose)
+            .field("done", &self.done.len())
+            .field("address", &self.address.as_ref().map(|_| "…"))
+            .field("client", &self.client)
+            .field("service", &self.service)
+            .field("time_unix", &self.time_unix.map(|_| "…"))
+            .field("person", &self.person.as_ref().map(|_| "…"))
+            .field("attributes", &self.attributes.len())
+            .finish()
+    }
+}
+
+/// A method a sign-in may use next.
+#[derive(Debug, Clone, Default, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(crate = ::guatiao)]
+pub struct Offer {
+    /// The [`methods`](crate::methods) word.
+    pub method: String,
+    /// The providers to ask, in order; empty is any provider that takes the method.
+    #[map(default, skip_serializing_if = Vec::is_empty)]
+    pub providers: Vec<String>,
+}
+
+/// What a sign-in may do next.
+#[derive(Debug, Clone, Default, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(crate = ::guatiao)]
+pub struct SignInDecision {
+    /// Whether the steps passed are enough to open the session.
+    pub complete: bool,
+    /// The methods that may be presented next, empty when none may: with
+    /// [`complete`](SignInDecision::complete) false that is a refusal.
+    pub methods: Vec<Offer>,
+    /// The rule that decided, by name or position, for a log.
+    pub rule: Option<String>,
+    /// Limits for the session, such as a lifetime; provider-defined.
+    #[map(default, skip_serializing_if = BTreeMap::is_empty)]
+    pub limits: BTreeMap<String, Value>,
 }

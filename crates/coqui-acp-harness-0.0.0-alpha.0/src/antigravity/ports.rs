@@ -1,7 +1,8 @@
 //! The loopback ports a set of processes listens on, found through the operating system's own
-//! tools and no `unsafe`.
+//! tables: Windows' TCP table in this process (the one `unsafe` module), Linux's `/proc`, and macOS'
+//! `lsof`, which is a program started and so is bounded.
 //!
-//! Each system's text is read by a function of its own that takes the text, so every one is
+//! Each system's table is read by a function of its own that takes the bytes or text, so every one is
 //! tested on every system from a recording.
 
 use alloc::collections::BTreeSet;
@@ -15,15 +16,15 @@ use std::time::Instant;
 const LISTING_LIMIT: Duration = Duration::from_secs(3);
 /// The most of a tool's output that is read.
 #[cfg_attr(
-    not(any(windows, target_os = "macos", test)),
-    allow(dead_code, reason = "only the tools' output is bounded")
+    not(any(target_os = "macos", test)),
+    allow(dead_code, reason = "only the tool's output is bounded")
 )]
 const OUTPUT_LIMIT: u64 = 16 * 1024 * 1024;
 
 /// The loopback addresses that `owners` (process ids) listen on, TCP, without repeats, in order. A tool
 /// the system is asked through is ended after 3 s.
 ///
-/// Windows reads `netstat.exe -ano`, Linux `/proc/<pid>/fd` joined with `/proc/net/tcp` and `tcp6`,
+/// Windows reads `GetExtendedTcpTable` for IPv4 and IPv6 and starts no program, Linux `/proc/<pid>/fd` joined with `/proc/net/tcp` and `tcp6`,
 /// macOS `lsof`. A process that has ended, or whose descriptors may not be read, has none.
 ///
 /// # Errors
@@ -89,71 +90,23 @@ pub(super) fn run_launch_until(
     }
 }
 
-/// Runs `command` with its standard output read, and ends it at `deadline`.
-#[cfg_attr(
-    not(any(windows, target_os = "macos", test)),
-    allow(dead_code, reason = "only the tools' output is bounded")
+#[cfg(windows)]
+#[allow(
+    unsafe_code,
+    reason = "the system's TCP table is read through its own call"
 )]
-pub(super) fn run_until(
-    command: &mut std::process::Command,
-    deadline: Option<Instant>,
-) -> io::Result<(std::process::ExitStatus, Vec<u8>)> {
-    use std::io::Read as _;
-    let mut child = command
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()?;
-    let stdout = child.stdout.take().ok_or(io::ErrorKind::BrokenPipe)?;
-    let reader = std::thread::spawn(move || {
-        let mut output = Vec::new();
-        stdout
-            .take(OUTPUT_LIMIT)
-            .read_to_end(&mut output)
-            .map(|_| output)
-    });
-    loop {
-        if let Some(status) = child.try_wait()? {
-            let output = reader
-                .join()
-                .map_err(|_| io::Error::other("the output was not read"))??;
-            return Ok((status, output));
-        }
-        if deadline.is_none_or(|deadline| Instant::now() >= deadline) {
-            let _ = child.kill();
-            let _ = child.wait();
-            let _ = reader.join();
-            return Err(io::ErrorKind::TimedOut.into());
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-}
+mod win32;
 
 #[cfg(windows)]
-fn system(owners: &[u32], deadline: Option<Instant>) -> io::Result<Vec<SocketAddr>> {
-    use std::os::windows::process::CommandExt as _;
-    /// `CREATE_NO_WINDOW`: no console window flashes up for a program started from a GUI.
-    const NO_WINDOW: u32 = 0x0800_0000;
-    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
-    let netstat = std::path::Path::new(&root)
-        .join("System32")
-        .join("netstat.exe");
+fn system(owners: &[u32], _deadline: Option<Instant>) -> io::Result<Vec<SocketAddr>> {
     let mut found = Vec::new();
-    for (family, needed) in [("TCP", true), ("TCPv6", false)] {
-        let ran = run_until(
-            std::process::Command::new(&netstat)
-                .args(["-ano", "-p", family])
-                .creation_flags(NO_WINDOW),
-            deadline,
-        );
-        let output = match ran {
-            Ok((status, output)) if status.success() => output,
-            Ok(_) if !needed => continue,
-            Err(error) if !needed && error.kind() != io::ErrorKind::TimedOut => continue,
-            Ok((status, _)) => return Err(io::Error::other(alloc::format!("netstat {status}"))),
+    for (v6, needed) in [(false, true), (true, false)] {
+        match win32::listening_table(v6) {
+            Ok(table) => found.extend(parse_tcp_table(&table, v6, owners)),
+            // A machine with IPv6 off has no such table.
+            Err(_) if !needed => {}
             Err(error) => return Err(error),
-        };
-        found.extend(parse_netstat(&String::from_utf8_lossy(&output), owners));
+        }
     }
     Ok(found)
 }
@@ -219,27 +172,39 @@ fn system(_owners: &[u32], _deadline: Option<Instant>) -> io::Result<Vec<SocketA
     ))
 }
 
-/// The listeners of `owners` in the output of `netstat -ano -p TCP` (or `TCPv6`): a row whose
-/// foreign address is the unspecified one with port 0 is listening, whatever language its State
-/// column is in, and the last column is the owner.
+/// The listeners of `owners` in a `MIB_TCPTABLE_OWNER_PID` (`v6` false) or `MIB_TCP6TABLE_OWNER_PID` as
+/// `GetExtendedTcpTable` fills it: a row count, then rows of 24 or 56 bytes, whose address is in network order, port in the
+/// low two bytes of a word in network byte order, and last word the owning process.
 #[cfg_attr(
     not(windows),
     allow(dead_code, reason = "read from a recording on every system")
 )]
-pub(super) fn parse_netstat(text: &str, owners: &[u32]) -> Vec<SocketAddr> {
-    text.lines()
-        .filter_map(|line| {
-            let columns: Vec<&str> = line.split_whitespace().collect();
-            let [protocol, local, foreign, .., owner] = columns.as_slice() else {
-                return None;
-            };
-            if !protocol.eq_ignore_ascii_case("TCP") || !matches!(*foreign, "0.0.0.0:0" | "[::]:0")
-            {
+pub(super) fn parse_tcp_table(table: &[u8], v6: bool, owners: &[u32]) -> Vec<SocketAddr> {
+    let word = |at: usize| -> Option<u32> {
+        Some(u32::from_le_bytes(
+            table.get(at..at.checked_add(4)?)?.try_into().ok()?,
+        ))
+    };
+    let (size, address, port, owner) = if v6 { (56, 0, 20, 52) } else { (24, 4, 8, 20) };
+    let rows = word(0).map_or(0, |rows| rows as usize);
+    (0..rows)
+        .filter_map(|row| {
+            let start = row.checked_mul(size)?.checked_add(4)?;
+            if !owners.contains(&word(start + owner)?) {
                 return None;
             }
-            let address: SocketAddr = local.parse().ok()?;
-            let owner: u32 = owner.parse().ok()?;
-            (owners.contains(&owner) && is_loopback(&address)).then_some(address)
+            let port = u16::try_from(word(start + port)? & 0xFFFF)
+                .ok()?
+                .swap_bytes();
+            let ip = if v6 {
+                let bytes = table.get(start + address..start + address + 16)?;
+                core::net::IpAddr::from(<[u8; 16]>::try_from(bytes).ok()?)
+            } else {
+                let bytes = table.get(start + address..start + address + 4)?;
+                core::net::IpAddr::from(<[u8; 4]>::try_from(bytes).ok()?)
+            };
+            let address = SocketAddr::new(ip, port);
+            is_loopback(&address).then_some(address)
         })
         .collect()
 }
@@ -326,25 +291,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn netstat_rows_are_read_in_any_language() {
-        let text = "\
-Active Connections
-
-  Proto  Local Address          Foreign Address        State           PID
-  TCP    0.0.0.0:135            0.0.0.0:0              LISTENING       1200
-  TCP    127.0.0.1:60946        0.0.0.0:0              ESCUCHANDO      79860
-  TCP    127.0.0.1:60947        0.0.0.0:0              LISTENING       79860
-  TCP    127.0.0.1:60947        127.0.0.1:50000        ESTABLISHED     79860
-  TCP    127.0.0.1:7000         0.0.0.0:0              LISTENING       4
-  TCP    192.168.1.5:9000       0.0.0.0:0              LISTENING       79860
-  TCP    [::1]:5000             [::]:0                 LISTENING       79860
-";
-        let found = parse_netstat(text, &[79860]);
-        let texts: Vec<String> = found.iter().map(SocketAddr::to_string).collect();
-        assert_eq!(texts, ["127.0.0.1:60946", "127.0.0.1:60947", "[::1]:5000"]);
-    }
-
-    #[test]
     fn a_proc_net_table_is_joined_with_the_descriptors_inodes() {
         let text = "\
   sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
@@ -370,30 +316,6 @@ Active Connections
         );
         assert_eq!(socket_inode("socket:[7001]"), Some(7001));
         assert_eq!(socket_inode("pipe:[7001]"), None);
-    }
-
-    #[test]
-    fn a_tool_that_outlasts_the_deadline_is_ended() {
-        #[cfg(windows)]
-        let mut command = {
-            let mut command = std::process::Command::new("ping");
-            command.args(["-n", "30", "127.0.0.1"]);
-            command
-        };
-        #[cfg(not(windows))]
-        let mut command = {
-            let mut command = std::process::Command::new("sleep");
-            command.arg("30");
-            command
-        };
-        let started = Instant::now();
-        let error = run_until(
-            &mut command,
-            Instant::now().checked_add(Duration::from_millis(300)),
-        )
-        .unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
-        assert!(started.elapsed() < Duration::from_secs(5));
     }
 
     #[test]
@@ -427,11 +349,66 @@ Active Connections
     #[test]
     fn a_deadline_that_has_passed_starts_no_tool() {
         let listed = listeners_before(&[1], None);
-        if cfg!(any(windows, target_os = "macos")) {
+        if cfg!(target_os = "macos") {
             assert_eq!(listed.unwrap_err().kind(), io::ErrorKind::TimedOut);
         } else {
             assert!(listed.is_ok());
         }
+    }
+
+    /// A `MIB_TCPTABLE_OWNER_PID` of three rows: 127.0.0.1:60946 of process 7, 0.0.0.0:135 of process 7, and
+    /// 127.0.0.1:7000 of process 4.
+    fn recorded_v4() -> Vec<u8> {
+        let mut table = 3_u32.to_le_bytes().to_vec();
+        for (address, port, owner) in [
+            ([127, 0, 0, 1], 60946_u16, 7_u32),
+            ([0, 0, 0, 0], 135, 7),
+            ([127, 0, 0, 1], 7000, 4),
+        ] {
+            table.extend(2_u32.to_le_bytes()); // state: listening
+            table.extend(address);
+            table.extend(u32::from(port.swap_bytes()).to_le_bytes());
+            table.extend([0; 8]); // remote address and port
+            table.extend(owner.to_le_bytes());
+        }
+        table
+    }
+
+    #[test]
+    fn a_tcp_table_is_read_per_owner_and_only_for_loopback() {
+        let found = parse_tcp_table(&recorded_v4(), false, &[7]);
+        assert_eq!(
+            found.iter().map(SocketAddr::to_string).collect::<Vec<_>>(),
+            ["127.0.0.1:60946"]
+        );
+        let mut six = 1_u32.to_le_bytes().to_vec();
+        let mut loopback = [0_u8; 16];
+        loopback[15] = 1;
+        six.extend(loopback);
+        six.extend(0_u32.to_le_bytes()); // scope
+        six.extend(u32::from(5000_u16.swap_bytes()).to_le_bytes());
+        six.extend([0; 16]);
+        six.extend([0; 4]); // remote scope
+        six.extend([0; 4]); // remote port
+        six.extend(2_u32.to_le_bytes()); // state
+        six.extend(7_u32.to_le_bytes());
+        assert_eq!(six.len(), 4 + 56);
+        let found = parse_tcp_table(&six, true, &[7]);
+        assert_eq!(
+            found.iter().map(SocketAddr::to_string).collect::<Vec<_>>(),
+            ["[::1]:5000"]
+        );
+    }
+
+    #[test]
+    fn a_short_or_lying_tcp_table_gives_nothing_and_does_not_panic() {
+        assert!(parse_tcp_table(&[], false, &[7]).is_empty());
+        let mut table = recorded_v4();
+        table.truncate(30);
+        assert!(parse_tcp_table(&table, false, &[7]).len() <= 1);
+        let mut huge = u32::MAX.to_le_bytes().to_vec();
+        huge.extend([0; 24]);
+        assert!(parse_tcp_table(&huge, false, &[7]).is_empty());
     }
 
     #[test]

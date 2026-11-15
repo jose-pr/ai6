@@ -116,6 +116,7 @@ pub(crate) fn by_name(
         display_name: None,
         groups,
         uid: None,
+        home: None,
         disabled: false,
     }))
 }
@@ -174,6 +175,7 @@ fn local_account(name: &str) -> Result<Option<Account>, ProviderError> {
         display_name: full_name.filter(|full| !full.is_empty()),
         groups,
         uid: None,
+        home: None,
         disabled,
     }))
 }

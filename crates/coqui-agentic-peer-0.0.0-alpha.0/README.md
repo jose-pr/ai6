@@ -9,7 +9,7 @@ A proven link between two peers, and what runs over it: pair once, then ACP, A2A
 - `pairing`: pair once with a PIN, over any channel, including through a reverse proxy.
 - `home`: one identity and one trust store per user, shared by every program and capability, with each method's identity in a file of its own.
 - `discovery`: DNS-SD records and per-user descriptors. What is found is a claim, and only the proof tests it.
-- `companion`: answers a browser extension over native messaging.
+- `companion`: native messaging for a browser extension: framing, registering a native host, and a discovery answer.
 
 ## Installation
 

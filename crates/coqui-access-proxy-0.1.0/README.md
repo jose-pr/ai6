@@ -11,6 +11,12 @@ carries the account name in a header, the client certificate the proxy verified,
 certificate's subject, and the configured directory supplies groups. Group claims in headers
 are never trusted.
 
+**The front proxy must verify the client certificate** against its CA and drop the header
+otherwise: this provider trusts what a trusted proxy forwards and checks no CA, so a proxy that
+accepts unverified certificates (nginx `ssl_verify_client optional_no_ca`, HAProxy `verify
+optional` with `ca-ignore-err`) forwards certificates anyone can mint. Where it cannot, have the
+consumer pin the certificate after the match.
+
 ## Features
 
 - **Trusted networks only** — addresses and CIDR ranges; an empty list trusts nobody.
@@ -18,6 +24,9 @@ are never trusted.
   AWS ALB (URL-encoded PEM), Traefik (base64 DER) or Envoy (`x-forwarded-client-cert`) forward
   it, read through account picks over its fields (SANs, subject, fingerprint); or a subject
   header, read through the same picks. An IP written as a DNS name counts as an IP.
+- **Claims by default** — a forwarded certificate is answered as its claims (subject and issuer
+  names, SANs, fingerprint, public key hash), for the consumer's matcher to tie to an account;
+  `account` picks name the account in the provider instead.
 - **Ambiguity refused** — a header sent twice is `Invalid`.
 
 ## Installation
@@ -51,7 +60,7 @@ Only configure headers the proxy overwrites.
 | `ProxyWord` | The provider: `new(config)` and the `Authenticator` kind. |
 | `ProxyWordConfig` | The Guatiao configuration. |
 | `CertificateEncoding` | How a forwarded certificate is written: `PemUrl`, `DerBase64`, `Xfcc`. |
-| `default_account`, `DEFAULT_MAX_CERTIFICATE_BYTES` | The defaults: `subject.cn` by `name`; 16 384 bytes. |
+| `default_account`, `DEFAULT_MAX_CERTIFICATE_BYTES` | The defaults: no picks (claims); 16 384 bytes. An empty `account` answers a forwarded certificate by its claims (`by: "claims"`) for a matcher. |
 | `field_of` | Reads a field from a `CN=a,O=b` or `/O=b/CN=a` subject. |
 
 ## Development

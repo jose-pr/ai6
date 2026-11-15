@@ -8,8 +8,8 @@
 
 The **kinds and models** that every access provider and every host share: authenticate
 credentials, resolve a person, authorize an action, and manage accounts. Built on
-[Guatiao](https://github.com/Boriken-Dev/guatiao); kind names and the hashes of their required
-methods are a pinned ABI. See the [documentation](https://boriken-dev.github.io/coqui-access/).
+[Guatiao](https://github.com/Boriken-Dev/guatiao); kind names and the floor hashes of their
+methods (optional ones included) are a pinned ABI. See the [documentation](https://boriken-dev.github.io/coqui-access/).
 
 ## Features
 
@@ -17,8 +17,11 @@ methods are a pinned ABI. See the [documentation](https://boriken-dev.github.io/
   `Person`, a person and an action give an `AuthorizationDecision`.
 - **Accounts, optional** — `accounts`, `put`, `remove` and `waiting` for providers that keep
   their own accounts.
-- **Redacted by construction** — `Debug` of `Attempt`, `Lookup`, `Person` and `AccountPut`
-  never shows a secret or an identity value.
+- **Sign-in policy** — `SignInPolicy` decides which methods a sign-in may use and what it
+  still needs, from the context the consumer knows.
+- **Redacted by construction** — `Debug` of `Attempt`, `Lookup`, `Person`, `AccountPut`,
+  `PutOutcome` and `SignInContext` never shows a secret, a code, an address or an identity
+  value.
 - **One import** — `coqui_access::guatiao` is the Guatiao providers must use.
 
 ## Installation
@@ -45,7 +48,7 @@ struct Always;
 
 impl Authenticator for Always {
     fn authenticate(&self, _: Attempt) -> Result<Verdict, ProviderError> {
-        Ok(Verdict::Valid(Lookup { by: "name".into(), value: "alice".into() }))
+        Ok(Verdict::Valid(Lookup { by: "name".into(), value: "alice".into(), ..Lookup::default() }))
     }
 }
 ```
@@ -54,11 +57,13 @@ impl Authenticator for Always {
 
 | Item | Purpose |
 | --- | --- |
-| `Authenticator`, `Directory`, `Authorizer`, `Accounts` | The four kinds. |
+| `Authenticator`, `Directory`, `Authorizer`, `Accounts`, `SignInPolicy` | The five kinds. |
 | `Attempt`, `Verdict`, `Lookup`, `Person` | Authentication and lookup models. |
 | `Subject` | `account:<name>`, `person:<id>` or `group:<name>`, as policies write who they name. |
 | `AuthorizationRequest`, `AuthorizationDecision` | Authorization models. |
 | `AccountInfo`, `AccountPut`, `PutOutcome`, `Waiting` | Account management models. |
+| `SignInContext`, `SignInDecision`, `Factor`, `Offer` | Sign-in policy models. |
+| `methods`, `purposes`, `clients` | The words a policy and its consumers share. |
 | `Description`, `takes` | What a provider says it is and takes. |
 | `error` | `bad_value`, `not_found`, `unsupported`, `internal` as `ProviderError`s. |
 
