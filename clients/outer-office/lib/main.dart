@@ -5753,7 +5753,7 @@ class _AccessGateState extends State<_AccessGate> {
     if (_chat case final chat? when chat.controller.token == token) return chat;
     _drop();
     final popups = widget.desktopWindows ? null : browserPopups();
-    return _chat = moneypennyChatFor(
+    final chat = _chat = moneypennyChatFor(
       board,
       widget.chatSettings,
       openWindow: widget.desktopWindows
@@ -5773,6 +5773,12 @@ class _AccessGateState extends State<_AccessGate> {
             ),
       windowOutlivesPage: widget.desktopWindows,
     );
+    // Connected from sign-in, not from the first time the chat is shown, so the stored
+    // conversation resumes and the socket outlives the page that is showing.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (identical(_chat, chat)) chat.controller.open();
+    });
+    return chat;
   }
 
   /// Disposes the old conversation after this frame, once nothing shows it.
