@@ -26,6 +26,7 @@ use crate::directorates::registry::tracker::{
 };
 use crate::station::limits::SourceLimits;
 use crate::station::sources::{Reopen, SourceSetup, StatusWords, source_setups};
+use crate::station::tracker_decisions;
 use guatiao::{Status, library::ProviderError};
 
 /// `blocked_reason` of a Mission waiting for an answer on its issue.
@@ -177,7 +178,25 @@ pub(crate) fn weakenings(roster: &Roster) -> Vec<String> {
                         operation.id, setup.name
                     )
                 });
-            issues.chain(trusted).chain(reopened).collect::<Vec<_>>()
+            let deciding = setups_of(operation)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|setup| setup.decisions.enabled())
+                .map(|setup| {
+                    format!(
+                        "Operation {:?} source {:?} lets {} listed account(s) decide green ink by a \
+                         comment on a linked item, so anyone who signs in to the tracker as one \
+                         can approve a step",
+                        operation.id,
+                        setup.name,
+                        setup.decisions.approvers.len()
+                    )
+                });
+            issues
+                .chain(trusted)
+                .chain(reopened)
+                .chain(deciding)
+                .collect::<Vec<_>>()
         })
         .collect()
 }
@@ -340,6 +359,11 @@ pub(crate) fn poll_replies(
                     link.item == reply.item
                         && unix_of(&reply.created).is_none_or(|made| made >= link.linked_at)
                 }) {
+                    let command = setup
+                        .decisions
+                        .enabled()
+                        .then(|| tracker_decisions::command_of(&reply.body))
+                        .flatten();
                     let mut record = IssueReply {
                         id: reply.id.clone(),
                         mission_id: link.mission_id.clone(),
@@ -352,9 +376,23 @@ pub(crate) fn poll_replies(
                         state: ReplyState::Pending,
                         operator: false,
                     };
-                    if !reply.permitted {
+                    // A decision is not for the Agent to read, whoever wrote it.
+                    if !reply.permitted || command.is_some() {
                         record.state = ReplyState::Ignored;
                         record.body = String::new();
+                    }
+                    if let Some(command) = &command {
+                        if matches!(registry.store_issue_reply(&record), Ok(true)) {
+                            tracker_decisions::settle(
+                                registry,
+                                (&setup.name, &setup.decisions),
+                                link,
+                                &reply,
+                                command,
+                                now,
+                            );
+                        }
+                        continue;
                     }
                     match registry.store_issue_reply(&record) {
                         Ok(true) if reply.permitted && settled(link) => {

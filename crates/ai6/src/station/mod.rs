@@ -35,4 +35,8 @@ pub(crate) mod source_reads;
 #[cfg(feature = "daemon")]
 pub(crate) mod sources;
 #[cfg(feature = "daemon")]
+pub(crate) mod tracker_decisions;
+#[cfg(all(test, feature = "daemon"))]
+mod tracker_decisions_tests;
+#[cfg(feature = "daemon")]
 pub(crate) mod transports;

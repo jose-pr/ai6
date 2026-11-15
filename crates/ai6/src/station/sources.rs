@@ -36,6 +36,7 @@ use crate::station::issues::{
 
 use crate::station::limits::SourceLimits;
 use crate::station::plugins::Plugins;
+use crate::station::tracker_decisions::Decisions;
 use guatiao::{FromValue, Schema, ToValue};
 
 /// Constructs the provider for a provider ID and an Operation's settings.
@@ -93,16 +94,21 @@ pub(crate) struct InstanceKeys {
     #[schema(title = "Reopen a settled item on")]
     #[map(default)]
     pub reopen: Reopen,
+    /// Who may decide green ink by a comment on a linked item. Off by default.
+    #[schema(title = "Decisions by comment")]
+    #[map(default)]
+    pub decisions: Decisions,
 }
 
 impl InstanceKeys {
-    const NAMES: [&str; 6] = [
+    const NAMES: [&str; 7] = [
         "status_labels",
         "status_transitions",
         "agent_labels",
         "agent_transitions",
         "priority_map",
         "reopen",
+        "decisions",
     ];
 }
 
@@ -210,6 +216,8 @@ pub(crate) struct SourceSetup {
     pub priority_map: BTreeMap<String, String>,
     /// What reopens an item whose Mission settled.
     pub reopen: Reopen,
+    /// Who may decide green ink from a comment on a linked item.
+    pub decisions: Decisions,
 }
 
 impl SourceSetup {
@@ -228,6 +236,7 @@ impl SourceSetup {
             agent_transitions: Vec::new(),
             priority_map: BTreeMap::new(),
             reopen: Reopen::default(),
+            decisions: Decisions::default(),
         }
     }
 
@@ -347,6 +356,7 @@ pub(crate) fn source_setups(
                 agent_transitions: keys.agent_transitions,
                 priority_map: keys.priority_map,
                 reopen: keys.reopen,
+                decisions: keys.decisions,
             })
         })
         .collect()
