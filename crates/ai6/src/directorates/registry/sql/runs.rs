@@ -274,10 +274,10 @@ impl RunStore for SqlRegistry {
         earlier: &RunResult,
     ) -> io::Result<usize> {
         self.write(|tx, revision| {
-            let all = records(tx, Some(mission_id), &self.limits.runs)?;
-            let changed = settle_results(all, latest, earlier, &self.limits.runs);
+            let all = records(tx, Some(mission_id), &self.current_limits().runs)?;
+            let changed = settle_results(all, latest, earlier, &self.current_limits().runs);
             for record in &changed {
-                put_run(tx, record, revision, &self.limits.runs)?;
+                put_run(tx, record, revision, &self.current_limits().runs)?;
             }
             Ok::<_, io::Error>(changed.len())
         })

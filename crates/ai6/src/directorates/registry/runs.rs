@@ -1632,7 +1632,7 @@ impl RunStore for FileRegistry {
             .into_iter()
             .filter(|record| record.mission_id == mission_id)
             .collect();
-        let changed = settle_results(records, latest, earlier, &self.limits.runs);
+        let changed = settle_results(records, latest, earlier, &self.current_limits().runs);
         for record in &changed {
             self.write_run(&self.run_path(&record.id), record)?;
         }
