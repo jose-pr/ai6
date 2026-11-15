@@ -34,10 +34,10 @@ coqui-aos = { git = "https://github.com/Boriken-Dev/coqui-aos", rev = "5176974f3
 anycfg = { git = "https://github.com/jose-pr/anycfg-rs", rev = "bf71f7097a550037972a0651e8bd35747b8dcd11" }
 # Shared access kinds, models, role authorizer and the five access providers, pinned to the
 # same guatiao revision as above so kinds and plugins agree.
-coqui-access = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "ce68969a397073dcef0a37fb00a83888b767e273" }
-coqui-roles = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "ce68969a397073dcef0a37fb00a83888b767e273" }
+coqui-access = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "d7f0f377e1b5d9bfb399e628592419a8ce0ed96d" }
+coqui-roles = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "d7f0f377e1b5d9bfb399e628592419a8ce0ed96d" }
 # Short-lived caches in front of the Directory and Authorizer a gateway loads.
-coqui-access-kit = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "ce68969a397073dcef0a37fb00a83888b767e273", features = ["cache"] }
+coqui-access-kit = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "d7f0f377e1b5d9bfb399e628592419a8ce0ed96d", features = ["cache"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
 clap = { version = "4", default-features = false, features = ["derive", "help", "std", "usage"] }
 serde = { version = "1", default-features = false, features = ["derive"] }
@@ -107,22 +107,22 @@ agent-client-protocol = { version = "3.6", default-features = false }
 futures = { version = "0.3", default-features = false, features = ["std", "async-await", "executor"] }
 # The ACP client above the SDK: connect, resume and turn state, permission deciding, line transports.
 # Pinned by revision until a release.
-coqui-acp = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "77f7a9d692844ce256e2c7cbda509ade6917768e" }
+coqui-acp = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "af005f0f1b49e0b0ec5dff6a6e9b0bca206d3e83" }
 # The agent run kind a handler returns and its events, shared with every project hosting agent
 # providers. Same revision as coqui-acp, and on the same Guatiao revision as above.
-coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "77f7a9d692844ce256e2c7cbda509ade6917768e" }
+coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "af005f0f1b49e0b0ec5dff6a6e9b0bca206d3e83" }
 # The usage model (buckets, limits, spend) and the words that read a failed turn as a limit; the same
 # revision as coqui-acp.
-coqui-acp-api = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "77f7a9d692844ce256e2c7cbda509ade6917768e" }
+coqui-acp-api = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "af005f0f1b49e0b0ec5dff6a6e9b0bca206d3e83" }
 # The Antigravity quota reader (`antigravity`) and the usage tracker that merges readings; same revision.
-coqui-acp-harness = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "77f7a9d692844ce256e2c7cbda509ade6917768e", default-features = false }
+coqui-acp-harness = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "af005f0f1b49e0b0ec5dff6a6e9b0bca206d3e83", default-features = false }
 # Codex's app-server driver: reads an account's rate limits with no thread and no turn.
-coqui-acp-codex = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "77f7a9d692844ce256e2c7cbda509ade6917768e" }
+coqui-acp-codex = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "af005f0f1b49e0b0ec5dff6a6e9b0bca206d3e83" }
 # A2A 1.0 over a proven coqui-agentic-peer link, for Liaison. The three move together: coqui-a2a
 # names the link crate and its transport crate at these revisions.
-coqui-a2a = { git = "https://github.com/Boriken-Dev/coqui-a2a", rev = "a11a466c12b8c07ea8864e4159939a48b1fa457a" }
-coqui-agentic-peer = { git = "https://github.com/Boriken-Dev/coqui-agentic-peer", rev = "8dad1766ba1b925f2bee9ebd403805e42e6afc47" }
-coqui-transport-web = { git = "https://github.com/Boriken-Dev/coqui-transport-web", rev = "c8df84264ff8e60907f5cedf269104e91d5add22", features = ["websocket"] }
+coqui-a2a = { git = "https://github.com/Boriken-Dev/coqui-a2a", rev = "43050fc4d078fc0112e4b4a9e329ff028b91d32d" }
+coqui-agentic-peer = { git = "https://github.com/Boriken-Dev/coqui-agentic-peer", rev = "f45938e8cede85a2a2e00afedea1b4944f7c8a67" }
+coqui-transport-web = { git = "https://github.com/Boriken-Dev/coqui-transport-web", rev = "df5be67b3a18e23b2d0073eb0f795a49a4221c93", features = ["websocket"] }
 # Sends Moneypenny's tool calls through Universal Exports' own router; axum already builds it.
 tower = { version = "0.5", default-features = false, features = ["util"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
