@@ -22,6 +22,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - A Source provider answers `board_url`, the page where its instance's issues are read as a board (the
   `github`, `gitlab` and `jira` providers derive it from their settings, which also take a `board_url`); the
   Headquarters Station relays it (`SourceRead` `boards`).
+- Charges keep their area working. A charge is told of Missions it should look at (`stuck`: a Mission with no
+  Run holding it, `verifying`, queued, blocked or held for long, and for M a charge whose lease lapsed or
+  whose turn did not run), each once, with thresholds on the charge record (`stuck_run_lost_after`,
+  `stuck_verifying_after`, `stuck_queued_after`, `stuck_blocked_after`, `stuck_charge_after`; `none` turns one off).
+  The timer carries a health summary of the area, and `wake_every_idle` (default `none`) replaces `wake_every`
+  while the area has no open work. Every charge owns its area and fixes what it finds with `board`,
+  `settle_mission`, `retry_mission`, `resume_mission`, `cancel_mission`, `wake_charge` and `notify_person`
+  (M on all of AI6, a Station's charge on its Station, an Operation's on its Operation); M also decides
+  any Operation's verifying Mission. Each act is audited with the charge as the actor before it is taken.
+
 - The `acp` handler has an `abort_wait_ms` setting (5000): how long a Run ended without a close waits for the agent to take its `session/cancel` before the process is ended.
 - Outer Office has a Charges page: M's, each Operation's and each Station's charge with its Run's state, Agent and route,
   Station, last wake and what that turn recorded, and for a person with `charge.converse` a live view of the
@@ -215,6 +225,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Mission doubles the wait, up to the new `retry_backoff_max` (600 seconds). Neither has a floor.
 
 ### Fixed
+
+- A Run lost with its Station reported `working` for ever, a Run a redispatch replaced kept reporting `verifying`,
+  and a settled Mission left its earlier Runs reporting `verifying`. A lost Run now reports its Mission queued
+  until `on_lost` files it failed, and the results of every closed Run of a settled Mission end.
 
 - A remote-hands command could not run longer than a minute: the harness's MCP client gave up on
   `theater_run` first (Claude Code and Codex wait 60 s, Antigravity 180 s). The Station now tells the

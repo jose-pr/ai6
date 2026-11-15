@@ -2608,6 +2608,9 @@ pub trait RunStore {
     fn update_run(&self, id: &str, station: &str, fence: u64, update: RunUpdate) -> Result<RunRecord, RunError>
     fn lose_run(&self, id: &str, reason: &str) -> Result<RunRecord, RunError>
     fn latest_run(&self, mission_id: &str) -> io::Result<Option<RunRecord>>  // highest run
+    fn settle_results(&self, mission_id: &str, latest: &RunResult, earlier: &RunResult) -> io::Result<usize>
+        // gives each CLOSED Run of the Mission whose result is not an end (done, failed, abandoned, blown) a result:
+        // `latest` to the highest run, `earlier` to the rest; answers how many changed; for a Mission being ended or queued again
     fn record_verdict(&self, operation, mission_id, &MissionVerdict) -> Result<RunRecord, RunError>
         // on the latest run; NotFound, or Unsettled when it has not ended done or held or is not verifying
     fn record_recommendation(&self, operation, mission_id, &MissionVerdict) -> Result<RunRecord, RunError>
@@ -2624,7 +2627,8 @@ pub trait RunStore {
 characters) and moves its fencing token on, so the old holder's next write is `Stale`;
 `HeldBy` while the lease is live, `Ended` once closed. A `Lost` Run is closed like an
 `Ended` one: it cannot be taken or written. `recent` keeps the last 20 lines, each cut to
-300 characters.
+300 characters. It also sets the Run's result to `queued` (reason `LOST_REASON`): the Mission waits for
+another run until `on_lost` files it failed, when the Station settles the results to `failed`.
 
 A Station acts on a Run only while it holds the lease. `open_run` creates the
 record held by `new`'s Station; `take_run` renews the lease for the current holder, takes
@@ -3881,7 +3885,8 @@ impl ChargeScope { pub fn operation(&self) -> Option<&str>; pub fn station(&self
 /// `[charge.<scope>]`; ToValue, FromValue, Schema, Form; deny_unknown_fields.
 #[non_exhaustive] pub struct ChargeDefinition {
     pub agent: String, pub operation: Option<String>,   // operation: M's/a Station's Cables; an Operation's may only repeat its own
-    pub wake_every: TimeLimit,            // 3600; none: events only
+    pub wake_every: TimeLimit,            // 3600; while the area has open work (a Mission not over, a Report unassessed); none: events only
+    pub wake_every_idle: TimeLimit,       // none; as wake_every while the area has no open work: no timer turn
     pub max_turns_per_hour: Limit,        // 30, counted on the record across Stations
     pub max_events_per_turn: Limit,       // 50
     pub max_waiting_events: Limit,        // 500; past it the oldest are dropped and logged
@@ -3889,6 +3894,11 @@ impl ChargeScope { pub fn operation(&self) -> Option<&str>; pub fn station(&self
     pub lease: Seconds,                   // 60; a lapsed lease is taken over
     pub stall_after: TimeLimit,           // 1800; a Station charge: a Run quiet this long is told of and may be surrendered; none: the Run's own watchdog
     pub poll_frozen_after: TimeLimit,     // 600; M's charge: a Source poll in flight, or unfinished past its interval, this long is flagged; none: never
+    pub stuck_run_lost_after: TimeLimit,  // 600; a Mission working or claimed with no Run holding it, this long, is told as `stuck` (run-lost); none: never
+    pub stuck_verifying_after: TimeLimit, // 3600; verifying this long (counted from when first seen)
+    pub stuck_queued_after: TimeLimit,    // 900; queued this long with no Station taking it
+    pub stuck_blocked_after: TimeLimit,   // 3600; blocked or held this long
+    pub stuck_charge_after: TimeLimit,    // 600; M's charge: another charge whose lease lapsed, or whose last turn did not run, this long
 }
 impl ChargeDefinition {
     pub const DEFAULTS: Self; pub fn new(agent) -> Self;
@@ -5519,12 +5529,21 @@ read once at start. `with_registry(Arc<dyn RegistryBackend>)` replaces the
 Each scheduler round also tends the charges on the roster this Station may run
 (`docs/charges.md`): on a check-in it claims or renews each, closes one another Station took, and
 looks at its area (Missions of its Operation in `verifying`, quarantines, dark Stations for M,
-controls); every round it takes the charge's Cables, adds a `wake_every` timer, and starts one turn
+controls, and Missions judged stuck: `charges::area` reads the Run records and the queue for the
+charge's scope and tells each `stuck` Mission once per Run); every round it takes the charge's Cables,
+adds a `wake_every` timer (`wake_every_idle` while the area has no open work; the timer carries a
+health summary), and starts one turn
 of waiting events when the hour's `max_turns_per_hour` has room. The harness runs on this host in
 `<state dir>/charges/charge--<scope>`, started as `AgentStart.mission_id = "charge--<scope>"` (no
 Mission has that ID), resumed with the record's Run, or started fresh with the
 logbook when the resume is refused or fails before it answers. A Station's charge gets the
-Station tools (below) on its Cable endpoint, an Operation's `request_resources`, M's `raise_flag`.
+Station tools (below) on its Cable endpoint, an Operation's `request_resources`, M's `raise_flag`,
+and every charge the area tools (`charges::keep::AreaDesk`: `board`, `settle_mission`,
+`retry_mission`, `resume_mission`, `cancel_mission`, `wake_charge`, `notify_person`; a Station's also
+`mission_detail`, M's the decision tools for any Operation). Each is audited before it acts with
+`charge:<scope>` as the actor and checks the charge's lease. A Run lost with its Station reports
+`queued` (then `failed` once `on_lost` files it), and `RunStore::settle_results` ends the results of
+a Mission's closed Runs that still report work.
 The scan also tells a Station's charge of its Runs that made no progress for `stall_after`
 (`health`, flag `run-stalled`, keyed by Run) and of the controls that are requests of an
 Operation's 00 (`request`, with the Station's own `check`), M's of Source polls that froze

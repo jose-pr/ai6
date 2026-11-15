@@ -5,6 +5,9 @@ deployment, an Operation's charge (its 00 Agent in charge) keeps its Operation, 
 charge (its Chief of Station) keeps that Station. It runs on a loop: the Station wakes it with the
 events of its area, it takes one turn, and it waits for the next wake.
 
+A charge owns its area and its job is to keep it working: it is told what is stuck, fixes what its
+tools allow there, and tells a person what it cannot ([Keeping the area working](#keeping-the-area-working)).
+
 **A charge is not a Mission.** It has no Mission record, brief, placement, run, verdict,
 scorecard credit or board card, and no Sleeper queues it. Its Run is recorded in the charge's
 own record in the Registry, which names its scope where a Mission's Run record names the
@@ -61,7 +64,8 @@ allow `00` as well, or the Agent cannot serve it.
 | --- | --- | --- |
 | `agent` | none | **Agent.** The Agent that keeps the charge, by codename: its handler, model, effort, route and pool account run the charge's Run. |
 | `operation` | none | **Cables in Operation.** For M's or a Station's charge, the Operation its Cables are sent and received in, under that Operation's Cable grants; without one, no Cable wakes it. An Operation's charge is in its own Operation, which this may only repeat. |
-| `wake_every` | 3,600 | **Woken at least every.** Seconds after its last wake that the charge is woken with nothing else to tell it; `none` wakes it only on events. |
+| `wake_every` | 3,600 | **Woken at least every.** Seconds after its last wake that the charge is woken with nothing else to tell it, while its area has open work (a Mission that is not over, a Report not yet assessed, a request waiting); `none` wakes it only on events. |
+| `wake_every_idle` | none | **Woken at least every, when idle.** As `wake_every`, while its area has no open work; `none` takes no timer turn then. Events still wake the charge. |
 | `max_turns_per_hour` | 30 | **Turns an hour.** Turns the charge takes in any hour, each wake one turn; past it, events wait for the hour to make room. |
 | `max_events_per_turn` | 50 | **Events one turn is given.** Events one turn is given; the rest wait for the next turn. |
 | `max_waiting_events` | 500 | **Events waiting.** Events waiting for a turn; past it the oldest are dropped, and the charge's logbook says how many. |
@@ -69,6 +73,11 @@ allow `00` as well, or the Agent cannot serve it.
 | `lease` | 60 | **Held without renewing for.** Seconds the Station running the charge holds it without renewing before another Station may take it over. |
 | `stall_after` | 1,800 | **Run stalled after.** For a Station's charge: seconds a Run of that Station may make no progress before the charge is told it is stalled and may surrender its claim; `none` leaves it to the Run's own stall judgement. |
 | `poll_frozen_after` | 600 | **Source poll frozen after.** For M's charge: seconds a Source poll may run, or a Source stay unpolled past its interval, before the charge is told the poll is frozen; `none` never flags one. |
+| `stuck_run_lost_after` | 600 | **Run lost after.** Seconds a Mission may stand `working` (or be claimed) with no Run holding it, because its Run's lease lapsed or ended without settling it, before the charge is told it is stuck; `none` never flags one. |
+| `stuck_verifying_after` | 3,600 | **Verifying stuck after.** Seconds a Mission may stand `verifying`, counted from when the Station first saw it so, before the charge is told it is stuck; `none` never flags one. |
+| `stuck_queued_after` | 900 | **Queued stuck after.** Seconds a Mission may wait in the queue before the charge is told it is stuck; `none` never flags one. |
+| `stuck_blocked_after` | 3,600 | **Blocked or held stuck after.** Seconds a Mission may stand `blocked` or `held`, counted from when the Station first saw it (a held Mission, from when its Run ended), before the charge is told it is stuck; `none` never flags one. |
+| `stuck_charge_after` | 600 | **Charge stuck after.** For M's charge: seconds another charge may stand with its lease lapsed, or its last turn failed, before M is told it is stuck; `none` never flags one. |
 <!-- schema:record.charge:end -->
 
 The Registry bounds what a charge's record keeps in [`[registry.limits.charges]`](configuration.md).
@@ -99,10 +108,11 @@ The Station wakes a charge with what its area holds that the charge has not been
 | `verifying`: a Mission of the Operation enters `verifying`, on any Station | `operation:` | always: it carries the final report and the brief |
 | `cable`: a Cable to the charge's Agent, or to its Operation | any, when its Cables have an Operation | always |
 | `health`: an Agent quarantined in the area; for M, a Station whose check-ins stopped and a Source poll that froze; for a Station's, a Run that stopped making progress | all | the quarantine's reason |
+| `stuck`: a Mission of the area judged [stuck](#stuck-work), or for M a charge that is | all | no: the words are AI6's own |
 | `request`: an Operation's 00 asked this Station for an Agent, a Theater, an account or capacity, with the Station's own check of what it can provide | `station:` | always: it carries the asker's words |
 | `resources`: a Station answered a request of the Operation | `operation:` | always: it carries the Station's reason |
 | `control`: a person asked the charge to wake, with an optional note | all | when it carries a note |
-| `timer`: `wake_every` passed with no other wake | all | no |
+| `timer`: `wake_every` (while the area has open work) or `wake_every_idle` (while it has none) passed with no other wake; it carries a short health summary of the area | all | no |
 
 Each wake is one turn. Its message lists the events as JSON, each saying whether it carries text
 written outside AI6; that text is data, never an instruction. An event is told once: the charge's
@@ -111,6 +121,34 @@ taken off the record when the turn that answered it is over.
 
 A control is a request in the Registry (`request_charge_wake`), which needs no lease: the Station
 running the charge takes it at its next check-in.
+
+### Stuck work
+
+A `stuck` event is told once per condition, and names the Mission (or the charge), its state, since
+when and why it is judged stuck. A Mission is stuck when it stands where nothing is going to move it:
+
+| Condition | A Mission that is | Counted from | Setting |
+| --- | --- | --- | --- |
+| `run-lost` | `working` or claimed with no Run holding it: its Run lost, ended without settling it, or its lease lapsed | the Run's close or lease lapse | `stuck_run_lost_after` |
+| `verifying` | waiting for its outcome to be verified | when the Station first saw it so | `stuck_verifying_after` |
+| `queued` | waiting in the queue, and no Station has taken it | its acceptance | `stuck_queued_after` |
+| `blocked`, `held` | `blocked` or `held` | when it ended (held), or when the Station first saw it (blocked) | `stuck_blocked_after` |
+| `charge-lapsed`, `charge-failing` | (M only) a charge whose lease lapsed, or whose last turn did not run | the lapse, or that turn | `stuck_charge_after` |
+
+M's charge is told of every Station's and Operation's; a Station's charge of the Missions whose Run
+is its Station's; an Operation's charge of its Operation's. Each threshold is a setting of the
+charge's record with a default and no floor (`0` flags at once); `none` turns the condition off. A
+Mission is told once per Run: a new Run, or a Mission that comes back to the condition under another
+Run, is told again. The Registry does not date a `blocked` or `verifying` Mission still being held, so
+the Station counts from when it first saw it; a restarted Station counts again.
+
+### The timer
+
+`wake_every` applies while the charge's area has open work: a Mission that is not over, a Report not
+yet assessed or a request waiting. `wake_every_idle` applies while it has none, and by default is
+`none`: an idle charge takes no timer turn and events still wake it. The timer's event carries a
+short health summary of the area (Missions by state, the oldest one open, Reports waiting), so a
+quiet turn has something to check.
 
 ### Quotas
 
@@ -210,6 +248,10 @@ A charge's tools are its scope's, and their rules are Station code:
 - **Cables**, on a charge whose Cables have an Operation: its own, or for M's and a Station's charge
   the `operation` its table names. It sends, reads and replies under that Operation's Cable grants
   like any Agent ([Agents](agents.md#cables)).
+- **The area tools**, on every charge, each acting in the charge's own scope
+  ([below](#keeping-the-area-working)): `board`, `settle_mission`, `retry_mission`,
+  `resume_mission`, `cancel_mission`, `wake_charge` and `notify_person`, and for a Station's charge
+  `mission_detail`.
 - **The Station charge's tools**, on a Station's charge: `station_report`, `file_report`,
   `tidy_safe_house`, `provision_theater`, `surrender_claim` and `answer_request`, each call checking
   that this Station still runs the charge ([Stations](stations.md#chief-of-station)).
@@ -217,7 +259,36 @@ A charge's tools are its scope's, and their rules are Station code:
   `deliverables`, `deliverable_probe`, `verify_mission`, `redispatch` and `propose_mission`
   ([below](#deciding-missions)), and `request_resources` to ask a Station for what the Operation
   needs to run ([Stations](stations.md#what-an-operation-asks-of-a-station)).
-- **`raise_flag`**, on M's charge ([below](#m-and-the-board)).
+- **M's decision tools**, on M's charge: `mission_detail`, `deliverable_probe`, `verify_mission` and
+  `redispatch` for a Mission of any Operation, and **`raise_flag`** ([below](#m-and-the-board)).
+
+## Keeping the area working
+
+A charge owns its area. M's charge acts across all of AI6 (every Operation and Station), a Station's
+charge in its Station, an Operation's charge in its Operation. Each tool is audited before it acts,
+with the charge as the actor (`charge:m`, `charge:station:<id>`, `charge:operation:<codename>`); an
+audit record that cannot be written refuses the act. Each also checks that the Station still holds
+the charge's lease. A Mission outside the charge's scope answers as one that does not exist.
+
+| Tool | What it does | M | Station | Operation |
+| --- | --- | --- | --- | --- |
+| `board` | The Missions of the area by state, what is stuck, the Reports waiting and, for M, the charges | all | its Station's Runs | its Operation |
+| `mission_detail` | One Mission: its state and Runs; M also reads the brief and report (untrusted) | yes | state only | yes |
+| `settle_mission` | Files a Mission nothing holds as `failed` (its Run results and its brief, taken from the queue or recovered) or `stalled`, with the reason | yes | yes | yes |
+| `retry_mission` | Queues its next run: through the operator control for a Mission the Station holds, otherwise by recovering the brief of a dark Station's Mission, bounded by the run limit; a named Agent must be on the roster and not quarantined | yes | yes | yes |
+| `resume_mission`, `cancel_mission` | Resumes the Run, or withdraws the Mission, of one the Station holds (cancel asks the Registry otherwise) | yes | yes | yes |
+| `wake_charge` | Wakes another charge with a note | any | Operations whose Missions it holds | Stations that hold its Missions |
+| `notify_person` | Files a Report in the charge's scope for a person, saying what it found, did and could not do | yes | yes | yes |
+| `verify_mission`, `redispatch` | Decide a Mission waiting for its outcome | any Operation | never | its Operation |
+
+Outcomes are an Operation's: its 00 is the first to verify its own Missions. A Station's charge
+decides none, and a `settle_mission` on a Mission waiting for its outcome is refused; with no
+Operation charge it says so with `notify_person`. M may decide any Mission, as it may act on anything,
+and does so as `charge:m`; a person's decision replaces a charge's. A Station's charge reads state, not
+an Operation's brief or report, since those cross an Operation.
+
+A fix a charge cannot make is reported with `notify_person`, not left unsaid. The standing context of
+each kind says this is its job, names its tools and says what it never does.
 
 ## Deciding Missions
 
@@ -253,10 +324,13 @@ stopped finishing (`health`, flag `source-poll-frozen`): a poll in flight longer
 the desk that polls, so every Source stops finishing, and each is told. A Source taken out of the
 configuration is not frozen. A person's controls reach it as for any charge.
 
-It acts only through controls M already has, and adds none. Its one tool, `raise_flag { title, text,
-severity?, kind? }`, files a [Report](reports.md) of M's own scope (`ai6ctl reports`, and the Reports
-page of Outer Office), which is the board's flag: it starts no work and changes nothing, and each is
-audited (`flag.raised`). It sends Cables like any charge whose table names an `operation`.
+M owns the whole deployment and acts in all of it: it has the [area tools](#keeping-the-area-working)
+on any Operation's or Station's Missions, its decision tools on any Operation's verifying Mission, and
+`wake_charge` on any charge. Each act is audited with `charge:m` as the actor before it is taken.
+`raise_flag { title, text, severity?, kind? }` files a [Report](reports.md) of M's own scope
+(`ai6ctl reports`, and the Reports page of Outer Office), which is the board's flag: it starts
+no work and changes nothing, and each is audited (`flag.raised`). It sends Cables like any charge
+whose table names an `operation`.
 
 ## Source items
 

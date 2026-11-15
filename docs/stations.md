@@ -284,6 +284,20 @@ the logbook entry stands and the answer says why.
 - `answer_request { request, operation, kind, name?, decision, reason? }`: see
   [What an Operation asks of a Station](#what-an-operation-asks-of-a-station).
 
+### Keeping the Station's Missions working
+
+The Chief of Station is told of `stuck` Missions whose Run is its Station's (a Run lost or ended
+without settling its Mission, a Mission `blocked` or `held` for long; see
+[Stuck work](charges.md#stuck-work)) and fixes what it can with the area tools: `board` and
+`mission_detail` (state and Runs, never the Operation's brief or report), `settle_mission` to file a
+Mission nothing holds as failed or stalled, `retry_mission`, `resume_mission` and `cancel_mission`
+for the Missions it holds, `wake_charge` to ask the Operation's charge to look, and `notify_person`
+for what it cannot fix. Each act is audited with `charge:station:<id>` as the actor before it is taken.
+It decides no outcome: a Mission waiting to be verified is its Operation's 00's, and when the
+Operation has no charge the Chief says so with `notify_person`. A Mission of another Station answers
+as one that does not exist. The thresholds are settings of the charge record
+([Charges](charges.md#configuration)).
+
 ### Runs that make no progress
 
 A Run counts as stalled when it has made no progress (output, or an operator's input) for the charge's
