@@ -7805,6 +7805,89 @@
             "attention_history": 604800.0
           }
         },
+        "search": {
+          "type": "object",
+          "properties": {
+            "page": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Missions in a page",
+              "description": "Missions in a page when the request names no limit, at least 1.",
+              "default": 25
+            },
+            "max_page": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Most Missions a page may ask for",
+              "description": "The most Missions a page may ask for.",
+              "default": 200
+            },
+            "scan": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Briefs one search reads",
+              "description": "The most briefs one search reads from the Registry; a Mission beyond them is not found.",
+              "default": 20000
+            },
+            "filter_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest search filter",
+              "description": "The most bytes any one search filter may carry.",
+              "default": 256
+            }
+          },
+          "additionalProperties": false,
+          "title": "Searching Missions",
+          "description": "`[search]`: searching Missions.",
+          "default": {
+            "page": 25,
+            "max_page": 200,
+            "scan": 20000,
+            "filter_bytes": 256
+          }
+        },
         "attach": {
           "type": "object",
           "properties": {
@@ -10727,6 +10810,89 @@
             "survey_entries": 500000,
             "reason_bytes": 2000,
             "audit_target_bytes": 500
+          }
+        },
+        "oversight": {
+          "type": "object",
+          "properties": {
+            "page": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Items in a page",
+              "description": "Items in a page when the charge names no limit, at least 1.",
+              "default": 25
+            },
+            "max_page": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Most items a page may ask for",
+              "description": "The most items a page may ask for.",
+              "default": 200
+            },
+            "scan": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Briefs one search reads",
+              "description": "The most briefs one search reads from the Registry; a Mission beyond them is not found.",
+              "default": 20000
+            },
+            "text_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest text read or searched",
+              "description": "Bytes of a brief, an outcome or a search text; a longer brief or outcome is cut and says so.",
+              "default": 16384
+            }
+          },
+          "additionalProperties": false,
+          "title": "The Operation charge's reads",
+          "description": "`[oversight]`: what an Operation's charge reads of its Operation.",
+          "default": {
+            "page": 25,
+            "max_page": 200,
+            "scan": 20000,
+            "text_bytes": 16384
           }
         },
         "probes": {
