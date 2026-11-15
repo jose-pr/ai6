@@ -780,6 +780,10 @@ enum MissionsCommand {
         /// A Station it may run on; repeat for several.
         #[arg(long = "station")]
         stations: Vec<String>,
+        /// The handle it is to have, in place of the Operation's next number: ASCII letters,
+        /// digits, '_' and '-'; refused when any Mission ever had it.
+        #[arg(long, conflicts_with_all = ["issue", "create_issue"])]
+        handle: Option<String>,
         /// The ticket it follows up, as TRACKER:ITEM.
         #[arg(long, conflicts_with = "create_issue")]
         issue: Option<String>,
@@ -797,6 +801,30 @@ enum MissionsCommand {
         /// several. A verifier checks them before the Mission is done.
         #[arg(long = "deliverable")]
         deliverables: Vec<String>,
+    },
+    /// Find Missions, newest first, among those you may read: by Operation, Agent, state, a piece
+    /// of the handle, a tracker item or words in the brief or the outcome. Every filter given
+    /// must match.
+    Search {
+        #[arg(long)]
+        operation: Option<String>,
+        #[arg(long)]
+        agent: Option<String>,
+        /// `new`, `held`, `claimed`, `done` or `failed`.
+        #[arg(long, value_parser = ["new", "held", "claimed", "done", "failed"])]
+        state: Option<String>,
+        /// A piece of the handle, or a former handle whole.
+        #[arg(long)]
+        handle: Option<String>,
+        /// A tracker item's key, its number or its code.
+        #[arg(long)]
+        ticket: Option<String>,
+        /// Words that must each appear in the title, brief or outcome.
+        #[arg(long)]
+        text: Option<String>,
+        /// The most Missions to list.
+        #[arg(long)]
+        limit: Option<usize>,
     },
     /// Ask the Station to read back what a verifying Mission was to deliver and wait for what it
     /// found (needs mission.verify). The Station reports each deliverable found, missing,
@@ -1802,6 +1830,54 @@ async fn run() -> Result<(), String> {
         }
         Command::Missions {
             command:
+                Some(MissionsCommand::Search {
+                    operation,
+                    agent,
+                    state,
+                    handle,
+                    ticket,
+                    text,
+                    limit,
+                }),
+            ..
+        } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            let mut url = server.clone();
+            url.path_segments_mut()
+                .map_err(|_| "Universal Exports URL cannot contain path segments".to_owned())?
+                .extend(["v1", "missions", "search"]);
+            {
+                let mut query = url.query_pairs_mut();
+                for (name, value) in [
+                    ("operation", operation),
+                    ("agent", agent),
+                    ("state", state),
+                    ("handle", handle),
+                    ("ticket", ticket),
+                    ("text", text),
+                    ("limit", limit.map(|limit| limit.to_string())),
+                ] {
+                    if let Some(value) = value {
+                        query.append_pair(name, &value);
+                    }
+                }
+            }
+            let found = access::exchange(&client, &token, Method::GET, url, None, None).await?;
+            for mission in found["missions"].as_array().into_iter().flatten() {
+                println!(
+                    "{}\t{}\t{}\t{}",
+                    access::text(&mission["handle"]),
+                    access::text(&mission["state"]),
+                    access::text(&mission["operation_id"]),
+                    access::text(&mission["title"])
+                );
+            }
+            if found["more"] == true {
+                println!("more matched; narrow the search or raise --limit");
+            }
+        }
+        Command::Missions {
+            command:
                 Some(MissionsCommand::Create {
                     operation,
                     title,
@@ -1810,6 +1886,7 @@ async fn run() -> Result<(), String> {
                     role,
                     tags,
                     stations,
+                    handle,
                     issue,
                     create_issue,
                     issue_title,
@@ -1828,6 +1905,9 @@ async fn run() -> Result<(), String> {
             )?;
             if !deliverables.is_empty() {
                 body["deliverables"] = serde_json::json!(deliverables);
+            }
+            if let Some(handle) = handle {
+                body["handle"] = serde_json::json!(handle);
             }
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             let mut url = server.clone();
@@ -4910,6 +4990,89 @@ mod tests {
                 .unwrap(),
             "Bearer user-token"
         );
+    }
+
+    #[test]
+    fn a_mission_create_may_ask_for_its_handle_and_missions_search_takes_its_filters() {
+        let create = Cli::try_parse_from([
+            "ai6ctl",
+            "missions",
+            "create",
+            "--operation",
+            "G",
+            "--title",
+            "t",
+            "--prompt",
+            "p",
+            "--handle",
+            "G-retake",
+        ])
+        .unwrap();
+        let Command::Missions {
+            command: Some(MissionsCommand::Create { handle, .. }),
+            ..
+        } = create.command
+        else {
+            panic!("a create");
+        };
+        assert_eq!(handle.as_deref(), Some("G-retake"));
+        // A ticket numbers the Mission, so it cannot also be given a handle.
+        assert!(
+            Cli::try_parse_from([
+                "ai6ctl",
+                "missions",
+                "create",
+                "--operation",
+                "G",
+                "--title",
+                "t",
+                "--prompt",
+                "p",
+                "--handle",
+                "G-x",
+                "--issue",
+                "gh:o/r#1",
+            ])
+            .is_err()
+        );
+        let search = Cli::try_parse_from([
+            "ai6ctl",
+            "missions",
+            "search",
+            "--operation",
+            "G",
+            "--state",
+            "done",
+            "--text",
+            "linker fails",
+            "--limit",
+            "5",
+        ])
+        .unwrap();
+        let Command::Missions {
+            command:
+                Some(MissionsCommand::Search {
+                    operation,
+                    state,
+                    text,
+                    limit,
+                    ..
+                }),
+            ..
+        } = search.command
+        else {
+            panic!("a search");
+        };
+        assert_eq!(
+            (
+                operation.as_deref(),
+                state.as_deref(),
+                text.as_deref(),
+                limit
+            ),
+            (Some("G"), Some("done"), Some("linker fails"), Some(5))
+        );
+        assert!(Cli::try_parse_from(["ai6ctl", "missions", "search", "--state", "lost"]).is_err());
     }
 
     #[test]
