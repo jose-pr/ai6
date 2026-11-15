@@ -5741,8 +5741,30 @@
           ],
           "format": "seconds",
           "title": "Woken at least every",
-          "description": "Seconds after its last wake that the charge is woken with nothing else to tell it; `none` wakes it only on events.",
+          "description": "Seconds after its last wake that the charge is woken with nothing else to tell it, while its area has open work (a Mission that is not over, a Report not yet assessed, a request waiting); `none` wakes it only on events.",
           "default": 3600.0
+        },
+        "wake_every_idle": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "none"
+              ],
+              "x-enum-labels": {
+                "none": "No limit"
+              }
+            }
+          ],
+          "format": "seconds",
+          "title": "Woken at least every, when idle",
+          "description": "As `wake_every`, while its area has no open work; `none` takes no timer turn then. Events still wake the charge.",
+          "default": "none"
         },
         "max_turns_per_hour": {
           "anyOf": [
@@ -5877,6 +5899,116 @@
           "format": "seconds",
           "title": "Source poll frozen after",
           "description": "For M's charge: seconds a Source poll may run, or a Source stay unpolled past its interval, before the charge is told the poll is frozen; `none` never flags one.",
+          "default": 600.0
+        },
+        "stuck_run_lost_after": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "none"
+              ],
+              "x-enum-labels": {
+                "none": "No limit"
+              }
+            }
+          ],
+          "format": "seconds",
+          "title": "Run lost after",
+          "description": "Seconds a Mission may stand `working` (or be claimed) with no Run holding it, because its Run's lease lapsed or ended without settling it, before the charge is told it is stuck; `none` never flags one.",
+          "default": 600.0
+        },
+        "stuck_verifying_after": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "none"
+              ],
+              "x-enum-labels": {
+                "none": "No limit"
+              }
+            }
+          ],
+          "format": "seconds",
+          "title": "Verifying stuck after",
+          "description": "Seconds a Mission may stand `verifying`, counted from when the Station first saw it so, before the charge is told it is stuck; `none` never flags one.",
+          "default": 3600.0
+        },
+        "stuck_queued_after": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "none"
+              ],
+              "x-enum-labels": {
+                "none": "No limit"
+              }
+            }
+          ],
+          "format": "seconds",
+          "title": "Queued stuck after",
+          "description": "Seconds a Mission may wait in the queue before the charge is told it is stuck; `none` never flags one.",
+          "default": 900.0
+        },
+        "stuck_blocked_after": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "none"
+              ],
+              "x-enum-labels": {
+                "none": "No limit"
+              }
+            }
+          ],
+          "format": "seconds",
+          "title": "Blocked or held stuck after",
+          "description": "Seconds a Mission may stand `blocked` or `held`, counted from when the Station first saw it (a held Mission, from when its Run ended), before the charge is told it is stuck; `none` never flags one.",
+          "default": 3600.0
+        },
+        "stuck_charge_after": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "none"
+              ],
+              "x-enum-labels": {
+                "none": "No limit"
+              }
+            }
+          ],
+          "format": "seconds",
+          "title": "Charge stuck after",
+          "description": "For M's charge: seconds another charge may stand with its lease lapsed, or its last turn failed, before M is told it is stuck; `none` never flags one.",
           "default": 600.0
         }
       },

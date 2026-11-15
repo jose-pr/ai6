@@ -19,16 +19,16 @@ use crate::station::sources::SourceDesk;
 use crate::{Source, SourcePoll};
 
 /// Only one test at a time keeps M's charge: its Run name is the same in every Station.
-static M_CHARGE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+pub(super) static M_CHARGE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// Every event a stand-in was woken for, with the charge's Run name, and what each tool answered.
-static HEARD: Mutex<Vec<(String, Value)>> = Mutex::new(Vec::new());
+pub(super) static HEARD: Mutex<Vec<(String, Value)>> = Mutex::new(Vec::new());
 static ANSWERED: Mutex<Vec<(String, String, String)>> = Mutex::new(Vec::new());
-static TOOL_NAMES: Mutex<BTreeMap<String, Vec<String>>> = Mutex::new(BTreeMap::new());
+pub(super) static TOOL_NAMES: Mutex<BTreeMap<String, Vec<String>>> = Mutex::new(BTreeMap::new());
 
 /// Makes the charge `key` act on each event it is woken for: `handle` is given its tools and the
 /// event.
-fn acting(key: String, handle: impl Fn(&Tools, &Value) + Send + Sync + 'static) {
+pub(super) fn acting(key: String, handle: impl Fn(&Tools, &Value) + Send + Sync + 'static) {
     let handle = Arc::new(handle);
     let name = key.clone();
     TURNS.lock().unwrap().insert(
@@ -58,7 +58,7 @@ fn acting(key: String, handle: impl Fn(&Tools, &Value) + Send + Sync + 'static) 
 }
 
 /// Calls `tool` as the charge `key` and keeps what it answered.
-fn call(tools: &Tools, key: &str, tool: &str, arguments: Value) -> String {
+pub(super) fn call(tools: &Tools, key: &str, tool: &str, arguments: Value) -> String {
     let answer = tools.call(tool, arguments);
     ANSWERED
         .lock()
@@ -67,7 +67,7 @@ fn call(tools: &Tools, key: &str, tool: &str, arguments: Value) -> String {
     answer
 }
 
-fn heard(key: &str, kind: &str) -> Vec<Value> {
+pub(super) fn heard(key: &str, kind: &str) -> Vec<Value> {
     HEARD
         .lock()
         .unwrap()
@@ -77,7 +77,7 @@ fn heard(key: &str, kind: &str) -> Vec<Value> {
         .collect()
 }
 
-fn answered(key: &str, tool: &str) -> Vec<String> {
+pub(super) fn answered(key: &str, tool: &str) -> Vec<String> {
     ANSWERED
         .lock()
         .unwrap()
@@ -87,7 +87,7 @@ fn answered(key: &str, tool: &str) -> Vec<String> {
         .collect()
 }
 
-fn audits(state: &DaemonState, action: &str) -> usize {
+pub(super) fn audits(state: &DaemonState, action: &str) -> usize {
     state
         .intake
         .audit_records()
@@ -100,7 +100,7 @@ fn audits(state: &DaemonState, action: &str) -> usize {
 /// A Station `station` whose Operation `TAG` has a charge, whose own charge is kept by Agent
 /// `sTAG` and, with `with_m`, whose M's charge by `mTAG`. Agent `M` runs Missions on the
 /// recorder; `operation` adds to the Operation's table or follows it with another.
-fn kit(
+pub(super) fn kit(
     root: &Path,
     tag: &str,
     station: &str,
@@ -118,13 +118,15 @@ fn kit(
         charge_agent(format!("s{tag}")),
         charge_agent(format!("m{tag}")),
     );
+    // The settings land in the Operation's charge table too, which comes first.
     let mut settings = format!(
-        "[charge.\"station:{station}\"]\nagent = \"s{tag}\"\nwake_every = \"none\"\n\
-         {station_settings}\n"
+        "{station_settings}\n[charge.\"station:{station}\"]\nagent = \"s{tag}\"\n\
+         wake_every = \"none\"\n{station_settings}\n"
     );
     if with_m {
         settings.push_str(&format!(
-            "[charge.m]\nagent = \"m{tag}\"\nwake_every = \"none\"\npoll_frozen_after = 1\n"
+            "[charge.m]\nagent = \"m{tag}\"\nwake_every = \"none\"\npoll_frozen_after = 1\n\
+             {station_settings}\n"
         ));
     }
     station_with(
@@ -141,18 +143,18 @@ fn kit(
     )
 }
 
-fn station_key(station: &str) -> String {
+pub(super) fn station_key(station: &str) -> String {
     charges::run_key(&ChargeScope::Station(station.to_owned()))
 }
 
-fn wake(state: &DaemonState, scope: &str, note: &str) {
+pub(super) fn wake(state: &DaemonState, scope: &str, note: &str) {
     state
         .intake
         .request_charge_wake(scope, "person-1", note)
         .unwrap();
 }
 
-fn turns_of(state: &DaemonState, scope: &str) -> usize {
+pub(super) fn turns_of(state: &DaemonState, scope: &str) -> usize {
     state.intake.charge(scope).unwrap().map_or(0, |record| {
         record
             .logbook
@@ -277,7 +279,11 @@ async fn a_00_asks_the_station_for_a_theater_and_its_charge_answers_with_the_the
 }
 
 /// [`tend_until`] on the Headquarters Station, which keeps M's charge.
-async fn headquarters_until(state: &DaemonState, what: &str, mut done: impl FnMut() -> bool) {
+pub(super) async fn headquarters_until(
+    state: &DaemonState,
+    what: &str,
+    mut done: impl FnMut() -> bool,
+) {
     let deadline = Instant::now() + Duration::from_secs(90);
     while !done() {
         assert!(Instant::now() < deadline, "never happened: {what}");
@@ -286,7 +292,7 @@ async fn headquarters_until(state: &DaemonState, what: &str, mut done: impl FnMu
     }
 }
 
-fn names_of(tag: &str) -> String {
+pub(super) fn names_of(tag: &str) -> String {
     names(tag).0
 }
 

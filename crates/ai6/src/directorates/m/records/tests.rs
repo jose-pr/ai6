@@ -289,13 +289,19 @@ fn full_example(record: ConfigRecord) -> Value {
             "agent": "M",
             "operation": "G",
             "wake_every": "none",
+            "wake_every_idle": 7200,
             "max_turns_per_hour": 12,
             "max_events_per_turn": 20,
             "max_waiting_events": "none",
             "turn_timeout": 600,
             "lease": 30,
             "stall_after": 900,
-            "poll_frozen_after": "none"
+            "poll_frozen_after": "none",
+            "stuck_run_lost_after": 300,
+            "stuck_verifying_after": "none",
+            "stuck_queued_after": 0,
+            "stuck_blocked_after": 1800,
+            "stuck_charge_after": 120
         }),
         ConfigRecord::Compartment => json!({
             "description": "Release work",

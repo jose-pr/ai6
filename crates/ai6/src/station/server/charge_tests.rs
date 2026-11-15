@@ -7,6 +7,8 @@ mod assess;
 mod attach;
 #[cfg(feature = "cables-mcp")]
 mod decides;
+#[cfg(feature = "cables-mcp")]
+mod keep;
 mod sources;
 #[cfg(feature = "cables-mcp")]
 mod station;
@@ -278,7 +280,14 @@ fn station_with(
     let (operation, agent) = names(tag);
     std::fs::write(
         root.join("charges.toml"),
-        format!("[charge.\"operation:{operation}\"]\nagent = \"{agent}\"\nwake_every = \"none\"\n{settings}"),
+        format!(
+            "[charge.\"operation:{operation}\"]\nagent = \"{agent}\"\n{}{settings}",
+            if settings.contains("wake_every = ") {
+                ""
+            } else {
+                "wake_every = \"none\"\n"
+            }
+        ),
     )
     .unwrap();
     let checkout = root.join("checkout");

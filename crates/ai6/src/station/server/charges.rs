@@ -22,6 +22,7 @@
 //! for each one entering `verifying` with the final report, the brief and the declared
 //! deliverables, it probes and reads the work, then decides through [`decide::DecisionDesk`].
 
+pub(super) mod area;
 #[cfg(feature = "cables-mcp")]
 pub(super) mod decide;
 mod turn;
@@ -90,8 +91,8 @@ impl ChargeDesk {
 /// One event of a charge's area, waiting for its turn.
 #[derive(Debug, Clone, Serialize)]
 struct ChargeEvent {
-    /// `verifying`, `cable`, `health`, `control`, `request` (an Operation's ask of a Station),
-    /// `resources` (a Station's answer) or `timer`.
+    /// `verifying`, `cable`, `health`, `stuck`, `control`, `request` (an Operation's ask of a
+    /// Station), `resources` (a Station's answer) or `timer`.
     kind: &'static str,
     /// When the Station saw it, as Unix seconds.
     at: f64,
@@ -139,6 +140,12 @@ pub(super) struct Live {
     claimed_at: f64,
     /// A turn is under way.
     busy: AtomicBool,
+    /// Whether the last look found its area with open work; the timer that applies follows it.
+    open_work: AtomicBool,
+    /// The health summary of its area from the last look, which a timer wake carries.
+    summary: Mutex<Option<serde_json::Value>>,
+    /// When each Mission was first seen blocked or held, which the Registry does not date.
+    first_seen: Mutex<BTreeMap<String, f64>>,
     /// Set when it stops: its tools refuse from then on.
     closing: AtomicBool,
     /// Before this time (Unix seconds) no turn starts: its harness last failed to start.
@@ -419,6 +426,9 @@ async fn open(state: &DaemonState, charge: &Charge, record: &ChargeRecord) -> Ar
             fence: AtomicU64::new(record.fence),
             claimed_at: unix_now(),
             busy: AtomicBool::new(false),
+            open_work: AtomicBool::new(true),
+            summary: Mutex::new(None),
+            first_seen: Mutex::new(BTreeMap::new()),
             closing: AtomicBool::new(false),
             retry_at: Mutex::new(0.0),
             waiting: Mutex::new(VecDeque::new()),
@@ -659,6 +669,36 @@ fn frozen_polls(state: &DaemonState, live: &Live) -> Vec<ChargeEvent> {
         .collect()
 }
 
+/// Looks at the charge's area: remembers whether it has open work and its health summary, and
+/// answers a `stuck` event for each Mission or charge judged stuck. Blocks on the Registry.
+fn look_at_area(state: &DaemonState, live: &Live) -> Vec<ChargeEvent> {
+    let charge = Charge::new(live.scope.clone(), live.settings().settings);
+    let now = unix_now();
+    let mut first_seen = live
+        .first_seen
+        .lock()
+        .map(|seen| seen.clone())
+        .unwrap_or_default();
+    let survey = area::survey(state, &charge, &mut first_seen, now);
+    if let Ok(mut seen) = live.first_seen.lock() {
+        *seen = first_seen;
+    }
+    live.open_work
+        .store(survey.has_open_work(), Ordering::Release);
+    if let Ok(mut summary) = live.summary.lock() {
+        *summary = Some(survey.summary());
+    }
+    survey
+        .stuck
+        .iter()
+        .map(|stuck| {
+            // Run IDs, handles and reasons are AI6's own words; nothing here is written outside.
+            ChargeEvent::new("stuck", false, area::stuck_detail(stuck, now))
+                .keyed(stuck.key.clone())
+        })
+        .collect()
+}
+
 /// What the charge's area holds that it has not been told: controls, Missions entering
 /// `verifying`, quarantines and dark Stations. Blocks on the Registry.
 fn scan(state: &DaemonState, live: &Live, record: &ChargeRecord) -> Vec<ChargeEvent> {
@@ -707,6 +747,7 @@ fn scan(state: &DaemonState, live: &Live, record: &ChargeRecord) -> Vec<ChargeEv
             ),
         }
     }
+    found.extend(look_at_area(state, live));
     if let Ok(quarantines) = state.intake.quarantines() {
         for quarantine in quarantines {
             let ours = match &live.scope {
@@ -836,16 +877,23 @@ async fn wake(state: &DaemonState, live: &Arc<Live>) {
             .ok()
             .and_then(|last| *last)
             .unwrap_or(live.claimed_at);
-        if charge
-            .settings
-            .wake_every
+        // While the area has open work the charge looks in on it every `wake_every`; with none, every
+        // `wake_every_idle`, which by default is never.
+        let open = live.open_work.load(Ordering::Acquire);
+        let every = if open {
+            charge.settings.wake_every
+        } else {
+            charge.settings.wake_every_idle
+        };
+        if every
             .get()
             .is_some_and(|every| now - since >= every.as_secs_f64())
         {
+            let area = live.summary.lock().ok().and_then(|summary| summary.clone());
             live.push(ChargeEvent::new(
                 "timer",
                 false,
-                serde_json::json!({ "since": since }),
+                serde_json::json!({ "since": since, "open_work": open, "area": area }),
             ));
         } else {
             return;

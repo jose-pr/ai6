@@ -107,11 +107,17 @@ pub struct ChargeDefinition {
     /// its own Operation, which this may only repeat.
     #[schema(title = "Cables in Operation", advanced)]
     pub operation: Option<String>,
-    /// Seconds after its last wake that the charge is woken with nothing else to tell it; `none`
-    /// wakes it only on events.
+    /// Seconds after its last wake that the charge is woken with nothing else to tell it, while
+    /// its area has open work (a Mission that is not over, a Report not yet assessed, a request
+    /// waiting); `none` wakes it only on events.
     #[schema(title = "Woken at least every")]
     #[map(default = ChargeDefinition::DEFAULTS.wake_every)]
     pub wake_every: TimeLimit,
+    /// As `wake_every`, while its area has no open work; `none` takes no timer turn then. Events
+    /// still wake the charge.
+    #[schema(title = "Woken at least every, when idle")]
+    #[map(default = ChargeDefinition::DEFAULTS.wake_every_idle)]
+    pub wake_every_idle: TimeLimit,
     /// Turns the charge takes in any hour, each wake one turn; past it, events wait for the hour to
     /// make room.
     #[schema(title = "Turns an hour")]
@@ -146,6 +152,33 @@ pub struct ChargeDefinition {
     #[schema(title = "Source poll frozen after")]
     #[map(default = ChargeDefinition::DEFAULTS.poll_frozen_after)]
     pub poll_frozen_after: TimeLimit,
+    /// Seconds a Mission may stand `working` (or be claimed) with no Run holding it, because its
+    /// Run's lease lapsed or ended without settling it, before the charge is told it is stuck;
+    /// `none` never flags one.
+    #[schema(title = "Run lost after")]
+    #[map(default = ChargeDefinition::DEFAULTS.stuck_run_lost_after)]
+    pub stuck_run_lost_after: TimeLimit,
+    /// Seconds a Mission may stand `verifying`, counted from when the Station first saw it so,
+    /// before the charge is told it is stuck; `none` never flags one.
+    #[schema(title = "Verifying stuck after")]
+    #[map(default = ChargeDefinition::DEFAULTS.stuck_verifying_after)]
+    pub stuck_verifying_after: TimeLimit,
+    /// Seconds a Mission may wait in the queue before the charge is told it is stuck; `none` never
+    /// flags one.
+    #[schema(title = "Queued stuck after")]
+    #[map(default = ChargeDefinition::DEFAULTS.stuck_queued_after)]
+    pub stuck_queued_after: TimeLimit,
+    /// Seconds a Mission may stand `blocked` or `held`, counted from when the Station first saw it
+    /// (a held Mission, from when its Run ended), before the charge is told it is stuck; `none`
+    /// never flags one.
+    #[schema(title = "Blocked or held stuck after")]
+    #[map(default = ChargeDefinition::DEFAULTS.stuck_blocked_after)]
+    pub stuck_blocked_after: TimeLimit,
+    /// For M's charge: seconds another charge may stand with its lease lapsed, or its last turn
+    /// failed, before M is told it is stuck; `none` never flags one.
+    #[schema(title = "Charge stuck after")]
+    #[map(default = ChargeDefinition::DEFAULTS.stuck_charge_after)]
+    pub stuck_charge_after: TimeLimit,
 }
 
 impl ChargeDefinition {
@@ -154,6 +187,7 @@ impl ChargeDefinition {
         agent: String::new(),
         operation: None,
         wake_every: TimeLimit::secs(3_600),
+        wake_every_idle: TimeLimit::UNBOUNDED,
         max_turns_per_hour: Limit::at(30),
         max_events_per_turn: Limit::at(50),
         max_waiting_events: Limit::at(500),
@@ -161,6 +195,11 @@ impl ChargeDefinition {
         lease: Seconds::new(60),
         stall_after: TimeLimit::secs(1_800),
         poll_frozen_after: TimeLimit::secs(600),
+        stuck_run_lost_after: TimeLimit::secs(600),
+        stuck_verifying_after: TimeLimit::secs(3_600),
+        stuck_queued_after: TimeLimit::secs(900),
+        stuck_blocked_after: TimeLimit::secs(3_600),
+        stuck_charge_after: TimeLimit::secs(600),
     };
 
     /// A charge kept by `agent`, every other setting at its default.
