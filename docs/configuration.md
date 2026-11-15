@@ -84,17 +84,13 @@ password = { provider = "file", key = "db-password" }   # when a SQL location gi
 poll = 5                              # seconds between checks for changes; 0 turns reloading off
 retry_first = 1                       # seconds before opening again at start, and retry_factor,
                                       # retry_longest, retry_for: see Opening at start below
-loadout_bytes = 1048576               # and the other limits under Limits below
 
-[registry]                            # shared: where the Registry is, and how much it keeps
+[registry]                            # shared: where the Registry is and how it opens
 location = "postgres://db/ai6"        # default: the provider's database when it is SQL,
                                       # else registry/ in the reading program's state directory
 password = { provider = "file", key = "db-password" }   # default: the provider's, when the Registry is its database
 headquarters_lease = 60               # seconds; also sets the SQL connections' timeouts
 sqlite_busy_timeout = 30              # seconds a SQLite connection waits for a lock
-
-[registry.limits.runs]            # what the Registry keeps and accepts: Limits below
-records = 100000
 
 [unex]                                # where Universal Exports is, and how it runs
 # Its clients: a Station, ai6ctl and Outer Office.
@@ -185,35 +181,57 @@ shows another host. Quotas and options are the roster's `[assistant.pages]`
 `universal-exports` takes `--config`, `--provider`, `--registry`, `--listen`,
 `--public-origin`, `--plugin-path` and `--plugin-profile` over the file.
 
-### Limits
+### Limits: the `registry` record
 
 How much the Registry keeps and accepts, and how much of a document the configuration
-provider reads, are bootstrap settings: both are needed before any provider record is read,
-by Stations and Universal Exports alike, from the one `[provider]` and `[registry]`. Every key
-has a default, and a table may name only the keys it
-changes.
+provider reads, are not bootstrap settings: they are the `registry` record of the configuration
+provider, a singleton that applies to every Station and to Universal Exports. A Registry opens
+with the built-in defaults, reads the record at start, and applies each later revision at the
+next poll (`[provider] poll`), with no restart. A lower limit refuses what is written after it and
+removes nothing already stored. A record that tightens `provider.loadout_bytes` or
+`provider.access_policy_bytes` below what the loadout or access records already hold is refused when
+it is saved, because the provider could no longer read them.
+
+It is edited like the other families: Outer Office's Roster page (Registry limits), `ai6ctl edit
+registry settings` or `ai6ctl set registry settings limits.runs.records=50000`, and the gateway's
+`/v1/user/roster/registry` routes, under `config.read` and `config.manage` on `config:registry`. A
+write is audited with the revision it made. A limit looser than its default is logged when it is
+applied. An `ai6.cfg` that still holds `[registry.limits]` or the `[provider]` keys `loadout_bytes`,
+`loadout_value_chars`, `access_policy_bytes` or `replace_retry` is refused at start, naming this
+record.
 
 The tables on this page are generated from the settings' own declarations, so they cannot
-disagree with them; `ai6 config schema SECTION` prints the same as JSON Schema. A count or size is
-a whole number; `null`, or the string `"none"` in TOML, which has no
+disagree with them; `ai6 config schema record.registry` prints the same as JSON Schema. A count or
+size is a whole number; `null`, or the string `"none"` in TOML, which has no
 null, takes the bound away. A number of seconds may be fractional. Only nonsense is refused:
 a negative number, or a word other than `none`. A value looser than its default (larger, or
-no bound) is a weakening, reported like an inline secret:
+no bound) is a weakening, logged when the record is applied:
 `registry.limits.runs.records none is looser than the default 100000`.
 
-```toml
-[provider]
-loadout_bytes = 2097152               # a larger loadout document; reported as a weakening
+A document that sets the record (`ai6ctl apply -f limits.toml`), with only the keys it changes:
 
-[registry]
-sqlite_busy_timeout = 10              # tighter than the default 30
+```toml
+[registry.provider]
+loadout_bytes = 2097152               # a larger loadout document; logged as a weakening
 
 [registry.limits.runs]
 records = 50000
 
 [registry.limits.audit]
-records = "none"                      # keep every audit record; reported as a weakening
+records = "none"                      # keep every audit record; logged as a weakening
 ```
+
+What stays in `ai6.cfg` is how to reach the Registry: `[registry] location`, `password`,
+`headquarters_lease` and `sqlite_busy_timeout`.
+
+#### Importing what an `ai6.cfg` set
+
+A deployment that set these limits in `ai6.cfg` moves them once. Copy each `[registry.limits.*]` table
+unchanged into a document and move the `[provider]` keys `loadout_bytes`, `loadout_value_chars`,
+`access_policy_bytes` and `replace_retry` under `[registry.provider]`. Remove all of them from `ai6.cfg`
+(a build that finds one refuses to start), deploy, and apply the document with a person's token
+(`ai6ctl apply -f limits.toml`): until then the Registry runs on the defaults, and it takes the record
+at the next poll. A host that set none has nothing to import.
 
 `[provider]`:
 
@@ -227,10 +245,6 @@ records = "none"                      # keep every audit record; reported as a w
 | `retry_factor` | 2 | **Growth of the wait between attempts.** What each wait is multiplied by after a failed attempt. |
 | `retry_longest` | 60 | **Longest wait between attempts.** Seconds the wait stops growing at. |
 | `retry_for` | see meaning | **How long to keep trying to open.** Seconds to keep trying from the first failure before the Station exits with the last error; 0 exits at the first failure. Default: none, and it tries until it opens or is stopped. A refusal retrying cannot fix (a malformed location, a failed certificate check, a wrong password) exits at once whatever this says. |
-| `loadout_bytes` | 1 MiB | **Loadout document.** Bytes of the loadout document (`loadout`, `sandbox`, `mcp`, `overlay`, `secret`, `secret_provider` and `pool` records together). |
-| `loadout_value_chars` | 4,096 | **One loadout value, in characters.** Characters of one text value in the loadout document. |
-| `access_policy_bytes` | 1 MiB | **Access policy.** Bytes of the access policy (the `access` record). |
-| `replace_retry` | 2 | **Wait for a reader of a family file.** Seconds a directory provider's replacement of a family file waits for a reader that has the file open. |
 <!-- schema:provider:end -->
 
 #### Opening at start
@@ -257,13 +271,24 @@ right.
 | `sqlite_busy_timeout` | 30 | **SQLite lock wait.** Seconds a SQLite connection waits for another's lock. |
 <!-- schema:registry:end -->
 
+`[registry.provider]` is the record's table for the configuration provider's own reads.
+
+<!-- schema:record.registry.provider:begin -->
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `loadout_bytes` | 1 MiB | **Loadout document.** Bytes of the loadout document (`loadout`, `sandbox`, `mcp`, `overlay`, `secret`, `secret_provider` and `pool` records together). |
+| `loadout_value_chars` | 4,096 | **One loadout value, in characters.** Characters of one text value in a loadout document. |
+| `access_policy_bytes` | 1 MiB | **Access policy.** Bytes of the access policy (the `access` record). |
+| `replace_retry` | 2 | **Wait for a reader of a family file.** Seconds a directory provider's replacement of a family file waits for a reader that has the file open. |
+<!-- schema:record.registry.provider:end -->
+
 Each `[registry.limits.*]` table bounds one record family. A Station's
 `max_concurrent_missions` setting is refused past `[registry.limits.stations]
 mission_capacity`. A logbook's whole size follows from its four keys.
 
 `[registry.limits.accounts]`
 
-<!-- schema:registry.limits.accounts:begin -->
+<!-- schema:record.registry.limits.accounts:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `record_bytes` | 256 KiB | **Largest account record.** Bytes of one account's record. |
@@ -271,11 +296,11 @@ mission_capacity`. A logbook's whole size follows from its four keys.
 | `windows` | 8 | **Quota windows per account.** Quota windows kept per account. |
 | `kept_days` | 8 | **Days of token counts per account.** Days of token counts kept per account. |
 | `sealed_bytes` | 4 MiB | **Largest sealed value.** Bytes of one sealed value's record, every Station's copy together. |
-<!-- schema:registry.limits.accounts:end -->
+<!-- schema:record.registry.limits.accounts:end -->
 
 `[registry.limits.agents]`
 
-<!-- schema:registry.limits.agents:begin -->
+<!-- schema:record.registry.limits.agents:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `record_bytes` | 1 MiB | **Largest Agent record.** Bytes of one Agent record. |
@@ -285,20 +310,20 @@ mission_capacity`. A logbook's whole size follows from its four keys.
 | `model_history` | 16 | Model changes kept per Agent. |
 | `key_bytes` | 512 | **Longest outcome report key.** Bytes of an outcome report's key. |
 | `agent_bytes` | 256 | **Longest Agent, Operation or model in a report.** Bytes of an outcome report's Agent, Operation and model. |
-<!-- schema:registry.limits.agents:end -->
+<!-- schema:record.registry.limits.agents:end -->
 
 `[registry.limits.agent_roles]`
 
-<!-- schema:registry.limits.agent_roles:begin -->
+<!-- schema:record.registry.limits.agent_roles:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `record_bytes` | 32 KiB | **Largest Agent role record.** Bytes of one Agent role record. |
 | `records` | 256 | Agent roles per Operation. |
-<!-- schema:registry.limits.agent_roles:end -->
+<!-- schema:record.registry.limits.agent_roles:end -->
 
 `[registry.limits.approvals]`
 
-<!-- schema:registry.limits.approvals:begin -->
+<!-- schema:record.registry.limits.approvals:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `record_bytes` | 16 KiB | **Largest approval record.** Bytes of one approval record. |
@@ -316,30 +341,30 @@ mission_capacity`. A logbook's whole size follows from its four keys.
 | `links` | 8 | **Links per request.** Links one request may carry. |
 | `link_label_bytes` | 128 | **Longest link label.** Bytes of a link's label. |
 | `link_url_bytes` | 1 KiB | **Longest link address.** Bytes of a link's address. |
-<!-- schema:registry.limits.approvals:end -->
+<!-- schema:record.registry.limits.approvals:end -->
 
 `[registry.limits.assistant_log]`: Moneypenny's conversation log. How long it is kept, and how
 much, is `[assistant.gateway] log_age` and `log_bytes` ([Moneypenny](assistant.md#her-conversation-log)).
 
-<!-- schema:registry.limits.assistant_log:begin -->
+<!-- schema:record.registry.limits.assistant_log:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `entry_bytes` | 1 MiB | **Largest log entry.** Bytes of one entry of the log; a longer one is kept without its data and with its text cut, and says how large it was. |
-<!-- schema:registry.limits.assistant_log:end -->
+<!-- schema:record.registry.limits.assistant_log:end -->
 
 `[registry.limits.audit]`
 
-<!-- schema:registry.limits.audit:begin -->
+<!-- schema:record.registry.limits.audit:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `record_bytes` | 16 KiB | **Largest audit record.** Bytes of one audit record. |
 | `records` | 10,000 | Audit records kept. |
 | `results` | 500 | **Most records in one listing.** Records one listing may ask for. |
-<!-- schema:registry.limits.audit:end -->
+<!-- schema:record.registry.limits.audit:end -->
 
 `[registry.limits.briefs]`
 
-<!-- schema:registry.limits.briefs:begin -->
+<!-- schema:record.registry.limits.briefs:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `record_bytes` | 1 MiB | **Largest brief.** Bytes of one brief. |
@@ -347,11 +372,11 @@ much, is `[assistant.gateway] log_age` and `log_bytes` ([Moneypenny](assistant.m
 | `provenance_bytes` | 16 KiB | **Longest brief provenance.** Bytes of a brief's provenance. |
 | `handle_bytes` | 120 | **Longest Mission handle.** Bytes of a Mission's handle: a longer one AI6 gives keeps its start and adds a short hash, and a rename to a longer one is refused. It names a Git branch, so it stays under 240 bytes whatever this says. |
 | `cancel_settle_after` | 300 | **Settle an unconfirmed cancel after.** Seconds after a cancel was asked for before the Headquarters Station settles a claimed brief its Station has not finished: filed as failed, its lease released. |
-<!-- schema:registry.limits.briefs:end -->
+<!-- schema:record.registry.limits.briefs:end -->
 
 `[registry.limits.cables]`
 
-<!-- schema:registry.limits.cables:begin -->
+<!-- schema:record.registry.limits.cables:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `record_bytes` | 2 MiB | **Largest Cable record.** Bytes of one Cable record. |
@@ -359,7 +384,7 @@ much, is `[assistant.gateway] log_age` and `log_bytes` ([Moneypenny](assistant.m
 | `body_bytes` | 16 KiB | **Longest Cable body.** UTF-8 bytes of a Cable's body the Registry stores. |
 | `max_ttl` | 86,400 (a day) | **Longest a Cable lives.** Seconds a Cable the Registry stores may live. |
 | `page` | 1,000 | **Cables in one read.** Cables one read of an inbox or of the held Cables takes. |
-<!-- schema:registry.limits.cables:end -->
+<!-- schema:record.registry.limits.cables:end -->
 
 What a Station's relay accepts from a sender is the `cables` record's
 ([Families](#families)); the Registry's bounds above apply to what is stored, whoever wrote
@@ -367,35 +392,35 @@ it.
 
 `[registry.limits.clearance]`
 
-<!-- schema:registry.limits.clearance:begin -->
+<!-- schema:record.registry.limits.clearance:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `record_bytes` | 16 KiB | **Largest clearance grant.** Bytes of one clearance grant. |
 | `grants` | 10,000 | Clearance grants. |
 | `text_bytes` | 512 | **Longest signer, approval, model or reason.** Bytes of a grant's signer, approval, model and reason. |
-<!-- schema:registry.limits.clearance:end -->
+<!-- schema:record.registry.limits.clearance:end -->
 
 `[registry.limits.contexts]`: each Run's harness context.
 
-<!-- schema:registry.limits.contexts:begin -->
+<!-- schema:record.registry.limits.contexts:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `context_bytes` | 8 MiB | **Largest Run context.** Bytes of one Run's context kept; a longer one keeps its newest part and says how large it was. |
 | `records` | 2,000 | **Run contexts kept.** Run contexts kept; the oldest filed go first. |
-<!-- schema:registry.limits.contexts:end -->
+<!-- schema:record.registry.limits.contexts:end -->
 
 `[registry.limits.files]`: how long the file Registry waits. The SQL Registry ignores it.
 
-<!-- schema:registry.limits.files:begin -->
+<!-- schema:record.registry.limits.files:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `rename_retry` | 2 | **Retry replacing a held file for.** Seconds a record write retries replacing a file another process holds open. |
 | `lock_wait` | 30 | **Wait for the directory lock.** Seconds a write waits for the Registry's directory lock. |
-<!-- schema:registry.limits.files:end -->
+<!-- schema:record.registry.limits.files:end -->
 
 `[registry.limits.held]`: A held record may be 64 KiB, room for its verdict, larger than a brief's `[registry.limits.briefs] record_bytes`.
 
-<!-- schema:registry.limits.held:begin -->
+<!-- schema:record.registry.limits.held:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `per_operation` | 1,000 | **Held briefs per Operation.** Briefs one Operation may hold. |
@@ -404,23 +429,23 @@ it.
 | `clearance_bytes` | 4 KiB | **Largest stored clearance.** Bytes of a stored clearance, the finding kinds a brief was released from. |
 | `reason_bytes` | 1 KiB | **Longest refusal reason.** Bytes of the reason a held brief is refused for. |
 | `actor_bytes` | 256 | **Longest name of who decided.** Bytes of who released or refused a held brief. |
-<!-- schema:registry.limits.held:end -->
+<!-- schema:record.registry.limits.held:end -->
 
 `[registry.limits.logbook]`: A whole logbook's size is bounded by these four.
 
-<!-- schema:registry.limits.logbook:begin -->
+<!-- schema:record.registry.limits.logbook:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `entries` | 20 | **Reports per logbook.** Reports kept per logbook, and handed to the next round. |
 | `summary_bytes` | 4 KiB | **Longest report summary.** Bytes of a report's summary. |
 | `findings` | 32 | Findings per report. |
 | `finding_bytes` | 1 KiB | **Longest finding.** Bytes of one finding. |
-<!-- schema:registry.limits.logbook:end -->
+<!-- schema:record.registry.limits.logbook:end -->
 
 `[registry.limits.memories]`: what one scope of memory may hold: a person's, an Operation's or the
 global one.
 
-<!-- schema:registry.limits.memories:begin -->
+<!-- schema:record.registry.limits.memories:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `content_bytes` | 256 KiB | **Longest entry.** Bytes of one entry's content. |
@@ -434,33 +459,33 @@ global one.
 | `search_results` | 50 | **Entries a search answers.** Entries one search answers. |
 | `query_bytes` | 4 KiB | **Longest search.** Bytes of what one search asks for. |
 | `proposals` | 64 | **Proposals waiting in a scope.** Agents' proposals waiting for a person in one scope. |
-<!-- schema:registry.limits.memories:end -->
+<!-- schema:record.registry.limits.memories:end -->
 
 `[registry.limits.proposals]`
 
-<!-- schema:registry.limits.proposals:begin -->
+<!-- schema:record.registry.limits.proposals:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `record_bytes` | 1 MiB | **Largest Mission proposal.** Bytes of one Mission proposal. |
 | `records` | 1,000 | **Pending proposals per Operation.** Pending Mission proposals per Operation. |
 | `results` | 500 | **Most proposals in one listing.** Proposals one listing may ask for. |
 | `idempotency_key_bytes` | 256 | **Longest idempotency key.** Bytes of a proposal's idempotency key. |
-<!-- schema:registry.limits.proposals:end -->
+<!-- schema:record.registry.limits.proposals:end -->
 
 `[registry.limits.quarantine]`
 
-<!-- schema:registry.limits.quarantine:begin -->
+<!-- schema:record.registry.limits.quarantine:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `record_bytes` | 16 KiB | **Largest quarantine record.** Bytes of one quarantine record. |
 | `records` | 10,000 | Quarantine records. |
 | `incidents` | 256 | **Incidents per Agent.** Incidents kept per Agent. |
 | `keep_incidents` | 604,800 (7 days) | **Keep an incident for.** Seconds an incident is kept. |
-<!-- schema:registry.limits.quarantine:end -->
+<!-- schema:record.registry.limits.quarantine:end -->
 
 `[registry.limits.reports]` ([Reports](reports.md))
 
-<!-- schema:registry.limits.reports:begin -->
+<!-- schema:record.registry.limits.reports:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `record_bytes` | 64 KiB | **Largest Report.** Bytes of one Report record. |
@@ -473,11 +498,11 @@ global one.
 | `per_operation` | 200 | **Agent Reports per scope in the window.** Reports Agents together may file against one scope in the window. |
 | `window` | 3,600 | **Rate window.** Seconds the two counts above look back over. |
 | `keep_closed` | none | **Keep a closed Report for.** Seconds a closed Report is kept; `null` keeps it for good. |
-<!-- schema:registry.limits.reports:end -->
+<!-- schema:record.registry.limits.reports:end -->
 
 `[registry.limits.runs]`
 
-<!-- schema:registry.limits.runs:begin -->
+<!-- schema:record.registry.limits.runs:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `record_bytes` | 64 KiB | **Largest Run record.** Bytes of one Run record. |
@@ -496,22 +521,22 @@ global one.
 | `evidence_detail_chars` | 300 | **Longest probe finding.** Characters kept of a probe finding's detail. |
 | `start_entries` | 32 | **Starts per Run.** Starts kept on one Run; the oldest go first. |
 | `prompt_excerpt_chars` | 200 | **Longest prompt excerpt.** Characters kept of the prompt a start gave; its whole length and digest are kept too. |
-<!-- schema:registry.limits.runs:end -->
+<!-- schema:record.registry.limits.runs:end -->
 
 `[registry.limits.sleepers]`
 
-<!-- schema:registry.limits.sleepers:begin -->
+<!-- schema:record.registry.limits.sleepers:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `catch_up` | see meaning | **A missed window still fires within.** Seconds a missed window may be late and still fire, once; an older one is skipped and recorded. `none` keeps no limit. Default: the window's own period, the time since the window before it. |
 | `prompt_bytes` | 16 KiB | **Longest Sleeper prompt.** Bytes of a Sleeper's prompt. |
 | `lookback_days` | 366 | **Days searched back for a window.** Days a schedule is searched back for its latest window. |
 | `skipped_events` | 64 | **Skipped windows named one by one.** Skipped windows the timeline names one by one when a later window comes; any older ones are one event. |
-<!-- schema:registry.limits.sleepers:end -->
+<!-- schema:record.registry.limits.sleepers:end -->
 
 `[registry.limits.issues]`
 
-<!-- schema:registry.limits.issues:begin -->
+<!-- schema:record.registry.limits.issues:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `links_per_mission` | 32 | **Linked issues per Mission.** Linked issues one Mission holds at once; unlinked ones do not count. |
@@ -519,21 +544,21 @@ global one.
 | `entry_bytes` | 128 KiB | **Largest outbox entry.** Bytes of one outbox entry's text and payload. |
 | `replies_per_mission` | 200 | **Stored replies per Mission.** Replies from a linked issue one Mission stores; delivered ones make room first. |
 | `reply_bytes` | 64 KiB | **Longest stored reply.** Bytes of one stored reply, cut past it. |
-<!-- schema:registry.limits.issues:end -->
+<!-- schema:record.registry.limits.issues:end -->
 
 `[registry.limits.sources]`
 
-<!-- schema:registry.limits.sources:begin -->
+<!-- schema:record.registry.limits.sources:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `item_text_bytes` | 64 KiB | **Longest Source item text.** Bytes of a Source item's text. |
 | `report_attempts` | 5 | **Tries to report a finished brief.** Times reporting a finished brief to its Source is tried before it is dropped. |
 | `name_bytes` | 256 | **Longest name beside a Mission ID.** Bytes of the name a brief shows beside its Mission ID. |
-<!-- schema:registry.limits.sources:end -->
+<!-- schema:record.registry.limits.sources:end -->
 
 `[registry.limits.stations]`
 
-<!-- schema:registry.limits.stations:begin -->
+<!-- schema:record.registry.limits.stations:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `record_bytes` | 1 MiB | **Largest Station record.** Bytes of one Station record. |
@@ -541,11 +566,11 @@ global one.
 | `settings_bytes` | 4 KiB | **Largest Station settings record.** Bytes of a Station's settings record. |
 | `mission_capacity` | 1,024 | **Most Missions a Station may run at once.** Missions a Station's settings may let it run at once. |
 | `gone_dark_after` | 180 | **A Station goes dark after.** Seconds after its last check-in that a Station counts as dark. |
-<!-- schema:registry.limits.stations:end -->
+<!-- schema:record.registry.limits.stations:end -->
 
 `[registry.limits.timeline]`
 
-<!-- schema:registry.limits.timeline:begin -->
+<!-- schema:record.registry.limits.timeline:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `records` | 10,000 | **Events kept.** Events kept; the oldest are dropped past it. |
@@ -554,28 +579,28 @@ global one.
 | `name_bytes` | 64 | **Longest kind, action or detail key.** Bytes of an event's kind, action and detail keys. |
 | `text_bytes` | 256 | **Longest event text.** Bytes of an event's Operation, Station, Mission, Run, actor and detail values. |
 | `detail_entries` | 8 | **Details per event.** Detail entries per event. |
-<!-- schema:registry.limits.timeline:end -->
+<!-- schema:record.registry.limits.timeline:end -->
 
 `[registry.limits.tokens]`
 
-<!-- schema:registry.limits.tokens:begin -->
+<!-- schema:record.registry.limits.tokens:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `record_bytes` | 16 KiB | **Largest access token record.** Bytes of one access token record. |
-<!-- schema:registry.limits.tokens:end -->
+<!-- schema:record.registry.limits.tokens:end -->
 
 `[registry.limits.usage]`
 
-<!-- schema:registry.limits.usage:begin -->
+<!-- schema:record.registry.limits.usage:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `ledger_bytes` | 1 MiB | **Largest usage ledger.** Bytes of one Mission's usage ledger. |
 | `kept_days` | 8 | Days of usage kept. |
-<!-- schema:registry.limits.usage:end -->
+<!-- schema:record.registry.limits.usage:end -->
 
 `[registry.limits.charges]`: each charge's record ([Charges](charges.md)).
 
-<!-- schema:registry.limits.charges:begin -->
+<!-- schema:record.registry.limits.charges:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `records` | 1,024 | **Charge records.** Charge records the Registry keeps. |
@@ -584,7 +609,7 @@ global one.
 | `entry_bytes` | 2 KiB | **Longest logbook entry.** Bytes of one logbook entry's text, or of a control's note; a longer entry is cut. |
 | `seen` | 1,024 | **Events remembered per charge.** Events a charge remembers being told of, so it is not told twice; past it the oldest go. |
 | `controls` | 32 | **Controls waiting per charge.** Controls waiting for a charge's Station; past it a control is refused. |
-<!-- schema:registry.limits.charges:end -->
+<!-- schema:record.registry.limits.charges:end -->
 
 ### `ai6ctl`
 
@@ -912,6 +937,7 @@ no-op is stored at once.
 | `compartment` | `compartments` | no | no | at each call | Outer Office Compartments page | `[compartment.<id>]`: [need-to-know access across Operations](compartments.md) |
 | `review` | `reviews` | no | no | live | Roster page, route | `[review.<name>]`: [review policies](review.md) |
 | `charge` | `charges` | no | no | live | Roster page (Charges), route `/v1/user/roster/charges` | `[charge.<scope>]`: [charges](charges.md), keyed `m`, `operation:<codename>` or `station:<id>` |
+| `registry` | `registry` | no | yes | live, in Stations and Universal Exports | Roster page (Registry limits), `ai6ctl`, route `registry`, under `config.read` and `config.manage` on `config:registry` | the whole file: [the Registry's limits and the provider's](#limits-the-registry-record) |
 
 A Station polls its provider every `[provider] poll` seconds. A family that applies live
 reaches requests, the scheduler and new Runs at once; running Runs keep what they
