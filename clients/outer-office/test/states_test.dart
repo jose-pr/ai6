@@ -19,7 +19,7 @@ import 'routes_test.dart' show locations;
 
 const _jsonHeaders = {'content-type': 'application/json'};
 
-/// A Moneypenny socket that says it is ready, so her field on Overview takes typing.
+/// A Moneypenny socket that says it is ready, so her composer takes typing.
 class ReadyChannel implements AssistantChannel {
   ReadyChannel() {
     _incoming.add(jsonEncode({'type': 'ready', 'entries': <Object>[]}));
@@ -482,7 +482,10 @@ void main() {
     final board = await signedIn(Gateway());
     await openAt(tester, board, '/');
     final field = find.byType(TextField);
-    expect(field, findsOneWidget, reason: "Moneypenny's field on Overview");
+    expect(field, findsNothing, reason: 'Overview has no field of its own');
+    await tester.tap(find.byTooltip('Ask Moneypenny (Ctrl+Alt+I)'));
+    await tester.pumpAndSettle();
+    expect(field, findsOneWidget, reason: "Moneypenny's composer");
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
@@ -506,6 +509,8 @@ void main() {
       'search', (tester) async {
     final board = await signedIn(Gateway());
     await openAt(tester, board, '/');
+    await tester.tap(find.byTooltip('Ask Moneypenny (Ctrl+Alt+I)'));
+    await tester.pumpAndSettle();
     final field = find.byType(TextField);
     await tester.tap(field);
     await tester.pump();

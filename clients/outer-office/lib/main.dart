@@ -6057,19 +6057,6 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
               onOpen: _open,
               activityEvery: board.limits.refresh.overview,
               onRoute: _openRoute,
-              assistant: widget.chat?.controller,
-              chatOpen: switch (widget.chat?.layout) {
-                ChatLayout.docked || ChatLayout.expanded => true,
-                _ => false,
-              },
-              onFocusChat: () => widget.chat?.focusComposer(),
-              onAsk: (text) {
-                widget.chat?.open();
-                widget.chat?.controller.ask(
-                  text,
-                  route: const OoRoute(OoPage.overview),
-                );
-              },
             ),
             OoPage.operations => OperationsPage(
               board: board,

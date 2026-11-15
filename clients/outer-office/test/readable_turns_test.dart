@@ -256,25 +256,15 @@ void main() {
     });
   });
 
-  testWidgets('with the chat open the dashboard has no second composer', (
-    tester,
-  ) async {
+  testWidgets('the dashboard has one composer, the chat\'s', (tester) async {
     final chat = await openChat(tester, FakeChannel(), const []);
     expect(chat.layout, ChatLayout.docked);
     expect(find.text('Ask Moneypenny…'), findsOneWidget);
-    expect(find.byKey(const ValueKey('ask-about-this-page')), findsOneWidget);
-    chat.composer.unfocus();
-    await tester.ensureVisible(
-      find.byKey(const ValueKey('ask-about-this-page')),
-    );
-    await tester.tap(find.byKey(const ValueKey('ask-about-this-page')));
-    await tester.pumpAndSettle();
-    expect(chat.composer.hasFocus, isTrue);
+    expect(find.byKey(const ValueKey('ask-about-this-page')), findsNothing);
 
     chat.collapse();
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('ask-about-this-page')), findsNothing);
-    expect(find.text('Ask Moneypenny…'), findsOneWidget, reason: 'the card');
+    expect(find.text('Ask Moneypenny…'), findsNothing);
   });
 
   testWidgets(

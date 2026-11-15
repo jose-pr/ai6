@@ -8,7 +8,6 @@ import 'package:material_ui/material_ui.dart';
 import 'package:outer_office/assistant/assistant_controller.dart';
 import 'package:outer_office/assistant/assistant_panel.dart';
 import 'package:outer_office/main.dart';
-import 'package:outer_office/settings/oo_config.dart';
 
 /// A socket whose failure the test decides: nothing happens until it says.
 class SilentChannel implements AssistantChannel {
@@ -170,6 +169,8 @@ void main() {
       await tester.pumpWidget(app(board));
       await board.login('ana', 'secret');
       await settle(tester);
+      await tester.tap(find.byTooltip('Ask Moneypenny (Ctrl+Alt+I)'));
+      await tester.pump();
       await tester.pump(const Duration(seconds: 1));
       expect(opened, greaterThan(0));
       last!.ready();
@@ -201,7 +202,7 @@ void main() {
       await tester.pumpWidget(app(board));
       await board.login('ana', 'secret');
       await tester.pumpAndSettle();
-      expect(find.text('MONEYPENNY'), findsOneWidget);
+      expect(find.byTooltip('Ask Moneypenny (Ctrl+Alt+I)'), findsOneWidget);
       await tester.tap(find.byTooltip('Your account and settings'));
       await tester.pumpAndSettle();
       expect(find.text(moneypennyOffNote), findsNothing);
@@ -210,85 +211,6 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
       board.dispose();
     });
-  });
-
-  group('Moneypenny on, her socket decides what the app says', () {
-    late SilentChannel channel;
-    late MissionBoard board;
-
-    Future<void> open(WidgetTester tester) async {
-      tester.view.physicalSize = const Size(1400, 1000);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-      channel = SilentChannel();
-      board = MissionBoard(
-        apiOrigin: Uri.parse('https://oo.example'),
-        pollInterval: null,
-        client: gateway({}, moneypenny: true),
-        assistantChannel: () => channel,
-      );
-      await tester.pumpWidget(app(board));
-      await board.login('ana', 'secret');
-      await tester.pump();
-      await tester.pump();
-    }
-
-    Future<void> close(WidgetTester tester) async {
-      await tester.pumpWidget(const SizedBox());
-      await tester.pump(const Duration(seconds: 1));
-      board.dispose();
-    }
-
-    testWidgets('no greeting until the socket says she is there', (
-      tester,
-    ) async {
-      await open(tester);
-      expect(find.textContaining('What would you like to know'), findsNothing);
-      expect(find.text('Connecting to Moneypenny…'), findsOneWidget);
-      channel.ready();
-      await tester.pump();
-      await tester.pump();
-      expect(
-        find.textContaining('What would you like to know'),
-        findsOneWidget,
-      );
-      await close(tester);
-    });
-
-    testWidgets('a failed socket says so and offers to try again', (
-      tester,
-    ) async {
-      await open(tester);
-      channel.fail();
-      await tester.pump();
-      await tester.pump();
-      expect(find.text('The connection to Moneypenny failed.'), findsOneWidget);
-      expect(find.textContaining('What would you like to know'), findsNothing);
-      expect(tester.takeException(), isNull);
-      final retry = find.widgetWithText(TextButton, 'Try again');
-      expect(retry, findsOneWidget);
-      final first = channel;
-      channel = SilentChannel();
-      await tester.tap(retry);
-      await tester.pump();
-      expect(channel, isNot(same(first)));
-      expect(channel.sent, hasLength(1), reason: 'the retry says hello again');
-      expect(find.text('Connecting to Moneypenny…'), findsOneWidget);
-      await close(tester);
-    });
-
-    testWidgets(
-      'a socket that stays silent ends in a retry, not an endless Connecting',
-      (tester) async {
-        await open(tester);
-        await tester.pump(ChatSettings.defaultConnectTimeout);
-        await tester.pump();
-        expect(find.text('Connecting to Moneypenny…'), findsNothing);
-        expect(find.text('Moneypenny did not answer.'), findsOneWidget);
-        expect(find.widgetWithText(TextButton, 'Try again'), findsOneWidget);
-        await close(tester);
-      },
-    );
   });
 
   group('the chat panel', () {

@@ -196,7 +196,7 @@ void main() {
     expect(ooInitials('Ana M.'), 'AM');
   });
 
-  testWidgets('on a phone Moneypenny opens full screen, and the Overview card '
+  testWidgets('on a phone Moneypenny opens full screen and a quick question '
       'asks her', (tester) async {
     await atSize(tester, const Size(390, 844));
     final channel = FakeChannel();
@@ -215,54 +215,70 @@ void main() {
     channel.answer({'type': 'ready', 'conversation': 'c-1', 'entries': []});
     await tester.pumpAndSettle();
     // An empty chat offers the quick questions as chips.
-    expect(
-      find.descendant(
-        of: find.byType(ChatPanel),
-        matching: find.widgetWithText(ActionChip, 'Summarise the board'),
-      ),
-      findsOneWidget,
+    final chip = find.descendant(
+      of: find.byType(ChatPanel),
+      matching: find.widgetWithText(ActionChip, 'What needs my attention?'),
     );
-    await tester.tap(find.byTooltip('Close Moneypenny (Ctrl+Alt+I)'));
-    await tester.pumpAndSettle();
-    expect(find.byType(ChatPanel), findsNothing);
-
-    final chip = find.widgetWithText(ActionChip, 'What needs my attention?');
-    await tester.ensureVisible(chip);
-    await tester.pumpAndSettle();
+    expect(chip, findsOneWidget);
     await tester.tap(chip);
     await tester.pumpAndSettle();
-    expect(find.byType(ChatPanel), findsOneWidget);
     expect(channel.sent.last, {
       'type': 'message',
       'text': 'What needs my attention?',
       'route': {'page': 'overview'},
     });
+    await tester.tap(find.byTooltip('Close Moneypenny (Ctrl+Alt+I)'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ChatPanel), findsNothing);
   });
 
-  testWidgets('without a conversation the Overview has no card for her', (
-    tester,
-  ) async {
-    await atSize(tester, const Size(1400, 900));
-    final board = signedIn(FakeChannel());
-    addTearDown(board.dispose);
-    await tester.pumpWidget(
-      MaterialApp(
-        home: MissionBoardPage(
-          board: board,
-          desktopWindows: false,
-          route: const OoRoute(OoPage.overview),
-          onRoute: (_) {},
+  for (final (name, size, columns, tallest) in [
+    ('desktop', const Size(1280, 800), 3, 130.0),
+    ('phone', const Size(390, 844), 1, 140.0),
+  ]) {
+    testWidgets('the Overview at $name width has no Moneypenny card, a short '
+        'banner and the Operations panel in the freed space', (tester) async {
+      await atSize(tester, size);
+      final board = signedIn(FakeChannel());
+      addTearDown(board.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MissionBoardPage(
+            board: board,
+            desktopWindows: false,
+            route: const OoRoute(OoPage.overview),
+            onRoute: (_) {},
+          ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.byTooltip('Ask Moneypenny (Ctrl+Alt+I)'), findsNothing);
-    expect(find.text('MONEYPENNY'), findsNothing);
-    expect(
-      find.widgetWithText(ActionChip, 'Summarise the board'),
-      findsNothing,
-    );
-  });
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('MONEYPENNY'), findsNothing);
+      expect(
+        find.widgetWithText(ActionChip, 'Summarise the board'),
+        findsNothing,
+      );
+      expect(find.byType(TextField), findsNothing);
+
+      final hero = tester.getRect(find.byType(OoHero));
+      expect(hero.height, lessThanOrEqualTo(tallest), reason: '$name banner');
+      expect(hero.width, greaterThan(size.width * 0.7), reason: 'full width');
+
+      final operations = tester.getRect(find.text('OPERATIONS'));
+      final activity = tester.getRect(find.text('RECENT ACTIVITY'));
+      expect(operations.top, greaterThan(hero.bottom));
+      if (columns == 3) {
+        expect(operations.left, greaterThan(activity.left));
+        expect(
+          operations.top,
+          closeTo(activity.top, 6),
+          reason: 'third column',
+        );
+      } else {
+        expect(operations.top, lessThan(activity.top));
+      }
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   test('a question asked before the conversation is ready waits for it', () {
     final channel = FakeChannel();

@@ -11,7 +11,7 @@ import 'package:outer_office/main.dart';
 import 'package:outer_office/shell/overview_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'demo_conversation_test.dart' show askFromOverview;
+import 'demo_conversation_test.dart' show askMoneypenny;
 import 'polish_test.dart' show FakeChannel, atSize;
 import 'routes_test.dart' show locations;
 
@@ -303,7 +303,7 @@ void main() {
       OuterOfficeApp(board: board, desktopWindows: false),
     );
     await tester.pumpAndSettle();
-    await askFromOverview(tester, 'Which Stations are dark?');
+    await askMoneypenny(tester, 'Which Stations are dark?');
     final card = _card('demo-nav-dark');
     expect(card, findsOneWidget);
     expect(

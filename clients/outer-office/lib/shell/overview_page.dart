@@ -4,9 +4,6 @@ import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
 
-import '../assistant/assistant_controller.dart';
-import '../assistant/assistant_panel.dart'
-    show MoneypennyAvatar, moneypennyPrompts;
 import '../held/held_briefs_page.dart' show revealInvisible;
 import '../settings/oo_config.dart';
 import '../main.dart';
@@ -25,7 +22,7 @@ import 'top_bar.dart';
 
 /// The command overview, all from what the board has loaded: the theme's hero art, the
 /// person's Operations with their progress, counts of Operations, Stations, active Missions
-/// and waiting Runs, recent activity, the Missions waiting to run, Moneypenny, and what
+/// and waiting Runs, recent activity, the Missions waiting to run, and what
 /// needs the person's attention.
 class OverviewPage extends StatelessWidget {
   const OverviewPage({
@@ -33,10 +30,6 @@ class OverviewPage extends StatelessWidget {
     required this.pages,
     required this.onOpen,
     required this.onRoute,
-    this.assistant,
-    this.onAsk,
-    this.chatOpen = false,
-    this.onFocusChat,
     this.activityEvery = RefreshSettings.defaultOverview,
     super.key,
   });
@@ -50,20 +43,11 @@ class OverviewPage extends StatelessWidget {
   /// Opens the page an attention item points to, with its filters.
   final ValueChanged<OoRoute> onRoute;
 
-  /// The conversation with Moneypenny; null where she is not served, and her card goes too.
-  final AssistantController? assistant;
-
-  /// Opens Moneypenny's chat and asks her the text.
-  final ValueChanged<String>? onAsk;
-
-  /// Whether the chat is open beside this page, where its composer is the one to type in.
-  final bool chatOpen;
-
-  /// Moves to the open chat's composer.
-  final VoidCallback? onFocusChat;
-
   /// How often Recent Activity is fetched again while shown; `null` only once.
   final Duration? activityEvery;
+
+  /// The least height of the banner above the panels, a strip rather than a picture.
+  static const double heroHeight = 84;
 
   /// The narrowest a stat tile reads well: its icon, count and a short label on one row.
   static const double statTileWidth = 230;
@@ -99,7 +83,7 @@ class OverviewPage extends StatelessWidget {
     final muted = TextStyle(color: tokens.muted);
 
     final heroText = Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      padding: EdgeInsets.fromLTRB(16, phone ? 10 : 12, 16, phone ? 10 : 12),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -108,7 +92,7 @@ class OverviewPage extends StatelessWidget {
             'AI6 / UNIVERSAL EXPORTS',
             style: ooSectionLabel(context).copyWith(fontSize: 11.5),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
           Text(
             'Command overview',
             style: (phone ? text.titleLarge : text.headlineSmall)?.copyWith(
@@ -209,21 +193,8 @@ class OverviewPage extends StatelessWidget {
       missions: missions,
       onOpen: (page) => pages.contains(page) ? () => onOpen(page) : null,
     );
-    final moneypenny = switch ((assistant, onAsk)) {
-      (final assistant?, final onAsk?) => _MoneypennyCard(
-        board: board,
-        assistant: assistant,
-        onAsk: onAsk,
-        chatOpen: chatOpen,
-        onFocusChat: onFocusChat,
-        waiting: open.length,
-        covered: gaps == null,
-      ),
-      _ => null,
-    };
     final gap = phone ? 12.0 : 16.0;
-    final side = width >= 1000;
-    final threeColumns = width >= 1080;
+    final threeColumns = width >= 1000;
     // Four tiles in a row, two, or one: never three and an orphan.
     final fit = ((width - gap) / (statTileWidth + gap)).floor();
     final statColumns = phone || fit < 2
@@ -239,27 +210,7 @@ class OverviewPage extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (side)
-            IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(minHeight: 270),
-                      child: OoHero(height: null, child: heroText),
-                    ),
-                  ),
-                  SizedBox(width: gap),
-                  SizedBox(width: 340, child: operationsPanel),
-                ],
-              ),
-            )
-          else ...[
-            OoHero(height: phone ? 170 : 220, child: heroText),
-            SizedBox(height: gap),
-            operationsPanel,
-          ],
+          OoHero(height: phone ? 64 : heroHeight, child: heroText),
           SizedBox(height: gap),
           Wrap(
             spacing: gap,
@@ -277,15 +228,14 @@ class OverviewPage extends StatelessWidget {
                   Expanded(child: activity),
                   SizedBox(width: gap),
                   Expanded(child: upcoming),
-                  if (moneypenny != null) ...[
-                    SizedBox(width: gap),
-                    Expanded(child: moneypenny),
-                  ],
+                  SizedBox(width: gap),
+                  Expanded(child: operationsPanel),
                 ],
               ),
             )
           else ...[
-            if (moneypenny != null) ...[moneypenny, SizedBox(height: gap)],
+            operationsPanel,
+            SizedBox(height: gap),
             activity,
             SizedBox(height: gap),
             upcoming,
@@ -943,194 +893,6 @@ class _UpcomingRow extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-/// Moneypenny on Overview: her portrait, a greeting with what needs the person, quick
-/// questions and a field; each opens her chat and asks. She greets only once her socket says
-/// she is there; until then the card says it is connecting, or that it failed, with a retry.
-class _MoneypennyCard extends StatefulWidget {
-  const _MoneypennyCard({
-    required this.board,
-    required this.assistant,
-    required this.onAsk,
-    required this.chatOpen,
-    required this.onFocusChat,
-    required this.waiting,
-    required this.covered,
-  });
-
-  final MissionBoard board;
-  final AssistantController assistant;
-  final ValueChanged<String> onAsk;
-
-  final bool chatOpen;
-  final VoidCallback? onFocusChat;
-
-  /// Whether every attention source was read: only then may she say nothing needs them.
-  final bool covered;
-
-  /// How many things need the person's attention.
-  final int waiting;
-
-  @override
-  State<_MoneypennyCard> createState() => _MoneypennyCardState();
-}
-
-class _MoneypennyCardState extends State<_MoneypennyCard> {
-  final _message = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    widget.assistant.open();
-  }
-
-  @override
-  void didUpdateWidget(_MoneypennyCard old) {
-    super.didUpdateWidget(old);
-    if (old.assistant != widget.assistant) widget.assistant.open();
-  }
-
-  @override
-  void dispose() {
-    _message.dispose();
-    super.dispose();
-  }
-
-  void _ask(String text) {
-    if (text.trim().isEmpty) return;
-    widget.onAsk(text.trim());
-    _message.clear();
-  }
-
-  @override
-  Widget build(BuildContext context) =>
-      ListenableBuilder(listenable: widget.assistant, builder: _card);
-
-  Widget _card(BuildContext context, Widget? _) {
-    final tokens = OoTokens.of(context);
-    final text = Theme.of(context).textTheme;
-    final assistant = widget.assistant;
-    final enabled = assistant.connected;
-    final hour = DateTime.now().hour;
-    final part = hour < 12
-        ? 'morning'
-        : hour < 18
-        ? 'afternoon'
-        : 'evening';
-    final run = widget.board.userSession;
-    final name =
-        (run?.displayName?.trim().isNotEmpty == true
-                ? run!.displayName!
-                : run?.name ?? '')
-            .trim()
-            .split(RegExp(r'\s+'))
-            .first;
-    final greeting = !enabled
-        ? assistant.connecting
-              ? 'Connecting to Moneypenny…'
-              : assistant.problem ?? 'Moneypenny is not connected.'
-        : [
-            'Good $part${name.isEmpty ? '' : ', $name'}.',
-            switch (widget.waiting) {
-              0 when !widget.covered => 'Nothing found in what loaded.',
-              0 => 'Nothing needs your attention right now.',
-              1 => 'One item needs your attention.',
-              final count => '$count items need your attention.',
-            },
-            'What would you like to know?',
-          ].join(' ');
-    return OoPanel(
-      title: 'MONEYPENNY',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: tokens.border),
-                ),
-                child: const MoneypennyAvatar(size: 64),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: tokens.raised,
-                    border: Border.all(color: tokens.border),
-                    borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(4),
-                      topRight: Radius.circular(14),
-                      bottomLeft: Radius.circular(14),
-                      bottomRight: Radius.circular(14),
-                    ),
-                  ),
-                  child: Text(greeting, style: text.bodyMedium),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final prompt in moneypennyPrompts)
-                ActionChip(
-                  label: Text(prompt),
-                  onPressed: enabled ? () => _ask(prompt) : null,
-                ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          if (widget.chatOpen)
-            // The chat beside the page has the one composer: this only moves to it.
-            Align(
-              alignment: Alignment.centerLeft,
-              child: FilledButton.tonalIcon(
-                key: const ValueKey('ask-about-this-page'),
-                onPressed: enabled ? widget.onFocusChat : null,
-                icon: const Icon(Icons.chat_bubble_outline),
-                label: const Text('Ask about this page'),
-              ),
-            )
-          else
-            TextField(
-              controller: _message,
-              enabled: enabled,
-              textInputAction: TextInputAction.send,
-              onSubmitted: _ask,
-              decoration: InputDecoration(
-                hintText: 'Ask Moneypenny…',
-                isDense: true,
-                filled: true,
-                fillColor: tokens.raised,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                suffixIcon: IconButton(
-                  tooltip: 'Send to Moneypenny',
-                  onPressed: enabled ? () => _ask(_message.text) : null,
-                  icon: const Icon(Icons.send),
-                ),
-              ),
-            ),
-          if (!enabled && !assistant.connecting)
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                onPressed: assistant.retry,
-                child: const Text('Try again'),
-              ),
-            ),
-        ],
       ),
     );
   }

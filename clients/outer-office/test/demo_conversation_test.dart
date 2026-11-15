@@ -6,7 +6,6 @@ import 'package:outer_office/assistant/assistant_panel.dart';
 import 'package:outer_office/assistant/chat_region.dart';
 import 'package:outer_office/assistant/demo_conversation.dart';
 import 'package:outer_office/main.dart';
-import 'package:outer_office/shell/overview_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'polish_test.dart' show FakeChannel, atSize, signedIn;
@@ -14,15 +13,21 @@ import 'polish_test.dart' show FakeChannel, atSize, signedIn;
 /// Long enough for any scripted reply.
 const _reply = Duration(seconds: 2);
 
-/// Taps the Overview card's quick question [prompt].
-Future<void> askFromOverview(WidgetTester tester, String prompt) async {
-  final chip = find.descendant(
-    of: find.byType(OverviewPage),
-    matching: find.widgetWithText(ActionChip, prompt),
+/// Opens Moneypenny's chat when it is closed and sends [text] from its composer.
+Future<void> askMoneypenny(WidgetTester tester, String text) async {
+  final opener = find.byTooltip('Ask Moneypenny (Ctrl+Alt+I)');
+  if (opener.evaluate().isNotEmpty) {
+    await tester.tap(opener);
+    await tester.pumpAndSettle();
+  }
+  await tester.enterText(
+    find.descendant(
+      of: find.byType(ChatPanel),
+      matching: find.byType(TextField),
+    ),
+    text,
   );
-  await tester.ensureVisible(chip);
-  await tester.pumpAndSettle();
-  await tester.tap(chip);
+  await tester.sendKeyEvent(LogicalKeyboardKey.enter);
   await tester.pump(_reply);
   await tester.pumpAndSettle();
 }
@@ -50,7 +55,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byTooltip('Ask Moneypenny (Ctrl+Alt+I)'), findsOneWidget);
 
-    await askFromOverview(tester, 'Summarise the board');
+    await askMoneypenny(tester, 'Summarise the board');
     final chat = find.byType(ChatPanel);
     expect(
       find.descendant(of: chat, matching: find.text(demoConversationLabel)),
@@ -81,7 +86,7 @@ void main() {
     await tester.drag(entries, const Offset(0, -10000));
     await tester.pumpAndSettle();
 
-    await askFromOverview(tester, 'What needs my attention?');
+    await askMoneypenny(tester, 'What needs my attention?');
     expect(find.text('Raise station-control-01 to 6 Missions'), findsOneWidget);
     await tester.tap(find.widgetWithText(FilledButton, 'Confirm'));
     await tester.pumpAndSettle();
@@ -127,7 +132,7 @@ void main() {
     await tester.pumpAndSettle();
     channel.answer({'type': 'ready', 'conversation': 'c-1', 'entries': []});
     await tester.pumpAndSettle();
-    await askFromOverview(tester, 'Summarise the board');
+    await askMoneypenny(tester, 'Summarise the board');
     expect(channel.sent.last['text'], 'Summarise the board');
     expect(find.text(demoConversationLabel), findsNothing);
     expect(find.text('The board by Station'), findsNothing);
