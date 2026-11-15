@@ -68,6 +68,8 @@ pub struct StationLimits {
     pub theater_tools: TheaterToolLimits,
     /// `[head_of_station]`: what the Station's charge reads and tidies.
     pub head_of_station: HeadOfStationLimits,
+    /// `[oversight]`: what an Operation's charge reads of its Operation.
+    pub oversight: OversightLimits,
     /// `[probes]`: reading a Mission's deliverables back.
     pub probes: ProbeLimits,
     /// `[attach]`: people attached to a live Run.
@@ -112,6 +114,17 @@ impl StationLimits {
         for (key, limit) in [
             ("scheduler.event_queue", self.scheduler.event_queue),
             ("publisher.terminal_bytes", self.publisher.terminal_bytes),
+        ] {
+            if limit.get() == Some(0) {
+                return Err(format!("station.{key}: at least 1"));
+            }
+        }
+        if self.oversight.page == 0 {
+            return Err("station.oversight.page: at least 1".to_owned());
+        }
+        for (key, limit) in [
+            ("oversight.max_page", self.oversight.max_page),
+            ("oversight.scan", self.oversight.scan),
         ] {
             if limit.get() == Some(0) {
                 return Err(format!("station.{key}: at least 1"));
@@ -1240,6 +1253,40 @@ impl Default for HeadOfStationLimits {
             survey_entries: Limit::at(500_000),
             reason_bytes: Limit::at(2_000),
             audit_target_bytes: Limit::at(500),
+        }
+    }
+}
+
+/// `[oversight]`.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
+pub struct OversightLimits {
+    /// Items in a page when the charge names no limit, at least 1.
+    #[schema(title = "Items in a page")]
+    #[map(default = OversightLimits::default().page)]
+    pub page: u64,
+    /// The most items a page may ask for.
+    #[schema(title = "Most items a page may ask for")]
+    #[map(default = OversightLimits::default().max_page)]
+    pub max_page: Limit,
+    /// The most briefs one search reads from the Registry; a Mission beyond them is not found.
+    #[schema(title = "Briefs one search reads")]
+    #[map(default = OversightLimits::default().scan)]
+    pub scan: Limit,
+    /// Bytes of a brief, an outcome or a search text; a longer brief or outcome is cut and says so.
+    #[schema(title = "Longest text read or searched", format = "bytes")]
+    #[map(default = OversightLimits::default().text_bytes)]
+    pub text_bytes: Limit,
+}
+
+impl Default for OversightLimits {
+    fn default() -> Self {
+        Self {
+            page: 25,
+            max_page: Limit::at(200),
+            scan: Limit::at(20_000),
+            text_bytes: Limit::at(16 * KIB),
         }
     }
 }

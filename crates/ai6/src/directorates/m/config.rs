@@ -754,6 +754,10 @@ pub struct StationRuntime {
     #[schema(title = "The Station charge's tools")]
     #[map(default)]
     pub head_of_station: limits::HeadOfStationLimits,
+    /// `[oversight]`: what an Operation's charge reads of its Operation.
+    #[schema(title = "The Operation charge's reads")]
+    #[map(default)]
+    pub oversight: limits::OversightLimits,
     /// `[probes]`: reading a Mission's deliverables back.
     #[schema(title = "Deliverable probes")]
     #[map(default)]
@@ -844,6 +848,7 @@ impl StationRuntime {
             theaters: self.theaters.clone(),
             theater_tools: self.theater_tools.clone(),
             head_of_station: self.head_of_station.clone(),
+            oversight: self.oversight.clone(),
             probes: self.probes.clone(),
             attach: self.attach.clone(),
             providers: self.providers.clone(),

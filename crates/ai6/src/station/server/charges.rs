@@ -27,6 +27,8 @@ pub(super) mod area;
 pub(super) mod decide;
 #[cfg(feature = "cables-mcp")]
 pub(super) mod keep;
+#[cfg(feature = "cables-mcp")]
+pub(super) mod oversight;
 mod turn;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};

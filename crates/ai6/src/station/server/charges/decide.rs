@@ -32,8 +32,8 @@ const BY_PREFIX: &str = "charge:operation:";
 /// An Operation's charge at work on its Missions.
 #[derive(Clone)]
 pub(in crate::station::server) struct DecisionDesk {
-    state: DaemonState,
-    operation: String,
+    pub(in crate::station::server) state: DaemonState,
+    pub(in crate::station::server) operation: String,
     agent: String,
     /// The charge's Run name, which its proposals name as their parent.
     key: String,

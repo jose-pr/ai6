@@ -90,7 +90,7 @@ struct ReopenArgs {
 }
 
 impl CableTools {
-    async fn with_decisions<F>(&self, work: F) -> String
+    pub(super) async fn with_decisions<F>(&self, work: F) -> String
     where
         F: FnOnce(&DecisionDesk) -> Result<String, String> + Send + 'static,
     {

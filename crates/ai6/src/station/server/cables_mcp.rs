@@ -30,6 +30,7 @@ mod compartment_tools;
 mod decision_tools;
 mod issue_tools;
 mod memory_tools;
+mod oversight_tools;
 mod report_tools;
 mod resource_tools;
 
@@ -1841,7 +1842,7 @@ impl CableTools {
             tool_router += if desk.is_any() {
                 Self::m_decision_router()
             } else {
-                Self::decision_router()
+                Self::decision_router() + Self::oversight_router()
             };
         }
         if let Some(desk) = area_desk.get() {
