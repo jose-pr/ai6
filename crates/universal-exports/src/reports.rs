@@ -516,6 +516,52 @@ pub(crate) async fn show(
     .await
 }
 
+/// `GET /v1/reports/{id}/document`: the Report as a document, as far as the person may see it:
+/// its title and text are the body, everything else the frontmatter. The same sight rules as
+/// the Report itself: one they are not read in to answers `403`.
+pub(crate) async fn document(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<axum::response::Response, Refused> {
+    let reader = reader_of(&gateway, &headers).await?;
+    let person = reader.person.clone();
+    let registry = registry_of(&gateway)?;
+    let (shown, scope) = blocking(move || {
+        let missing = || refused(StatusCode::NOT_FOUND, "No such report.");
+        let report = registry.report(&id).ok().flatten().ok_or_else(missing)?;
+        if !reader.reads_scope(&report.scope) {
+            return Err(missing());
+        }
+        let shown = shown(registry.as_ref(), &reader, &report);
+        if shown["sight"] == "markings" {
+            return Err(Refused {
+                status: StatusCode::FORBIDDEN,
+                body: json!({
+                    "error": "You are not read in to this report, or not cleared for it.",
+                    "report": shown,
+                }),
+            });
+        }
+        Ok((shown, report.scope))
+    })
+    .await?;
+    let operation = match &scope {
+        ReportScope::Operation(operation) => Some(operation.to_string()),
+        _ => None,
+    };
+    let mut draft = crate::documents::Draft::new("report", operation.as_deref());
+    let mut body = String::new();
+    if let Value::Object(map) = &shown {
+        draft = draft.with_all(map, &["text"]);
+        if let Some(text) = map.get("text").and_then(Value::as_str) {
+            body.push_str(text);
+        }
+    }
+    let document = crate::documents::compose(&gateway, person, draft.body(body)).await?;
+    Ok(crate::documents::respond(&headers, document))
+}
+
 /// `POST /v1/reports`: `{"scope": SCOPE, "title", "text", ...}`, filed by the person; answers
 /// `201` with the Report as they see it. It creates no Mission.
 pub(crate) async fn file(

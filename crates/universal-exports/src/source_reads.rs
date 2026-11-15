@@ -161,6 +161,44 @@ fn read_of(gateway: &Gateway, operation: &OperationId) -> SourceRead {
     }
 }
 
+/// The boards the providers of `operation`'s Sources name, asked of the Headquarters Station
+/// (the providers are loaded there). None when no Station holds the lease, none answers in
+/// time or a provider names none: a document then lists no board, and says nothing is wrong.
+pub(crate) async fn boards(gateway: &Gateway, operation: &str) -> Vec<ai6::SourceBoard> {
+    let Some(registry) = gateway.registry.clone() else {
+        return Vec::new();
+    };
+    let elected = tokio::task::spawn_blocking(move || registry.headquarters())
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .flatten();
+    if elected.is_none() {
+        return Vec::new();
+    }
+    let limits = crate::moneypenny::gateway_limits(gateway);
+    let read = SourceRead {
+        id: uuid::Uuid::new_v4().to_string(),
+        operation: operation.to_owned(),
+        tracker: None,
+        item: None,
+        query: None,
+        comments: 0,
+        items: 0,
+        boards: true,
+    };
+    gateway
+        .source_reads
+        .ask(
+            read,
+            limits.source_reads,
+            gateway.config.unex().text.document_board_wait.0,
+        )
+        .await
+        .map(|answer| answer.boards)
+        .unwrap_or_default()
+}
+
 /// `GET /v1/user/operations/{operation_id}/source-item?tracker=&item=`: one item of the
 /// Operation's trackers as it is now, `{item, comments, missions, error?}`: its title, state,
 /// labels and assignees, its latest comments with their authors' roles and dates, and the

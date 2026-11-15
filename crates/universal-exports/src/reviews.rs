@@ -198,6 +198,102 @@ pub(crate) async fn list(
     ))
 }
 
+/// `text` as a block quote, so words from a reviewer never become the document's structure.
+fn quoted(text: &str) -> String {
+    text.lines()
+        .map(|line| format!("> {line}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The reviews as the body of a document: a section for each gate, its votes and their reasons.
+fn review_body(views: &[ReviewView]) -> String {
+    let mut body = String::new();
+    for view in views {
+        let gate = serde_json::to_value(view.gate)
+            .ok()
+            .and_then(|gate| gate.as_str().map(str::to_owned))
+            .unwrap_or_default();
+        let status = serde_json::to_value(view.status)
+            .ok()
+            .and_then(|status| status.as_str().map(str::to_owned))
+            .unwrap_or_default();
+        body.push_str(&format!("## {gate} review: {status}\n\n"));
+        if let Some(why) = &view.why {
+            body.push_str(&format!("{}\n\n", quoted(why)));
+        }
+        for vote in &view.votes {
+            let verdict = serde_json::to_value(vote.vote)
+                .ok()
+                .and_then(|vote| vote.as_str().map(str::to_owned))
+                .unwrap_or_default();
+            body.push_str(&format!(
+                "- Time {}, round {}: **{}** ({}, weight {}) voted {verdict}\n",
+                vote.iteration, vote.round, vote.agent, vote.model, vote.weight
+            ));
+            for reason in &vote.reasons {
+                body.push_str(&format!("\n{}\n", quoted(reason)));
+            }
+        }
+        if let Some(overrule) = &view.overrule {
+            body.push_str(&format!(
+                "\nOverruled by {}: {}\n\n{}\n",
+                overrule.by,
+                overrule.decision,
+                quoted(&overrule.reason)
+            ));
+        }
+        body.push('\n');
+    }
+    body
+}
+
+/// `GET /v1/user/operations/{operation_id}/missions/{mission_id}/reviews/document`: each gate's
+/// review of the Mission as a document: the gates in the frontmatter, the votes and the
+/// reasons in the body. Needs `mission.read`.
+pub(crate) async fn document(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path((operation_id, mission_id)): Path<(String, String)>,
+) -> Result<axum::response::Response, ApiError> {
+    let mission_id = crate::mission_key(&gateway, &mission_id).await?;
+    let (person, operation, registry) =
+        authorized(&gateway, &headers, operation_id, "mission.read").await?;
+    let wanted = operation.to_string();
+    let uid = mission_id.clone();
+    let views: Vec<ReviewView> =
+        tokio::task::spawn_blocking(move || registry.mission_reviews(&uid))
+            .await
+            .map_err(|_| ApiError::internal())?
+            .map_err(registry_error)?
+            .into_iter()
+            .filter(|review| review.operation == wanted)
+            .map(ReviewView::of)
+            .collect();
+    let gates: Vec<serde_json::Value> = views
+        .iter()
+        .filter_map(|view| serde_json::to_value(view).ok())
+        .map(|mut gate| {
+            if let Some(map) = gate.as_object_mut() {
+                map.remove("votes");
+                map.remove("why");
+            }
+            gate
+        })
+        .collect();
+    let document = crate::documents::compose(
+        &gateway,
+        person,
+        crate::documents::Draft::new("review", Some(operation.as_str()))
+            .with("operation", operation.to_string())
+            .with("mission", mission_id)
+            .with("reviews", gates)
+            .body(review_body(&views)),
+    )
+    .await?;
+    Ok(crate::documents::respond(&headers, document))
+}
+
 /// `POST /v1/user/operations/{operation_id}/missions/{mission_id}/reviews/{gate}/overrule`:
 /// decides over the panel, with a reason. Only while the review is open or waits for a person.
 pub(crate) async fn overrule(

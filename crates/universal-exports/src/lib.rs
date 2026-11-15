@@ -14,6 +14,9 @@ mod board_tests;
 mod charges;
 mod compartments;
 mod controls;
+mod documents;
+#[cfg(test)]
+mod documents_tests;
 #[cfg(test)]
 mod follow_up_tests;
 mod green_ink;
@@ -1699,6 +1702,7 @@ impl Gateway {
             )
             .route("/v1/reports/sources/{key}", get(reports::source))
             .route("/v1/reports/{id}", get(reports::show))
+            .route("/v1/reports/{id}/document", get(reports::document))
             .route(
                 "/v1/reports/{id}/reopen",
                 post(reports::reopen),
@@ -1794,6 +1798,22 @@ impl Gateway {
             .route(
                 "/v1/user/operations/{operation_id}/missions/{mission_id}/reviews/{gate}/overrule",
                 post(reviews::overrule),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/missions/{mission_id}/reviews/document",
+                get(reviews::document),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/missions/{mission_id}/brief",
+                get(documents::brief),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/held-briefs/{key}/document",
+                get(held::document),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/green-ink/{request_id}/document",
+                get(green_ink::document),
             )
             .route(
                 "/v1/user/operations/{operation_id}/agent-roles",
@@ -2066,6 +2086,7 @@ impl Gateway {
             )
             .route("/v1/user/charges", get(charges::list))
             .route("/v1/user/charges/{scope}", get(charges::show))
+            .route("/v1/user/charges/{scope}/document", get(charges::document))
             .route("/v1/socket/attach", get(run_attach::socket))
             .route("/v1/station/hub/next", get(run_attach::next))
             .route("/v1/station/hub/frames", post(run_attach::frames))

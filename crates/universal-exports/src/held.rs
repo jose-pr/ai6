@@ -144,6 +144,71 @@ pub(crate) async fn list(
     ))
 }
 
+/// `GET /v1/user/operations/{operation_id}/held-briefs/{key}/document`: a held brief as a
+/// document: its text is the body, why it is held and where it came from the frontmatter.
+/// Needs `mission.create`, as the list does.
+pub(crate) async fn document(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path((operation_id, key)): Path<(String, String)>,
+) -> Result<axum::response::Response, ApiError> {
+    let key = crate::mission_key(&gateway, &key).await?;
+    valid_key(&key)?;
+    let (person, operation, registry) = authorized(&gateway, &headers, operation_id).await?;
+    let wanted = operation.to_string();
+    let held = tokio::task::spawn_blocking(move || {
+        registry.held_briefs(&wanted, registry.limits().held.results.or_max())
+    })
+    .await
+    .map_err(|_| ApiError::internal())?
+    .map_err(registry_error)?
+    .into_iter()
+    .find(|held| held.brief.key() == key)
+    .ok_or_else(ApiError::not_found)?;
+    let brief = &held.brief;
+    let findings: Vec<serde_json::Value> = held
+        .vetting
+        .findings
+        .iter()
+        .filter_map(|finding| serde_json::to_value(finding).ok())
+        .collect();
+    let mut draft = crate::documents::Draft::new("held_brief", Some(operation.as_str()))
+        .with("operation", operation.to_string())
+        .with("key", key)
+        .with("mission", brief.mission_id.clone())
+        .with("handle", brief.handle.clone())
+        .with("title", brief.title.clone())
+        .with("name", brief.name.clone())
+        .with("source", brief.source.clone())
+        .with("agent", brief.agent.clone())
+        .with("role", brief.role.clone())
+        .with("url", brief.url.clone())
+        .with("stations", brief.stations.clone())
+        .with("priority", brief.priority)
+        .with("created", brief.created.clone())
+        .with("held_at", held.held_at)
+        .with(
+            "verdict",
+            serde_json::to_value(held.vetting.verdict).unwrap_or_default(),
+        )
+        .with("findings", findings);
+    if let Some(serde_json::Value::Object(mut origin)) = brief
+        .provenance
+        .as_ref()
+        .and_then(|provenance| serde_json::to_value(provenance).ok())
+    {
+        origin.remove("digest");
+        draft = draft.with("origin", serde_json::Value::Object(origin));
+    }
+    let body = if brief.body.trim().is_empty() {
+        brief.title.clone()
+    } else {
+        brief.body.clone()
+    };
+    let document = crate::documents::compose(&gateway, person, draft.body(body)).await?;
+    Ok(crate::documents::respond(&headers, document))
+}
+
 /// `POST /v1/user/operations/{operation_id}/held-briefs/{key}/release`: returns the brief to
 /// the queue, cleared of the kinds it was held for.
 pub(crate) async fn release(

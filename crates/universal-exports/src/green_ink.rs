@@ -203,6 +203,65 @@ pub(crate) async fn pending(
     Ok(Json(requests))
 }
 
+/// `GET /v1/user/operations/{operation_id}/green-ink/{request_id}/document`: the request as a
+/// document, pending or decided: the Agent's reason is the body, the step and who decided it
+/// the frontmatter. Needs `approval.decide`, as the list does.
+pub(crate) async fn document(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path((operation_id, request_id)): Path<(String, String)>,
+) -> Result<axum::response::Response, ApiError> {
+    valid_id(&request_id)?;
+    let (person, operation, registry) =
+        authorized(&gateway, &headers, operation_id, "approval.decide").await?;
+    let now = unix_timestamp()?;
+    let wanted = (operation.to_string(), request_id);
+    let status = tokio::task::spawn_blocking(move || registry.approval(&wanted.0, &wanted.1, now))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(registry_error)?
+        .ok_or_else(ApiError::not_found)?;
+    let request = status.request();
+    let mut draft = crate::documents::Draft::new("green_ink", Some(operation.as_str()))
+        .with("operation", operation.to_string())
+        .with("id", request.id.clone())
+        .with("state", status.name())
+        .with("mission", request.mission.to_string())
+        .with("run", request.run.to_string())
+        .with("agent", request.agent.clone())
+        .with("step", request.scope.kind.clone())
+        .with("target", request.scope.target.clone())
+        .with("requested_at", request.requested_at)
+        .with("expires_at", request.expires_at)
+        .with("proposed_role", request.proposed_role.clone())
+        .with(
+            "rearmed",
+            serde_json::to_value(&request.rearmed).unwrap_or_default(),
+        )
+        .with(
+            "links",
+            serde_json::to_value(&request.links).unwrap_or_default(),
+        );
+    let mut body = request.reason.clone();
+    if let ApprovalStatus::Decided(approval) = &status {
+        draft = draft
+            .with("signer", approval.signer.clone())
+            .with("decided_at", approval.at)
+            .with("decision_expires_at", approval.expires_at)
+            .with("notified_at", approval.notified_at)
+            .with("spent_at", approval.spent_at)
+            .with(
+                "revoked",
+                serde_json::to_value(&approval.revoked).unwrap_or_default(),
+            );
+        if let Some(note) = approval.note.as_deref().filter(|note| !note.is_empty()) {
+            body.push_str(&format!("\n\n## Note from {}\n\n{note}\n", approval.signer));
+        }
+    }
+    let document = crate::documents::compose(&gateway, person, draft.body(body)).await?;
+    Ok(crate::documents::respond(&headers, document))
+}
+
 /// `GET /v1/user/operations/{operation_id}/green-ink/sources`: where the Operation's Sources are
 /// read on the web, so the page can link what a reason names. Empty on a gateway with no roster.
 pub(crate) async fn sources(

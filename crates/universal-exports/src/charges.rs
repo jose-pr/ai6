@@ -356,6 +356,72 @@ pub(crate) async fn show(
     }))
 }
 
+/// Unix seconds as an RFC 3339 time, or the number itself when it is out of range.
+fn when(at: f64) -> String {
+    #[allow(clippy::cast_possible_truncation)]
+    time::OffsetDateTime::from_unix_timestamp(at as i64)
+        .ok()
+        .and_then(|time| {
+            time.format(&time::format_description::well_known::Rfc3339)
+                .ok()
+        })
+        .unwrap_or_else(|| at.to_string())
+}
+
+/// A charge's report as the body of a document: what its last turn said, then its logbook.
+fn report_body(scope: &str, last: Option<&str>, logbook: &[ChargeLogEntry]) -> String {
+    let mut body = format!("# Report of {scope}\n\n");
+    match last {
+        Some(said) => body.push_str(&format!("{said}\n\n")),
+        None => body.push_str("It has not reported yet.\n\n"),
+    }
+    if !logbook.is_empty() {
+        body.push_str("## Logbook\n\n");
+        for entry in logbook {
+            let text = entry.text.lines().collect::<Vec<_>>().join("\n  ");
+            body.push_str(&format!(
+                "- {} **{}**: {text}\n",
+                when(entry.at),
+                entry.kind
+            ));
+        }
+    }
+    body
+}
+
+/// `GET /v1/user/charges/{scope}/document`: a charge's report as a document: what it last said
+/// and its logbook as the body, where it runs and how it fared in the frontmatter. A Station's
+/// report is its charge's. Needs `charge.converse` on it, as the logbook does.
+pub(crate) async fn document(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path(scope): Path<String>,
+) -> Result<axum::response::Response, ApiError> {
+    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    let sources = sources(&gateway).await?;
+    let Some((view, record)) = view(&gateway, &person, &sources, &scope).await else {
+        return Err(ApiError::not_found());
+    };
+    if !view.can_converse {
+        return Err(ApiError::forbidden());
+    }
+    let logbook = record.map(|record| record.logbook).unwrap_or_default();
+    let operation = scope.strip_prefix("operation:").map(str::to_owned);
+    let last = view.last_turn.clone();
+    let shown = serde_json::to_value(&view).unwrap_or_default();
+    let mut draft = crate::documents::Draft::new("charge", operation.as_deref());
+    if let Value::Object(map) = &shown {
+        draft = draft.with_all(map, &["can_converse", "can_interrupt", "last_turn"]);
+    }
+    let document = crate::documents::compose(
+        &gateway,
+        person,
+        draft.body(report_body(&scope, last.as_deref(), &logbook)),
+    )
+    .await?;
+    Ok(crate::documents::respond(&headers, document))
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
