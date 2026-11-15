@@ -527,6 +527,8 @@ mod tests {
         a_rename_reaches_the_brief_in_every_state,
         a_taken_or_malformed_handle_is_refused,
         a_requested_handle_is_taken_and_a_taken_one_refused,
+        a_search_finds_a_mission_by_handle_ticket_agent_state_and_words,
+        a_search_is_bounded_by_what_it_examines_and_returns,
         a_former_handle_is_never_given_again,
         a_renamed_item_keeps_its_new_handle_when_polled_again,
         run_handles_follow_the_current_handle_only_for_new_runs,
@@ -1356,6 +1358,158 @@ mod tests {
                 .unwrap_err();
             assert_eq!(error.kind(), io::ErrorKind::InvalidInput, "{malformed:?}");
         }
+    }
+
+    /// A brief of Operation `operation` with `title`, `body` and `agent`, entered as a person's.
+    fn entered_for(
+        registry: &dyn crate::directorates::registry::suite::TestRegistry,
+        (operation, title, body): (&str, &str, &str),
+        agent: Option<&str>,
+    ) -> Brief {
+        let mut filed = brief(title);
+        filed.title = title.to_owned();
+        filed.body = body.to_owned();
+        filed.operation = Some(operation.to_owned());
+        filed.agent = agent.map(str::to_owned);
+        registry
+            .enter_brief(&filed, &MissionEntry::person(Some(operation)))
+            .unwrap()
+    }
+
+    fn found(
+        registry: &dyn crate::directorates::registry::suite::TestRegistry,
+        search: &crate::directorates::registry::store::BriefSearch,
+    ) -> Vec<String> {
+        let mut handles: Vec<String> = registry
+            .search_briefs(search, 100)
+            .unwrap()
+            .iter()
+            .map(|filed| filed.brief.shown_handle())
+            .collect();
+        handles.sort();
+        handles
+    }
+
+    fn a_search_finds_a_mission_by_handle_ticket_agent_state_and_words(store: &dyn Store) {
+        use crate::directorates::registry::store::BriefSearch;
+        let registry = store.handle();
+        let build = entered_for(
+            registry.as_ref(),
+            ("G", "Repair the build", "The linker fails on Windows."),
+            Some("007"),
+        );
+        let docs = entered_for(
+            registry.as_ref(),
+            ("G", "Write the guide", "Cover the quota pools."),
+            Some("008"),
+        );
+        let other = entered_for(
+            registry.as_ref(),
+            ("H", "Repair the build", "Another Operation's secret."),
+            Some("007"),
+        );
+        registry
+            .ingest_source_item(
+                "G",
+                "gh",
+                &source_item("o/r#31", Some("31"), Some("gh")),
+                "hq",
+            )
+            .unwrap();
+        let claimed = registry.claim_new(Some(&build.key())).unwrap().unwrap();
+        registry
+            .finish(
+                &claimed,
+                &serde_json::json!({"report": {"summary": "Pinned the Linker version."}}),
+                true,
+                None,
+                None,
+            )
+            .unwrap();
+        registry.rename_mission(&docs.key(), "G-guide").unwrap();
+
+        let search = |change: &dyn Fn(&mut BriefSearch)| {
+            let mut search = BriefSearch::default();
+            change(&mut search);
+            found(registry.as_ref(), &search)
+        };
+        let all = search(&|_| {});
+        assert_eq!(all.len(), 4, "{all:?}");
+        // The Operation scopes every other filter.
+        let operation = search(&|search| search.operation = Some("G".to_owned()));
+        assert_eq!(operation.len(), 3, "{operation:?}");
+        assert!(!operation.contains(&other.shown_handle()));
+        let shown = |brief: &Brief| vec![brief.shown_handle()];
+        // Words match the brief's text without case, and the outcome's.
+        assert_eq!(
+            search(&|search| search.text = Some("QUOTA pools".to_owned())),
+            vec!["G-guide".to_owned()]
+        );
+        assert_eq!(
+            search(&|search| {
+                search.operation = Some("G".to_owned());
+                search.text = Some("linker".to_owned());
+            }),
+            shown(&build)
+        );
+        assert!(
+            search(&|search| search.text = Some("linker windows quota".to_owned())).is_empty(),
+            "every word must appear"
+        );
+        // State, Agent and handle.
+        assert_eq!(
+            search(&|search| search.state = Some("done".to_owned())),
+            shown(&build)
+        );
+        assert_eq!(
+            search(&|search| search.agent = Some("008".to_owned())),
+            vec!["G-guide".to_owned()]
+        );
+        assert_eq!(
+            search(&|search| search.handle = Some("guide".to_owned())),
+            vec!["G-guide".to_owned()]
+        );
+        // A former handle, written whole, still finds the Mission.
+        let former = docs.shown_handle();
+        assert_eq!(
+            search(&|search| search.handle = Some(former.clone())),
+            vec!["G-guide".to_owned()]
+        );
+        // A ticket by its key, its number or its code.
+        for ticket in ["o/r#31", "31", "#31"] {
+            assert_eq!(
+                search(&|search| search.ticket = Some(ticket.to_owned())),
+                vec!["G-gh-31".to_owned()],
+                "{ticket}"
+            );
+        }
+        assert!(search(&|search| search.ticket = Some("32".to_owned())).is_empty());
+    }
+
+    fn a_search_is_bounded_by_what_it_examines_and_returns(store: &dyn Store) {
+        use crate::directorates::registry::store::BriefSearch;
+        let registry = store.handle();
+        for index in 0..5 {
+            entered_for(
+                registry.as_ref(),
+                ("G", &format!("Task {index}"), "Common words."),
+                None,
+            );
+        }
+        let mut search = BriefSearch {
+            text: Some("common".to_owned()),
+            ..BriefSearch::default()
+        };
+        assert_eq!(registry.search_briefs(&search, 100).unwrap().len(), 5);
+        assert_eq!(registry.search_briefs(&search, 2).unwrap().len(), 2);
+        search.scan = crate::bounds::Limit::at(3);
+        assert_eq!(
+            registry.search_briefs(&search, 100).unwrap().len(),
+            3,
+            "only three records are looked at"
+        );
+        search.scan = crate::bounds::Limit::at(0);
+        assert!(registry.search_briefs(&search, 100).unwrap().is_empty());
     }
 
     fn a_taken_or_malformed_handle_is_refused(store: &dyn Store) {

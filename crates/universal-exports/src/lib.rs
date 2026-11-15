@@ -48,6 +48,9 @@ mod roster;
 mod run_attach;
 #[cfg(test)]
 mod run_attach_tests;
+mod search;
+#[cfg(test)]
+mod search_tests;
 mod source_reads;
 mod timeline;
 mod tls;
@@ -1689,6 +1692,7 @@ impl Gateway {
                 get(get_user_station_settings).put(put_user_station_settings),
             )
             .route("/v1/missions", get(missions))
+            .route("/v1/missions/search", get(search::search))
             .route(
                 "/v1/missions/{id}/products",
                 get(compartments::mission_products),

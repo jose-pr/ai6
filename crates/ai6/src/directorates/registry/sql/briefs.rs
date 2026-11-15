@@ -16,8 +16,9 @@ use crate::directorates::registry::sources::{
     source_brief, source_entry, source_provenance,
 };
 use crate::directorates::registry::store::{
-    Brief, BriefStore, FiledBrief, Lease, LeaseRecovery, MissionProposal, Reentry, current_handle,
-    invalid_data, is_lost, lost_outcome, newest_first, unix_time, validate_registry_key,
+    Brief, BriefSearch, BriefStore, FiledBrief, Lease, LeaseRecovery, MissionProposal, Reentry,
+    current_handle, invalid_data, is_lost, lost_outcome, newest_first, unix_time,
+    validate_registry_key,
 };
 use crate::directorates::registry::vetting::{
     Clearance, HeldBrief, VettingStore, already_decided, check_actor, check_limit, is_withdrawn,
@@ -917,6 +918,31 @@ impl BriefStore for SqlRegistry {
             .iter()
             .filter_map(|row| filed_row(row).ok())
             .filter(|filed| filed.brief.operation.as_deref() == Some(operation))
+            .collect();
+        Ok(newest_first(found, limit))
+    }
+
+    fn search_briefs(&self, search: &BriefSearch, limit: usize) -> io::Result<Vec<FiledBrief>> {
+        let named = match &search.handle {
+            Some(handle) => self.resolve_mission(handle)?.map(|found| found.mission_id),
+            None => None,
+        };
+        let scan = row_limit(search.scan);
+        // The state is a column, so it narrows the rows read; the rest is inside the record.
+        let rows = self.read(|tx| match &search.state {
+            Some(state) => tx.query(
+                "SELECT brief, provenance, state, claims, outcome FROM ai6_briefs                  WHERE state = $1 ORDER BY revision DESC LIMIT $2",
+                &[state.as_str().into(), scan.into()],
+            ),
+            None => tx.query(
+                "SELECT brief, provenance, state, claims, outcome FROM ai6_briefs                  ORDER BY revision DESC LIMIT $1",
+                &[scan.into()],
+            ),
+        })?;
+        let found = rows
+            .iter()
+            .filter_map(|row| filed_row(row).ok())
+            .filter(|filed| search.matches(filed, named.as_deref()))
             .collect();
         Ok(newest_first(found, limit))
     }

@@ -1009,6 +1009,10 @@ pub struct UnexRecord {
     #[schema(title = "Timeline pages")]
     #[map(default)]
     pub timeline: super::unex_limits::UnexTimelineLimits,
+    /// `[search]`: searching Missions.
+    #[schema(title = "Searching Missions")]
+    #[map(default)]
+    pub search: super::unex_limits::UnexSearchLimits,
     /// `[attach]`: people attached to a Run through the gateway.
     #[schema(title = "Attaching to a Run")]
     #[map(default)]
@@ -1051,6 +1055,7 @@ impl Default for UnexRecord {
             gateway: Default::default(),
             controls: Default::default(),
             timeline: Default::default(),
+            search: Default::default(),
             attach: Default::default(),
             login: Default::default(),
             text: Default::default(),
@@ -1143,6 +1148,7 @@ impl UnexRecord {
             gateway: self.gateway.clone(),
             controls: self.controls.clone(),
             timeline: self.timeline.clone(),
+            search: self.search.clone(),
             attach: self.attach.clone(),
             login: self.login.clone(),
             text: self.text.clone(),

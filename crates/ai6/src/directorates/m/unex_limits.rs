@@ -1,5 +1,5 @@
 //! The bounds and pace of Universal Exports that the `unex` record sets, one table per area:
-//! `[gateway]`, `[controls]`, `[timeline]`, `[attach]`, `[login]` and `[text]`. Each default is the value
+//! `[gateway]`, `[controls]`, `[timeline]`, `[search]`, `[attach]`, `[login]` and `[text]`. Each default is the value
 //! applied when the record says nothing, and the record applies at restart.
 //!
 //! Counts and sizes are [`Limit`]s and ceilings on durations are [`TimeLimit`]s: `null` (or
@@ -24,6 +24,8 @@ pub struct UnexLimits {
     pub controls: ControlLimits,
     /// `[timeline]`: a Mission's timeline pages.
     pub timeline: UnexTimelineLimits,
+    /// `[search]`: searching Missions.
+    pub search: UnexSearchLimits,
     /// `[attach]`: people attached to a Run through the gateway.
     pub attach: UnexAttachLimits,
     /// `[login]`: how password and key tries are told apart and counted.
@@ -333,6 +335,40 @@ impl Default for UnexTimelineLimits {
     }
 }
 
+/// `[search]`: how many Missions a search returns and how much of the Registry it reads.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
+pub struct UnexSearchLimits {
+    /// Missions in a page when the request names no limit, at least 1.
+    #[schema(title = "Missions in a page")]
+    #[map(default = UnexSearchLimits::default().page)]
+    pub page: u64,
+    /// The most Missions a page may ask for.
+    #[schema(title = "Most Missions a page may ask for")]
+    #[map(default = UnexSearchLimits::default().max_page)]
+    pub max_page: Limit,
+    /// The most briefs one search reads from the Registry; a Mission beyond them is not found.
+    #[schema(title = "Briefs one search reads")]
+    #[map(default = UnexSearchLimits::default().scan)]
+    pub scan: Limit,
+    /// The most bytes any one search filter may carry.
+    #[schema(title = "Longest search filter", format = "bytes")]
+    #[map(default = UnexSearchLimits::default().filter_bytes)]
+    pub filter_bytes: Limit,
+}
+
+impl Default for UnexSearchLimits {
+    fn default() -> Self {
+        Self {
+            page: 25,
+            max_page: Limit::at(200),
+            scan: Limit::at(20_000),
+            filter_bytes: Limit::at(256),
+        }
+    }
+}
+
 /// `[login]`. The tries allowed are the flat `login_tries_per_address` and
 /// `login_tries_per_name`.
 #[non_exhaustive]
@@ -541,6 +577,17 @@ impl UnexLimits {
             return Err("timeline.audit_page: at least 1".to_owned());
         }
         at_least_one("timeline", &[("max_page", self.timeline.max_page)])?;
+        if self.search.page == 0 {
+            return Err("search.page: at least 1".to_owned());
+        }
+        at_least_one(
+            "search",
+            &[
+                ("max_page", self.search.max_page),
+                ("scan", self.search.scan),
+                ("filter_bytes", self.search.filter_bytes),
+            ],
+        )?;
         at_least_one(
             "attach",
             &[
@@ -576,6 +623,7 @@ impl UnexLimits {
         let mut found = looser("unex.gateway", &self.gateway);
         found.extend(looser("unex.controls", &self.controls));
         found.extend(looser("unex.timeline", &self.timeline));
+        found.extend(looser("unex.search", &self.search));
         found.extend(looser("unex.attach", &self.attach));
         found.extend(looser("unex.login", &self.login));
         found.extend(looser("unex.text", &self.text));

@@ -115,7 +115,7 @@ pub use directorates::m::theaters::{
 };
 pub use directorates::m::unex_limits::{
     ControlLimits, LoginTable, TextLimits, UnexAttachLimits, UnexGatewayLimits, UnexLimits,
-    UnexTimelineLimits,
+    UnexSearchLimits, UnexTimelineLimits,
 };
 pub use directorates::m::vetting::{
     CHIEF_OF_STAFF_ROLE, DEFAULT_MAX_BRIEF_BYTES, DEFAULT_MAX_PER_HOUR,
@@ -241,8 +241,8 @@ pub use directorates::registry::sources::{
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
 pub use directorates::registry::sql::{SqlOptions, SqlRegistry};
 pub use directorates::registry::store::{
-    AuditRecord, Brief, DEFAULT_LEASE, FileRegistry, FiledBrief, HeadquartersLease, Lease,
-    LeaseRecovery, MissionProposal, Reentry, StationRecord, StationSettings,
+    AuditRecord, Brief, BriefSearch, DEFAULT_LEASE, FileRegistry, FiledBrief, HeadquartersLease,
+    Lease, LeaseRecovery, MissionProposal, Reentry, StationRecord, StationSettings,
 };
 pub use directorates::registry::timeline::TimelineEvent;
 pub use directorates::registry::tracker::{

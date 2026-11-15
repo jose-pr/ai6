@@ -1108,6 +1108,122 @@ pub struct FiledBrief {
     pub outcome: Option<serde_json::Value>,
 }
 
+/// What a search of the Mission briefs asks. Every field that is set must match; none set
+/// matches every brief.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BriefSearch {
+    /// Only this Operation's Missions.
+    pub operation: Option<String>,
+    /// Only Missions assigned this Agent.
+    pub agent: Option<String>,
+    /// Only briefs in this state: `new`, `held`, `claimed`, `done` or `failed`.
+    pub state: Option<String>,
+    /// A piece of a handle, compared without case. A handle the Mission was ever given, written
+    /// whole, finds it too.
+    pub handle: Option<String>,
+    /// A tracker item's key: the item as the Source names it (`owner/repo#31`), or its number
+    /// or code after the last `#` or `/` (`31`), compared without case.
+    pub ticket: Option<String>,
+    /// Words that must each appear, without case, in the brief's title, name or body, or in a
+    /// text of its outcome.
+    pub text: Option<String>,
+    /// The most records examined; the rest are not looked at.
+    pub scan: crate::bounds::Limit,
+}
+
+impl Default for BriefSearch {
+    /// Matches every brief, and examines them all.
+    fn default() -> Self {
+        Self {
+            operation: None,
+            agent: None,
+            state: None,
+            handle: None,
+            ticket: None,
+            text: None,
+            scan: crate::bounds::Limit::UNBOUNDED,
+        }
+    }
+}
+
+impl BriefSearch {
+    /// Whether `filed` is what the search asks for. `named` is the UID of the Mission
+    /// [`BriefSearch::handle`] names whole, when a Mission goes by it.
+    pub fn matches(&self, filed: &FiledBrief, named: Option<&str>) -> bool {
+        let brief = &filed.brief;
+        let same = |wanted: &Option<String>, found: Option<&str>| {
+            wanted.as_deref().is_none_or(|wanted| found == Some(wanted))
+        };
+        if !same(&self.operation, brief.operation.as_deref())
+            || !same(&self.agent, brief.agent.as_deref())
+            || !same(&self.state, Some(filed.state.as_str()))
+        {
+            return false;
+        }
+        if let Some(wanted) = &self.handle {
+            let wanted = wanted.to_lowercase();
+            let current = brief.shown_handle().to_lowercase();
+            if !current.contains(&wanted) && named != Some(brief.key().as_str()) {
+                return false;
+            }
+        }
+        if let Some(wanted) = &self.ticket {
+            let wanted = wanted.trim_start_matches('#').to_lowercase();
+            let source_item = brief
+                .data
+                .get("source")
+                .or_else(|| brief.data.get("follow_up"))
+                .and_then(|source| source.get("item"))
+                .and_then(serde_json::Value::as_str);
+            let found = [Some(brief.id.as_str()), source_item]
+                .into_iter()
+                .flatten()
+                .any(|item| {
+                    let item = item.to_lowercase();
+                    item == wanted || item.rsplit(['#', '/']).next() == Some(wanted.as_str())
+                });
+            if !found {
+                return false;
+            }
+        }
+        if let Some(words) = &self.text {
+            let mut haystack = format!(
+                "{}\n{}\n{}",
+                brief.title,
+                brief.name.as_deref().unwrap_or_default(),
+                brief.body
+            );
+            if let Some(outcome) = &filed.outcome {
+                push_texts(outcome, &mut haystack);
+            }
+            let haystack = haystack.to_lowercase();
+            if !words
+                .split_whitespace()
+                .all(|word| haystack.contains(&word.to_lowercase()))
+            {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+/// Appends every string in `value` to `into`, one to a line.
+fn push_texts(value: &serde_json::Value, into: &mut String) {
+    match value {
+        serde_json::Value::String(text) => {
+            into.push('\n');
+            into.push_str(text);
+        }
+        serde_json::Value::Array(items) => items.iter().for_each(|item| push_texts(item, into)),
+        serde_json::Value::Object(fields) => {
+            fields.values().for_each(|item| push_texts(item, into));
+        }
+        _ => {}
+    }
+}
+
 /// What [`BriefStore::reenter_brief`] did.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
@@ -1375,6 +1491,14 @@ pub trait BriefStore {
     /// Returns an error when the Registry cannot be read.
     fn filed_briefs(&self, operation: &str, limit: usize) -> io::Result<Vec<FiledBrief>>;
 
+    /// The briefs `search` matches, newest first, at most `limit` of them, among the first
+    /// `search.scan` in the Registry. Unreadable records are passed over.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Registry cannot be read.
+    fn search_briefs(&self, search: &BriefSearch, limit: usize) -> io::Result<Vec<FiledBrief>>;
+
     /// Records that a cancel of the claimed brief `key` was asked for at `at`, as Unix seconds,
     /// keeping the first time it was asked. `false` when the brief is not claimed. Finishing the
     /// brief forgets it; a claim that lapses back to the queue keeps it.
@@ -1529,6 +1653,51 @@ impl BriefStore for FileRegistry {
                 // A record this cannot read is passed over, as a listing of the queue does.
                 if let Ok(Some(filed)) = self.filed_in(state, key)
                     && filed.brief.operation.as_deref() == Some(operation)
+                {
+                    seen.insert(key.to_owned());
+                    found.push(filed);
+                }
+            }
+        }
+        Ok(newest_first(found, limit))
+    }
+
+    fn search_briefs(&self, search: &BriefSearch, limit: usize) -> io::Result<Vec<FiledBrief>> {
+        let named = match &search.handle {
+            Some(handle) => self.resolve_mission(handle)?.map(|found| found.mission_id),
+            None => None,
+        };
+        let mut found = Vec::new();
+        let mut seen = BTreeSet::new();
+        let mut examined = 0usize;
+        let scan = search.scan.or_max();
+        for state in BRIEF_STATES {
+            if search
+                .state
+                .as_deref()
+                .is_some_and(|wanted| wanted != state)
+            {
+                continue;
+            }
+            let entries = match fs::read_dir(self.root.join(state)) {
+                Ok(entries) => entries,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error),
+            };
+            for entry in entries {
+                let name = entry?.file_name().to_string_lossy().into_owned();
+                let Some(key) = name.strip_suffix(".json") else {
+                    continue;
+                };
+                if key.ends_with(".outcome") || seen.contains(key) {
+                    continue;
+                }
+                if examined >= scan {
+                    break;
+                }
+                examined += 1;
+                if let Ok(Some(filed)) = self.filed_in(state, key)
+                    && search.matches(&filed, named.as_deref())
                 {
                     seen.insert(key.to_owned());
                     found.push(filed);
