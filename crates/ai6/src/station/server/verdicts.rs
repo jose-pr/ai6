@@ -173,7 +173,7 @@ fn settle(state: &DaemonState, mission_id: &str, verdict: &MissionVerdict) {
     };
     publish_finished_event(state, mission_id, event, Some(finished));
     file_settled(state, mission_id);
-    // Redispatched runs before this one reported `verifying` and kept doing so.
+    // A run a redispatch replaced may still report `verifying`.
     let latest = if verdict.verdict == OutcomeVerdict::Confirmed {
         RunResult::new("done")
     } else {

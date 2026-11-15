@@ -470,11 +470,13 @@ pub(super) fn redispatch(state: &DaemonState, mission: &Mission, verdict: &Missi
         );
     }
     // Runs before it that were redispatched when this Station was not the one to close them.
-    let _ = state.intake.settle_results(
+    if let Err(error) = state.intake.settle_results(
         mission_id,
         &RunResult::new("abandoned").with_reason(Some(RunResult::REDISPATCHED.to_owned())),
         &RunResult::new("abandoned").with_reason(Some(RunResult::REDISPATCHED.to_owned())),
-    );
+    ) {
+        eprintln!("ai6: Mission {mission_id:?}: its Run records were not settled: {error}");
+    }
     let queued = state
         .missions
         .lock()

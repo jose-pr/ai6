@@ -200,11 +200,27 @@ fn settle_failed_runs(state: &DaemonState, mission_id: &str, outcome: Option<&se
     let reason = outcome
         .and_then(|outcome| outcome["reason"].as_str())
         .map(str::to_owned);
+    fail_runs(state, mission_id, reason);
+}
+
+/// Ends the results of a Mission's closed Runs that still report work, because the Mission is
+/// failed: the latest `failed` with `reason`, the earlier ones `abandoned`.
+pub(super) fn fail_runs(state: &DaemonState, mission_id: &str, reason: Option<String>) {
     if let Err(error) = state.intake.settle_results(
         mission_id,
         &RunResult::new("failed").with_reason(reason),
         &RunResult::new("abandoned").with_reason(Some(SUPERSEDED.to_owned())),
     ) {
+        eprintln!("ai6: Mission {mission_id:?}: its Run records were not settled: {error}");
+    }
+}
+
+/// Ends the results of the earlier Runs of a Mission that is over, which a lost or replaced Run
+/// left reporting `queued` or `working`; the Run that ended it already says how.
+pub(super) fn settle_earlier_runs(state: &DaemonState, mission_id: &str, over: MissionState) {
+    let latest = RunResult::new(over.as_str());
+    let earlier = RunResult::new("abandoned").with_reason(Some(SUPERSEDED.to_owned()));
+    if let Err(error) = state.intake.settle_results(mission_id, &latest, &earlier) {
         eprintln!("ai6: Mission {mission_id:?}: its Run records were not settled: {error}");
     }
 }

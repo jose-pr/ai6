@@ -217,6 +217,10 @@ pub(super) fn give_up(
         lose_held(state, hold, reason);
     }
     let to = hand_back(state, mission_id);
+    if to == MissionState::Failed {
+        // A Mission with no brief to queue again fails here, so its Runs say so.
+        super::standing::fail_runs(state, mission_id, Some(reason.to_owned()));
+    }
     if let Some(hold) = &hold {
         super::agents::count_lost(state, mission_id, hold.number);
     }
@@ -1409,16 +1413,12 @@ mod tests {
         b.stopping.store(true, Ordering::Release);
     }
 
-    /// Pops `mission_id`'s events on `state` until it completes, and answers its ticks.
     #[tokio::test]
     async fn a_run_lost_with_its_station_is_filed_failed_when_its_operation_says_so() {
         let root = tempfile::tempdir().unwrap();
         let registry = root.path().join("registry");
-        let operation = "on_lost = \"fail\"
-";
-        let agents = "[agent.007]
-handler = \"mock-agent\"
-";
+        let operation = "on_lost = \"fail\"\n";
+        let agents = "[agent.007]\nhandler = \"mock-agent\"\n";
         let a = station(root.path(), "station-a", &registry, operation, agents, None);
         let b = station(root.path(), "station-b", &registry, operation, agents, None);
         let mission_id = submit(a.intake.as_ref(), &format!("fail-{}", std::process::id()));
@@ -1442,6 +1442,7 @@ handler = \"mock-agent\"
         assert!(b.intake.leases().unwrap().is_empty());
     }
 
+    /// Pops `mission_id`'s events on `state` until it completes, and answers its ticks.
     async fn finish(state: &DaemonState, mission_id: &str) -> Vec<u32> {
         let mut events = Vec::new();
         until("the Run completes", || {
@@ -1628,6 +1629,103 @@ handler = \"mock-agent\"
         assert_eq!(finish(&b, &mission_id).await.len(), DRIP_TICKS as usize);
         a.stopping.store(true, Ordering::Release);
         b.stopping.store(true, Ordering::Release);
+    }
+
+    #[tokio::test]
+    async fn a_run_given_up_with_no_brief_to_queue_again_reports_its_mission_failed() {
+        let root = tempfile::tempdir().unwrap();
+        let registry = root.path().join("registry");
+        let agents = "[agent.007]\nhandler = \"mock-agent\"\n";
+        let a = station(root.path(), "station-a", &registry, "", agents, None);
+        let mission_id = submit(
+            a.intake.as_ref(),
+            &format!("nobrief-{}", std::process::id()),
+        );
+        publish_station_check_in(&a);
+        assert!(schedule_intake_once(&a));
+        schedule_queued_once(&a).await;
+        wait_for_state(&a, &mission_id, MissionState::Blocked).await;
+        let first = run_hold(&a, &mission_id).unwrap();
+        // Its brief is filed, so nothing is left to queue again.
+        for lease in a.intake.leases().unwrap() {
+            let brief = a.intake.read_claimed(lease.key()).unwrap().unwrap();
+            a.intake
+                .finish(
+                    &brief,
+                    &serde_json::json!({ "state": "failed" }),
+                    false,
+                    None,
+                    Some(lease.station()),
+                )
+                .unwrap();
+        }
+
+        give_up(&a, &mission_id, None, "its harness is gone");
+        let run = a.intake.run(&first.id).unwrap().unwrap();
+        assert_eq!(run.status, RunStatus::Lost);
+        assert_eq!(run.result.unwrap().state, "failed");
+        a.stopping.store(true, Ordering::Release);
+    }
+
+    #[tokio::test]
+    async fn a_mission_that_finishes_ends_the_earlier_runs_a_loss_left_queued() {
+        let root = tempfile::tempdir().unwrap();
+        let registry = root.path().join("registry");
+        let agents = "[agent.007]\nhandler = \"mock-agent\"\n";
+        let a = station(root.path(), "station-a", &registry, "", agents, None);
+        let mission_id = submit(
+            a.intake.as_ref(),
+            &format!("earlier-{}", std::process::id()),
+        );
+        // An earlier run was lost with its Station and the Mission queued again.
+        a.intake
+            .open_run(
+                crate::NewRun::new("earlier-run", &mission_id, "station-x")
+                    .with_operation("G")
+                    .with_number(1, None),
+                Duration::from_millis(1),
+            )
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        a.intake.lose_run("earlier-run", "gone dark").unwrap();
+        assert_eq!(
+            a.intake
+                .run("earlier-run")
+                .unwrap()
+                .unwrap()
+                .result
+                .unwrap()
+                .state,
+            "queued"
+        );
+
+        publish_station_check_in(&a);
+        assert!(schedule_intake_once(&a));
+        schedule_queued_once(&a).await;
+        wait_for_state(&a, &mission_id, MissionState::Blocked).await;
+        let second = run_hold(&a, &mission_id).unwrap();
+        assert_eq!(second.number, 2);
+        a.missions
+            .lock()
+            .unwrap()
+            .transition(&mission_id, MissionState::Failed)
+            .unwrap();
+        super::super::sync_run_record(&a, &mission_id);
+
+        let earlier = a
+            .intake
+            .run("earlier-run")
+            .unwrap()
+            .unwrap()
+            .result
+            .unwrap();
+        assert_eq!(
+            earlier.state, "abandoned",
+            "no Run is left reporting `queued`"
+        );
+        let last = a.intake.run(&second.id).unwrap().unwrap().result.unwrap();
+        assert_eq!(last.state, "failed");
+        a.stopping.store(true, Ordering::Release);
     }
 
     #[test]

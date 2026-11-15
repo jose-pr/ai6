@@ -2276,7 +2276,12 @@ fn sync_run_record(state: &DaemonState, mission_id: &str) {
         .update_run(&hold.id, &state.station_id, hold.fence, update)
     {
         // Only the Station that holds the Run counts what its Agent did.
-        Ok(_) | Err(RunError::Ended) => agents::count_mission(state, mission_id, hold.number),
+        Ok(_) | Err(RunError::Ended) => {
+            agents::count_mission(state, mission_id, hold.number);
+            if is_terminal_state(mission.state) {
+                standing::settle_earlier_runs(state, mission_id, mission.state);
+            }
+        }
         Err(RunError::Stale | RunError::HeldBy(_)) => fence_out(state, mission_id),
         Err(error) => eprintln!("ai6: Run record {:?} not updated: {error}", hold.id),
     }
