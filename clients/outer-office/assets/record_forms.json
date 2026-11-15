@@ -8097,6 +8097,55 @@
               "title": "Longest Mission instructions",
               "description": "Bytes of the instructions of a Mission a person starts.",
               "default": 65536
+            },
+            "document_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest document",
+              "description": "Bytes of one document's Markdown (a brief, a green ink request, a held brief, a review, a charge's report or a Report); the author's body is cut to fit after the frontmatter.",
+              "default": 1048576
+            },
+            "document_references": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "References resolved in a document",
+              "description": "References resolved in one document; those past it stay plain text.",
+              "default": 256
+            },
+            "document_board_wait": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "A document waits for boards",
+              "description": "Seconds a document waits for the Headquarters Station to name the boards of the Sources a Mission or Operation reference leads to; past it the reference carries none.",
+              "default": 5.0
             }
           },
           "additionalProperties": false,
@@ -8112,7 +8161,10 @@
             "roster_key_bytes": 128,
             "access_name_bytes": 128,
             "mission_title_chars": 512,
-            "mission_prompt_bytes": 65536
+            "mission_prompt_bytes": 65536,
+            "document_bytes": 1048576,
+            "document_references": 256,
+            "document_board_wait": 5.0
           }
         }
       },

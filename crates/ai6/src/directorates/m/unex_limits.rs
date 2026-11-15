@@ -413,6 +413,20 @@ pub struct TextLimits {
     #[schema(title = "Longest Mission instructions", format = "bytes")]
     #[map(default = TextLimits::default().mission_prompt_bytes)]
     pub mission_prompt_bytes: Limit,
+    /// Bytes of one document's Markdown (a brief, a green ink request, a held brief, a review, a
+    /// charge's report or a Report); the author's body is cut to fit after the frontmatter.
+    #[schema(title = "Longest document", format = "bytes")]
+    #[map(default = TextLimits::default().document_bytes)]
+    pub document_bytes: Limit,
+    /// References resolved in one document; those past it stay plain text.
+    #[schema(title = "References resolved in a document")]
+    #[map(default = TextLimits::default().document_references)]
+    pub document_references: Limit,
+    /// Seconds a document waits for the Headquarters Station to name the boards of the Sources a
+    /// Mission or Operation reference leads to; past it the reference carries none.
+    #[schema(title = "A document waits for boards")]
+    #[map(default = TextLimits::default().document_board_wait)]
+    pub document_board_wait: Seconds,
 }
 
 impl Default for TextLimits {
@@ -428,6 +442,9 @@ impl Default for TextLimits {
             access_name_bytes: Limit::at(128),
             mission_title_chars: Limit::at(512),
             mission_prompt_bytes: Limit::at(64 * KIB),
+            document_bytes: Limit::at(MIB),
+            document_references: Limit::at(256),
+            document_board_wait: Seconds::new(5),
         }
     }
 }
@@ -451,6 +468,7 @@ const PACE: &[&str] = &[
     "audit_page",
     "attention_items",
     "attention_history",
+    "document_board_wait",
 ];
 
 /// One line per bound of `current` looser than its default, its pace keys left out.

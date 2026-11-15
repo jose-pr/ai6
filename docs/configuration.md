@@ -1100,6 +1100,9 @@ pending_per_station = 8
 | `access_name_bytes` | 128 | **Longest role, Operation or account name.** Bytes of a role name, an Operation ID or an account name in the access and account routes. |
 | `mission_title_chars` | 512 | **Longest Mission title.** Characters of the title of a Mission a person starts. |
 | `mission_prompt_bytes` | 64 KiB | **Longest Mission instructions.** Bytes of the instructions of a Mission a person starts. |
+| `document_bytes` | 1 MiB | **Longest document.** Bytes of one document's Markdown (a brief, a green ink request, a held brief, a review, a charge's report or a Report); the author's body is cut to fit after the frontmatter. |
+| `document_references` | 256 | **References resolved in a document.** References resolved in one document; those past it stay plain text. |
+| `document_board_wait` | 5 | **A document waits for boards.** Seconds a document waits for the Headquarters Station to name the boards of the Sources a Mission or Operation reference leads to; past it the reference carries none. |
 <!-- schema:record.unex.text:end -->
 
 ### Station runtime limits
