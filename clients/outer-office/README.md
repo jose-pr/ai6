@@ -72,12 +72,12 @@ Mission → Run board, Mission briefs, live Run terminals, administration and au
 - Stations, with tabs for every Station's Theaters, each Station's settings (its Mission
   capacity and resource limits: the free memory and CPU past which it takes no new
   Missions; 0 MiB and 100% turn them off) and a placement preview.
-- Overview, the page Outer Office opens on: the theme's hero art beside the person's
-  Operations (each with the share of its Missions done) and the Stations; counts of
-  Operations, Stations online and dark, active Missions and waiting Runs; recent
-  activity from the Operations' timelines (with `audit.read`); Upcoming, the Missions
-  waiting to run (queued Missions oldest first, then held briefs, each labelled); a
-  Moneypenny card whose quick questions and field open her chat and ask her; and what needs
+- Overview, the page Outer Office opens on: a short banner with the theme's hero art
+  across the top; counts of Operations, Stations online and dark, active Missions and
+  waiting Runs; recent activity from the Operations' timelines (with `audit.read`);
+  Upcoming, the Missions waiting to run (queued Missions oldest first, then held briefs,
+  each labelled); the person's Operations (each with the share of its Missions done) beside
+  them, or above them on a narrow window; and what needs
   attention (blocked Runs, green ink requests waiting where the person has
   `approval.decide`, briefs vetting holds and Mission proposals waiting where the person has
   `mission.create`, dark Stations), each saying what, where and when and linking to its page

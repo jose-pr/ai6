@@ -1159,8 +1159,8 @@ message is about: by default the page the person is on (**Operation · guatiao**
 button removes the scope (**All accessible Operations**, no route sent), its menu pins an
 Operation, and once the scope is pinned or removed a page the person moves to is offered as
 **Ask about … instead** and never taken by itself; **Follow the page** goes back. With the chat
-open beside or over the page there is one composer: Overview's own box becomes **Ask about
-this page**, which moves to the chat's. Switching between the side and expanded views keeps
+open beside or over the page there is one composer, the chat's; Overview has no Moneypenny
+card of its own. Switching between the side and expanded views keeps
 the draft, the scroll position and the focus.
 
 "What needs my attention?" is answered from her `attention` tool, the same summary Overview
