@@ -49,6 +49,7 @@ nav:
       - Memories: memories.md
       - Reports: reports.md
       - Review: review.md
+      - Documents: documents.md
       - The Agent Client Protocol: acp.md
       - Moneypenny, the assistant: assistant.md
       - Terminals: terminals.md

@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The gateway serves a brief, a green ink request, a held brief, a Mission's reviews, a charge's report and a
+  Report as documents (`.../missions/{mission}/brief`, `.../green-ink/{id}/document`,
+  `.../held-briefs/{key}/document`, `.../reviews/document`, `/v1/user/charges/{scope}/document`,
+  `/v1/reports/{id}/document`): `{markdown, references, trackers}`, the Markdown opening with frontmatter the
+  gateway writes (never a secret or an environment value) and an author's own frontmatter kept as text under
+  `author`. Issue keys and `owner/repo#n` resolve to the Source's address; Mission, Operation and Run IDs become
+  `app:` routes only where the reader holds `mission.read`, another Operation through the compartments (audited
+  first), and a Mission or Operation reference lists its linked issues and its Sources' boards. `Accept:
+  text/markdown` returns the Markdown alone. `[text] document_bytes`, `document_references` and `document_board_wait` of the `unex`
+  record bound it.
+- A Source provider answers `board_url`, the page where its instance's issues are read as a board (the
+  `github`, `gitlab` and `jira` providers derive it from their settings, which also take a `board_url`); the
+  Headquarters Station relays it (`SourceRead` `boards`).
 - The `acp` handler has an `abort_wait_ms` setting (5000): how long a Run ended without a close waits for the agent to take its `session/cancel` before the process is ended.
 - Outer Office has a Charges page: M's, each Operation's and each Station's charge with its Run's state, Agent and route,
   Station, last wake and what that turn recorded, and for a person with `charge.converse` a live view of the
