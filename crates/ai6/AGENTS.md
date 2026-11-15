@@ -148,7 +148,7 @@ Operation from the Stations' `operation_lineage`), and a rule whose scope is amo
 matches too unless it sets `propagate = false`; a child Operation is narrowed by a rule placed
 before its parent's. `[limits] ancestors` (a number or `"none"`, default 64) bounds how many
 a request names; more is an error, never a denial. The file is read up to `max_bytes`
-(`[provider] access_policy_bytes`, 1 MiB by default). The Universal Exports gateway loads and
+(`access_policy_bytes` of the `registry` record's `provider` table, 1 MiB by default). The Universal Exports gateway loads and
 enforces this policy for user requests.
 
 ### Operation policies
@@ -419,7 +419,7 @@ outcome's other keys (Run IDs, who recovered it) are not part of a product.
 ## Settings (`ai6::settings`)
 
 ```rust
-pub fn schema(section: &str) -> Option<serde_json::Value>;   // a dotted path: provider, registry.limits.runs, record.station.scheduler
+pub fn schema(section: &str) -> Option<serde_json::Value>;   // a dotted path: provider, record.registry.limits.runs, record.station.scheduler
 pub fn sections() -> Vec<(String, String)>;                  // every table's path and title
 pub mod reference {
     pub const DOCS: [&str; 4];                               // the docs holding generated tables
@@ -1166,10 +1166,11 @@ impl SecretRef {
 // each field has a title and a default in its schema (Bootstrap::schema()); Seconds, Limit: crate::bounds
 pub struct ProviderSettings { location: Option<String>, password: Option<SecretRef>, poll: Option<Seconds>,
     retry_first: Option<Seconds>, retry_factor: Option<f64>, retry_longest: Option<Seconds>,
-    retry_for: Option<Seconds>,   // start-up open retry; defaults 1 s, ×2, 60 s, no end
-    loadout_bytes: Limit, loadout_value_chars: Limit, access_policy_bytes: Limit }   // ConfigLimits defaults
+    retry_for: Option<Seconds> }   // start-up open retry; defaults 1 s, ×2, 60 s, no end
+// A file still holding [registry.limits] or a [provider] limit key (loadout_bytes, loadout_value_chars,
+// access_policy_bytes, replace_retry) is refused by Bootstrap::read, naming the `registry` record.
 pub struct RegistrySettings { location: Option<String>, password: Option<SecretRef>, headquarters_lease: Option<Seconds>,
-    sqlite_busy_timeout: Option<Seconds>, limits: RegistryLimits }   // [registry.limits.*]
+    sqlite_busy_timeout: Option<Seconds> }   // the limits are the `registry` record
 pub struct IdentitySettings { dir: Option<PathBuf> }
 pub struct PluginSettings { paths: Vec<PathBuf>, profile: Option<PluginProfile>, keep_verified: Option<KeepVerified> }
 impl PluginSettings { pub fn keep_verified(&self) -> KeepVerified; } // its default: the newest 8
@@ -1191,7 +1192,6 @@ pub struct Bootstrap { provider: ProviderSettings, registry: RegistrySettings, u
     station: StationSettings, oo: serde_json::Map<String, serde_json::Value> }  // oo: unread here
 pub const DEFAULT_PAGES_LISTEN: SocketAddr;                              // 127.0.0.1:7083
 impl ProviderSettings { pub fn poll(&self) -> Duration;                    // DEFAULT_POLL; 0 turns reload off
-                        pub fn limits(&self) -> ConfigLimits;
                         pub fn start_retry(&self) -> Result<StartRetry, String>; }  // refuses a negative or non-finite factor
 // How `ai6 serve` waits when its provider or Registry is unreachable; only an unreachable server is
 // retried (a SQL open reports it as ErrorKind::ConnectionRefused), never a bad location, password or certificate.
@@ -1271,10 +1271,20 @@ pub struct Settings {
     pub unex: UnexRecord,                    // unex record
     pub limits: ConfigLimits,                // what the provider read these within
 }
-// [provider] limits of the bootstrap file; also at the crate root. Default: 1 MiB, 4,096, 1 MiB.
-#[non_exhaustive] #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ConfigLimits { pub loadout_bytes: Limit, pub loadout_value_chars: Limit, pub access_policy_bytes: Limit }
-impl ConfigLimits { pub fn weakenings(&self) -> Vec<String>; }   // "provider.KEY VALUE is looser than the default D"
+// The `provider` table of the `registry` record; also at the crate root. Default: 1 MiB, 4,096, 1 MiB, 2 s.
+#[non_exhaustive] #[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+pub struct ConfigLimits { pub loadout_bytes: Limit, pub loadout_value_chars: Limit, pub access_policy_bytes: Limit,
+    pub replace_retry: TimeLimit }
+impl ConfigLimits { pub fn weakenings(&self) -> Vec<String>; }   // "registry.provider.KEY VALUE is looser than the default D"
+// The `registry` record (ConfigRecord::Registry: a global singleton, the whole `registry` file, applies live,
+// `config.read` / `config.manage` on `config:registry`); also at the crate root. The provider derives its
+// limits from it on every load and check, so a put that tightens them is checked against what is stored.
+#[non_exhaustive] #[derive(Clone, Debug, Default, PartialEq, Eq, ToValue, FromValue, Schema, Form)]
+pub struct RegistryRecord { pub limits: RegistryLimits, pub provider: ConfigLimits }
+impl RegistryRecord {
+    pub fn weakenings(&self) -> Vec<String>;
+    pub fn apply_to(&self, registry: &dyn Limited);   // set_limits(self.limits.clone())
+}
 impl Settings {
     pub fn access_policy(&self) -> Result<Option<AccessPolicy>, String>;   // none: no record
     #[cfg(feature = "station-tls")]
@@ -1362,9 +1372,9 @@ pub fn export(provider: &dyn ConfigProvider, dir: &Path) -> Result<usize, Roster
 #[non_exhaustive] #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
 pub enum ConfigRecord { Operation, Agent, Role, Assistant, Cover, Theater, Loadout, Sandbox,
     Mcp, Overlay, Secret, Pool, Cables, Plugin, Station, Tls, Access, OperationAccess, Unex,
-    Roster, Compartment, Review, Charge }        // Charge: `[charge.<scope>]`, file `charges`, global
+    Roster, Compartment, Review, Charge, Registry }      // Charge: `[charge.<scope>]`, file `charges`, global
 impl ConfigRecord {
-    pub const ALL: [Self; 24];                  // Roster first
+    pub const ALL: [Self; 25];                  // Roster first
     pub const SINGLETON_KEY: &'static str;      // "settings": a singleton family's one record
     pub const fn name(self) -> &'static str;    // "operation", "agent", ... "unex", "roster"
     pub fn from_name(name: &str) -> Option<Self>;
@@ -1398,23 +1408,20 @@ pub struct ConfigStatus {
     pub needs_restart: Vec<String>,  // restart-only family names ("theater", "cables")
 }
 pub struct FileProvider;     // ConfigProvider (+ definitions, read-only); new(root), root(),
-                             // with_limits(ConfigLimits)
 pub struct MemoryProvider;   // ConfigProvider (read-only); new(roster), with_settings(Settings),
                              // with_limits(ConfigLimits), replace(&self, roster),
                              // replace_all(&self, roster, settings)
 /// `sqlite:PATH` / `sqlite://PATH` / `postgres://…` → SqlProvider; anything else →
 /// FileProvider. Unsupported for a SQL location without its feature.
 pub fn open(location: &str) -> io::Result<Arc<dyn ConfigProvider>>;
-/// As `open`, a SQL provider connected with `options` (features `sqlite` or `postgres`), and
-/// either provider reading documents within `limits`.
-pub fn open_with(location: &str, options: &SqlOptions, limits: ConfigLimits) -> io::Result<Arc<dyn ConfigProvider>>;
+/// As `open`, a SQL provider connected with `options` (features `sqlite` or `postgres`).
+pub fn open_with(location: &str, options: &SqlOptions) -> io::Result<Arc<dyn ConfigProvider>>;
 
 // Features `sqlite` or `postgres`; also at the crate root.
 pub struct SqlProvider;   // ConfigProvider with definitions/put/remove + Debug
 impl SqlProvider {
     pub fn open(location: &str) -> io::Result<Self>;   // as SqlRegistry::open
     pub fn open_with(location: &str, options: &SqlOptions) -> io::Result<Self>;
-    pub fn with_limits(self, limits: ConfigLimits) -> Self;
 }
 ```
 
@@ -1993,7 +2000,11 @@ pub trait UsageStore;        // usage ledgers and daily spend (usage.rs)
 pub trait AccountStore;      // pool account claims, quota and daily tokens (accounts.rs)
 pub trait VettingStore;      // held briefs and vetting clearances (vetting.rs)
 pub trait ChargeStore;        // each charge's record, lease and logbook (charges.rs)
-pub trait Limited { fn limits(&self) -> &RegistryLimits; }   // the bounds it was opened with
+// The bounds it applies now. A Registry opens with the defaults (or SqlOptions / FileRegistry::with_limits);
+// set_limits replaces them for every operation that starts after it, on the handle and its clones (LiveLimits).
+// A lower limit refuses new writes past it and removes nothing stored. A Station applies the `registry`
+// record at its next poll, Universal Exports the same.
+pub trait Limited { fn limits(&self) -> Arc<RegistryLimits>; fn set_limits(&self, limits: RegistryLimits); }
 pub trait RegistryBackend: Limited + AccountStore + AgentRecordStore + BriefStore + StationStore + AccessTokenStore + CableStore
     + AuditStore + AgentRoleStore + ApprovalStore + AssistantLogStore + ClearanceStore + LogbookStore
     + QuarantineStore + ReportStore + RunContextStore + RunStore + SleeperStore + SourceStore + TimelineStore
@@ -2011,7 +2022,7 @@ pub fn open_with(location: &str, options: &SqlOptions) -> io::Result<Arc<dyn Reg
 ## Registry limits (`ai6::directorates::registry::limits`, also at the crate root)
 
 ```rust
-// [registry.limits] of ai6.cfg: one table per family, each #[non_exhaustive],
+// The `limits` of the `registry` record: one table per family, each #[non_exhaustive],
 // ToValue, FromValue, Schema, deny_unknown_fields, Default = the documented defaults
 // (docs/configuration.md "Limits"). Counts and sizes are Limit, ages TimeLimit, days u32.
 pub struct RegistryLimits { pub accounts: AccountLimits, pub agents: AgentLimits, pub agent_roles: AgentRoleLimits,
@@ -2813,7 +2824,7 @@ pub trait MemoryStore {  // part of RegistryBackend; `memories/<scope digest>/<i
     fn memory_versions(&self, id: &str) -> io::Result<Vec<MemoryEntry>>; // newest first
     fn forget_memory(&self, id: &str, base: Option<u64>) -> Result<MemoryEntry, MemoryError>;
         // and its prior versions
-    fn memory_limits(&self) -> &MemoryLimits;
+    fn memory_limits(&self) -> MemoryLimits;
     fn propose_memory(&self, &MemoryProposal) -> Result<(), MemoryError>; // Full past `proposals` a scope
     fn memory_proposals(&self, scope: &MemoryScope) -> io::Result<Vec<MemoryProposal>>; // oldest first
     fn memory_proposal(&self, id: &str) -> io::Result<Option<MemoryProposal>>;

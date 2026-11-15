@@ -240,26 +240,18 @@ pub ai6::bootstrap::PluginSettings::profile: core::option::Option<ai6::directora
 impl ai6::bootstrap::PluginSettings
 pub fn ai6::bootstrap::PluginSettings::keep_verified(&self) -> ai6::directorates::registry::bona_fides::KeepVerified
 #[non_exhaustive] pub struct ai6::bootstrap::ProviderSettings
-pub ai6::bootstrap::ProviderSettings::access_policy_bytes: ai6::bounds::Limit
-pub ai6::bootstrap::ProviderSettings::loadout_bytes: ai6::bounds::Limit
-pub ai6::bootstrap::ProviderSettings::loadout_value_chars: ai6::bounds::Limit
 pub ai6::bootstrap::ProviderSettings::location: core::option::Option<alloc::string::String>
 pub ai6::bootstrap::ProviderSettings::password: core::option::Option<ai6::bootstrap::SecretRef>
 pub ai6::bootstrap::ProviderSettings::poll: core::option::Option<ai6::bounds::Seconds>
-pub ai6::bootstrap::ProviderSettings::replace_retry: ai6::bounds::TimeLimit
 pub ai6::bootstrap::ProviderSettings::retry_factor: core::option::Option<f64>
 pub ai6::bootstrap::ProviderSettings::retry_first: core::option::Option<ai6::bounds::Seconds>
 pub ai6::bootstrap::ProviderSettings::retry_for: core::option::Option<ai6::bounds::Seconds>
 pub ai6::bootstrap::ProviderSettings::retry_longest: core::option::Option<ai6::bounds::Seconds>
 impl ai6::bootstrap::ProviderSettings
-pub fn ai6::bootstrap::ProviderSettings::limits(&self) -> ai6::directorates::m::config::ConfigLimits
 pub fn ai6::bootstrap::ProviderSettings::poll(&self) -> core::time::Duration
 pub fn ai6::bootstrap::ProviderSettings::start_retry(&self) -> core::result::Result<ai6::bootstrap::StartRetry, alloc::string::String>
-impl core::default::Default for ai6::bootstrap::ProviderSettings
-pub fn ai6::bootstrap::ProviderSettings::default() -> Self
 #[non_exhaustive] pub struct ai6::bootstrap::RegistrySettings
 pub ai6::bootstrap::RegistrySettings::headquarters_lease: core::option::Option<ai6::bounds::Seconds>
-pub ai6::bootstrap::RegistrySettings::limits: ai6::directorates::registry::limits::RegistryLimits
 pub ai6::bootstrap::RegistrySettings::location: core::option::Option<alloc::string::String>
 pub ai6::bootstrap::RegistrySettings::password: core::option::Option<ai6::bootstrap::SecretRef>
 pub ai6::bootstrap::RegistrySettings::sqlite_busy_timeout: core::option::Option<ai6::bounds::Seconds>
@@ -1044,6 +1036,7 @@ pub ai6::directorates::m::config::ConfigRecord::OperationAccess
 pub ai6::directorates::m::config::ConfigRecord::Overlay
 pub ai6::directorates::m::config::ConfigRecord::Plugin
 pub ai6::directorates::m::config::ConfigRecord::Pool
+pub ai6::directorates::m::config::ConfigRecord::Registry
 pub ai6::directorates::m::config::ConfigRecord::Review
 pub ai6::directorates::m::config::ConfigRecord::Role
 pub ai6::directorates::m::config::ConfigRecord::Roster
@@ -1055,7 +1048,7 @@ pub ai6::directorates::m::config::ConfigRecord::Theater
 pub ai6::directorates::m::config::ConfigRecord::Tls
 pub ai6::directorates::m::config::ConfigRecord::Unex
 impl ai6::directorates::m::config::ConfigRecord
-pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 24]
+pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 25]
 pub const ai6::directorates::m::config::ConfigRecord::SINGLETON_KEY: &'static str
 pub const fn ai6::directorates::m::config::ConfigRecord::applies_live(self) -> bool
 pub const fn ai6::directorates::m::config::ConfigRecord::file(self) -> &'static str
@@ -1119,7 +1112,6 @@ pub struct ai6::directorates::m::config::FileProvider
 impl ai6::FileProvider
 pub fn ai6::FileProvider::new(impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn ai6::FileProvider::root(&self) -> &std::path::Path
-pub fn ai6::FileProvider::with_limits(self, ai6::directorates::m::config::ConfigLimits) -> Self
 impl ai6::directorates::m::config::ConfigProvider for ai6::FileProvider
 pub fn ai6::FileProvider::changes_since(&self, &str, ai6::directorates::m::config::ConfigRevision) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigSnapshot>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::FileProvider::check_all(&self, &ai6::directorates::m::config::ConfigScope, &[(ai6::directorates::m::config::ConfigRecord, alloc::string::String, serde_json::value::Value)]) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
@@ -1153,6 +1145,12 @@ pub fn ai6::directorates::m::config::MemoryProvider::revision(&self, &str) -> co
 pub fn ai6::directorates::m::config::MemoryProvider::scopes(&self) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::config::ConfigScope>, ai6::directorates::m::roster::RosterError>
 impl core::fmt::Debug for ai6::directorates::m::config::MemoryProvider
 pub fn ai6::directorates::m::config::MemoryProvider::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::directorates::m::config::RegistryRecord
+pub ai6::directorates::m::config::RegistryRecord::limits: ai6::directorates::registry::limits::RegistryLimits
+pub ai6::directorates::m::config::RegistryRecord::provider: ai6::directorates::m::config::ConfigLimits
+impl ai6::directorates::m::config::RegistryRecord
+pub fn ai6::directorates::m::config::RegistryRecord::apply_to(&self, &dyn ai6::directorates::registry::backend::Limited)
+pub fn ai6::directorates::m::config::RegistryRecord::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 #[non_exhaustive] pub struct ai6::directorates::m::config::Settings
 pub ai6::directorates::m::config::Settings::access: core::option::Option<serde_json::value::Value>
 pub ai6::directorates::m::config::Settings::cables: ai6::CableConfig
@@ -1161,6 +1159,7 @@ pub ai6::directorates::m::config::Settings::limits: ai6::directorates::m::config
 pub ai6::directorates::m::config::Settings::loadouts: ai6::directorates::q::LoadoutCatalog
 pub ai6::directorates::m::config::Settings::operation_access: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::OperationAccess>
 pub ai6::directorates::m::config::Settings::pins: core::option::Option<ai6::directorates::registry::bona_fides::PinSet>
+pub ai6::directorates::m::config::Settings::registry: ai6::directorates::m::config::RegistryRecord
 pub ai6::directorates::m::config::Settings::station: ai6::directorates::m::config::StationRuntime
 pub ai6::directorates::m::config::Settings::theaters: ai6::directorates::m::theaters::Theaters
 pub ai6::directorates::m::config::Settings::tls: core::option::Option<serde_json::value::Value>
@@ -1178,7 +1177,6 @@ pub struct ai6::directorates::m::config::SqlProvider
 impl ai6::SqlProvider
 pub fn ai6::SqlProvider::open(&str) -> core::io::error::Result<Self>
 pub fn ai6::SqlProvider::open_with(&str, &ai6::directorates::registry::sql::SqlOptions) -> core::io::error::Result<Self>
-pub fn ai6::SqlProvider::with_limits(self, ai6::directorates::m::config::ConfigLimits) -> Self
 impl ai6::directorates::m::config::ConfigProvider for ai6::SqlProvider
 pub fn ai6::SqlProvider::changes_since(&self, &str, ai6::directorates::m::config::ConfigRevision) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigSnapshot>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::SqlProvider::check_all(&self, &ai6::directorates::m::config::ConfigScope, &[(ai6::directorates::m::config::ConfigRecord, alloc::string::String, serde_json::value::Value)]) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
@@ -1272,7 +1270,7 @@ pub fn ai6::directorates::m::config::UnexRecord::limits(&self) -> ai6::directora
 pub fn ai6::directorates::m::config::UnexRecord::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::directorates::m::config::UnexRecord
 pub fn ai6::directorates::m::config::UnexRecord::default() -> Self
-pub const ai6::directorates::m::config::IMPORT_ORDER: [ai6::directorates::m::config::ConfigRecord; 24]
+pub const ai6::directorates::m::config::IMPORT_ORDER: [ai6::directorates::m::config::ConfigRecord; 25]
 pub const ai6::directorates::m::config::TRUST_ROOT: [ai6::directorates::m::config::ConfigRecord; 4]
 pub trait ai6::directorates::m::config::ConfigProvider: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::m::config::ConfigProvider::changes_since(&self, &str, ai6::directorates::m::config::ConfigRevision) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigSnapshot>, ai6::directorates::m::roster::RosterError>
@@ -1326,7 +1324,7 @@ pub fn ai6::directorates::m::config::document_records(serde_json::value::Value) 
 pub fn ai6::directorates::m::config::document_tables(ai6::directorates::m::config::ConfigRecord, impl core::iter::traits::collect::IntoIterator<Item = (alloc::string::String, serde_json::value::Value)>) -> serde_json::map::Map<alloc::string::String, serde_json::value::Value>
 pub fn ai6::directorates::m::config::family_of_kind(&str) -> core::option::Option<ai6::directorates::m::config::ConfigRecord>
 pub fn ai6::directorates::m::config::open(&str) -> core::io::error::Result<alloc::sync::Arc<dyn ai6::directorates::m::config::ConfigProvider>>
-pub fn ai6::directorates::m::config::open_with(&str, &ai6::directorates::registry::sql::SqlOptions, ai6::directorates::m::config::ConfigLimits) -> core::io::error::Result<alloc::sync::Arc<dyn ai6::directorates::m::config::ConfigProvider>>
+pub fn ai6::directorates::m::config::open_with(&str, &ai6::directorates::registry::sql::SqlOptions) -> core::io::error::Result<alloc::sync::Arc<dyn ai6::directorates::m::config::ConfigProvider>>
 pub fn ai6::directorates::m::config::parse_document(&std::path::Path, core::option::Option<ai6::bootstrap::format::Format>, &str) -> core::result::Result<alloc::vec::Vec<(ai6::directorates::m::config::ConfigRecord, alloc::string::String, serde_json::value::Value)>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::directorates::m::config::record_weakenings(ai6::directorates::m::config::ConfigRecord, &[(alloc::string::String, serde_json::value::Value)]) -> alloc::vec::Vec<alloc::string::String>
 pub fn ai6::directorates::m::config::references_to(&dyn ai6::directorates::m::config::ConfigProvider, ai6::directorates::m::config::ConfigRecord, &ai6::directorates::m::config::ConfigScope, &str) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::config::ConfigReference>, ai6::directorates::m::roster::RosterError>
@@ -5205,11 +5203,14 @@ pub fn ai6::directorates::registry::store::FileRegistry::holds(&self, &str) -> c
 pub fn ai6::directorates::registry::store::FileRegistry::lift_hold(&self, &str, &str, core::option::Option<&ai6::directorates::m::roster::RouteRef>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::holds::RosterHold>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_hold(&self, &ai6::directorates::registry::holds::RosterHold) -> core::io::error::Result<()>
 pub trait ai6::directorates::registry::backend::Limited
-pub fn ai6::directorates::registry::backend::Limited::limits(&self) -> &ai6::directorates::registry::limits::RegistryLimits
+pub fn ai6::directorates::registry::backend::Limited::limits(&self) -> alloc::sync::Arc<ai6::directorates::registry::limits::RegistryLimits>
+pub fn ai6::directorates::registry::backend::Limited::set_limits(&self, ai6::directorates::registry::limits::RegistryLimits)
 impl ai6::directorates::registry::backend::Limited for ai6::directorates::registry::sql::SqlRegistry
-pub fn ai6::directorates::registry::sql::SqlRegistry::limits(&self) -> &ai6::directorates::registry::limits::RegistryLimits
+pub fn ai6::directorates::registry::sql::SqlRegistry::limits(&self) -> alloc::sync::Arc<ai6::directorates::registry::limits::RegistryLimits>
+pub fn ai6::directorates::registry::sql::SqlRegistry::set_limits(&self, ai6::directorates::registry::limits::RegistryLimits)
 impl ai6::directorates::registry::backend::Limited for ai6::directorates::registry::store::FileRegistry
-pub fn ai6::directorates::registry::store::FileRegistry::limits(&self) -> &ai6::directorates::registry::limits::RegistryLimits
+pub fn ai6::directorates::registry::store::FileRegistry::limits(&self) -> alloc::sync::Arc<ai6::directorates::registry::limits::RegistryLimits>
+pub fn ai6::directorates::registry::store::FileRegistry::set_limits(&self, ai6::directorates::registry::limits::RegistryLimits)
 pub trait ai6::directorates::registry::backend::LogbookStore
 pub fn ai6::directorates::registry::backend::LogbookStore::file_station_report(&self, &ai6::directorates::registry::logbook::StationReport) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::backend::LogbookStore::logbook(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::logbook::StationReport>>
@@ -5225,7 +5226,7 @@ pub fn ai6::directorates::registry::backend::MemoryStore::forget_memory(&self, &
 pub fn ai6::directorates::registry::backend::MemoryStore::memory(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::directorates::registry::backend::MemoryStore::memory_candidates(&self, &[ai6::directorates::registry::memories::MemoryScope], &[alloc::string::String]) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::directorates::registry::backend::MemoryStore::memory_headers(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>>
-pub fn ai6::directorates::registry::backend::MemoryStore::memory_limits(&self) -> &ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::directorates::registry::backend::MemoryStore::memory_limits(&self) -> ai6::directorates::registry::limits::MemoryLimits
 pub fn ai6::directorates::registry::backend::MemoryStore::memory_proposal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryProposal>>
 pub fn ai6::directorates::registry::backend::MemoryStore::memory_proposals(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>>
 pub fn ai6::directorates::registry::backend::MemoryStore::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
@@ -5237,7 +5238,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::forget_memory(&self, &str,
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory_candidates(&self, &[ai6::directorates::registry::memories::MemoryScope], &[alloc::string::String]) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory_headers(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>>
-pub fn ai6::directorates::registry::sql::SqlRegistry::memory_limits(&self) -> &ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_limits(&self) -> ai6::directorates::registry::limits::MemoryLimits
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory_proposal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryProposal>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory_proposals(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
@@ -5249,7 +5250,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::forget_memory(&self, &s
 pub fn ai6::directorates::registry::store::FileRegistry::memory(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::directorates::registry::store::FileRegistry::memory_candidates(&self, &[ai6::directorates::registry::memories::MemoryScope], &[alloc::string::String]) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::directorates::registry::store::FileRegistry::memory_headers(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>>
-pub fn ai6::directorates::registry::store::FileRegistry::memory_limits(&self) -> &ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::directorates::registry::store::FileRegistry::memory_limits(&self) -> ai6::directorates::registry::limits::MemoryLimits
 pub fn ai6::directorates::registry::store::FileRegistry::memory_proposal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryProposal>>
 pub fn ai6::directorates::registry::store::FileRegistry::memory_proposals(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>>
 pub fn ai6::directorates::registry::store::FileRegistry::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
@@ -5928,7 +5929,7 @@ pub fn ai6::CableRelay::discover_through_compartments(&self, &ai6::CablePrincipa
 pub fn ai6::CableRelay::held(&self, &ai6::CablePrincipal, usize) -> core::result::Result<alloc::vec::Vec<ai6::CableHeldDelivery>, ai6::CableRelayError>
 pub fn ai6::CableRelay::inbox(&self, &ai6::CablePrincipal, usize) -> core::result::Result<alloc::vec::Vec<ai6::CableDelivery>, ai6::CableRelayError>
 pub fn ai6::CableRelay::inbox_from(&self, &ai6::CablePrincipal, &str, usize) -> core::result::Result<alloc::vec::Vec<ai6::CableDelivery>, ai6::CableRelayError>
-pub fn ai6::CableRelay::limits(&self) -> &ai6::directorates::registry::limits::RegistryLimits
+pub fn ai6::CableRelay::limits(&self) -> alloc::sync::Arc<ai6::directorates::registry::limits::RegistryLimits>
 pub fn ai6::CableRelay::new(alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>, ai6::CablePolicy, impl core::ops::function::Fn() -> alloc::vec::Vec<ai6::CableEndpoint> + core::marker::Send + core::marker::Sync + 'static, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::collections::btree::set::BTreeSet<alloc::string::String>>) -> Self
 pub fn ai6::CableRelay::notice(&self, &ai6::CablePrincipal, &str, &str, alloc::string::String, &str) -> core::result::Result<ai6::directorates::registry::cables::Cable, ai6::CableRelayError>
 pub fn ai6::CableRelay::register_endpoint(&self, ai6::CableEndpoint) -> core::result::Result<(), ai6::CableRelayError>
@@ -6299,6 +6300,11 @@ pub ai6::directorates::registry::limits::IssueLimits::replies_per_mission: ai6::
 pub ai6::directorates::registry::limits::IssueLimits::reply_bytes: ai6::bounds::Limit
 impl core::default::Default for ai6::directorates::registry::limits::IssueLimits
 pub fn ai6::directorates::registry::limits::IssueLimits::default() -> Self
+pub struct ai6::directorates::registry::limits::LiveLimits(_)
+impl ai6::directorates::registry::limits::LiveLimits
+pub fn ai6::directorates::registry::limits::LiveLimits::get(&self) -> alloc::sync::Arc<ai6::directorates::registry::limits::RegistryLimits>
+pub fn ai6::directorates::registry::limits::LiveLimits::new(ai6::directorates::registry::limits::RegistryLimits) -> Self
+pub fn ai6::directorates::registry::limits::LiveLimits::set(&self, ai6::directorates::registry::limits::RegistryLimits)
 #[non_exhaustive] pub struct ai6::directorates::registry::limits::LogbookLimits
 pub ai6::directorates::registry::limits::LogbookLimits::entries: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::LogbookLimits::finding_bytes: ai6::bounds::Limit
@@ -6580,7 +6586,7 @@ pub fn ai6::directorates::registry::memories::MemoryStore::forget_memory(&self, 
 pub fn ai6::directorates::registry::memories::MemoryStore::memory(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::directorates::registry::memories::MemoryStore::memory_candidates(&self, &[ai6::directorates::registry::memories::MemoryScope], &[alloc::string::String]) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::directorates::registry::memories::MemoryStore::memory_headers(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>>
-pub fn ai6::directorates::registry::memories::MemoryStore::memory_limits(&self) -> &ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::directorates::registry::memories::MemoryStore::memory_limits(&self) -> ai6::directorates::registry::limits::MemoryLimits
 pub fn ai6::directorates::registry::memories::MemoryStore::memory_proposal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryProposal>>
 pub fn ai6::directorates::registry::memories::MemoryStore::memory_proposals(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>>
 pub fn ai6::directorates::registry::memories::MemoryStore::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
@@ -6592,7 +6598,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::forget_memory(&self, &str,
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory_candidates(&self, &[ai6::directorates::registry::memories::MemoryScope], &[alloc::string::String]) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory_headers(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>>
-pub fn ai6::directorates::registry::sql::SqlRegistry::memory_limits(&self) -> &ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_limits(&self) -> ai6::directorates::registry::limits::MemoryLimits
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory_proposal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryProposal>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory_proposals(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
@@ -6604,7 +6610,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::forget_memory(&self, &s
 pub fn ai6::directorates::registry::store::FileRegistry::memory(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::directorates::registry::store::FileRegistry::memory_candidates(&self, &[ai6::directorates::registry::memories::MemoryScope], &[alloc::string::String]) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::directorates::registry::store::FileRegistry::memory_headers(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>>
-pub fn ai6::directorates::registry::store::FileRegistry::memory_limits(&self) -> &ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::directorates::registry::store::FileRegistry::memory_limits(&self) -> ai6::directorates::registry::limits::MemoryLimits
 pub fn ai6::directorates::registry::store::FileRegistry::memory_proposal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryProposal>>
 pub fn ai6::directorates::registry::store::FileRegistry::memory_proposals(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>>
 pub fn ai6::directorates::registry::store::FileRegistry::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
@@ -7739,7 +7745,8 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::assistant_log(&self, &str)
 pub fn ai6::directorates::registry::sql::SqlRegistry::log_assistant_entry(&self, &ai6::directorates::registry::assistant_log::AssistantLogEntry) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::prune_assistant_log(&self, core::option::Option<f64>, ai6::bounds::Limit) -> core::io::error::Result<u64>
 impl ai6::directorates::registry::backend::Limited for ai6::directorates::registry::sql::SqlRegistry
-pub fn ai6::directorates::registry::sql::SqlRegistry::limits(&self) -> &ai6::directorates::registry::limits::RegistryLimits
+pub fn ai6::directorates::registry::sql::SqlRegistry::limits(&self) -> alloc::sync::Arc<ai6::directorates::registry::limits::RegistryLimits>
+pub fn ai6::directorates::registry::sql::SqlRegistry::set_limits(&self, ai6::directorates::registry::limits::RegistryLimits)
 impl ai6::directorates::registry::charges::ChargeStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::charge(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::charges::ChargeRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::charges(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::charges::ChargeRecord>>
@@ -7771,7 +7778,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::forget_memory(&self, &str,
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory_candidates(&self, &[ai6::directorates::registry::memories::MemoryScope], &[alloc::string::String]) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory_headers(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>>
-pub fn ai6::directorates::registry::sql::SqlRegistry::memory_limits(&self) -> &ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_limits(&self) -> ai6::directorates::registry::limits::MemoryLimits
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory_proposal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryProposal>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory_proposals(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
@@ -8039,7 +8046,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::assistant_log(&self, &s
 pub fn ai6::directorates::registry::store::FileRegistry::log_assistant_entry(&self, &ai6::directorates::registry::assistant_log::AssistantLogEntry) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::prune_assistant_log(&self, core::option::Option<f64>, ai6::bounds::Limit) -> core::io::error::Result<u64>
 impl ai6::directorates::registry::backend::Limited for ai6::directorates::registry::store::FileRegistry
-pub fn ai6::directorates::registry::store::FileRegistry::limits(&self) -> &ai6::directorates::registry::limits::RegistryLimits
+pub fn ai6::directorates::registry::store::FileRegistry::limits(&self) -> alloc::sync::Arc<ai6::directorates::registry::limits::RegistryLimits>
+pub fn ai6::directorates::registry::store::FileRegistry::set_limits(&self, ai6::directorates::registry::limits::RegistryLimits)
 impl ai6::directorates::registry::charges::ChargeStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::charge(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::charges::ChargeRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::charges(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::charges::ChargeRecord>>
@@ -8071,7 +8079,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::forget_memory(&self, &s
 pub fn ai6::directorates::registry::store::FileRegistry::memory(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::directorates::registry::store::FileRegistry::memory_candidates(&self, &[ai6::directorates::registry::memories::MemoryScope], &[alloc::string::String]) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::directorates::registry::store::FileRegistry::memory_headers(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>>
-pub fn ai6::directorates::registry::store::FileRegistry::memory_limits(&self) -> &ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::directorates::registry::store::FileRegistry::memory_limits(&self) -> ai6::directorates::registry::limits::MemoryLimits
 pub fn ai6::directorates::registry::store::FileRegistry::memory_proposal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryProposal>>
 pub fn ai6::directorates::registry::store::FileRegistry::memory_proposals(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>>
 pub fn ai6::directorates::registry::store::FileRegistry::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
@@ -10058,6 +10066,7 @@ pub ai6::ConfigRecord::OperationAccess
 pub ai6::ConfigRecord::Overlay
 pub ai6::ConfigRecord::Plugin
 pub ai6::ConfigRecord::Pool
+pub ai6::ConfigRecord::Registry
 pub ai6::ConfigRecord::Review
 pub ai6::ConfigRecord::Role
 pub ai6::ConfigRecord::Roster
@@ -10069,7 +10078,7 @@ pub ai6::ConfigRecord::Theater
 pub ai6::ConfigRecord::Tls
 pub ai6::ConfigRecord::Unex
 impl ai6::directorates::m::config::ConfigRecord
-pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 24]
+pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 25]
 pub const ai6::directorates::m::config::ConfigRecord::SINGLETON_KEY: &'static str
 pub const fn ai6::directorates::m::config::ConfigRecord::applies_live(self) -> bool
 pub const fn ai6::directorates::m::config::ConfigRecord::file(self) -> &'static str
@@ -11628,7 +11637,7 @@ pub fn ai6::CableRelay::discover_through_compartments(&self, &ai6::CablePrincipa
 pub fn ai6::CableRelay::held(&self, &ai6::CablePrincipal, usize) -> core::result::Result<alloc::vec::Vec<ai6::CableHeldDelivery>, ai6::CableRelayError>
 pub fn ai6::CableRelay::inbox(&self, &ai6::CablePrincipal, usize) -> core::result::Result<alloc::vec::Vec<ai6::CableDelivery>, ai6::CableRelayError>
 pub fn ai6::CableRelay::inbox_from(&self, &ai6::CablePrincipal, &str, usize) -> core::result::Result<alloc::vec::Vec<ai6::CableDelivery>, ai6::CableRelayError>
-pub fn ai6::CableRelay::limits(&self) -> &ai6::directorates::registry::limits::RegistryLimits
+pub fn ai6::CableRelay::limits(&self) -> alloc::sync::Arc<ai6::directorates::registry::limits::RegistryLimits>
 pub fn ai6::CableRelay::new(alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>, ai6::CablePolicy, impl core::ops::function::Fn() -> alloc::vec::Vec<ai6::CableEndpoint> + core::marker::Send + core::marker::Sync + 'static, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::collections::btree::set::BTreeSet<alloc::string::String>>) -> Self
 pub fn ai6::CableRelay::notice(&self, &ai6::CablePrincipal, &str, &str, alloc::string::String, &str) -> core::result::Result<ai6::directorates::registry::cables::Cable, ai6::CableRelayError>
 pub fn ai6::CableRelay::register_endpoint(&self, ai6::CableEndpoint) -> core::result::Result<(), ai6::CableRelayError>
@@ -12035,7 +12044,6 @@ pub struct ai6::FileProvider
 impl ai6::FileProvider
 pub fn ai6::FileProvider::new(impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn ai6::FileProvider::root(&self) -> &std::path::Path
-pub fn ai6::FileProvider::with_limits(self, ai6::directorates::m::config::ConfigLimits) -> Self
 impl ai6::directorates::m::config::ConfigProvider for ai6::FileProvider
 pub fn ai6::FileProvider::changes_since(&self, &str, ai6::directorates::m::config::ConfigRevision) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigSnapshot>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::FileProvider::check_all(&self, &ai6::directorates::m::config::ConfigScope, &[(ai6::directorates::m::config::ConfigRecord, alloc::string::String, serde_json::value::Value)]) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
@@ -12098,7 +12106,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::assistant_log(&self, &s
 pub fn ai6::directorates::registry::store::FileRegistry::log_assistant_entry(&self, &ai6::directorates::registry::assistant_log::AssistantLogEntry) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::prune_assistant_log(&self, core::option::Option<f64>, ai6::bounds::Limit) -> core::io::error::Result<u64>
 impl ai6::directorates::registry::backend::Limited for ai6::directorates::registry::store::FileRegistry
-pub fn ai6::directorates::registry::store::FileRegistry::limits(&self) -> &ai6::directorates::registry::limits::RegistryLimits
+pub fn ai6::directorates::registry::store::FileRegistry::limits(&self) -> alloc::sync::Arc<ai6::directorates::registry::limits::RegistryLimits>
+pub fn ai6::directorates::registry::store::FileRegistry::set_limits(&self, ai6::directorates::registry::limits::RegistryLimits)
 impl ai6::directorates::registry::charges::ChargeStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::charge(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::charges::ChargeRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::charges(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::charges::ChargeRecord>>
@@ -12130,7 +12139,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::forget_memory(&self, &s
 pub fn ai6::directorates::registry::store::FileRegistry::memory(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::directorates::registry::store::FileRegistry::memory_candidates(&self, &[ai6::directorates::registry::memories::MemoryScope], &[alloc::string::String]) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::directorates::registry::store::FileRegistry::memory_headers(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>>
-pub fn ai6::directorates::registry::store::FileRegistry::memory_limits(&self) -> &ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::directorates::registry::store::FileRegistry::memory_limits(&self) -> ai6::directorates::registry::limits::MemoryLimits
 pub fn ai6::directorates::registry::store::FileRegistry::memory_proposal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryProposal>>
 pub fn ai6::directorates::registry::store::FileRegistry::memory_proposals(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>>
 pub fn ai6::directorates::registry::store::FileRegistry::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
@@ -13191,6 +13200,12 @@ impl ai6::directorates::registry::limits::RegistryLimits
 pub fn ai6::directorates::registry::limits::RegistryLimits::held_record_bytes(&self) -> ai6::bounds::Limit
 impl ai6::directorates::registry::limits::RegistryLimits
 pub fn ai6::directorates::registry::limits::RegistryLimits::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
+#[non_exhaustive] pub struct ai6::RegistryRecord
+pub ai6::RegistryRecord::limits: ai6::directorates::registry::limits::RegistryLimits
+pub ai6::RegistryRecord::provider: ai6::directorates::m::config::ConfigLimits
+impl ai6::directorates::m::config::RegistryRecord
+pub fn ai6::directorates::m::config::RegistryRecord::apply_to(&self, &dyn ai6::directorates::registry::backend::Limited)
+pub fn ai6::directorates::m::config::RegistryRecord::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 #[non_exhaustive] pub struct ai6::RenewalLease
 pub ai6::RenewalLease::station: alloc::string::String
 pub ai6::RenewalLease::until: f64
@@ -13786,6 +13801,7 @@ pub ai6::Settings::limits: ai6::directorates::m::config::ConfigLimits
 pub ai6::Settings::loadouts: ai6::directorates::q::LoadoutCatalog
 pub ai6::Settings::operation_access: alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::OperationAccess>
 pub ai6::Settings::pins: core::option::Option<ai6::directorates::registry::bona_fides::PinSet>
+pub ai6::Settings::registry: ai6::directorates::m::config::RegistryRecord
 pub ai6::Settings::station: ai6::directorates::m::config::StationRuntime
 pub ai6::Settings::theaters: ai6::directorates::m::theaters::Theaters
 pub ai6::Settings::tls: core::option::Option<serde_json::value::Value>
@@ -13930,7 +13946,6 @@ pub struct ai6::SqlProvider
 impl ai6::SqlProvider
 pub fn ai6::SqlProvider::open(&str) -> core::io::error::Result<Self>
 pub fn ai6::SqlProvider::open_with(&str, &ai6::directorates::registry::sql::SqlOptions) -> core::io::error::Result<Self>
-pub fn ai6::SqlProvider::with_limits(self, ai6::directorates::m::config::ConfigLimits) -> Self
 impl ai6::directorates::m::config::ConfigProvider for ai6::SqlProvider
 pub fn ai6::SqlProvider::changes_since(&self, &str, ai6::directorates::m::config::ConfigRevision) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigSnapshot>, ai6::directorates::m::roster::RosterError>
 pub fn ai6::SqlProvider::check_all(&self, &ai6::directorates::m::config::ConfigScope, &[(ai6::directorates::m::config::ConfigRecord, alloc::string::String, serde_json::value::Value)]) -> core::result::Result<(), ai6::directorates::m::roster::RosterError>
@@ -13994,7 +14009,8 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::assistant_log(&self, &str)
 pub fn ai6::directorates::registry::sql::SqlRegistry::log_assistant_entry(&self, &ai6::directorates::registry::assistant_log::AssistantLogEntry) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::prune_assistant_log(&self, core::option::Option<f64>, ai6::bounds::Limit) -> core::io::error::Result<u64>
 impl ai6::directorates::registry::backend::Limited for ai6::directorates::registry::sql::SqlRegistry
-pub fn ai6::directorates::registry::sql::SqlRegistry::limits(&self) -> &ai6::directorates::registry::limits::RegistryLimits
+pub fn ai6::directorates::registry::sql::SqlRegistry::limits(&self) -> alloc::sync::Arc<ai6::directorates::registry::limits::RegistryLimits>
+pub fn ai6::directorates::registry::sql::SqlRegistry::set_limits(&self, ai6::directorates::registry::limits::RegistryLimits)
 impl ai6::directorates::registry::charges::ChargeStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::charge(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::charges::ChargeRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::charges(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::charges::ChargeRecord>>
@@ -14026,7 +14042,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::forget_memory(&self, &str,
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory_candidates(&self, &[ai6::directorates::registry::memories::MemoryScope], &[alloc::string::String]) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory_headers(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>>
-pub fn ai6::directorates::registry::sql::SqlRegistry::memory_limits(&self) -> &ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_limits(&self) -> ai6::directorates::registry::limits::MemoryLimits
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory_proposal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryProposal>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory_proposals(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
@@ -15337,11 +15353,14 @@ pub fn ai6::directorates::registry::store::FileRegistry::holds(&self, &str) -> c
 pub fn ai6::directorates::registry::store::FileRegistry::lift_hold(&self, &str, &str, core::option::Option<&ai6::directorates::m::roster::RouteRef>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::holds::RosterHold>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_hold(&self, &ai6::directorates::registry::holds::RosterHold) -> core::io::error::Result<()>
 pub trait ai6::Limited
-pub fn ai6::Limited::limits(&self) -> &ai6::directorates::registry::limits::RegistryLimits
+pub fn ai6::Limited::limits(&self) -> alloc::sync::Arc<ai6::directorates::registry::limits::RegistryLimits>
+pub fn ai6::Limited::set_limits(&self, ai6::directorates::registry::limits::RegistryLimits)
 impl ai6::directorates::registry::backend::Limited for ai6::directorates::registry::sql::SqlRegistry
-pub fn ai6::directorates::registry::sql::SqlRegistry::limits(&self) -> &ai6::directorates::registry::limits::RegistryLimits
+pub fn ai6::directorates::registry::sql::SqlRegistry::limits(&self) -> alloc::sync::Arc<ai6::directorates::registry::limits::RegistryLimits>
+pub fn ai6::directorates::registry::sql::SqlRegistry::set_limits(&self, ai6::directorates::registry::limits::RegistryLimits)
 impl ai6::directorates::registry::backend::Limited for ai6::directorates::registry::store::FileRegistry
-pub fn ai6::directorates::registry::store::FileRegistry::limits(&self) -> &ai6::directorates::registry::limits::RegistryLimits
+pub fn ai6::directorates::registry::store::FileRegistry::limits(&self) -> alloc::sync::Arc<ai6::directorates::registry::limits::RegistryLimits>
+pub fn ai6::directorates::registry::store::FileRegistry::set_limits(&self, ai6::directorates::registry::limits::RegistryLimits)
 pub trait ai6::LogbookStore
 pub fn ai6::LogbookStore::file_station_report(&self, &ai6::directorates::registry::logbook::StationReport) -> core::io::error::Result<()>
 pub fn ai6::LogbookStore::logbook(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::logbook::StationReport>>
@@ -15357,7 +15376,7 @@ pub fn ai6::MemoryStore::forget_memory(&self, &str, core::option::Option<u64>) -
 pub fn ai6::MemoryStore::memory(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::MemoryStore::memory_candidates(&self, &[ai6::directorates::registry::memories::MemoryScope], &[alloc::string::String]) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::MemoryStore::memory_headers(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>>
-pub fn ai6::MemoryStore::memory_limits(&self) -> &ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::MemoryStore::memory_limits(&self) -> ai6::directorates::registry::limits::MemoryLimits
 pub fn ai6::MemoryStore::memory_proposal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryProposal>>
 pub fn ai6::MemoryStore::memory_proposals(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>>
 pub fn ai6::MemoryStore::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
@@ -15369,7 +15388,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::forget_memory(&self, &str,
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory_candidates(&self, &[ai6::directorates::registry::memories::MemoryScope], &[alloc::string::String]) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory_headers(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>>
-pub fn ai6::directorates::registry::sql::SqlRegistry::memory_limits(&self) -> &ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_limits(&self) -> ai6::directorates::registry::limits::MemoryLimits
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory_proposal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryProposal>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory_proposals(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
@@ -15381,7 +15400,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::forget_memory(&self, &s
 pub fn ai6::directorates::registry::store::FileRegistry::memory(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::directorates::registry::store::FileRegistry::memory_candidates(&self, &[ai6::directorates::registry::memories::MemoryScope], &[alloc::string::String]) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
 pub fn ai6::directorates::registry::store::FileRegistry::memory_headers(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>>
-pub fn ai6::directorates::registry::store::FileRegistry::memory_limits(&self) -> &ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::directorates::registry::store::FileRegistry::memory_limits(&self) -> ai6::directorates::registry::limits::MemoryLimits
 pub fn ai6::directorates::registry::store::FileRegistry::memory_proposal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryProposal>>
 pub fn ai6::directorates::registry::store::FileRegistry::memory_proposals(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>>
 pub fn ai6::directorates::registry::store::FileRegistry::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
