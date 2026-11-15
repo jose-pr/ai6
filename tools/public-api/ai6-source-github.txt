@@ -3,6 +3,7 @@ pub struct ai6_source_github::Github
 impl ai6_source_github::Github
 pub fn ai6_source_github::Github::new(ai6_source_github::Settings) -> core::result::Result<Self, alloc::string::String>
 impl ai6::directorates::registry::sources::Source for ai6_source_github::Github
+pub fn ai6_source_github::Github::board_url(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6_source_github::Github::poll(&self, ai6::directorates::registry::sources::SourcePoll) -> core::result::Result<ai6::directorates::registry::sources::SourceBatch, guatiao::library::kind::ProviderError>
 impl ai6::directorates::registry::tracker::Tracker for ai6_source_github::Github
 pub fn ai6_source_github::Github::capabilities(&self, core::option::Option<alloc::string::String>) -> core::result::Result<ai6::directorates::registry::tracker::TrackerCapabilities, guatiao::library::kind::ProviderError>

@@ -2662,6 +2662,9 @@ pub fn ai6::directorates::m::unex_limits::LoginTable::default() -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::unex_limits::TextLimits
 pub ai6::directorates::m::unex_limits::TextLimits::access_name_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::unex_limits::TextLimits::agent_reason_chars: ai6::bounds::Limit
+pub ai6::directorates::m::unex_limits::TextLimits::document_board_wait: ai6::bounds::Seconds
+pub ai6::directorates::m::unex_limits::TextLimits::document_bytes: ai6::bounds::Limit
+pub ai6::directorates::m::unex_limits::TextLimits::document_references: ai6::bounds::Limit
 pub ai6::directorates::m::unex_limits::TextLimits::green_ink_expired_window: ai6::bounds::TimeLimit
 pub ai6::directorates::m::unex_limits::TextLimits::green_ink_max_grant: ai6::bounds::TimeLimit
 pub ai6::directorates::m::unex_limits::TextLimits::green_ink_note_chars: ai6::bounds::Limit
@@ -7644,10 +7647,13 @@ pub struct ai6::directorates::registry::sources::SourcePoll
 pub ai6::directorates::registry::sources::SourcePoll::cursor: core::option::Option<alloc::string::String>
 pub const ai6::directorates::registry::sources::SOURCE_BRIEF_PREFIX: &str
 pub trait ai6::directorates::registry::sources::Source: core::marker::Send + core::marker::Sync
+pub fn ai6::directorates::registry::sources::Source::board_url(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::registry::sources::Source::poll(&self, ai6::directorates::registry::sources::SourcePoll) -> core::result::Result<ai6::directorates::registry::sources::SourceBatch, guatiao::library::kind::ProviderError>
 impl ai6::directorates::registry::sources::Source for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::sources::Source>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::sources::Source>::board_url(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::sources::Source>::poll(&self, ai6::directorates::registry::sources::SourcePoll) -> core::result::Result<ai6::directorates::registry::sources::SourceBatch, guatiao::library::kind::ProviderError>
 impl ai6::directorates::registry::sources::Source for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::sources::Source>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::sources::Source>::board_url(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::sources::Source>::poll(&self, ai6::directorates::registry::sources::SourcePoll) -> core::result::Result<ai6::directorates::registry::sources::SourceBatch, guatiao::library::kind::ProviderError>
 pub trait ai6::directorates::registry::sources::SourceStore
 pub fn ai6::directorates::registry::sources::SourceStore::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
@@ -8522,7 +8528,12 @@ pub ai6::directorates::registry::tracker::ReplyBatch::replies: alloc::vec::Vec<a
 pub struct ai6::directorates::registry::tracker::ReplyPoll
 pub ai6::directorates::registry::tracker::ReplyPoll::items: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::registry::tracker::ReplyPoll::since: core::option::Option<alloc::string::String>
+pub struct ai6::directorates::registry::tracker::SourceBoard
+pub ai6::directorates::registry::tracker::SourceBoard::provider: alloc::string::String
+pub ai6::directorates::registry::tracker::SourceBoard::tracker: alloc::string::String
+pub ai6::directorates::registry::tracker::SourceBoard::url: alloc::string::String
 pub struct ai6::directorates::registry::tracker::SourceRead
+pub ai6::directorates::registry::tracker::SourceRead::boards: bool
 pub ai6::directorates::registry::tracker::SourceRead::comments: u32
 pub ai6::directorates::registry::tracker::SourceRead::id: alloc::string::String
 pub ai6::directorates::registry::tracker::SourceRead::item: core::option::Option<alloc::string::String>
@@ -8531,6 +8542,7 @@ pub ai6::directorates::registry::tracker::SourceRead::operation: alloc::string::
 pub ai6::directorates::registry::tracker::SourceRead::query: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::tracker::SourceRead::tracker: core::option::Option<alloc::string::String>
 pub struct ai6::directorates::registry::tracker::SourceReadAnswer
+pub ai6::directorates::registry::tracker::SourceReadAnswer::boards: alloc::vec::Vec<ai6::directorates::registry::tracker::SourceBoard>
 pub ai6::directorates::registry::tracker::SourceReadAnswer::comments: alloc::vec::Vec<ai6::directorates::registry::tracker::SourceReadComment>
 pub ai6::directorates::registry::tracker::SourceReadAnswer::error: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::tracker::SourceReadAnswer::item: core::option::Option<ai6::directorates::registry::tracker::SourceReadItem>
@@ -13838,6 +13850,10 @@ pub fn ai6::directorates::registry::sleepers::SleeperMark::new(i64, i64) -> Self
 pub struct ai6::SourceBatch
 pub ai6::SourceBatch::cursor: core::option::Option<alloc::string::String>
 pub ai6::SourceBatch::items: alloc::vec::Vec<ai6::directorates::registry::sources::SourceItem>
+pub struct ai6::SourceBoard
+pub ai6::SourceBoard::provider: alloc::string::String
+pub ai6::SourceBoard::tracker: alloc::string::String
+pub ai6::SourceBoard::url: alloc::string::String
 pub struct ai6::SourceItem
 pub ai6::SourceItem::author: core::option::Option<alloc::string::String>
 pub ai6::SourceItem::body: alloc::string::String
@@ -13861,6 +13877,7 @@ pub ai6::SourcePage::web: alloc::string::String
 pub struct ai6::SourcePoll
 pub ai6::SourcePoll::cursor: core::option::Option<alloc::string::String>
 pub struct ai6::SourceRead
+pub ai6::SourceRead::boards: bool
 pub ai6::SourceRead::comments: u32
 pub ai6::SourceRead::id: alloc::string::String
 pub ai6::SourceRead::item: core::option::Option<alloc::string::String>
@@ -13869,6 +13886,7 @@ pub ai6::SourceRead::operation: alloc::string::String
 pub ai6::SourceRead::query: core::option::Option<alloc::string::String>
 pub ai6::SourceRead::tracker: core::option::Option<alloc::string::String>
 pub struct ai6::SourceReadAnswer
+pub ai6::SourceReadAnswer::boards: alloc::vec::Vec<ai6::directorates::registry::tracker::SourceBoard>
 pub ai6::SourceReadAnswer::comments: alloc::vec::Vec<ai6::directorates::registry::tracker::SourceReadComment>
 pub ai6::SourceReadAnswer::error: core::option::Option<alloc::string::String>
 pub ai6::SourceReadAnswer::item: core::option::Option<ai6::directorates::registry::tracker::SourceReadItem>
@@ -14354,6 +14372,9 @@ pub ai6::TerminalOffer::tty: bool
 #[non_exhaustive] pub struct ai6::TextLimits
 pub ai6::TextLimits::access_name_bytes: ai6::bounds::Limit
 pub ai6::TextLimits::agent_reason_chars: ai6::bounds::Limit
+pub ai6::TextLimits::document_board_wait: ai6::bounds::Seconds
+pub ai6::TextLimits::document_bytes: ai6::bounds::Limit
+pub ai6::TextLimits::document_references: ai6::bounds::Limit
 pub ai6::TextLimits::green_ink_expired_window: ai6::bounds::TimeLimit
 pub ai6::TextLimits::green_ink_max_grant: ai6::bounds::TimeLimit
 pub ai6::TextLimits::green_ink_note_chars: ai6::bounds::Limit
@@ -15604,10 +15625,13 @@ pub fn ai6::directorates::registry::store::FileRegistry::revoke_sleeper(&self, &
 pub fn ai6::directorates::registry::store::FileRegistry::set_sleeper_disabled(&self, &str, &str, bool, &str, i64) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 pub trait ai6::Source: core::marker::Send + core::marker::Sync
+pub fn ai6::Source::board_url(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::Source::poll(&self, ai6::directorates::registry::sources::SourcePoll) -> core::result::Result<ai6::directorates::registry::sources::SourceBatch, guatiao::library::kind::ProviderError>
 impl ai6::directorates::registry::sources::Source for guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::sources::Source>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::sources::Source>::board_url(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::registry::sources::Source>::poll(&self, ai6::directorates::registry::sources::SourcePoll) -> core::result::Result<ai6::directorates::registry::sources::SourceBatch, guatiao::library::kind::ProviderError>
 impl ai6::directorates::registry::sources::Source for guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::sources::Source>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::sources::Source>::board_url(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::sources::Source>::poll(&self, ai6::directorates::registry::sources::SourcePoll) -> core::result::Result<ai6::directorates::registry::sources::SourceBatch, guatiao::library::kind::ProviderError>
 pub trait ai6::SourceStore
 pub fn ai6::SourceStore::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
