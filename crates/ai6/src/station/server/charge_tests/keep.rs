@@ -633,3 +633,427 @@ async fn an_operation_charge_settles_its_own_missions_and_not_another_operations
     assert!(tool_names(&op_key).contains(&"retry_mission".to_owned()));
     charges::close_all(&state).await;
 }
+
+// ---- Acts are checked before they are taken, and text does not cross unchecked ----
+
+use crate::directorates::registry::charges::{ChargeLogEntry, ChargeUpdate};
+use crate::station::server::charges::keep::AreaDesk;
+
+/// A desk for the charge of `scope`, kept by `agent`, on `state`.
+fn desk(state: &DaemonState, scope: ChargeScope, agent: &str) -> AreaDesk {
+    AreaDesk::new(state.clone(), scope, agent)
+}
+
+async fn off_the_workers<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
+    tokio::task::spawn_blocking(work).await.unwrap()
+}
+
+/// A Mission of `operation` whose Station holds a brief claim that is still live and whose Run
+/// is lost. Answers the Mission's key.
+fn seed_live_claim(state: &DaemonState, operation: &str, id: &str) -> String {
+    let brief: crate::directorates::registry::store::Brief = serde_json::from_value(json!({
+        "title": "work", "id": id, "source": "test", "operation": operation,
+    }))
+    .unwrap();
+    state.intake.submit_brief(&brief).unwrap();
+    let key = brief.key();
+    let meta = std::collections::BTreeMap::from([
+        ("mission_id".to_owned(), json!(key)),
+        ("operation".to_owned(), json!(operation)),
+    ]);
+    state
+        .intake
+        .claim_with_lease(Some(&key), "elsewhere", Duration::from_secs(600), meta)
+        .unwrap()
+        .expect("the brief is claimed");
+    seed(state, operation, "elsewhere", &key, "lost");
+    key
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn settling_refuses_before_changing_anything_while_the_briefs_lease_is_live() {
+    let root = tempfile::tempdir().unwrap();
+    let tag = "n1";
+    let state = station(root.path(), tag, "test", "", "");
+    charges::tend(&state, false, true).await;
+    let operation = names_of(tag);
+    let key = seed_live_claim(&state, &operation, "n1-live");
+    let own = desk(
+        &state,
+        ChargeScope::Operation(operation.clone()),
+        &format!("k{tag}"),
+    );
+
+    let (settling, mission) = (own.clone(), key.clone());
+    let refused =
+        off_the_workers(move || settling.settle(&mission, "failed", "it looks dark")).await;
+    let refused = refused.unwrap_err();
+    assert!(refused.contains("has not lapsed"), "{refused}");
+    // Nothing was audited or changed: the Run still reports its Mission queued, the brief is
+    // still claimed.
+    assert!(audit_actions(&state, &own.actor(), "mission.settle").is_empty());
+    let run = state.intake.latest_run(&key).unwrap().unwrap();
+    assert_eq!(run.result.unwrap().state, "queued");
+    assert_eq!(
+        state.intake.filed_brief(&key).unwrap().unwrap().state,
+        "claimed"
+    );
+    charges::close_all(&state).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_act_whose_audit_cannot_be_written_is_not_taken() {
+    let root = tempfile::tempdir().unwrap();
+    let tag = "n2";
+    let state = station(root.path(), tag, "test", "", "");
+    charges::tend(&state, false, true).await;
+    let operation = names_of(tag);
+    let key = seed_dark(&state, &operation, "n2-dark");
+    let own = desk(
+        &state,
+        ChargeScope::Operation(operation),
+        &format!("k{tag}"),
+    );
+
+    // The audit log cannot be written: its directory is a file.
+    let audit = root.path().join("registry").join("audit");
+    let _ = std::fs::remove_dir_all(&audit);
+    std::fs::write(&audit, b"not a directory").unwrap();
+
+    let (settling, mission) = (own.clone(), key.clone());
+    let refused = off_the_workers(move || settling.settle(&mission, "failed", "dark")).await;
+    let refused = refused.unwrap_err();
+    assert!(
+        refused.contains("audit record could not be written"),
+        "{refused}"
+    );
+    let run = state.intake.latest_run(&key).unwrap().unwrap();
+    assert_eq!(
+        run.result.unwrap().state,
+        "queued",
+        "the Run was not touched"
+    );
+    assert_eq!(
+        state.intake.filed_brief(&key).unwrap().unwrap().state,
+        "claimed"
+    );
+    charges::close_all(&state).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_tool_is_refused_once_the_charge_no_longer_holds_its_lease() {
+    let root = tempfile::tempdir().unwrap();
+    let tag = "n3";
+    let state = station(root.path(), tag, "test", "", "");
+    charges::tend(&state, false, true).await;
+    let operation = names_of(tag);
+    let key = seed_dark(&state, &operation, "n3-dark");
+    let own = desk(
+        &state,
+        ChargeScope::Operation(operation),
+        &format!("k{tag}"),
+    );
+
+    // The lease lapses (the Station stopped renewing it).
+    let held = record(&state, tag);
+    state
+        .intake
+        .update_charge(
+            &scope(tag),
+            &held.station,
+            held.fence,
+            Some(Duration::from_nanos(1)),
+            ChargeUpdate::default(),
+        )
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(30));
+
+    let (settling, mission) = (own.clone(), key.clone());
+    let refused = off_the_workers(move || settling.settle(&mission, "failed", "dark")).await;
+    assert!(refused.unwrap_err().contains("no longer holds its lease"));
+    assert!(
+        own.retry(&key, None)
+            .await
+            .unwrap_err()
+            .contains("no longer holds its lease")
+    );
+    assert!(audit_actions(&state, &own.actor(), "mission.settle").is_empty());
+    assert_eq!(
+        state.intake.filed_brief(&key).unwrap().unwrap().state,
+        "claimed"
+    );
+    charges::close_all(&state).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_run_whose_holder_renewed_is_not_given_up() {
+    let root = tempfile::tempdir().unwrap();
+    let tag = "n4";
+    let state = station(root.path(), tag, "test", "", "");
+    let operation = names_of(tag);
+    // The holder has renewed its lease since the Run was read as unheld.
+    let run = seed(&state, &operation, "elsewhere", "n4-held", "working");
+    let own = desk(
+        &state,
+        ChargeScope::Operation(operation),
+        &format!("k{tag}"),
+    );
+    let refused = own.lose_unheld(&run, "looked dark").unwrap_err();
+    assert!(refused.contains("could not be given up"), "{refused}");
+    let after = state.intake.run(&run.id).unwrap().unwrap();
+    assert_eq!(after.status, RunStatus::Active);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn text_from_an_operation_crosses_to_another_charge_only_as_a_code_or_through_a_compartment()
+{
+    let _only = M_CHARGE.lock().await;
+    let root = tempfile::tempdir().unwrap();
+    let (tag, station) = ("n5", "stn-n5");
+    let state = kit(root.path(), tag, station, ("", true), "");
+    let operation = names_of(tag);
+    // The Operation has a Mission on this Station, so each may wake the other's charge.
+    seed(&state, &operation, station, "n5-live", "working");
+    charges::tend(&state, true, true).await;
+    assert!(state.charges.is_live("m") && state.charges.is_live(&scope(tag)));
+    let op_desk = desk(
+        &state,
+        ChargeScope::Operation(operation.clone()),
+        &format!("k{tag}"),
+    );
+    let target = format!("station:{station}");
+
+    // An Operation's charge wakes a Station's with no note or a code, never prose.
+    let (waking, to) = (op_desk.clone(), target.clone());
+    let free =
+        off_the_workers(move || waking.wake(&to, Some("the build is red, please fix"), None)).await;
+    assert!(
+        free.unwrap_err()
+            .contains("does not go to a Station's charge")
+    );
+    let (waking, to) = (op_desk.clone(), target.clone());
+    off_the_workers(move || waking.wake(&to, Some("run-lost"), None))
+        .await
+        .unwrap();
+    let (waking, to) = (op_desk.clone(), target.clone());
+    off_the_workers(move || waking.wake(&to, None, None))
+        .await
+        .unwrap();
+
+    // M relaying text it read in another Operation reaches this Operation's charge only through
+    // a compartment; none is configured, so it is refused, and nothing was delivered.
+    let m_desk = desk(&state, ChargeScope::M, &format!("m{tag}"));
+    let before = state
+        .intake
+        .charge(&scope(tag))
+        .unwrap()
+        .unwrap()
+        .controls
+        .len();
+    let (waking, to) = (m_desk.clone(), scope(tag));
+    let refused =
+        off_the_workers(move || waking.wake(&to, Some("they said X"), Some("OTHER"))).await;
+    assert!(refused.unwrap_err().contains("no compartment"));
+    let after = state
+        .intake
+        .charge(&scope(tag))
+        .unwrap()
+        .unwrap()
+        .controls
+        .len();
+    assert_eq!(before, after);
+    // Its own words, or text from the target's own Operation, go through, audited.
+    let (waking, to, own) = (m_desk.clone(), scope(tag), operation.clone());
+    off_the_workers(move || waking.wake(&to, Some("look at the board"), None))
+        .await
+        .unwrap();
+    let (waking, to) = (m_desk.clone(), scope(tag));
+    off_the_workers(move || waking.wake(&to, Some("same Operation"), Some(&own)))
+        .await
+        .unwrap();
+    assert_eq!(audit_actions(&state, "charge:m", "charge.wake").len(), 2);
+    charges::close_all(&state).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_station_charge_is_given_no_operation_reason_in_events_or_tools() {
+    let root = tempfile::tempdir().unwrap();
+    let (tag, station) = ("n6", "stn-n6");
+    let state = kit(
+        root.path(),
+        tag,
+        station,
+        ("stuck_blocked_after = 0\nstuck_run_lost_after = 0\n", false),
+        "",
+    );
+    let operation = names_of(tag);
+    // A blocked Mission whose hold text is an Agent's words, and a lost one an earlier charge
+    // settled with its reason.
+    let held = seed(&state, &operation, station, "n6-held", "blocked");
+    state
+        .intake
+        .update_run(
+            &held.id,
+            station,
+            held.fence,
+            RunUpdate::default()
+                .result(RunResult::new("blocked").with_reason(Some("SECRET-HOLD-TEXT".to_owned()))),
+        )
+        .unwrap();
+    seed(&state, &operation, station, "n6-lost", "lost");
+    state
+        .intake
+        .settle_results(
+            "n6-lost",
+            &RunResult::new("stalled").with_reason(Some("SECRET-CHARGE-REASON".to_owned())),
+            &RunResult::new("abandoned"),
+        )
+        .unwrap();
+
+    let charge = state
+        .roster
+        .charges()
+        .get(&format!("station:{station}"))
+        .cloned()
+        .unwrap();
+    let looking = state.clone();
+    let survey = off_the_workers(move || {
+        charges::area::survey(&looking, &charge, &mut BTreeMap::new(), unix_now())
+    })
+    .await;
+    assert!(!survey.stuck.is_empty());
+    for stuck in &survey.stuck {
+        let event = charges::area::stuck_detail(stuck, unix_now()).to_string();
+        assert!(!event.contains("SECRET"), "{event}");
+    }
+    let station_desk = desk(
+        &state,
+        ChargeScope::Station(station.to_owned()),
+        &format!("s{tag}"),
+    );
+    let reading = station_desk.clone();
+    let board = off_the_workers(move || reading.board(None, None))
+        .await
+        .unwrap();
+    assert!(!board.contains("SECRET"), "{board}");
+    for mission in ["n6-held", "n6-lost"] {
+        let (reading, mission) = (station_desk.clone(), mission.to_owned());
+        let detail = off_the_workers(move || reading.state_of(&mission))
+            .await
+            .unwrap();
+        assert!(!detail.contains("SECRET"), "{detail}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelling_withdraws_a_queued_mission_and_settles_one_whose_station_is_dark() {
+    let root = tempfile::tempdir().unwrap();
+    let tag = "n7";
+    let state = station(root.path(), tag, "test", "", "");
+    charges::tend(&state, false, true).await;
+    let operation = names_of(tag);
+    let own = desk(
+        &state,
+        ChargeScope::Operation(operation.clone()),
+        &format!("k{tag}"),
+    );
+
+    let queued: crate::directorates::registry::store::Brief = serde_json::from_value(json!({
+        "title": "work", "id": "n7-queued", "source": "test", "operation": operation,
+    }))
+    .unwrap();
+    state.intake.submit_brief(&queued).unwrap();
+    let answer = own.cancel(&queued.key(), "no longer wanted").await.unwrap();
+    assert!(answer.contains("\"withdrawn\":true"), "{answer}");
+    assert_eq!(
+        state
+            .intake
+            .filed_brief(&queued.key())
+            .unwrap()
+            .unwrap()
+            .state,
+        "failed"
+    );
+    assert!(state.intake.list_new().unwrap().is_empty());
+    assert_eq!(
+        audit_actions(&state, &own.actor(), "mission.cancel"),
+        std::slice::from_ref(&operation)
+    );
+
+    let dark = seed_dark(&state, &operation, "n7-dark");
+    let answer = own.cancel(&dark, "its Station is gone").await.unwrap();
+    assert!(answer.contains("\"settled\":\"failed\""), "{answer}");
+    assert_eq!(
+        state.intake.filed_brief(&dark).unwrap().unwrap().state,
+        "failed"
+    );
+    charges::close_all(&state).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn m_is_told_of_a_charge_whose_last_turn_did_not_run_from_a_field_not_prose() {
+    let root = tempfile::tempdir().unwrap();
+    let (tag, station) = ("n8", "stn-n8");
+    let state = kit(
+        root.path(),
+        tag,
+        station,
+        ("stuck_charge_after = 0\n", true),
+        "",
+    );
+    let scope_name = format!("station:{station}");
+    let held = state
+        .intake
+        .claim_charge(
+            &scope_name,
+            &format!("s{tag}"),
+            "elsewhere",
+            Duration::from_secs(600),
+        )
+        .unwrap();
+    let write = |kind: &str, text: &str| {
+        state
+            .intake
+            .update_charge(
+                &scope_name,
+                "elsewhere",
+                held.fence,
+                None,
+                ChargeUpdate::default().log(ChargeLogEntry::new(kind, text, 1.0)),
+            )
+            .unwrap();
+    };
+    // Prose that merely says it is not enough.
+    write("turn", "woke for control but took no turn: it only says so");
+    let m = state.roster.charges().get("m").cloned().unwrap();
+    let looking = state.clone();
+    let charge = m.clone();
+    let survey = off_the_workers(move || {
+        charges::area::survey(&looking, &charge, &mut BTreeMap::new(), unix_now())
+    })
+    .await;
+    assert!(
+        survey
+            .stuck
+            .iter()
+            .all(|stuck| stuck.condition != "charge-failing")
+    );
+    write(
+        "turn-refused",
+        "woke for control but took no turn: the harness did not start",
+    );
+    let looking = state.clone();
+    let survey = off_the_workers(move || {
+        charges::area::survey(&looking, &m, &mut BTreeMap::new(), unix_now())
+    })
+    .await;
+    assert!(
+        survey
+            .stuck
+            .iter()
+            .any(|stuck| stuck.condition == "charge-failing"
+                && stuck.charge.as_deref() == Some(scope_name.as_str())),
+        "{:?}",
+        survey.stuck
+    );
+}

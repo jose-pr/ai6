@@ -301,7 +301,8 @@ fn full_example(record: ConfigRecord) -> Value {
             "stuck_verifying_after": "none",
             "stuck_queued_after": 0,
             "stuck_blocked_after": 1800,
-            "stuck_charge_after": 120
+            "stuck_charge_after": 120,
+            "max_text_chars": 200
         }),
         ConfigRecord::Compartment => json!({
             "description": "Release work",

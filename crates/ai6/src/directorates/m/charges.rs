@@ -179,6 +179,11 @@ pub struct ChargeDefinition {
     #[schema(title = "Charge stuck after")]
     #[map(default = ChargeDefinition::DEFAULTS.stuck_charge_after)]
     pub stuck_charge_after: TimeLimit,
+    /// Characters of text one of the charge's acts records in the audit log and on the timeline
+    /// (a target, a reason); the rest is cut. `none` records it whole.
+    #[schema(title = "Text one act records")]
+    #[map(default = ChargeDefinition::DEFAULTS.max_text_chars)]
+    pub max_text_chars: Limit,
 }
 
 impl ChargeDefinition {
@@ -200,6 +205,7 @@ impl ChargeDefinition {
         stuck_queued_after: TimeLimit::secs(900),
         stuck_blocked_after: TimeLimit::secs(3_600),
         stuck_charge_after: TimeLimit::secs(600),
+        max_text_chars: Limit::at(500),
     };
 
     /// A charge kept by `agent`, every other setting at its default.

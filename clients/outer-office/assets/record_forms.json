@@ -6010,6 +6010,26 @@
           "title": "Charge stuck after",
           "description": "For M's charge: seconds another charge may stand with its lease lapsed, or its last turn failed, before M is told it is stuck; `none` never flags one.",
           "default": 600.0
+        },
+        "max_text_chars": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "none"
+              ],
+              "x-enum-labels": {
+                "none": "No limit"
+              }
+            }
+          ],
+          "title": "Text one act records",
+          "description": "Characters of text one of the charge's acts records in the audit log and on the timeline (a target, a reason); the rest is cut. `none` records it whole.",
+          "default": 500
         }
       },
       "additionalProperties": false,

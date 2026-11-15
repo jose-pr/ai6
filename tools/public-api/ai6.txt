@@ -867,6 +867,7 @@ pub fn ai6::directorates::m::charges::Charge::new(ai6::directorates::m::charges:
 pub ai6::directorates::m::charges::ChargeDefinition::agent: alloc::string::String
 pub ai6::directorates::m::charges::ChargeDefinition::lease: ai6::bounds::Seconds
 pub ai6::directorates::m::charges::ChargeDefinition::max_events_per_turn: ai6::bounds::Limit
+pub ai6::directorates::m::charges::ChargeDefinition::max_text_chars: ai6::bounds::Limit
 pub ai6::directorates::m::charges::ChargeDefinition::max_turns_per_hour: ai6::bounds::Limit
 pub ai6::directorates::m::charges::ChargeDefinition::max_waiting_events: ai6::bounds::Limit
 pub ai6::directorates::m::charges::ChargeDefinition::operation: core::option::Option<alloc::string::String>
@@ -11716,6 +11717,7 @@ pub fn ai6::directorates::m::charges::Charge::new(ai6::directorates::m::charges:
 pub ai6::ChargeDefinition::agent: alloc::string::String
 pub ai6::ChargeDefinition::lease: ai6::bounds::Seconds
 pub ai6::ChargeDefinition::max_events_per_turn: ai6::bounds::Limit
+pub ai6::ChargeDefinition::max_text_chars: ai6::bounds::Limit
 pub ai6::ChargeDefinition::max_turns_per_hour: ai6::bounds::Limit
 pub ai6::ChargeDefinition::max_waiting_events: ai6::bounds::Limit
 pub ai6::ChargeDefinition::operation: core::option::Option<alloc::string::String>

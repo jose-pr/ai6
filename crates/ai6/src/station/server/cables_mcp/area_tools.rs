@@ -67,8 +67,12 @@ struct CancelArgs {
 struct WakeArgs {
     /// The charge's scope: m, operation:<codename> or station:<id>.
     charge: String,
-    /// Why it should look; it reads this as a person's word, untrusted.
-    note: String,
+    /// Why it should look; it reads this as a person's word, untrusted. An Operation's charge
+    /// may wake a Station's with no note or an AI6 code only.
+    note: Option<String>,
+    /// The Operation whose text the note repeats, when you read it there: it reaches another
+    /// Operation's charge only through a compartment of that Operation that allows sending there.
+    about_operation: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -167,11 +171,17 @@ impl CableTools {
 
     /// Ask another charge to look.
     #[tool(
-        description = "Wake another charge with a note saying what to look at. M may wake any charge; a Station's charge the charges of the Operations whose Missions it holds; an Operation's charge the charges of the Stations that hold its Missions. Audited."
+        description = "Wake another charge with a note saying what to look at. M may wake any charge; a Station's charge the charges of the Operations whose Missions it holds; an Operation's charge the charges of the Stations that hold its Missions. Text that comes from one Operation does not reach another Operation's charge, or a Station's, unless a compartment allows it; a Station's charge gets no free text from an Operation's. Audited."
     )]
     async fn wake_charge(&self, Parameters(args): Parameters<WakeArgs>) -> String {
-        self.with_area(move |desk| desk.wake(&args.charge, &args.note))
-            .await
+        self.with_area(move |desk| {
+            desk.wake(
+                &args.charge,
+                args.note.as_deref(),
+                args.about_operation.as_deref(),
+            )
+        })
+        .await
     }
 
     /// Tell a person.

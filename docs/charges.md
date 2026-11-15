@@ -78,6 +78,7 @@ allow `00` as well, or the Agent cannot serve it.
 | `stuck_queued_after` | 900 | **Queued stuck after.** Seconds a Mission may wait in the queue before the charge is told it is stuck; `none` never flags one. |
 | `stuck_blocked_after` | 3,600 | **Blocked or held stuck after.** Seconds a Mission may stand `blocked` or `held`, counted from when the Station first saw it (a held Mission, from when its Run ended), before the charge is told it is stuck; `none` never flags one. |
 | `stuck_charge_after` | 600 | **Charge stuck after.** For M's charge: seconds another charge may stand with its lease lapsed, or its last turn failed, before M is told it is stuck; `none` never flags one. |
+| `max_text_chars` | 500 | **Text one act records.** Characters of text one of the charge's acts records in the audit log and on the timeline (a target, a reason); the rest is cut. `none` records it whole. |
 <!-- schema:record.charge:end -->
 
 The Registry bounds what a charge's record keeps in [`[registry.limits.charges]`](configuration.md).
@@ -277,7 +278,7 @@ the charge's lease. A Mission outside the charge's scope answers as one that doe
 | `settle_mission` | Files a Mission nothing holds as `failed` (its Run results and its brief, taken from the queue or recovered) or `stalled`, with the reason | yes | yes | yes |
 | `retry_mission` | Queues its next run: through the operator control for a Mission the Station holds, otherwise by recovering the brief of a dark Station's Mission, bounded by the run limit; a named Agent must be on the roster and not quarantined | yes | yes | yes |
 | `resume_mission`, `cancel_mission` | Resumes the Run, or withdraws the Mission, of one the Station holds (cancel asks the Registry otherwise) | yes | yes | yes |
-| `wake_charge` | Wakes another charge with a note | any | Operations whose Missions it holds | Stations that hold its Missions |
+| `wake_charge` | Wakes another charge, with an optional note | any | Operations whose Missions it holds | Stations that hold its Missions, with no note or an AI6 code only |
 | `notify_person` | Files a Report in the charge's scope for a person, saying what it found, did and could not do | yes | yes | yes |
 | `verify_mission`, `redispatch` | Decide a Mission waiting for its outcome | any Operation | never | its Operation |
 
@@ -286,6 +287,16 @@ decides none, and a `settle_mission` on a Mission waiting for its outcome is ref
 Operation charge it says so with `notify_person`. M may decide any Mission, as it may act on anything,
 and does so as `charge:m`; a person's decision replaces a charge's. A Station's charge reads state, not
 an Operation's brief or report, since those cross an Operation.
+
+Text does not cross an Operation unchecked. A `stuck` event carries AI6's own words only (a condition, a
+state, a time), never the reason an Agent or another charge gave; a Station's charge is shown no Operation's
+reasons, in events or in `board` and `mission_detail`. A note M says it read in one Operation reaches
+another Operation's charge only through a compartment of the first that allows sending there
+(`about_operation`), checked and audited before it is delivered. `settle_mission` refuses, before it audits or
+changes anything, a Mission whose Station's lease on its brief has not lapsed, and every tool refuses once the
+charge no longer holds its lease or its audit record cannot be written. `cancel_mission` withdraws a queued
+Mission from the queue and settles one whose Station is dark. The text one act records in the audit log is
+cut to `max_text_chars`.
 
 A fix a charge cannot make is reported with `notify_person`, not left unsaid. The standing context of
 each kind says this is its job, names its tools and says what it never does.

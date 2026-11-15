@@ -12,10 +12,13 @@ use serde_json::{Value, json};
 use super::super::{DaemonState, unix_now};
 use super::area::{self, MissionView};
 use crate::directorates::m::charges::ChargeScope;
+use crate::directorates::m::compartments::{
+    CompartmentAction, CompartmentResource, FieldPrincipal,
+};
 use crate::directorates::m::memories::fenced;
 use crate::directorates::m::reports::ReportFiling;
 use crate::directorates::registry::reports::{ReportFiler, ReportScope};
-use crate::directorates::registry::runs::{RunResult, RunStatus};
+use crate::directorates::registry::runs::{RunError, RunRecord, RunResult, RunStatus};
 use crate::directorates::registry::store::{AuditRecord, LeaseRecovery};
 use crate::directorates::registry::timeline::TimelineEvent;
 
@@ -83,6 +86,28 @@ impl AreaDesk {
         Ok(())
     }
 
+    /// [`admit`](Self::admit) off the async workers: it reads the Registry.
+    async fn admitted(&self) -> Result<(), String> {
+        let desk = self.clone();
+        tokio::task::spawn_blocking(move || desk.admit())
+            .await
+            .map_err(|_| "the call failed".to_owned())?
+    }
+
+    /// How many characters of text one act records, from the charge's `max_text_chars`.
+    fn text_chars(&self) -> usize {
+        self.state
+            .roster
+            .charges()
+            .get(&self.scope.to_string())
+            .map_or(
+                crate::directorates::m::charges::ChargeDefinition::DEFAULTS
+                    .max_text_chars
+                    .or_max(),
+                |charge| charge.settings.max_text_chars.or_max(),
+            )
+    }
+
     /// Writes the audit record of an act the charge is about to take; no record, no act.
     fn audit(&self, action: &str, operation: Option<&str>, target: &str) -> Result<(), String> {
         let record = AuditRecord {
@@ -91,7 +116,7 @@ impl AreaDesk {
             action: action.to_owned(),
             operation: operation.unwrap_or_default().to_owned(),
             resource: Some(format!("station:{}", self.state.station_id)),
-            target: target.chars().take(500).collect(),
+            target: target.chars().take(self.text_chars()).collect(),
             at: unix_now(),
         };
         self.state.intake.record_audit(&record).map_err(|error| {
@@ -195,7 +220,10 @@ impl AreaDesk {
         let event = TimelineEvent::new("charge", action, operation, unix_now())
             .mission(view.mission.clone())
             .actor(self.actor())
-            .detail("reason", detail.chars().take(500).collect::<String>());
+            .detail(
+                "reason",
+                detail.chars().take(self.text_chars()).collect::<String>(),
+            );
         let _ = self.state.intake.record_event(&event);
     }
 
@@ -223,12 +251,18 @@ impl AreaDesk {
                 "since": view.since,
                 "held_by_no_run": view.unheld,
                 "decided": view.decided,
-                "reason": view.reason,
+                // Reasons are an Operation's words; a Station's charge reads state alone.
+                "reason": (!self.is_station()).then_some(view.reason.as_deref()),
             }));
         }
         let mut board = json!({ "scope": self.scope.to_string(), "missions_by_state": by_state });
         if let Some(charge) = self.state.roster.charges().get(&self.scope.to_string()) {
-            let mut first_seen = Default::default();
+            let mut first_seen = self
+                .state
+                .charges
+                .get(&self.scope.to_string())
+                .and_then(|live| live.first_seen.lock().ok().map(|seen| seen.clone()))
+                .unwrap_or_default();
             let survey = area::survey(&self.state, charge, &mut first_seen, now);
             board["stuck"] = Value::Array(
                 survey
@@ -280,8 +314,6 @@ impl AreaDesk {
                     "station": run.station,
                     "status": run.status,
                     "state": run.result.as_ref().map(|result| result.state.as_str()),
-                    "reason": run.result.as_ref().and_then(|result| result.reason.as_deref()),
-                    "lost": run.lost,
                     "decided": run.verdict.as_ref().map(|verdict| verdict.verdict.as_str()),
                 })
             })
@@ -339,17 +371,15 @@ impl AreaDesk {
         if run.status == RunStatus::Active && run.leased_at(now) {
             return Err("its Run's lease is live: a Station still holds it".to_owned());
         }
+        if outcome == "failed" {
+            self.brief_can_be_filed(&view.mission)?;
+        }
         self.audit(
             "mission.settle",
             view.operation.as_deref(),
             &format!("{} {outcome}", view.mission),
         )?;
-        if run.status == RunStatus::Active || run.status == RunStatus::Parked {
-            match intake.lose_run(&run.id, reason) {
-                Ok(_) | Err(crate::directorates::registry::runs::RunError::Ended) => {}
-                Err(error) => return Err(format!("its Run could not be given up: {error}")),
-            }
-        }
+        self.lose_unheld(&run, reason)?;
         let latest = RunResult::new(outcome).with_reason(Some(reason.to_owned()));
         let earlier =
             RunResult::new("abandoned").with_reason(Some(RunResult::SUPERSEDED.to_owned()));
@@ -369,6 +399,51 @@ impl AreaDesk {
             "brief": filed,
         })
         .to_string())
+    }
+
+    /// Gives up a Run whose lease lapsed. Any refusal but `Ended` stops the act: a holder that
+    /// renewed meanwhile still has the Run.
+    pub(in crate::station::server) fn lose_unheld(
+        &self,
+        run: &RunRecord,
+        reason: &str,
+    ) -> Result<(), String> {
+        if run.status != RunStatus::Active {
+            return Ok(());
+        }
+        match self.state.intake.lose_run(&run.id, reason) {
+            Ok(_) | Err(RunError::Ended) => Ok(()),
+            Err(error) => Err(format!("its Run could not be given up: {error}")),
+        }
+    }
+
+    /// Whether the Mission's brief may be filed failed now: refused, before anything is changed,
+    /// while a Station's lease on it is live or it is filed done.
+    fn brief_can_be_filed(&self, mission: &str) -> Result<(), String> {
+        let intake = &self.state.intake;
+        let Some(filed) = intake
+            .filed_brief(mission)
+            .map_err(|error| error.to_string())?
+        else {
+            return Ok(());
+        };
+        match filed.state.as_str() {
+            "claimed" => {
+                let lease = intake
+                    .lease(mission)
+                    .map_err(|error| error.to_string())?
+                    .ok_or("its brief has no lease")?;
+                if lease.expires() >= unix_now() {
+                    return Err(format!(
+                        "Station {:?}'s lease on its brief has not lapsed; settle it once it has",
+                        lease.station()
+                    ));
+                }
+                Ok(())
+            }
+            "done" => Err("its brief is filed done".to_owned()),
+            _ => Ok(()),
+        }
     }
 
     /// Files the Mission's brief failed, whatever state the Registry holds it in.
@@ -446,7 +521,7 @@ impl AreaDesk {
         name: &str,
         agent: Option<&str>,
     ) -> Result<String, String> {
-        self.admit()?;
+        self.admitted().await?;
         let (desk, mission) = (self.clone(), name.to_owned());
         let view = tokio::task::spawn_blocking(move || desk.find(&mission))
             .await
@@ -456,7 +531,10 @@ impl AreaDesk {
             return Err("it is already queued".to_owned());
         }
         if let Some(agent) = agent {
-            self.qualified(&view, agent)?;
+            let (desk, view, agent) = (self.clone(), view.clone(), agent.to_owned());
+            tokio::task::spawn_blocking(move || desk.qualified(&view, &agent))
+                .await
+                .map_err(|_| "the call failed".to_owned())??;
         }
         if self.holds_here(&view) {
             return self
@@ -542,10 +620,8 @@ impl AreaDesk {
             view.operation.as_deref(),
             &format!("{} on the queue", view.mission),
         )?;
-        if let Some(run) = run
-            && run.status == RunStatus::Active
-        {
-            let _ = intake.lose_run(&run.id, "its Station stopped renewing it");
+        if let Some(run) = run {
+            self.lose_unheld(&run, "its Station stopped renewing it")?;
         }
         let limit = self.state.station.limits().scheduler.intake_runs;
         match intake
@@ -573,7 +649,7 @@ impl AreaDesk {
         name: &str,
         message: Option<&str>,
     ) -> Result<String, String> {
-        self.admit()?;
+        self.admitted().await?;
         let (desk, mission) = (self.clone(), name.to_owned());
         let view = tokio::task::spawn_blocking(move || desk.find(&mission))
             .await
@@ -593,14 +669,15 @@ impl AreaDesk {
             .await
     }
 
-    /// Withdraws the Mission: its Run stopped when this Station holds it, otherwise its brief
-    /// asked to be cancelled.
+    /// Withdraws the Mission: its Run stopped when this Station holds it; a queued one is
+    /// withdrawn from the queue; one whose Station is dark is settled as failed; otherwise its
+    /// brief is asked to be cancelled.
     pub(in crate::station::server) async fn cancel(
         &self,
         name: &str,
         reason: &str,
     ) -> Result<String, String> {
-        self.admit()?;
+        self.admitted().await?;
         if reason.trim().is_empty() {
             return Err("cancelling needs its reason".to_owned());
         }
@@ -617,6 +694,36 @@ impl AreaDesk {
         let desk = self.clone();
         let reason = reason.to_owned();
         tokio::task::spawn_blocking(move || {
+            if view.state == "queued" {
+                let operation = view
+                    .operation
+                    .as_deref()
+                    .ok_or("the Mission belongs to no Operation")?;
+                desk.audit("mission.cancel", Some(operation), &view.mission)?;
+                return match desk.state.intake.withdraw_brief(
+                    operation,
+                    &view.mission,
+                    &desk.actor(),
+                    &reason,
+                    unix_now(),
+                ) {
+                    Ok(_) => {
+                        desk.timeline("withdrawn", &view, &reason);
+                        Ok(json!({ "withdrawn": true, "mission": view.mission }).to_string())
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        Err("it is no longer in the queue".to_owned())
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                        Err("a Station took it meanwhile, or it finished".to_owned())
+                    }
+                    Err(error) => Err(error.to_string()),
+                };
+            }
+            // Nothing holds it: there is no Run to stop, so it is settled, not waited on.
+            if view.unheld && view.number > 0 && desk.brief_can_be_filed(&view.mission).is_ok() {
+                return desk.settle(&view.mission, "failed", &reason);
+            }
             desk.audit(
                 "mission.cancel",
                 view.operation.as_deref(),
@@ -681,7 +788,15 @@ impl AreaDesk {
             .await
             .map_err(|_| "the call failed".to_owned())??;
         let outcome = super::super::controls::apply(&self.state, &control).await;
-        self.timeline(verb, view, outcome.reason.as_deref().unwrap_or("applied"));
+        let (desk, seen, note) = (
+            self.clone(),
+            view.clone(),
+            outcome
+                .reason
+                .clone()
+                .unwrap_or_else(|| "applied".to_owned()),
+        );
+        let _ = tokio::task::spawn_blocking(move || desk.timeline(verb, &seen, &note)).await;
         if outcome.outcome == "applied" {
             Ok(json!({ verb: true, "mission": view.mission, "state": outcome.state }).to_string())
         } else {
@@ -704,12 +819,20 @@ impl AreaDesk {
     /// Asks another charge to look: the note is the reason, and the charge reads it as a person's
     /// word, untrusted. M may ask any charge; a Station's charge the Operations' charges for the
     /// Missions it holds; an Operation's charge the Station charges that hold its Missions.
+    ///
+    /// Free text that comes from an Operation does not cross to another Operation's charge or to
+    /// a Station's unchecked: an Operation's charge may wake a Station's charge with no note or an
+    /// AI6 code only, and text M says it read in `from_operation` reaches another Operation's
+    /// charge only through a compartment of `from_operation` that allows sending there, which is
+    /// audited first.
     pub(in crate::station::server) fn wake(
         &self,
         target: &str,
-        note: &str,
+        note: Option<&str>,
+        from_operation: Option<&str>,
     ) -> Result<String, String> {
         self.admit()?;
+        let note = note.map(str::trim).filter(|note| !note.is_empty());
         let target: ChargeScope = target.parse()?;
         let name = target.to_string();
         if !self.state.roster.charges().contains_key(&name) {
@@ -734,12 +857,59 @@ impl AreaDesk {
         if !allowed || target == self.scope {
             return Err(format!("you may not wake {name}"));
         }
-        self.audit("charge.wake", None, &name)?;
+        let mut crossing = String::new();
+        if let Some(note) = note {
+            let coded = is_code(note);
+            let from = match (&self.scope, from_operation) {
+                (ChargeScope::Operation(own), _) => Some(own.as_str()),
+                (_, from) => from,
+            };
+            if let Some(from) = from {
+                match &target {
+                    ChargeScope::Station(_) if !coded => {
+                        return Err(format!(
+                            "text from Operation {from} does not go to a Station's charge: wake \
+                             it with no note, or an AI6 code"
+                        ));
+                    }
+                    ChargeScope::Operation(into) if into != from => {
+                        let compartment = self.compartment_between(from, into)?;
+                        crossing = format!(" {from}->{into} {compartment}");
+                    }
+                    _ => {}
+                }
+            }
+        }
+        self.audit("charge.wake", None, &format!("{name}{crossing}"))?;
         self.state
             .intake
-            .request_charge_wake(&name, &self.actor(), note)
+            .request_charge_wake(&name, &self.actor(), note.unwrap_or_default())
             .map_err(|error| error.to_string())?;
         Ok(json!({ "woken": name }).to_string())
+    }
+
+    /// The compartment of Operation `from` that lets this charge's text reach Operation `into`,
+    /// read now.
+    fn compartment_between(&self, from: &str, into: &str) -> Result<String, String> {
+        let state = self.state.current();
+        let compiled = state
+            .config
+            .compartments()
+            .map_err(|_| "compartments are unavailable".to_owned())?;
+        let clearance = super::super::agents::effective(&state, None, &self.agent)
+            .map_err(|_| "compartments are unavailable".to_owned())?
+            .clearance;
+        let principal = FieldPrincipal::new(self.agent.clone(), from.to_owned(), None, clearance);
+        compiled
+            .field_allows(
+                &principal,
+                CompartmentAction::CableSend,
+                &CompartmentResource::Operation(into.to_owned()),
+            )
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                format!("no compartment lets text from Operation {from} reach Operation {into}")
+            })
     }
 
     /// Files a Report in the charge's own scope for a person, who sees it in the attention list:
@@ -782,6 +952,15 @@ impl AreaDesk {
                 .to_string(),
         )
     }
+}
+
+/// Whether `note` is an AI6 code (a state, a condition, an ID): short, no spaces, no prose.
+fn is_code(note: &str) -> bool {
+    !note.is_empty()
+        && note.len() <= 64
+        && note
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':'))
 }
 
 /// What a control asks of a Mission this Station holds.
