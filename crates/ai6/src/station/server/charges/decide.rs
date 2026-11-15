@@ -37,6 +37,8 @@ pub(in crate::station::server) struct DecisionDesk {
     agent: String,
     /// The charge's Run name, which its proposals name as their parent.
     key: String,
+    /// M's charge: it decides the Missions of every Operation, not one Operation's.
+    any: bool,
 }
 
 impl DecisionDesk {
@@ -51,6 +53,47 @@ impl DecisionDesk {
             operation,
             agent,
             key,
+            any: false,
+        }
+    }
+
+    /// The desk of M's charge, kept by `agent`: it decides the Missions of every Operation.
+    pub(in crate::station::server) fn for_m(
+        state: DaemonState,
+        agent: String,
+        key: String,
+    ) -> Self {
+        Self {
+            state,
+            operation: String::new(),
+            agent,
+            key,
+            any: true,
+        }
+    }
+
+    /// Whether the desk is M's.
+    pub(in crate::station::server) fn is_any(&self) -> bool {
+        self.any
+    }
+
+    /// The Operation a decision on `record` is made in.
+    fn operation_of(&self, record: &RunRecord) -> Result<String, String> {
+        if self.any {
+            record
+                .operation
+                .clone()
+                .ok_or_else(|| "that Mission belongs to no Operation".to_owned())
+        } else {
+            Ok(self.operation.clone())
+        }
+    }
+
+    fn operation_only(&self) -> Result<(), String> {
+        if self.any {
+            Err("M's charge has no Operation of its own; the Operation's 00 does this".to_owned())
+        } else {
+            Ok(())
         }
     }
 
@@ -59,7 +102,11 @@ impl DecisionDesk {
     }
 
     fn by(&self) -> String {
-        format!("{BY_PREFIX}{}", self.operation)
+        if self.any {
+            "charge:m".to_owned()
+        } else {
+            format!("{BY_PREFIX}{}", self.operation)
+        }
     }
 
     /// The latest run at the Mission `name` names (a UID or a handle), when the Operation is
@@ -79,7 +126,9 @@ impl DecisionDesk {
             }
         };
         latest
-            .filter(|record| record.operation.as_deref() == Some(self.operation.as_str()))
+            .filter(|record| {
+                self.any || record.operation.as_deref() == Some(self.operation.as_str())
+            })
             .ok_or_else(|| "that is not a Mission of your Operation".to_owned())
     }
 
@@ -92,7 +141,9 @@ impl DecisionDesk {
             .runs()
             .map_err(|error| error.to_string())?
             .into_iter()
-            .filter(|record| record.operation.as_deref() == Some(self.operation.as_str()))
+            .filter(|record| {
+                self.any || record.operation.as_deref() == Some(self.operation.as_str())
+            })
         {
             match latest.get(&record.mission_id) {
                 Some(held) if held.number >= record.number => {}
@@ -147,14 +198,15 @@ impl DecisionDesk {
     /// next pass.
     pub(in crate::station::server) fn probe(&self, name: &str) -> Result<String, String> {
         let record = self.latest(name)?;
-        decisions::check_verifying(&Some(record.clone()), &self.operation)
+        let operation = self.operation_of(&record)?;
+        decisions::check_verifying(&Some(record.clone()), &operation)
             .map_err(|error| error.to_string())?;
         let now = unix_seconds();
         let audit = AuditRecord {
             id: uuid::Uuid::new_v4().to_string(),
             actor: self.by(),
             action: "mission.probe".to_owned(),
-            operation: self.operation.clone(),
+            operation: operation.clone(),
             resource: Some(format!("mission:{}", record.mission_id)),
             target: record.mission_id.clone(),
             at: now,
@@ -171,7 +223,7 @@ impl DecisionDesk {
         if !here {
             self.state
                 .intake
-                .request_probe(&self.operation, &record.mission_id, now)
+                .request_probe(&operation, &record.mission_id, now)
                 .map_err(|error| error.to_string())?;
             return Ok(json!({
                 "asked": true,
@@ -214,24 +266,23 @@ impl DecisionDesk {
             .verdict
             .as_ref()
             .map(|given| given.by.as_str())
-            .filter(|by| !by.starts_with(BY_PREFIX))
+            .filter(|by| !by.starts_with("charge:"))
         {
             return Err(format!("{by} has already decided this Mission"));
         }
-        let clearance = agents::effective(&self.state, Some(&self.operation), &self.agent)
-            .map_err(|error| error.to_string())?
-            .clearance;
+        let operation = self.operation_of(&record)?;
+        let clearance = agents::effective(
+            &self.state,
+            (!self.any).then_some(self.operation.as_str()),
+            &self.agent,
+        )
+        .map_err(|error| error.to_string())?
+        .clearance;
         let by = self.by();
         let at = unix_seconds();
-        let decision = VerifyingDecision::new(
-            &self.operation,
-            &record.mission_id,
-            verdict,
-            reason,
-            &by,
-            at,
-        )
-        .with_amendment(amendment);
+        let decision =
+            VerifyingDecision::new(&operation, &record.mission_id, verdict, reason, &by, at)
+                .with_amendment(amendment);
         let store = self.state.intake.as_ref();
         if clearance == "desk" {
             decisions::recommend(store, &decision).map_err(|error| error.to_string())?;
@@ -255,6 +306,7 @@ impl DecisionDesk {
 impl DecisionDesk {
     /// The Operation's Source items that wait for a decision, the longest waiting first.
     pub(in crate::station::server) fn items(&self) -> Result<String, String> {
+        self.operation_only()?;
         let open = self
             .state
             .intake
@@ -273,6 +325,7 @@ impl DecisionDesk {
 
     /// One Source item as the Source reported it, with the words of the item.
     pub(in crate::station::server) fn item(&self, id: &str) -> Result<String, String> {
+        self.operation_only()?;
         let report = source_items::item_report(self.state.intake.as_ref(), &self.operation, id)
             .map_err(|error| error.to_string())?;
         let mut row = item_row(&report);
@@ -290,6 +343,7 @@ impl DecisionDesk {
     /// Source, vetted as any brief is. At `desk` clearance the charge assesses nothing and a
     /// person does.
     pub(in crate::station::server) fn assess(&self, call: AssessCall) -> Result<String, String> {
+        self.operation_only()?;
         let clearance = agents::effective(&self.state, Some(&self.operation), &self.agent)
             .map_err(|error| error.to_string())?
             .clearance;
@@ -308,6 +362,7 @@ impl DecisionDesk {
 
     /// Opens an assessed or closed Report of the Operation again, for the reason given.
     pub(in crate::station::server) fn reopen(&self, id: &str, why: &str) -> Result<String, String> {
+        self.operation_only()?;
         ReportDesk::new(self.state.clone()).reopen(&self.reader(), id, why, &self.by())
     }
 

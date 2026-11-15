@@ -25,6 +25,8 @@
 pub(super) mod area;
 #[cfg(feature = "cables-mcp")]
 pub(super) mod decide;
+#[cfg(feature = "cables-mcp")]
+pub(super) mod keep;
 mod turn;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -487,6 +489,18 @@ async fn open(state: &DaemonState, charge: &Charge, record: &ChargeRecord) -> Ar
                             state.clone(),
                             charge.scope.clone(),
                             charge.settings.agent.clone(),
+                        ));
+                    }
+                    endpoint.open_area_tools(keep::AreaDesk::new(
+                        state.clone(),
+                        charge.scope.clone(),
+                        charge.settings.agent.clone(),
+                    ));
+                    if is_m {
+                        endpoint.open_decision_tools(decide::DecisionDesk::for_m(
+                            state.clone(),
+                            charge.settings.agent.clone(),
+                            run_key(&charge.scope),
                         ));
                     }
                     if let Some(operation) = charge.scope.operation() {

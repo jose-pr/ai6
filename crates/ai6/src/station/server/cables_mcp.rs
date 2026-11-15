@@ -25,6 +25,7 @@ use subtle::ConstantTimeEq;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
+mod area_tools;
 mod compartment_tools;
 mod decision_tools;
 mod issue_tools;
@@ -33,6 +34,7 @@ mod report_tools;
 mod resource_tools;
 
 use super::charges::decide::DecisionDesk;
+use super::charges::keep::AreaDesk;
 use super::compartments::CompartmentDesk;
 use super::green_ink::{Asked, Checked, Desk};
 use super::head_of_station;
@@ -83,6 +85,7 @@ pub(super) struct Endpoint {
     plan: Arc<OnceLock<review::PlanDesk>>,
     decision_desk: Arc<OnceLock<DecisionDesk>>,
     resource_desk: Arc<OnceLock<ResourceDesk>>,
+    area_desk: Arc<OnceLock<AreaDesk>>,
 }
 
 impl Endpoint {
@@ -121,6 +124,7 @@ impl Endpoint {
         let plan = Arc::new(OnceLock::new());
         let decision_desk = Arc::new(OnceLock::new());
         let resource_desk = Arc::new(OnceLock::new());
+        let area_desk = Arc::new(OnceLock::new());
         let token = Uuid::new_v4().to_string();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
@@ -140,6 +144,7 @@ impl Endpoint {
                 let plan = plan.clone();
                 let decision_desk = decision_desk.clone();
                 let resource_desk = resource_desk.clone();
+                let area_desk = area_desk.clone();
                 let identity = identity.clone();
                 move || {
                     Ok(CableTools::new(
@@ -159,6 +164,7 @@ impl Endpoint {
                         plan.clone(),
                         decision_desk.clone(),
                         resource_desk.clone(),
+                        area_desk.clone(),
                     ))
                 }
             },
@@ -190,7 +196,15 @@ impl Endpoint {
             plan,
             decision_desk,
             resource_desk,
+            area_desk,
         })
+    }
+
+    /// Gives a charge the tools to fix its area (settle, retry, resume, cancel, wake another
+    /// charge, tell a person); without this they do not exist for the Run. Open it before the
+    /// harness connects.
+    pub(super) fn open_area_tools(&self, desk: AreaDesk) {
+        let _ = self.area_desk.set(desk);
     }
 
     /// Gives an Operation's charge the tool to ask a Station for resources, and M's charge the
@@ -1757,6 +1771,7 @@ struct CableTools {
     plan: Arc<OnceLock<review::PlanDesk>>,
     decision_desk: Arc<OnceLock<DecisionDesk>>,
     resource_desk: Arc<OnceLock<ResourceDesk>>,
+    area_desk: Arc<OnceLock<AreaDesk>>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -1779,6 +1794,7 @@ impl CableTools {
         plan: Arc<OnceLock<review::PlanDesk>>,
         decision_desk: Arc<OnceLock<DecisionDesk>>,
         resource_desk: Arc<OnceLock<ResourceDesk>>,
+        area_desk: Arc<OnceLock<AreaDesk>>,
     ) -> Self {
         // The Station's own tools exist only for the Station's charge, and the issue tools
         // only where the Station opened them.
@@ -1801,6 +1817,7 @@ impl CableTools {
                 plan,
                 decision_desk,
                 resource_desk,
+                area_desk,
                 tool_router: Self::plan_router(),
             };
         }
@@ -1820,8 +1837,18 @@ impl CableTools {
         if report_desk.get().is_some() {
             tool_router += Self::report_router();
         }
-        if decision_desk.get().is_some() {
-            tool_router += Self::decision_router();
+        if let Some(desk) = decision_desk.get() {
+            tool_router += if desk.is_any() {
+                Self::m_decision_router()
+            } else {
+                Self::decision_router()
+            };
+        }
+        if let Some(desk) = area_desk.get() {
+            tool_router += Self::area_router();
+            if desk.is_station() {
+                tool_router += Self::station_detail_router();
+            }
         }
         if let Some(desk) = resource_desk.get() {
             tool_router += if desk.is_m() {
@@ -1847,6 +1874,7 @@ impl CableTools {
             plan,
             decision_desk,
             resource_desk,
+            area_desk,
             tool_router,
         }
     }
