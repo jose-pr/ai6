@@ -32,6 +32,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (M on all of AI6, a Station's charge on its Station, an Operation's on its Operation); M also decides
   any Operation's verifying Mission. Each act is audited with the charge as the actor before it is taken.
 
+- A Mission can be created with the handle you want: `handle` in the create body, refused `400` when
+  malformed and `409` when any Mission ever had it, with no number taken from the Operation's counter.
+- `GET /v1/missions/search` finds Missions in the Registry by Operation, Agent, state, handle, ticket and
+  words in the brief or outcome, with or without anything published, limited to what the person may read
+  (a compartment's crossing audited). `[search]` in the `unex` record sets its page, ceiling, the briefs
+  it reads and the longest text.
+- An Operation's charge has read-only tools over its own Operation: `search_missions`,
+  `mission_record`, `mission_attempts`, `held_briefs`, `mission_timeline` and `operation_approvals`,
+  bounded by `[oversight]` in the `station` record.
+- A Source can let listed accounts decide green ink with a `/approve` or `/reject REASON` comment on a
+  Mission's linked item (`decisions = { approvers = [...] }`, off by default). The decision is audited with
+  the comment's ID before it is made, a comment from anyone else is audited as refused, and listing
+  approvers is reported as a weakening.
 - The `acp` handler has an `abort_wait_ms` setting (5000): how long a Run ended without a close waits for the agent to take its `session/cancel` before the process is ended.
 - Outer Office has a Charges page: M's, each Operation's and each Station's charge with its Run's state, Agent and route,
   Station, last wake and what that turn recorded, and for a person with `charge.converse` a live view of the

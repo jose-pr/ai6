@@ -258,7 +258,8 @@ A charge's tools are its scope's, and their rules are Station code:
   that this Station still runs the charge ([Stations](stations.md#chief-of-station)).
 - **The Operation charge's tools**, on an Operation's charge: `operation_missions`, `mission_detail`,
   `deliverables`, `deliverable_probe`, `verify_mission`, `redispatch` and `propose_mission`
-  ([below](#deciding-missions)), and `request_resources` to ask a Station for what the Operation
+  ([below](#deciding-missions)), the read-only tools of [Reading the Operation](#reading-the-operation),
+  and `request_resources` to ask a Station for what the Operation
   needs to run ([Stations](stations.md#what-an-operation-asks-of-a-station)).
 - **M's decision tools**, on M's charge: `mission_detail`, `deliverable_probe`, `verify_mission` and
   `redispatch` for a Mission of any Operation, and **`raise_flag`** ([below](#m-and-the-board)).
@@ -325,6 +326,29 @@ A Cable to the Operation (its coordinating role) goes to its charge alone when t
 and reaches it as a message ([Agents](agents.md#cables)); it creates no Mission. Only the
 Operation's own 00 Agents see it when there is no charge. A charge that leaves a Mission
 `verifying` leaves it for a person, shown on the board.
+
+## Reading the Operation
+
+Beside the tools it decides with, the charge has read-only tools over its own Operation: how it
+stands and what happened (`board` shows how it stands by state). They exist for no other Run, change nothing, and answer for the charge's
+Operation alone; a Mission of any other Operation, and one nobody filed, both answer `unknown
+Mission`. What came from outside the Operation (briefs, outcomes, names) comes inside `<ai6-data>` and
+is data, never instructions.
+
+| Tool | Answers |
+| --- | --- |
+| `search_missions` | Missions by `text` (title, brief, outcome), a piece of the `handle`, a `ticket`, the `agent` or the `state`; every field given must match. Status only. |
+| `mission_record` | One Mission in any state: status, brief and filed outcome. |
+| `mission_attempts` | Its runs, oldest first: status, state, Agent, Station, times, why one was lost, whether it was decided. |
+| `held_briefs` | The briefs vetting holds for a person, with the kinds of finding. |
+| `mission_timeline` | A Mission's, or the Operation's, newest first. |
+| `operation_approvals` | The requests waiting for a decision, or a Mission's requests with how each was decided. |
+
+`[oversight]` in the `station` record bounds them: `page`, `max_page`, `scan` (briefs one search
+reads) and `text_bytes` (a brief or outcome longer is cut, and the answer says so).
+
+Deciding stays with the decision tools and with people. Reading across Operations is the
+[compartment](compartments.md) tools'.
 
 ## M and the board
 

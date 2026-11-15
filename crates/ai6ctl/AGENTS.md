@@ -128,8 +128,11 @@ origin leaves the public roots alone.
 - `ai6ctl missions rename <MISSION> <HANDLE> [--operation <ID>]` (`mission.control`) posts
   `.../missions/{mission}/rename` and prints `UID: OLD is now NEW`; a refusal prints the
   gateway's words and exits `1`. The Operation is looked up when not given.
+- `ai6ctl missions search [--operation O] [--agent A] [--state new|held|claimed|done|failed]
+  [--handle H] [--ticket K] [--text WORDS] [--limit N]` gets `/v1/missions/search` and prints
+  `HANDLE<TAB>STATE<TAB>OPERATION<TAB>TITLE` per Mission, then a line saying more matched.
 - `ai6ctl missions create --operation <ID> --title <T> --prompt <P> [--agent A] [--role R]
-  [--tag T]... [--station S]... [--issue TRACKER:ITEM | --create-issue TRACKER [--issue-title T]
+  [--tag T]... [--station S]... [--handle H | --issue TRACKER:ITEM | --create-issue TRACKER [--issue-title T]
   [--issue-body B]]` (`mission.create`; `--create-issue` also `issue.create`) posts
   `.../operations/{op}/missions` and prints `HANDLE (UID) queued`, or for `--create-issue`
   `waiting for its ticket: issue proposal ID`. `--issue` that is not `TRACKER:ITEM` is refused

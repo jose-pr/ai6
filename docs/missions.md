@@ -133,7 +133,14 @@ ai6ctl missions create --operation G --title "Add the regression test" \
   --prompt "Cover the fix." --issue gh:o/r#31
 ai6ctl missions create --operation G --title "Fix the login page" \
   --prompt "It times out." --create-issue gh
+ai6ctl missions create --operation G --title "Retake the build fix" \
+  --prompt "The first run missed the linker." --handle ai6-build-fix-retake
 ```
+
+`"handle": "ai6-retake-31"` names the Mission yourself, in place of the Operation's next number. It
+follows the rename rules above and is refused `400` when malformed and `409` when any Mission, current
+or former, ever had it, compared without case; it takes no number from the Operation's counter. It
+cannot be asked for beside `issue` or `create_issue`, which number the Mission by its item.
 
 `"stations": ["ID", ...]` pins the Mission to those Stations. A pin is an exact Station ID (`[station]
 id`, or the `HOST-xxxxxxxx` a Station gives itself), so one that names no Station that ever checked in,
@@ -151,6 +158,38 @@ being tried again: the Station looks the handler's program (`AgentHandler::progr
 environment's own `PATH`, never its own, and fails the Mission with "Agent X has no PATH in its
 environment (no `[loadout.X] env`)" or "... is not on its PATH"; the brief is filed failed with
 that reason.
+
+## Searching Missions
+
+`GET /v1/missions/search` finds Missions in the Registry, whether or not anything was published for
+them, newest first. Each filter you give must match:
+
+| Query | Matches |
+| --- | --- |
+| `operation` | The Operation's Missions. |
+| `agent` | Missions assigned that Agent codename. |
+| `state` | `new`, `held`, `claimed`, `done` or `failed`: where the brief stands. |
+| `handle` | A piece of the current handle, or a handle the Mission ever had, written whole. |
+| `ticket` | A tracker item's key (`owner/repo#31`), or its number or code (`31`). |
+| `text` | Words that must each appear, without case, in the title, the name or the brief, or in the outcome. |
+| `limit` | Missions in the page. |
+
+```bash
+curl -f "$UNEX_URL/v1/missions/search?operation=G&state=done&text=linker" \
+  -H "authorization: Bearer $UNEX_ACCESS_TOKEN"
+ai6ctl missions search --operation G --state done --text linker
+```
+
+The answer is `{"missions": [...], "more": BOOL}`: each Mission with its `mission_id`, `handle`,
+`operation_id`, `state`, `agent`, `role`, `title`, `name`, `url`, `ticket`, `created` and `attempts`. It
+holds only what the person may read: `mission.read` on the Mission's Operation, or a compartment
+giving it on that Mission (the crossing is audited before the Mission is shown). Anything else is
+left out as if it did not exist, so a search cannot be used to learn that a Mission is there.
+
+`[search]` in the `unex` record bounds it: `page` (Missions in a page when `limit` is not given),
+`max_page` (the most `limit` may ask), `scan` (briefs read from the Registry for one search; a Mission
+beyond them is not found) and `filter_bytes` (the longest any one filter). A request over a bound is refused
+`400`.
 
 ## Cancel, retry, resume and interrupt
 
@@ -1039,6 +1078,35 @@ those reads is not seen.
 A Source's text is untrusted already. With `comment`, anyone the tracker lets answer for an item
 can start its work again with what they write, so `comment` is reported as a weakening at start
 and at check-in.
+
+### Deciding green ink from the tracker
+
+A Source can let named people decide green ink where they already work, on the item a Mission is
+linked to. It is off unless the instance lists approvers, by the tracker's account ID (a GitHub or
+GitLab login, a Jira account ID):
+
+```toml
+[operation.G.sources.gh]
+decisions = { approvers = ["alice-id"] }
+```
+
+A comment that is exactly `/approve`, or `/reject` followed by a reason, decides the request the
+Mission's Agent is waiting for. It is made as `tracker:INSTANCE:ACCOUNT` and shown on the request as
+its signer. Before anything is decided an audit record is written (`green_ink.approved` or
+`green_ink.rejected`, whose target names the request and the comment's ID), and if it cannot be
+written nothing is decided. The approval covers its step for `approval_secs` (`decisions = {
+approvers = [...], approval_secs = 600 }`), by default as long as an approval given in the app.
+
+- A command from an account that is not listed decides nothing. It is audited as `green_ink.refused`
+  with its author and comment, and shows on the Mission's timeline as `decision_refused`.
+- With more than one request waiting for the Mission a bare comment cannot say which, so it decides
+  none; a request to raise an Agent's clearance or to hold one needs `agent.configure`, which a
+  comment cannot show, and is left for a person. Both are refused and audited the same way.
+- A command is never given to the Agent as a message, whoever wrote it. With no approvers listed the
+  same text is an ordinary comment.
+
+Listing approvers is reported as a weakening at start and at check-in, since whoever can sign in to
+the tracker as one of them can approve a step.
 
 ## Linked issues
 

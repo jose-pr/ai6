@@ -1327,7 +1327,8 @@ pub struct UnexRecord { authenticators: Vec<SignInProvider> /* ordered; each ans
     assistant_agent /* "moneypenny" */, route_text_bytes /* None: 128 */,
     provider_config_depth: Limit /* 64 */,
     gateway: UnexGatewayLimits, controls: ControlLimits, timeline: UnexTimelineLimits,
-    login: LoginTable, text: TextLimits }          // [gateway] [controls] [timeline] [login] [text]
+    search: UnexSearchLimits /* page 25, max_page 200, scan 20000, filter_bytes 256 */,
+    login: LoginTable, text: TextLimits }          // [gateway] [controls] [timeline] [search] [login] [text]
 impl UnexRecord { pub fn weakenings(&self) -> Vec<String>;   // inline credentials, and each looser limit
     pub fn limits(&self) -> UnexLimits; }                   // the five tables together
 pub struct UnexLimits { pub gateway, pub controls, pub timeline, pub login, pub text }
@@ -1975,6 +1976,10 @@ every type that implements each family (a blanket impl: nothing to write for it)
 ```rust
 pub trait BriefStore;        // proposals, queued briefs, claims, leases, outcomes (store.rs);
                              // filed_brief(key), filed_briefs(operation, limit) -> FiledBrief { brief, state, runs, outcome }
+                             // search_briefs(&BriefSearch, limit) -> Vec<FiledBrief>, newest first, among the first `search.scan` records
+                             // (SQL narrows by `state`); BriefSearch { operation, agent, state, handle /* piece, or a former one whole */,
+                             // ticket /* item key, number or code */, text /* words, without case, in title, name, body, outcome */, scan: Limit }
+                             // has Default (everything, unbounded) and `matches(&FiledBrief, named_uid)`
                              // refile_lost(key, outcome, ok) -> bool: replaces the outcome of a brief filed as lost (its Station was dark) with the one the Station settled; false when not filed as lost
                              // request_cancel(key, at) -> io::Result<bool>: keeps the first time a cancel of the
                              //   claimed brief was asked (false: not claimed); finishing forgets it, a lapse back to
@@ -2311,6 +2316,9 @@ pub fn run_handle(mission_handle: &str, number: u32) -> String;  // `<handle>.<n
 pub struct MissionEntry;  // where a brief enters; all of these are the only way a handle is made
 impl MissionEntry {
     pub fn person(operation: Option<&str>) -> Self;              // <operation>-<n>; `mission` with none
+    pub fn person_named(operation: Option<&str>, handle: &str) -> Self;
+        // the handle as asked, no number taken; allotting is InvalidInput for a malformed one and
+        // AlreadyExists when any Mission, current or former, was ever given it (without case)
     pub fn proposal(operation: &str, proposal_id: &str) -> Self; // <operation>-<n>, once per proposal
     pub fn review(operation: &str, review_id: &str) -> Self;     // <operation>-<n>, once per review
     pub fn sleeper(operation: &str, name: &str, window: &str, station: Option<&str>) -> Self; // <operation>-<name>-<n>
@@ -3749,7 +3757,16 @@ reads the issue into the link's `snapshot`, and unlinks it when it cannot be rea
 `ai6::settings_from_table::<T>(toml::Table)` builds a provider's settings through a Guatiao value, so
 its one declaration gives its parsing, defaults and schema. `source_setups` strips `provider`,
 `intake`, `interval_secs` and the keys of `InstanceKeys` (`status_labels`, `status_transitions`,
-`agent_labels`, `agent_transitions`, `priority_map`, `reopen`) before a provider sees the table.
+`agent_labels`, `agent_transitions`, `priority_map`, `reopen`, `decisions`) before a provider sees the table.
+
+`decisions = { approvers = [ACCOUNT_ID...], approval_secs? }` (off with no approvers) lets
+`station::tracker_decisions` read a comment on a Mission's linked item that is exactly `/approve`, or
+`/reject REASON`, as a decision on the green ink its Agent waits for. `issues::poll_replies` stores the
+comment as an ignored reply (never given to the Agent), then settles it: an author not in `approvers`
+(compared with `Reply::author_id`), no request or several waiting for the Mission, or a `clearance`
+or `hold` request is audited `green_ink.refused` and decides nothing; otherwise `green_ink.approved` or
+`green_ink.rejected` (actor `tracker:INSTANCE:ACCOUNT`, target request, kind, target and comment ID) is
+audited first and `decide_approval` follows. Listing approvers is a weakening (`issues::weakenings`).
 
 `reopen` (`label` default, `comment`, `never`) decides what queues a settled item again as its
 Mission's next run (`BriefStore::reenter_brief`, only over the item's own Source brief): a poll
@@ -5645,7 +5662,10 @@ configured clearance is not `00`. Its `verifying` event carries the run (brief a
 untrusted; deliverables; evidence; verdict; recommendation). Its Cable endpoint gets `operation_missions`,
 `mission_detail`, `deliverables`, `deliverable_probe` (probes locally and keeps the evidence, or asks the
 holding Station through `request_probe`), `verify_mission(mission, done|failed, reason)` and
-`redispatch(mission, brief_amendment?, reason)`, which call `registry::decisions` as the charge
+`redispatch(mission, brief_amendment?, reason)`, and the read-only `search_missions`,
+`mission_record`, `mission_attempts`, `held_briefs`, `mission_timeline` and `operation_approvals` over its
+own Operation alone (another Operation's Mission is `unknown Mission`; bounded by the station record's
+`[oversight]`: `page`, `max_page`, `scan`, `text_bytes`), which call `registry::decisions` as the charge
 (`charge:operation:CODENAME`), re-reading the Agent's effective clearance each time: at `desk` they
 `recommend`. It never replaces a verdict a person gave. `propose_mission` is its tool too, naming the
 charge's Run where a Mission's would be named. A Cable to `operation:CODENAME` waits for the charge's

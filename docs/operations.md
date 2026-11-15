@@ -216,6 +216,10 @@ lists its own (`reply_authors` and `labels` on all three, `reply_min_access` on 
 `status_labels` and `status_transitions` name a label or a workflow transition for `working`,
 `waiting`, `paused`, `done` and `failed`.
 
+`decisions = { approvers = ["ACCOUNT-ID"] }` lets those accounts decide a Mission's green ink with
+a `/approve` or `/reject REASON` comment on its linked item; it is off without approvers
+([Missions](missions.md#deciding-green-ink-from-the-tracker)).
+
 Credentials are never configured: a source names the environment variable that holds its
 token (`token_env`), and the Station reads it when it polls. A bare string is shorthand for
 the provider's main target, as in `sources = { jira = "GUA" }`.

@@ -1083,6 +1083,17 @@ pending_per_station = 8
 | `attention_history` | 604,800 (7 days) | **Past conditions the attention summary shows.** How far back, in seconds, the attention summary looks for a condition that has since passed, such as a refused configuration a later revision replaced. `"none"` looks as far as the audit log goes. |
 <!-- schema:record.unex.timeline:end -->
 
+`[search]`: searching Missions ([Missions](missions.md#searching-missions)).
+
+<!-- schema:record.unex.search:begin -->
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `page` | 25 | **Missions in a page.** Missions in a page when the request names no limit, at least 1. |
+| `max_page` | 200 | **Most Missions a page may ask for.** The most Missions a page may ask for. |
+| `scan` | 20,000 | **Briefs one search reads.** The most briefs one search reads from the Registry; a Mission beyond them is not found. |
+| `filter_bytes` | 256 | **Longest search filter.** The most bytes any one search filter may carry. |
+<!-- schema:record.unex.search:end -->
+
 `[attach]`: people attached to a Run through the gateway.
 
 <!-- schema:record.unex.attach:begin -->
@@ -1476,6 +1487,17 @@ a Run. `unpinned = true` is a weakening, named each time such an overlay is issu
 | `reason_bytes` | 2,000 | **Longest reason for a safe house deletion.** Bytes of the reason the charge gives when it asks to delete a safe house; longer is cut. |
 | `audit_target_bytes` | 500 | **Longest provisioning audit target.** Bytes of what a provisioning audit record names; longer is cut. |
 <!-- schema:record.station.head_of_station:end -->
+
+`[oversight]`: what an Operation's charge reads of its Operation ([Charges](charges.md#reading-the-operation)).
+
+<!-- schema:record.station.oversight:begin -->
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `page` | 25 | **Items in a page.** Items in a page when the charge names no limit, at least 1. |
+| `max_page` | 200 | **Most items a page may ask for.** The most items a page may ask for. |
+| `scan` | 20,000 | **Briefs one search reads.** The most briefs one search reads from the Registry; a Mission beyond them is not found. |
+| `text_bytes` | 16 KiB | **Longest text read or searched.** Bytes of a brief, an outcome or a search text; a longer brief or outcome is cut and says so. |
+<!-- schema:record.station.oversight:end -->
 
 `[attach]`: people attached to a live Run through [a charge's or a Mission's attach](charges.md#attaching-to-a-charges-run).
 
