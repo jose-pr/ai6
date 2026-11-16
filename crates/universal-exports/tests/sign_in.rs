@@ -1,6 +1,7 @@
 //! The sign-in policy through the gateway's real routes: what the page is offered, what a login
 //! may present from where, what a renewal decides again, and how the policy is changed.
 
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -238,7 +239,13 @@ fn gateway_over(
     )
     .unwrap()
     .with_login_limits(limits(per_address));
-    Gateway::with_access(config, Arc::new(registry.clone()), access).with_access_admin(live)
+    let pages = tempfile::tempdir().unwrap();
+    let pages_dir = pages.path().to_path_buf();
+    std::mem::forget(pages);
+    Gateway::with_access(config, Arc::new(registry.clone()), access)
+        .with_access_admin(live)
+        .with_pages(universal_exports::PagesConfig::new(pages_dir))
+        .unwrap()
 }
 
 async fn listen(
@@ -250,7 +257,13 @@ async fn listen(
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let server = tokio::spawn(async move {
-        let _ = axum::serve(listener, gateway.router()).await;
+        let _ = axum::serve(
+            listener,
+            gateway
+                .router()
+                .into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await;
     });
     Served {
         base,
@@ -453,6 +466,43 @@ async fn the_page_is_offered_what_the_office_rule_says_for_its_own_address() {
     .await;
     assert_eq!(methods(&h, None, true).await, ["password"]);
     assert!(methods(&h, None, false).await.is_empty());
+    // A browser sends no origin on a same-origin GET; what it does send is a hint, and only that.
+    let same_origin: Value = reqwest::Client::new()
+        .get(format!("{}/v1/auth/methods", h.base))
+        .header("sec-fetch-site", "same-origin")
+        .header("sec-fetch-mode", "cors")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(same_origin["methods"], json!(["password"]));
+}
+
+#[tokio::test]
+async fn the_policy_sees_the_address_the_proxy_said_and_no_other() {
+    let h = serve(Some(office_rule()), false, 50).await;
+    let ask = |lines: &'static [&'static str]| {
+        let h = &h;
+        async move {
+            let mut request = reqwest::Client::new().get(format!("{}/v1/auth/methods", h.base));
+            for line in lines {
+                request = request.header("x-forwarded-for", *line);
+            }
+            let answer: Value = request.send().await.unwrap().json().await.unwrap();
+            strings(Some(&answer["methods"]))
+        }
+    };
+    let inside = ["password", "certificate"];
+    // The client's own earlier line is ignored; the proxy's, last, counts.
+    assert_eq!(ask(&["10.1.2.3", "203.0.113.7"]).await, ["certificate"]);
+    assert_eq!(ask(&["6.6.6.6", "10.1.2.3"]).await, inside);
+    // An address the proxy did not give is no address, though the peer is loopback.
+    assert_eq!(ask(&[]).await, ["certificate"]);
+    assert_eq!(ask(&["unknown"]).await, ["certificate"]);
+    // A mapped address is the IPv4 address.
+    assert_eq!(ask(&["::ffff:10.1.2.3"]).await, inside);
 }
 
 #[tokio::test]
@@ -602,7 +652,8 @@ async fn editable() -> Editable {
     let access = Arc::new(
         LiveAccess::new(provider.clone(), vec!["account:alice".to_owned()], None).unwrap(),
     );
-    let live = Arc::new(LiveSignIn::new(provider.clone(), Arc::new(Loader)));
+    let live =
+        Arc::new(LiveSignIn::new(provider.clone(), Arc::new(Loader)).with_providers(["local"]));
     let people = Arc::new(People(counts.clone()));
     let providers = AccessProviders::new(
         Arc::new(Stand {
@@ -802,7 +853,7 @@ async fn a_person_without_access_manage_reads_and_changes_no_policy() {
 }
 
 #[tokio::test]
-async fn a_policy_that_does_not_build_is_kept_out_and_the_one_in_force_stays() {
+async fn a_policy_that_does_not_build_offers_nothing_and_is_shown_invalid() {
     let h = editable().await;
     let read = |value: Value| -> ai6::SignInPolicyProvider {
         ai6::directorates::m::records::from_json(&value).unwrap()
@@ -812,9 +863,189 @@ async fn a_policy_that_does_not_build_is_kept_out_and_the_one_in_force_stays() {
     let bad = read(json!({"config": {"rule": [{"allow": []}]}}));
     assert!(h.live.apply(Some(&bad)).is_err());
     assert!(h.live.invalid().is_some());
-    assert!(h.live.policy().is_some(), "the one in force stays");
-    assert_eq!(h.live.apply(Some(&good)), Ok(false));
-    assert!(h.live.invalid().is_none(), "back at the one in force");
+    assert!(
+        h.live.offers_nothing(),
+        "a policy this gateway cannot build offers nothing, not the one before"
+    );
+    let (_, view) = call(&h, &h.token, Method::GET, None, None).await;
+    assert!(view["invalid"].is_string(), "{view}");
+    assert_eq!(h.live.apply(Some(&good)), Ok(true));
+    assert!(h.live.invalid().is_none());
+    assert!(!h.live.offers_nothing());
     assert_eq!(h.live.apply(None), Ok(true));
     assert!(h.live.policy().is_none());
+}
+
+/// The digest the gateway keeps of a token it issued, so a test can write a record of its own.
+fn digest_of(token: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(b"ai6-access-token\0");
+    hasher.update(token.as_bytes());
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+async fn renewal(h: &Served, token: &str) -> reqwest::Response {
+    browser(
+        reqwest::Client::new()
+            .post(format!("{}/v1/auth/renew", h.base))
+            .bearer_auth(token),
+        Some("10.1.2.3"),
+    )
+    .send()
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn a_sign_in_with_no_steps_is_not_complete_and_only_a_stations_token_is_exempt() {
+    let h = serve(None, false, 50).await;
+    // A record no sign-in made and no Station issued signs in once more.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f64();
+    h.registry
+        .store_access_token(
+            &AccessTokenRecord::try_new(
+                "6c2e8d3c-2f31-4c54-9d57-7c8f1f2b9a02",
+                digest_of("old-token"),
+                "id-alice",
+                now - 1.0,
+                now + 3_600.0,
+                None,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        renewal(&h, "old-token").await.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    // A Station's token renews, and a browser's renewal of it gets no page cookie.
+    let issued: Value = reqwest::Client::new()
+        .post(format!("{}/v1/station/access-tokens", h.base))
+        .bearer_auth(STATION_TOKEN)
+        .json(&json!({"person_id": "id-alice", "ttl_seconds": 3600}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let station = renewal(&h, issued["token"].as_str().unwrap()).await;
+    assert_eq!(station.status(), StatusCode::OK);
+    assert!(station.headers().get("set-cookie").is_none());
+    // The same renewal of a password sign-in does mint one.
+    let (_, body) = password(&h, Some("10.1.2.3"), "alice", "pw", true).await;
+    let signed_in = renewal(&h, body["token"].as_str().unwrap()).await;
+    assert_eq!(signed_in.status(), StatusCode::OK);
+    assert!(signed_in.headers().get("set-cookie").is_some());
+}
+
+#[tokio::test]
+async fn a_policy_naming_a_provider_nobody_has_is_refused() {
+    let h = editable().await;
+    let (_, view) = call(&h, &h.token, Method::GET, None, None).await;
+    let revision = view["revision"].as_str().unwrap().to_owned();
+    let (status, body) = call(
+        &h,
+        &h.token,
+        Method::PUT,
+        Some(&revision),
+        Some(json!({"config": {"rule": [{"providers": ["nobody"], "allow": [["password"]]}]}})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("nobody"), "{body}");
+    assert_eq!(stored(&h), None);
+    let (status, _) = call(
+        &h,
+        &h.token,
+        Method::PUT,
+        Some(&revision),
+        Some(json!({"config": {"rule": [{"providers": ["local"], "allow": [["password"]]}]}})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn a_policy_that_offers_nothing_says_when_only_a_database_edit_restores_sign_in() {
+    let h = editable().await;
+    let (_, view) = call(&h, &h.token, Method::GET, None, None).await;
+    let revision = view["revision"].as_str().unwrap().to_owned();
+    let (status, changed) = call(
+        &h,
+        &h.token,
+        Method::PUT,
+        Some(&revision),
+        Some(json!({"config": {"rule": []}})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        changed["note"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("database"),
+        "{changed}"
+    );
+    let (_, view) = call(&h, &h.token, Method::GET, None, None).await;
+    assert!(
+        view["note"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("database")
+    );
+}
+
+#[tokio::test]
+async fn a_refresh_takes_the_stored_record_and_never_an_older_one() {
+    let h = editable().await;
+    let (_, view) = call(&h, &h.token, Method::GET, None, None).await;
+    let revision = view["revision"].as_str().unwrap().to_owned();
+    let (status, _) = call(
+        &h,
+        &h.token,
+        Method::PUT,
+        Some(&revision),
+        Some(json!({"config": office_rule()})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let refresh = |live: Arc<LiveSignIn>| async move {
+        tokio::task::spawn_blocking(move || live.refresh())
+            .await
+            .unwrap()
+    };
+    assert_eq!(
+        refresh(h.live.clone()).await,
+        Ok(false),
+        "what the route stored"
+    );
+    // A record changed behind the gateway's back is taken on the next refresh.
+    let mut record = h
+        .provider
+        .definitions(ConfigRecord::Unex, &ConfigScope::Global)
+        .unwrap()
+        .records
+        .remove(0);
+    let before = record.1.clone();
+    record.1["sign_in_policy"] = json!({"config": {"rule": []}});
+    h.provider
+        .put_if(
+            ConfigRecord::Unex,
+            &ConfigScope::Global,
+            &record.0,
+            Some(&before),
+            &record.1,
+        )
+        .unwrap();
+    assert_eq!(refresh(h.live.clone()).await, Ok(true));
+    assert!(h.live.offers_nothing());
 }

@@ -1132,23 +1132,22 @@ checking the configuration); `fixed(policy)` is one no route changes. `apply(Opt
 record's policy in force and says whether that changed anything, keeping the one in force when the new one does not
 build (`invalid()` says why); `policy()`; `offers_nothing()` is true when no client from an unknown address or loopback
 is offered a sign-in, and `NOTHING_OFFERED` is the line the gateway logs then (a policy that offers no sign-in is
-accepted, not a weakening; only API keys work). `universal-exports` applies it at start and at each poll of the provider.
+accepted, not a weakening; only API keys work; `nothing_offered(keys)` is the line, which says that only a database edit restores sign-in when no key provider is configured). A policy that does not build, or lists a provider ID `with_providers` did not name, fails closed: `apply` returns the reason, nothing is offered and `invalid()` shows it. `refresh()` (blocking) reads the stored record under the lock a route's change holds; `universal-exports` calls it at each poll, and `apply` at start.
 
 `POST /v1/auth/login` decides the method it was given (`proxy` when the proxy identity header came, else `password`)
 with `purpose sign_in`, the client's address (`client_address_header`, else the connection, `None` when neither tells),
-client `browser` when the request names an origin and `api` otherwise (so a rule for `app` never matches), and service
+client `browser` when the request names an origin or carries `Sec-Fetch-Mode`/`Sec-Fetch-Site`, else `api` (advice, never a barrier; a rule for `app` never matches), the address from the last line and rightmost entry of `client_address_header` (none when it is missing or unreadable, IPv4-mapped IPv6 read as IPv4), and service
 `unex`. A method not offered is `403` and reaches no provider and no try count; only the offer's providers are asked, in
 its order (an empty list is every provider); the valid factor is decided again with the person and anything short of
 `complete` is `401` as a wrong password is. The steps passed are stored on the token and the session cookie record
 (`AccessTokenRecord::factors`); `resume` and `renew` decide `purpose resume` with them, the person as the directory has them
-now and this request's address: a sign-in the policy no longer completes is `401`. A token holding no steps (a Station's)
-is not decided. A page's viewer is decided as `certificate` (a certificate the gateway's TLS proved) or `proxy`, service
+now and this request's address: a sign-in the policy no longer completes is `401`. A token a Station issued carries the single step `station` and is not decided, and a renewal of it sets no page cookie; a record with no steps at all is not complete (`401`). A page's viewer is decided as `certificate` (a certificate the gateway's TLS proved) or `proxy`, service
 `pages`, client `browser`. Bearer API keys are outside the policy.
 
 | Route | Needs | Answers |
 | --- | --- | --- |
 | `GET /v1/user/access/sign-in` | `access.read` at `config:access` | `revision`, `writable`, `policy` (the stored `{provider?, config?}`, `null` for none), `in_force`, `offers_nothing`, `invalid?` |
-| `PUT /v1/user/access/sign-in` | `access.manage` at `config:access`, `If-Match` | `{provider?, config?}`; `400` when it does not build (audited `access.sign_in.refused`), else stored in the `unex` record, in force at once, audited `access.sign_in.update`; `{revision, offers_nothing}` |
+| `PUT /v1/user/access/sign-in` | `access.manage` at `config:access`, `If-Match` | `{provider?, config?}`; `400` when it does not build or lists a provider no sign-in provider is configured under (audited `access.sign_in.refused`), else audited `access.sign_in.update` first, then stored in the `unex` record and in force at once; `{revision, offers_nothing, note?}` |
 | `DELETE /v1/user/access/sign-in` | the same | back to the default; audited `access.sign_in.remove`; `404` when none is stored |
 
 ### Access administration (`access_admin.rs`, `accounts.rs`)

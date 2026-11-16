@@ -93,6 +93,9 @@ pub fn universal_exports::AccessProviders::with_proxy_identity(self, http::heade
 pub fn universal_exports::AccessProviders::with_proxy_secret(self, impl core::convert::Into<alloc::string::String>, usize) -> core::result::Result<Self, alloc::string::String>
 pub fn universal_exports::AccessProviders::with_sign_in(self, alloc::sync::Arc<universal_exports::LiveSignIn>) -> Self
 pub fn universal_exports::AccessProviders::with_sign_in_policy(self, alloc::sync::Arc<dyn coqui_access::kind::SignInPolicy>) -> Self
+impl universal_exports::AccessProviders
+pub fn universal_exports::AccessProviders::has_keys(&self) -> bool
+pub fn universal_exports::AccessProviders::provider_ids(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::fmt::Debug for universal_exports::AccessProviders
 pub fn universal_exports::AccessProviders::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct universal_exports::AgentInput
@@ -437,6 +440,8 @@ pub fn universal_exports::LiveSignIn::invalid(&self) -> core::option::Option<all
 pub fn universal_exports::LiveSignIn::new(alloc::sync::Arc<dyn ai6::directorates::m::config::ConfigProvider>, alloc::sync::Arc<dyn universal_exports::SignInLoader>) -> Self
 pub fn universal_exports::LiveSignIn::offers_nothing(&self) -> bool
 pub fn universal_exports::LiveSignIn::policy(&self) -> core::option::Option<alloc::sync::Arc<dyn coqui_access::kind::SignInPolicy>>
+pub fn universal_exports::LiveSignIn::refresh(&self) -> core::result::Result<bool, alloc::string::String>
+pub fn universal_exports::LiveSignIn::with_providers<I, S>(self, I) -> Self where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::Into<alloc::string::String>
 impl core::fmt::Debug for universal_exports::LiveSignIn
 pub fn universal_exports::LiveSignIn::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct universal_exports::LoginLimits
@@ -555,8 +560,8 @@ pub universal_exports::ViewLimits::text_bytes: usize
 pub universal_exports::ViewLimits::view_bytes: usize
 impl core::default::Default for universal_exports::ViewLimits
 pub fn universal_exports::ViewLimits::default() -> Self
-pub const universal_exports::NOTHING_OFFERED: &str
 pub const universal_exports::PROXY_SECRET_HEADER: &str
 pub trait universal_exports::SignInLoader: core::marker::Send + core::marker::Sync
 pub fn universal_exports::SignInLoader::load(&self, &str, core::option::Option<&ai6::directorates::m::config::ProviderConfig>) -> core::result::Result<alloc::sync::Arc<dyn coqui_access::kind::SignInPolicy>, alloc::string::String>
+pub fn universal_exports::nothing_offered(bool) -> &'static str
 pub fn universal_exports::tls_server_config(&[u8], &[u8]) -> core::result::Result<rustls::server::server_conn::ServerConfig, alloc::string::String>

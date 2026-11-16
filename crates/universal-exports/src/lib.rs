@@ -117,7 +117,7 @@ pub use login_limit::LoginLimits;
 pub use moneypenny::{AssistantConfig, PagesConfig, ViewLimits};
 pub use pools::{BoardAccount, BoardClaim, BoardLogin, BoardLoginRequest, BoardWindow, PoolBoard};
 pub use roster::{EffectiveOperation, RosterChange, RosterRecord, RosterRecords};
-pub use sign_in::{LiveSignIn, NOTHING_OFFERED, SignInLoader};
+pub use sign_in::{LiveSignIn, SignInLoader, nothing_offered};
 pub use timeline::{TimelineItem, TimelinePage};
 pub use tls::tls_server_config;
 pub use unstarted::BoardPending;
@@ -3946,13 +3946,15 @@ async fn resumed_token(
     if asserted.is_some_and(|asserted| asserted.id != person.id) {
         return Ok(None);
     }
+    let factors = cookie.factors();
     if !still_complete(
         gateway,
         &providers,
         headers,
         address,
         &person,
-        cookie.factors(),
+        factors,
+        sign_in::SERVICE,
     )
     .await
     {
@@ -4017,18 +4019,21 @@ async fn renew(
         .ok_or_else(ApiError::unauthorized)?;
     let providers = gateway.access.clone().ok_or_else(ApiError::unavailable)?;
     let address = connection.map(|Extension(ConnectInfo(address))| address);
+    let factors = record.factors();
     if !still_complete(
         &gateway,
         &providers,
         &headers,
         address,
         &person,
-        record.factors(),
+        factors,
+        sign_in::SERVICE,
     )
     .await
     {
         return Err(ApiError::unauthorized());
     }
+    let from_station = sign_in::from_station(factors);
     let table = &gateway.config.unex().gateway;
     let session_max = table.session_max;
     let now = unix_timestamp()?;
@@ -4063,7 +4068,8 @@ async fn renew(
             .map(|idle| (now + idle).min(ends_at.unwrap_or(f64::INFINITY))),
     };
     // A browser's renewal keeps its page cookie as long as the sign-in it names.
-    let page_cookie = headers.contains_key(ORIGIN).then(|| {
+    // A Station's token is no browser's sign-in: its renewal sets no page cookie.
+    let page_cookie = (headers.contains_key(ORIGIN) && !from_station).then(|| {
         let seconds = match extended.sign_in() {
             Some(_) => renewed.ends_at.unwrap_or(f64::MAX) - unix_timestamp().unwrap_or(0.0),
             None => renewed.expires_in,
@@ -4079,9 +4085,10 @@ async fn renew(
     Ok(response)
 }
 
-/// Whether the steps a sign-in was opened with still complete it, decided as it stands now: the
-/// policy in force, the person as the directory has them, the address of this request. A token no
-/// sign-in made holds no steps and is not decided here.
+/// Whether the steps a sign-in was opened with still complete it for `service`, decided as it
+/// stands now: the policy in force, the person as the directory has them, the address of this
+/// request. A token a Station issued is not decided; a record with no steps at all is no sign-in
+/// and holds nothing.
 async fn still_complete(
     gateway: &Gateway,
     providers: &AccessProviders,
@@ -4089,9 +4096,13 @@ async fn still_complete(
     address: Option<SocketAddr>,
     person: &Person,
     factors: &[SignInFactor],
+    service: &str,
 ) -> bool {
-    if factors.is_empty() {
+    if sign_in::from_station(factors) {
         return true;
+    }
+    if factors.is_empty() {
+        return false;
     }
     let context = SignInContext {
         done: Gateway::passed(factors),
@@ -4100,7 +4111,7 @@ async fn still_complete(
             ai6::directorates::m::access::purposes::RESUME,
             headers,
             address,
-            sign_in::SERVICE,
+            service,
         )
     };
     gateway
@@ -4182,6 +4193,9 @@ async fn issue_access_token_record(
     session_max: TimeLimit,
 ) -> Result<IssuedAccessToken, ApiError> {
     let issued_at = unix_timestamp()?;
+    // The record says a Station issued it: no sign-in made it, and none is decided again.
+    let issuer = SignInFactor::try_new(sign_in::STATION, None, Some(person_id.clone()))
+        .map_err(|_| ApiError::internal())?;
     store_bearer(
         registry,
         person_id,
@@ -4193,7 +4207,7 @@ async fn issue_access_token_record(
         },
         session_max,
         None,
-        Vec::new(),
+        vec![issuer],
     )
     .await
 }
@@ -7484,6 +7498,11 @@ mod tests {
         server.abort();
     }
 
+    /// The step a password sign-in of Alice's passed.
+    fn password_steps() -> Vec<SignInFactor> {
+        vec![SignInFactor::try_new("password", None, Some("alice-id".to_owned())).unwrap()]
+    }
+
     struct OneAccount;
 
     impl Authenticator for OneAccount {
@@ -7841,7 +7860,8 @@ mod tests {
                 expires_at,
                 None,
             )
-            .unwrap();
+            .unwrap()
+            .with_factors(password_steps());
             self.registry.store_access_token(&record).unwrap();
             token
         }
@@ -7902,6 +7922,7 @@ mod tests {
                 None,
             )
             .unwrap()
+            .with_factors(password_steps())
             .into_session_cookie();
             self.registry.store_access_token(&record).unwrap();
             format!("{SESSION_COOKIE}={value}")
@@ -8461,6 +8482,7 @@ mod tests {
             None,
         )
         .unwrap()
+        .with_factors(password_steps())
         .into_session_cookie();
         signing.registry.store_access_token(&record).unwrap();
         let resumed = signing.resume(&format!("{SESSION_COOKIE}={value}")).await;
@@ -8489,6 +8511,7 @@ mod tests {
             None,
         )
         .unwrap()
+        .with_factors(password_steps())
         .into_session_cookie();
         signing.registry.store_access_token(&cookie).unwrap();
         let token = new_secret();
@@ -8501,6 +8524,7 @@ mod tests {
             None,
         )
         .unwrap()
+        .with_factors(password_steps())
         .in_sign_in(cookie_id)
         .unwrap();
         signing.registry.store_access_token(&bearer).unwrap();

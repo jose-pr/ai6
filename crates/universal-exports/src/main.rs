@@ -15,7 +15,7 @@ use guatiao::value::Number;
 use serde_json::Value as JsonValue;
 use universal_exports::{
     AccessProviders, AssistantConfig, EitherAuthorizer, Gateway, GatewayConfig, GatewayLimits,
-    KeyProvider, LiveAccess, LiveSignIn, LoginLimits, NOTHING_OFFERED, SignInLoader, ViewLimits,
+    KeyProvider, LiveAccess, LiveSignIn, LoginLimits, SignInLoader, ViewLimits, nothing_offered,
 };
 
 #[derive(Debug, Parser)]
@@ -246,6 +246,9 @@ async fn run(cli: Cli) -> Result<(), String> {
         );
     }
     let mut sign_in = None;
+    let has_keys = access
+        .as_ref()
+        .is_some_and(|(access, ..)| access.has_keys());
     let mut gateway = match access {
         Some((access, accounts, catalog, in_force)) => {
             sign_in = Some(in_force);
@@ -334,6 +337,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             provider,
             live,
             sign_in,
+            has_keys,
             followed_registry,
             snapshot.clone(),
             poll,
@@ -406,6 +410,7 @@ async fn follow_policy(
     provider: Arc<dyn ConfigProvider>,
     live: Arc<LiveAccess>,
     sign_in: Option<Arc<LiveSignIn>>,
+    has_keys: bool,
     registry: Arc<dyn ai6::RegistryBackend>,
     started: ai6::ConfigSnapshot,
     every: Duration,
@@ -441,9 +446,11 @@ async fn follow_policy(
                     })
                     .collect();
                 live.apply(&snapshot);
+                // Read again under the lock a route's change holds, not taken from this snapshot,
+                // which a change since may have outdated.
                 let policy = match &sign_in {
                     Some(sign_in) => sign_in
-                        .apply(snapshot.settings.unex.sign_in_policy.as_ref())
+                        .refresh()
                         .map(|applied| (applied, sign_in.offers_nothing())),
                     None => Ok((false, false)),
                 };
@@ -464,7 +471,7 @@ async fn follow_policy(
                     Ok((true, nothing)) => {
                         eprintln!("universal-exports: sign-in policy applied");
                         if nothing {
-                            eprintln!("{NOTHING_OFFERED}");
+                            eprintln!("{}", nothing_offered(has_keys));
                         }
                         refused_policy = None;
                     }
@@ -472,8 +479,8 @@ async fn follow_policy(
                     Err(reason) => {
                         if refused_policy.as_ref() != Some(&reason) {
                             eprintln!(
-                                "universal-exports: sign-in policy refused, keeping the one in \
-                                 force: {reason}"
+                                "universal-exports: sign-in policy does not stand, so no sign-in \
+                                 is offered until it does: {reason}"
                             );
                             refused_policy = Some(reason);
                         }
@@ -790,27 +797,6 @@ fn configured_access(
     let access = people.fold(access, |access, (id, authenticator)| {
         access.with_authenticator(authenticator).named(id)
     });
-    let sign_in = Arc::new(LiveSignIn::new(
-        store.clone(),
-        Arc::new(PluginPolicies {
-            plugins: plugins.clone(),
-            depth: record.provider_config_depth,
-        }),
-    ));
-    // Checked now, as the authenticators are: a policy that does not build stops the start.
-    sign_in
-        .apply(record.sign_in_policy.as_ref())
-        .map_err(|reason| {
-            let provider = record
-                .sign_in_policy
-                .as_ref()
-                .map_or("", |policy| policy.provider.as_str());
-            format!("unex.sign_in_policy ({provider}): {reason}")
-        })?;
-    if sign_in.offers_nothing() {
-        eprintln!("{NOTHING_OFFERED}");
-    }
-    let access = access.with_sign_in(sign_in.clone());
     let access = match keys {
         Some(keys) => access.with_keys(keys),
         None => access,
@@ -827,6 +813,30 @@ fn configured_access(
         }
         None => access,
     };
+    let sign_in = Arc::new(
+        LiveSignIn::new(
+            store.clone(),
+            Arc::new(PluginPolicies {
+                plugins: plugins.clone(),
+                depth: record.provider_config_depth,
+            }),
+        )
+        .with_providers(access.provider_ids()),
+    );
+    // Checked now, as the authenticators are: a policy that does not build stops the start.
+    sign_in
+        .apply(record.sign_in_policy.as_ref())
+        .map_err(|reason| {
+            let provider = record
+                .sign_in_policy
+                .as_ref()
+                .map_or("", |policy| policy.provider.as_str());
+            format!("unex.sign_in_policy ({provider}): {reason}")
+        })?;
+    if sign_in.offers_nothing() {
+        eprintln!("{}", nothing_offered(access.has_keys()));
+    }
+    let access = access.with_sign_in(sign_in.clone());
     Ok(Some((access, accounts, plugins.catalog(), sign_in)))
 }
 

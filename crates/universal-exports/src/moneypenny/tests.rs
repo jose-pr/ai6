@@ -17,7 +17,34 @@ use serde_json::{Value, json};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 use super::*;
-use crate::{AccessProviders, GatewayConfig, GatewayLimits, issue_access_token_record};
+use crate::{AccessProviders, GatewayConfig, GatewayLimits};
+
+/// A token of `person_id` as a password sign-in made it, which is what a browser's page cookie
+/// needs: a Station's token is no sign-in and gets none.
+async fn issue_access_token_record(
+    registry: Arc<dyn RegistryBackend>,
+    person_id: String,
+    ttl: Duration,
+    session_max: ai6::TimeLimit,
+) -> Result<crate::IssuedAccessToken, crate::ApiError> {
+    let issued_at = crate::unix_timestamp()?;
+    let step = ai6::SignInFactor::try_new("password", None, Some(person_id.clone()))
+        .map_err(|_| crate::ApiError::internal())?;
+    crate::store_bearer(
+        registry,
+        person_id,
+        crate::Times {
+            issued_at,
+            expires_at: issued_at + ttl.as_secs_f64(),
+            now: issued_at,
+            idle: None,
+        },
+        session_max,
+        None,
+        vec![step],
+    )
+    .await
+}
 
 /// The default settings with `[assistant.gateway]` changed by `change`.
 fn tuned(change: impl FnOnce(&mut AssistantGatewayLimits)) -> AssistantConfig {
@@ -2667,7 +2694,8 @@ fn age_token(served: &Served, token: &str, seconds: f64) -> f64 {
         found.expires_at() - seconds,
         None,
     )
-    .unwrap();
+    .unwrap()
+    .with_factors(found.factors().to_vec());
     std::fs::write(
         served
             ._directory

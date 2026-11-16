@@ -51,10 +51,10 @@ pub(crate) async fn viewer(
     (connection, certificates): Connection,
 ) -> Result<Person, NoViewer> {
     let providers = gateway.access.as_ref().ok_or(NoViewer::Unavailable)?;
+    let address = connection
+        .as_ref()
+        .map(|Extension(ConnectInfo(address))| *address);
     if let Some(authenticator) = providers.page_authenticator.clone() {
-        let address = connection
-            .as_ref()
-            .map(|Extension(ConnectInfo(address))| *address);
         let certificates = certificates.map(|Extension(ClientCertificates(chain))| chain);
         // A certificate the gateway's own TLS proved is `certificate`; anything the request
         // carries for a front door to have vouched for is `proxy`.
@@ -100,10 +100,14 @@ pub(crate) async fn viewer(
                         crate::sign_in::PAGES,
                     )
                 };
-                return match gateway.decide_sign_in(providers, context).await {
-                    Some(decision) if decision.complete => Ok(person),
-                    _ => Err(NoViewer::Nobody),
-                };
+                // Refused here, the request may still hold a page cookie decided the same way.
+                if gateway
+                    .decide_sign_in(providers, context)
+                    .await
+                    .is_some_and(|decision| decision.complete)
+                {
+                    return Ok(person);
+                }
             }
             Verdict::Unknown => {}
             _ => return Err(NoViewer::Nobody),
@@ -119,12 +123,27 @@ pub(crate) async fn viewer(
         .map_err(|_| NoViewer::Unavailable)?
         .map_err(|_| NoViewer::Unavailable)?
         .ok_or(NoViewer::SignedOut)?;
-    person_by_id(gateway, record.person_id().to_owned())
+    let person = person_by_id(gateway, record.person_id().to_owned())
         .await
         .map_err(|error| match error.status {
             axum::http::StatusCode::UNAUTHORIZED => NoViewer::SignedOut,
             _ => NoViewer::Unavailable,
-        })
+        })?;
+    // The steps the cookie's sign-in passed are decided for the pages, as a viewer's are.
+    if !crate::still_complete(
+        gateway,
+        providers,
+        headers,
+        address,
+        &person,
+        record.factors(),
+        crate::sign_in::PAGES,
+    )
+    .await
+    {
+        return Err(NoViewer::Nobody);
+    }
+    Ok(person)
 }
 
 /// The person the directory finds for `lookup`.
@@ -269,16 +288,20 @@ mod tests {
 
     impl Directory for Front {
         fn lookup(&self, lookup: Lookup) -> Result<Option<Person>, ProviderError> {
-            Ok((lookup.value == "alice").then(|| Person {
-                id: "alice-id".to_owned(),
-                name: "alice".to_owned(),
-                ..Person::default()
-            }))
+            Ok(["alice", "alice-id"]
+                .contains(&lookup.value.as_str())
+                .then(|| Person {
+                    id: "alice-id".to_owned(),
+                    name: "alice".to_owned(),
+                    ..Person::default()
+                }))
         }
     }
 
     fn gateway(rule: RuleDef) -> Gateway {
         let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().to_path_buf();
+        std::mem::forget(directory);
         let access = AccessProviders::new(
             Arc::new(Front),
             Arc::new(Front),
@@ -296,9 +319,11 @@ mod tests {
                 Duration::from_secs(30),
             )
             .unwrap(),
-            Arc::new(FileRegistry::open(directory.path())),
+            Arc::new(FileRegistry::open(&root)),
             access,
         )
+        .with_pages(crate::PagesConfig::new(root.join("pages")))
+        .unwrap()
     }
 
     async fn viewer_of(gateway: &Gateway) -> Result<Person, NoViewer> {
@@ -324,6 +349,61 @@ mod tests {
         assert!(
             viewer_of(&named).await.is_ok(),
             "the authenticator is listed by its ID"
+        );
+    }
+
+    /// A sign-in of `method`, held by `gateway`'s Registry, and the page cookie that names it.
+    fn cookie_of(gateway: &Gateway, method: &str, id: &str) -> HeaderMap {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        let step = ai6::SignInFactor::try_new(method, None, Some("alice-id".to_owned())).unwrap();
+        let record = ai6::AccessTokenRecord::try_new(
+            id,
+            format!("{:0>64}", id.replace('-', "")),
+            "alice-id",
+            now - 1.0,
+            now + 3_600.0,
+            None,
+        )
+        .unwrap()
+        .with_factors(vec![step]);
+        gateway
+            .registry
+            .clone()
+            .unwrap()
+            .store_access_token(&record)
+            .unwrap();
+        let mut headers = HeaderMap::new();
+        let value = format!("{PAGE_COOKIE}={id}.{}", mark(gateway, id).unwrap());
+        headers.insert(COOKIE, HeaderValue::from_str(&value).unwrap());
+        headers
+    }
+
+    #[tokio::test]
+    async fn a_pages_cookie_is_decided_for_the_pages_by_the_steps_its_sign_in_passed() {
+        let pages_by_certificate = || gateway(RuleDef::new([["certificate"]]).services(["pages"]));
+        // A password sign-in's cookie is not a certificate's.
+        let gateway = pages_by_certificate();
+        let password = cookie_of(&gateway, "password", "7d2e8d3c-2f31-4c54-9d57-7c8f1f2b9a01");
+        assert_eq!(
+            viewer(&gateway, &password, (None, None)).await,
+            Err(NoViewer::Nobody)
+        );
+        // A certificate's is, though the front door's own word (`proxy`) was refused first.
+        let mut certificate = cookie_of(
+            &gateway,
+            "certificate",
+            "7d2e8d3c-2f31-4c54-9d57-7c8f1f2b9a02",
+        );
+        certificate.insert("x-viewer", HeaderValue::from_static("alice"));
+        assert_eq!(
+            viewer(&gateway, &certificate, (None, None))
+                .await
+                .unwrap()
+                .id,
+            "alice-id"
         );
     }
 }

@@ -59,12 +59,15 @@ pub trait SignInLoader: Send + Sync {
 
 struct Held {
     record: Option<SignInPolicyProvider>,
+    /// The stored record could not be read at all, so `record` says nothing of it.
+    unparsed: bool,
     policy: Option<Arc<dyn SignInPolicy>>,
     invalid: Option<String>,
 }
 
 /// The sign-in policy in force, and the way back to the record that stores it.
 pub struct LiveSignIn {
+    known: Option<std::collections::BTreeSet<String>>,
     store: Option<Arc<dyn ConfigProvider>>,
     loader: Option<Arc<dyn SignInLoader>>,
     held: RwLock<Held>,
@@ -82,10 +85,12 @@ impl LiveSignIn {
     /// until [`apply`](Self::apply) takes the record.
     pub fn new(store: Arc<dyn ConfigProvider>, loader: Arc<dyn SignInLoader>) -> Self {
         Self {
+            known: None,
             store: Some(store),
             loader: Some(loader),
             held: RwLock::new(Held {
                 record: None,
+                unparsed: false,
                 policy: None,
                 invalid: None,
             }),
@@ -96,15 +101,64 @@ impl LiveSignIn {
     /// `policy`, which no route changes.
     pub fn fixed(policy: Arc<dyn SignInPolicy>) -> Self {
         Self {
+            known: None,
             store: None,
             loader: None,
             held: RwLock::new(Held {
                 record: None,
+                unparsed: false,
                 policy: Some(policy),
                 invalid: None,
             }),
             write: tokio::sync::Mutex::new(()),
         }
+    }
+
+    /// The IDs of the sign-in providers a policy may list; a policy listing any other is refused.
+    /// Without this nothing is checked.
+    #[must_use]
+    pub fn with_providers<I, S>(mut self, ids: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.known = Some(ids.into_iter().map(Into::into).collect());
+        self
+    }
+
+    /// Takes the record stored now. It reads the store under the lock a route's change holds, so
+    /// a poll that began before a change cannot put an older record over it.
+    ///
+    /// Call it where blocking is allowed.
+    ///
+    /// # Errors
+    ///
+    /// Why the stored record does not stand: the policy offers nothing meanwhile.
+    pub fn refresh(&self) -> Result<bool, String> {
+        let _turn = self.write.blocking_lock();
+        let store = self
+            .store
+            .clone()
+            .ok_or_else(|| "the sign-in policy is not kept in the configuration".to_owned())?;
+        let stored = store
+            .definitions(ConfigRecord::Unex, &ConfigScope::Global)
+            .map_err(|error| error.to_string())?
+            .records
+            .into_iter()
+            .find(|(key, _)| key == KEY)
+            .and_then(|(_, definition)| definition.get("sign_in_policy").cloned());
+        let record = match stored {
+            None => None,
+            Some(value) => match ai6::directorates::m::records::from_json(&value) {
+                Ok(record) => Some(record),
+                Err(reason) => {
+                    let reason = format!("sign_in_policy: {reason}");
+                    self.deny(None, reason.clone(), true);
+                    return Err(reason);
+                }
+            },
+        };
+        self.apply(record.as_ref())
     }
 
     fn read(&self) -> std::sync::RwLockReadGuard<'_, Held> {
@@ -122,38 +176,56 @@ impl LiveSignIn {
     }
 
     /// Puts the policy `record` names in force, or none when it names none, and says whether
-    /// that changed what is in force. A policy that does not build is kept out and the one in
-    /// force stays.
+    /// that changed what is in force. A policy that does not build, or names a provider that is
+    /// not configured, fails closed: nothing is offered and [`invalid`](Self::invalid) says why,
+    /// never the policy that was in force before.
     ///
     /// # Errors
     ///
-    /// Why the policy does not build.
+    /// Why the policy does not stand.
     pub fn apply(&self, record: Option<&SignInPolicyProvider>) -> Result<bool, String> {
-        if self.read().record.as_ref() == record {
-            self.held
-                .write()
-                .unwrap_or_else(PoisonError::into_inner)
-                .invalid = None;
-            return Ok(false);
+        {
+            let held = self.read();
+            if held.record.as_ref() == record && !held.unparsed {
+                return match &held.invalid {
+                    Some(reason) => Err(reason.clone()),
+                    None => Ok(false),
+                };
+            }
         }
-        let policy = match record {
-            None => None,
+        match record {
+            None => self.install(None, None),
             Some(record) => match self.build(record) {
-                Ok(policy) => Some(policy),
+                Ok(policy) => self.install(Some(record.clone()), Some(policy)),
                 Err(reason) => {
-                    self.held
-                        .write()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .invalid = Some(reason.clone());
+                    self.deny(Some(record.clone()), reason.clone(), false);
                     return Err(reason);
                 }
             },
-        };
-        self.install(record.cloned(), policy);
+        }
         Ok(true)
     }
 
+    /// Offers nothing, and says why.
+    fn deny(&self, record: Option<SignInPolicyProvider>, reason: String, unparsed: bool) {
+        let mut held = self.held.write().unwrap_or_else(PoisonError::into_inner);
+        held.record = record;
+        held.policy = Some(Arc::new(SignInRules::default()));
+        held.invalid = Some(reason);
+        held.unparsed = unparsed;
+    }
+
     fn build(&self, record: &SignInPolicyProvider) -> Result<Arc<dyn SignInPolicy>, String> {
+        if let Some(known) = &self.known {
+            for id in listed_providers(record) {
+                if !known.contains(&id) {
+                    return Err(format!(
+                        "the policy lists the provider {id}, which no sign-in provider is \
+                         configured under"
+                    ));
+                }
+            }
+        }
         self.loader
             .as_ref()
             .ok_or_else(|| "no sign-in policy provider can be loaded here".to_owned())?
@@ -165,6 +237,7 @@ impl LiveSignIn {
         held.record = record;
         held.policy = policy;
         held.invalid = None;
+        held.unparsed = false;
     }
 
     /// Whether the policy in force offers no sign-in to any client from an unknown address or
@@ -196,15 +269,61 @@ impl LiveSignIn {
     }
 }
 
+/// The provider IDs a rules policy lists in its conditions.
+fn listed_providers(record: &SignInPolicyProvider) -> Vec<String> {
+    if record.provider != SignInPolicyProvider::RULES {
+        return Vec::new();
+    }
+    record
+        .config
+        .as_ref()
+        .and_then(|config| config.0.get("rule"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|rule| rule.get("providers")?.as_array())
+        .flatten()
+        .filter_map(|id| id.as_str().map(str::to_owned))
+        .collect()
+}
+
+/// The step a Station's token carries: no sign-in made it, and none decides it again.
+pub(crate) const STATION: &str = "station";
+
+/// Whether `factors` say a Station issued the token.
+pub(crate) fn from_station(factors: &[SignInFactor]) -> bool {
+    matches!(factors, [only] if only.method() == STATION)
+}
+
 impl AccessProviders {
-    /// The methods a page's viewer may be named by when no policy says otherwise: the page
-    /// authenticator's own, whichever it uses.
+    /// The IDs a sign-in policy may list: each named sign-in provider and the page
+    /// authenticator. The built-in proxy identity has none, so a `providers` condition never
+    /// matches its step.
+    pub fn provider_ids(&self) -> Vec<String> {
+        self.authenticators
+            .iter()
+            .filter_map(|signer| signer.id.clone())
+            .chain(self.page_authenticator_id.clone())
+            .collect()
+    }
+
+    /// Whether a key provider is configured, which keeps working whatever the policy offers.
+    pub fn has_keys(&self) -> bool {
+        self.keys.is_some()
+    }
+
+    /// The methods a page's viewer may be named by when no policy says otherwise: those a sign-in
+    /// may have used, and the page authenticator's own, whichever it uses.
     pub(crate) fn page_methods(&self) -> Vec<&'static str> {
+        let mut methods = self.configured_methods();
         if self.page_authenticator.is_some() {
-            vec!["certificate", "proxy"]
-        } else {
-            Vec::new()
+            for method in ["certificate", "proxy"] {
+                if !methods.contains(&method) {
+                    methods.push(method);
+                }
+            }
         }
+        methods
     }
 
     /// The methods each configured sign-in provider and proxy identity offer, as a policy words
@@ -244,7 +363,13 @@ impl Gateway {
         connection: Option<SocketAddr>,
         service: &str,
     ) -> SignInContext {
-        let client = if service == PAGES || headers.contains_key(ORIGIN) {
+        // Only a hint about what to offer: the caller says all of this. A browser sends no origin
+        // on a same-origin GET, but it does say how it is fetching.
+        let browser = service == PAGES
+            || headers.contains_key(ORIGIN)
+            || headers.contains_key("sec-fetch-mode")
+            || headers.contains_key("sec-fetch-site");
+        let client = if browser {
             clients::BROWSER
         } else {
             clients::API
@@ -393,6 +518,9 @@ pub(crate) struct PolicyView {
     offers_nothing: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     invalid: Option<String>,
+    /// Said when nothing is offered and no key provider is configured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    note: Option<&'static str>,
 }
 
 /// `GET /v1/user/access/sign-in`: needs `access.read` at `config:access`.
@@ -404,13 +532,15 @@ pub(crate) async fn read_policy(
     authorize_resource_action(&gateway, person, CONFIG_ACCESS.to_owned(), "access.read").await?;
     let live = live(&gateway)?;
     let stored = read_stored(store(&live)?).await?;
+    let nothing = offers_nothing(&live).await;
     Ok(Json(PolicyView {
         revision: token(stored.policy()),
         writable: stored.writable,
         policy: stored.policy().cloned(),
         in_force: live.policy().is_some(),
-        offers_nothing: live.offers_nothing(),
+        offers_nothing: nothing,
         invalid: live.invalid(),
+        note: restore_note(&gateway, nothing),
     }))
 }
 
@@ -432,6 +562,9 @@ pub(crate) struct PolicyChanged {
     revision: String,
     /// Whether the policy now in force offers no sign-in, so that only API keys work.
     offers_nothing: bool,
+    /// Said when nothing is offered and no key provider is configured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    note: Option<&'static str>,
 }
 
 enum Change {
@@ -520,21 +653,27 @@ async fn write(
     };
     // Built before it is stored, so a policy that cannot stand is never written.
     let built = match &change {
-        Change::Set(record, _) => match live.build(record) {
-            Ok(policy) => Some(policy),
-            Err(reason) => {
-                audit(
-                    &gateway,
-                    &person,
-                    "access.sign_in.refused",
-                    None,
-                    CONFIG_ACCESS,
-                    &format!("{target}: {reason}"),
-                )
-                .await?;
-                return Err(AdminError::Refused(reason));
+        Change::Set(record, _) => {
+            let (building, record) = (live.clone(), (**record).clone());
+            let result = tokio::task::spawn_blocking(move || building.build(&record))
+                .await
+                .map_err(|_| AdminError::Api(ApiError::internal()))?;
+            match result {
+                Ok(policy) => Some(policy),
+                Err(reason) => {
+                    audit(
+                        &gateway,
+                        &person,
+                        "access.sign_in.refused",
+                        None,
+                        CONFIG_ACCESS,
+                        &format!("{target}: {reason}"),
+                    )
+                    .await?;
+                    return Err(AdminError::Refused(reason));
+                }
             }
-        },
+        }
         Change::Remove => {
             if stored.policy().is_none() {
                 return Err(AdminError::Api(ApiError::not_found()));
@@ -557,6 +696,8 @@ async fn write(
     let definition = Value::Object(definition);
     ai6::directorates::m::records::from_json::<UnexRecord>(&definition)
         .map_err(|reason| AdminError::Refused(format!("unex: {reason}")))?;
+    // The audit record comes first: a change that cannot be recorded is not stored.
+    audit(&gateway, &person, action, None, CONFIG_ACCESS, &target).await?;
     let swapped = {
         let (provider, expected, definition) =
             (provider.clone(), stored.unex.clone(), definition.clone());
@@ -584,21 +725,49 @@ async fn write(
             _ => AdminError::Api(ApiError::unavailable()),
         });
     }
-    audit(&gateway, &person, action, None, CONFIG_ACCESS, &target).await?;
     match change {
         Change::Set(record, _) => live.install(Some(*record), built),
         Change::Remove => live.install(None, None),
     }
-    let offers_nothing = live.offers_nothing();
-    if offers_nothing {
-        eprintln!("{NOTHING_OFFERED}");
+    let nothing = offers_nothing(&live).await;
+    let keys = gateway
+        .access
+        .as_ref()
+        .is_some_and(AccessProviders::has_keys);
+    if nothing {
+        eprintln!("{}", nothing_offered(keys));
     }
     Ok(Json(PolicyChanged {
         revision: token(definition.get("sign_in_policy")),
-        offers_nothing,
+        offers_nothing: nothing,
+        note: restore_note(&gateway, nothing),
     }))
 }
 
-/// What the gateway says when the policy in force offers no sign-in.
-pub const NOTHING_OFFERED: &str = "universal-exports: sign-in policy: no sign-in is offered; API \
-     keys still work (ai6ctl with a key holding access.manage changes the policy)";
+/// What the gateway says when the policy in force offers no sign-in; with no key provider
+/// configured, there is nothing left that works but an edit to the database.
+pub fn nothing_offered(keys: bool) -> &'static str {
+    if keys {
+        "universal-exports: sign-in policy: no sign-in is offered; API keys still work (ai6ctl \
+         with a key holding access.manage changes the policy)"
+    } else {
+        "universal-exports: sign-in policy: no sign-in is offered and no key provider is \
+         configured; only an edit to the database's unex record restores sign-in"
+    }
+}
+
+fn restore_note(gateway: &Gateway, offers_nothing: bool) -> Option<&'static str> {
+    let keys = gateway
+        .access
+        .as_ref()
+        .is_some_and(AccessProviders::has_keys);
+    (offers_nothing && !keys).then(|| nothing_offered(false))
+}
+
+/// [`LiveSignIn::offers_nothing`], where blocking is allowed: the policy may be a plugin.
+async fn offers_nothing(live: &Arc<LiveSignIn>) -> bool {
+    let live = live.clone();
+    tokio::task::spawn_blocking(move || live.offers_nothing())
+        .await
+        .unwrap_or(true)
+}
