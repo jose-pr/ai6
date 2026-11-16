@@ -1,0 +1,37 @@
+# coqui-access/providers/access/totp at 97eed019f3df8783bb7e688f2c0889c39dc8c4f8, with what it inherits written out.
+[package]
+name = "coqui-access-totp"
+description = "One-time codes (TOTP, RFC 6238) as a second factor, with enrolment, recovery codes and reset through the Accounts kind"
+readme = "README.md"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MPL-2.0"
+repository = "https://github.com/Boriken-Dev/coqui-access"
+publish = false
+exclude = [".*", "*.local.*"]
+[dependencies]
+[dependencies.coqui-access]
+path = "crates/coqui-access"
+[dependencies.coqui-access-kit]
+path = "crates/coqui-access-kit"
+[dependencies.coqui-builder]
+git = "https://github.com/Boriken-Dev/coqui-builder"
+rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
+features = ["derive"]
+[dependencies.data-encoding]
+version = "2.11"
+[dependencies.getrandom]
+version = "0.4"
+[dependencies.hmac]
+version = "0.13"
+[dependencies.percent-encoding]
+version = "2.3"
+[dependencies.sha1]
+version = "0.11"
+default-features = false
+[dependencies.sha2]
+version = "0.11.1"
+default-features = false
+[dependencies.subtle]
+version = "2.6"
