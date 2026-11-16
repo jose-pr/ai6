@@ -51,9 +51,12 @@ mod run_attach_tests;
 mod search;
 #[cfg(test)]
 mod search_tests;
+mod factor_seal;
+mod second_factor;
 mod sign_in;
 mod source_reads;
 mod timeline;
+mod totp_store;
 mod tls;
 mod transcripts;
 mod tree;
@@ -117,6 +120,8 @@ pub use login_limit::LoginLimits;
 pub use moneypenny::{AssistantConfig, PagesConfig, ViewLimits};
 pub use pools::{BoardAccount, BoardClaim, BoardLogin, BoardLoginRequest, BoardWindow, PoolBoard};
 pub use roster::{EffectiveOperation, RosterChange, RosterRecord, RosterRecords};
+pub use factor_seal::{FactorSealer, SealError};
+pub use second_factor::{TOTP as TOTP_PROVIDER, totp_builder, totp_provider};
 pub use sign_in::{LiveSignIn, SignInLoader, nothing_offered};
 pub use timeline::{TimelineItem, TimelinePage};
 pub use tls::tls_server_config;
@@ -187,6 +192,13 @@ pub struct AccessProviders {
     page_authenticator_id: Option<String>,
     /// Which methods a sign-in may use; none means each configured method alone is enough.
     sign_in: Option<Arc<LiveSignIn>>,
+    /// Providers that check a code after an earlier step named the person; never asked for a
+    /// first factor.
+    second: Vec<Signer>,
+    /// Where a person's second factor is set up and reset, when a provider keeps one.
+    factors: Option<Arc<dyn ai6::Accounts>>,
+    /// The key one-time code secrets are sealed with; without it no factor is set up.
+    factor_sealer: Option<Arc<FactorSealer>>,
 }
 
 /// A sign-in provider and the ID a sign-in policy lists it by, when it has one.
@@ -232,6 +244,9 @@ impl AccessProviders {
             page_authenticator: None,
             page_authenticator_id: None,
             sign_in: None,
+            second: Vec::new(),
+            factors: None,
+            factor_sealer: None,
         }
     }
 
@@ -254,6 +269,34 @@ impl AccessProviders {
         if let Some(last) = self.authenticators.last_mut() {
             last.id = Some(id.into());
         }
+        self
+    }
+
+    /// Adds a provider that checks a one-time code once an earlier step named the person, listed
+    /// in a sign-in policy by `id`. It is never asked for a first factor. With `accounts`, people
+    /// set up and reset their factor through it.
+    #[must_use]
+    pub fn with_second_factor(
+        mut self,
+        id: impl Into<String>,
+        authenticator: Arc<dyn Authenticator>,
+        accounts: Option<Arc<dyn ai6::Accounts>>,
+    ) -> Self {
+        self.second.push(Signer {
+            id: Some(id.into()),
+            authenticator,
+        });
+        if self.factors.is_none() {
+            self.factors = accounts;
+        }
+        self
+    }
+
+    /// The key one-time code secrets are sealed with. Without a ready one setting up a factor is
+    /// refused.
+    #[must_use]
+    pub fn with_factor_sealer(mut self, sealer: Arc<FactorSealer>) -> Self {
+        self.factor_sealer = Some(sealer);
         self
     }
 
@@ -294,6 +337,9 @@ impl AccessProviders {
             page_authenticator: None,
             page_authenticator_id: None,
             sign_in: None,
+            second: Vec::new(),
+            factors: None,
+            factor_sealer: None,
         }
     }
 
@@ -322,6 +368,9 @@ impl AccessProviders {
             page_authenticator: None,
             page_authenticator_id: None,
             sign_in: None,
+            second: Vec::new(),
+            factors: None,
+            factor_sealer: None,
         }
     }
 
@@ -684,6 +733,8 @@ pub struct Gateway {
     own_providers: Arc<Vec<ai6::providers::ProviderEntry>>,
     /// What was last written for each person seen signing in.
     sightings: Arc<principals::Sightings>,
+    /// Sign-ins that have waited for a next step, which paces the sweep of stale ones.
+    pending_begun: Arc<std::sync::atomic::AtomicU64>,
 }
 
 /// A bearer the gateway makes for itself to read, in this process, as a person who proved who
@@ -795,6 +846,7 @@ impl Gateway {
             liaison: None,
             own_providers: Arc::default(),
             sightings: Arc::default(),
+            pending_begun: Arc::default(),
         }
     }
 
@@ -2155,6 +2207,21 @@ impl Gateway {
             )
             .route("/v1/auth/methods", get(auth_methods))
             .route("/v1/auth/login", post(login))
+            .route("/v1/auth/enrol", post(second_factor::begin_first))
+            .route("/v1/auth/enrol/confirm", post(second_factor::confirm_first))
+            .route("/v1/user/factors", get(second_factor::state))
+            .route(
+                "/v1/user/factors/totp",
+                post(second_factor::begin_enrolment),
+            )
+            .route(
+                "/v1/user/factors/totp/confirm",
+                post(second_factor::confirm_enrolment),
+            )
+            .route(
+                "/v1/user/access/factors/{person}",
+                axum::routing::delete(second_factor::reset),
+            )
             .route("/v1/auth/logout", post(logout))
             .route("/v1/auth/renew", post(renew))
             .route("/v1/auth/resume", post(resume))
@@ -3445,12 +3512,18 @@ struct IssueAccessTokenRequest {
     ttl_seconds: u64,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct LoginRequest {
     #[serde(default)]
     name: String,
     #[serde(default)]
     secret: String,
+    /// The pending sign-in a next step belongs to, as `202` gave it.
+    #[serde(default)]
+    pending: Option<String>,
+    /// The method a next step is presented as: `totp`, `recovery_code`, `proxy` or `password`.
+    #[serde(default)]
+    method: Option<String>,
     #[serde(default)]
     ttl_seconds: Option<u64>,
     /// `false` asks a browser's sign-in not to get a session cookie.
@@ -3626,6 +3699,9 @@ struct AuthMethods {
     /// What the sign-in policy offers this request: `password` (a name and a secret), `proxy` (an
     /// identity the reverse proxy asserts), or any other method the policy names.
     methods: Vec<String>,
+    /// `next` while a sign-in that has passed some steps waits for the rest.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    step: Option<&'static str>,
 }
 
 async fn auth_methods(
@@ -3636,12 +3712,26 @@ async fn auth_methods(
     let Some(providers) = gateway.access.clone() else {
         return Ok(Json(AuthMethods {
             methods: Vec::new(),
+            step: None,
         }));
     };
+    let address = connection.map(|Extension(ConnectInfo(address))| address);
+    if let Some(token) = headers
+        .get(second_factor::PENDING_HEADER)
+        .and_then(|value| value.to_str().ok())
+    {
+        let methods = second_factor::offer_next(&gateway, &providers, &headers, address, token)
+            .await
+            .ok_or_else(ApiError::unauthorized)?;
+        return Ok(Json(AuthMethods {
+            methods,
+            step: Some("next"),
+        }));
+    }
     let context = gateway.sign_in_context(
         ai6::directorates::m::access::purposes::SIGN_IN,
         &headers,
-        connection.map(|Extension(ConnectInfo(address))| address),
+        address,
         sign_in::SERVICE,
     );
     let mut methods: Vec<String> = Vec::new();
@@ -3655,15 +3745,29 @@ async fn auth_methods(
             methods.push(offer.method);
         }
     }
-    Ok(Json(AuthMethods { methods }))
+    Ok(Json(AuthMethods {
+        methods,
+        step: None,
+    }))
 }
 
 async fn login(
     State(gateway): State<Gateway>,
     connection: Option<Extension<ConnectInfo<SocketAddr>>>,
+    certificates: Option<Extension<tls::ClientCertificates>>,
     headers: HeaderMap,
     Json(request): Json<LoginRequest>,
 ) -> Result<Response, ApiError> {
+    let address = connection.map(|Extension(ConnectInfo(address))| address);
+    // A next step of a sign-in that is under way, or a code with none under way.
+    if request.pending.is_some()
+        || request.method.as_deref().is_some_and(|method| {
+            ai6::directorates::m::access::methods::NEEDS_ACCOUNT.contains(&method)
+        })
+    {
+        let chain = certificates.map(|Extension(tls::ClientCertificates(chain))| chain);
+        return second_factor::continue_login(&gateway, address, chain, &headers, request).await;
+    }
     // A browser always names the page's origin on a POST, and nothing else this gateway serves
     // does, so that is what tells a web sign-in from a desktop app's or an API client's.
     let from_browser = headers.contains_key(ORIGIN);
@@ -3676,7 +3780,6 @@ async fn login(
     );
     let wants_cookie = from_browser && request.session_cookie != Some(false);
     let providers = gateway.access.clone().ok_or_else(ApiError::unavailable)?;
-    let address = connection.map(|Extension(ConnectInfo(address))| address);
     // The method presented is decided before any provider is asked or any try is counted: a
     // refusal costs the address nothing.
     let proxied = providers
@@ -3712,17 +3815,18 @@ async fn login(
             &providers,
             &headers,
             address,
-            request,
+            request.clone(),
             &offer.providers,
         )
         .await?;
         let step = sign_in::step(method, provider.as_deref(), &person)?;
         (person, step)
     };
-    // A valid factor is decided again with the person; anything but a complete sign-in is
-    // answered as a wrong password is.
+    // A valid factor is decided again with the person. A complete sign-in is issued; one the
+    // policy offers more steps to waits for them; anything else is answered as a wrong
+    // password is.
     let factors = vec![step];
-    let decided = gateway
+    let decision = gateway
         .decide_sign_in(
             &providers,
             SignInContext {
@@ -3731,11 +3835,37 @@ async fn login(
                 ..context
             },
         )
-        .await
-        .is_some_and(|decision| decision.complete);
-    if !decided {
-        return Err(ApiError::unauthorized());
+        .await;
+    match decision {
+        Some(decision) if decision.complete => {
+            complete_login(&gateway, from_browser, wants_cookie, ttl, person, factors)
+                .await
+        }
+        Some(decision) if !decision.methods.is_empty() => {
+            let mut methods: Vec<String> = Vec::new();
+            for offer in decision.methods {
+                if !methods.contains(&offer.method) {
+                    methods.push(offer.method);
+                }
+            }
+            gateway
+                .wait_for_next_step(&person, factors, methods, from_browser, &request)
+                .await
+        }
+        _ => Err(ApiError::unauthorized()),
     }
+}
+
+/// Opens the sign-in `factors` completed for `person`: its token, and for a browser its
+/// cookies.
+async fn complete_login(
+    gateway: &Gateway,
+    from_browser: bool,
+    wants_cookie: bool,
+    ttl: Duration,
+    person: Person,
+    factors: Vec<SignInFactor>,
+) -> Result<Response, ApiError> {
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
     let table = &gateway.config.unex().gateway;
     let session_max = table.session_max;
@@ -3771,7 +3901,7 @@ async fn login(
     )
     .await?;
     let page_cookie = from_browser
-        .then(|| page_cookie_for(&gateway, &issued, sign_in.as_deref()))
+        .then(|| page_cookie_for(gateway, &issued, sign_in.as_deref()))
         .flatten();
     let mut response = (StatusCode::CREATED, Json(issued)).into_response();
     if let Some(cookie) = cookie {

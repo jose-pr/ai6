@@ -39,6 +39,11 @@ pub struct LoginLimits {
     pub address_window: Duration,
     /// How long a try for one account name is counted. Default ten minutes.
     pub name_window: Duration,
+    /// How long a sign-in that has passed its first step waits for the next. Default five
+    /// minutes.
+    pub pending_seconds: Duration,
+    /// Tries at the next step one waiting sign-in allows before it ends. Default 5.
+    pub pending_tries: u32,
 }
 
 impl Default for LoginLimits {
@@ -52,6 +57,8 @@ impl Default for LoginLimits {
             forget_every: u32::try_from(table.forget_every).unwrap_or(u32::MAX),
             address_window: table.address_window.0,
             name_window: table.name_window.0,
+            pending_seconds: table.pending_seconds.0,
+            pending_tries: u32::try_from(table.pending_tries).unwrap_or(u32::MAX),
         }
     }
 }

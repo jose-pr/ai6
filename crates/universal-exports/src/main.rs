@@ -238,7 +238,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
     }
     live.apply(&snapshot);
-    let access = configured_access(&settings, &snapshot, &live, &provider)
+    let access = configured_access(&settings, &snapshot, &live, &provider, &registry)
         .map_err(|error| format!("user access configuration failed: {error}"))?;
     if access.is_some() && live.has_no_chief() {
         eprintln!(
@@ -607,6 +607,8 @@ fn login_limits(record: &UnexRecord) -> Result<LoginLimits, String> {
         forget_every: u32::try_from(record.login.forget_every).unwrap_or(u32::MAX),
         address_window: record.login.address_window.0,
         name_window: record.login.name_window.0,
+        pending_seconds: record.login.pending_seconds.0,
+        pending_tries: u32::try_from(record.login.pending_tries).unwrap_or(u32::MAX),
     })
 }
 
@@ -713,6 +715,7 @@ fn configured_access(
     snapshot: &ai6::ConfigSnapshot,
     live: &Arc<LiveAccess>,
     store: &Arc<dyn ConfigProvider>,
+    registry: &Arc<dyn ai6::RegistryBackend>,
 ) -> Result<Option<Configured>, String> {
     let record = &snapshot.settings.unex;
     let needs_directory = user_access_configured(record) || snapshot.settings.access.is_some();
@@ -745,7 +748,9 @@ fn configured_access(
     };
     let directory_config = config(&record.directory_config)?;
     let authorizer_config = config(&record.authorizer_config)?;
-    let (people, keys, first_accounts) = sign_in_providers(&plugins, record, &config)?;
+    let sealer = Arc::new(factor_sealer(settings)?);
+    let (people, keys, first_accounts, second) =
+        sign_in_providers(&plugins, record, &config, registry, &sealer)?;
     let cache = access_cache(record)?;
     let directory: Arc<dyn Directory> = plugins
         .cached_directory(directory_id, directory_config.as_ref(), cache)
@@ -797,6 +802,10 @@ fn configured_access(
     let access = people.fold(access, |access, (id, authenticator)| {
         access.with_authenticator(authenticator).named(id)
     });
+    let access = access.with_factor_sealer(sealer);
+    let access = second.into_iter().fold(access, |access, (id, totp)| {
+        access.with_second_factor(id, totp.clone(), Some(totp))
+    });
     let access = match keys {
         Some(keys) => access.with_keys(keys),
         None => access,
@@ -846,6 +855,7 @@ type SignIn = (
     Vec<(String, Arc<dyn Authenticator>)>,
     Option<KeyProvider>,
     Option<Arc<dyn ai6::Accounts>>,
+    Vec<(String, Arc<coqui_access_totp::TotpAccounts>)>,
 );
 
 /// Reads a provider's configuration from the record as a value.
@@ -858,14 +868,26 @@ fn sign_in_providers(
     plugins: &ai6::station::plugins::Plugins,
     record: &UnexRecord,
     config: &ConfigReader<'_>,
+    registry: &Arc<dyn ai6::RegistryBackend>,
+    sealer: &Arc<universal_exports::FactorSealer>,
 ) -> Result<SignIn, String> {
     let offered = plugins.account_managers();
+    let mut second = Vec::new();
     let mut people: Vec<(String, Arc<dyn Authenticator>)> = Vec::new();
     let mut keys: Option<KeyProvider> = None;
     let mut accounts: Option<Arc<dyn ai6::Accounts>> = None;
     for (index, entry) in record.authenticators.iter().enumerate() {
         let id = entry.provider.as_str();
         let at = |reason: String| format!("unex.authenticators[{index}] ({id}): {reason}");
+        if id == universal_exports::TOTP_PROVIDER {
+            // Kept in the Registry so every gateway sharing it sees the same factors; never
+            // asked for a first factor.
+            let totp =
+                universal_exports::totp_provider(registry, entry.config.as_ref(), sealer)
+                    .map_err(at)?;
+            second.push((id.to_owned(), totp));
+            continue;
+        }
         let value = config(&entry.config).map_err(at)?;
         if let Some(value) = &value {
             plugins.check_settings(id, value).map_err(at)?;
@@ -908,7 +930,26 @@ fn sign_in_providers(
             people.push((id.to_owned(), authenticator));
         }
     }
-    Ok((people, keys, accounts))
+    Ok((people, keys, accounts, second))
+}
+
+/// The key `[unex] factor_key` names, which seals one-time code secrets; none seals nothing, and
+/// no factor can then be set up or checked.
+fn factor_sealer(settings: &Settings) -> Result<universal_exports::FactorSealer, String> {
+    let key = settings
+        .located
+        .value
+        .unex
+        .factor_key
+        .as_ref()
+        .map(|secret| {
+            secret
+                .read()
+                .map_err(|error| format!("[unex] factor_key: {error}"))
+        })
+        .transpose()?;
+    universal_exports::FactorSealer::new(key.as_ref().map(|key| key.as_str()))
+        .map_err(|error| format!("[unex] factor_key: {error}"))
 }
 
 /// `[unex] proxy_secret_min_bytes`: the fewest bytes the proxy secret may hold.

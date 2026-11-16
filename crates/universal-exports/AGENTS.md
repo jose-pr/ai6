@@ -68,6 +68,8 @@ pub struct LoginLimits {
     pub forget_every: u32,                       // 256 tries between sweeps, at least 1
     pub address_window: std::time::Duration,     // 60 s
     pub name_window: std::time::Duration,        // 600 s
+    pub pending_seconds: std::time::Duration,    // 300 s a sign-in waits for its next step
+    pub pending_tries: u32,                      // 5 tries at a waiting sign-in's next step
 }
 ```
 
@@ -127,6 +129,11 @@ impl AccessProviders {
     // identity). Bearer keys are outside it. `with_sign_in_policy(policy)` fixes one no route changes.
     pub fn with_sign_in(self, sign_in: Arc<LiveSignIn>) -> Self;
     pub fn with_sign_in_policy(self, policy: Arc<dyn ai6::directorates::m::access::SignInPolicy>) -> Self;
+    // A provider that checks a one-time code once an earlier step named the person, listed in a
+    // policy by `id`; never asked for a first factor. With `accounts`, factors are set up and reset
+    // through the `/v1/user/factors` routes.
+    pub fn with_second_factor(self, id: impl Into<String>, authenticator: Arc<dyn ai6::Authenticator>,
+                              accounts: Option<Arc<dyn ai6::Accounts>>) -> Self;
     // Bearer keys alone: nobody signs in with a password.
     pub fn keys_only(directory: Arc<dyn ai6::Directory>, authorizer: Arc<dyn ai6::Authorizer>) -> Self;
     // Another people's sign-in provider, asked after those added: `Unknown` passes the
@@ -1111,6 +1118,22 @@ The optional `cli` feature builds the service command:
   is printed as a warning. The gateway polls the provider every `[provider] poll` seconds and
   swaps in a changed `access` or `operation_access` record (a refused one keeps the last good policy); a changed
   `unex` record (apart from its `sign_in_policy`, applied at once) or `plugin` record is logged as needing a restart.
+
+### Second factors (`second_factor.rs`, `totp_store.rs`)
+
+`pub const TOTP_PROVIDER` (`coqui_access_totp`), `totp_builder(registry, config)` and `totp_provider(registry, config)`
+build the one-time code provider over the Registry's `factors` documents (`FactorStore`), so every gateway sharing
+it sees the same accounts, enrolments, spent steps and recovery codes; the secret is sealed there (AES-256-GCM under `[unex] factor_key`; none, no factor). The
+`unex` record's `authenticators` entry of that ID is built this way, not loaded as a library.
+
+`POST /v1/auth/login` answers `202 {pending, methods, expires_in}` when the policy offers more steps; the next
+step is `{pending, method, secret}` (`totp`, `recovery_code`, `proxy`, `password`). The pending sign-in is a
+Registry document keyed by the digest of `pending`, with a try cap (`[login] pending_tries`), a time
+(`pending_seconds`) and the steps passed; a try is counted in the login guard under the person's ID first, and one
+request takes the sign-in. `GET /v1/auth/methods` with `X-AI6-Pending` answers `{step: "next", methods}`.
+`GET /v1/user/factors`, `POST /v1/user/factors/totp[/confirm]` (decided under `enrol`), `POST /v1/auth/enrol[/confirm]`
+(`enrol_first`, on a pending sign-in) and `DELETE /v1/user/access/factors/{person}` (`account.manage` at
+`config:accounts`) set up and reset factors, audited first as `account.factor.enrol`, `.confirm`, `.reset`.
 
 ### The sign-in policy (`sign_in.rs`)
 

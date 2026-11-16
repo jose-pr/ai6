@@ -302,6 +302,7 @@ impl AccessProviders {
     pub fn provider_ids(&self) -> Vec<String> {
         self.authenticators
             .iter()
+            .chain(self.second.iter())
             .filter_map(|signer| signer.id.clone())
             .chain(self.page_authenticator_id.clone())
             .collect()

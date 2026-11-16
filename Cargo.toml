@@ -38,6 +38,8 @@ coqui-access = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "97e
 coqui-roles = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "97eed019f3df8783bb7e688f2c0889c39dc8c4f8" }
 # Short-lived caches in front of the Directory and Authorizer a gateway loads.
 coqui-access-kit = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "97eed019f3df8783bb7e688f2c0889c39dc8c4f8", features = ["cache"] }
+# One-time codes (TOTP) as a second step, with enrolment and recovery codes.
+coqui-access-totp = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "97eed019f3df8783bb7e688f2c0889c39dc8c4f8" }
 # The sign-in policy: which methods a sign-in may use, from where, and what it still needs.
 coqui-access-signin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "97eed019f3df8783bb7e688f2c0889c39dc8c4f8" }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }

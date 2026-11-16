@@ -1195,6 +1195,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "coqui-access-totp"
+version = "0.1.0"
+source = "git+https://github.com/Boriken-Dev/coqui-access?rev=97eed019f3df8783bb7e688f2c0889c39dc8c4f8#97eed019f3df8783bb7e688f2c0889c39dc8c4f8"
+dependencies = [
+ "coqui-access",
+ "coqui-access-kit",
+ "coqui-builder",
+ "data-encoding",
+ "getrandom 0.4.3",
+ "hmac 0.13.0",
+ "percent-encoding",
+ "sha1 0.11.0",
+ "sha2 0.11.1",
+ "subtle",
+]
+
+[[package]]
 name = "coqui-acp"
 version = "0.0.0-alpha.0"
 source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=af005f0f1b49e0b0ec5dff6a6e9b0bca206d3e83#af005f0f1b49e0b0ec5dff6a6e9b0bca206d3e83"
@@ -4542,7 +4559,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8050abb251097357e24aff63ba2c52a6309ecb7d23a5474023df960a02694d8"
 dependencies = [
  "annotate-snippets",
- "base64 0.23.1",
+ "base64 0.22.1",
  "encoding_rs_io",
  "granit-parser 1.3.0",
  "nohash-hasher",
@@ -4559,7 +4576,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a253edfdea34032da21af84e16fcc94f4c7a6ba237f9f3bc2dbf43cea8535c44"
 dependencies = [
  "annotate-snippets",
- "base64 0.23.1",
+ "base64 0.22.1",
  "encoding_rs_io",
  "granit-parser 2.0.0",
  "nohash-hasher",
@@ -5118,7 +5135,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -5568,22 +5585,26 @@ dependencies = [
  "coqui-access-proxy-plugin",
  "coqui-access-signin",
  "coqui-access-signin-plugin",
+ "coqui-access-totp",
  "coqui-agentic-peer",
  "coqui-peer",
  "coqui-transport-web",
  "futures-util",
  "governor",
  "guatiao",
+ "guatiao-serde",
  "hmac 0.13.0",
  "hyper",
  "hyper-util",
  "pulldown-cmark",
  "rcgen",
  "reqwest 0.12.28",
+ "ring",
  "roxmltree",
  "rustls",
  "serde",
  "serde_json",
+ "sha1 0.11.0",
  "sha2 0.11.1",
  "similar",
  "subtle",
