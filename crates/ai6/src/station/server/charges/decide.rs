@@ -15,7 +15,7 @@ use super::super::compartments::Reader;
 use super::super::reports::{AssessCall, ReportDesk};
 use super::super::{DaemonState, agents, verification};
 use crate::directorates::m::approvals::DEFAULT_REQUEST_TTL;
-use crate::directorates::m::memories::fenced;
+use crate::directorates::m::knowledge::fenced;
 use crate::directorates::m::mission::MissionState;
 use crate::directorates::medical::exposure::ExposureGate;
 use crate::directorates::registry::decisions::{self, VerifyingDecision};

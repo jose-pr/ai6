@@ -20,12 +20,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use super::limits::ReportLimits;
-use super::memories::words;
 use super::reports::{Report, ReportScope, ReportState};
 use super::store::{FileRegistry, validate_registry_key};
 use crate::bounds::Limit;
-
-pub use super::memories::search_terms;
 
 /// What a revisioned write or a forget did not do.
 #[non_exhaustive]
@@ -165,6 +162,21 @@ impl ReportQuery {
                 .all(|topic| topics.contains(&topic.to_lowercase()))
             && self.title.iter().all(|word| titled.contains(word))
     }
+}
+
+/// The words of `text`, lower case: every run of letters and digits.
+pub(super) fn words(text: &str) -> impl Iterator<Item = String> + '_ {
+    text.split(|character: char| !character.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(str::to_lowercase)
+}
+
+/// The distinct words of a search, in the order first asked.
+pub fn search_terms(query: &str) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    words(query)
+        .filter(|word| seen.insert(word.clone()))
+        .collect()
 }
 
 /// The distinct words of `report` a database's text index holds, within `limit` bytes: its title,

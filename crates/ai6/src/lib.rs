@@ -214,15 +214,12 @@ pub use directorates::registry::holds::{AUTOMATIC as AUTOMATIC_HOLD, HoldStore, 
 pub use directorates::registry::limits::{
     AccountLimits, AgentLimits, AgentRoleLimits, ApiKeyLimits, ApprovalLimits, AssistantLogLimits,
     AuditLimits, BriefLimits, CableLimits, ClearanceLimits, ContextLimits, FileLimits, HeldLimits,
-    HoldLimits, LogbookLimits, MemoryLimits, PrincipalLimits, ProposalLimits, QuarantineLimits,
-    RegistryLimits, RunLimits, SleeperLimits, SourceLimits, StationLimits, TimelineLimits,
-    TokenLimits, UsageLimits,
+    HoldLimits, LogbookLimits, PrincipalLimits, ProposalLimits, QuarantineLimits, RegistryLimits,
+    RunLimits, SleeperLimits, SourceLimits, StationLimits, TimelineLimits, TokenLimits,
+    UsageLimits,
 };
 pub use directorates::registry::logbook::{
     Severity, StationFinding, StationFindingKind, StationReport,
-};
-pub use directorates::registry::memories::{
-    MemoryEntry, MemoryError, MemoryHeader, MemoryProposal, MemoryScope, MemorySource, MemoryStore,
 };
 pub use directorates::registry::mission_ids::{
     MissionEntry, MissionHandle, is_uid, new_uid, run_handle, valid_handle,

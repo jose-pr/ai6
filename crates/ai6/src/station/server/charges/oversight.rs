@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 
 use super::decide::DecisionDesk;
 use crate::bounds::Limit;
-use crate::directorates::m::memories::fenced;
+use crate::directorates::m::knowledge::fenced;
 use crate::directorates::registry::products::mission_status;
 use crate::directorates::registry::store::{BriefSearch, FiledBrief};
 

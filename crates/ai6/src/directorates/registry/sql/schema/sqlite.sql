@@ -629,46 +629,6 @@ CREATE TABLE IF NOT EXISTS ai6_issue_proposals (
     revision INTEGER NOT NULL
 );
 
--- Memories: rows of text with a scope (person:ID, operation:ID or global). entry_revision counts an
--- entry's writes, what a write names; revision is the clock's, as on every row. source and
--- compartments are JSON. Search reads the words of an entry from ai6_memories_search, kept in the
--- same transaction, and filters and ranks what it finds outside the database.
-CREATE TABLE IF NOT EXISTS ai6_memories (
-    id TEXT PRIMARY KEY,
-    scope TEXT NOT NULL,
-    name TEXT,
-    summary TEXT NOT NULL,
-    content TEXT NOT NULL,
-    created_at REAL NOT NULL,
-    updated_at REAL NOT NULL,
-    updated_by TEXT NOT NULL,
-    source TEXT NOT NULL,
-    compartments TEXT NOT NULL,
-    entry_revision INTEGER NOT NULL,
-    bytes INTEGER NOT NULL,
-    revision INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS ai6_memories_scope ON ai6_memories (scope);
-CREATE VIRTUAL TABLE IF NOT EXISTS ai6_memories_search USING fts5 (id UNINDEXED, words);
-
--- What each entry held before its later writes, gone when the entry is forgotten.
-CREATE TABLE IF NOT EXISTS ai6_memory_versions (
-    id TEXT NOT NULL,
-    entry_revision INTEGER NOT NULL,
-    record TEXT NOT NULL,
-    revision INTEGER NOT NULL,
-    PRIMARY KEY (id, entry_revision)
-);
-
--- What Agents asked to change in the memory, each until a person decides it.
-CREATE TABLE IF NOT EXISTS ai6_memory_proposals (
-    id TEXT PRIMARY KEY,
-    scope TEXT NOT NULL,
-    record TEXT NOT NULL,
-    revision INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS ai6_memory_proposals_scope ON ai6_memory_proposals (scope);
-
 -- Moneypenny's conversation log: one row per entry, the entry as JSON; bytes is its size.
 CREATE TABLE IF NOT EXISTS ai6_assistant_log (
     id TEXT PRIMARY KEY,

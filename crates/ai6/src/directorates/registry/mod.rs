@@ -1,7 +1,7 @@
 //! The Registry: the shared record every Station reads and writes. Its store keeps the
 //! brief queue, held briefs and each brief's provenance ([`bona_fides`]), leases, Station
 //! check-ins, the Headquarters lease, audit records and access tokens, Source cursors and
-//! Sleeper approvals, green ink requests and decisions, pool accounts, Station logbooks, memories,
+//! Sleeper approvals, green ink requests and decisions, pool accounts, Station logbooks, Reports and what AI6 knows,
 //! the activity timeline, Moneypenny's conversation log, each Run's harness context and each charge's record; its relay carries Cables between Agents. [`backend`] names what a
 //! store must do, one trait per record family, and opens a store by location: the
 //! [`FileRegistry`](store::FileRegistry) directory, or with the `sqlite` or `postgres`
@@ -24,7 +24,6 @@ pub mod holds;
 pub mod knowledge;
 pub mod limits;
 pub mod logbook;
-pub mod memories;
 pub mod mission_ids;
 pub mod mission_issues;
 pub mod principals;

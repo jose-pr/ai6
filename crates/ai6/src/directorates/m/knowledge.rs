@@ -681,6 +681,15 @@ pub fn bounded(text: &str, limit: Limit) -> String {
     line[..end].to_owned()
 }
 
+/// `value` fenced as data for a model: `<` is escaped inside the JSON, so nothing in a Report can
+/// close the element.
+pub fn fenced(tool: &str, value: &Value) -> String {
+    let body = serde_json::to_string_pretty(value)
+        .unwrap_or_default()
+        .replace('<', "\\u003c");
+    format!("<ai6-data tool=\"{tool}\">\n{body}\n</ai6-data>")
+}
+
 /// A Report of a known kind as tools and routes show it: its fields and its text. What a reader
 /// may see of an observation is [`report_json`](crate::directorates::m::reports::report_json).
 pub fn knowledge_json(report: &Report) -> Value {

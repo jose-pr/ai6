@@ -32,7 +32,6 @@ pub use super::contexts::RunContextStore;
 pub use super::holds::HoldStore;
 pub use super::knowledge::KnowledgeStore;
 pub use super::logbook::LogbookStore;
-pub use super::memories::MemoryStore;
 pub use super::mission_issues::MissionIssueStore;
 pub use super::principals::PrincipalStore;
 pub use super::quarantine::QuarantineStore;
@@ -88,7 +87,6 @@ pub trait RegistryBackend:
     + HoldStore
     + KnowledgeStore
     + LogbookStore
-    + MemoryStore
     + MissionIssueStore
     + MissionReviewStore
     + QuarantineStore
@@ -177,7 +175,6 @@ impl<T> RegistryBackend for T where
         + ApiKeyStore
         + PrincipalStore
         + LogbookStore
-        + MemoryStore
         + MissionIssueStore
         + MissionReviewStore
         + QuarantineStore

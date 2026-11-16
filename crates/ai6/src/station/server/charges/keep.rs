@@ -15,7 +15,7 @@ use crate::directorates::m::charges::ChargeScope;
 use crate::directorates::m::compartments::{
     CompartmentAction, CompartmentResource, FieldPrincipal,
 };
-use crate::directorates::m::memories::fenced;
+use crate::directorates::m::knowledge::fenced;
 use crate::directorates::m::reports::ReportFiling;
 use crate::directorates::registry::reports::{ReportFiler, ReportScope};
 use crate::directorates::registry::runs::{RunError, RunRecord, RunResult, RunStatus};

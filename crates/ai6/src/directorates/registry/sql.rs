@@ -31,7 +31,6 @@ mod charges;
 pub(crate) mod db;
 mod holds;
 mod knowledge;
-mod memories;
 mod mission_issues;
 #[cfg(feature = "postgres")]
 mod postgres;
@@ -1039,7 +1038,7 @@ mod tests {
             db::statements(include_str!("sql/schema/sqlite.sql"))
                 .unwrap()
                 .iter()
-                .find(|s| s.creates.as_deref() == Some("ai6_memories_search"))
+                .find(|s| s.creates.as_deref() == Some("ai6_reports_search"))
                 .and_then(|s| s.columns.clone())
                 .unwrap(),
             ["id", "words"]

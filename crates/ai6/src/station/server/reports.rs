@@ -26,9 +26,9 @@ use crate::directorates::m::compartments::{
     CompartmentAction, CompartmentResource, CompiledCompartments, FieldPrincipal,
 };
 use crate::directorates::m::knowledge::{
-    self, GLOBAL_RESOURCE, KnowledgeCaller, KnowledgeChange, KnowledgeOutcome, KnowledgeRight,
+    self, GLOBAL_RESOURCE, KnowledgeCaller, KnowledgeChange, KnowledgeForgotten, KnowledgeOutcome,
+    KnowledgeRight, bounded, fenced,
 };
-use crate::directorates::m::memories::{bounded, fenced};
 use crate::directorates::m::reports::{
     ReportFiling, ReportReader, ReportRules, ReportSettings, ReportSight, report_json, sight,
 };
@@ -507,6 +507,10 @@ impl ReportDesk {
                 return refused("no such report");
             }
             let shown = self.shown(state, caller, &report);
+            // What is known and not readable is not there.
+            if shown["sight"] == "markings" && report.is_known() {
+                return refused("no such report");
+            }
             if shown["sight"] == "markings" {
                 return json!({
                     "status": "refused",
@@ -657,6 +661,34 @@ impl ReportDesk {
                     "id": proposal.id,
                     "scope": proposal.scope.to_string(),
                     "state": proposal.state.as_str(),
+                    "note": "it waits for a verdict from your Operation's charge or a person",
+                }),
+                Err(refusal) => refused(refusal.to_string()),
+            }
+        })
+    }
+
+    /// Forgets the memory `id`, or retires the tradecraft, rule or contact, as the Run: at once
+    /// where its clearance writes the scope, otherwise a proposal that waits for a verdict.
+    pub(super) fn forget(
+        &self,
+        reader: &Reader,
+        run: Option<String>,
+        id: &str,
+        revision: Option<u64>,
+    ) -> Result<Value, String> {
+        self.with_reader(reader, None, run, |state, caller| {
+            let rules = ReportRules::new(&caller.settings, &caller.clearances);
+            match knowledge::forget_report(state.intake.as_ref(), caller, &rules, id, revision) {
+                Ok(KnowledgeForgotten::Forgotten(gone)) => {
+                    json!({ "status": "forgotten", "id": gone.id })
+                }
+                Ok(KnowledgeForgotten::Retired(kept)) => {
+                    json!({ "status": "retired", "id": kept.id, "state": kept.state.as_str() })
+                }
+                Ok(KnowledgeForgotten::Proposed(proposal)) => json!({
+                    "status": "proposed",
+                    "id": proposal.id,
                     "note": "it waits for a verdict from your Operation's charge or a person",
                 }),
                 Err(refusal) => refused(refusal.to_string()),

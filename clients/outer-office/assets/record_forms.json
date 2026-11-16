@@ -13559,253 +13559,6 @@
                 "refresh": 300.0
               }
             },
-            "memories": {
-              "type": "object",
-              "properties": {
-                "content_bytes": {
-                  "anyOf": [
-                    {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    {
-                      "type": "string",
-                      "enum": [
-                        "none"
-                      ],
-                      "x-enum-labels": {
-                        "none": "No limit"
-                      }
-                    }
-                  ],
-                  "format": "bytes",
-                  "title": "Longest entry",
-                  "description": "Bytes of one entry's content.",
-                  "default": 262144
-                },
-                "entries": {
-                  "anyOf": [
-                    {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    {
-                      "type": "string",
-                      "enum": [
-                        "none"
-                      ],
-                      "x-enum-labels": {
-                        "none": "No limit"
-                      }
-                    }
-                  ],
-                  "title": "Entries in a scope",
-                  "description": "Entries in one scope.",
-                  "default": 1024
-                },
-                "scope_bytes": {
-                  "anyOf": [
-                    {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    {
-                      "type": "string",
-                      "enum": [
-                        "none"
-                      ],
-                      "x-enum-labels": {
-                        "none": "No limit"
-                      }
-                    }
-                  ],
-                  "format": "bytes",
-                  "title": "All the entries of a scope",
-                  "description": "Bytes of every entry's name, summary and content in one scope.",
-                  "default": 8388608
-                },
-                "versions": {
-                  "anyOf": [
-                    {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    {
-                      "type": "string",
-                      "enum": [
-                        "none"
-                      ],
-                      "x-enum-labels": {
-                        "none": "No limit"
-                      }
-                    }
-                  ],
-                  "title": "Prior versions of an entry",
-                  "description": "Prior versions kept of one entry; forgetting the entry removes them. `0` keeps none.",
-                  "default": 8
-                },
-                "summary_bytes": {
-                  "anyOf": [
-                    {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    {
-                      "type": "string",
-                      "enum": [
-                        "none"
-                      ],
-                      "x-enum-labels": {
-                        "none": "No limit"
-                      }
-                    }
-                  ],
-                  "format": "bytes",
-                  "title": "Longest summary",
-                  "description": "Bytes of an entry's one-line summary.",
-                  "default": 1024
-                },
-                "name_bytes": {
-                  "anyOf": [
-                    {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    {
-                      "type": "string",
-                      "enum": [
-                        "none"
-                      ],
-                      "x-enum-labels": {
-                        "none": "No limit"
-                      }
-                    }
-                  ],
-                  "format": "bytes",
-                  "title": "Longest name or author",
-                  "description": "Bytes of an entry's name, or of who wrote it.",
-                  "default": 256
-                },
-                "compartments": {
-                  "anyOf": [
-                    {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    {
-                      "type": "string",
-                      "enum": [
-                        "none"
-                      ],
-                      "x-enum-labels": {
-                        "none": "No limit"
-                      }
-                    }
-                  ],
-                  "title": "Compartments on an entry",
-                  "description": "Compartments on one entry, each at most `name_bytes`.",
-                  "default": 16
-                },
-                "index_bytes": {
-                  "anyOf": [
-                    {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    {
-                      "type": "string",
-                      "enum": [
-                        "none"
-                      ],
-                      "x-enum-labels": {
-                        "none": "No limit"
-                      }
-                    }
-                  ],
-                  "format": "bytes",
-                  "title": "Words of an entry in the text index",
-                  "description": "Bytes of an entry's distinct words a database's text index holds. A word past it is found only by a search that matched another word of the entry, and PostgreSQL refuses an index of 1 MiB or more for one entry.",
-                  "default": 524288
-                },
-                "search_results": {
-                  "anyOf": [
-                    {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    {
-                      "type": "string",
-                      "enum": [
-                        "none"
-                      ],
-                      "x-enum-labels": {
-                        "none": "No limit"
-                      }
-                    }
-                  ],
-                  "title": "Entries a search answers",
-                  "description": "Entries one search answers.",
-                  "default": 50
-                },
-                "query_bytes": {
-                  "anyOf": [
-                    {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    {
-                      "type": "string",
-                      "enum": [
-                        "none"
-                      ],
-                      "x-enum-labels": {
-                        "none": "No limit"
-                      }
-                    }
-                  ],
-                  "format": "bytes",
-                  "title": "Longest search",
-                  "description": "Bytes of what one search asks for.",
-                  "default": 4096
-                },
-                "proposals": {
-                  "anyOf": [
-                    {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    {
-                      "type": "string",
-                      "enum": [
-                        "none"
-                      ],
-                      "x-enum-labels": {
-                        "none": "No limit"
-                      }
-                    }
-                  ],
-                  "title": "Proposals waiting in a scope",
-                  "description": "Agents' proposals waiting for a person in one scope.",
-                  "default": 64
-                }
-              },
-              "additionalProperties": false,
-              "title": "Memory entries",
-              "description": "`[registry.limits.memories]`: memory entries, per scope.",
-              "default": {
-                "content_bytes": 262144,
-                "entries": 1024,
-                "scope_bytes": 8388608,
-                "versions": 8,
-                "summary_bytes": 1024,
-                "name_bytes": 256,
-                "compartments": 16,
-                "index_bytes": 524288,
-                "search_results": 50,
-                "query_bytes": 4096,
-                "proposals": 64
-              }
-            },
             "proposals": {
               "type": "object",
               "properties": {
@@ -14021,7 +13774,7 @@
                   "format": "bytes",
                   "title": "Largest Report",
                   "description": "Bytes of one Report record.",
-                  "default": 65536
+                  "default": 2097152
                 },
                 "reports": {
                   "anyOf": [
@@ -14063,6 +13816,27 @@
                   "title": "Longest Report text",
                   "description": "Bytes of a Report's text.",
                   "default": 16384
+                },
+                "knowledge_text_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest knowledge text",
+                  "description": "Bytes of the text of a memory, tradecraft, a rule or a contact.",
+                  "default": 262144
                 },
                 "name_bytes": {
                   "anyOf": [
@@ -14384,9 +14158,10 @@
               "title": "Reports",
               "description": "`[registry.limits.reports]`: Reports.",
               "default": {
-                "record_bytes": 65536,
+                "record_bytes": 2097152,
                 "reports": 100000,
                 "text_bytes": 16384,
+                "knowledge_text_bytes": 262144,
                 "name_bytes": 256,
                 "links": 64,
                 "page": 1000,
@@ -15494,19 +15269,6 @@
               "text_bytes": 512,
               "refresh": 300.0
             },
-            "memories": {
-              "content_bytes": 262144,
-              "entries": 1024,
-              "scope_bytes": 8388608,
-              "versions": 8,
-              "summary_bytes": 1024,
-              "name_bytes": 256,
-              "compartments": 16,
-              "index_bytes": 524288,
-              "search_results": 50,
-              "query_bytes": 4096,
-              "proposals": 64
-            },
             "proposals": {
               "record_bytes": 1048576,
               "records": 1000,
@@ -15520,9 +15282,10 @@
               "keep_incidents": 604800.0
             },
             "reports": {
-              "record_bytes": 65536,
+              "record_bytes": 2097152,
               "reports": 100000,
               "text_bytes": 16384,
+              "knowledge_text_bytes": 262144,
               "name_bytes": 256,
               "links": 64,
               "page": 1000,

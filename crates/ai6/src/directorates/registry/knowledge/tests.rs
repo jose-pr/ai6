@@ -195,7 +195,7 @@ fn what_a_scope_may_hold_is_limited(store: &dyn Store) {
     let registry = store.handle();
     let limits = registry.limits().reports.clone();
     // A Report over the text limit is refused for what it is.
-    let huge = "x".repeat(limits.text_bytes.or_max() + 1);
+    let huge = "x".repeat(limits.knowledge_text_bytes.or_max() + 1);
     assert_eq!(
         registry
             .file_report(&memory(person("ana"), "t", "s", &huge))
@@ -203,11 +203,30 @@ fn what_a_scope_may_hold_is_limited(store: &dyn Store) {
             .kind(),
         std::io::ErrorKind::InvalidInput
     );
+    // An observation keeps the shorter limit, a known kind the longer.
+    let between = "x".repeat(limits.text_bytes.or_max() + 1);
+    registry
+        .file_report(&memory(person("zed"), "t", "s", &between))
+        .unwrap();
+    let observed = Report::new(
+        uuid::Uuid::new_v4().to_string(),
+        ReportScope::Operation("G".to_owned()),
+        "finding",
+        Severity::Info,
+        "t",
+        between,
+        filer(),
+        10.0,
+    );
+    assert_eq!(
+        registry.file_report(&observed).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidInput
+    );
     // Filling a scope to its total stops the next, and another scope is not touched.
-    let large = "y".repeat(limits.text_bytes.or_max());
+    let large = "y".repeat(limits.knowledge_text_bytes.or_max());
     let registry = store.handle_with(crate::directorates::registry::limits::RegistryLimits {
         reports: crate::directorates::registry::limits::ReportLimits {
-            scope_bytes: Limit::at(2 * limits.text_bytes.or_max() as u64 + 1_024),
+            scope_bytes: Limit::at(2 * limits.knowledge_text_bytes.or_max() as u64 + 1_024),
             ..Default::default()
         },
         ..Default::default()

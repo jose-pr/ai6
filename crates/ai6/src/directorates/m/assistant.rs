@@ -3,7 +3,7 @@
 //! A person's personal repository is Moneypenny's working directory for that person; each
 //! directory group may map to a shared repository she reads, and one more may be shared with
 //! everyone (`org`). Without a personal repository she works in an empty directory. Her memory
-//! needs none of this: it is rows in the Registry (`directorates::m::memories`).
+//! needs none of this: it is Reports in the Registry (`directorates::m::knowledge`).
 //!
 //! ```toml
 //! [assistant]

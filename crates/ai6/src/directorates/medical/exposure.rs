@@ -46,12 +46,6 @@ pub fn issue_source(tracker: &str, limit: Limit) -> String {
     bounded(format!("issue:{tracker}"), limit)
 }
 
-/// The source for a Run that read a memory entry an exposed Run wrote, cut to `limit`
-/// bytes.
-pub fn memory_source(id: &str, limit: Limit) -> String {
-    bounded(format!("memory:{id}"), limit)
-}
-
 /// The source for a Run that read a Report an exposed Run wrote, cut to `limit` bytes.
 pub fn report_source(id: &str, limit: Limit) -> String {
     bounded(format!("report:{id}"), limit)

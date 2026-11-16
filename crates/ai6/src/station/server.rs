@@ -37,8 +37,6 @@ mod issues;
 mod lease_tests;
 mod logins;
 mod medical;
-#[cfg(feature = "cables-mcp")]
-mod memories;
 mod models;
 mod observations;
 mod overlay_desk;
@@ -5456,7 +5454,6 @@ async fn start_mission(
             endpoint.open_plan_tools(review::PlanDesk::new(state.clone(), mission_id.clone()));
         }
         endpoint.open_compartment_tools(compartments::CompartmentDesk::new(state.clone()));
-        endpoint.open_memory_tools(memories::MemoryDesk::new(state.clone()));
         endpoint.open_report_tools(reports::ReportDesk::new(state.clone()));
         if let Some(role) = mission.role_id.as_deref() {
             endpoint.set_mission_role(role);
@@ -6485,7 +6482,6 @@ async fn resume_mission(
             endpoint.open_plan_tools(review::PlanDesk::new(state.clone(), mission_id.clone()));
         }
         endpoint.open_compartment_tools(compartments::CompartmentDesk::new(state.clone()));
-        endpoint.open_memory_tools(memories::MemoryDesk::new(state.clone()));
         endpoint.open_report_tools(reports::ReportDesk::new(state.clone()));
         if let Some(role) = mission.role_id.as_deref() {
             endpoint.set_mission_role(role);

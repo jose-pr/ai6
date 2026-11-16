@@ -121,6 +121,14 @@ struct ReadReportArgs {
     id: String,
 }
 
+#[derive(Deserialize, JsonSchema)]
+struct ForgetReportArgs {
+    /// The report's ID, as reports gave it.
+    id: String,
+    /// The revision you read, if the forget should be refused once it has moved on.
+    revision: Option<u64>,
+}
+
 /// The first line of `summary`, cut to `limit` bytes.
 fn title_of(summary: &str, limit: usize) -> String {
     let line = summary
@@ -369,6 +377,19 @@ impl CableTools {
     async fn read_report(&self, Parameters(args): Parameters<ReadReportArgs>) -> String {
         self.with_reports(move |desk, reader, station| desk.read(reader, station, &args.id))
             .await
+    }
+
+    /// Forget a memory, or retire another kind of knowledge.
+    #[tool(
+        description = "Forget a memory by ID, with its earlier revisions, or retire tradecraft, a rule or a contact, which stays on record closed as retired. Where your clearance may not write that scope, it is a proposal that waits for a verdict, and the answer says which. Name the revision you read to have it refused once the report has moved on."
+    )]
+    async fn forget_report(&self, Parameters(args): Parameters<ForgetReportArgs>) -> String {
+        let run = self.bound_run();
+        self.with_reports(move |desk, reader, _| {
+            desk.forget(reader, run, &args.id, args.revision)
+                .map(|answer| answer.to_string())
+        })
+        .await
     }
 }
 

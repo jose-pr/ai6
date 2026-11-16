@@ -822,8 +822,12 @@ impl Report {
                 ),
             ));
         }
-        let text_in_bounds =
-            |text: &str| !text.trim().is_empty() && limits.text_bytes.allows(text.len());
+        let text_bytes = if is_known_kind(&self.kind) {
+            limits.knowledge_text_bytes
+        } else {
+            limits.text_bytes
+        };
+        let text_in_bounds = |text: &str| !text.trim().is_empty() && text_bytes.allows(text.len());
         let forgets = self
             .proposes
             .as_ref()
@@ -833,7 +837,7 @@ impl Report {
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("a report's text must be 1 to {} bytes", limits.text_bytes),
+                format!("a report's text must be 1 to {text_bytes} bytes"),
             ));
         }
         if !limits.links.allows(self.links.len()) {
