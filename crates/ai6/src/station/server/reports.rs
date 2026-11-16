@@ -73,18 +73,25 @@ struct RunReader<'a> {
 }
 
 impl RunReader<'_> {
-    fn crosses_into(&self, operation: &str) -> bool {
+    fn crosses_into(&self, operation: &str, known: bool) -> bool {
         let mut crossed = self
             .crossed
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(known) = crossed.get(operation) {
-            return *known;
+        let key = format!("{}{operation}", if known { "known:" } else { "" });
+        if let Some(seen) = crossed.get(&key) {
+            return *seen;
         }
+        let action = if known {
+            CompartmentAction::MemoryRead
+        } else {
+            CompartmentAction::MissionRead
+        };
         let resource = CompartmentResource::Operation(operation.to_owned());
-        let through = self.compiled.as_ref().and_then(|compiled| {
-            compiled.field_allows(&self.principal, CompartmentAction::MissionRead, &resource)
-        });
+        let through = self
+            .compiled
+            .as_ref()
+            .and_then(|compiled| compiled.field_allows(&self.principal, action, &resource));
         let allowed = through.is_some_and(|compartment| {
             self.state
                 .intake
@@ -99,7 +106,7 @@ impl RunReader<'_> {
                 })
                 .is_ok()
         });
-        crossed.insert(operation.to_owned(), allowed);
+        crossed.insert(key, allowed);
         allowed
     }
 }
@@ -108,10 +115,19 @@ impl ReportReader for RunReader<'_> {
     fn reads_scope(&self, scope: &ReportScope) -> bool {
         match scope {
             ReportScope::Operation(operation) if *operation == self.reader.operation => true,
-            ReportScope::Operation(operation) => self.crosses_into(operation),
+            ReportScope::Operation(operation) => self.crosses_into(operation, false),
             ReportScope::Station(station) => self.station == Some(station.as_str()),
             ReportScope::Global => true,
             ReportScope::M | ReportScope::Person(_) => false,
+        }
+    }
+
+    fn reads_known_scope(&self, scope: &ReportScope) -> bool {
+        match scope {
+            ReportScope::Operation(operation) if *operation != self.reader.operation => {
+                self.crosses_into(operation, true)
+            }
+            scope => self.reads_scope(scope),
         }
     }
 
@@ -434,7 +450,7 @@ impl ReportDesk {
         };
         let answer = self.with_reader(reader, station, None, |state, caller| {
             if let Some(scope) = &scope {
-                if !caller.reads_scope(scope) {
+                if !(caller.reads_scope(scope) || caller.reads_known_scope(scope)) {
                     return refused(format!("{scope} is not yours to read"));
                 }
                 filter = filter.clone().in_scope(scope.clone());
@@ -503,7 +519,12 @@ impl ReportDesk {
                 Ok(None) | Err(_) => return refused("no such report"),
             };
             // A Report of a scope the Run may not read answers as one that does not exist.
-            if !caller.reads_scope(&report.scope) {
+            let reads = if report.is_known() {
+                caller.reads_known_scope(&report.scope)
+            } else {
+                caller.reads_scope(&report.scope)
+            };
+            if !reads {
                 return refused("no such report");
             }
             let shown = self.shown(state, caller, &report);

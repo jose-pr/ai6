@@ -41,7 +41,9 @@ use ai6::directorates::registry::knowledge::ReportQuery;
 use ai6::directorates::registry::reports::{
     ReportClearance, ReportFiler, ReportFilter, ReportScope, ReportState, is_known_kind,
 };
-use ai6::{AuditRecord, AuthorizationRequest, Authorizer, Person};
+use ai6::{
+    AuditRecord, AuthorizationRequest, Authorizer, CompartmentAction, CompartmentResource, Person,
+};
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -194,6 +196,18 @@ impl PersonReader {
             .map_err(|_| "It could not be audited, so it was not done.".to_owned())
     }
 
+    /// Whether the reader holds the read of the scope of `report`, for its kind.
+    pub(crate) fn reads_report(
+        &self,
+        report: &ai6::directorates::registry::reports::Report,
+    ) -> bool {
+        if report.is_known() {
+            self.reads_known_scope(&report.scope)
+        } else {
+            self.reads_scope(&report.scope)
+        }
+    }
+
     pub(crate) fn rules(&self) -> ReportRules<'_> {
         ReportRules::new(&self.settings, &self.clearances)
     }
@@ -227,6 +241,25 @@ impl ReportReader for PersonReader {
             scope => {
                 actions_of(scope).is_some_and(|(resource, read, _)| self.holds(read, resource))
             }
+        }
+    }
+
+    fn reads_known_scope(&self, scope: &ReportScope) -> bool {
+        match scope {
+            // What is known of an Operation is read by its policy alone, or through a compartment
+            // granting `memory.read`, a crossing audited as such.
+            ReportScope::Operation(operation) => {
+                self.policy_holds("mission.read", &format!("operation:{operation}"))
+                    || self
+                        .access
+                        .through(
+                            &self.person,
+                            CompartmentAction::MemoryRead,
+                            &CompartmentResource::Operation(operation.clone()),
+                        )
+                        .is_some()
+            }
+            scope => self.reads_scope(scope),
         }
     }
 
@@ -518,7 +551,7 @@ async fn list_reports(
             }
             (Some(scope), _) => {
                 let scope = scope_of(scope)?;
-                if !reader.reads_scope(&scope) {
+                if !(reader.reads_scope(&scope) || reader.reads_known_scope(&scope)) {
                     return Err(refused(
                         StatusCode::FORBIDDEN,
                         format!("You may not read the reports of {scope}."),
@@ -835,7 +868,7 @@ pub(crate) async fn show(
     blocking(move || {
         let missing = || refused(StatusCode::NOT_FOUND, "No such report.");
         let report = registry.report(&id).ok().flatten().ok_or_else(missing)?;
-        if !reader.reads_scope(&report.scope) {
+        if !reader.reads_report(&report) {
             return Err(missing());
         }
         if report.is_known() && sight(&reader, &report, &reader.rules()) != ReportSight::Content {
@@ -870,7 +903,7 @@ pub(crate) async fn document(
     let (shown, scope) = blocking(move || {
         let missing = || refused(StatusCode::NOT_FOUND, "No such report.");
         let report = registry.report(&id).ok().flatten().ok_or_else(missing)?;
-        if !reader.reads_scope(&report.scope) {
+        if !reader.reads_report(&report) {
             return Err(missing());
         }
         let shown = shown(registry.as_ref(), &reader, &report);
@@ -1145,7 +1178,7 @@ pub(crate) async fn mark(
     blocking(move || {
         let missing = || refused(StatusCode::NOT_FOUND, "No such report.");
         let report = registry.report(&id).ok().flatten().ok_or_else(missing)?;
-        if !reader.reads_scope(&report.scope) {
+        if !reader.reads_report(&report) {
             return Err(missing());
         }
         let mut refusal = None;
@@ -1212,7 +1245,13 @@ pub(crate) async fn assess(
                 .believed(request.credibility)
                 .prioritised(request.priority.as_deref())
                 .judged(judgement);
-        let reads = |scope: &ReportScope| reader.reads_scope(scope);
+        let reads = |scope: &ReportScope| {
+            if report.is_known() {
+                reader.reads_known_scope(scope)
+            } else {
+                reader.reads_scope(scope)
+            }
+        };
         let context = Context {
             settings: &reader.settings,
             reads: &reads,
@@ -1236,7 +1275,7 @@ fn controlled(
 ) -> Result<ai6::directorates::registry::reports::Report, Refused> {
     let missing = || refused(StatusCode::NOT_FOUND, "No such report.");
     let report = registry.report(id).ok().flatten().ok_or_else(missing)?;
-    if !reader.reads_scope(&report.scope) {
+    if !reader.reads_report(&report) {
         return Err(missing());
     }
     // What is proposed of a known kind is decided by who may write what is known there.
@@ -1384,7 +1423,7 @@ pub(crate) async fn source(
         let behind: Vec<Value> = standing
             .behind
             .iter()
-            .filter(|report| reader.reads_scope(&report.scope))
+            .filter(|report| reader.reads_report(report))
             .map(|report| shown(registry.as_ref(), &reader, report))
             .collect();
         let rule = &reader.settings;

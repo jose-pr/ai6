@@ -1216,7 +1216,7 @@ async fn a_read_in_reads_an_operations_memory_audited_and_a_removed_grant_holds_
     // A compartment that grants other things gives nothing here.
     fixture.compartment(
         "OTHER",
-        &["product.read"],
+        &["mission.read", "product.read"],
         json!([{"operation": "L"}]),
         "person:viewer-007",
     );
@@ -1226,12 +1226,35 @@ async fn a_read_in_reads_an_operations_memory_audited_and_a_removed_grant_holds_
 
     fixture.compartment(
         "KESTREL",
-        &["mission.read"],
+        &["memory.read"],
         json!([{"operation": "L"}]),
         "person:viewer-007",
     );
     let (status, entry) = fixture.call(&viewer, Method::GET, &path, None).await;
     assert_eq!(status, StatusCode::OK, "{entry}");
+    // It gives what is known and no observed Report.
+    let finding = ai6::directorates::registry::reports::Report::new(
+        uuid::Uuid::new_v4().to_string(),
+        ReportScope::Operation("L".to_owned()),
+        "finding",
+        ai6::Severity::Info,
+        "observed in L",
+        "seen",
+        ai6::directorates::registry::reports::ReportFiler::Person {
+            person: "ana".to_owned(),
+        },
+        1.0,
+    );
+    fixture.served.registry.file_report(&finding).unwrap();
+    let (status, _) = fixture
+        .call(
+            &viewer,
+            Method::GET,
+            &format!("/v1/reports/{}", finding.id),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
     let crossings = fixture.audits("compartment.read");
     assert!(!crossings.is_empty(), "audited as a crossing");
     assert_eq!(crossings[0].actor, "viewer-007");

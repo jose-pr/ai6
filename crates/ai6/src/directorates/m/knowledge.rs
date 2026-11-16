@@ -192,7 +192,7 @@ fn find(
         .ok()
         .flatten()
         .ok_or(KnowledgeRefusal::Missing)?;
-    if !caller.reads_scope(&report.scope) || !readable(caller, rules, &report) {
+    if !caller.reads_known_scope(&report.scope) || !readable(caller, rules, &report) {
         return Err(KnowledgeRefusal::Missing);
     }
     Ok(report)
@@ -266,7 +266,11 @@ pub fn search_reports(
         .report_scopes()?
         .into_iter()
         .filter(|scope| query.scope.as_ref().is_none_or(|only| only == scope))
-        .filter(|scope| caller.reads_scope(scope))
+        .filter(|scope| match query.kind.as_deref() {
+            Some(kind) if is_known_kind(kind) => caller.reads_known_scope(scope),
+            Some(_) => caller.reads_scope(scope),
+            None => caller.reads_scope(scope) || caller.reads_known_scope(scope),
+        })
         .collect();
     let seen: Vec<Report> = store
         .report_candidates(&readable_scopes, query)?
@@ -776,7 +780,7 @@ pub fn list_reports(
     rules: &ReportRules<'_>,
     scope: &ReportScope,
 ) -> Result<Vec<Report>, KnowledgeRefusal> {
-    if !caller.reads_scope(scope) {
+    if !caller.reads_known_scope(scope) {
         return Ok(Vec::new());
     }
     let query = ReportQuery::default().in_scope(scope.clone());
@@ -825,7 +829,7 @@ pub fn decide_proposal(
     };
     let by = caller.by();
     let assessment = Assessment::new(id, verdict, reason, &by, caller.now());
-    let reads = |scope: &ReportScope| caller.reads_scope(scope);
+    let reads = |scope: &ReportScope| caller.reads_known_scope(scope);
     let context = Context::within(rules.settings, &reads);
     Ok(assessments::assess(store, &assessment, &context)?)
 }

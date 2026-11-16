@@ -245,7 +245,7 @@ compartment's clearance floor).
 
 A Mission's Agent has `reports`, `read_report`, `file_report` and `forget_report` on its AI6 MCP
 server. It reads its own Operation's knowledge and the global one, and another Operation's through a
-compartment granting `mission.read`, each such read written to the audit log before it is answered. It
+compartment granting `memory.read`, each such read written to the audit log before it is answered. It
 reads no person's memory. What it reads comes back inside `<ai6-data>`, as data. `reports` takes
 `words`, `kind`, `topics`, `title` and `scope`; `file_report` takes `kind` (a known one), `line` (the
 summary), `topics`, `scope`, `compartments`, and `revises` with the `revision` it read to change one;

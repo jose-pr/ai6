@@ -751,7 +751,7 @@ mod knowledge_of_a_run {
             root.path(),
             &[(
                 "OTHER",
-                &["product.read"],
+                &["product.read", "mission.read"],
                 "operation = \"B\"",
                 &["agent:007"],
             )],
@@ -761,13 +761,28 @@ mod knowledge_of_a_run {
             root.path(),
             &[(
                 "KESTREL",
-                &["mission.read"],
+                &["memory.read"],
                 "operation = \"B\"",
                 &["agent:007"],
             )],
         );
         assert_eq!(read(&state, &who, &other)["title"], "needle of B");
         assert_eq!(crossings(&state), 1, "audited as a crossing");
+        // It gives what is known and no observed Report.
+        let finding = Report::new(
+            uuid::Uuid::new_v4().to_string(),
+            operation("B"),
+            "finding",
+            Severity::Info,
+            "observed in B",
+            "seen",
+            ReportFiler::Person {
+                person: "ana".to_owned(),
+            },
+            1.0,
+        );
+        state.intake.file_report(&finding).unwrap();
+        assert_eq!(read(&state, &who, &finding.id), missing);
         assert_eq!(found(&state, &who, "needle", None)["total"], 1);
         // Reading is all it gives.
         let refused = written(&state, &who, new_in(operation("B"), "s"));

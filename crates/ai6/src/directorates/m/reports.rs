@@ -226,6 +226,13 @@ pub trait ReportReader {
     /// reader writes to the audit log before answering `true`.
     fn reads_scope(&self, scope: &ReportScope) -> bool;
 
+    /// Whether the reader holds the read of `scope` for what is known there (a memory, tradecraft,
+    /// a rule or a contact). It differs from [`Self::reads_scope`] only where a compartment gives
+    /// the read: that needs the action `memory.read`, not `mission.read`.
+    fn reads_known_scope(&self, scope: &ReportScope) -> bool {
+        self.reads_scope(scope)
+    }
+
     /// Whether the reader is read in to `compartment`. One that is unknown or cannot be read
     /// answers `false`.
     fn read_in(&self, compartment: &str) -> bool;
@@ -278,7 +285,12 @@ fn cleared(
 /// What `reader` sees of `report`. Without the scope's read it is [`ReportSight::Markings`], as
 /// for anything that only links to it.
 pub fn sight(reader: &dyn ReportReader, report: &Report, rules: &ReportRules<'_>) -> ReportSight {
-    if !reader.reads_scope(&report.scope) {
+    let reads = if report.is_known() {
+        reader.reads_known_scope(&report.scope)
+    } else {
+        reader.reads_scope(&report.scope)
+    };
+    if !reads {
         return ReportSight::Markings;
     }
     if report.is_proposal() && !reader.assesses(&report.scope) && !reader.filed(&report.filer) {
