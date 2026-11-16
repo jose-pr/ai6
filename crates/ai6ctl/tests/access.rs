@@ -326,3 +326,23 @@ async fn the_sign_in_policy_is_shown_set_and_cleared_under_the_revision_read() {
                 && revision.as_deref() == Some("r1"))
     );
 }
+
+#[tokio::test]
+async fn a_revision_named_on_the_command_line_is_the_one_sent_and_its_refusal_is_shown() {
+    let (server, seen) = serve().await;
+    let (ok, _, err) = ai6ctl(&server, &["access", "sign-in", "clear", "--revision", "r0"]).await;
+    assert!(!ok && err.contains("409"), "{err}");
+    let (ok, out, err) = ai6ctl(&server, &["access", "sign-in", "clear", "--revision", "r1"]).await;
+    assert!(ok && out.contains("cleared"), "{out}{err}");
+    let seen = seen.lock().unwrap();
+    let sent: Vec<_> = seen
+        .iter()
+        .filter(|(method, ..)| method == "DELETE")
+        .map(|(_, _, revision, _)| revision.clone())
+        .collect();
+    assert_eq!(sent, [Some("r0".to_owned()), Some("r1".to_owned())]);
+    assert!(
+        seen.iter().all(|(method, ..)| method != "GET"),
+        "a named revision is not read first"
+    );
+}

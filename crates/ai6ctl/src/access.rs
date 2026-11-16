@@ -124,9 +124,17 @@ pub(crate) enum SignInCommand {
         /// A JSON file holding the provider's configuration.
         #[arg(long, value_name = "FILE")]
         config: Option<std::path::PathBuf>,
+        /// The revision `show` printed: sent as it is, so a change since is refused (409);
+        /// default: the revision read now.
+        #[arg(long)]
+        revision: Option<String>,
     },
     /// Remove the stored policy: each configured method alone is enough again.
-    Clear,
+    Clear {
+        /// The revision `show` printed; default: the revision read now.
+        #[arg(long)]
+        revision: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -345,6 +353,22 @@ fn print_policy(view: &Value, operation: Option<&str>) {
     }
 }
 
+/// The revision a change is sent under: the one named, else the one read now.
+async fn current_revision(
+    client: &Client,
+    token: &str,
+    target: &Url,
+    named: Option<String>,
+) -> Result<String, String> {
+    match named {
+        Some(revision) => Ok(revision),
+        None => {
+            let view = exchange(client, token, Method::GET, target.clone(), None, None).await?;
+            Ok(text(&view["revision"]))
+        }
+    }
+}
+
 /// Runs an `access` command.
 pub(crate) async fn run_access(
     client: &Client,
@@ -480,24 +504,30 @@ pub(crate) async fn run_access(
         }
         AccessCommand::SignIn { command } => {
             let path = ["access", "sign-in"];
-            let view =
-                exchange(client, token, Method::GET, url(server, &path)?, None, None).await?;
-            let revision = text(&view["revision"]);
+            let target = url(server, &path)?;
             match command {
                 SignInCommand::Show => {
-                    println!("revision\t{revision}");
+                    let view = exchange(client, token, Method::GET, target, None, None).await?;
+                    println!("revision\t{}", text(&view["revision"]));
                     println!("writable\t{}", view["writable"]);
                     println!("in force\t{}", view["in_force"]);
                     println!("offers nothing\t{}", view["offers_nothing"]);
                     if let Some(reason) = view.get("invalid").and_then(Value::as_str) {
                         println!("invalid\t{}", plain(reason));
                     }
+                    if let Some(note) = view.get("note").and_then(Value::as_str) {
+                        println!("note\t{}", plain(note));
+                    }
                     match view.get("policy").filter(|policy| !policy.is_null()) {
                         Some(policy) => println!("policy\t{}", plain(&policy.to_string())),
                         None => println!("policy\t-"),
                     }
                 }
-                SignInCommand::Set { provider, config } => {
+                SignInCommand::Set {
+                    provider,
+                    config,
+                    revision,
+                } => {
                     let mut body = json!({});
                     if let Some(provider) = provider {
                         body["provider"] = json!(provider);
@@ -508,30 +538,27 @@ pub(crate) async fn run_access(
                         body["config"] = serde_json::from_str(&source)
                             .map_err(|error| format!("{}: {error}", file.display()))?;
                     }
+                    let revision = current_revision(client, token, &target, revision).await?;
                     let changed = exchange(
                         client,
                         token,
                         Method::PUT,
-                        url(server, &path)?,
+                        target,
                         Some(&revision),
                         Some(body),
                     )
                     .await?;
                     println!("sign-in policy set");
                     if changed["offers_nothing"] == true {
-                        println!("no sign-in is offered; API keys still work");
+                        println!("no sign-in is offered");
+                    }
+                    if let Some(note) = changed.get("note").and_then(Value::as_str) {
+                        println!("{}", plain(note));
                     }
                 }
-                SignInCommand::Clear => {
-                    exchange(
-                        client,
-                        token,
-                        Method::DELETE,
-                        url(server, &path)?,
-                        Some(&revision),
-                        None,
-                    )
-                    .await?;
+                SignInCommand::Clear { revision } => {
+                    let revision = current_revision(client, token, &target, revision).await?;
+                    exchange(client, token, Method::DELETE, target, Some(&revision), None).await?;
                     println!("sign-in policy cleared");
                 }
             }
