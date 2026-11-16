@@ -6972,6 +6972,36 @@
           "description": "The Authenticator providers for sign-in, in the order they are asked. Each answers only for the credentials it claims: a key provider for a bearer key, the others for a name and a password. Default: none; nobody signs in.",
           "default": []
         },
+        "sign_in_policy": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "provider": {
+              "type": "string",
+              "format": "provider:coqui_sign_in_policy",
+              "title": "Provider",
+              "description": "The sign-in policy provider ID, from those the gateway reports. Default: `coqui_signin_rules`, ordered rules.",
+              "default": "coqui_signin_rules"
+            },
+            "config": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {},
+              "format": "settings-of:provider",
+              "title": "Provider's configuration",
+              "description": "The provider's configuration, checked against the provider's own schema. Default: none.",
+              "x-sensitive": true,
+              "writeOnly": true
+            }
+          },
+          "additionalProperties": false,
+          "title": "Sign-in policy",
+          "description": "Which methods a sign-in may use, from where it is made, and what it still needs. Bearer API keys are outside it. Default: none; each configured method alone is enough, from anywhere (`password` with a sign-in provider, `proxy` with a proxy identity). A policy that offers no sign-in is accepted: only API keys then work."
+        },
         "directory": {
           "type": [
             "string",
@@ -8408,6 +8438,9 @@
     "form": {
       "fields": {
         "authenticators": {
+          "form": {}
+        },
+        "sign_in_policy": {
           "form": {}
         }
       }
