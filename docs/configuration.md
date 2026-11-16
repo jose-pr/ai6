@@ -917,15 +917,15 @@ no-op is stored at once.
 | `agent`, `role` | `agents` | no | no | live | Roster page, route | `[agent.<codename>]`, `[role.<id>]` |
 | `assistant` | `agents` | no | yes | live | Roster page, route | `[assistant]`, Moneypenny's settings |
 | `cover` | `covers` | no | no | live | Roster page, route | `[cover.<name>]` |
-| `theater` | `theaters` | yes | no | restart | Roster page (Theaters), `ai6ctl`, route `theaters` | `[theater.<id>]` |
+| `theater` | `theaters` | yes | no | live | Roster page (Theaters), `ai6ctl`, route `theaters` | `[theater.<id>]` |
 | `loadout`, `sandbox`, `mcp`, `overlay`, `secret`, `secret_provider`, `pool` | `loadouts` | yes | no | live | Roster page, `ai6ctl`, routes `loadouts`, `sandboxes`, `mcps`, `overlays`, `secrets`, `secret_providers`, `pools`, each under `config.read` and `config.manage` on `config:<family>` | `[loadout.<agent>]` (its `env` holds non-secret values, shown to anyone who reads it), `[sandbox.<name>]`, `[mcp.<name>]`, `[overlay.<name>]` ([overlays](agents.md#overlays)), `[secret.<name>]` (references, never values), `[pool.<id>]` |
-| `cables` | `cables` | yes | yes | restart | Roster page, `ai6ctl`, own action and confirmation | the whole file: grants, inbound, channels, limits |
+| `cables` | `cables` | yes | yes | live, in Stations | Roster page, `ai6ctl`, own action and confirmation | the whole file: grants, inbound, channels, limits |
 | `plugin` | `plugins` | yes | no | restart | Roster page, `ai6ctl`, own action and confirmation | `[[library]]` entries, keyed by their `file` |
-| `station` | `station` | yes | yes | restart | Outer Office (Roster page, Stations > Settings), `ai6ctl`, route `station` | the whole file: the Station's runtime settings |
-| `tls` | `tls` | yes | yes | restart | Roster page, `ai6ctl`, own action and confirmation | the whole file: the Station TLS policy |
+| `station` | `station` | yes | yes | live, but the keys named [below](#what-stays-restart-only) | Outer Office (Roster page, Stations > Settings), `ai6ctl`, route `station` | the whole file: the Station's runtime settings |
+| `tls` | `tls` | yes | yes | live, for what a Station connects or accepts after it | Roster page, `ai6ctl`, own action and confirmation | the whole file: the Station TLS policy |
 | `access` | `access` | no | yes | live, in Universal Exports | Outer Office Access page | the whole file: `[role.<name>]`, `[[rule]]`, `chief` and `delegable` |
 | `operation_access` | `operation_access` | no | no | live, in Universal Exports | Outer Office Access page | `[operation_access.<id>]`: an Operation's own `[role.<name>]` and `[[rule]]` |
-| `unex` | `unex` | no | yes | restart | Roster page, `ai6ctl`, own action and confirmation | the whole file: Universal Exports' sign-in, limits and assistant |
+| `unex` | `unex` | no | yes | live, in Universal Exports, for the keys [named below](#what-stays-restart-only) | Roster page, `ai6ctl`, own action and confirmation | the whole file: Universal Exports' sign-in, limits and assistant |
 | `compartment` | `compartments` | no | no | at each call | Outer Office Compartments page | `[compartment.<id>]`: [need-to-know access across Operations](compartments.md) |
 | `review` | `reviews` | no | no | live | Roster page, route | `[review.<name>]`: [review policies](review.md) |
 | `charge` | `charges` | no | no | live | Roster page (Charges), route `/v1/user/roster/charges` | `[charge.<scope>]`: [charges](charges.md), keyed `m`, `operation:<codename>` or `station:<id>` |
@@ -936,6 +936,35 @@ reaches requests, the scheduler and new Runs at once; running Runs keep what the
 started with. A changed family that applies at restart is logged and listed at check-in in
 `config.needs_restart` by name. A revision that fails its checks is refused once: logged,
 audited as `config.refused`, and reported at check-in.
+
+#### What stays restart-only
+
+A change to one of these is stored and audited like any other, then logged and listed at check-in
+in `config.needs_restart` until the program restarts. Each is read once, because what it
+configures exists only once the program is running:
+
+| Where | Keys | Why |
+| --- | --- | --- |
+| `station` | `resources_every` and the `[transports]` table | The probes of every Theater's transport are paced when the Station starts. |
+| `station` | the `[publisher]`, `[api]`, `[sources]` and `[attach]` tables | The connection to Universal Exports, the Station's own API token check, the Source poller and the attach hub are built at start with them. |
+| `station` | `[providers.<id>]` | A provider library is configured as it loads. |
+| `plugin` | the whole family | A loaded library is held open and, on Windows, locked, so it cannot be swapped under the Station. |
+| `unex` | the sign-in providers, directory, authorizer and accounts, the access cache, `proxy_*`, `assistant`, `assistant_agent`, `route_text_bytes`, `provider_config_depth`, `[login]`, and the `[gateway]` keys that size what exists once the gateway runs (`runs`, `clients_per_run`, `scrollback_events`, `frame_bytes`, `input_frames_per_second`, `input_queue`, `fanout`, `buffer_budget_bytes`, `client_slots`, the attach and write-lease lifetimes, `station_token_min_bytes`, `origin_bytes`) | Providers are loaded and the assistant and sign-in are wired into the gateway when it starts, and its queues and slots are allocated then. The sign-in policy, `[controls]`, `[timeline]`, `[search]`, `[attach]`, `[text]` and the `[gateway]` keys read per request (`board_runs`, the access-token and session keys, `compartment_audit`) apply at the next poll. |
+| `ai6.cfg` | listener address, Station ID and identity, the provider and Registry location | They locate or name the process before it reads a record. |
+
+The `tls` family applies to a connection made after the change: the policy a Station reports and
+warns of at check-in changes at the next poll, and a TLS client or the `ai6 peer` command reads
+the record each time it connects or runs. A connection already open keeps the policy it was
+made under.
+
+The `cables` record applies to the Station's relay at the next poll: grants, inbound choices,
+channels, fan-out, rates, body size, lifetimes and `cross_operation` take effect for the sends and
+deliveries that follow, and a Cable already stored keeps what it was sent with. Universal Exports
+builds its own relay from the record when it starts.
+
+A changed `theater` record builds the transport of each new or changed Theater and forgets a
+removed one at the next poll; a Run already on a Theater keeps the transport it started with, and
+a Theater a Mission's ephemeral template made is left alone.
 
 The `station` record's own keys; seconds may be fractional. Its tables bound and pace the
 Station's work ([Station runtime limits](#station-runtime-limits)), and its `[providers.<id>]`
@@ -1015,7 +1044,7 @@ Unlike the tables below it applies as soon as the record changes, and a route ed
 
 ### Universal Exports limits
 
-The `unex` record's tables bound and pace the gateway, and apply at restart. They follow the
+The `unex` record's tables bound and pace the gateway; those [named above](#what-stays-restart-only) apply at restart, the rest at the next poll. They follow the
 [Limits](#limits) rules: a count or size is a whole number and `null` or `"none"` takes the
 bound away, seconds may be fractional, a value looser than its default is reported at start,
 and only a zero where nothing could pass is refused.
@@ -1149,8 +1178,8 @@ pending_per_station = 8
 
 ### Station runtime limits
 
-The `station` record's tables bound and pace one Station's work, and apply at restart like
-the rest of the record. They follow the [Limits](#limits) rules: a count or size is a whole
+The `station` record's tables bound and pace one Station's work, and apply live like
+the rest of the record, except the tables named [above](#what-stays-restart-only). They follow the [Limits](#limits) rules: a count or size is a whole
 number or `"none"` (no bound); seconds may be fractional; a key left out keeps its default.
 Only what cannot work is refused: a queue, page or run count of 0. Looser values are not
 reported as weakenings.

@@ -1263,6 +1263,7 @@ pub ai6::directorates::m::config::StationRuntime::vetting: ai6::station::limits:
 impl ai6::directorates::m::config::StationRuntime
 pub fn ai6::directorates::m::config::StationRuntime::duration(core::option::Option<f64>) -> core::option::Option<core::time::Duration>
 pub fn ai6::directorates::m::config::StationRuntime::limits(&self) -> ai6::station::limits::StationLimits
+pub fn ai6::directorates::m::config::StationRuntime::restart_only_differs(&self, &Self) -> bool
 pub fn ai6::directorates::m::config::StationRuntime::validate(&self) -> core::result::Result<(), alloc::string::String>
 #[non_exhaustive] pub struct ai6::directorates::m::config::UnexRecord
 pub ai6::directorates::m::config::UnexRecord::access_cache_entries: core::option::Option<u64>
@@ -1297,6 +1298,7 @@ pub ai6::directorates::m::config::UnexRecord::text: ai6::directorates::m::unex_l
 pub ai6::directorates::m::config::UnexRecord::timeline: ai6::directorates::m::unex_limits::UnexTimelineLimits
 impl ai6::directorates::m::config::UnexRecord
 pub fn ai6::directorates::m::config::UnexRecord::limits(&self) -> ai6::directorates::m::unex_limits::UnexLimits
+pub fn ai6::directorates::m::config::UnexRecord::running_with(&self, &Self) -> Self
 pub fn ai6::directorates::m::config::UnexRecord::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::directorates::m::config::UnexRecord
 pub fn ai6::directorates::m::config::UnexRecord::default() -> Self
@@ -5983,6 +5985,7 @@ pub fn ai6::directorates::registry::cables::CableRecipient::try_new(alloc::strin
 pub struct ai6::directorates::registry::cables::CableRelay
 impl ai6::CableRelay
 pub fn ai6::CableRelay::acknowledge(&self, &ai6::CablePrincipal, &str) -> core::result::Result<(), ai6::CableRelayError>
+pub fn ai6::CableRelay::apply_config(&self, &ai6::CableConfig) -> core::result::Result<(), ai6::directorates::registry::cables::CableError>
 pub fn ai6::CableRelay::body_bytes(&self) -> ai6::bounds::Limit
 pub fn ai6::CableRelay::cross_operation(&self) -> ai6::directorates::registry::cables::CrossOperation
 pub fn ai6::CableRelay::deliver_new(&self, &ai6::CablePrincipal, usize, &mut dyn core::ops::function::FnMut() -> bool) -> core::result::Result<alloc::vec::Vec<ai6::CableDelivery>, ai6::CableRelayError>
@@ -11706,6 +11709,7 @@ pub fn ai6::directorates::registry::cables::CableRecipient::try_new(alloc::strin
 pub struct ai6::CableRelay
 impl ai6::CableRelay
 pub fn ai6::CableRelay::acknowledge(&self, &ai6::CablePrincipal, &str) -> core::result::Result<(), ai6::CableRelayError>
+pub fn ai6::CableRelay::apply_config(&self, &ai6::CableConfig) -> core::result::Result<(), ai6::directorates::registry::cables::CableError>
 pub fn ai6::CableRelay::body_bytes(&self) -> ai6::bounds::Limit
 pub fn ai6::CableRelay::cross_operation(&self) -> ai6::directorates::registry::cables::CrossOperation
 pub fn ai6::CableRelay::deliver_new(&self, &ai6::CablePrincipal, usize, &mut dyn core::ops::function::FnMut() -> bool) -> core::result::Result<alloc::vec::Vec<ai6::CableDelivery>, ai6::CableRelayError>
@@ -14411,6 +14415,7 @@ pub ai6::StationRuntime::vetting: ai6::station::limits::VettingLimits
 impl ai6::directorates::m::config::StationRuntime
 pub fn ai6::directorates::m::config::StationRuntime::duration(core::option::Option<f64>) -> core::option::Option<core::time::Duration>
 pub fn ai6::directorates::m::config::StationRuntime::limits(&self) -> ai6::station::limits::StationLimits
+pub fn ai6::directorates::m::config::StationRuntime::restart_only_differs(&self, &Self) -> bool
 pub fn ai6::directorates::m::config::StationRuntime::validate(&self) -> core::result::Result<(), alloc::string::String>
 #[non_exhaustive] pub struct ai6::StationSettings
 impl ai6::directorates::registry::store::StationSettings
@@ -14723,6 +14728,7 @@ pub ai6::UnexRecord::text: ai6::directorates::m::unex_limits::TextLimits
 pub ai6::UnexRecord::timeline: ai6::directorates::m::unex_limits::UnexTimelineLimits
 impl ai6::directorates::m::config::UnexRecord
 pub fn ai6::directorates::m::config::UnexRecord::limits(&self) -> ai6::directorates::m::unex_limits::UnexLimits
+pub fn ai6::directorates::m::config::UnexRecord::running_with(&self, &Self) -> Self
 pub fn ai6::directorates::m::config::UnexRecord::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::directorates::m::config::UnexRecord
 pub fn ai6::directorates::m::config::UnexRecord::default() -> Self

@@ -328,6 +328,7 @@ pub async fn universal_exports::Gateway::attach(&self, &ai6_diptel::RunId, &str,
 pub fn universal_exports::Gateway::authenticate_station(&self, &str) -> core::result::Result<(), universal_exports::GatewayError>
 pub async fn universal_exports::Gateway::board_missions(&self) -> alloc::vec::Vec<universal_exports::BoardMission>
 pub async fn universal_exports::Gateway::board_runs(&self) -> alloc::vec::Vec<universal_exports::BoardRun>
+pub fn universal_exports::Gateway::config(&self) -> &alloc::sync::Arc<universal_exports::GatewayConfig>
 pub async fn universal_exports::Gateway::disconnect(&self, universal_exports::Attachment)
 pub async fn universal_exports::Gateway::disconnect_connection(&self, &ai6_diptel::RunId, &str)
 pub async fn universal_exports::Gateway::exchange_attach_token(&self, &str) -> core::result::Result<alloc::string::String, universal_exports::GatewayError>
@@ -366,6 +367,8 @@ pub struct universal_exports::GatewayConfig
 impl universal_exports::GatewayConfig
 pub fn universal_exports::GatewayConfig::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, universal_exports::GatewayLimits, core::time::Duration, core::time::Duration) -> core::result::Result<Self, universal_exports::GatewayError>
 pub fn universal_exports::GatewayConfig::public_origin(&self) -> &str
+pub fn universal_exports::GatewayConfig::set_unex_limits(&self, ai6::directorates::m::unex_limits::UnexLimits)
+pub fn universal_exports::GatewayConfig::unex(&self) -> alloc::sync::Arc<ai6::directorates::m::unex_limits::UnexLimits>
 pub fn universal_exports::GatewayConfig::with_login_limits(self, universal_exports::LoginLimits) -> Self
 pub fn universal_exports::GatewayConfig::with_unex_limits(self, ai6::directorates::m::unex_limits::UnexLimits) -> Self
 impl core::fmt::Debug for universal_exports::GatewayConfig
