@@ -659,3 +659,13 @@ CREATE TABLE IF NOT EXISTS ai6_principals (
     record TEXT NOT NULL,
     revision BIGINT NOT NULL
 );
+
+-- Sign-in factor documents (pending sign-ins, one-time code accounts and enrolments) by
+-- family and key; the text is the family owner's.
+CREATE TABLE IF NOT EXISTS ai6_factors (
+    family TEXT NOT NULL,
+    doc_key TEXT NOT NULL,
+    text TEXT NOT NULL,
+    revision BIGINT NOT NULL,
+    PRIMARY KEY (family, doc_key)
+);

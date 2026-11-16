@@ -1988,6 +1988,9 @@ pub trait BriefStore;        // proposals, queued briefs, claims, leases, outcom
                              //   File: cancels/KEY.json; SQL: ai6_briefs.cancel_requested_at (step briefs.cancel_requested_at)
 pub trait StationStore;      // check-ins, Station settings, Headquarters election (store.rs)
 pub trait AccessTokenStore;  // Universal Exports access tokens (store.rs)
+pub trait FactorStore;       // sign-in factor documents by family and key: factor_documents(family), factor_update(family,
+                             //   key, edit) (one atomic change from what is held: Keep, Put(text), Remove), factor_retain(family,
+                             //   keep) (factors.rs; SQL: ai6_factors). Pending sign-ins and one-time code accounts
 pub trait CableStore;        // Cables, their delivery state and send quotas (store.rs)
 pub trait AuditStore;        // audit records (store.rs)
 pub trait AgentRoleStore;    // the per-Operation Agent-role overlay (store.rs)

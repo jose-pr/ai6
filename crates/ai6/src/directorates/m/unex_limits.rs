@@ -391,6 +391,15 @@ pub struct LoginTable {
     #[schema(title = "One account name's tries are counted over")]
     #[map(default = LoginTable::default().name_window)]
     pub name_window: Seconds,
+    /// Seconds a sign-in that has passed its first step waits for the next one.
+    #[schema(title = "A sign-in waits for its next step")]
+    #[map(default = LoginTable::default().pending_seconds)]
+    pub pending_seconds: Seconds,
+    /// Tries at the next step one waiting sign-in allows before it ends; every try is also
+    /// counted against the account.
+    #[schema(title = "Tries at a waiting sign-in's next step")]
+    #[map(default = LoginTable::default().pending_tries)]
+    pub pending_tries: u64,
 }
 
 impl Default for LoginTable {
@@ -400,6 +409,8 @@ impl Default for LoginTable {
             forget_every: 256,
             address_window: Seconds::new(60),
             name_window: Seconds::new(600),
+            pending_seconds: Seconds::new(300),
+            pending_tries: 5,
         }
     }
 }

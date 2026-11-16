@@ -8140,6 +8140,22 @@
               "title": "One account name's tries are counted over",
               "description": "Seconds one account name's tries are counted over.",
               "default": 600.0
+            },
+            "pending_seconds": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "A sign-in waits for its next step",
+              "description": "Seconds a sign-in that has passed its first step waits for the next one.",
+              "default": 300.0
+            },
+            "pending_tries": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Tries at a waiting sign-in's next step",
+              "description": "Tries at the next step one waiting sign-in allows before it ends; every try is also counted against the account.",
+              "default": 5
             }
           },
           "additionalProperties": false,
@@ -8149,7 +8165,9 @@
             "name_bytes": 64,
             "forget_every": 256,
             "address_window": 60.0,
-            "name_window": 600.0
+            "name_window": 600.0,
+            "pending_seconds": 300.0,
+            "pending_tries": 5
           }
         },
         "text": {

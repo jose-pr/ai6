@@ -618,6 +618,11 @@ pub struct UnexSettings {
     /// Default: 32.
     #[schema(title = "Shortest reverse-proxy secret", format = "bytes")]
     pub proxy_secret_min_bytes: Option<u64>,
+    /// The key every gateway sharing a Registry seals one-time code secrets with, so the
+    /// database holds none in the clear. Default: none, and no one-time code factor can be set
+    /// up or checked. Changing it invalidates every enrolled factor.
+    #[schema(title = "One-time code sealing key", sensitive)]
+    pub factor_key: Option<SecretRef>,
     /// Where it keeps its state: verified copies of provider libraries, and the Registry when
     /// nothing else names one. Default: the platform's state directory.
     #[schema(title = "Gateway state directory")]
@@ -823,6 +828,7 @@ impl Located<Bootstrap> {
                 "reverse-proxy secret",
                 self.value.unex.proxy_secret.as_ref(),
             ),
+            ("one-time code sealing key", self.value.unex.factor_key.as_ref()),
             ("provider password", self.value.provider.password.as_ref()),
             ("Registry password", self.value.registry.password.as_ref()),
         ] {
@@ -1231,6 +1237,7 @@ impl Bootstrap {
             .proxy_secret
             .take()
             .map(|secret| secret.relative_to(dir));
+        unex.factor_key = unex.factor_key.take().map(|key| key.relative_to(dir));
         unex.state_dir = unex.state_dir.take().map(|state| beside(dir, &state));
         unex.pages.dir = unex.pages.dir.take().map(|pages| beside(dir, &pages));
         unex.plugins.resolve(dir);
@@ -1239,6 +1246,7 @@ impl Bootstrap {
             ("[registry] password", &value.registry.password),
             ("[unex] station_token", &value.unex.station_token),
             ("[unex] proxy_secret", &value.unex.proxy_secret),
+            ("[unex] factor_key", &value.unex.factor_key),
         ] {
             if let Some(SecretRef::Named(_)) = secret {
                 return Err(BootstrapError::invalid(

@@ -102,6 +102,7 @@ station_token = { provider = "file", key = "station-token" }   # a Station publi
 listen = "127.0.0.1:7082"             # loopback, behind the HTTPS reverse proxy
 public_origin = "https://ai6.example" # required
 proxy_secret = { provider = "file", key = "proxy-secret" }     # what a trusted reverse proxy sends in X-AI6-Proxy-Secret
+factor_key = { provider = "file", key = "factor-key" }         # seals one-time code secrets; every gateway sharing a Registry names the same
 state_dir = "/var/lib/unex"           # verified provider libraries, pages, and a default Registry
 
 [unex.plugins]                        # the gateway's provider libraries, as [station.plugins]
@@ -1121,6 +1122,8 @@ pending_per_station = 8
 | `forget_every` | 256 | **Tries between sweeps of old counters.** Tries between sweeps that forget old counters, at least 1. |
 | `address_window` | 60 | **One address's tries are counted over.** Seconds one client address's tries are counted over. |
 | `name_window` | 600 | **One account name's tries are counted over.** Seconds one account name's tries are counted over. |
+| `pending_seconds` | 300 | **A sign-in waits for its next step.** Seconds a sign-in that has passed its first step waits for the next one. |
+| `pending_tries` | 5 | **Tries at a waiting sign-in's next step.** Tries at the next step one waiting sign-in allows before it ends; every try is also counted against the account. |
 <!-- schema:record.unex.login:end -->
 
 `[text]`

@@ -28,6 +28,7 @@ pub use super::approvals::ApprovalStore;
 pub use super::assistant_log::AssistantLogStore;
 pub use super::charges::ChargeStore;
 pub use super::clearance::ClearanceStore;
+pub use super::factors::FactorStore;
 pub use super::contexts::RunContextStore;
 pub use super::holds::HoldStore;
 pub use super::knowledge::KnowledgeStore;
@@ -84,6 +85,7 @@ pub trait RegistryBackend:
     + ApprovalStore
     + AssistantLogStore
     + ClearanceStore
+    + FactorStore
     + HoldStore
     + KnowledgeStore
     + LogbookStore
@@ -170,6 +172,7 @@ impl<T> RegistryBackend for T where
         + ApprovalStore
         + AssistantLogStore
         + ClearanceStore
+        + FactorStore
         + HoldStore
         + KnowledgeStore
         + ApiKeyStore

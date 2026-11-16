@@ -29,6 +29,7 @@ mod approvals;
 mod briefs;
 mod charges;
 pub(crate) mod db;
+mod factors;
 mod holds;
 mod knowledge;
 mod mission_issues;

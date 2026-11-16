@@ -20,6 +20,7 @@ pub mod charges;
 pub mod clearance;
 pub mod contexts;
 pub mod decisions;
+pub mod factors;
 pub mod holds;
 pub mod knowledge;
 pub mod limits;

@@ -284,6 +284,7 @@ pub ai6::bootstrap::StationSettings::state_dir: core::option::Option<std::path::
 #[non_exhaustive] pub struct ai6::bootstrap::UnexSettings
 pub ai6::bootstrap::UnexSettings::access: ai6::bootstrap::AccessSettings
 pub ai6::bootstrap::UnexSettings::ca_file: core::option::Option<std::path::PathBuf>
+pub ai6::bootstrap::UnexSettings::factor_key: core::option::Option<ai6::bootstrap::SecretRef>
 pub ai6::bootstrap::UnexSettings::liaison: ai6::bootstrap::LiaisonSettings
 pub ai6::bootstrap::UnexSettings::listen: core::option::Option<core::net::socket_addr::SocketAddr>
 pub ai6::bootstrap::UnexSettings::pages: ai6::bootstrap::PagesSettings
@@ -1676,7 +1677,6 @@ pub fn ai6::directorates::m::knowledge::KnowledgeCaller::writes_scope(&self, &ai
 pub fn ai6::directorates::m::knowledge::bounded(&str, ai6::bounds::Limit) -> alloc::string::String
 pub fn ai6::directorates::m::knowledge::brief_json(&ai6::directorates::registry::reports::Report) -> serde_json::value::Value
 pub fn ai6::directorates::m::knowledge::decide_proposal(&dyn ai6::directorates::registry::backend::RegistryBackend, &dyn ai6::directorates::m::knowledge::KnowledgeCaller, &ai6::directorates::m::reports::ReportRules<'_>, &str, bool, &str) -> core::result::Result<ai6::directorates::registry::reports::Report, ai6::directorates::m::knowledge::KnowledgeRefusal>
-pub fn ai6::directorates::m::knowledge::fenced(&str, &serde_json::value::Value) -> alloc::string::String
 pub fn ai6::directorates::m::knowledge::forget_report(&dyn ai6::directorates::registry::backend::RegistryBackend, &dyn ai6::directorates::m::knowledge::KnowledgeCaller, &ai6::directorates::m::reports::ReportRules<'_>, &str, core::option::Option<u64>) -> core::result::Result<ai6::directorates::m::knowledge::KnowledgeForgotten, ai6::directorates::m::knowledge::KnowledgeRefusal>
 pub fn ai6::directorates::m::knowledge::knowledge_json(&ai6::directorates::registry::reports::Report) -> serde_json::value::Value
 pub fn ai6::directorates::m::knowledge::list_reports(&dyn ai6::directorates::registry::backend::RegistryBackend, &dyn ai6::directorates::m::knowledge::KnowledgeCaller, &ai6::directorates::m::reports::ReportRules<'_>, &ai6::directorates::registry::reports::ReportScope) -> core::result::Result<alloc::vec::Vec<ai6::directorates::registry::reports::Report>, ai6::directorates::m::knowledge::KnowledgeRefusal>
@@ -1695,6 +1695,89 @@ pub fn ai6::directorates::m::limits::OnLimit::as_str(self) -> &'static str
 pub const ai6::directorates::m::limits::DEFAULT_LIMIT_FALLBACK_SECS: u64
 pub fn ai6::directorates::m::limits::lifts_at(i64, &coqui_acp_api::usage::LimitHit) -> core::option::Option<i64>
 pub fn ai6::directorates::m::limits::parked_until(i64, core::option::Option<i64>, core::option::Option<u64>, u64, i64) -> i64
+pub mod ai6::directorates::m::memories
+pub enum ai6::directorates::m::memories::MemoryForgotten
+pub ai6::directorates::m::memories::MemoryForgotten::Forgotten(ai6::directorates::registry::memories::MemoryEntry)
+pub ai6::directorates::m::memories::MemoryForgotten::Proposed(ai6::directorates::registry::memories::MemoryProposal)
+pub enum ai6::directorates::m::memories::MemoryOutcome
+pub ai6::directorates::m::memories::MemoryOutcome::Kept(ai6::directorates::m::memories::MemoryWritten)
+pub ai6::directorates::m::memories::MemoryOutcome::Proposed(ai6::directorates::registry::memories::MemoryProposal)
+#[non_exhaustive] pub enum ai6::directorates::m::memories::MemoryRefusal
+pub ai6::directorates::m::memories::MemoryRefusal::Changed
+pub ai6::directorates::m::memories::MemoryRefusal::Changed::revision: u64
+pub ai6::directorates::m::memories::MemoryRefusal::Failed(alloc::string::String)
+pub ai6::directorates::m::memories::MemoryRefusal::Forbidden(alloc::string::String)
+pub ai6::directorates::m::memories::MemoryRefusal::Full(alloc::string::String)
+pub ai6::directorates::m::memories::MemoryRefusal::Invalid(alloc::string::String)
+pub ai6::directorates::m::memories::MemoryRefusal::Missing
+impl core::convert::From<ai6::directorates::registry::memories::MemoryError> for ai6::directorates::m::memories::MemoryRefusal
+pub fn ai6::directorates::m::memories::MemoryRefusal::from(ai6::directorates::registry::memories::MemoryError) -> Self
+impl core::convert::From<core::io::error::Error> for ai6::directorates::m::memories::MemoryRefusal
+pub fn ai6::directorates::m::memories::MemoryRefusal::from(core::io::error::Error) -> Self
+impl core::error::Error for ai6::directorates::m::memories::MemoryRefusal
+impl core::fmt::Display for ai6::directorates::m::memories::MemoryRefusal
+pub fn ai6::directorates::m::memories::MemoryRefusal::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::directorates::m::memories::MemoryTarget
+pub ai6::directorates::m::memories::MemoryTarget::Existing
+pub ai6::directorates::m::memories::MemoryTarget::Existing::id: alloc::string::String
+pub ai6::directorates::m::memories::MemoryTarget::Existing::revision: u64
+pub ai6::directorates::m::memories::MemoryTarget::New(ai6::directorates::registry::memories::MemoryScope)
+#[non_exhaustive] pub enum ai6::directorates::m::memories::MemoryWriteRight
+pub ai6::directorates::m::memories::MemoryWriteRight::Propose
+pub ai6::directorates::m::memories::MemoryWriteRight::Refused
+pub ai6::directorates::m::memories::MemoryWriteRight::Write
+#[non_exhaustive] pub struct ai6::directorates::m::memories::MemoryChange
+pub ai6::directorates::m::memories::MemoryChange::compartments: core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub ai6::directorates::m::memories::MemoryChange::content: alloc::string::String
+pub ai6::directorates::m::memories::MemoryChange::name: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::memories::MemoryChange::summary: alloc::string::String
+pub ai6::directorates::m::memories::MemoryChange::target: ai6::directorates::m::memories::MemoryTarget
+impl ai6::directorates::m::memories::MemoryChange
+pub fn ai6::directorates::m::memories::MemoryChange::new(ai6::directorates::m::memories::MemoryTarget, core::option::Option<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::memories::MemoryChange::with_compartments(self, core::option::Option<alloc::vec::Vec<alloc::string::String>>) -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::memories::MemorySearch
+pub ai6::directorates::m::memories::MemorySearch::hits: alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>
+pub ai6::directorates::m::memories::MemorySearch::total: usize
+#[non_exhaustive] pub struct ai6::directorates::m::memories::MemoryWritten
+pub ai6::directorates::m::memories::MemoryWritten::before: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::memories::MemoryWritten::entry: ai6::directorates::registry::memories::MemoryEntry
+pub const ai6::directorates::m::memories::AUDIT_APPROVED: &str
+pub const ai6::directorates::m::memories::AUDIT_COMPARTMENTS: &str
+pub const ai6::directorates::m::memories::AUDIT_FORGET: &str
+pub const ai6::directorates::m::memories::AUDIT_MARK_CLEARED: &str
+pub const ai6::directorates::m::memories::AUDIT_PROPOSED: &str
+pub const ai6::directorates::m::memories::AUDIT_READ: &str
+pub const ai6::directorates::m::memories::AUDIT_REJECTED: &str
+pub const ai6::directorates::m::memories::AUDIT_WRITE: &str
+pub const ai6::directorates::m::memories::GLOBAL_RESOURCE: &str
+pub const ai6::directorates::m::memories::PERSON_RESOURCE: &str
+pub trait ai6::directorates::m::memories::MemoryCaller
+pub fn ai6::directorates::m::memories::MemoryCaller::acts_in_person(&self) -> bool
+pub fn ai6::directorates::m::memories::MemoryCaller::audit(&self, &str, &ai6::directorates::registry::memories::MemoryScope, &str) -> core::result::Result<(), alloc::string::String>
+pub fn ai6::directorates::m::memories::MemoryCaller::by(&self) -> alloc::string::String
+pub fn ai6::directorates::m::memories::MemoryCaller::exposures(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn ai6::directorates::m::memories::MemoryCaller::mark_bytes(&self) -> ai6::bounds::Limit
+pub fn ai6::directorates::m::memories::MemoryCaller::now(&self) -> f64
+pub fn ai6::directorates::m::memories::MemoryCaller::read_in(&self, &str) -> bool
+pub fn ai6::directorates::m::memories::MemoryCaller::reads_scope(&self, &ai6::directorates::registry::memories::MemoryScope) -> bool
+pub fn ai6::directorates::m::memories::MemoryCaller::run(&self) -> core::option::Option<alloc::string::String>
+pub fn ai6::directorates::m::memories::MemoryCaller::saw_marked(&self, &str)
+pub fn ai6::directorates::m::memories::MemoryCaller::sees_all_compartments(&self) -> bool
+pub fn ai6::directorates::m::memories::MemoryCaller::writes_scope(&self, &ai6::directorates::registry::memories::MemoryScope) -> ai6::directorates::m::memories::MemoryWriteRight
+pub fn ai6::directorates::m::memories::bounded(&str, ai6::bounds::Limit) -> alloc::string::String
+pub fn ai6::directorates::m::memories::decide_proposal(&dyn ai6::directorates::registry::memories::MemoryStore, &dyn ai6::directorates::m::memories::MemoryCaller, &str, bool) -> core::result::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>, ai6::directorates::m::memories::MemoryRefusal>
+pub fn ai6::directorates::m::memories::entry_json(&ai6::directorates::registry::memories::MemoryEntry) -> serde_json::value::Value
+pub fn ai6::directorates::m::memories::fenced(&str, &serde_json::value::Value) -> alloc::string::String
+pub fn ai6::directorates::m::memories::forget_entry(&dyn ai6::directorates::registry::memories::MemoryStore, &dyn ai6::directorates::m::memories::MemoryCaller, &str, core::option::Option<u64>) -> core::result::Result<ai6::directorates::m::memories::MemoryForgotten, ai6::directorates::m::memories::MemoryRefusal>
+pub fn ai6::directorates::m::memories::header_json(&ai6::directorates::registry::memories::MemoryHeader) -> serde_json::value::Value
+pub fn ai6::directorates::m::memories::list_entries(&dyn ai6::directorates::registry::memories::MemoryStore, &dyn ai6::directorates::m::memories::MemoryCaller, &ai6::directorates::registry::memories::MemoryScope) -> core::result::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>, ai6::directorates::m::memories::MemoryRefusal>
+pub fn ai6::directorates::m::memories::list_proposals(&dyn ai6::directorates::registry::memories::MemoryStore, &dyn ai6::directorates::m::memories::MemoryCaller, &ai6::directorates::registry::memories::MemoryScope) -> core::result::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>, ai6::directorates::m::memories::MemoryRefusal>
+pub fn ai6::directorates::m::memories::prior_versions(&dyn ai6::directorates::registry::memories::MemoryStore, &dyn ai6::directorates::m::memories::MemoryCaller, &str) -> core::result::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>, ai6::directorates::m::memories::MemoryRefusal>
+pub fn ai6::directorates::m::memories::proposal_json(&ai6::directorates::registry::memories::MemoryProposal) -> serde_json::value::Value
+pub fn ai6::directorates::m::memories::read_entry(&dyn ai6::directorates::registry::memories::MemoryStore, &dyn ai6::directorates::m::memories::MemoryCaller, &str) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::m::memories::MemoryRefusal>
+pub fn ai6::directorates::m::memories::search_entries(&dyn ai6::directorates::registry::memories::MemoryStore, &dyn ai6::directorates::m::memories::MemoryCaller, &[ai6::directorates::registry::memories::MemoryScope], &str, &ai6::directorates::registry::limits::MemoryLimits) -> core::result::Result<ai6::directorates::m::memories::MemorySearch, ai6::directorates::m::memories::MemoryRefusal>
+pub fn ai6::directorates::m::memories::summaries_for_a_model(&[ai6::directorates::registry::memories::MemoryHeader], ai6::bounds::Limit, impl core::ops::function::Fn(&serde_json::value::Value) -> alloc::string::String) -> core::option::Option<alloc::string::String>
+pub fn ai6::directorates::m::memories::write_entry(&dyn ai6::directorates::registry::memories::MemoryStore, &dyn ai6::directorates::m::memories::MemoryCaller, ai6::directorates::m::memories::MemoryChange) -> core::result::Result<ai6::directorates::m::memories::MemoryOutcome, ai6::directorates::m::memories::MemoryRefusal>
 pub mod ai6::directorates::m::mission
 pub enum ai6::directorates::m::mission::MissionError
 pub ai6::directorates::m::mission::MissionError::AlreadyExists
@@ -2001,7 +2084,6 @@ pub trait ai6::directorates::m::reports::ReportReader
 pub fn ai6::directorates::m::reports::ReportReader::assesses(&self, &ai6::directorates::registry::reports::ReportScope) -> bool
 pub fn ai6::directorates::m::reports::ReportReader::filed(&self, &ai6::directorates::registry::reports::ReportFiler) -> bool
 pub fn ai6::directorates::m::reports::ReportReader::read_in(&self, &str) -> bool
-pub fn ai6::directorates::m::reports::ReportReader::reads_known_scope(&self, &ai6::directorates::registry::reports::ReportScope) -> bool
 pub fn ai6::directorates::m::reports::ReportReader::reads_scope(&self, &ai6::directorates::registry::reports::ReportScope) -> bool
 pub fn ai6::directorates::m::reports::ReportReader::subjects(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn ai6::directorates::m::reports::new_report_id() -> alloc::string::String
@@ -2694,6 +2776,8 @@ pub ai6::directorates::m::unex_limits::LoginTable::address_window: ai6::bounds::
 pub ai6::directorates::m::unex_limits::LoginTable::forget_every: u64
 pub ai6::directorates::m::unex_limits::LoginTable::name_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::unex_limits::LoginTable::name_window: ai6::bounds::Seconds
+pub ai6::directorates::m::unex_limits::LoginTable::pending_seconds: ai6::bounds::Seconds
+pub ai6::directorates::m::unex_limits::LoginTable::pending_tries: u64
 impl core::default::Default for ai6::directorates::m::unex_limits::LoginTable
 pub fn ai6::directorates::m::unex_limits::LoginTable::default() -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::unex_limits::TextLimits
@@ -2930,6 +3014,7 @@ pub const ai6::directorates::medical::exposure::REVIEW: &str
 pub const ai6::directorates::medical::exposure::STATION_REPORT: &str
 pub fn ai6::directorates::medical::exposure::cable_source(&str, ai6::bounds::Limit) -> alloc::string::String
 pub fn ai6::directorates::medical::exposure::issue_source(&str, ai6::bounds::Limit) -> alloc::string::String
+pub fn ai6::directorates::medical::exposure::memory_source(&str, ai6::bounds::Limit) -> alloc::string::String
 pub fn ai6::directorates::medical::exposure::product_source(&str, ai6::bounds::Limit) -> alloc::string::String
 pub fn ai6::directorates::medical::exposure::report_source(&str, ai6::bounds::Limit) -> alloc::string::String
 pub fn ai6::directorates::medical::exposure::tool_source(&str, ai6::bounds::Limit) -> alloc::string::String
@@ -5242,6 +5327,18 @@ pub fn ai6::directorates::registry::store::FileRegistry::put_clearance_grant(&se
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant_if(&self, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
+pub trait ai6::directorates::registry::backend::FactorStore
+pub fn ai6::directorates::registry::backend::FactorStore::factor_documents(&self, &str) -> core::io::error::Result<alloc::vec::Vec<(alloc::string::String, alloc::string::String)>>
+pub fn ai6::directorates::registry::backend::FactorStore::factor_retain(&self, &str, &mut ai6::directorates::registry::factors::FactorKeep<'_>) -> core::io::error::Result<usize>
+pub fn ai6::directorates::registry::backend::FactorStore::factor_update(&self, &str, &str, &mut ai6::directorates::registry::factors::FactorEdit<'_>) -> core::io::error::Result<()>
+impl ai6::directorates::registry::factors::FactorStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::factor_documents(&self, &str) -> core::io::error::Result<alloc::vec::Vec<(alloc::string::String, alloc::string::String)>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::factor_retain(&self, &str, &mut ai6::directorates::registry::factors::FactorKeep<'_>) -> core::io::error::Result<usize>
+pub fn ai6::directorates::registry::sql::SqlRegistry::factor_update(&self, &str, &str, &mut ai6::directorates::registry::factors::FactorEdit<'_>) -> core::io::error::Result<()>
+impl ai6::directorates::registry::factors::FactorStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::factor_documents(&self, &str) -> core::io::error::Result<alloc::vec::Vec<(alloc::string::String, alloc::string::String)>>
+pub fn ai6::directorates::registry::store::FileRegistry::factor_retain(&self, &str, &mut ai6::directorates::registry::factors::FactorKeep<'_>) -> core::io::error::Result<usize>
+pub fn ai6::directorates::registry::store::FileRegistry::factor_update(&self, &str, &str, &mut ai6::directorates::registry::factors::FactorEdit<'_>) -> core::io::error::Result<()>
 pub trait ai6::directorates::registry::backend::HoldStore
 pub fn ai6::directorates::registry::backend::HoldStore::holds(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::holds::RosterHold>>
 pub fn ai6::directorates::registry::backend::HoldStore::lift_hold(&self, &str, &str, core::option::Option<&ai6::directorates::m::roster::RouteRef>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::holds::RosterHold>>
@@ -5290,6 +5387,42 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::logbook(&self, &str) -> co
 impl ai6::directorates::registry::logbook::LogbookStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::file_station_report(&self, &ai6::directorates::registry::logbook::StationReport) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::logbook(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::logbook::StationReport>>
+pub trait ai6::directorates::registry::backend::MemoryStore
+pub fn ai6::directorates::registry::backend::MemoryStore::drop_memory_proposal(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::backend::MemoryStore::forget_memory(&self, &str, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::directorates::registry::backend::MemoryStore::memory(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::backend::MemoryStore::memory_candidates(&self, &[ai6::directorates::registry::memories::MemoryScope], &[alloc::string::String]) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::backend::MemoryStore::memory_headers(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>>
+pub fn ai6::directorates::registry::backend::MemoryStore::memory_limits(&self) -> ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::directorates::registry::backend::MemoryStore::memory_proposal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryProposal>>
+pub fn ai6::directorates::registry::backend::MemoryStore::memory_proposals(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>>
+pub fn ai6::directorates::registry::backend::MemoryStore::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::backend::MemoryStore::propose_memory(&self, &ai6::directorates::registry::memories::MemoryProposal) -> core::result::Result<(), ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::directorates::registry::backend::MemoryStore::write_memory(&self, ai6::directorates::registry::memories::MemoryEntry, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
+impl ai6::directorates::registry::memories::MemoryStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::drop_memory_proposal(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::forget_memory(&self, &str, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_candidates(&self, &[ai6::directorates::registry::memories::MemoryScope], &[alloc::string::String]) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_headers(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_limits(&self) -> ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_proposal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryProposal>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_proposals(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::propose_memory(&self, &ai6::directorates::registry::memories::MemoryProposal) -> core::result::Result<(), ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::write_memory(&self, ai6::directorates::registry::memories::MemoryEntry, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
+impl ai6::directorates::registry::memories::MemoryStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::drop_memory_proposal(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::forget_memory(&self, &str, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::directorates::registry::store::FileRegistry::memory(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::memory_candidates(&self, &[ai6::directorates::registry::memories::MemoryScope], &[alloc::string::String]) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::memory_headers(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>>
+pub fn ai6::directorates::registry::store::FileRegistry::memory_limits(&self) -> ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::directorates::registry::store::FileRegistry::memory_proposal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryProposal>>
+pub fn ai6::directorates::registry::store::FileRegistry::memory_proposals(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>>
+pub fn ai6::directorates::registry::store::FileRegistry::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::propose_memory(&self, &ai6::directorates::registry::memories::MemoryProposal) -> core::result::Result<(), ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::directorates::registry::store::FileRegistry::write_memory(&self, ai6::directorates::registry::memories::MemoryEntry, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
 pub trait ai6::directorates::registry::backend::MissionIssueStore
 pub fn ai6::directorates::registry::backend::MissionIssueStore::active_issue_links(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueLink>>
 pub fn ai6::directorates::registry::backend::MissionIssueStore::adopt_outbox_send(&self, &str, u64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
@@ -5428,8 +5561,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::store::FileRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
-pub trait ai6::directorates::registry::backend::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::api_keys::ApiKeyStore + ai6::directorates::registry::principals::PrincipalStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::knowledge::KnowledgeStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::reports::ReportStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::RunContextStore + ai6::directorates::registry::runs::RunStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::charges::ChargeStore + core::marker::Send + core::marker::Sync
-impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::knowledge::KnowledgeStore + ai6::directorates::registry::api_keys::ApiKeyStore + ai6::directorates::registry::principals::PrincipalStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::reports::ReportStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::RunContextStore + ai6::directorates::registry::runs::RunStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::charges::ChargeStore + core::marker::Send + core::marker::Sync
+pub trait ai6::directorates::registry::backend::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::api_keys::ApiKeyStore + ai6::directorates::registry::principals::PrincipalStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::factors::FactorStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::knowledge::KnowledgeStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::reports::ReportStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::RunContextStore + ai6::directorates::registry::runs::RunStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::charges::ChargeStore + core::marker::Send + core::marker::Sync
+impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::factors::FactorStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::knowledge::KnowledgeStore + ai6::directorates::registry::api_keys::ApiKeyStore + ai6::directorates::registry::principals::PrincipalStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::reports::ReportStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::RunContextStore + ai6::directorates::registry::runs::RunStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::charges::ChargeStore + core::marker::Send + core::marker::Sync
 pub trait ai6::directorates::registry::backend::ReportStore
 pub fn ai6::directorates::registry::backend::ReportStore::change_report(&self, &str, ai6::directorates::registry::reports::ReportChange<'_>) -> core::io::error::Result<ai6::directorates::registry::reports::Report>
 pub fn ai6::directorates::registry::backend::ReportStore::file_report(&self, &ai6::directorates::registry::reports::Report) -> core::io::error::Result<()>
@@ -6194,6 +6327,25 @@ pub fn ai6::directorates::registry::decisions::VerifyingDecision<'a>::word(&self
 pub fn ai6::directorates::registry::decisions::check_verifying(&core::option::Option<ai6::directorates::registry::runs::RunRecord>, &str) -> core::result::Result<(), ai6::directorates::registry::runs::RunError>
 pub fn ai6::directorates::registry::decisions::decide(&dyn ai6::directorates::registry::backend::RegistryBackend, &ai6::directorates::registry::decisions::VerifyingDecision<'_>) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
 pub fn ai6::directorates::registry::decisions::recommend(&dyn ai6::directorates::registry::backend::RegistryBackend, &ai6::directorates::registry::decisions::VerifyingDecision<'_>) -> core::result::Result<ai6::directorates::registry::runs::RunRecord, ai6::directorates::registry::runs::RunError>
+pub mod ai6::directorates::registry::factors
+#[non_exhaustive] pub enum ai6::directorates::registry::factors::FactorChange
+pub ai6::directorates::registry::factors::FactorChange::Keep
+pub ai6::directorates::registry::factors::FactorChange::Put(alloc::string::String)
+pub ai6::directorates::registry::factors::FactorChange::Remove
+pub trait ai6::directorates::registry::factors::FactorStore
+pub fn ai6::directorates::registry::factors::FactorStore::factor_documents(&self, &str) -> core::io::error::Result<alloc::vec::Vec<(alloc::string::String, alloc::string::String)>>
+pub fn ai6::directorates::registry::factors::FactorStore::factor_retain(&self, &str, &mut ai6::directorates::registry::factors::FactorKeep<'_>) -> core::io::error::Result<usize>
+pub fn ai6::directorates::registry::factors::FactorStore::factor_update(&self, &str, &str, &mut ai6::directorates::registry::factors::FactorEdit<'_>) -> core::io::error::Result<()>
+impl ai6::directorates::registry::factors::FactorStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::factor_documents(&self, &str) -> core::io::error::Result<alloc::vec::Vec<(alloc::string::String, alloc::string::String)>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::factor_retain(&self, &str, &mut ai6::directorates::registry::factors::FactorKeep<'_>) -> core::io::error::Result<usize>
+pub fn ai6::directorates::registry::sql::SqlRegistry::factor_update(&self, &str, &str, &mut ai6::directorates::registry::factors::FactorEdit<'_>) -> core::io::error::Result<()>
+impl ai6::directorates::registry::factors::FactorStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::factor_documents(&self, &str) -> core::io::error::Result<alloc::vec::Vec<(alloc::string::String, alloc::string::String)>>
+pub fn ai6::directorates::registry::store::FileRegistry::factor_retain(&self, &str, &mut ai6::directorates::registry::factors::FactorKeep<'_>) -> core::io::error::Result<usize>
+pub fn ai6::directorates::registry::store::FileRegistry::factor_update(&self, &str, &str, &mut ai6::directorates::registry::factors::FactorEdit<'_>) -> core::io::error::Result<()>
+pub type ai6::directorates::registry::factors::FactorEdit<'a> = (dyn core::ops::function::FnMut(core::option::Option<&str>) -> core::io::error::Result<ai6::directorates::registry::factors::FactorChange> + 'a)
+pub type ai6::directorates::registry::factors::FactorKeep<'a> = (dyn core::ops::function::FnMut(&str, &str) -> bool + 'a)
 pub mod ai6::directorates::registry::holds
 #[non_exhaustive] pub struct ai6::directorates::registry::holds::RosterHold
 pub ai6::directorates::registry::holds::RosterHold::agent: alloc::string::String
@@ -6401,6 +6553,20 @@ impl ai6::directorates::registry::limits::LogbookLimits
 pub fn ai6::directorates::registry::limits::LogbookLimits::record_bytes(&self) -> ai6::bounds::Limit
 impl core::default::Default for ai6::directorates::registry::limits::LogbookLimits
 pub fn ai6::directorates::registry::limits::LogbookLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::directorates::registry::limits::MemoryLimits
+pub ai6::directorates::registry::limits::MemoryLimits::compartments: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::MemoryLimits::content_bytes: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::MemoryLimits::entries: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::MemoryLimits::index_bytes: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::MemoryLimits::name_bytes: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::MemoryLimits::proposals: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::MemoryLimits::query_bytes: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::MemoryLimits::scope_bytes: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::MemoryLimits::search_results: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::MemoryLimits::summary_bytes: ai6::bounds::Limit
+pub ai6::directorates::registry::limits::MemoryLimits::versions: ai6::bounds::Limit
+impl core::default::Default for ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::directorates::registry::limits::MemoryLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::limits::PrincipalLimits
 pub ai6::directorates::registry::limits::PrincipalLimits::groups: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::PrincipalLimits::principals: ai6::bounds::Limit
@@ -6443,6 +6609,7 @@ pub ai6::directorates::registry::limits::RegistryLimits::held: ai6::directorates
 pub ai6::directorates::registry::limits::RegistryLimits::holds: ai6::directorates::registry::limits::HoldLimits
 pub ai6::directorates::registry::limits::RegistryLimits::issues: ai6::directorates::registry::limits::IssueLimits
 pub ai6::directorates::registry::limits::RegistryLimits::logbook: ai6::directorates::registry::limits::LogbookLimits
+pub ai6::directorates::registry::limits::RegistryLimits::memories: ai6::directorates::registry::limits::MemoryLimits
 pub ai6::directorates::registry::limits::RegistryLimits::principals: ai6::directorates::registry::limits::PrincipalLimits
 pub ai6::directorates::registry::limits::RegistryLimits::proposals: ai6::directorates::registry::limits::ProposalLimits
 pub ai6::directorates::registry::limits::RegistryLimits::quarantine: ai6::directorates::registry::limits::QuarantineLimits
@@ -6461,7 +6628,6 @@ pub fn ai6::directorates::registry::limits::RegistryLimits::weakenings(&self) ->
 #[non_exhaustive] pub struct ai6::directorates::registry::limits::ReportLimits
 pub ai6::directorates::registry::limits::ReportLimits::index_bytes: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::ReportLimits::keep_closed: ai6::bounds::TimeLimit
-pub ai6::directorates::registry::limits::ReportLimits::knowledge_text_bytes: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::ReportLimits::links: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::ReportLimits::name_bytes: ai6::bounds::Limit
 pub ai6::directorates::registry::limits::ReportLimits::page: ai6::bounds::Limit
@@ -6593,6 +6759,114 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::logbook(&self, &str) -> co
 impl ai6::directorates::registry::logbook::LogbookStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::file_station_report(&self, &ai6::directorates::registry::logbook::StationReport) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::logbook(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::logbook::StationReport>>
+pub mod ai6::directorates::registry::memories
+#[non_exhaustive] pub enum ai6::directorates::registry::memories::MemoryError
+pub ai6::directorates::registry::memories::MemoryError::Changed
+pub ai6::directorates::registry::memories::MemoryError::Changed::revision: u64
+pub ai6::directorates::registry::memories::MemoryError::Full(alloc::string::String)
+pub ai6::directorates::registry::memories::MemoryError::Invalid(alloc::string::String)
+pub ai6::directorates::registry::memories::MemoryError::Io(core::io::error::Error)
+pub ai6::directorates::registry::memories::MemoryError::Missing
+impl core::convert::From<ai6::directorates::registry::memories::MemoryError> for ai6::directorates::m::memories::MemoryRefusal
+pub fn ai6::directorates::m::memories::MemoryRefusal::from(ai6::directorates::registry::memories::MemoryError) -> Self
+impl core::convert::From<core::io::error::Error> for ai6::directorates::registry::memories::MemoryError
+pub fn ai6::directorates::registry::memories::MemoryError::from(core::io::error::Error) -> Self
+impl core::error::Error for ai6::directorates::registry::memories::MemoryError
+impl core::fmt::Display for ai6::directorates::registry::memories::MemoryError
+pub fn ai6::directorates::registry::memories::MemoryError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::directorates::registry::memories::MemoryScope
+pub ai6::directorates::registry::memories::MemoryScope::Global
+pub ai6::directorates::registry::memories::MemoryScope::Operation(alloc::string::String)
+pub ai6::directorates::registry::memories::MemoryScope::Person(alloc::string::String)
+impl ai6::directorates::registry::memories::MemoryScope
+pub fn ai6::directorates::registry::memories::MemoryScope::parse(&str) -> core::option::Option<Self>
+impl core::fmt::Display for ai6::directorates::registry::memories::MemoryScope
+pub fn ai6::directorates::registry::memories::MemoryScope::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl serde_core::ser::Serialize for ai6::directorates::registry::memories::MemoryScope
+pub fn ai6::directorates::registry::memories::MemoryScope::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+impl<'de> serde_core::de::Deserialize<'de> for ai6::directorates::registry::memories::MemoryScope
+pub fn ai6::directorates::registry::memories::MemoryScope::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+#[non_exhaustive] pub struct ai6::directorates::registry::memories::MemoryEntry
+pub ai6::directorates::registry::memories::MemoryEntry::content: alloc::string::String
+pub ai6::directorates::registry::memories::MemoryEntry::header: ai6::directorates::registry::memories::MemoryHeader
+impl ai6::directorates::registry::memories::MemoryEntry
+pub fn ai6::directorates::registry::memories::MemoryEntry::behind(self, impl core::iter::traits::collect::IntoIterator<Item = alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::memories::MemoryEntry::new(ai6::directorates::registry::memories::MemoryScope, core::option::Option<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, ai6::directorates::registry::memories::MemorySource, f64) -> Self
+pub fn ai6::directorates::registry::memories::MemoryEntry::validate(&self, &ai6::directorates::registry::limits::MemoryLimits) -> core::result::Result<(), alloc::string::String>
+pub fn ai6::directorates::registry::memories::MemoryEntry::with_id(alloc::string::String, ai6::directorates::registry::memories::MemoryScope, core::option::Option<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, ai6::directorates::registry::memories::MemorySource, f64) -> Self
+#[non_exhaustive] pub struct ai6::directorates::registry::memories::MemoryHeader
+pub ai6::directorates::registry::memories::MemoryHeader::bytes: u64
+pub ai6::directorates::registry::memories::MemoryHeader::compartments: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::memories::MemoryHeader::created_at: f64
+pub ai6::directorates::registry::memories::MemoryHeader::id: alloc::string::String
+pub ai6::directorates::registry::memories::MemoryHeader::name: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::memories::MemoryHeader::revision: u64
+pub ai6::directorates::registry::memories::MemoryHeader::scope: ai6::directorates::registry::memories::MemoryScope
+pub ai6::directorates::registry::memories::MemoryHeader::source: ai6::directorates::registry::memories::MemorySource
+pub ai6::directorates::registry::memories::MemoryHeader::summary: alloc::string::String
+pub ai6::directorates::registry::memories::MemoryHeader::updated_at: f64
+pub ai6::directorates::registry::memories::MemoryHeader::updated_by: alloc::string::String
+#[non_exhaustive] pub struct ai6::directorates::registry::memories::MemoryProposal
+pub ai6::directorates::registry::memories::MemoryProposal::at: f64
+pub ai6::directorates::registry::memories::MemoryProposal::compartments: core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub ai6::directorates::registry::memories::MemoryProposal::content: alloc::string::String
+pub ai6::directorates::registry::memories::MemoryProposal::forget: bool
+pub ai6::directorates::registry::memories::MemoryProposal::id: alloc::string::String
+pub ai6::directorates::registry::memories::MemoryProposal::name: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::memories::MemoryProposal::scope: ai6::directorates::registry::memories::MemoryScope
+pub ai6::directorates::registry::memories::MemoryProposal::source: ai6::directorates::registry::memories::MemorySource
+pub ai6::directorates::registry::memories::MemoryProposal::summary: alloc::string::String
+pub ai6::directorates::registry::memories::MemoryProposal::target: core::option::Option<(alloc::string::String, u64)>
+impl ai6::directorates::registry::memories::MemoryProposal
+pub fn ai6::directorates::registry::memories::MemoryProposal::new(ai6::directorates::registry::memories::MemoryScope, core::option::Option<(alloc::string::String, u64)>, core::option::Option<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, core::option::Option<alloc::vec::Vec<alloc::string::String>>, ai6::directorates::registry::memories::MemorySource, f64) -> Self
+pub fn ai6::directorates::registry::memories::MemoryProposal::validate(&self, &ai6::directorates::registry::limits::MemoryLimits) -> core::result::Result<(), alloc::string::String>
+#[non_exhaustive] pub struct ai6::directorates::registry::memories::MemorySource
+pub ai6::directorates::registry::memories::MemorySource::by: alloc::string::String
+pub ai6::directorates::registry::memories::MemorySource::exposures: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::memories::MemorySource::run: core::option::Option<alloc::string::String>
+impl ai6::directorates::registry::memories::MemorySource
+pub fn ai6::directorates::registry::memories::MemorySource::exposed(&self) -> bool
+pub fn ai6::directorates::registry::memories::MemorySource::exposed_by(self, impl core::iter::traits::collect::IntoIterator<Item = alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::memories::MemorySource::new(impl core::convert::Into<alloc::string::String>, core::option::Option<alloc::string::String>) -> Self
+pub trait ai6::directorates::registry::memories::MemoryStore
+pub fn ai6::directorates::registry::memories::MemoryStore::drop_memory_proposal(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::memories::MemoryStore::forget_memory(&self, &str, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::directorates::registry::memories::MemoryStore::memory(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::memories::MemoryStore::memory_candidates(&self, &[ai6::directorates::registry::memories::MemoryScope], &[alloc::string::String]) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::memories::MemoryStore::memory_headers(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>>
+pub fn ai6::directorates::registry::memories::MemoryStore::memory_limits(&self) -> ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::directorates::registry::memories::MemoryStore::memory_proposal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryProposal>>
+pub fn ai6::directorates::registry::memories::MemoryStore::memory_proposals(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>>
+pub fn ai6::directorates::registry::memories::MemoryStore::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::memories::MemoryStore::propose_memory(&self, &ai6::directorates::registry::memories::MemoryProposal) -> core::result::Result<(), ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::directorates::registry::memories::MemoryStore::write_memory(&self, ai6::directorates::registry::memories::MemoryEntry, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
+impl ai6::directorates::registry::memories::MemoryStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::drop_memory_proposal(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::forget_memory(&self, &str, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_candidates(&self, &[ai6::directorates::registry::memories::MemoryScope], &[alloc::string::String]) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_headers(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_limits(&self) -> ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_proposal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryProposal>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_proposals(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::propose_memory(&self, &ai6::directorates::registry::memories::MemoryProposal) -> core::result::Result<(), ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::write_memory(&self, ai6::directorates::registry::memories::MemoryEntry, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
+impl ai6::directorates::registry::memories::MemoryStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::drop_memory_proposal(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::forget_memory(&self, &str, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::directorates::registry::store::FileRegistry::memory(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::memory_candidates(&self, &[ai6::directorates::registry::memories::MemoryScope], &[alloc::string::String]) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::memory_headers(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>>
+pub fn ai6::directorates::registry::store::FileRegistry::memory_limits(&self) -> ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::directorates::registry::store::FileRegistry::memory_proposal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryProposal>>
+pub fn ai6::directorates::registry::store::FileRegistry::memory_proposals(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>>
+pub fn ai6::directorates::registry::store::FileRegistry::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::propose_memory(&self, &ai6::directorates::registry::memories::MemoryProposal) -> core::result::Result<(), ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::directorates::registry::store::FileRegistry::write_memory(&self, ai6::directorates::registry::memories::MemoryEntry, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::directorates::registry::memories::is_memory_id(&str) -> bool
+pub fn ai6::directorates::registry::memories::matching(alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>, &[alloc::string::String]) -> alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>
+pub fn ai6::directorates::registry::memories::search_terms(&str) -> alloc::vec::Vec<alloc::string::String>
 pub mod ai6::directorates::registry::mission_ids
 pub struct ai6::directorates::registry::mission_ids::MissionEntry
 impl ai6::directorates::registry::mission_ids::MissionEntry
@@ -7775,6 +8049,10 @@ impl ai6::directorates::registry::contexts::RunContextStore for ai6::directorate
 pub fn ai6::directorates::registry::sql::SqlRegistry::conversation_contexts(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::contexts::RunContext>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::file_run_context(&self, &ai6::directorates::registry::contexts::RunContext) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::run_context(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::contexts::RunContext>>
+impl ai6::directorates::registry::factors::FactorStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::factor_documents(&self, &str) -> core::io::error::Result<alloc::vec::Vec<(alloc::string::String, alloc::string::String)>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::factor_retain(&self, &str, &mut ai6::directorates::registry::factors::FactorKeep<'_>) -> core::io::error::Result<usize>
+pub fn ai6::directorates::registry::sql::SqlRegistry::factor_update(&self, &str, &str, &mut ai6::directorates::registry::factors::FactorEdit<'_>) -> core::io::error::Result<()>
 impl ai6::directorates::registry::holds::HoldStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::holds(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::holds::RosterHold>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::lift_hold(&self, &str, &str, core::option::Option<&ai6::directorates::m::roster::RouteRef>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::holds::RosterHold>>
@@ -7788,6 +8066,18 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::write_report(&self, &ai6::
 impl ai6::directorates::registry::logbook::LogbookStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::file_station_report(&self, &ai6::directorates::registry::logbook::StationReport) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::logbook(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::logbook::StationReport>>
+impl ai6::directorates::registry::memories::MemoryStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::drop_memory_proposal(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::forget_memory(&self, &str, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_candidates(&self, &[ai6::directorates::registry::memories::MemoryScope], &[alloc::string::String]) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_headers(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_limits(&self) -> ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_proposal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryProposal>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_proposals(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::propose_memory(&self, &ai6::directorates::registry::memories::MemoryProposal) -> core::result::Result<(), ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::write_memory(&self, ai6::directorates::registry::memories::MemoryEntry, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
 impl ai6::directorates::registry::mission_issues::MissionIssueStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::active_issue_links(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueLink>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::adopt_outbox_send(&self, &str, u64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
@@ -8084,6 +8374,10 @@ impl ai6::directorates::registry::contexts::RunContextStore for ai6::directorate
 pub fn ai6::directorates::registry::store::FileRegistry::conversation_contexts(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::contexts::RunContext>>
 pub fn ai6::directorates::registry::store::FileRegistry::file_run_context(&self, &ai6::directorates::registry::contexts::RunContext) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::run_context(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::contexts::RunContext>>
+impl ai6::directorates::registry::factors::FactorStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::factor_documents(&self, &str) -> core::io::error::Result<alloc::vec::Vec<(alloc::string::String, alloc::string::String)>>
+pub fn ai6::directorates::registry::store::FileRegistry::factor_retain(&self, &str, &mut ai6::directorates::registry::factors::FactorKeep<'_>) -> core::io::error::Result<usize>
+pub fn ai6::directorates::registry::store::FileRegistry::factor_update(&self, &str, &str, &mut ai6::directorates::registry::factors::FactorEdit<'_>) -> core::io::error::Result<()>
 impl ai6::directorates::registry::holds::HoldStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::holds(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::holds::RosterHold>>
 pub fn ai6::directorates::registry::store::FileRegistry::lift_hold(&self, &str, &str, core::option::Option<&ai6::directorates::m::roster::RouteRef>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::holds::RosterHold>>
@@ -8097,6 +8391,18 @@ pub fn ai6::directorates::registry::store::FileRegistry::write_report(&self, &ai
 impl ai6::directorates::registry::logbook::LogbookStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::file_station_report(&self, &ai6::directorates::registry::logbook::StationReport) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::logbook(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::logbook::StationReport>>
+impl ai6::directorates::registry::memories::MemoryStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::drop_memory_proposal(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::forget_memory(&self, &str, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::directorates::registry::store::FileRegistry::memory(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::memory_candidates(&self, &[ai6::directorates::registry::memories::MemoryScope], &[alloc::string::String]) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::memory_headers(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>>
+pub fn ai6::directorates::registry::store::FileRegistry::memory_limits(&self) -> ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::directorates::registry::store::FileRegistry::memory_proposal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryProposal>>
+pub fn ai6::directorates::registry::store::FileRegistry::memory_proposals(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>>
+pub fn ai6::directorates::registry::store::FileRegistry::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::propose_memory(&self, &ai6::directorates::registry::memories::MemoryProposal) -> core::result::Result<(), ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::directorates::registry::store::FileRegistry::write_memory(&self, ai6::directorates::registry::memories::MemoryEntry, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
 impl ai6::directorates::registry::mission_issues::MissionIssueStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::active_issue_links(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueLink>>
 pub fn ai6::directorates::registry::store::FileRegistry::adopt_outbox_send(&self, &str, u64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
@@ -10247,6 +10553,32 @@ pub ai6::LoginRequestAction::AddStation::station: alloc::string::String
 pub ai6::LoginRequestAction::RemoveStation
 pub ai6::LoginRequestAction::RemoveStation::station: alloc::string::String
 pub ai6::LoginRequestAction::SignOutAndForget
+#[non_exhaustive] pub enum ai6::MemoryError
+pub ai6::MemoryError::Changed
+pub ai6::MemoryError::Changed::revision: u64
+pub ai6::MemoryError::Full(alloc::string::String)
+pub ai6::MemoryError::Invalid(alloc::string::String)
+pub ai6::MemoryError::Io(core::io::error::Error)
+pub ai6::MemoryError::Missing
+impl core::convert::From<ai6::directorates::registry::memories::MemoryError> for ai6::directorates::m::memories::MemoryRefusal
+pub fn ai6::directorates::m::memories::MemoryRefusal::from(ai6::directorates::registry::memories::MemoryError) -> Self
+impl core::convert::From<core::io::error::Error> for ai6::directorates::registry::memories::MemoryError
+pub fn ai6::directorates::registry::memories::MemoryError::from(core::io::error::Error) -> Self
+impl core::error::Error for ai6::directorates::registry::memories::MemoryError
+impl core::fmt::Display for ai6::directorates::registry::memories::MemoryError
+pub fn ai6::directorates::registry::memories::MemoryError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::MemoryScope
+pub ai6::MemoryScope::Global
+pub ai6::MemoryScope::Operation(alloc::string::String)
+pub ai6::MemoryScope::Person(alloc::string::String)
+impl ai6::directorates::registry::memories::MemoryScope
+pub fn ai6::directorates::registry::memories::MemoryScope::parse(&str) -> core::option::Option<Self>
+impl core::fmt::Display for ai6::directorates::registry::memories::MemoryScope
+pub fn ai6::directorates::registry::memories::MemoryScope::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl serde_core::ser::Serialize for ai6::directorates::registry::memories::MemoryScope
+pub fn ai6::directorates::registry::memories::MemoryScope::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+impl<'de> serde_core::de::Deserialize<'de> for ai6::directorates::registry::memories::MemoryScope
+pub fn ai6::directorates::registry::memories::MemoryScope::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
 #[non_exhaustive] pub enum ai6::NetworkPolicy
 pub ai6::NetworkPolicy::Denied
 pub ai6::NetworkPolicy::Limited
@@ -12148,6 +12480,10 @@ impl ai6::directorates::registry::contexts::RunContextStore for ai6::directorate
 pub fn ai6::directorates::registry::store::FileRegistry::conversation_contexts(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::contexts::RunContext>>
 pub fn ai6::directorates::registry::store::FileRegistry::file_run_context(&self, &ai6::directorates::registry::contexts::RunContext) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::run_context(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::contexts::RunContext>>
+impl ai6::directorates::registry::factors::FactorStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::factor_documents(&self, &str) -> core::io::error::Result<alloc::vec::Vec<(alloc::string::String, alloc::string::String)>>
+pub fn ai6::directorates::registry::store::FileRegistry::factor_retain(&self, &str, &mut ai6::directorates::registry::factors::FactorKeep<'_>) -> core::io::error::Result<usize>
+pub fn ai6::directorates::registry::store::FileRegistry::factor_update(&self, &str, &str, &mut ai6::directorates::registry::factors::FactorEdit<'_>) -> core::io::error::Result<()>
 impl ai6::directorates::registry::holds::HoldStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::holds(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::holds::RosterHold>>
 pub fn ai6::directorates::registry::store::FileRegistry::lift_hold(&self, &str, &str, core::option::Option<&ai6::directorates::m::roster::RouteRef>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::holds::RosterHold>>
@@ -12161,6 +12497,18 @@ pub fn ai6::directorates::registry::store::FileRegistry::write_report(&self, &ai
 impl ai6::directorates::registry::logbook::LogbookStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::file_station_report(&self, &ai6::directorates::registry::logbook::StationReport) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::logbook(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::logbook::StationReport>>
+impl ai6::directorates::registry::memories::MemoryStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::drop_memory_proposal(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::forget_memory(&self, &str, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::directorates::registry::store::FileRegistry::memory(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::memory_candidates(&self, &[ai6::directorates::registry::memories::MemoryScope], &[alloc::string::String]) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::memory_headers(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>>
+pub fn ai6::directorates::registry::store::FileRegistry::memory_limits(&self) -> ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::directorates::registry::store::FileRegistry::memory_proposal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryProposal>>
+pub fn ai6::directorates::registry::store::FileRegistry::memory_proposals(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>>
+pub fn ai6::directorates::registry::store::FileRegistry::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::propose_memory(&self, &ai6::directorates::registry::memories::MemoryProposal) -> core::result::Result<(), ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::directorates::registry::store::FileRegistry::write_memory(&self, ai6::directorates::registry::memories::MemoryEntry, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
 impl ai6::directorates::registry::mission_issues::MissionIssueStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::active_issue_links(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueLink>>
 pub fn ai6::directorates::registry::store::FileRegistry::adopt_outbox_send(&self, &str, u64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
@@ -12589,6 +12937,8 @@ pub ai6::LoginTable::address_window: ai6::bounds::Seconds
 pub ai6::LoginTable::forget_every: u64
 pub ai6::LoginTable::name_bytes: ai6::bounds::Limit
 pub ai6::LoginTable::name_window: ai6::bounds::Seconds
+pub ai6::LoginTable::pending_seconds: ai6::bounds::Seconds
+pub ai6::LoginTable::pending_tries: u64
 impl core::default::Default for ai6::directorates::m::unex_limits::LoginTable
 pub fn ai6::directorates::m::unex_limits::LoginTable::default() -> Self
 pub struct ai6::MadeTheater
@@ -12608,6 +12958,54 @@ pub fn ai6::directorates::q::McpServer::name(&self) -> &str
 pub struct ai6::McpServerRef
 pub ai6::McpServerRef::env_prefix: alloc::string::String
 pub ai6::McpServerRef::name: alloc::string::String
+#[non_exhaustive] pub struct ai6::MemoryEntry
+pub ai6::MemoryEntry::content: alloc::string::String
+pub ai6::MemoryEntry::header: ai6::directorates::registry::memories::MemoryHeader
+impl ai6::directorates::registry::memories::MemoryEntry
+pub fn ai6::directorates::registry::memories::MemoryEntry::behind(self, impl core::iter::traits::collect::IntoIterator<Item = alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::memories::MemoryEntry::new(ai6::directorates::registry::memories::MemoryScope, core::option::Option<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, ai6::directorates::registry::memories::MemorySource, f64) -> Self
+pub fn ai6::directorates::registry::memories::MemoryEntry::validate(&self, &ai6::directorates::registry::limits::MemoryLimits) -> core::result::Result<(), alloc::string::String>
+pub fn ai6::directorates::registry::memories::MemoryEntry::with_id(alloc::string::String, ai6::directorates::registry::memories::MemoryScope, core::option::Option<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, ai6::directorates::registry::memories::MemorySource, f64) -> Self
+#[non_exhaustive] pub struct ai6::MemoryHeader
+pub ai6::MemoryHeader::bytes: u64
+pub ai6::MemoryHeader::compartments: alloc::vec::Vec<alloc::string::String>
+pub ai6::MemoryHeader::created_at: f64
+pub ai6::MemoryHeader::id: alloc::string::String
+pub ai6::MemoryHeader::name: core::option::Option<alloc::string::String>
+pub ai6::MemoryHeader::revision: u64
+pub ai6::MemoryHeader::scope: ai6::directorates::registry::memories::MemoryScope
+pub ai6::MemoryHeader::source: ai6::directorates::registry::memories::MemorySource
+pub ai6::MemoryHeader::summary: alloc::string::String
+pub ai6::MemoryHeader::updated_at: f64
+pub ai6::MemoryHeader::updated_by: alloc::string::String
+#[non_exhaustive] pub struct ai6::MemoryLimits
+pub ai6::MemoryLimits::compartments: ai6::bounds::Limit
+pub ai6::MemoryLimits::content_bytes: ai6::bounds::Limit
+pub ai6::MemoryLimits::entries: ai6::bounds::Limit
+pub ai6::MemoryLimits::index_bytes: ai6::bounds::Limit
+pub ai6::MemoryLimits::name_bytes: ai6::bounds::Limit
+pub ai6::MemoryLimits::proposals: ai6::bounds::Limit
+pub ai6::MemoryLimits::query_bytes: ai6::bounds::Limit
+pub ai6::MemoryLimits::scope_bytes: ai6::bounds::Limit
+pub ai6::MemoryLimits::search_results: ai6::bounds::Limit
+pub ai6::MemoryLimits::summary_bytes: ai6::bounds::Limit
+pub ai6::MemoryLimits::versions: ai6::bounds::Limit
+impl core::default::Default for ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::directorates::registry::limits::MemoryLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::MemoryProposal
+pub ai6::MemoryProposal::at: f64
+pub ai6::MemoryProposal::compartments: core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub ai6::MemoryProposal::content: alloc::string::String
+pub ai6::MemoryProposal::forget: bool
+pub ai6::MemoryProposal::id: alloc::string::String
+pub ai6::MemoryProposal::name: core::option::Option<alloc::string::String>
+pub ai6::MemoryProposal::scope: ai6::directorates::registry::memories::MemoryScope
+pub ai6::MemoryProposal::source: ai6::directorates::registry::memories::MemorySource
+pub ai6::MemoryProposal::summary: alloc::string::String
+pub ai6::MemoryProposal::target: core::option::Option<(alloc::string::String, u64)>
+impl ai6::directorates::registry::memories::MemoryProposal
+pub fn ai6::directorates::registry::memories::MemoryProposal::new(ai6::directorates::registry::memories::MemoryScope, core::option::Option<(alloc::string::String, u64)>, core::option::Option<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, core::option::Option<alloc::vec::Vec<alloc::string::String>>, ai6::directorates::registry::memories::MemorySource, f64) -> Self
+pub fn ai6::directorates::registry::memories::MemoryProposal::validate(&self, &ai6::directorates::registry::limits::MemoryLimits) -> core::result::Result<(), alloc::string::String>
 pub struct ai6::MemoryProvider
 impl ai6::directorates::m::config::MemoryProvider
 pub fn ai6::directorates::m::config::MemoryProvider::new(ai6::directorates::m::roster::Roster) -> Self
@@ -12629,6 +13027,14 @@ pub fn ai6::directorates::m::config::MemoryProvider::revision(&self, &str) -> co
 pub fn ai6::directorates::m::config::MemoryProvider::scopes(&self) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::config::ConfigScope>, ai6::directorates::m::roster::RosterError>
 impl core::fmt::Debug for ai6::directorates::m::config::MemoryProvider
 pub fn ai6::directorates::m::config::MemoryProvider::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::MemorySource
+pub ai6::MemorySource::by: alloc::string::String
+pub ai6::MemorySource::exposures: alloc::vec::Vec<alloc::string::String>
+pub ai6::MemorySource::run: core::option::Option<alloc::string::String>
+impl ai6::directorates::registry::memories::MemorySource
+pub fn ai6::directorates::registry::memories::MemorySource::exposed(&self) -> bool
+pub fn ai6::directorates::registry::memories::MemorySource::exposed_by(self, impl core::iter::traits::collect::IntoIterator<Item = alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::memories::MemorySource::new(impl core::convert::Into<alloc::string::String>, core::option::Option<alloc::string::String>) -> Self
 pub struct ai6::MessageContent
 pub ai6::MessageContent::images: alloc::vec::Vec<ai6::directorates::section_00::content::MessageImage>
 pub ai6::MessageContent::text: alloc::string::String
@@ -13147,6 +13553,7 @@ pub ai6::RegistryLimits::held: ai6::directorates::registry::limits::HeldLimits
 pub ai6::RegistryLimits::holds: ai6::directorates::registry::limits::HoldLimits
 pub ai6::RegistryLimits::issues: ai6::directorates::registry::limits::IssueLimits
 pub ai6::RegistryLimits::logbook: ai6::directorates::registry::limits::LogbookLimits
+pub ai6::RegistryLimits::memories: ai6::directorates::registry::limits::MemoryLimits
 pub ai6::RegistryLimits::principals: ai6::directorates::registry::limits::PrincipalLimits
 pub ai6::RegistryLimits::proposals: ai6::directorates::registry::limits::ProposalLimits
 pub ai6::RegistryLimits::quarantine: ai6::directorates::registry::limits::QuarantineLimits
@@ -14007,6 +14414,10 @@ impl ai6::directorates::registry::contexts::RunContextStore for ai6::directorate
 pub fn ai6::directorates::registry::sql::SqlRegistry::conversation_contexts(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::contexts::RunContext>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::file_run_context(&self, &ai6::directorates::registry::contexts::RunContext) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::run_context(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::contexts::RunContext>>
+impl ai6::directorates::registry::factors::FactorStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::factor_documents(&self, &str) -> core::io::error::Result<alloc::vec::Vec<(alloc::string::String, alloc::string::String)>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::factor_retain(&self, &str, &mut ai6::directorates::registry::factors::FactorKeep<'_>) -> core::io::error::Result<usize>
+pub fn ai6::directorates::registry::sql::SqlRegistry::factor_update(&self, &str, &str, &mut ai6::directorates::registry::factors::FactorEdit<'_>) -> core::io::error::Result<()>
 impl ai6::directorates::registry::holds::HoldStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::holds(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::holds::RosterHold>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::lift_hold(&self, &str, &str, core::option::Option<&ai6::directorates::m::roster::RouteRef>) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::holds::RosterHold>>
@@ -14020,6 +14431,18 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::write_report(&self, &ai6::
 impl ai6::directorates::registry::logbook::LogbookStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::file_station_report(&self, &ai6::directorates::registry::logbook::StationReport) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::logbook(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::logbook::StationReport>>
+impl ai6::directorates::registry::memories::MemoryStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::drop_memory_proposal(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::forget_memory(&self, &str, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_candidates(&self, &[ai6::directorates::registry::memories::MemoryScope], &[alloc::string::String]) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_headers(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_limits(&self) -> ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_proposal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryProposal>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_proposals(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::propose_memory(&self, &ai6::directorates::registry::memories::MemoryProposal) -> core::result::Result<(), ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::write_memory(&self, ai6::directorates::registry::memories::MemoryEntry, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
 impl ai6::directorates::registry::mission_issues::MissionIssueStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::active_issue_links(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::mission_issues::IssueLink>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::adopt_outbox_send(&self, &str, u64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::mission_issues::OutboxEntry>>
@@ -15358,6 +15781,42 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::logbook(&self, &str) -> co
 impl ai6::directorates::registry::logbook::LogbookStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::file_station_report(&self, &ai6::directorates::registry::logbook::StationReport) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::logbook(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::logbook::StationReport>>
+pub trait ai6::MemoryStore
+pub fn ai6::MemoryStore::drop_memory_proposal(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::MemoryStore::forget_memory(&self, &str, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::MemoryStore::memory(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::MemoryStore::memory_candidates(&self, &[ai6::directorates::registry::memories::MemoryScope], &[alloc::string::String]) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::MemoryStore::memory_headers(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>>
+pub fn ai6::MemoryStore::memory_limits(&self) -> ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::MemoryStore::memory_proposal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryProposal>>
+pub fn ai6::MemoryStore::memory_proposals(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>>
+pub fn ai6::MemoryStore::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::MemoryStore::propose_memory(&self, &ai6::directorates::registry::memories::MemoryProposal) -> core::result::Result<(), ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::MemoryStore::write_memory(&self, ai6::directorates::registry::memories::MemoryEntry, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
+impl ai6::directorates::registry::memories::MemoryStore for ai6::directorates::registry::sql::SqlRegistry
+pub fn ai6::directorates::registry::sql::SqlRegistry::drop_memory_proposal(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::forget_memory(&self, &str, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_candidates(&self, &[ai6::directorates::registry::memories::MemoryScope], &[alloc::string::String]) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_headers(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_limits(&self) -> ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_proposal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryProposal>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_proposals(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::propose_memory(&self, &ai6::directorates::registry::memories::MemoryProposal) -> core::result::Result<(), ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::write_memory(&self, ai6::directorates::registry::memories::MemoryEntry, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
+impl ai6::directorates::registry::memories::MemoryStore for ai6::directorates::registry::store::FileRegistry
+pub fn ai6::directorates::registry::store::FileRegistry::drop_memory_proposal(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::forget_memory(&self, &str, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::directorates::registry::store::FileRegistry::memory(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::memory_candidates(&self, &[ai6::directorates::registry::memories::MemoryScope], &[alloc::string::String]) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::memory_headers(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryHeader>>
+pub fn ai6::directorates::registry::store::FileRegistry::memory_limits(&self) -> ai6::directorates::registry::limits::MemoryLimits
+pub fn ai6::directorates::registry::store::FileRegistry::memory_proposal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::memories::MemoryProposal>>
+pub fn ai6::directorates::registry::store::FileRegistry::memory_proposals(&self, &ai6::directorates::registry::memories::MemoryScope) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryProposal>>
+pub fn ai6::directorates::registry::store::FileRegistry::memory_versions(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::memories::MemoryEntry>>
+pub fn ai6::directorates::registry::store::FileRegistry::propose_memory(&self, &ai6::directorates::registry::memories::MemoryProposal) -> core::result::Result<(), ai6::directorates::registry::memories::MemoryError>
+pub fn ai6::directorates::registry::store::FileRegistry::write_memory(&self, ai6::directorates::registry::memories::MemoryEntry, core::option::Option<u64>) -> core::result::Result<ai6::directorates::registry::memories::MemoryEntry, ai6::directorates::registry::memories::MemoryError>
 pub trait ai6::PrincipalStore
 pub fn ai6::PrincipalStore::note_principal(&self, &ai6::directorates::registry::principals::PrincipalRecord) -> core::io::error::Result<bool>
 pub fn ai6::PrincipalStore::principal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::principals::PrincipalRecord>>
@@ -15388,8 +15847,8 @@ pub fn ai6::directorates::registry::store::FileRegistry::quarantine_agent(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::quarantines(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::quarantine::Quarantine>>
 pub fn ai6::directorates::registry::store::FileRegistry::record_incident(&self, &str, ai6::directorates::medical::quarantine::Incident) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::medical::quarantine::Incident>>
 pub fn ai6::directorates::registry::store::FileRegistry::release_quarantine(&self, &str, core::option::Option<&str>) -> core::io::error::Result<bool>
-pub trait ai6::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::api_keys::ApiKeyStore + ai6::directorates::registry::principals::PrincipalStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::knowledge::KnowledgeStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::reports::ReportStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::RunContextStore + ai6::directorates::registry::runs::RunStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::charges::ChargeStore + core::marker::Send + core::marker::Sync
-impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::knowledge::KnowledgeStore + ai6::directorates::registry::api_keys::ApiKeyStore + ai6::directorates::registry::principals::PrincipalStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::reports::ReportStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::RunContextStore + ai6::directorates::registry::runs::RunStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::charges::ChargeStore + core::marker::Send + core::marker::Sync
+pub trait ai6::RegistryBackend: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::api_keys::ApiKeyStore + ai6::directorates::registry::principals::PrincipalStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::factors::FactorStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::knowledge::KnowledgeStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::reports::ReportStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::RunContextStore + ai6::directorates::registry::runs::RunStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::charges::ChargeStore + core::marker::Send + core::marker::Sync
+impl<T> ai6::directorates::registry::backend::RegistryBackend for T where T: ai6::directorates::registry::backend::Limited + ai6::directorates::registry::accounts::AccountStore + ai6::directorates::registry::agent_records::AgentRecordStore + ai6::directorates::registry::store::BriefStore + ai6::directorates::registry::store::StationStore + ai6::directorates::registry::store::AccessTokenStore + ai6::directorates::registry::store::CableStore + ai6::directorates::registry::store::AuditStore + ai6::directorates::registry::store::AgentRoleStore + ai6::directorates::registry::approvals::ApprovalStore + ai6::directorates::registry::assistant_log::AssistantLogStore + ai6::directorates::registry::clearance::ClearanceStore + ai6::directorates::registry::factors::FactorStore + ai6::directorates::registry::holds::HoldStore + ai6::directorates::registry::knowledge::KnowledgeStore + ai6::directorates::registry::api_keys::ApiKeyStore + ai6::directorates::registry::principals::PrincipalStore + ai6::directorates::registry::logbook::LogbookStore + ai6::directorates::registry::memories::MemoryStore + ai6::directorates::registry::mission_issues::MissionIssueStore + ai6::directorates::registry::reviews::MissionReviewStore + ai6::directorates::registry::quarantine::QuarantineStore + ai6::directorates::registry::reports::ReportStore + ai6::directorates::registry::sealed::SealedStore + ai6::directorates::registry::contexts::RunContextStore + ai6::directorates::registry::runs::RunStore + ai6::directorates::registry::sleepers::SleeperStore + ai6::directorates::registry::sources::SourceStore + ai6::directorates::registry::timeline::TimelineStore + ai6::directorates::registry::usage::UsageStore + ai6::directorates::registry::vetting::VettingStore + ai6::directorates::registry::charges::ChargeStore + core::marker::Send + core::marker::Sync
 pub trait ai6::RunContextStore
 pub fn ai6::RunContextStore::conversation_contexts(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::contexts::RunContext>>
 pub fn ai6::RunContextStore::file_run_context(&self, &ai6::directorates::registry::contexts::RunContext) -> core::io::error::Result<()>

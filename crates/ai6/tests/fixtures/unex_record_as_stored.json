@@ -56,7 +56,9 @@
     "address_window": 60.0,
     "forget_every": 256,
     "name_bytes": 64,
-    "name_window": 600.0
+    "name_window": 600.0,
+    "pending_seconds": 300.0,
+    "pending_tries": 5
   },
   "login_tries_per_address": 10,
   "login_tries_per_name": null,
