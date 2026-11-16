@@ -400,6 +400,11 @@ pub struct LoginTable {
     #[schema(title = "Tries at a waiting sign-in's next step")]
     #[map(default = LoginTable::default().pending_tries)]
     pub pending_tries: u64,
+    /// Seconds a sign-in stays fresh enough to replace its person's second factor without a
+    /// code from the one they have.
+    #[schema(title = "A sign-in may replace a second factor for")]
+    #[map(default = LoginTable::default().enrol_fresh_seconds)]
+    pub enrol_fresh_seconds: Seconds,
 }
 
 impl Default for LoginTable {
@@ -411,6 +416,7 @@ impl Default for LoginTable {
             name_window: Seconds::new(600),
             pending_seconds: Seconds::new(300),
             pending_tries: 5,
+            enrol_fresh_seconds: Seconds::new(300),
         }
     }
 }

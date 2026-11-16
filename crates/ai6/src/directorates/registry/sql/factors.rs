@@ -9,6 +9,19 @@ use crate::directorates::registry::factors::{
 use crate::directorates::registry::store::{invalid_data, validate_registry_key};
 
 impl FactorStore for SqlRegistry {
+    fn factor_get(&self, family: &str, key: &str) -> io::Result<Option<String>> {
+        validate_registry_key(family)?;
+        validate_factor_key(key)?;
+        self.read(|tx| {
+            tx.query_opt(
+                "SELECT text FROM ai6_factors WHERE family = $1 AND doc_key = $2",
+                &[family.into(), key.into()],
+            )?
+            .map(|row| row.text(0))
+            .transpose()
+        })
+    }
+
     fn factor_documents(&self, family: &str) -> io::Result<Vec<(String, String)>> {
         validate_registry_key(family)?;
         let rows = self.read(|tx| {

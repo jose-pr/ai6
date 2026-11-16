@@ -54,6 +54,8 @@ pub const DEFAULT_LISTEN: SocketAddr = SocketAddr::V4(std::net::SocketAddrV4::ne
 pub const DEFAULT_POLL: Duration = Duration::from_secs(5);
 /// The fewest bytes a reverse-proxy secret holds unless the file says otherwise.
 pub const DEFAULT_PROXY_SECRET_MIN_BYTES: u64 = 32;
+/// The fewest bytes a one-time code sealing key holds unless the file says otherwise.
+pub const DEFAULT_FACTOR_KEY_MIN_BYTES: u64 = 32;
 /// The loopback listener Universal Exports uses when its bootstrap file names none.
 pub const DEFAULT_UNEX_LISTEN: SocketAddr = SocketAddr::V4(std::net::SocketAddrV4::new(
     std::net::Ipv4Addr::LOCALHOST,
@@ -623,6 +625,10 @@ pub struct UnexSettings {
     /// up or checked. Changing it invalidates every enrolled factor.
     #[schema(title = "One-time code sealing key", sensitive)]
     pub factor_key: Option<SecretRef>,
+    /// The fewest bytes `factor_key` may hold; a shorter key seals nothing, so no factor can be
+    /// set up, and a lower floor is a weakening. Default: 32.
+    #[schema(title = "Shortest one-time code sealing key", format = "bytes")]
+    pub factor_key_min_bytes: Option<u64>,
     /// Where it keeps its state: verified copies of provider libraries, and the Registry when
     /// nothing else names one. Default: the platform's state directory.
     #[schema(title = "Gateway state directory")]
@@ -817,6 +823,15 @@ impl Located<Bootstrap> {
             .unwrap_or(DEFAULT_PROXY_SECRET_MIN_BYTES)
     }
 
+    /// The fewest bytes the one-time code sealing key may hold: `[unex] factor_key_min_bytes`,
+    /// else [`DEFAULT_FACTOR_KEY_MIN_BYTES`].
+    pub fn factor_key_min_bytes(&self) -> u64 {
+        self.value
+            .unex
+            .factor_key_min_bytes
+            .unwrap_or(DEFAULT_FACTOR_KEY_MIN_BYTES)
+    }
+
     /// What the file gives up against the defaults for the gateway, worded for a log line: each
     /// of its secrets read from the environment or written inline, and each `[registry]` or
     /// `[provider]` limit looser than its default.
@@ -835,6 +850,12 @@ impl Located<Bootstrap> {
             if let Some(weakening) = secret.and_then(SecretRef::weakening) {
                 weakened.push(format!("the {what} is {weakening}"));
             }
+        }
+        if self.factor_key_min_bytes() < DEFAULT_FACTOR_KEY_MIN_BYTES {
+            weakened.push(format!(
+                "factor_key_min_bytes {} is looser than the default {DEFAULT_FACTOR_KEY_MIN_BYTES}",
+                self.factor_key_min_bytes()
+            ));
         }
         if self.proxy_secret_min_bytes() < DEFAULT_PROXY_SECRET_MIN_BYTES {
             weakened.push(format!(
@@ -1599,6 +1620,18 @@ mod tests {
         assert_eq!(
             lowered.unex_weakenings(),
             ["proxy_secret_min_bytes 8 is looser than the default 32"]
+        );
+    }
+
+    #[test]
+    fn the_gateway_reads_the_factor_key_floor_and_reports_a_lower_one() {
+        let default = located("");
+        assert_eq!(default.factor_key_min_bytes(), 32);
+        let lowered = located("[unex]\nfactor_key_min_bytes = 8\n");
+        assert_eq!(lowered.factor_key_min_bytes(), 8);
+        assert_eq!(
+            lowered.unex_weakenings(),
+            ["factor_key_min_bytes 8 is looser than the default 32"]
         );
     }
 

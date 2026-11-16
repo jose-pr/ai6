@@ -210,15 +210,7 @@ pub struct ai6::bootstrap::Located<T>
 pub ai6::bootstrap::Located::path: core::option::Option<std::path::PathBuf>
 pub ai6::bootstrap::Located::value: T
 impl ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>
-pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::identity_dir(&self) -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
-pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::listen(&self) -> core::net::socket_addr::SocketAddr
-pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::provider_location(&self) -> core::result::Result<alloc::string::String, ai6::bootstrap::BootstrapError>
-pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::registry_location(&self) -> core::result::Result<alloc::string::String, ai6::bootstrap::BootstrapError>
-pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::registry_password(&self) -> core::option::Option<&ai6::bootstrap::SecretRef>
-pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::secrets_dir(&self) -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
-pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::state_dir(&self) -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
-pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
-impl ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>
+pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::factor_key_min_bytes(&self) -> u64
 pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::liaison_identity(&self) -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
 pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::pages_dir(&self) -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
 pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::pages_listen(&self) -> core::net::socket_addr::SocketAddr
@@ -227,6 +219,15 @@ pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::unex_listen(&self) ->
 pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::unex_registry_location(&self) -> core::result::Result<alloc::string::String, ai6::bootstrap::BootstrapError>
 pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::unex_state_dir(&self) -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
 pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::unex_weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
+impl ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>
+pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::identity_dir(&self) -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
+pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::listen(&self) -> core::net::socket_addr::SocketAddr
+pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::provider_location(&self) -> core::result::Result<alloc::string::String, ai6::bootstrap::BootstrapError>
+pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::registry_location(&self) -> core::result::Result<alloc::string::String, ai6::bootstrap::BootstrapError>
+pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::registry_password(&self) -> core::option::Option<&ai6::bootstrap::SecretRef>
+pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::secrets_dir(&self) -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
+pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::state_dir(&self) -> core::result::Result<std::path::PathBuf, ai6::bootstrap::BootstrapError>
+pub fn ai6::bootstrap::Located<ai6::bootstrap::Bootstrap>::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl<T> ai6::bootstrap::Located<T>
 pub fn ai6::bootstrap::Located<T>::dir(&self) -> core::option::Option<&std::path::Path>
 #[non_exhaustive] pub struct ai6::bootstrap::PagesSettings
@@ -285,6 +286,7 @@ pub ai6::bootstrap::StationSettings::state_dir: core::option::Option<std::path::
 pub ai6::bootstrap::UnexSettings::access: ai6::bootstrap::AccessSettings
 pub ai6::bootstrap::UnexSettings::ca_file: core::option::Option<std::path::PathBuf>
 pub ai6::bootstrap::UnexSettings::factor_key: core::option::Option<ai6::bootstrap::SecretRef>
+pub ai6::bootstrap::UnexSettings::factor_key_min_bytes: core::option::Option<u64>
 pub ai6::bootstrap::UnexSettings::liaison: ai6::bootstrap::LiaisonSettings
 pub ai6::bootstrap::UnexSettings::listen: core::option::Option<core::net::socket_addr::SocketAddr>
 pub ai6::bootstrap::UnexSettings::pages: ai6::bootstrap::PagesSettings
@@ -300,6 +302,7 @@ pub ai6::bootstrap::UnexSettings::url: core::option::Option<alloc::string::Strin
 pub ai6::bootstrap::UnexTlsSettings::certificate: core::option::Option<std::path::PathBuf>
 pub ai6::bootstrap::UnexTlsSettings::key: core::option::Option<std::path::PathBuf>
 pub const ai6::bootstrap::CONFIG_ENV: &str
+pub const ai6::bootstrap::DEFAULT_FACTOR_KEY_MIN_BYTES: u64
 pub const ai6::bootstrap::DEFAULT_LISTEN: core::net::socket_addr::SocketAddr
 pub const ai6::bootstrap::DEFAULT_PAGES_LISTEN: core::net::socket_addr::SocketAddr
 pub const ai6::bootstrap::DEFAULT_POLL: core::time::Duration
@@ -2773,6 +2776,7 @@ impl core::default::Default for ai6::directorates::m::unex_limits::ControlLimits
 pub fn ai6::directorates::m::unex_limits::ControlLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::unex_limits::LoginTable
 pub ai6::directorates::m::unex_limits::LoginTable::address_window: ai6::bounds::Seconds
+pub ai6::directorates::m::unex_limits::LoginTable::enrol_fresh_seconds: ai6::bounds::Seconds
 pub ai6::directorates::m::unex_limits::LoginTable::forget_every: u64
 pub ai6::directorates::m::unex_limits::LoginTable::name_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::unex_limits::LoginTable::name_window: ai6::bounds::Seconds
@@ -4994,6 +4998,7 @@ pub fn ai6::directorates::registry::backend::AccessTokenStore::find_access_token
 pub fn ai6::directorates::registry::backend::AccessTokenStore::find_session_cookie(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::backend::AccessTokenStore::login_by_id(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::backend::AccessTokenStore::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::backend::AccessTokenStore::revoke_person_logins(&self, &str, &[alloc::string::String]) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::backend::AccessTokenStore::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
@@ -5001,6 +5006,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::find_access_token(&self, &
 pub fn ai6::directorates::registry::sql::SqlRegistry::find_session_cookie(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::login_by_id(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_person_logins(&self, &str, &[alloc::string::String]) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::sql::SqlRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
@@ -5008,6 +5014,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::find_access_token(&self
 pub fn ai6::directorates::registry::store::FileRegistry::find_session_cookie(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::login_by_id(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::revoke_person_logins(&self, &str, &[alloc::string::String]) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::store::FileRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 pub trait ai6::directorates::registry::backend::AccountStore
 pub fn ai6::directorates::registry::backend::AccountStore::accounts(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::accounts::AccountState>>
@@ -5329,14 +5336,17 @@ pub fn ai6::directorates::registry::store::FileRegistry::remove_clearance_grant_
 pub fn ai6::directorates::registry::store::FileRegistry::replace_clearance_grant(&self, core::option::Option<&ai6::directorates::registry::clearance::ClearanceGrant>, &ai6::directorates::registry::clearance::ClearanceGrant) -> core::io::error::Result<bool>
 pub trait ai6::directorates::registry::backend::FactorStore
 pub fn ai6::directorates::registry::backend::FactorStore::factor_documents(&self, &str) -> core::io::error::Result<alloc::vec::Vec<(alloc::string::String, alloc::string::String)>>
+pub fn ai6::directorates::registry::backend::FactorStore::factor_get(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::backend::FactorStore::factor_retain(&self, &str, &mut ai6::directorates::registry::factors::FactorKeep<'_>) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::backend::FactorStore::factor_update(&self, &str, &str, &mut ai6::directorates::registry::factors::FactorEdit<'_>) -> core::io::error::Result<()>
 impl ai6::directorates::registry::factors::FactorStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::factor_documents(&self, &str) -> core::io::error::Result<alloc::vec::Vec<(alloc::string::String, alloc::string::String)>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::factor_get(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::factor_retain(&self, &str, &mut ai6::directorates::registry::factors::FactorKeep<'_>) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::sql::SqlRegistry::factor_update(&self, &str, &str, &mut ai6::directorates::registry::factors::FactorEdit<'_>) -> core::io::error::Result<()>
 impl ai6::directorates::registry::factors::FactorStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::factor_documents(&self, &str) -> core::io::error::Result<alloc::vec::Vec<(alloc::string::String, alloc::string::String)>>
+pub fn ai6::directorates::registry::store::FileRegistry::factor_get(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::store::FileRegistry::factor_retain(&self, &str, &mut ai6::directorates::registry::factors::FactorKeep<'_>) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::store::FileRegistry::factor_update(&self, &str, &str, &mut ai6::directorates::registry::factors::FactorEdit<'_>) -> core::io::error::Result<()>
 pub trait ai6::directorates::registry::backend::HoldStore
@@ -6334,14 +6344,17 @@ pub ai6::directorates::registry::factors::FactorChange::Put(alloc::string::Strin
 pub ai6::directorates::registry::factors::FactorChange::Remove
 pub trait ai6::directorates::registry::factors::FactorStore
 pub fn ai6::directorates::registry::factors::FactorStore::factor_documents(&self, &str) -> core::io::error::Result<alloc::vec::Vec<(alloc::string::String, alloc::string::String)>>
+pub fn ai6::directorates::registry::factors::FactorStore::factor_get(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::factors::FactorStore::factor_retain(&self, &str, &mut ai6::directorates::registry::factors::FactorKeep<'_>) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::factors::FactorStore::factor_update(&self, &str, &str, &mut ai6::directorates::registry::factors::FactorEdit<'_>) -> core::io::error::Result<()>
 impl ai6::directorates::registry::factors::FactorStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::factor_documents(&self, &str) -> core::io::error::Result<alloc::vec::Vec<(alloc::string::String, alloc::string::String)>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::factor_get(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::factor_retain(&self, &str, &mut ai6::directorates::registry::factors::FactorKeep<'_>) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::sql::SqlRegistry::factor_update(&self, &str, &str, &mut ai6::directorates::registry::factors::FactorEdit<'_>) -> core::io::error::Result<()>
 impl ai6::directorates::registry::factors::FactorStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::factor_documents(&self, &str) -> core::io::error::Result<alloc::vec::Vec<(alloc::string::String, alloc::string::String)>>
+pub fn ai6::directorates::registry::store::FileRegistry::factor_get(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::store::FileRegistry::factor_retain(&self, &str, &mut ai6::directorates::registry::factors::FactorKeep<'_>) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::store::FileRegistry::factor_update(&self, &str, &str, &mut ai6::directorates::registry::factors::FactorEdit<'_>) -> core::io::error::Result<()>
 pub type ai6::directorates::registry::factors::FactorEdit<'a> = (dyn core::ops::function::FnMut(core::option::Option<&str>) -> core::io::error::Result<ai6::directorates::registry::factors::FactorChange> + 'a)
@@ -8051,6 +8064,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::file_run_context(&self, &a
 pub fn ai6::directorates::registry::sql::SqlRegistry::run_context(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::contexts::RunContext>>
 impl ai6::directorates::registry::factors::FactorStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::factor_documents(&self, &str) -> core::io::error::Result<alloc::vec::Vec<(alloc::string::String, alloc::string::String)>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::factor_get(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::factor_retain(&self, &str, &mut ai6::directorates::registry::factors::FactorKeep<'_>) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::sql::SqlRegistry::factor_update(&self, &str, &str, &mut ai6::directorates::registry::factors::FactorEdit<'_>) -> core::io::error::Result<()>
 impl ai6::directorates::registry::holds::HoldStore for ai6::directorates::registry::sql::SqlRegistry
@@ -8176,6 +8190,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::find_access_token(&self, &
 pub fn ai6::directorates::registry::sql::SqlRegistry::find_session_cookie(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::login_by_id(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_person_logins(&self, &str, &[alloc::string::String]) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::sql::SqlRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AgentRoleStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::agent_role(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::roster::AgentRole>>
@@ -8376,6 +8391,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::file_run_context(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::run_context(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::contexts::RunContext>>
 impl ai6::directorates::registry::factors::FactorStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::factor_documents(&self, &str) -> core::io::error::Result<alloc::vec::Vec<(alloc::string::String, alloc::string::String)>>
+pub fn ai6::directorates::registry::store::FileRegistry::factor_get(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::store::FileRegistry::factor_retain(&self, &str, &mut ai6::directorates::registry::factors::FactorKeep<'_>) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::store::FileRegistry::factor_update(&self, &str, &str, &mut ai6::directorates::registry::factors::FactorEdit<'_>) -> core::io::error::Result<()>
 impl ai6::directorates::registry::holds::HoldStore for ai6::directorates::registry::store::FileRegistry
@@ -8501,6 +8517,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::find_access_token(&self
 pub fn ai6::directorates::registry::store::FileRegistry::find_session_cookie(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::login_by_id(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::revoke_person_logins(&self, &str, &[alloc::string::String]) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::store::FileRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AgentRoleStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::agent_role(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::roster::AgentRole>>
@@ -8625,6 +8642,7 @@ pub fn ai6::directorates::registry::store::AccessTokenStore::find_access_token(&
 pub fn ai6::directorates::registry::store::AccessTokenStore::find_session_cookie(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::AccessTokenStore::login_by_id(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::AccessTokenStore::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::AccessTokenStore::revoke_person_logins(&self, &str, &[alloc::string::String]) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::store::AccessTokenStore::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
@@ -8632,6 +8650,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::find_access_token(&self, &
 pub fn ai6::directorates::registry::sql::SqlRegistry::find_session_cookie(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::login_by_id(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_person_logins(&self, &str, &[alloc::string::String]) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::sql::SqlRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
@@ -8639,6 +8658,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::find_access_token(&self
 pub fn ai6::directorates::registry::store::FileRegistry::find_session_cookie(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::login_by_id(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::revoke_person_logins(&self, &str, &[alloc::string::String]) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::store::FileRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 pub trait ai6::directorates::registry::store::AgentRoleStore
 pub fn ai6::directorates::registry::store::AgentRoleStore::agent_role(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::roster::AgentRole>>
@@ -12482,6 +12502,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::file_run_context(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::run_context(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::contexts::RunContext>>
 impl ai6::directorates::registry::factors::FactorStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::factor_documents(&self, &str) -> core::io::error::Result<alloc::vec::Vec<(alloc::string::String, alloc::string::String)>>
+pub fn ai6::directorates::registry::store::FileRegistry::factor_get(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::store::FileRegistry::factor_retain(&self, &str, &mut ai6::directorates::registry::factors::FactorKeep<'_>) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::store::FileRegistry::factor_update(&self, &str, &str, &mut ai6::directorates::registry::factors::FactorEdit<'_>) -> core::io::error::Result<()>
 impl ai6::directorates::registry::holds::HoldStore for ai6::directorates::registry::store::FileRegistry
@@ -12607,6 +12628,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::find_access_token(&self
 pub fn ai6::directorates::registry::store::FileRegistry::find_session_cookie(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::login_by_id(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::revoke_person_logins(&self, &str, &[alloc::string::String]) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::store::FileRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AgentRoleStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::agent_role(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::roster::AgentRole>>
@@ -12934,6 +12956,7 @@ pub fn ai6::directorates::registry::accounts::LoginState::leased_at(&self, f64) 
 pub fn ai6::directorates::registry::accounts::LoginState::usable_by(&self, &str) -> bool
 #[non_exhaustive] pub struct ai6::LoginTable
 pub ai6::LoginTable::address_window: ai6::bounds::Seconds
+pub ai6::LoginTable::enrol_fresh_seconds: ai6::bounds::Seconds
 pub ai6::LoginTable::forget_every: u64
 pub ai6::LoginTable::name_bytes: ai6::bounds::Limit
 pub ai6::LoginTable::name_window: ai6::bounds::Seconds
@@ -14416,6 +14439,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::file_run_context(&self, &a
 pub fn ai6::directorates::registry::sql::SqlRegistry::run_context(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::contexts::RunContext>>
 impl ai6::directorates::registry::factors::FactorStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::factor_documents(&self, &str) -> core::io::error::Result<alloc::vec::Vec<(alloc::string::String, alloc::string::String)>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::factor_get(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::factor_retain(&self, &str, &mut ai6::directorates::registry::factors::FactorKeep<'_>) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::sql::SqlRegistry::factor_update(&self, &str, &str, &mut ai6::directorates::registry::factors::FactorEdit<'_>) -> core::io::error::Result<()>
 impl ai6::directorates::registry::holds::HoldStore for ai6::directorates::registry::sql::SqlRegistry
@@ -14541,6 +14565,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::find_access_token(&self, &
 pub fn ai6::directorates::registry::sql::SqlRegistry::find_session_cookie(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::login_by_id(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_person_logins(&self, &str, &[alloc::string::String]) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::sql::SqlRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AgentRoleStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::agent_role(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::roster::AgentRole>>
@@ -15327,6 +15352,7 @@ pub fn ai6::AccessTokenStore::find_access_token(&self, &str) -> core::io::error:
 pub fn ai6::AccessTokenStore::find_session_cookie(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::AccessTokenStore::login_by_id(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::AccessTokenStore::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::AccessTokenStore::revoke_person_logins(&self, &str, &[alloc::string::String]) -> core::io::error::Result<usize>
 pub fn ai6::AccessTokenStore::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
@@ -15334,6 +15360,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::find_access_token(&self, &
 pub fn ai6::directorates::registry::sql::SqlRegistry::find_session_cookie(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::login_by_id(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_person_logins(&self, &str, &[alloc::string::String]) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::sql::SqlRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 impl ai6::directorates::registry::store::AccessTokenStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
@@ -15341,6 +15368,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::find_access_token(&self
 pub fn ai6::directorates::registry::store::FileRegistry::find_session_cookie(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::login_by_id(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_access_token(&self, &str) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::revoke_person_logins(&self, &str, &[alloc::string::String]) -> core::io::error::Result<usize>
 pub fn ai6::directorates::registry::store::FileRegistry::store_access_token(&self, &ai6::directorates::m::identity::AccessTokenRecord) -> core::io::error::Result<()>
 pub trait ai6::AccountLogin: core::marker::Send + core::marker::Sync
 pub fn ai6::AccountLogin::login(&self, &ai6::AccountPool, &ai6::Account, &std::path::Path, &str) -> core::result::Result<(), alloc::string::String>

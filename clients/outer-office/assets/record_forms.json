@@ -8156,6 +8156,14 @@
               "title": "Tries at a waiting sign-in's next step",
               "description": "Tries at the next step one waiting sign-in allows before it ends; every try is also counted against the account.",
               "default": 5
+            },
+            "enrol_fresh_seconds": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "A sign-in may replace a second factor for",
+              "description": "Seconds a sign-in stays fresh enough to replace its person's second factor without a code from the one they have.",
+              "default": 300.0
             }
           },
           "additionalProperties": false,
@@ -8167,7 +8175,8 @@
             "address_window": 60.0,
             "name_window": 600.0,
             "pending_seconds": 300.0,
-            "pending_tries": 5
+            "pending_tries": 5,
+            "enrol_fresh_seconds": 300.0
           }
         },
         "text": {

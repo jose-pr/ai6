@@ -1124,6 +1124,7 @@ pending_per_station = 8
 | `name_window` | 600 | **One account name's tries are counted over.** Seconds one account name's tries are counted over. |
 | `pending_seconds` | 300 | **A sign-in waits for its next step.** Seconds a sign-in that has passed its first step waits for the next one. |
 | `pending_tries` | 5 | **Tries at a waiting sign-in's next step.** Tries at the next step one waiting sign-in allows before it ends; every try is also counted against the account. |
+| `enrol_fresh_seconds` | 300 | **A sign-in may replace a second factor for.** Seconds a sign-in stays fresh enough to replace its person's second factor without a code from the one they have. |
 <!-- schema:record.unex.login:end -->
 
 `[text]`

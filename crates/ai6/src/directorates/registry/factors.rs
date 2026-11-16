@@ -43,6 +43,15 @@ pub trait FactorStore {
     /// own errors.
     fn factor_documents(&self, family: &str) -> io::Result<Vec<(String, String)>>;
 
+    /// The document under `key` in `family`, read without a write: no lock is taken for a
+    /// writer's turn and the Registry's revision does not move, so a request that only looks
+    /// costs the shared store nothing.
+    ///
+    /// # Errors
+    ///
+    /// As [`factor_documents`](Self::factor_documents).
+    fn factor_get(&self, family: &str, key: &str) -> io::Result<Option<String>>;
+
     /// Changes the document under `key` in `family`, from what is held there now, as one step.
     /// `edit` may run more than once where the store retries; it must not keep state between
     /// runs.
@@ -110,6 +119,16 @@ impl FileRegistry {
 }
 
 impl FactorStore for FileRegistry {
+    fn factor_get(&self, family: &str, key: &str) -> io::Result<Option<String>> {
+        validate_registry_key(family)?;
+        validate_factor_key(key)?;
+        // A document is replaced whole, so a read needs no lock.
+        Ok(self
+            .read_factor(&self.factor_path(family, key))?
+            .filter(|stored| stored.key == key)
+            .map(|stored| stored.text))
+    }
+
     fn factor_documents(&self, family: &str) -> io::Result<Vec<(String, String)>> {
         validate_registry_key(family)?;
         let _lock = self.lock()?;
@@ -201,8 +220,48 @@ mod tests {
 
     backend_tests!(
         a_document_is_changed_from_what_is_held_and_removed,
-        documents_are_kept_per_family_and_swept_by_what_they_say
+        documents_are_kept_per_family_and_swept_by_what_they_say,
+        a_persons_other_logins_end_and_the_one_kept_goes_on
     );
+
+    fn a_persons_other_logins_end_and_the_one_kept_goes_on(store: &dyn Store) {
+        let registry = store.handle();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        let id = |number: u8| format!("00000000-0000-4000-8000-0000000000{number:02}");
+        let digest = |character: char| character.to_string().repeat(64);
+        let record = |number: u8, person: &str| {
+            crate::AccessTokenRecord::try_new(
+                id(number),
+                digest((b'a' + number) as char),
+                person,
+                now,
+                now + 3600.0,
+                None,
+            )
+            .unwrap()
+        };
+        let cookie = record(0, "person-1").into_session_cookie();
+        let token = record(1, "person-1").in_sign_in(id(0)).unwrap();
+        let other = record(2, "person-1");
+        let someone = record(3, "person-2");
+        for kept in [&cookie, &token, &other, &someone] {
+            registry.store_access_token(kept).unwrap();
+        }
+        let ended = registry
+            .revoke_person_logins("person-1", &[id(0)])
+            .unwrap();
+        assert_eq!(ended, 1, "only the other sign-in");
+        assert!(registry.find_access_token(&digest('b')).unwrap().is_some());
+        assert!(registry.find_access_token(&digest('c')).unwrap().is_none());
+        assert!(registry.find_access_token(&digest('d')).unwrap().is_some());
+        let ended = registry.revoke_person_logins("person-1", &[]).unwrap();
+        assert_eq!(ended, 2, "the cookie and its token");
+        assert!(registry.find_access_token(&digest('b')).unwrap().is_none());
+        assert!(registry.find_access_token(&digest('d')).unwrap().is_some());
+    }
 
     fn put(registry: &dyn FactorStore, family: &str, key: &str, text: &str) {
         registry
@@ -256,6 +315,13 @@ mod tests {
             );
         }
         assert!(registry.factor_documents("../x").is_err());
+        put(registry.as_ref(), "totp", "id-bob", "kept");
+        assert_eq!(
+            registry.factor_get("totp", "id-bob").unwrap().as_deref(),
+            Some("kept")
+        );
+        assert_eq!(registry.factor_get("totp", "id-nobody").unwrap(), None);
+        assert!(registry.factor_get("../x", "k").is_err());
     }
 
     fn documents_are_kept_per_family_and_swept_by_what_they_say(store: &dyn Store) {

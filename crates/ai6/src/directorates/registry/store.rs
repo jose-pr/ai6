@@ -2769,9 +2769,18 @@ pub trait AccessTokenStore {
         token_id: &str,
         expires_at: f64,
     ) -> io::Result<Option<crate::AccessTokenRecord>>;
+
+    /// Revokes every record of `person_id` that stands, except the ones named in `keep` (token
+    /// or session cookie IDs) and the tokens of a sign-in named there; answers how many it
+    /// revoked. A person's other sign-ins end, and the one that asked for it goes on.
+    fn revoke_person_logins(&self, person_id: &str, keep: &[String]) -> io::Result<usize>;
 }
 
 impl AccessTokenStore for FileRegistry {
+    fn revoke_person_logins(&self, person_id: &str, keep: &[String]) -> io::Result<usize> {
+        self.revoke_logins_of(person_id, keep)
+    }
+
     fn store_access_token(&self, record: &crate::AccessTokenRecord) -> io::Result<()> {
         let record = validate_access_token_record(record)?;
         let token_path = self
@@ -2893,6 +2902,42 @@ impl AccessTokenStore for FileRegistry {
 }
 
 impl FileRegistry {
+    fn revoke_logins_of(&self, person_id: &str, keep: &[String]) -> io::Result<usize> {
+        let _registry_lock = self.lock()?;
+        let entries = match fs::read_dir(self.root.join("access-tokens")) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(0),
+            Err(error) => return Err(error),
+        };
+        let now = unix_time()?;
+        let mut revoked = 0;
+        for entry in entries {
+            let path = entry?.path();
+            let Some(token_id) = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(str::to_owned)
+            else {
+                continue;
+            };
+            let Some(record) = self.stored_access_token(&path, &token_id)? else {
+                continue;
+            };
+            if record.person_id() != person_id
+                || record.revoked_at().is_some()
+                || keep.iter().any(|kept| {
+                    kept == record.token_id() || Some(kept.as_str()) == record.sign_in()
+                })
+            {
+                continue;
+            }
+            let bytes = serde_json::to_vec(&revoked_token(&record, now)?).map_err(io::Error::other)?;
+            self.write_atomic(&path, &bytes)?;
+            revoked += 1;
+        }
+        Ok(revoked)
+    }
+
     /// The valid record stored under `digest`, active or not, under the caller's Registry lock.
     fn token_by_digest(&self, digest: &str) -> io::Result<Option<crate::AccessTokenRecord>> {
         let digest_path = self

@@ -589,6 +589,29 @@ mod tests {
     }
 
     #[test]
+    fn a_factor_read_leaves_the_registry_clock_alone_and_a_change_does_not() {
+        use crate::directorates::registry::factors::{FactorChange, FactorStore};
+        on_each_database(|location| {
+            let registry = SqlRegistry::open(location).unwrap();
+            registry
+                .factor_update("pending", "k", &mut |_| Ok(FactorChange::Put("v".to_owned())))
+                .unwrap();
+            let revision = clock_revision(&registry);
+            for key in ["k", "nobody"] {
+                registry.factor_get("pending", key).unwrap();
+            }
+            assert_eq!(clock_revision(&registry), revision, "reads write nothing");
+            registry
+                .factor_update("pending", "nobody", &mut |_| Ok(FactorChange::Keep))
+                .unwrap();
+            assert!(
+                clock_revision(&registry) > revision,
+                "a change that keeps what is held is still a write"
+            );
+        });
+    }
+
+    #[test]
     fn what_a_database_lacks_is_made_when_it_is_opened_and_nothing_else_changes() {
         on_each_database(|location| {
             let station = SqlRegistry::open(location).unwrap();

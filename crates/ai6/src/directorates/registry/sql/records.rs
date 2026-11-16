@@ -30,6 +30,40 @@ use crate::directorates::registry::timeline::{TimelineEvent, TimelineStore};
 use crate::directorates::registry::usage::{UsageStore, add_usage, cost_on_day, parse_ledger};
 
 impl AccessTokenStore for SqlRegistry {
+    fn revoke_person_logins(&self, person_id: &str, keep: &[String]) -> io::Result<usize> {
+        let limit = self.current_limits().tokens.record_bytes;
+        self.write(|tx, revision| {
+            let rows = tx.query("SELECT token_id, record FROM ai6_access_tokens", &[])?;
+            let now = unix_time()?;
+            let mut revoked = 0;
+            for row in rows {
+                let token_id = row.text(0)?;
+                let Some(record) = stored_token(&row.text(1)?, limit) else {
+                    continue;
+                };
+                if record.token_id() != token_id
+                    || record.person_id() != person_id
+                    || record.revoked_at().is_some()
+                    || keep.iter().any(|kept| {
+                        kept == record.token_id() || Some(kept.as_str()) == record.sign_in()
+                    })
+                {
+                    continue;
+                }
+                tx.execute(
+                    "UPDATE ai6_access_tokens SET record = $2, revision = $3 WHERE token_id = $1",
+                    &[
+                        token_id.as_str().into(),
+                        to_json(&revoked_token(&record, now)?)?.into(),
+                        revision.into(),
+                    ],
+                )?;
+                revoked += 1;
+            }
+            Ok(revoked)
+        })
+    }
+
     fn store_access_token(&self, record: &crate::AccessTokenRecord) -> io::Result<()> {
         let record = validate_access_token_record(record)?;
         let text = bounded_json(

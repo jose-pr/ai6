@@ -54,6 +54,7 @@
   "key_ttl": null,
   "login": {
     "address_window": 60.0,
+    "enrol_fresh_seconds": 300.0,
     "forget_every": 256,
     "name_bytes": 64,
     "name_window": 600.0,
