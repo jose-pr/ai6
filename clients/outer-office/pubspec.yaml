@@ -27,6 +27,8 @@ dependencies:
       ref: 0350bae7fef4cef2aa46ce73f1ef6be15983d83b
       path: bindings/dart/guatiao_flutter
   http: ^1.6.0
+  # Draws the provisioning link of a one-time code app as a QR code.
+  qr: ^3.0.2
   material_ui: ^1.1.0
   shared_preferences: ^2.5.5
   # ai6.cfg: TOML, or JSON or YAML when its first line names them.

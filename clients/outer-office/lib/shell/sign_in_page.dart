@@ -69,10 +69,78 @@ class _SignInPageState extends State<SignInPage> {
     _waiting?.cancel();
     _name.dispose();
     _secret.dispose();
+    _code.dispose();
     super.dispose();
   }
 
   bool get _holding => widget.board.loginWait != null;
+
+  final _code = TextEditingController();
+  bool _recovery = false;
+
+  bool get _canSendCode =>
+      !_submitting && !_holding && _code.text.trim().isNotEmpty;
+
+  Future<void> _sendCode() async {
+    if (!_canSendCode) return;
+    setState(() => _submitting = true);
+    final code = _code.text.trim();
+    _code.clear();
+    await widget.board.loginCode(code, recovery: _recovery);
+    if (mounted) setState(() => _submitting = false);
+  }
+
+  /// The step after the password: a code from the authenticator app, or a recovery code.
+  List<Widget> _codeStep() {
+    final tokens = OoTokens.of(context);
+    final border = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(8),
+      borderSide: BorderSide(color: tokens.border),
+    );
+    final canRecover = widget.board.pendingMethods.contains('recovery_code');
+    return [
+      Text(
+        _recovery
+            ? 'Enter one of your recovery codes. Each works once.'
+            : 'Enter the code your authenticator app shows.',
+        key: const ValueKey('sign-in-help'),
+        style: TextStyle(color: tokens.muted),
+      ),
+      const SizedBox(height: 16),
+      TextField(
+        controller: _code,
+        autocorrect: false,
+        enableSuggestions: false,
+        keyboardType: _recovery ? TextInputType.text : TextInputType.number,
+        autofillHints: const [AutofillHints.oneTimeCode],
+        onChanged: (_) => setState(() {}),
+        onSubmitted: (_) => _sendCode(),
+        decoration: InputDecoration(
+          labelText: _recovery ? 'Recovery code' : 'Code',
+          filled: true,
+          fillColor: tokens.raised,
+          border: border,
+          enabledBorder: border,
+          focusedBorder: border.copyWith(
+            borderSide: BorderSide(color: tokens.accent, width: 2),
+          ),
+        ),
+      ),
+      if (canRecover)
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton(
+            onPressed: () => setState(() {
+              _recovery = !_recovery;
+              _code.clear();
+            }),
+            child: Text(
+              _recovery ? 'Use a code from the app' : 'Use a recovery code',
+            ),
+          ),
+        ),
+    ];
+  }
 
   bool get _canSubmit =>
       !_submitting &&
@@ -101,6 +169,7 @@ class _SignInPageState extends State<SignInPage> {
     final tokens = OoTokens.of(context);
     final theme = Theme.of(context);
     final error = _problem;
+    final waiting = widget.board.pendingSignIn != null;
     return Scaffold(
       body: SizedBox.expand(
         child: OoBackdrop(
@@ -132,12 +201,13 @@ class _SignInPageState extends State<SignInPage> {
                       ),
                     ),
                     const SizedBox(height: 20),
-                    if (_methods.password) ..._form(),
-                    if (!_methods.password && _methods.proxy)
+                    if (waiting) ..._codeStep(),
+                    if (!waiting && _methods.password) ..._form(),
+                    if (!waiting && !_methods.password && _methods.proxy)
                       const Text(
                         'Continue with the account authenticated by your organization.',
                       ),
-                    if (!_methods.password && !_methods.proxy)
+                    if (!waiting && !_methods.password && !_methods.proxy)
                       const Text(
                         'This gateway has no sign-in set up. An administrator can configure '
                         'one.',
@@ -153,7 +223,32 @@ class _SignInPageState extends State<SignInPage> {
                         ),
                       ),
                     ],
-                    if (_methods.password) ...[
+                    if (waiting) ...[
+                      const SizedBox(height: 20),
+                      FilledButton(
+                        onPressed: _canSendCode ? _sendCode : null,
+                        child: _submitting
+                            ? const SizedBox.square(
+                                dimension: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Text('Continue'),
+                      ),
+                      const SizedBox(height: 8),
+                      TextButton(
+                        onPressed: _submitting
+                            ? null
+                            : () {
+                                _code.clear();
+                                setState(() => _recovery = false);
+                                widget.board.cancelPendingSignIn();
+                              },
+                        child: const Text('Start again'),
+                      ),
+                    ],
+                    if (!waiting && _methods.password) ...[
                       const SizedBox(height: 20),
                       FilledButton(
                         onPressed: _canSubmit ? _signIn : null,
@@ -167,7 +262,7 @@ class _SignInPageState extends State<SignInPage> {
                             : const Text('Continue'),
                       ),
                     ],
-                    if (_methods.proxy) ...[
+                    if (!waiting && _methods.proxy) ...[
                       SizedBox(height: _methods.password ? 12 : 20),
                       _proxyButton(),
                     ],

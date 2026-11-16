@@ -41,6 +41,7 @@ import 'controls/mission_actions.dart';
 import 'green_ink/green_ink_page.dart';
 import 'held/held_briefs_page.dart';
 import 'issues/linked_issues.dart';
+import 'factors/second_factor_section.dart';
 import 'keys/keys_section.dart';
 import 'pools/pools_page.dart';
 import 'reviews/mission_reviews.dart';
@@ -596,6 +597,15 @@ class MissionBoard extends ChangeNotifier
 
   /// When the login limit lets the next try through, after a `429` that said how long.
   DateTime? loginRetryAt;
+
+  /// The sign-in that has passed its first step and waits for the next, as the gateway named it.
+  String? pendingSignIn;
+
+  /// What the waiting sign-in may be given next: `totp`, `recovery_code`.
+  List<String> pendingMethods = const [];
+
+  /// When the waiting sign-in runs out, by the gateway's own count of seconds.
+  DateTime? pendingEnds;
 
   /// How long the login limit still holds the person off; `null` once it does not.
   Duration? get loginWait {
@@ -3648,6 +3658,9 @@ class MissionBoard extends ChangeNotifier
   }
 
   void _clearBoard() {
+    pendingSignIn = null;
+    pendingMethods = const [];
+    pendingEnds = null;
     accessToken = null;
     _tokenTimer?.cancel();
     _tokenTimer = null;
@@ -3946,6 +3959,66 @@ class MissionBoard extends ChangeNotifier
     await _login(const <String, Object>{});
   }
 
+  /// Takes the sign-in a `202` says waits for its next step.
+  void _waitForNextStep(http.Response response) {
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    pendingSignIn = body['pending'] as String;
+    pendingMethods = (body['methods'] as List<dynamic>).cast<String>();
+    final seconds = (body['expires_in'] as num?)?.toDouble();
+    pendingEnds = seconds == null
+        ? null
+        : ooClock().add(Duration(milliseconds: (seconds * 1000).round()));
+  }
+
+  /// Gives the waiting sign-in its next step: a one-time code, or with [recovery] a recovery
+  /// code. The code goes only to the gateway and is kept nowhere.
+  Future<void> loginCode(String code, {bool recovery = false}) async {
+    final pending = pendingSignIn;
+    if (pending == null) return;
+    loginError = null;
+    loginRetryAt = null;
+    notifyListeners();
+    try {
+      final response = await _client.post(
+        apiOrigin.resolve('/v1/auth/login'),
+        headers: {'content-type': 'application/json'},
+        body: jsonEncode({
+          'pending': pending,
+          'method': recovery ? 'recovery_code' : 'totp',
+          'secret': code,
+        }),
+      );
+      switch (response.statusCode) {
+        case 201:
+          pendingSignIn = null;
+          pendingMethods = const [];
+          pendingEnds = null;
+          await _signedIn(jsonDecode(response.body) as Map<String, dynamic>);
+          return;
+        case 202:
+          _waitForNextStep(response);
+        case 401:
+          loginError =
+              'That code did not work, or the sign-in ran out. Try again, or '
+              'start again.';
+        default:
+          _loginRefused(response, proxy: false);
+      }
+    } on Object {
+      loginError = 'Could not connect to Universal Exports.';
+    }
+    notifyListeners();
+  }
+
+  /// Gives up the waiting sign-in, back to the password.
+  void cancelPendingSignIn() {
+    pendingSignIn = null;
+    pendingMethods = const [];
+    pendingEnds = null;
+    loginError = null;
+    notifyListeners();
+  }
+
   /// What `POST /v1/auth/login` accepts here; [SignInMethods.unknown] when the gateway does
   /// not say, and a try then finds out.
   Future<SignInMethods> loadSignInMethods() async {
@@ -3970,6 +4043,11 @@ class MissionBoard extends ChangeNotifier
         headers: {'content-type': 'application/json'},
         body: jsonEncode(credentials),
       );
+      if (response.statusCode == 202) {
+        _waitForNextStep(response);
+        notifyListeners();
+        return;
+      }
       if (response.statusCode != 201) {
         _loginRefused(response, proxy: credentials.isEmpty);
         notifyListeners();
@@ -7702,6 +7780,8 @@ Future<void> _showOperatorMenu(BuildContext context, MissionBoard board) async {
                   if (!board.demo) ...[
                     const SizedBox(height: 18),
                     KeysSection(board: board),
+                    const SizedBox(height: 18),
+                    SecondFactorSection(board: board),
                   ],
                   const SizedBox(height: 18),
                   _ThemeChooser(board: board),
