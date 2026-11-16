@@ -2001,6 +2001,7 @@ pub trait ai6::directorates::m::reports::ReportReader
 pub fn ai6::directorates::m::reports::ReportReader::assesses(&self, &ai6::directorates::registry::reports::ReportScope) -> bool
 pub fn ai6::directorates::m::reports::ReportReader::filed(&self, &ai6::directorates::registry::reports::ReportFiler) -> bool
 pub fn ai6::directorates::m::reports::ReportReader::read_in(&self, &str) -> bool
+pub fn ai6::directorates::m::reports::ReportReader::reads_known_scope(&self, &ai6::directorates::registry::reports::ReportScope) -> bool
 pub fn ai6::directorates::m::reports::ReportReader::reads_scope(&self, &ai6::directorates::registry::reports::ReportScope) -> bool
 pub fn ai6::directorates::m::reports::ReportReader::subjects(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn ai6::directorates::m::reports::new_report_id() -> alloc::string::String
