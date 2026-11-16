@@ -448,9 +448,7 @@ class _MemoryPageState extends State<MemoryPage> {
                       memorySource(proposal.writtenBy, proposal.exposed),
                       if (!proposal.forget) revealInvisible(proposal.content),
                     ].join('\n'),
-                    style: proposal.exposed
-                        ? TextStyle(color: error)
-                        : null,
+                    style: proposal.exposed ? TextStyle(color: error) : null,
                   ),
                   isThreeLine: true,
                   trailing: Wrap(
@@ -499,7 +497,8 @@ class _MemoryPageState extends State<MemoryPage> {
                   title: Text(revealInvisible(entry.title)),
                   subtitle: Text(
                     [
-                      if (entry.summary.isNotEmpty) revealInvisible(entry.summary),
+                      if (entry.summary.isNotEmpty)
+                        revealInvisible(entry.summary),
                       if (entry.exposed) 'Written after reading outside text',
                       'Revision ${entry.revision}',
                     ].join(' · '),

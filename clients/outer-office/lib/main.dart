@@ -2597,7 +2597,8 @@ class MissionBoard extends ChangeNotifier
   Future<void> forgetMemory(String id, {String? scope}) async {
     if (demo) throw StateError('Memory changes are unavailable in preview.');
     final response = await _userRequest('DELETE', '$_reportsPath/$id');
-    if (![200, 202].contains(response.statusCode)) throw _memoryRefused(response);
+    if (![200, 202].contains(response.statusCode))
+      throw _memoryRefused(response);
   }
 
   /// What Agents proposed for the memory [scope] names that the person may decide, oldest first.
@@ -2626,7 +2627,9 @@ class MissionBoard extends ChangeNotifier
       '$_reportsPath/$id/assessment',
       body: {
         'assessment': approve ? 'accepted' : 'no_action',
-        'reason': approve ? 'Accepted in Outer Office.' : 'Declined in Outer Office.',
+        'reason': approve
+            ? 'Accepted in Outer Office.'
+            : 'Declined in Outer Office.',
       },
     );
     if (response.statusCode != 200) throw _memoryRefused(response);

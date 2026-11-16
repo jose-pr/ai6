@@ -204,7 +204,13 @@ void main() {
     tester,
   ) async {
     final gateway = ReportsGateway([
-      memory(_idPrefs, 'Answers', 'Tables.\n', revision: 3, summary: 'How they like answers'),
+      memory(
+        _idPrefs,
+        'Answers',
+        'Tables.\n',
+        revision: 3,
+        summary: 'How they like answers',
+      ),
       memory(_idCall, 'on-call', 'Ana.\n', summary: 'Who is on call'),
     ]);
     await openMemory(tester, signedIn(gateway));
@@ -394,8 +400,7 @@ void main() {
   });
 
   testWidgets('a memory the gateway cannot list says why', (tester) async {
-    const none =
-        'This gateway keeps no Registry, so it holds no reports.';
+    const none = 'This gateway keeps no Registry, so it holds no reports.';
     final empty = ReportsGateway([])
       ..refuse = (_) =>
           http.Response(jsonEncode({'error': none}), 503, headers: _json);
@@ -469,7 +474,10 @@ void main() {
       expect(find.byKey(const Key('memory-shelf-operation:G')), findsOneWidget);
       expect(find.byKey(const Key('memory-shelf-operation:L')), findsNothing);
       expect(find.text('Memory: Operation G'), findsOneWidget);
-      expect(gateway.requests.first.url.queryParameters['scope'], 'operation:G');
+      expect(
+        gateway.requests.first.url.queryParameters['scope'],
+        'operation:G',
+      );
       expect(find.text('How G deploys'), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('memory-shelf-global')));
@@ -521,7 +529,12 @@ void main() {
     expect(find.text('Waiting for you'), findsOneWidget);
     expect(find.textContaining('agent:007'), findsOneWidget);
     expect(find.textContaining('after reading outside text'), findsOneWidget);
-    expect(gateway.requests.any((request) => request.url.queryParameters['state'] == 'open'), isTrue);
+    expect(
+      gateway.requests.any(
+        (request) => request.url.queryParameters['state'] == 'open',
+      ),
+      isTrue,
+    );
     await tester.tap(find.byTooltip('Approve How G deploys'));
     await tester.pumpAndSettle();
     final decided = gateway.sent('PUT').single;
