@@ -9,6 +9,7 @@ mod attach;
 mod compartments;
 mod keys;
 mod login;
+mod liaison;
 mod reports;
 mod resources;
 mod reviews;
@@ -324,6 +325,12 @@ enum Command {
     Keys {
         #[command(subcommand)]
         command: keys::KeysCommand,
+    },
+    /// Liaison's A2A link as the standard A2A HTTP binding on this machine's loopback, for A2A
+    /// software that knows nothing of links. Needs no sign-in.
+    Liaison {
+        #[command(subcommand)]
+        command: liaison::LiaisonCommand,
     },
     /// List the pool accounts an Operation may draw from: Runs using each, quota used,
     /// until when it is limited and tokens today (needs pool.read on the Operation).
@@ -1553,6 +1560,10 @@ async fn attach_and_exit(
 
 async fn run() -> Result<(), String> {
     let cli = Cli::parse();
+    // The link is proven by key, so nothing here reads the Universal Exports origin or token.
+    if let Command::Liaison { command } = cli.command {
+        return liaison::run(command, cli.ca_file).await;
+    }
     let server = server_url(&origin(cli.server.as_deref(), cli.config.as_deref())?)?;
     let mut builder = Client::builder().redirect(reqwest::redirect::Policy::none());
     for certificate in ca_certificates(cli.ca_file.as_deref(), cli.config.as_deref())? {
@@ -2127,6 +2138,7 @@ async fn run() -> Result<(), String> {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             login::run(&client, &server, &token, command).await?;
         }
+        Command::Liaison { .. } => unreachable!("handled before the origin is read"),
         Command::Keys { command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             keys::run(&client, &server, &token, command).await?;

@@ -394,6 +394,13 @@ dependencies = [
  "ai6-diptel",
  "axum",
  "clap",
+ "coqui-a2a",
+ "coqui-agentic-peer",
+ "coqui-peer",
+ "coqui-peer-tls",
+ "coqui-peer-webcrypto",
+ "coqui-transport",
+ "coqui-transport-web",
  "futures-util",
  "rcgen",
  "reqwest 0.12.28",
@@ -406,6 +413,7 @@ dependencies = [
  "tokio-tungstenite",
  "toml 0.9.12+spec-1.1.0",
  "universal-exports",
+ "url",
  "webpki-root-certs",
 ]
 
