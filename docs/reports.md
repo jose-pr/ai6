@@ -217,9 +217,88 @@ ai6ctl reports assess PROPOSAL-ID accepted --reason "checked"
 
 The routes are `GET /v1/reports?words=&topics=&title=&kind=&scope=` (search), `POST /v1/reports` with a
 known `kind` (filed `201` standing, or `202` waiting for a verdict), `PUT /v1/reports/{id}` with the
-`revision` read, `DELETE /v1/reports/{id}[?revision=N]` and `GET /v1/reports/{id}/versions`. An Agent's
-`reports` tool takes `words`, `kind`, `topics`, `title` and `scope`, and its `file_report` takes `line`
-(the summary), `topics`, `scope`, and `revises` with `revision`.
+`revision` read, `DELETE /v1/reports/{id}[?revision=N]` and `GET /v1/reports/{id}/versions`.
+
+Who may do what is asked at every call, of what is granted at that moment: a removed rule or
+read-in holds from the next call. The cases work the same on the file Registry, SQLite and
+PostgreSQL. A write names the revision it read; titles and summaries may repeat.
+
+### Protected by compartments
+
+A known Report can carry [compartments](compartments.md). They narrow who can see it at all, never
+widen: a reader needs the scope's read and to be read into each of them, so a `global` Report can be
+everyone's in reach and need-to-know in fact. What the compartment grants or covers does not matter
+here, only who is read into it (a person, group or account; an Agent, an Operation or a Mission, at the
+compartment's clearance floor).
+
+- **Hidden means hidden.** To anyone else the Report is not in a search, a listing, a count or a
+  starting context, and reading, changing or forgetting it answers exactly as an ID that does not
+  exist. Its summary is protected with its text, and since titles may repeat, trying to take its title
+  tells nothing.
+- **It fails closed.** A compartment that does not exist, or whose record cannot be read, reads nobody
+  in: the Report is hidden from everyone.
+- **Who sets one.** Only someone read into a compartment adds it to a Report or removes it, and nobody
+  may leave a Report hidden from themselves. A change is audited `memory.compartments`. Writing a
+  protected Report still needs the scope's write.
+
+### What an Agent does with them
+
+A Mission's Agent has `reports`, `read_report`, `file_report` and `forget_report` on its AI6 MCP
+server. It reads its own Operation's knowledge and the global one, and another Operation's through a
+compartment granting `mission.read`, each such read written to the audit log before it is answered. It
+reads no person's memory. What it reads comes back inside `<ai6-data>`, as data. `reports` takes
+`words`, `kind`, `topics`, `title` and `scope`; `file_report` takes `kind` (a known one), `line` (the
+summary), `topics`, `scope`, `compartments`, and `revises` with the `revision` it read to change one;
+`forget_report` takes an ID and optionally a `revision`.
+
+Its write is a proposal that waits for a verdict, unless the Operation lets its clearance write:
+
+```toml
+[operation.G]
+memory_write = "00"   # field or 00; none by default: every Agent proposes
+```
+
+It proposes to the global scope at any clearance, and to no other Operation's. Proposals wait (64 a scope
+by default) for those who decide the scope, who approve (`accepted`) or reject (`no_action`) them in the
+app or with `ai6ctl reports assess`. The tools work from the Run as its Station started it, so they
+answer before the provider's Run ID arrives on its stream.
+
+### Knowledge can carry an attack
+
+An Agent that read an issue, a web page or a Cable can write a note a later Agent trusts. So a known
+Report keeps what marked its writer:
+
+- What an [exposed](medical.md) Run writes stays **marked** with how it was exposed, and so does what it
+  proposes. Accepting a proposal is not an edit: the Report stays marked.
+- Reading a marked Report, or seeing it in a search, marks the reader's Run exposed (`report:<id>`), as
+  a Cable from an exposed sender does, and what that Run writes afterwards is marked in turn.
+  Moneypenny's conversation is never exposed, but one that read a marked Report marks what she writes
+  from it.
+- An Agent's edit keeps the mark. A person's own edit clears it, audited `memory.mark_cleared`.
+
+Every change is audited before it is made (`memory.write`, `memory.forget`, `memory.proposed`, and
+`report.assess` for a verdict), naming the Report and the Run it came from: an Operation's under that
+Operation, where its timeline shows them, the global scope's under `config:memory`, and a person's under
+`config:assistant`. One that cannot be audited is not made.
+
+### In the app
+
+Outer Office's **Memory** page (`app:/memory`, `?scope=global`, `?operation_id=G`) shows the memories
+(Reports of kind `memory`) of one scope at a time, chosen at its top: what Moneypenny keeps of you,
+everyone's, or an Operation's you may read. It lists them, newest change first, with a warning on one an
+exposed Run wrote; searches them; and opens one in a form (title, summary, compartments, text) saved from
+the revision that was opened, or forgotten once you confirm. Where you may change that scope, what Agents
+proposed for it waits at the top, with who asked and their mark, to accept or reject. It reads and
+writes through `/v1/reports` with `kind=memory`.
+
+### Limits
+
+`[registry.limits.reports]` ([Configuration](configuration.md#limits)) holds what one scope may hold of
+knowledge: `knowledge_text_bytes` (256 KiB, a known Report's text; observations keep `text_bytes`, 16 KiB), `scope_entries` (1,024) and `scope_bytes` (8 MiB) standing Reports, `proposals` waiting
+(64), `versions` kept of each (8), `summary_bytes`, `topics`, and for a search `search_results` (50),
+`query_bytes` (4 KiB) and `index_bytes`. Hidden Reports count toward a scope's limits, so a full scope
+refuses the next one even when its writer sees room; the refusal names no count and nothing of what is
+hidden.
 
 ## The Reports page
 

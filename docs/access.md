@@ -138,7 +138,7 @@ that table bound the people kept, a record and a name.
 `access.toml` binds people to roles at a scope. A scope is `*` or `station:<id>`,
 `operation:<id>`, `theater:<id>`, `config:roster` (the roster every Station reads),
 `config:assistant` (Moneypenny's repositories), `config:memory` (the global
-[memory](memories.md)), `config:access` (the global policy) or
+[memory](reports.md#knowledge)), `config:access` (the global policy) or
 `config:accounts` (the accounts) or `config:<family>` (a [configuration family](configuration.md#families) such as `config:charge`); the
 first rule that matches decides, and no match denies. The actions Universal Exports checks
 are `access.manage`, `access.read`, `account.manage`, `agent.configure`, `agent.read`, `approval.class`, `approval.decide`,
@@ -174,7 +174,7 @@ them](assistant.md#your-memory-in-the-app) with no action at all, and nobody els
 (it decides what code that Station runs, so [it is held by the chief](stations.md#approving-a-library-from-outer-office)
 until a role is given it); `assistant.memory.admin` on `config:assistant` lets an administrator read anyone's, each read
 audited `memory.read`, and change none. `memory.write` on `operation:<id>` changes that
-Operation's [memory](memories.md) and decides its Agents' proposals, and on `config:memory` the
+Operation's [memory](reports.md#knowledge) and decides its Agents' proposals, and on `config:memory` the
 global one; reading an Operation's memory takes `mission.read` there.
 
 A rule on an Operation reaches the Operations under it: Universal Exports names a request's

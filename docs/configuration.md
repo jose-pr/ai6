@@ -442,25 +442,6 @@ it.
 | `finding_bytes` | 1 KiB | **Longest finding.** Bytes of one finding. |
 <!-- schema:record.registry.limits.logbook:end -->
 
-`[registry.limits.memories]`: what one scope of memory may hold: a person's, an Operation's or the
-global one.
-
-<!-- schema:record.registry.limits.memories:begin -->
-| Key | Default | Meaning |
-| --- | --- | --- |
-| `content_bytes` | 256 KiB | **Longest entry.** Bytes of one entry's content. |
-| `entries` | 1,024 | **Entries in a scope.** Entries in one scope. |
-| `scope_bytes` | 8 MiB | **All the entries of a scope.** Bytes of every entry's name, summary and content in one scope. |
-| `versions` | 8 | **Prior versions of an entry.** Prior versions kept of one entry; forgetting the entry removes them. `0` keeps none. |
-| `summary_bytes` | 1 KiB | **Longest summary.** Bytes of an entry's one-line summary. |
-| `name_bytes` | 256 | **Longest name or author.** Bytes of an entry's name, or of who wrote it. |
-| `compartments` | 16 | **Compartments on an entry.** Compartments on one entry, each at most `name_bytes`. |
-| `index_bytes` | 512 KiB | **Words of an entry in the text index.** Bytes of an entry's distinct words a database's text index holds. A word past it is found only by a search that matched another word of the entry, and PostgreSQL refuses an index of 1 MiB or more for one entry. |
-| `search_results` | 50 | **Entries a search answers.** Entries one search answers. |
-| `query_bytes` | 4 KiB | **Longest search.** Bytes of what one search asks for. |
-| `proposals` | 64 | **Proposals waiting in a scope.** Agents' proposals waiting for a person in one scope. |
-<!-- schema:record.registry.limits.memories:end -->
-
 `[registry.limits.proposals]`
 
 <!-- schema:record.registry.limits.proposals:begin -->
@@ -488,9 +469,10 @@ global one.
 <!-- schema:record.registry.limits.reports:begin -->
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `record_bytes` | 64 KiB | **Largest Report.** Bytes of one Report record. |
+| `record_bytes` | 2 MiB | **Largest Report.** Bytes of one Report record. |
 | `reports` | 100,000 | Reports kept. |
 | `text_bytes` | 16 KiB | **Longest Report text.** Bytes of a Report's text. |
+| `knowledge_text_bytes` | 256 KiB | **Longest knowledge text.** Bytes of the text of a memory, tradecraft, a rule or a contact. |
 | `name_bytes` | 256 | **Longest title or name.** Bytes of a Report's kind and title, and of each name on it: filer, links, compartments. |
 | `links` | 64 | **Links on a Report.** Links on one Report. |
 | `page` | 1,000 | **Reports in one list.** Reports one list returns. |

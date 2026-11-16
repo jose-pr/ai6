@@ -397,71 +397,64 @@ refused.
 
 ## Her memory
 
-Moneypenny remembers each person in rows of the Registry, with nothing to set up: no repository,
-no Station and no clone stand behind it, so she has it on every Station and it survives each of
-them. An entry has an ID (a generated UUID, what every tool and route names it by), a one-line
-summary saying what it is for, an optional name, its content, and who wrote it and when. Names
-and summaries may repeat. Each new harness starts with the newest summaries of hers and then of the
-global memory (what the person may see of it), fenced as data
-(`[assistant.gateway] memory_context_bytes`, 8 KiB, and whatever the job's own bound leaves), and
-she reads what she needs:
+Moneypenny remembers each person as [Reports](reports.md#knowledge) of kind `memory` in the scope
+`person:<id>`, with nothing to set up: no repository, no Station and no clone stand behind it, so she
+has it on every Station and it survives each of them. A memory has an ID (a generated UUID, what every
+tool and route names it by), a title, a one-line summary saying what it is for, its text, and who wrote
+it and when. Titles and summaries may repeat. Each new harness starts with the newest summaries of hers
+and then of the global scope (what the person may see of it), fenced as data
+(`[assistant.gateway] memory_context_bytes`, 8 KiB, and whatever the job's own bound leaves), and she
+reads what she needs:
 
 | Tool | What it does |
 | --- | --- |
-| `memory_search` | Finds entries by the words in their name, summary or content, best first, in her memory of the person, the global memory and the Operations the person may read, and answers their IDs, names and summaries |
-| `memory_read` | One entry's content and revision, fenced as data |
-| `memory_write` | Keeps something: a new entry, or a change to one that names the revision she read. In her memory of the person at once; in an Operation's or the global [memory](memories.md) a proposal a person who may change it decides |
-| `memory_forget` | Forgets one entry, with its prior versions, at once or as a proposal as a write |
+| `reports` | With `words`, `kind`, `topics`, `title` or `scope`: finds Reports by the words in their title, summary, topics or text, best first, in her memory of the person, the global scope and the Operations the person may read, and answers their IDs, kinds, titles and summaries. With none of them it lists the Reports waiting for an assessment, as above |
+| `read_report` | One Report's text and revision, fenced as data |
+| `file_report` | Keeps something: a new Report (a memory unless she names another known kind), or a change to one that names the revision she read. In her memory of the person at once; in an Operation's or the global [scope](reports.md#knowledge) a proposal a person who may change it decides |
+| `forget_report` | Forgets one memory, with its prior revisions, at once or as a proposal as a write; tradecraft, a rule or a contact is retired instead, and stays on record |
 
-A search counts words, not parts of words, and needs only one of them: entries holding more of
-them rank first, then those holding them in the name or summary, then the newest. It answers the
-same on every Registry, since the database's own index (FTS5 on SQLite, `tsvector` on PostgreSQL,
-a scan on the file Registry) only finds the candidates.
+A search counts words, not parts of words, and needs only one of them: Reports holding more of them
+rank first, then those holding them in the title, summary or topics, then the newest. It answers the
+same on every Registry, since the database's own index (FTS5 on SQLite, `tsvector` on PostgreSQL, a scan
+on the file Registry) only finds the candidates.
 
-What she keeps of you needs nobody's confirmation, and you see it happen: the conversation shows
-the summary and the diff as it is written. Her conversation is never exposed, but once she has
-read an entry an [exposed Run wrote](memories.md#a-memory-can-carry-an-attack), whatever she
-writes in that conversation carries its mark. A change is refused when the entry has moved on from the
-revision she read (another conversation's change, or your own edit), so nothing written meanwhile
-is lost: she reads it again and makes the change from what it holds now.
+What she keeps of you needs nobody's confirmation, and you see it happen: the conversation shows the
+title and the diff as it is written. Her conversation is never exposed, but once she has read a Report an
+[exposed Run wrote](reports.md#knowledge-can-carry-an-attack), whatever she writes in that conversation
+carries its mark. A change is refused when the Report has moved on from the revision she read (another
+conversation's change, or your own edit), so nothing written meanwhile is lost: she reads it again and
+makes the change from what it holds now.
 
 ## Your memory in the app
 
-What she remembers about you is yours to read and correct. In the app, **Ask Moneypenny**'s
-menu opens **Her memory of you**: your entries with who wrote each, a search, and a form to add,
-edit and forget one (after you confirm). The same page shows the global memory and each
-Operation's you may read ([Memories](memories.md#in-the-app)).
+What she remembers about you is yours to read and correct. In the app, **Ask Moneypenny**'s menu opens
+**Her memory of you**: your memories, a search, and a form to add, edit and forget one (after you
+confirm). The same page shows the global scope and each Operation's you may read
+([Reports](reports.md#in-the-app)).
 
 **Export conversation**, in the same menu, saves the conversation as you see it as a Markdown
 file: a heading per entry with who said it and when, and the data of a proposal, view or page as a
 JSON block. In a browser it is a download; on a desktop it is a new file in your Downloads folder,
 never written over another. **Copy** beside each of her answers copies it as she wrote it.
 
-| Route | Does |
-| --- | --- |
-| `GET /v1/user/assistant/memory[?q=TEXT]` | Lists your entries, newest change first, or searches them, best first: `{"person", "entries", "total"}`, with no content |
-| `POST /v1/user/assistant/memory` | Adds an entry: `{"name"?, "summary", "content"}` |
-| `GET /v1/user/assistant/memory/{id}` | One entry with its content |
-| `PUT /v1/user/assistant/memory/{id}` | Changes one: `{"name"?, "summary", "content", "revision"}` |
-| `DELETE /v1/user/assistant/memory/{id}[?revision=N]` | Forgets one, with its prior versions |
-| `GET /v1/user/assistant/memory/{id}/versions` | What it held before, newest first |
+The page reads and writes through the Report routes, `/v1/reports` with `kind=memory` and
+`scope=person:<your id>` ([Reports](reports.md#knowledge)): `GET` lists or searches, `POST` adds,
+`PUT` and `DELETE` on `/v1/reports/{id}` change and forget one, and `GET /v1/reports/{id}/versions`
+reads what it held before. A memory holds at most `knowledge_text_bytes` of
+[`[registry.limits.reports]`](configuration.md#limits) of text, and your scope `scope_entries`
+memories and `scope_bytes` in all; up to `versions` prior revisions of each are kept, and forgetting it
+removes them. A save names the revision that was opened, so a memory she changed meanwhile is refused
+(`409`, with the `revision` it is at) rather than overwritten: open it again and make the change from
+what it holds now. Likewise her next change to one you edited is refused, and she makes it again from
+your text. A conversation already running keeps what it already read.
 
-An entry holds at most 256 KiB, and your memory 1,024 entries and 8 MiB in all
-([`[registry.limits.memories]`](configuration.md#limits)); up to 8 prior versions of each are
-kept, and forgetting it removes them. A save names the revision that was opened, so an entry she
-changed meanwhile is refused (`409`, with the `revision` it is at) rather than overwritten: open
-it again and make the change from what it holds now. Likewise her next change to an entry you
-edited is refused, and she makes it again from your text. A conversation already running keeps
-what it already read.
-
-Your memory is yours alone. The deployment's administrators can read it, never change it: a
-person holding `assistant.memory.admin` on `config:assistant` ([access
-policy](access.md#the-access-policy)) adds `?person=<id>` to the `GET` routes, and each such read
-is audited `memory.read` before it is made. Without asking by name, another person's entry answers
-exactly as an ID that does not exist, to an administrator as to anyone. Nobody, administrator or
-not, writes or forgets another person's memory. Your own changes and hers are audited
-(`memory.write`, `memory.forget`, naming the entry and the conversation), and one that cannot be
-audited is not made.
+Your memory is yours alone. The deployment's administrators can read it, never change it: a person
+holding `assistant.memory.admin` on `config:assistant` ([access policy](access.md#the-access-policy))
+can read `scope=person:<id>` of another person, and each such read is audited `memory.read` before it is
+made. Without that, another person's memory answers exactly as an ID that does not exist, to an
+administrator as to anyone. Nobody, administrator or not, writes or forgets another person's memory.
+Your own changes and hers are audited (`memory.write`, `memory.forget`, naming the Report and the
+conversation), and one that cannot be audited is not made.
 
 ## Her scripts and the web
 
@@ -1309,7 +1302,7 @@ person's or everyone's for someone who holds both actions.
 | Conversations' size | 1 MiB per conversation, 4 MiB per person (oldest views go first); the app is sent the newest 100 entries | `[assistant.gateway]` `conversation_bytes`, `person_bytes`, `ready_entries` |
 | Her conversation log | 90 days and 1 GiB in all, trimmed every hour; 1 MiB an entry | `[assistant.gateway]` `log_age`, `log_bytes`, `log_prune_every`; `[registry.limits.assistant_log] entry_bytes` |
 | Her Runs' contexts | 8 MiB each, its newest part kept; 2,000 kept | `[registry.limits.contexts]` `context_bytes`, `records` |
-| Her memory | 256 KiB an entry, 1,024 entries and 8 MiB a person, 8 prior versions, 50 entries a search | `[registry.limits.memories]` ([Configuration](configuration.md#limits)) |
+| Her memory | 256 KiB a memory, 1,024 memories and 8 MiB a person, 8 prior revisions, 50 Reports a search | `[registry.limits.reports]` `knowledge_text_bytes`, `scope_entries`, `scope_bytes`, `versions`, `search_results` ([Configuration](configuration.md#limits)) |
 | Her memory's summaries in a new harness | 8 KiB, and no more than the job's context leaves | `[assistant.gateway] memory_context_bytes` |
 | Assistant Runs on one Station | 4 running or starting; closed after 10 idle minutes | `[assistant.desk]` `live`, `idle` |
 | A clone of one of her repositories | 120 seconds and 512 MiB, then given up and removed | `[assistant.desk]` `clone_timeout`, `clone_bytes` |

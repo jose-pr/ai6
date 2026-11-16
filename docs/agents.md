@@ -510,8 +510,8 @@ of its Runs that was already open.
 
 Across Operations, a Cable needs a [compartment](compartments.md#cables) as well as these grants,
 and a Run holding one also has `compartments`, `missions_in`, `mission_brief` and
-`mission_products`. Every Run also has `memory_search`, `memory_read`, `memory_write`
-and `memory_forget`, for its Operation's memory and the global one ([Memories](memories.md#agents)).
+`mission_products`. Every Run also has `reports`, `read_report`, `file_report` and `forget_report`, for what its
+Operation and everyone know ([Reports](reports.md#what-an-agent-does-with-them)).
 
 ## Reports
 

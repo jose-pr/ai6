@@ -18,7 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   is retired (closed, kept). `reports` searches words, kind, topics, title and scope over title, summary, topics and
   text (FTS5 on SQLite, `tsvector` on PostgreSQL, a scan in the file Registry), filtering what the asker may not read
   before it ranks or counts. The Report tools, the `/v1/reports` routes (`PUT`, `DELETE` and `/versions` too) and
-  `ai6ctl reports` take the new fields and filters. The memory store stays beside it until memories move in.
+  `ai6ctl reports` take the new fields and filters.
+
+- Memories are Reports of kind `memory`: Moneypenny's memory of a person, an Operation's and everyone's are read and written
+  by `reports`, `read_report`, `file_report` and `forget_report` (hers and an Agent's) and by `/v1/reports`, and Outer
+  Office's Memory page reads and writes through those routes. Her starting context lists a person's memory summaries
+  from Reports within `[assistant.gateway] memory_context_bytes`.
 
 - The `unex` record's `sign_in_policy` (a `coqui_sign_in_policy` provider, default `coqui_signin_rules`,
   and its configuration) decides which methods a sign-in may use, from where it is made and what it still
@@ -216,6 +221,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   A refusal's stated `retry-after` parks a Mission ahead of the Operation's fallback. The Account Pools page and
   `ai6ctl pools` show the models a window covers and when it was read.
 
+### Removed
+
+- The memory store: the `memories` record family (`ai6_memories`, `ai6_memories_search`, `ai6_memory_versions`,
+  `ai6_memory_proposals`), `[registry.limits.memories]` (the Report limits in `[registry.limits.reports]` replace it),
+  the `memory_search`, `memory_read`, `memory_write` and `memory_forget` tools, `/v1/user/memories`,
+  `/v1/user/assistant/memory`, `ai6ctl memories` and `docs/memories.md` (its content is in `docs/reports.md`). The
+  `memory.write` and `assistant.memory.admin` actions stay. A deployed PostgreSQL database moves its rows once with
+  a script, backup first.
+
+- The gateway serves a brief, a green ink request, a held brief, a Mission's reviews, a charge's report and a
 ### Changed
 
 - A Sleeper has no `each_station` (one brief per Station per window); the Chief of Station's charge is

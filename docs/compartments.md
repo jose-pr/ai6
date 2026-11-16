@@ -45,7 +45,7 @@ burst = 50
 | `cable.send` | Sending Cables there | both |
 | `cable.read` | Moneypenny reading the Cables sent to her there | people |
 | `mission.propose` | Proposing Missions there, as untrusted intake | Agents |
-| `memory.read` | Reading the Operation's [memory](memories.md), audited as a crossing | both |
+| `memory.read` | Reading the Operation's [memory](reports.md#knowledge), audited as a crossing | both |
 
 **Covers** are what it grants access to: an Operation, with its Missions and everything under it
 unless the entry says `propagate = false`, or one Mission. An Operation a compartment names must
@@ -102,7 +102,7 @@ tools when it starts, so a Run read in later sees them when it resumes.
 | `mission_products(mission)` | `product.read` | The status, the outcome's `state`, `reason`, `branch` and `summary`, the CX report and the refs, each text cut at `max_product_bytes` |
 
 These answer for other Operations only: an Operation's own work is read as it always was. Its
-[memory tools](memories.md#agents) read another Operation's memory through `memory.read`. A
+[memory tools](reports.md#what-an-agent-does-with-them) read another Operation's memory through `memory.read`. A
 Mission the Run may not see answers as a Mission that does not exist.
 
 A brief or a product is outside text, so reading one marks the Run
@@ -224,7 +224,7 @@ the Missions page filters by compartment. Moneypenny's `compartments` tool reads
 
 ## Protecting a memory entry
 
-A [memory entry](memories.md#protected-by-compartments) can name compartments: only those read
+A [memory entry](reports.md#protected-by-compartments) can name compartments: only those read
 into one of them see it at all, whatever the compartment grants or covers. A compartment that
 does not exist or cannot be read reads nobody in, so its entries are hidden from everyone but a
 chief.
