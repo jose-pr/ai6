@@ -14161,6 +14161,190 @@
                   "title": "Keep a closed Report for",
                   "description": "Seconds a closed Report is kept; `null` keeps it for good.",
                   "default": "none"
+                },
+                "versions": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Prior revisions of a Report",
+                  "description": "Prior revisions kept of one Report; forgetting a memory removes them. `0` keeps none.",
+                  "default": 8
+                },
+                "summary_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest Report summary",
+                  "description": "Bytes of a Report's one-line summary.",
+                  "default": 1024
+                },
+                "topics": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Topics on a Report",
+                  "description": "Topics on one Report, each at most `name_bytes`.",
+                  "default": 16
+                },
+                "scope_entries": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Standing Reports in a scope",
+                  "description": "Standing Reports of the known kinds (memory, tradecraft, rule, contact) in one scope.",
+                  "default": 1024
+                },
+                "scope_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "All the standing Reports of a scope",
+                  "description": "Bytes of every standing known-kind Report's title, summary and text in one scope.",
+                  "default": 8388608
+                },
+                "proposals": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Proposals waiting in a scope",
+                  "description": "Proposals (open Reports of a known kind) waiting in one scope.",
+                  "default": 64
+                },
+                "index_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Words of a Report in the text index",
+                  "description": "Bytes of a Report's distinct words a database's text index holds. A word past it is found only by a search that matched another word of the Report, and PostgreSQL refuses an index of 1 MiB or more for one Report.",
+                  "default": 524288
+                },
+                "search_results": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "title": "Reports a search answers",
+                  "description": "Reports one search answers.",
+                  "default": 50
+                },
+                "query_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "none"
+                      ],
+                      "x-enum-labels": {
+                        "none": "No limit"
+                      }
+                    }
+                  ],
+                  "format": "bytes",
+                  "title": "Longest search",
+                  "description": "Bytes of what one search asks for.",
+                  "default": 4096
                 }
               },
               "additionalProperties": false,
@@ -14176,7 +14360,16 @@
                 "per_run": 20,
                 "per_operation": 200,
                 "window": 3600.0,
-                "keep_closed": "none"
+                "keep_closed": "none",
+                "versions": 8,
+                "summary_bytes": 1024,
+                "topics": 16,
+                "scope_entries": 1024,
+                "scope_bytes": 8388608,
+                "proposals": 64,
+                "index_bytes": 524288,
+                "search_results": 50,
+                "query_bytes": 4096
               }
             },
             "runs": {
@@ -15303,7 +15496,16 @@
               "per_run": 20,
               "per_operation": 200,
               "window": 3600.0,
-              "keep_closed": "none"
+              "keep_closed": "none",
+              "versions": 8,
+              "summary_bytes": 1024,
+              "topics": 16,
+              "scope_entries": 1024,
+              "scope_bytes": 8388608,
+              "proposals": 64,
+              "index_bytes": 524288,
+              "search_results": 50,
+              "query_bytes": 4096
             },
             "runs": {
               "record_bytes": 65536,

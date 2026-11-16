@@ -52,6 +52,11 @@ pub fn memory_source(id: &str, limit: Limit) -> String {
     bounded(format!("memory:{id}"), limit)
 }
 
+/// The source for a Run that read a Report an exposed Run wrote, cut to `limit` bytes.
+pub fn report_source(id: &str, limit: Limit) -> String {
+    bounded(format!("report:{id}"), limit)
+}
+
 /// The source for a Run that read a brief or a product of `operation`, cut to `limit` bytes.
 pub fn product_source(operation: &str, limit: Limit) -> String {
     bounded(format!("{PRODUCT_PREFIX}{operation}"), limit)

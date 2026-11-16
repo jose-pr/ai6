@@ -524,7 +524,7 @@ pub trait MemoryStore {
 }
 
 /// The words of `text`, lower case: every run of letters and digits.
-fn words(text: &str) -> impl Iterator<Item = String> + '_ {
+pub(super) fn words(text: &str) -> impl Iterator<Item = String> + '_ {
     text.split(|character: char| !character.is_alphanumeric())
         .filter(|word| !word.is_empty())
         .map(str::to_lowercase)

@@ -30,6 +30,7 @@ mod briefs;
 mod charges;
 pub(crate) mod db;
 mod holds;
+mod knowledge;
 mod memories;
 mod mission_issues;
 #[cfg(feature = "postgres")]

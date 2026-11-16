@@ -730,6 +730,44 @@ pub struct ReportLimits {
     #[schema(title = "Keep a closed Report for")]
     #[map(default = ReportLimits::default().keep_closed)]
     pub keep_closed: TimeLimit,
+    /// Prior revisions kept of one Report; forgetting a memory removes them. `0` keeps none.
+    #[schema(title = "Prior revisions of a Report")]
+    #[map(default = ReportLimits::default().versions)]
+    pub versions: Limit,
+    /// Bytes of a Report's one-line summary.
+    #[schema(title = "Longest Report summary", format = "bytes")]
+    #[map(default = ReportLimits::default().summary_bytes)]
+    pub summary_bytes: Limit,
+    /// Topics on one Report, each at most `name_bytes`.
+    #[schema(title = "Topics on a Report")]
+    #[map(default = ReportLimits::default().topics)]
+    pub topics: Limit,
+    /// Standing Reports of the known kinds (memory, tradecraft, rule, contact) in one scope.
+    #[schema(title = "Standing Reports in a scope")]
+    #[map(default = ReportLimits::default().scope_entries)]
+    pub scope_entries: Limit,
+    /// Bytes of every standing known-kind Report's title, summary and text in one scope.
+    #[schema(title = "All the standing Reports of a scope", format = "bytes")]
+    #[map(default = ReportLimits::default().scope_bytes)]
+    pub scope_bytes: Limit,
+    /// Proposals (open Reports of a known kind) waiting in one scope.
+    #[schema(title = "Proposals waiting in a scope")]
+    #[map(default = ReportLimits::default().proposals)]
+    pub proposals: Limit,
+    /// Bytes of a Report's distinct words a database's text index holds. A word past it is
+    /// found only by a search that matched another word of the Report, and PostgreSQL refuses
+    /// an index of 1 MiB or more for one Report.
+    #[schema(title = "Words of a Report in the text index", format = "bytes")]
+    #[map(default = ReportLimits::default().index_bytes)]
+    pub index_bytes: Limit,
+    /// Reports one search answers.
+    #[schema(title = "Reports a search answers")]
+    #[map(default = ReportLimits::default().search_results)]
+    pub search_results: Limit,
+    /// Bytes of what one search asks for.
+    #[schema(title = "Longest search", format = "bytes")]
+    #[map(default = ReportLimits::default().query_bytes)]
+    pub query_bytes: Limit,
 }
 
 impl Default for ReportLimits {
@@ -745,6 +783,15 @@ impl Default for ReportLimits {
             per_operation: Limit::at(200),
             window: Seconds::new(3_600),
             keep_closed: TimeLimit::UNBOUNDED,
+            versions: Limit::at(8),
+            summary_bytes: Limit::at(KIB),
+            topics: Limit::at(16),
+            scope_entries: Limit::at(1_024),
+            scope_bytes: Limit::at(8 * MIB),
+            proposals: Limit::at(64),
+            index_bytes: Limit::at(512 * KIB),
+            search_results: Limit::at(50),
+            query_bytes: Limit::at(4 * KIB),
         }
     }
 }

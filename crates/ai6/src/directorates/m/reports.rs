@@ -233,6 +233,17 @@ pub trait ReportReader {
     /// The subjects the reader's [`ReportClearance`]s are granted to: `person:ID` and
     /// `group:NAME` for a person, `agent:CODENAME` for an Agent.
     fn subjects(&self) -> Vec<String>;
+
+    /// Whether the reader decides what is proposed in `scope`: a person who may write it, or its
+    /// charge. Only they, and whoever made it, read a proposal of a known kind.
+    fn assesses(&self, _scope: &ReportScope) -> bool {
+        false
+    }
+
+    /// Whether `filer` is the reader's own filing.
+    fn filed(&self, _filer: &ReportFiler) -> bool {
+        false
+    }
 }
 
 /// How much of a Report a reader sees.
@@ -268,6 +279,9 @@ fn cleared(
 /// for anything that only links to it.
 pub fn sight(reader: &dyn ReportReader, report: &Report, rules: &ReportRules<'_>) -> ReportSight {
     if !reader.reads_scope(&report.scope) {
+        return ReportSight::Markings;
+    }
+    if report.is_proposal() && !reader.assesses(&report.scope) && !reader.filed(&report.filer) {
         return ReportSight::Markings;
     }
     if cleared(
@@ -333,6 +347,12 @@ pub fn report_json(report: &Report, sight: ReportSight, source: Option<&ReportSo
     for (key, value) in [
         ("title", json!(report.title)),
         ("text", json!(report.text)),
+        ("summary", json!(report.summary)),
+        ("topics", json!(report.topics)),
+        ("revision", json!(report.revision)),
+        ("updated_by", json!(report.updated_by)),
+        ("exposed", json!(!report.exposures.is_empty())),
+        ("proposes", json!(report.proposes)),
         ("filer", json!(report.filer)),
         ("source", json!(report.filer.source_key())),
         (
@@ -447,6 +467,12 @@ pub struct ReportFiling {
     pub title: String,
     /// What was observed.
     pub text: String,
+    /// One line saying what it is for, listed by a search beside the title.
+    #[serde(default)]
+    pub summary: Option<String>,
+    /// Free words a search and a facet use.
+    #[serde(default)]
+    pub topics: Vec<String>,
     /// A short label; `finding` when left out.
     #[serde(default)]
     pub kind: Option<String>,
@@ -525,6 +551,8 @@ impl ReportFiling {
                 report = report.linked(link);
             }
         }
+        report.summary = self.summary;
+        report.topics = self.topics;
         report.priority = self.priority;
         report.deadline = self.deadline;
         report.from = self.information_from;

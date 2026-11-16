@@ -1,10 +1,16 @@
 //! Reports: what anyone or anything observed, as one record in the Registry.
 //!
-//! A Report names its scope (an Operation, a Station or M), what it is about (a kind, a
-//! severity, a title and a text), who or what filed it, and what it is tied to. It starts `open`
-//! and is never deleted by AI6 before `[registry.limits.reports] keep_closed`. Its text is
+//! A Report names its scope (an Operation, a Station, M, a person or everyone), what it is about (a
+//! kind, a severity, a title and a text), who or what filed it, and what it is tied to. It starts
+//! `open` and is never deleted by AI6 before `[registry.limits.reports] keep_closed`. Its text is
 //! untrusted unless a person filed it. Filing a Report creates no Mission, brief or placement;
 //! only a proposal or a person does.
+//!
+//! What AI6 knows or was told is a Report of a known kind ([`KNOWN_KINDS`]): a memory, tradecraft,
+//! a rule or a contact. One written by someone who may write its scope is `standing`; one an Agent
+//! may only propose stays `open` until it is assessed `accepted`. Every write to one names the
+//! revision it read, prior revisions are kept up to `[registry.limits.reports] versions`, and a
+//! memory forgotten goes with them ([`KnowledgeStore`](super::knowledge::KnowledgeStore)).
 //!
 //! It carries markings the filer sets: a classification and a handling mark from the lists in
 //! the settings, and compartments. Who may read what is `ai6::directorates::m::reports`.
@@ -18,12 +24,16 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use super::assessments::Judgement;
+use super::knowledge::{Held, check_room};
 use super::limits::ReportLimits;
 use super::logbook::{Severity, station_key};
 use super::sources::SourceItem;
-use super::store::{FileRegistry, invalid_data, validate_registry_key, validate_station_id};
+use super::store::{
+    FileRegistry, hex_digest, invalid_data, validate_registry_key, validate_station_id,
+};
 use crate::directorates::m::reports::ReportSettings;
 
 /// What a Report is filed against.
@@ -35,15 +45,22 @@ pub enum ReportScope {
     Station(String),
     /// M's own scope, for what belongs to no Operation or Station.
     M,
+    /// One person's, by ID: what is known of them. Known kinds only.
+    Person(String),
+    /// What everyone may read. Known kinds only.
+    Global,
 }
 
 impl ReportScope {
-    /// The directory a scope's Reports are kept in.
-    fn directory(&self) -> String {
+    /// The directory a scope's Reports are kept in. A person's is a digest of the ID, which may
+    /// hold any text, so two IDs differing only by case stay apart on a filesystem that folds it.
+    pub(super) fn directory(&self) -> String {
         match self {
             Self::Operation(id) => format!("operation-{id}"),
             Self::Station(id) => format!("station-{}", station_key(id)),
             Self::M => "m".to_owned(),
+            Self::Person(id) => format!("person-{}", hex_digest(&Sha256::digest(id.as_bytes()))),
+            Self::Global => "global".to_owned(),
         }
     }
 
@@ -59,18 +76,25 @@ impl ReportScope {
         match self {
             Self::Operation(id) => validate_registry_key(id),
             Self::Station(id) => validate_station_id(id),
-            Self::M => Ok(()),
+            Self::M | Self::Global => Ok(()),
+            Self::Person(id) if !id.is_empty() => Ok(()),
+            Self::Person(_) => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "a person's scope names the person",
+            )),
         }
     }
 }
 
 impl fmt::Display for ReportScope {
-    /// `operation:ID`, `station:ID` or `m`.
+    /// `operation:ID`, `station:ID`, `person:ID`, `global` or `m`.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Operation(id) => write!(f, "operation:{id}"),
             Self::Station(id) => write!(f, "station:{id}"),
+            Self::Person(id) => write!(f, "person:{id}"),
             Self::M => f.write_str("m"),
+            Self::Global => f.write_str("global"),
         }
     }
 }
@@ -82,9 +106,11 @@ impl FromStr for ReportScope {
         match text.split_once(':') {
             Some(("operation", id)) if !id.is_empty() => Ok(Self::Operation(id.to_owned())),
             Some(("station", id)) if !id.is_empty() => Ok(Self::Station(id.to_owned())),
+            Some(("person", id)) if !id.is_empty() => Ok(Self::Person(id.to_owned())),
             None if text == "m" => Ok(Self::M),
+            None if text == "global" => Ok(Self::Global),
             _ => Err(format!(
-                "{text:?} is not a scope: use operation:ID, station:ID or m"
+                "{text:?} is not a scope: use operation:ID, station:ID, person:ID, global or m"
             )),
         }
     }
@@ -115,15 +141,18 @@ pub enum ReportState {
     Assessed,
     /// What it was assessed into ended, or it needed nothing.
     Closed,
+    /// Known and current: no verdict closes it, and a search lists it. Known kinds only.
+    Standing,
 }
 
 impl ReportState {
-    /// The name used on the wire: `open`, `assessed` or `closed`.
+    /// The name used on the wire: `open`, `assessed`, `closed` or `standing`.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Open => "open",
             Self::Assessed => "assessed",
             Self::Closed => "closed",
+            Self::Standing => "standing",
         }
     }
 }
@@ -136,8 +165,9 @@ impl FromStr for ReportState {
             "open" => Ok(Self::Open),
             "assessed" => Ok(Self::Assessed),
             "closed" => Ok(Self::Closed),
+            "standing" => Ok(Self::Standing),
             other => Err(format!(
-                "{other:?} is not a state: use open, assessed or closed"
+                "{other:?} is not a state: use open, assessed, closed or standing"
             )),
         }
     }
@@ -184,6 +214,11 @@ pub enum ReportFiler {
         /// The person's ID.
         person: String,
     },
+    /// Moneypenny, writing for a person.
+    Assistant {
+        /// The person's ID.
+        person: String,
+    },
     /// A probe's check of a deliverable.
     Probe {
         /// The probe's name.
@@ -213,12 +248,13 @@ impl ReportFiler {
     }
 
     /// The key of the source whose reliability this filer carries: `source:NAME`,
-    /// `agent:CODENAME`, `person:ID`, `probe:NAME`, `review` or `watchdog`.
+    /// `agent:CODENAME`, `person:ID`, `assistant:ID`, `probe:NAME`, `review` or `watchdog`.
     pub fn source_key(&self) -> String {
         match self {
             Self::Source { source, .. } => format!("source:{source}"),
             Self::Agent { agent, .. } | Self::Charge { agent, .. } => format!("agent:{agent}"),
             Self::Person { person } => format!("person:{person}"),
+            Self::Assistant { person } => format!("assistant:{person}"),
             Self::Probe { probe } => format!("probe:{probe}"),
             Self::Review { .. } => "review".to_owned(),
             Self::Watchdog => "watchdog".to_owned(),
@@ -234,7 +270,7 @@ impl ReportFiler {
                 mission,
             } => vec![agent, run, mission],
             Self::Charge { agent, scope, run } => vec![agent, scope, run],
-            Self::Person { person } => vec![person],
+            Self::Person { person } | Self::Assistant { person } => vec![person],
             Self::Probe { probe } => vec![probe],
             Self::Review { mission } => vec![mission],
             Self::Watchdog => Vec::new(),
@@ -417,6 +453,60 @@ impl Tearline {
     }
 }
 
+/// The kinds of what AI6 knows or was told rather than what something observed: a `memory` of a
+/// person, an Operation or everyone, `tradecraft` (how a thing is done), a `rule` an Agent
+/// follows and a `contact`. A Report of one of them can be `standing`, is revised in place and is
+/// searched as one body of knowledge.
+pub const KNOWN_KINDS: [&str; 4] = ["memory", "tradecraft", "rule", "contact"];
+
+/// The resolution outcome of a `tradecraft` or `rule` taken out of use: closed, and kept.
+pub const RETIRED: &str = "retired";
+
+/// Whether `kind` is one of [`KNOWN_KINDS`].
+pub fn is_known_kind(kind: &str) -> bool {
+    KNOWN_KINDS.contains(&kind)
+}
+
+/// What an open Report of a known kind asks to change in another: the one it targets, the
+/// revision it was written from, and whether it asks that the target be forgotten (a memory) or
+/// retired (tradecraft, a rule) rather than rewritten.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReportProposes {
+    /// The Report it changes.
+    pub target: String,
+    /// The revision of the target it was made from.
+    pub revision: u64,
+    /// It forgets or retires the target; its own text is then only the reason.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub forget: bool,
+}
+
+impl ReportProposes {
+    /// A proposal to rewrite `target`, made from `revision`.
+    pub fn rewrite(target: impl Into<String>, revision: u64) -> Self {
+        Self {
+            target: target.into(),
+            revision,
+            forget: false,
+        }
+    }
+
+    /// A proposal to forget or retire `target`, made from `revision`.
+    pub fn forget(target: impl Into<String>, revision: u64) -> Self {
+        Self {
+            target: target.into(),
+            revision,
+            forget: true,
+        }
+    }
+}
+
+fn first_revision() -> u64 {
+    1
+}
+
 /// One observation, with its markings, its ties and its state.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -434,7 +524,13 @@ pub struct Report {
     pub title: String,
     /// What was observed, in the filer's words.
     pub text: String,
-    /// Who or what filed it.
+    /// One line saying what it is for, listed by a search beside the title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    /// Free words a search and a facet use.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub topics: Vec<String>,
+    /// Who or what filed it, or last wrote what a known kind holds now.
     pub filer: ReportFiler,
     /// The Missions, Reports, decisions and evidence it is tied to.
     #[serde(default)]
@@ -484,6 +580,20 @@ pub struct Report {
     pub created: f64,
     /// When it last changed, as Unix seconds.
     pub updated: f64,
+    /// How many times a known kind has been written, `1` when new: a write names the revision it
+    /// was made from.
+    #[serde(default = "first_revision")]
+    pub revision: u64,
+    /// Who made the current revision, as `person:ID`, `agent:CODENAME` or `moneypenny:ID`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_by: Option<String>,
+    /// How the Run that wrote it was exposed; reading a Report with any marks the reader's Run
+    /// exposed as `report:ID`, and a person's edit clears them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exposures: Vec<String>,
+    /// What it asks to change in another Report, for a proposal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposes: Option<ReportProposes>,
 }
 
 impl Report {
@@ -506,6 +616,8 @@ impl Report {
             severity,
             title: title.into(),
             text: text.into(),
+            summary: None,
+            topics: Vec::new(),
             filer,
             links: Vec::new(),
             sub_source: None,
@@ -523,7 +635,65 @@ impl Report {
             resolution: None,
             created: at,
             updated: at,
+            revision: 1,
+            updated_by: None,
+            exposures: Vec::new(),
+            proposes: None,
         }
+    }
+
+    /// Gives it a one-line summary.
+    #[must_use]
+    pub fn summarised(mut self, summary: impl Into<String>) -> Self {
+        self.summary = Some(summary.into());
+        self
+    }
+
+    /// Sets its topics.
+    #[must_use]
+    pub fn on_topics(mut self, topics: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.topics = topics.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Marks it as written by a Run exposed as `exposures`, sorted and without repeats.
+    #[must_use]
+    pub fn exposed_by(mut self, exposures: impl IntoIterator<Item = String>) -> Self {
+        self.exposures = exposures
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        self
+    }
+
+    /// Makes it a proposal to change another Report.
+    #[must_use]
+    pub fn proposing(mut self, proposes: ReportProposes) -> Self {
+        self.proposes = Some(proposes);
+        self
+    }
+
+    /// Makes it known and current: `standing`.
+    #[must_use]
+    pub fn standing(mut self) -> Self {
+        self.state = ReportState::Standing;
+        self
+    }
+
+    /// Whether it is of a known kind.
+    pub fn is_known(&self) -> bool {
+        is_known_kind(&self.kind)
+    }
+
+    /// Bytes of its title, summary and text: what a scope's limit counts.
+    pub fn size(&self) -> u64 {
+        (self.title.len() + self.summary.as_deref().map_or(0, str::len) + self.text.len()) as u64
+    }
+
+    /// Whether it is a known kind waiting for a verdict: what an Agent proposed.
+    pub fn is_proposal(&self) -> bool {
+        self.is_known() && self.state == ReportState::Open
     }
 
     /// Adds a link.
@@ -654,7 +824,13 @@ impl Report {
         }
         let text_in_bounds =
             |text: &str| !text.trim().is_empty() && limits.text_bytes.allows(text.len());
-        if !text_in_bounds(&self.text) {
+        let forgets = self
+            .proposes
+            .as_ref()
+            .is_some_and(|proposes| proposes.forget);
+        if (!(forgets && self.text.is_empty()) && !text_in_bounds(&self.text))
+            || self.text.contains('\0')
+        {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!("a report's text must be 1 to {} bytes", limits.text_bytes),
@@ -680,6 +856,58 @@ impl Report {
             return Err(bad(
                 "a report's compartments and sub-source are names in bounds",
             ));
+        }
+        if let ReportScope::Person(person) = &self.scope
+            && !named(person)
+        {
+            return Err(bad("a person's scope names the person, in bounds"));
+        }
+        if self.summary.as_deref().is_some_and(|summary| {
+            summary.trim().is_empty()
+                || !limits.summary_bytes.allows(summary.len())
+                || summary.contains(char::is_control)
+        }) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "a summary is one line of 1 to {} bytes",
+                    limits.summary_bytes
+                ),
+            ));
+        }
+        if !limits.topics.allows(self.topics.len()) || self.topics.iter().any(|topic| !named(topic))
+        {
+            return Err(bad("a report's topics are names in bounds"));
+        }
+        if self.updated_by.as_deref().is_some_and(|by| !named(by))
+            || !limits.links.allows(self.exposures.len())
+            || self.exposures.iter().any(|mark| !named(mark))
+        {
+            return Err(bad(
+                "who wrote a report and how they were exposed are names in bounds",
+            ));
+        }
+        if self.revision == 0 {
+            return Err(bad("a report's revision counts from 1"));
+        }
+        if !self.is_known() {
+            if self.state == ReportState::Standing
+                || self.proposes.is_some()
+                || matches!(self.scope, ReportScope::Person(_) | ReportScope::Global)
+            {
+                return Err(bad(
+                    "only a memory, tradecraft, rule or contact stands, proposes, or is a person's or everyone's",
+                ));
+            }
+        } else if let Some(proposes) = &self.proposes {
+            validate_registry_key(&proposes.target)?;
+            if proposes.revision == 0
+                || self.state != ReportState::Open && self.state != ReportState::Closed
+            {
+                return Err(bad(
+                    "a proposal is made from a revision, and is open until decided",
+                ));
+            }
         }
         if let Some(tearline) = &self.tearline {
             if !text_in_bounds(&tearline.text) {
@@ -1270,7 +1498,10 @@ impl FileRegistry {
         Ok(sources)
     }
 
-    fn read_reports(&self, scope: Option<&ReportScope>) -> io::Result<Vec<(PathBuf, Report)>> {
+    pub(super) fn read_reports(
+        &self,
+        scope: Option<&ReportScope>,
+    ) -> io::Result<Vec<(PathBuf, Report)>> {
         let mut found = Vec::new();
         for directory in self.scope_directories(scope)? {
             let entries = match fs::read_dir(&directory) {
@@ -1318,12 +1549,23 @@ impl ReportStore for FileRegistry {
         if let Some(before) = closed_before(limits, report.created) {
             all.retain(|(path, other)| {
                 let stale = other.state == ReportState::Closed && other.updated < before;
-                !(stale && fs::remove_file(path).is_ok())
+                let gone = stale && fs::remove_file(path).is_ok();
+                if gone {
+                    // What a Report held before goes with it.
+                    let _ = fs::remove_dir_all(self.versions_root().join(&other.id));
+                }
+                !gone
             });
         }
         if !limits.reports.allows(all.len() + 1) {
             return Err(invalid_data("too many reports"));
         }
+        let held = Held::of(
+            all.iter()
+                .map(|(_, other)| other)
+                .filter(|other| other.scope == report.scope),
+        );
+        check_room(limits, report, held, None)?;
         let directory = self.reports_root().join(report.scope.directory());
         fs::create_dir_all(&directory)?;
         self.write_atomic(&directory.join(format!("{}.json", report.id)), &bytes)
@@ -1361,6 +1603,11 @@ impl ReportStore for FileRegistry {
             .find(|(_, report)| report.id == id)
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no such report"))?;
         let changed = apply_change(limits, &stored, change)?;
+        if stored.state != ReportState::Standing && changed.state == ReportState::Standing {
+            let in_scope = self.read_reports(Some(&stored.scope))?;
+            let held = Held::of(in_scope.iter().map(|(_, other)| other));
+            check_room(limits, &changed, held, None)?;
+        }
         self.write_atomic(&path, &report_bytes(&changed, limits)?)?;
         Ok(changed)
     }

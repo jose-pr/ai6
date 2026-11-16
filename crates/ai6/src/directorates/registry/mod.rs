@@ -21,6 +21,7 @@ pub mod clearance;
 pub mod contexts;
 pub mod decisions;
 pub mod holds;
+pub mod knowledge;
 pub mod limits;
 pub mod logbook;
 pub mod memories;

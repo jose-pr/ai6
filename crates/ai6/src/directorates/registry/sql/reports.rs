@@ -3,16 +3,23 @@
 
 use std::io;
 
-use super::db::{Tx, Value};
+use super::db::{Dialect, Tx, Value};
 use super::{SqlRegistry, from_json, to_json};
+use crate::directorates::registry::knowledge::{Held, check_room, index_words};
 use crate::directorates::registry::reports::{
-    Report, ReportChange, ReportClearance, ReportFilter, ReportSource, ReportState, ReportStore,
-    apply_change, check_rate, closed_before, parse_report, report_bytes, window_start,
+    KNOWN_KINDS, Report, ReportChange, ReportClearance, ReportFilter, ReportSource, ReportState,
+    ReportStore, apply_change, check_rate, closed_before, parse_report, report_bytes, window_start,
 };
 use crate::directorates::registry::store::{invalid_data, validate_registry_key};
 
-/// Writes `report`'s row and its links, replacing what it had.
-fn put(tx: &mut Tx<'_>, report: &Report, text: String, revision: i64) -> io::Result<()> {
+/// Writes `report`'s row, its links and its words, replacing what it had.
+pub(super) fn put(
+    registry: &SqlRegistry,
+    tx: &mut Tx<'_>,
+    report: &Report,
+    text: String,
+    revision: i64,
+) -> io::Result<()> {
     tx.execute(
         "DELETE FROM ai6_report_links WHERE report_id = $1",
         &[report.id.as_str().into()],
@@ -21,11 +28,12 @@ fn put(tx: &mut Tx<'_>, report: &Report, text: String, revision: i64) -> io::Res
         "DELETE FROM ai6_reports WHERE id = $1",
         &[report.id.as_str().into()],
     )?;
+    let words = index_words(report, registry.current_limits().reports.index_bytes);
     tx.execute(
         "INSERT INTO ai6_reports \
          (id, scope, state, kind, run_id, source_key, priority, deadline, credibility, \
-          created, updated, record, revision) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+          created, updated, record, revision, words) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
         &[
             report.id.as_str().into(),
             report.scope.to_string().into(),
@@ -42,8 +50,10 @@ fn put(tx: &mut Tx<'_>, report: &Report, text: String, revision: i64) -> io::Res
             report.updated.into(),
             text.into(),
             revision.into(),
+            words.as_str().into(),
         ],
     )?;
+    set_search_words(registry, tx, &report.id, &words)?;
     for link in &report.links {
         tx.execute(
             "INSERT INTO ai6_report_links (report_id, kind, target) VALUES ($1, $2, $3) \
@@ -54,6 +64,51 @@ fn put(tx: &mut Tx<'_>, report: &Report, text: String, revision: i64) -> io::Res
                 link.id.as_str().into(),
             ],
         )?;
+    }
+    Ok(())
+}
+
+/// Keeps a Report's words where its backend looks for them, in the transaction writing it.
+fn set_search_words(
+    registry: &SqlRegistry,
+    tx: &mut Tx<'_>,
+    id: &str,
+    words: &str,
+) -> io::Result<()> {
+    match registry.db.dialect() {
+        #[cfg(feature = "sqlite")]
+        Dialect::Sqlite => {
+            tx.execute("DELETE FROM ai6_reports_search WHERE id = $1", &[id.into()])?;
+            tx.execute(
+                "INSERT INTO ai6_reports_search (id, words) VALUES ($1, $2)",
+                &[id.into(), words.into()],
+            )?;
+        }
+        // The generated column indexes the words written with the row.
+        #[cfg(feature = "postgres")]
+        Dialect::Postgres => {
+            let _ = (tx, id, words);
+        }
+    }
+    Ok(())
+}
+
+/// Removes the search rows of the closed Reports that `stale` (`updated`, `state`) selects,
+/// before those Reports go.
+fn drop_search_words(registry: &SqlRegistry, tx: &mut Tx<'_>, stale: &[Value]) -> io::Result<()> {
+    match registry.db.dialect() {
+        #[cfg(feature = "sqlite")]
+        Dialect::Sqlite => {
+            tx.execute(
+                "DELETE FROM ai6_reports_search WHERE id IN \
+                 (SELECT id FROM ai6_reports WHERE updated < $1 AND state = $2)",
+                stale,
+            )?;
+        }
+        #[cfg(feature = "postgres")]
+        Dialect::Postgres => {
+            let _ = (tx, stale);
+        }
     }
     Ok(())
 }
@@ -92,6 +147,12 @@ impl ReportStore for SqlRegistry {
             check_rate(limits, report, &recent)?;
             if let Some(before) = closed_before(limits, report.created) {
                 let stale = [before.into(), ReportState::Closed.as_str().into()];
+                drop_search_words(self, tx, &stale)?;
+                tx.execute(
+                    "DELETE FROM ai6_report_versions WHERE id IN \
+                     (SELECT id FROM ai6_reports WHERE updated < $1 AND state = $2)",
+                    &stale,
+                )?;
                 tx.execute(
                     "DELETE FROM ai6_report_links WHERE report_id IN \
                      (SELECT id FROM ai6_reports WHERE updated < $1 AND state = $2)",
@@ -108,7 +169,9 @@ impl ReportStore for SqlRegistry {
             if !limits.reports.allows(count + 1) {
                 return Err(invalid_data("too many reports"));
             }
-            put(tx, report, text, revision)
+            let held = known_held(tx, &scope)?;
+            check_room(limits, report, held, None)?;
+            put(self, tx, report, text, revision)
         })
     }
 
@@ -195,9 +258,13 @@ impl ReportStore for SqlRegistry {
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no such report"))?;
             let stored = parse_report(stored.text(0)?.as_bytes(), limits)?;
             let changed = apply_change(limits, &stored, change)?;
+            if stored.state != ReportState::Standing && changed.state == ReportState::Standing {
+                let held = known_held(tx, &stored.scope.to_string())?;
+                check_room(limits, &changed, held, None)?;
+            }
             let text =
                 String::from_utf8(report_bytes(&changed, limits)?).map_err(io::Error::other)?;
-            put(tx, &changed, text, revision)?;
+            put(self, tx, &changed, text, revision)?;
             Ok(changed)
         })
     }
@@ -287,4 +354,25 @@ impl ReportStore for SqlRegistry {
             Ok(removed > 0)
         })
     }
+}
+
+/// What `scope` holds of the known kinds now, as this transaction sees it.
+pub(super) fn known_held(tx: &mut Tx<'_>, scope: &str) -> io::Result<Held> {
+    let kinds = KNOWN_KINDS
+        .iter()
+        .map(|kind| format!("'{kind}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let rows = tx.query(
+        &format!(
+            "SELECT record FROM ai6_reports \
+             WHERE scope = $1 AND kind IN ({kinds}) AND state IN ('standing', 'open')"
+        ),
+        &[scope.into()],
+    )?;
+    let mut reports = Vec::with_capacity(rows.len());
+    for row in rows {
+        reports.push(from_json::<Report>(&row.text(0)?, "report")?);
+    }
+    Ok(Held::of(reports.iter()))
 }

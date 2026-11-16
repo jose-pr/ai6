@@ -52,6 +52,17 @@ pub(super) const STEPS: &[Step] = &[
         #[cfg(feature = "postgres")]
         postgres: "ALTER TABLE ai6_mission_ids ADD COLUMN handle TEXT NOT NULL",
     },
+    // The distinct words of a Report that search reads; a row made before has none, and is
+    // always a candidate until it is written again.
+    Step {
+        name: "reports.words",
+        table: "ai6_reports",
+        column: "words",
+        #[cfg(feature = "sqlite")]
+        sqlite: "ALTER TABLE ai6_reports ADD COLUMN words TEXT NOT NULL DEFAULT ''",
+        #[cfg(feature = "postgres")]
+        postgres: "ALTER TABLE ai6_reports ADD COLUMN words TEXT NOT NULL DEFAULT '';                    ALTER TABLE ai6_reports ADD COLUMN search tsvector                    GENERATED ALWAYS AS (to_tsvector('simple', words)) STORED",
+    },
     // When a cancel of a claimed brief was first asked for; existing rows have none asked.
     Step {
         name: "briefs.cancel_requested_at",

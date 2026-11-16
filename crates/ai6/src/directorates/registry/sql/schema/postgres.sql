@@ -537,9 +537,22 @@ CREATE TABLE IF NOT EXISTS ai6_reports (
     created DOUBLE PRECISION NOT NULL,
     updated DOUBLE PRECISION NOT NULL,
     record TEXT NOT NULL,
+    words TEXT NOT NULL DEFAULT '',
+    search tsvector GENERATED ALWAYS AS (to_tsvector('simple', words)) STORED,
     revision BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ai6_reports_scope ON ai6_reports (scope, created);
+CREATE INDEX IF NOT EXISTS ai6_reports_search ON ai6_reports USING GIN (search);
+
+-- What each known-kind Report held before its later revisions, gone when a memory is forgotten.
+-- report_revision is the Report's own count; revision is the clock's, as on every row.
+CREATE TABLE IF NOT EXISTS ai6_report_versions (
+    id TEXT NOT NULL,
+    report_revision BIGINT NOT NULL,
+    record TEXT NOT NULL,
+    revision BIGINT NOT NULL,
+    PRIMARY KEY (id, report_revision)
+);
 
 -- The Missions, Reports, decisions and evidence a Report is tied to, to find a Mission's Reports.
 CREATE TABLE IF NOT EXISTS ai6_report_links (

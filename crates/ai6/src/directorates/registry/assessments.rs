@@ -22,8 +22,8 @@ use serde::{Deserialize, Serialize};
 use super::approvals::{ApprovalRequest, ApprovalStatus, Decision};
 use super::backend::RegistryBackend;
 use super::reports::{
-    Reliability, Report, ReportAssessment, ReportFilter, ReportLink, ReportLinkKind,
-    ReportResolution, ReportScope, ReportSource, ReportState,
+    RETIRED, Reliability, Report, ReportAssessment, ReportFilter, ReportLink, ReportLinkKind,
+    ReportProposes, ReportResolution, ReportScope, ReportSource, ReportState,
 };
 use super::store::AuditRecord;
 use super::timeline::TimelineEvent;
@@ -47,7 +47,7 @@ pub const DECISION_KIND: &str = "decision";
 const DECISION_RUN: &str = "report";
 
 /// The outcomes a closed Report can carry, which a deployment's rating rule counts.
-pub const OUTCOMES: [&str; 7] = [
+pub const OUTCOMES: [&str; 9] = [
     "mission_done",
     "mission_failed",
     "decision_approved",
@@ -55,6 +55,8 @@ pub const OUTCOMES: [&str; 7] = [
     "duplicate",
     "related",
     "no_action",
+    "accepted",
+    "retired",
 ];
 
 /// The probability yardstick's words, least to most likely.
@@ -271,6 +273,9 @@ pub enum Verdict {
         /// What is asked of them.
         question: String,
     },
+    /// A proposal of a known kind taken up: it stands, or it is applied to the Report it
+    /// changes (as its next revision, or a forget or retirement) and closed, linked to it.
+    Accepted,
 }
 
 impl Verdict {
@@ -358,6 +363,10 @@ impl Verdict {
                     condition: condition.map(str::to_owned),
                 })
             }
+            "accepted" => {
+                leftover(&[])?;
+                Ok(Self::Accepted)
+            }
             "decision" => {
                 leftover(&["question"])?;
                 Ok(Self::Decision {
@@ -367,7 +376,7 @@ impl Verdict {
                 })
             }
             _ => Err(
-                "an assessment is mission, duplicate, related, no_action, awaiting, later or decision"
+                "an assessment is mission, duplicate, related, no_action, awaiting, later, decision or accepted"
                     .to_owned(),
             ),
         }
@@ -383,6 +392,7 @@ impl Verdict {
             Self::Awaiting { .. } => "awaiting",
             Self::Later { .. } => "later",
             Self::Decision { .. } => "decision",
+            Self::Accepted => "accepted",
         }
     }
 }
@@ -500,6 +510,8 @@ fn audit_scope(scope: &ReportScope) -> (String, String) {
         ReportScope::Operation(id) => (id.clone(), format!("operation:{id}")),
         ReportScope::Station(id) => (String::new(), format!("station:{id}")),
         ReportScope::M => (String::new(), "config:reports".to_owned()),
+        ReportScope::Person(_) => (String::new(), "config:assistant".to_owned()),
+        ReportScope::Global => (String::new(), "config:memory".to_owned()),
     }
 }
 
@@ -608,6 +620,15 @@ pub fn assess(
     if a.reason.trim().is_empty() {
         return Err(invalid("an assessment needs its reason"));
     }
+    let proposal = stored.is_proposal();
+    if matches!(a.verdict, Verdict::Accepted) && !proposal {
+        return Err(invalid("only what is proposed of a known kind is accepted"));
+    }
+    if proposal && !matches!(a.verdict, Verdict::Accepted | Verdict::NoAction) {
+        return Err(invalid(
+            "a proposal of a known kind is accepted, or closed with no_action",
+        ));
+    }
     if let Some(priority) = a.priority
         && !cx.settings.priorities.iter().any(|each| each == priority)
     {
@@ -701,7 +722,7 @@ pub fn assess(
                 ));
             }
         }
-        Verdict::NoAction => {}
+        Verdict::NoAction | Verdict::Accepted => {}
     }
     if a.credibility == Some(1)
         && !corroborated(&stored.links)
@@ -736,6 +757,18 @@ pub fn assess(
     if let Verdict::Decision { question } = &a.verdict {
         let request = decision_request(store, &stored, question, a, cx)?;
         tie = Some(ReportLink::new(ReportLinkKind::Decision, request.id));
+    }
+    // What a proposal changes is changed after it is audited and before it closes.
+    let mut applied = false;
+    if matches!(a.verdict, Verdict::Accepted)
+        && let Some(proposes) = &stored.proposes
+    {
+        apply_proposal(store, &stored, proposes, a)?;
+        tie = Some(ReportLink::new(
+            ReportLinkKind::Report,
+            proposes.target.clone(),
+        ));
+        applied = true;
     }
     // The other Report names this one back, so each lists the other.
     if let Some(other) = &other {
@@ -808,6 +841,13 @@ pub fn assess(
                 close(report, "related", format!("related to {}", to.trim()));
             }
             Verdict::NoAction => close(report, "no_action", a.reason.to_owned()),
+            Verdict::Accepted if applied => {
+                close(report, "accepted", a.reason.to_owned());
+            }
+            Verdict::Accepted => {
+                report.state = ReportState::Standing;
+                report.updated_by = Some(a.by.to_owned());
+            }
         }
         report.assessment = Some(assessment);
         Ok(())
@@ -817,6 +857,60 @@ pub fn assess(
         rate(store, &report, outcome, cx.settings, a.at)?;
     }
     Ok(report)
+}
+
+/// Carries out what `proposal` asks of the Report it targets: its words as that Report's next
+/// revision, or the target forgotten (a memory) or retired (anything else known).
+fn apply_proposal(
+    store: &dyn RegistryBackend,
+    proposal: &Report,
+    proposes: &ReportProposes,
+    a: &Assessment<'_>,
+) -> io::Result<()> {
+    let target = store
+        .report(&proposes.target)?
+        .filter(|target| target.scope == proposal.scope && target.kind == proposal.kind)
+        .ok_or_else(|| invalid("what it changes is gone: close it with no_action"))?;
+    if target.state != ReportState::Standing {
+        return Err(invalid(
+            "what it changes is no longer standing: close it with no_action",
+        ));
+    }
+    if proposes.forget {
+        if target.revision != proposes.revision {
+            return Err(invalid(format!(
+                "what it changes has moved on to revision {}: close it with no_action",
+                target.revision
+            )));
+        }
+        if target.kind == "memory" {
+            store.forget_report(&target.id, Some(proposes.revision))?;
+        } else {
+            store.change_report(&target.id, &mut |report| {
+                report.state = ReportState::Closed;
+                let mut ended = ReportResolution::new(a.by, a.at);
+                ended.outcome = Some(RETIRED.to_owned());
+                ended.note = Some(a.reason.to_owned());
+                report.resolution = Some(ended);
+                report.updated = a.at.max(report.created);
+                report.updated_by = Some(a.by.to_owned());
+                Ok(())
+            })?;
+        }
+        return Ok(());
+    }
+    let mut next = target;
+    next.title = proposal.title.clone();
+    next.summary = proposal.summary.clone();
+    next.topics = proposal.topics.clone();
+    next.text = proposal.text.clone();
+    next.compartments = proposal.compartments.clone();
+    next.filer = proposal.filer.clone();
+    next.exposures = proposal.exposures.clone();
+    next.updated = a.at.max(next.created);
+    next.updated_by = Some(a.by.to_owned());
+    store.write_report(&next, proposes.revision)?;
+    Ok(())
 }
 
 /// Refuses a Mission that is not `operation`'s.

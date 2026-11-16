@@ -15,6 +15,7 @@ pub mod identity;
 pub mod inherit;
 pub mod intake;
 pub mod issues;
+pub mod knowledge;
 pub mod limits;
 pub mod memories;
 pub mod mission;

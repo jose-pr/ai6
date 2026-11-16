@@ -537,9 +537,25 @@ CREATE TABLE IF NOT EXISTS ai6_reports (
     created REAL NOT NULL,
     updated REAL NOT NULL,
     record TEXT NOT NULL,
+    words TEXT NOT NULL DEFAULT '',
     revision INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ai6_reports_scope ON ai6_reports (scope, created);
+
+-- Search reads the distinct words of a Report (title, summary, topics, text) from
+-- ai6_reports_search, kept in the same transaction, and filters and ranks what it finds outside
+-- the database. A Report with no row here is always a candidate.
+CREATE VIRTUAL TABLE IF NOT EXISTS ai6_reports_search USING fts5 (id UNINDEXED, words);
+
+-- What each known-kind Report held before its later revisions, gone when a memory is forgotten.
+-- report_revision is the Report's own count; revision is the clock's, as on every row.
+CREATE TABLE IF NOT EXISTS ai6_report_versions (
+    id TEXT NOT NULL,
+    report_revision INTEGER NOT NULL,
+    record TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    PRIMARY KEY (id, report_revision)
+);
 
 -- The Missions, Reports, decisions and evidence a Report is tied to, to find a Mission's Reports.
 CREATE TABLE IF NOT EXISTS ai6_report_links (
