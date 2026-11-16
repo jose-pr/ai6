@@ -454,6 +454,10 @@ class _GreenInkPageState extends State<GreenInkPage> {
                               sources: widget.board.loadSourcePages(
                                 request.operationId,
                               ),
+                              readAll: () => widget.board.loadGreenInkDocument(
+                                request.operationId,
+                                request.id,
+                              ),
                             ),
                             const SizedBox(height: 8),
                             Wrap(
@@ -726,6 +730,8 @@ class _ExpiredCard extends StatelessWidget {
               reason: request.reason,
               links: request.links,
               sources: board.loadSourcePages(request.operationId),
+              readAll: () =>
+                  board.loadGreenInkDocument(request.operationId, request.id),
             ),
             const SizedBox(height: 8),
             OutlinedButton(onPressed: onRearm, child: const Text('Re-arm…')),

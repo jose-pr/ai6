@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../assistant/pages.dart' show PageLauncher, launchPage;
+import '../shell/oo_document_view.dart';
 import '../shell/oo_markdown.dart';
 
 /// An address an Agent gave with a request.
@@ -102,12 +103,15 @@ List<DocReference> referencesIn(String text, List<SourcePageSummary> pages) {
 
 /// Why an Agent asks, as a person reads it: Markdown whose references lead to the Operation's
 /// Sources, then the links it gave. All of it is the Agent's: a link to anywhere but a Source shows
-/// its address before it opens.
+/// its address before it opens. With [readAll], a reason longer than [previewLines] shows its first
+/// lines, and a button opens the whole request as a document.
 class GreenInkReason extends StatelessWidget {
   const GreenInkReason({
     required this.reason,
     this.links = const [],
     this.sources,
+    this.readAll,
+    this.previewLines = 8,
     this.launcher = launchPage,
     super.key,
   });
@@ -117,6 +121,10 @@ class GreenInkReason extends StatelessWidget {
 
   /// The Operation's Sources, when they are being read.
   final Future<List<SourcePageSummary>>? sources;
+
+  /// Reads the request as a document; none, and the whole reason is shown here.
+  final Future<OoDocument> Function()? readAll;
+  final int previewLines;
   final PageLauncher launcher;
 
   /// A label as Markdown that reads as itself, whatever it holds.
@@ -133,16 +141,29 @@ class GreenInkReason extends StatelessWidget {
       final hosts = {
         for (final page in pages) Uri.parse(page.web).host.toLowerCase(),
       };
+      final preview = readAll == null
+          ? null
+          : markdownPreview(reason, previewLines);
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         spacing: 4,
         children: [
           OoMarkdown(
-            reason,
+            preview ?? reason,
             references: referencesIn(reason, pages),
             trackers: hosts,
             launcher: launcher,
           ),
+          if (readAll case final read?)
+            TextButton(
+              onPressed: () => openDocumentPage(
+                context,
+                title: 'Green ink request',
+                load: read,
+                fallback: reason,
+              ),
+              child: Text(preview == null ? 'Open as document' : 'Read all'),
+            ),
           for (final link in links)
             OoMarkdown(
               _plain(link.label),

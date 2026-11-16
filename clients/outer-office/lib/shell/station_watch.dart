@@ -7,8 +7,10 @@ import '../main.dart';
 import '../routes/oo_route.dart';
 import '../theme/oo_theme.dart';
 import 'missions_board.dart';
+import 'oo_document_view.dart';
 import 'oo_freshness.dart';
 import 'oo_link.dart';
+import 'oo_markdown.dart';
 import 'oo_shell.dart';
 
 /// The Stations as cards. With [detailed], the route named one Station: its card is the
@@ -251,11 +253,16 @@ class StationCard extends StatelessWidget {
               const SizedBox(height: 10),
               Text(report.heading, style: text.labelSmall),
               const SizedBox(height: 2),
-              Text(
-                report.summary,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: text.bodySmall,
+              OoMarkdown(markdownPreview(report.summary, 3) ?? report.summary),
+              TextButton(
+                onPressed: () => openDocumentPage(
+                  context,
+                  title: 'Station ${station.stationId}',
+                  load: () =>
+                      board.loadChargeDocument('station:${station.stationId}'),
+                  fallback: report.summary,
+                ),
+                child: const Text('Read the report'),
               ),
               for (final finding in report.findings)
                 Padding(

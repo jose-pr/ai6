@@ -17,6 +17,7 @@ import '../theme/oo_tokens.dart';
 import 'app_window.dart';
 import 'oo_empty.dart';
 import 'oo_freshness.dart';
+import 'oo_document_view.dart';
 import 'oo_link.dart';
 
 /// The Missions a Missions [route] selects from the board, in its order. A state filter looks at
@@ -385,7 +386,10 @@ class MissionCard extends StatelessWidget {
                   tooltip: 'View Mission brief and launch context',
                   onPressed: () => Navigator.of(context).push(
                     MaterialPageRoute<void>(
-                      builder: (_) => MissionBriefPage(brief: brief),
+                      builder: (_) => OoLinks.carry(
+                        context,
+                        MissionBriefPage(brief: brief, board: board),
+                      ),
                     ),
                   ),
                   icon: const Icon(Icons.description_outlined),
@@ -601,10 +605,13 @@ class _RunHistory extends StatelessWidget {
   }
 }
 
+/// A Mission's brief as a document: the launch context from its frontmatter, then the
+/// instructions the Agent got. Environment values are never in it, only their names.
 class MissionBriefPage extends StatelessWidget {
-  const MissionBriefPage({required this.brief, super.key});
+  const MissionBriefPage({required this.brief, required this.board, super.key});
 
   final MissionBriefSummary brief;
+  final MissionBoard board;
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -616,47 +623,12 @@ class MissionBriefPage extends StatelessWidget {
           OperationNames.of(brief.operationId),
           style: Theme.of(context).textTheme.titleMedium,
         ),
-        const SizedBox(height: 20),
-        Text('Brief', style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 8),
-        SelectableText(brief.prompt),
-        const SizedBox(height: 24),
-        Text('Launch context', style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 8),
-        _manifestRow('Origin', brief.origin?.describe() ?? 'Not recorded'),
-        if (brief.origin?.itemUrl case final url?) _manifestRow('Item', url),
-        _manifestRow('Agent', brief.agentId ?? 'Unassigned'),
-        _manifestRow('Role', brief.roleId ?? 'Unspecified'),
-        _manifestRow('Station', brief.stationId ?? 'Not recorded'),
-        _manifestRow('Theater', brief.theaterId ?? 'Not recorded'),
-        if (brief.mode != null) _manifestRow('Mode', brief.mode!),
-        _manifestRow('Handler', brief.handlerProvider),
-        _manifestRow('Terminal', brief.terminalProvider),
-        _manifestRow('Working directory', brief.workingDirectory),
-        _manifestRow('Model', brief.model ?? 'Configured by handler'),
-        _manifestRow('Effort', brief.effort ?? 'Configured by handler'),
-        _manifestRow(
-          'Environment names',
-          brief.environmentKeys.isEmpty
-              ? 'None'
-              : brief.environmentKeys.join(', '),
+        const SizedBox(height: 12),
+        OoDocumentView(
+          load: () =>
+              board.loadBriefDocument(brief.operationId, brief.missionId),
+          fallback: brief.prompt,
         ),
-        const SizedBox(height: 8),
-        Text(
-          'Environment values are withheld.',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-      ],
-    ),
-  );
-
-  Widget _manifestRow(String label, String value) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 5),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(width: 160, child: Text(label)),
-        Expanded(child: SelectableText(value)),
       ],
     ),
   );

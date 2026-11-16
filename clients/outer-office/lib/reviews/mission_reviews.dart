@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../main.dart';
+import '../shell/oo_document_view.dart';
 import '../theme/oo_theme.dart';
 
 /// One reviewer's vote in a round. Its reasons are the reviewer's own words: data.
@@ -206,6 +207,15 @@ class _MissionReviewsSectionState extends State<MissionReviewsSection> {
                       ? (decision) => _overrule(review, decision)
                       : null,
                 ),
+              const SizedBox(height: 8),
+              // The votes and each reviewer's reasons are the document's body.
+              OoDocumentView(
+                key: ObjectKey(_reviews),
+                load: () => widget.board.loadReviewsDocument(
+                  widget.operationId,
+                  widget.missionId,
+                ),
+              ),
             ],
           );
         },
@@ -253,19 +263,6 @@ class _ReviewCard extends StatelessWidget {
                 style: text.bodySmall,
               ),
             const SizedBox(height: 8),
-            for (final vote in review.votes)
-              Semantics(
-                label: 'Round ${vote.round}: ${vote.agent} voted ${vote.vote}',
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Text(
-                    'Time ${vote.iteration}, round ${vote.round}: ${vote.agent} '
-                    'voted ${vote.vote} (weight ${vote.weight})'
-                    '${vote.reasons.isEmpty ? '' : ': ${vote.reasons.join('; ')}'}',
-                    style: text.bodySmall,
-                  ),
-                ),
-              ),
             if (review.overruledBy != null)
               Text('Decided by ${review.overruledBy}', style: text.bodySmall),
             if (onOverrule != null)

@@ -63,6 +63,8 @@ import 'settings/oo_settings_section.dart';
 import 'settings/oo_config.dart';
 import 'settings/oo_config_file.dart';
 import 'shell/app_window.dart';
+import 'shell/demo_documents.dart';
+import 'shell/oo_markdown.dart' show OoDocument;
 import 'shell/attention_summary.dart';
 import 'shell/board_reads.dart';
 import 'shell/stay_signed_in.dart';
@@ -367,6 +369,13 @@ class MissionBoard extends ChangeNotifier
             running: 2,
             capacity: 4,
             operations: ['G'],
+            headOfStation: StationLogReport(
+              at: _demoNow().round() - 600,
+              agent: '007',
+              summary:
+                  '# Head of Station report\n\nTheaters are ready. Tracked as OPS-12 and '
+                  'acme/demo#12, continuing mission-007.',
+            ),
             resources: HostResources(
               sampledAt: _demoNow().round() - 8,
               cpus: 8,
@@ -1273,6 +1282,62 @@ class MissionBoard extends ChangeNotifier
     ],
   );
 
+  /// The document at [path], a gateway document route: Markdown with its frontmatter and the
+  /// references resolved for this reader.
+  Future<OoDocument> loadDocument(String path) async {
+    if (demo) {
+      return demoDocument(path) ??
+          (throw StateError('Preview has no document there.'));
+    }
+    final response = await _userRequest(
+      'GET',
+      path,
+      headers: {'accept': 'application/json'},
+    );
+    if (response.statusCode != 200) {
+      throw GatewayRefused(
+        response.statusCode,
+        'The gateway refused the document.',
+      );
+    }
+    return OoDocument.fromJson(
+      jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>,
+    );
+  }
+
+  static String _operationPath(String operationId) =>
+      '/v1/user/operations/${Uri.encodeComponent(operationId)}';
+
+  Future<OoDocument> loadBriefDocument(String operationId, String missionId) =>
+      loadDocument(
+        '${_operationPath(operationId)}/missions/'
+        '${Uri.encodeComponent(missionId)}/brief',
+      );
+
+  Future<OoDocument> loadGreenInkDocument(String operationId, String id) =>
+      loadDocument(
+        '${_operationPath(operationId)}/green-ink/'
+        '${Uri.encodeComponent(id)}/document',
+      );
+
+  Future<OoDocument> loadHeldBriefDocument(String operationId, String key) =>
+      loadDocument(
+        '${_operationPath(operationId)}/held-briefs/'
+        '${Uri.encodeComponent(key)}/document',
+      );
+
+  Future<OoDocument> loadReviewsDocument(
+    String operationId,
+    String missionId,
+  ) => loadDocument(
+    '${_operationPath(operationId)}/missions/'
+    '${Uri.encodeComponent(missionId)}/reviews/document',
+  );
+
+  /// A charge's report; a Station's is the charge `station:<id>`.
+  Future<OoDocument> loadChargeDocument(String scope) =>
+      loadDocument('/v1/user/charges/${Uri.encodeComponent(scope)}/document');
+
   /// Each gate's review of a Mission; none in preview.
   Future<List<MissionReviewSummary>> loadMissionReviews(
     String operationId,
@@ -2021,7 +2086,9 @@ class MissionBoard extends ChangeNotifier
       key: 'source_github--org_repo_7',
       operationId: operationId,
       title: 'Resolve github item org/repo#7',
-      body: 'Title: Crash on save\n\nThe app crashes when saving.',
+      body:
+          '# Crash on save\n\nThe app crashes when saving. Tracked as OPS-12 and '
+          'acme/demo#12, continuing mission-007.',
       source: 'source:github',
       url: 'https://github.com/org/repo/issues/7',
       findings: const [
@@ -2959,7 +3026,9 @@ class MissionBoard extends ChangeNotifier
       agent: '007',
       kind: 'push',
       target: 'origin:refs/heads/main',
-      reason: 'The release branch passed review; push it to main.',
+      reason:
+          '## Why this push\n\nThe release branch passed review; push it to main. '
+          'Tracked as OPS-12 and acme/demo#12, continuing mission-007.',
       links: const [
         GreenInkLink(label: 'PR 42', url: 'https://github.com/o/n/pull/42'),
       ],

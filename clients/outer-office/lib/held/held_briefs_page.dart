@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import '../main.dart';
 import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
+import '../shell/oo_document_view.dart';
 import '../shell/oo_freshness.dart';
 import '../shell/oo_link.dart';
 import '../shell/operation_names.dart';
@@ -376,7 +377,13 @@ class _HeldBriefsPageState extends State<HeldBriefsPage> {
             children: [
               Align(
                 alignment: Alignment.centerLeft,
-                child: SelectableText(revealInvisible(held.body)),
+                child: OoDocumentView(
+                  load: () => widget.board.loadHeldBriefDocument(
+                    held.operationId,
+                    held.key,
+                  ),
+                  fallback: held.body,
+                ),
               ),
             ],
           ),

@@ -909,6 +909,19 @@ void main() {
           return http.Response(userProfileResponse(), 200);
         }
         if (request.url.path ==
+            '/v1/user/operations/operation-alpha/missions/mission-007/brief') {
+          return http.Response(
+            jsonEncode({
+              'markdown':
+                  '---\nkind: brief\nagent: case-officer\n'
+                  'station: station-alpha\ntheater: local\nmode: field\n'
+                  'environment_names:\n  - AI6_MISSION_ID\n---\n\n'
+                  'Review the requested change.',
+            }),
+            200,
+          );
+        }
+        if (request.url.path ==
             '/v1/user/operations/operation-alpha/placement-preview') {
           return http.Response(
             jsonEncode({
@@ -1132,19 +1145,22 @@ void main() {
 
     await tester.tap(find.byTooltip('View Mission brief and launch context'));
     await tester.pumpAndSettle();
-    expect(find.text('Review the requested change.'), findsOneWidget);
     expect(
-      find.text(
-        'Dropped into the Registry queue (unauthenticated), found by station-alpha',
-      ),
+      find.textContaining('Review the requested change.', findRichText: true),
       findsOneWidget,
     );
-    expect(find.text('case-officer'), findsOneWidget);
-    expect(find.text('station-alpha'), findsOneWidget);
-    expect(find.text('local'), findsOneWidget);
-    expect(find.text('field'), findsOneWidget);
-    expect(find.text('AI6_MISSION_ID'), findsOneWidget);
-    expect(find.text('Environment values are withheld.'), findsOneWidget);
+    expect(
+      find.textContaining('case-officer', findRichText: true),
+      findsWidgets,
+    );
+    expect(
+      find.textContaining('station-alpha', findRichText: true),
+      findsWidgets,
+    );
+    expect(
+      find.textContaining('AI6_MISSION_ID', findRichText: true),
+      findsWidgets,
+    );
     await tester.pageBack();
     await tester.pumpAndSettle();
 

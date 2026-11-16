@@ -96,6 +96,12 @@ Future<MissionBoard> _board(
           'stations': [],
         }),
         '/v1/user/operations/G/missions/m1/reviews' => json(_reviews),
+        '/v1/user/operations/G/missions/m1/reviews/document' => json({
+          'markdown':
+              '## Output review\n\n- r1 voted redo (weight 2)\n\n'
+              '> no test for the new path\n\n'
+              '- Tanner voted absent (weight 1)\n',
+        }),
         '/v1/user/operations/G/missions/m1/reviews/output/overrule' => json(
           _reviews.first,
         ),
@@ -142,12 +148,13 @@ void main() {
         expect(find.text('the panel did not agree'), findsOneWidget);
         expect(find.text('r1 (gemini-free), weight 2, veto'), findsOneWidget);
         expect(
-          find.textContaining(
-            'r1 voted redo (weight 2): no test for the new path',
-          ),
+          find.textContaining('no test for the new path', findRichText: true),
           findsOneWidget,
         );
-        expect(find.textContaining('Tanner voted absent'), findsOneWidget);
+        expect(
+          find.textContaining('Tanner voted absent', findRichText: true),
+          findsOneWidget,
+        );
         expect(
           find.text('Pass it'),
           findsNothing,

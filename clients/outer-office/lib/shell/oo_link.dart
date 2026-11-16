@@ -29,6 +29,23 @@ class OoLinks extends InheritedWidget {
         : null;
   }
 
+  /// [page], pushed on the Navigator from [from], with [from]'s links: a link followed there
+  /// closes the page first, so the route it names shows.
+  static Widget carry(BuildContext from, Widget page) {
+    final links = maybeOf(from);
+    if (links == null) return page;
+    return Builder(
+      builder: (context) => OoLinks(
+        pages: links.pages,
+        onRoute: (route) {
+          Navigator.of(context).pop();
+          links.onRoute(route);
+        },
+        child: page,
+      ),
+    );
+  }
+
   @override
   bool updateShouldNotify(OoLinks old) =>
       old.pages != pages || old.onRoute != onRoute;

@@ -220,7 +220,10 @@ class MissionDetail extends StatelessWidget {
                 TextButton.icon(
                   onPressed: () => Navigator.of(context).push(
                     MaterialPageRoute<void>(
-                      builder: (_) => MissionBriefPage(brief: brief),
+                      builder: (_) => OoLinks.carry(
+                        context,
+                        MissionBriefPage(brief: brief, board: board),
+                      ),
                     ),
                   ),
                   icon: const Icon(Icons.description_outlined, size: 18),
