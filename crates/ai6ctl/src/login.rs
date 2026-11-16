@@ -43,9 +43,11 @@ pub(crate) enum FactorsCommand {
     /// provisioning link and the recovery codes, once.
     Enrol,
     /// Confirm the app with the code it shows now; until then the old factor, if any, stands.
+    /// Without CODE it is asked for on standard input, which keeps it out of the shell history
+    /// and the process list.
     Confirm {
         /// The code from the app.
-        code: String,
+        code: Option<String>,
     },
     /// Remove a person's second factor so that they enrol again (needs account.manage).
     Reset {
@@ -200,9 +202,13 @@ pub(crate) async fn run(
             for code in begun["recovery_codes"].as_array().into_iter().flatten() {
                 println!("recovery\t{}", text(code));
             }
-            eprintln!("shown once; confirm with `ai6ctl factors confirm CODE`");
+            eprintln!("shown once; then run `ai6ctl factors confirm` and enter the app's code");
         }
         FactorsCommand::Confirm { code } => {
+            let code = match code {
+                Some(code) => code,
+                None => read_line("Code: ")?,
+            };
             exchange(
                 client,
                 token,

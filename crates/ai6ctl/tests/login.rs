@@ -200,6 +200,10 @@ async fn factors_set_up_show_codes_once_confirm_and_reset() {
     let (ok, out, err) = ai6ctl(&server, &["factors", "confirm", "654321"], &token, "").await;
     assert!(ok, "{err}");
     assert!(out.contains("enrolled"));
+    // Without the code on the command line it is read from standard input.
+    let (ok, out, err) = ai6ctl(&server, &["factors", "confirm"], &token, "654321\n").await;
+    assert!(ok, "{err}");
+    assert!(out.contains("enrolled") && err.contains("Code: "), "{out} {err}");
     let (ok, out, err) = ai6ctl(&server, &["factors", "reset", "id-alice"], &token, "").await;
     assert!(ok, "{err}");
     assert!(out.contains("second factor removed"));
