@@ -15,7 +15,7 @@ use guatiao::value::Number;
 use serde_json::Value as JsonValue;
 use universal_exports::{
     AccessProviders, AssistantConfig, EitherAuthorizer, Gateway, GatewayConfig, GatewayLimits,
-    KeyProvider, LiveAccess, LoginLimits, ViewLimits,
+    KeyProvider, LiveAccess, LiveSignIn, LoginLimits, NOTHING_OFFERED, SignInLoader, ViewLimits,
 };
 
 #[derive(Debug, Parser)]
@@ -238,15 +238,17 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
     }
     live.apply(&snapshot);
-    let access = configured_access(&settings, &snapshot, &live)
+    let access = configured_access(&settings, &snapshot, &live, &provider)
         .map_err(|error| format!("user access configuration failed: {error}"))?;
     if access.is_some() && live.has_no_chief() {
         eprintln!(
             "universal-exports: access: no chief; nobody can change access; set [unex.access] chief in ai6.cfg"
         );
     }
+    let mut sign_in = None;
     let mut gateway = match access {
-        Some((access, accounts, catalog)) => {
+        Some((access, accounts, catalog, in_force)) => {
+            sign_in = Some(in_force);
             let gateway = Gateway::with_access(config, registry, access)
                 .with_access_admin(live.clone())
                 .with_own_providers(catalog);
@@ -331,6 +333,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         tokio::spawn(follow_policy(
             provider,
             live,
+            sign_in,
             followed_registry,
             snapshot.clone(),
             poll,
@@ -395,12 +398,14 @@ fn own_tls(settings: &Settings) -> Result<Option<std::sync::Arc<rustls::ServerCo
 }
 
 /// Reads the provider every `every` and applies a changed `access` or `operation_access`
-/// record, and gives `registry` the limits of a changed `registry` record; a changed record of a
-/// family only a restart applies (`unex`, `plugin`) is logged as needing one. A configuration the provider refuses keeps the policy in force, and the access
-/// admin shows why.
+/// record and the `unex` record's `sign_in_policy`, and gives `registry` the limits of a changed
+/// `registry` record; a changed record of a family only a restart applies (the rest of `unex`,
+/// `plugin`) is logged as needing one. A configuration the provider refuses keeps the policy in
+/// force, and the access admin shows why.
 async fn follow_policy(
     provider: Arc<dyn ConfigProvider>,
     live: Arc<LiveAccess>,
+    sign_in: Option<Arc<LiveSignIn>>,
     registry: Arc<dyn ai6::RegistryBackend>,
     started: ai6::ConfigSnapshot,
     every: Duration,
@@ -409,38 +414,71 @@ async fn follow_policy(
     let mut limits = started.settings.registry.clone();
     let started = Arc::new(started);
     let mut refused = None;
+    let mut refused_policy: Option<String> = None;
     let mut restart: Vec<ai6::ConfigRecord> = Vec::new();
     loop {
         tokio::time::sleep(every).await;
         let (provider, live, base) = (provider.clone(), live.clone(), started.clone());
         let outcome = {
             let live = live.clone();
+            let sign_in = sign_in.clone();
             tokio::task::spawn_blocking(move || {
                 let snapshot = match provider.changes_since("", since) {
                     Ok(Some(snapshot)) => snapshot,
                     Ok(None) => return Ok(None),
                     Err(error) => return Err(error.to_string()),
                 };
+                // The sign-in policy is applied live; the rest of the record waits for a restart.
+                let mut unex = base.settings.unex.clone();
+                unex.sign_in_policy = snapshot.settings.unex.sign_in_policy.clone();
                 let changed: Vec<ai6::ConfigRecord> = base
                     .changed_families(&snapshot)
                     .into_iter()
-                    .filter(|record| {
-                        matches!(record, ai6::ConfigRecord::Unex | ai6::ConfigRecord::Plugin)
+                    .filter(|record| match record {
+                        ai6::ConfigRecord::Unex => unex != snapshot.settings.unex,
+                        ai6::ConfigRecord::Plugin => true,
+                        _ => false,
                     })
                     .collect();
                 live.apply(&snapshot);
+                let policy = match &sign_in {
+                    Some(sign_in) => sign_in
+                        .apply(snapshot.settings.unex.sign_in_policy.as_ref())
+                        .map(|applied| (applied, sign_in.offers_nothing())),
+                    None => Ok((false, false)),
+                };
                 Ok(Some((
                     snapshot.revision,
                     changed,
                     snapshot.settings.registry,
+                    policy,
                 )))
             })
             .await
         };
         match outcome {
-            Ok(Ok(Some((revision, changed, record)))) => {
+            Ok(Ok(Some((revision, changed, record, policy)))) => {
                 since = revision;
                 refused = None;
+                match policy {
+                    Ok((true, nothing)) => {
+                        eprintln!("universal-exports: sign-in policy applied");
+                        if nothing {
+                            eprintln!("{NOTHING_OFFERED}");
+                        }
+                        refused_policy = None;
+                    }
+                    Ok((false, _)) => refused_policy = None,
+                    Err(reason) => {
+                        if refused_policy.as_ref() != Some(&reason) {
+                            eprintln!(
+                                "universal-exports: sign-in policy refused, keeping the one in \
+                                 force: {reason}"
+                            );
+                            refused_policy = Some(reason);
+                        }
+                    }
+                }
                 if record != limits {
                     record.apply_to(registry.as_ref());
                     eprintln!("universal-exports: Registry limits applied");
@@ -630,7 +668,36 @@ type Configured = (
     AccessProviders,
     Option<Arc<dyn ai6::Accounts>>,
     Vec<ai6::providers::ProviderEntry>,
+    Arc<LiveSignIn>,
 );
+
+/// Builds a sign-in policy provider from the plugins the gateway loaded, its configuration
+/// checked against the provider's own schema.
+struct PluginPolicies {
+    plugins: Arc<ai6::station::plugins::Plugins>,
+    depth: ai6::Limit,
+}
+
+impl SignInLoader for PluginPolicies {
+    fn load(
+        &self,
+        provider: &str,
+        config: Option<&ai6::ProviderConfig>,
+    ) -> Result<Arc<dyn ai6::directorates::m::access::SignInPolicy>, String> {
+        let value = config
+            .map(|object| {
+                json_to_provider_value(JsonValue::Object(object.0.clone()), 0, self.depth)
+            })
+            .transpose()?;
+        if let Some(value) = &value {
+            self.plugins.check_settings(provider, value)?;
+        }
+        self.plugins
+            .sign_in_policy(provider, value.as_ref())
+            .map(Arc::from)
+            .map_err(|error| error.to_string())
+    }
+}
 
 /// The user access providers `snapshot` configures, with the accounts provider when there is
 /// one; `None` without user access.
@@ -638,6 +705,7 @@ fn configured_access(
     settings: &Settings,
     snapshot: &ai6::ConfigSnapshot,
     live: &Arc<LiveAccess>,
+    store: &Arc<dyn ConfigProvider>,
 ) -> Result<Option<Configured>, String> {
     let record = &snapshot.settings.unex;
     let needs_directory = user_access_configured(record) || snapshot.settings.access.is_some();
@@ -651,10 +719,10 @@ fn configured_access(
     if snapshot.settings.access.is_some() && record.authorizer.is_some() {
         return Err("configure either the access record or unex.authorizer".to_owned());
     }
-    let plugins = ai6::station::plugins::Plugins::scan_with(
+    let plugins = Arc::new(ai6::station::plugins::Plugins::scan_with(
         &settings.located.value.unex.plugins.paths,
         &plugin_policy(settings, snapshot),
-    );
+    ));
     ai6::station::plugins::log_scan(plugins.scan_summary());
     let config = |value: &Option<ai6::ProviderConfig>| {
         value
@@ -702,10 +770,11 @@ fn configured_access(
     };
     let mut people = people.into_iter();
     let access = match (people.next(), record.proxy_user_header.as_deref()) {
-        (Some(first), Some(name)) => AccessProviders::new(first, directory, authorizer)
+        (Some((id, first)), Some(name)) => AccessProviders::new(first, directory, authorizer)
+            .named(id)
             .with_proxy_identity(header(name)?, record.proxy_lookup_by.clone())
             .with_proxy_secret(proxy_secret(settings)?, proxy_secret_min(settings))?,
-        (Some(first), None) => AccessProviders::new(first, directory, authorizer),
+        (Some((id, first)), None) => AccessProviders::new(first, directory, authorizer).named(id),
         (None, Some(name)) => AccessProviders::from_reverse_proxy(
             directory,
             authorizer,
@@ -718,7 +787,30 @@ fn configured_access(
             return Err("configure unex.authenticators or unex.proxy_user_header".to_owned());
         }
     };
-    let access = people.fold(access, AccessProviders::with_authenticator);
+    let access = people.fold(access, |access, (id, authenticator)| {
+        access.with_authenticator(authenticator).named(id)
+    });
+    let sign_in = Arc::new(LiveSignIn::new(
+        store.clone(),
+        Arc::new(PluginPolicies {
+            plugins: plugins.clone(),
+            depth: record.provider_config_depth,
+        }),
+    ));
+    // Checked now, as the authenticators are: a policy that does not build stops the start.
+    sign_in
+        .apply(record.sign_in_policy.as_ref())
+        .map_err(|reason| {
+            let provider = record
+                .sign_in_policy
+                .as_ref()
+                .map_or("", |policy| policy.provider.as_str());
+            format!("unex.sign_in_policy ({provider}): {reason}")
+        })?;
+    if sign_in.offers_nothing() {
+        eprintln!("{NOTHING_OFFERED}");
+    }
+    let access = access.with_sign_in(sign_in.clone());
     let access = match keys {
         Some(keys) => access.with_keys(keys),
         None => access,
@@ -729,17 +821,19 @@ fn configured_access(
             let page_authenticator = plugins
                 .authenticator(id, page_config.as_ref())
                 .map_err(|error| format!("unex.page_authenticator: {error}"))?;
-            access.with_page_authenticator(Arc::from(page_authenticator))
+            access
+                .with_page_authenticator(Arc::from(page_authenticator))
+                .with_page_authenticator_id(id)
         }
         None => access,
     };
-    Ok(Some((access, accounts, plugins.catalog())))
+    Ok(Some((access, accounts, plugins.catalog(), sign_in)))
 }
 
 /// What the `unex` record's sign-in providers come to: the people's, in order, the key
 /// provider, and the accounts provider of the first that offers accounts.
 type SignIn = (
-    Vec<Arc<dyn Authenticator>>,
+    Vec<(String, Arc<dyn Authenticator>)>,
     Option<KeyProvider>,
     Option<Arc<dyn ai6::Accounts>>,
 );
@@ -756,7 +850,7 @@ fn sign_in_providers(
     config: &ConfigReader<'_>,
 ) -> Result<SignIn, String> {
     let offered = plugins.account_managers();
-    let mut people: Vec<Arc<dyn Authenticator>> = Vec::new();
+    let mut people: Vec<(String, Arc<dyn Authenticator>)> = Vec::new();
     let mut keys: Option<KeyProvider> = None;
     let mut accounts: Option<Arc<dyn ai6::Accounts>> = None;
     for (index, entry) in record.authenticators.iter().enumerate() {
@@ -801,7 +895,7 @@ fn sign_in_providers(
             );
         } else {
             accounts = accounts.or(kept);
-            people.push(authenticator);
+            people.push((id.to_owned(), authenticator));
         }
     }
     Ok((people, keys, accounts))

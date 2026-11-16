@@ -90,8 +90,12 @@ impl LoginGuard {
     }
 
     /// The address a request came from: the proxy's header when one is configured and holds
-    /// an address, else the connection's, else a single shared bucket for the unknown.
-    pub(crate) fn source(&self, headers: &HeaderMap, connection: Option<SocketAddr>) -> IpAddr {
+    /// an address, else the connection's; `None` when neither tells.
+    pub(crate) fn address(
+        &self,
+        headers: &HeaderMap,
+        connection: Option<SocketAddr>,
+    ) -> Option<IpAddr> {
         self.address_header
             .as_ref()
             .and_then(|name| headers.get(name))
@@ -99,6 +103,12 @@ impl LoginGuard {
             .and_then(|value| value.rsplit(',').next())
             .and_then(|entry| parse_address(entry.trim()))
             .or_else(|| connection.map(|address| address.ip()))
+    }
+
+    /// What a request is counted against: its address, else a single shared bucket for the
+    /// unknown.
+    pub(crate) fn source(&self, headers: &HeaderMap, connection: Option<SocketAddr>) -> IpAddr {
+        self.address(headers, connection)
             .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
     }
 

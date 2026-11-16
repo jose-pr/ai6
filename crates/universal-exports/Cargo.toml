@@ -34,6 +34,11 @@ name = "keys"
 path = "tests/keys.rs"
 required-features = ["cli"]
 
+[[test]]
+name = "sign_in"
+path = "tests/sign_in.rs"
+required-features = ["cli"]
+
 [dependencies]
 ai6 = { path = "../ai6" }
 coqui-access-kit = { workspace = true, optional = true }

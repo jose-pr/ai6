@@ -115,8 +115,18 @@ impl KeyProvider {
     pub fn with_use_precision(self, seconds: Option<f64>) -> Self;
 }
 
-pub struct AccessProviders { /* the people's Authenticators in order, an optional KeyProvider, one Directory, one Authorizer, an optional proxy identity */ }
+pub struct AccessProviders { /* the people's Authenticators in order (each optionally named), an optional KeyProvider, one Directory, one Authorizer, an optional proxy identity, an optional sign-in policy */ }
 impl AccessProviders {
+    // Names the sign-in provider added last by `id`, the ID a sign-in policy lists it by; one with
+    // no name is asked only when an offer lists no provider.
+    pub fn named(self, id: impl Into<String>) -> Self;
+    // The page authenticator's ID, as a policy lists it.
+    pub fn with_page_authenticator_id(self, id: impl Into<String>) -> Self;
+    // Which methods a sign-in may use. Without one each configured method alone is enough, from
+    // anywhere (`password` with a provider that takes a name and a secret, `proxy` with a proxy
+    // identity). Bearer keys are outside it. `with_sign_in_policy(policy)` fixes one no route changes.
+    pub fn with_sign_in(self, sign_in: Arc<LiveSignIn>) -> Self;
+    pub fn with_sign_in_policy(self, policy: Arc<dyn ai6::directorates::m::access::SignInPolicy>) -> Self;
     // Bearer keys alone: nobody signs in with a password.
     pub fn keys_only(directory: Arc<dyn ai6::Directory>, authorizer: Arc<dyn ai6::Authorizer>) -> Self;
     // Another people's sign-in provider, asked after those added: `Unknown` passes the
@@ -938,8 +948,8 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/missions/search` | Requires a user bearer. Query `operation`, `agent`, `state` (`new`, `held`, `claimed`, `done`, `failed`), `handle` (a piece of the current handle, or a former one whole), `ticket` (item key, number or code), `text` (words that must each appear, without case, in the title, name, brief or outcome) and `limit`; unknown parameters, an empty one, a `limit` of 0 or over `[search] max_page`, or a filter over `[search] filter_bytes` is `400`. Reads the Registry's briefs (newest `[search] scan` of them), so a Mission is found with nothing published. Returns `{missions: [{mission_id, handle, operation_id, state, agent, role, title, name, url, ticket, created, attempts}], more}` of only what the bearer may read: `mission.read` on the Operation, or a compartment on that Mission (audited `compartment.read` before it is shown); anything else is left out. |
 | `POST /v1/user/operations/{operation_id}/missions/{mission_id}/rename` | Requires `mission.control`; body `{"handle"}`. Returns `{operation_id, mission_id, handle, previous}`; a refusal is `{"error": TEXT}` with `400` (malformed), `409` (a handle another Mission had) or `404` (no such Mission in the Operation). Audited `mission.rename` (resource `mission:UID`, target the UID), timeline kind `control` action `rename.done` with details `handle` and `previous`. |
 | `GET /v1/operations/{operation_id}/missions/{mission_id}` | Requires a user bearer; returns one authorized Mission, its AI6-published brief when available, its `usage` (tokens and cost per Run and UTC day) once a provider has reported any, and its `runs` from the shared Run records. `GET /v1/missions` carries `runs` too. |
-| `GET /v1/auth/methods` | No token. `{"methods": [...]}`: `password` when the Authenticator takes a name and a secret (it says so in `describe`, or says nothing), `proxy` with a proxy identity header. Names no account. |
-| `POST /v1/auth/login` | Resolves the sanitized identity header from the trusted reverse proxy, or uses the configured Authenticator and Directory; returns a one-time user bearer secret, `expires_at`, `expires_in` (seconds left, for a client that does not trust its clock) and `ends_at`. `ttl_seconds` is optional, default `[gateway] access_token_ttl`, at most `access_token_max_ttl`. A request with `Origin` (checked) also gets `Set-Cookie: ai6_session=…; Path=/v1/auth; HttpOnly; Secure; SameSite=Strict; Max-Age=…`, ending `session_max` after signing in, unless `[gateway] session_cookie` is `false`, `session_max` is `0` or the body says `"session_cookie": false`; and, when pages share the API's origin, the page cookie `ai6_pages` (see Pages she publishes), which `resume` and a renewal with `Origin` set again and `logout` with `Origin` drops. |
+| `GET /v1/auth/methods` | No token. `{"methods": [...]}`: what the sign-in policy offers this request; with none, `password` when the Authenticator takes a name and a secret (it says so in `describe`, or says nothing) and `proxy` with a proxy identity header. Names no account. |
+| `POST /v1/auth/login` | Decides the presented method by the sign-in policy first (`403` when not offered, nothing counted), then resolves the sanitized identity header from the trusted reverse proxy, or uses the configured Authenticator and Directory; returns a one-time user bearer secret, `expires_at`, `expires_in` (seconds left, for a client that does not trust its clock) and `ends_at`. `ttl_seconds` is optional, default `[gateway] access_token_ttl`, at most `access_token_max_ttl`. A request with `Origin` (checked) also gets `Set-Cookie: ai6_session=…; Path=/v1/auth; HttpOnly; Secure; SameSite=Strict; Max-Age=…`, ending `session_max` after signing in, unless `[gateway] session_cookie` is `false`, `session_max` is `0` or the body says `"session_cookie": false`; and, when pages share the API's origin, the page cookie `ai6_pages` (see Pages she publishes), which `resume` and a renewal with `Origin` set again and `logout` with `Origin` drops. |
 | `POST /v1/auth/resume` | Takes the `ai6_session` cookie, not a bearer. `Origin` must be the public origin (`403`). Answers `201` as login does, with a new token of the same sign-in: its time still runs from signing in, and its renewals stop at the same `ends_at`. `401` and the cookie cleared when it is refused: not active, past the end, the person gone from the directory, a proven proxy identity naming someone else, or the setting off; `401` with nothing cleared when no cookie came. Refused cookies are counted by address alone (`login_tries_per_address`), apart from login tries, and past that answer `429`. |
 | `POST /v1/auth/logout` | Revokes the presented user token across gateways sharing the Registry. With an `ai6_session` cookie from the public origin it also takes that, and the token may then be absent or over; `204`, `401` when it ended nothing, and a cookie sent is cleared either way. A token or cookie of a sign-in takes the whole sign-in: the cookie and every token issued from it. |
 | `POST /v1/auth/renew` | Moves the presented token's expiry on by `[gateway] access_token_ttl`, up to `session_max` after it was issued, never earlier; the value does not change. `Origin` is checked when present; it is not counted as a login try. `200 {token_id, expires_at, expires_in, ends_at}`, no secret (`ends_at` is `null` with no bound); `401` when not active or the person has left the directory. |
@@ -1112,7 +1122,34 @@ The optional `cli` feature builds the service command:
   a plugin Authorizer are loaded behind coqui-access-kit's cache; a lifetime past the default
   is printed as a warning. The gateway polls the provider every `[provider] poll` seconds and
   swaps in a changed `access` or `operation_access` record (a refused one keeps the last good policy); a changed
-  `unex` or `plugin` record is logged as needing a restart.
+  `unex` record (apart from its `sign_in_policy`, applied at once) or `plugin` record is logged as needing a restart.
+
+### The sign-in policy (`sign_in.rs`)
+
+`LiveSignIn` holds the `coqui_sign_in_policy` in force: `new(store, loader)` keeps it in the `unex` record of the
+configuration provider and builds it through a `SignInLoader` (`load(provider, config)`, the provider's own schema
+checking the configuration); `fixed(policy)` is one no route changes. `apply(Option<&SignInPolicyProvider>)` puts the
+record's policy in force and says whether that changed anything, keeping the one in force when the new one does not
+build (`invalid()` says why); `policy()`; `offers_nothing()` is true when no client from an unknown address or loopback
+is offered a sign-in, and `NOTHING_OFFERED` is the line the gateway logs then (a policy that offers no sign-in is
+accepted, not a weakening; only API keys work). `universal-exports` applies it at start and at each poll of the provider.
+
+`POST /v1/auth/login` decides the method it was given (`proxy` when the proxy identity header came, else `password`)
+with `purpose sign_in`, the client's address (`client_address_header`, else the connection, `None` when neither tells),
+client `browser` when the request names an origin and `api` otherwise (so a rule for `app` never matches), and service
+`unex`. A method not offered is `403` and reaches no provider and no try count; only the offer's providers are asked, in
+its order (an empty list is every provider); the valid factor is decided again with the person and anything short of
+`complete` is `401` as a wrong password is. The steps passed are stored on the token and the session cookie record
+(`AccessTokenRecord::factors`); `resume` and `renew` decide `purpose resume` with them, the person as the directory has them
+now and this request's address: a sign-in the policy no longer completes is `401`. A token holding no steps (a Station's)
+is not decided. A page's viewer is decided as `certificate` (a certificate the gateway's TLS proved) or `proxy`, service
+`pages`, client `browser`. Bearer API keys are outside the policy.
+
+| Route | Needs | Answers |
+| --- | --- | --- |
+| `GET /v1/user/access/sign-in` | `access.read` at `config:access` | `revision`, `writable`, `policy` (the stored `{provider?, config?}`, `null` for none), `in_force`, `offers_nothing`, `invalid?` |
+| `PUT /v1/user/access/sign-in` | `access.manage` at `config:access`, `If-Match` | `{provider?, config?}`; `400` when it does not build (audited `access.sign_in.refused`), else stored in the `unex` record, in force at once, audited `access.sign_in.update`; `{revision, offers_nothing}` |
+| `DELETE /v1/user/access/sign-in` | the same | back to the default; audited `access.sign_in.remove`; `404` when none is stored |
 
 ### Access administration (`access_admin.rs`, `accounts.rs`)
 

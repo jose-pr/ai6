@@ -12,6 +12,7 @@
 
 use std::net::SocketAddr;
 
+use ai6::directorates::m::access::{Factor, SignInContext, purposes};
 use ai6::{Attempt, Lookup, Person, Verdict};
 use axum::Extension;
 use axum::extract::ConnectInfo;
@@ -51,7 +52,17 @@ pub(crate) async fn viewer(
 ) -> Result<Person, NoViewer> {
     let providers = gateway.access.as_ref().ok_or(NoViewer::Unavailable)?;
     if let Some(authenticator) = providers.page_authenticator.clone() {
+        let address = connection
+            .as_ref()
+            .map(|Extension(ConnectInfo(address))| *address);
         let certificates = certificates.map(|Extension(ClientCertificates(chain))| chain);
+        // A certificate the gateway's own TLS proved is `certificate`; anything the request
+        // carries for a front door to have vouched for is `proxy`.
+        let method = if certificates.as_ref().is_some_and(|chain| !chain.is_empty()) {
+            "certificate"
+        } else {
+            "proxy"
+        };
         let attempt = Attempt {
             headers: headers
                 .iter()
@@ -72,7 +83,28 @@ pub(crate) async fn viewer(
             .map_err(|_| NoViewer::Unavailable)?
             .map_err(|_| NoViewer::Unavailable)?;
         match verdict {
-            Verdict::Valid(lookup) => return found(gateway, lookup).await,
+            Verdict::Valid(lookup) => {
+                let person = found(gateway, lookup).await?;
+                let step = Factor {
+                    method: method.to_owned(),
+                    provider: providers.page_authenticator_id.clone(),
+                    person: Some(person.id.clone()),
+                };
+                let context = SignInContext {
+                    done: vec![step],
+                    person: Some(person.clone()),
+                    ..gateway.sign_in_context(
+                        purposes::SIGN_IN,
+                        headers,
+                        address,
+                        crate::sign_in::PAGES,
+                    )
+                };
+                return match gateway.decide_sign_in(providers, context).await {
+                    Some(decision) if decision.complete => Ok(person),
+                    _ => Err(NoViewer::Nobody),
+                };
+            }
             Verdict::Unknown => {}
             _ => return Err(NoViewer::Nobody),
         }
@@ -198,5 +230,100 @@ pub(crate) fn ended_page_cookie(gateway: &Gateway) -> Option<HeaderValue> {
 pub(crate) fn append(headers: &mut HeaderMap, cookie: Option<HeaderValue>) {
     if let Some(cookie) = cookie {
         headers.append(SET_COOKIE, cookie);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use ai6::directorates::m::access::{Authenticator, Directory};
+    use ai6::guatiao::library::ProviderError;
+    use ai6::{Attempt, FileRegistry, Lookup, Person, Verdict};
+    use coqui_access_signin::{RuleDef, SignInRules};
+
+    use super::*;
+    use crate::{AccessProviders, GatewayConfig, GatewayLimits};
+
+    /// Names Alice for any request that carries `x-viewer`, as a front door that verified her would.
+    struct Front;
+
+    impl Authenticator for Front {
+        fn authenticate(&self, attempt: Attempt) -> Result<Verdict, ProviderError> {
+            let vouched = attempt
+                .headers
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("x-viewer"));
+            Ok(if vouched {
+                Verdict::Valid(Lookup {
+                    by: "name".to_owned(),
+                    value: "alice".to_owned(),
+                    ..Default::default()
+                })
+            } else {
+                Verdict::Unknown
+            })
+        }
+    }
+
+    impl Directory for Front {
+        fn lookup(&self, lookup: Lookup) -> Result<Option<Person>, ProviderError> {
+            Ok((lookup.value == "alice").then(|| Person {
+                id: "alice-id".to_owned(),
+                name: "alice".to_owned(),
+                ..Person::default()
+            }))
+        }
+    }
+
+    fn gateway(rule: RuleDef) -> Gateway {
+        let directory = tempfile::tempdir().unwrap();
+        let access = AccessProviders::new(
+            Arc::new(Front),
+            Arc::new(Front),
+            Arc::new(ai6::directorates::m::access::RoleAuthorizer::default()),
+        )
+        .with_page_authenticator(Arc::new(Front))
+        .with_page_authenticator_id("front")
+        .with_sign_in_policy(Arc::new(SignInRules::builder().rule(rule).build().unwrap()));
+        Gateway::with_access(
+            GatewayConfig::new(
+                "https://localhost",
+                "m-token-that-is-long-enough-for-testing",
+                GatewayLimits::default(),
+                Duration::from_secs(30),
+                Duration::from_secs(30),
+            )
+            .unwrap(),
+            Arc::new(FileRegistry::open(directory.path())),
+            access,
+        )
+    }
+
+    async fn viewer_of(gateway: &Gateway) -> Result<Person, NoViewer> {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-viewer", HeaderValue::from_static("alice"));
+        viewer(gateway, &headers, (None, None)).await
+    }
+
+    #[tokio::test]
+    async fn a_viewer_is_decided_as_the_method_the_front_door_gives_it_for_the_pages() {
+        let rule = |chain: &[&str]| RuleDef::new([chain.to_vec()]);
+        let allowed = gateway(rule(&["proxy"]).services(["pages"]));
+        assert_eq!(viewer_of(&allowed).await.unwrap().id, "alice-id");
+        for refused in [
+            rule(&["certificate"]),
+            rule(&["proxy"]).services(["unex"]),
+            rule(&["proxy"]).providers(["another"]),
+            rule(&["proxy", "totp"]),
+        ] {
+            assert_eq!(viewer_of(&gateway(refused)).await, Err(NoViewer::Nobody));
+        }
+        let named = gateway(rule(&["proxy"]).providers(["front"]));
+        assert!(
+            viewer_of(&named).await.is_ok(),
+            "the authenticator is listed by its ID"
+        );
     }
 }

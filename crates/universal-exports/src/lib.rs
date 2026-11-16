@@ -51,6 +51,7 @@ mod run_attach_tests;
 mod search;
 #[cfg(test)]
 mod search_tests;
+mod sign_in;
 mod source_reads;
 mod timeline;
 mod tls;
@@ -68,12 +69,13 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use ai6::directorates::m::access::SignInContext;
 use ai6::directorates::registry::backend::*;
 use ai6::directorates::registry::mission_issues::{IssueLink, LinkRelation, LinkState};
 use ai6::{
     AccessTokenRecord, AgentRole, Attempt, AuditRecord, Authenticator, AuthorizationRequest,
     Authorizer, Brief, ConfigProvider, Directory, Lookup, MissionHandle, MissionProposal,
-    MissionUsage, Origin, Person, Provenance, Quarantine, StationSettings, TimeLimit,
+    MissionUsage, Origin, Person, Provenance, Quarantine, SignInFactor, StationSettings, TimeLimit,
     TimelineEvent, Verdict,
 };
 
@@ -115,6 +117,7 @@ pub use login_limit::LoginLimits;
 pub use moneypenny::{AssistantConfig, PagesConfig, ViewLimits};
 pub use pools::{BoardAccount, BoardClaim, BoardLogin, BoardLoginRequest, BoardWindow, PoolBoard};
 pub use roster::{EffectiveOperation, RosterChange, RosterRecord, RosterRecords};
+pub use sign_in::{LiveSignIn, NOTHING_OFFERED, SignInLoader};
 pub use timeline::{TimelineItem, TimelinePage};
 pub use tls::tls_server_config;
 pub use unstarted::BoardPending;
@@ -171,7 +174,7 @@ pub struct GatewayLimits {
 #[derive(Clone)]
 pub struct AccessProviders {
     /// The people's sign-in providers, in the order they are asked a name and a password.
-    authenticators: Vec<Arc<dyn Authenticator>>,
+    authenticators: Vec<Signer>,
     /// The key provider, which answers bearer keys and nothing else.
     keys: Option<KeyProvider>,
     directory: Arc<dyn Directory>,
@@ -180,6 +183,17 @@ pub struct AccessProviders {
     /// Names the person asking for a page from the request itself; read only by the page
     /// routes.
     page_authenticator: Option<Arc<dyn Authenticator>>,
+    /// The ID a sign-in policy lists the page authenticator by.
+    page_authenticator_id: Option<String>,
+    /// Which methods a sign-in may use; none means each configured method alone is enough.
+    sign_in: Option<Arc<LiveSignIn>>,
+}
+
+/// A sign-in provider and the ID a sign-in policy lists it by, when it has one.
+#[derive(Clone)]
+struct Signer {
+    id: Option<String>,
+    authenticator: Arc<dyn Authenticator>,
 }
 
 #[derive(Clone)]
@@ -207,12 +221,17 @@ impl AccessProviders {
         authorizer: Arc<dyn Authorizer>,
     ) -> Self {
         Self {
-            authenticators: vec![authenticator],
+            authenticators: vec![Signer {
+                id: None,
+                authenticator,
+            }],
             keys: None,
             directory,
             authorizer,
             proxy_identity: None,
             page_authenticator: None,
+            page_authenticator_id: None,
+            sign_in: None,
         }
     }
 
@@ -221,8 +240,38 @@ impl AccessProviders {
     /// [`new`](Self::new).
     #[must_use]
     pub fn with_authenticator(mut self, authenticator: Arc<dyn Authenticator>) -> Self {
-        self.authenticators.push(authenticator);
+        self.authenticators.push(Signer {
+            id: None,
+            authenticator,
+        });
         self
+    }
+
+    /// Names the sign-in provider added last by `id`, the ID a sign-in policy lists it by.
+    /// A provider with no name is asked only when a policy lists none.
+    #[must_use]
+    pub fn named(mut self, id: impl Into<String>) -> Self {
+        if let Some(last) = self.authenticators.last_mut() {
+            last.id = Some(id.into());
+        }
+        self
+    }
+
+    /// Lets `sign_in` decide which methods a sign-in may use. Without it each configured method
+    /// alone is enough, from anywhere. Bearer keys are outside it.
+    #[must_use]
+    pub fn with_sign_in(mut self, sign_in: Arc<LiveSignIn>) -> Self {
+        self.sign_in = Some(sign_in);
+        self
+    }
+
+    /// Lets `policy` decide which methods a sign-in may use, as it stands; no route changes it.
+    #[must_use]
+    pub fn with_sign_in_policy(
+        self,
+        policy: Arc<dyn ai6::directorates::m::access::SignInPolicy>,
+    ) -> Self {
+        self.with_sign_in(Arc::new(LiveSignIn::fixed(policy)))
     }
 
     /// Takes bearer keys from `keys`. A key is presented as the bearer of a request, never as a
@@ -243,6 +292,8 @@ impl AccessProviders {
             authorizer,
             proxy_identity: None,
             page_authenticator: None,
+            page_authenticator_id: None,
+            sign_in: None,
         }
     }
 
@@ -269,6 +320,8 @@ impl AccessProviders {
                 secret: None,
             }),
             page_authenticator: None,
+            page_authenticator_id: None,
+            sign_in: None,
         }
     }
 
@@ -279,6 +332,13 @@ impl AccessProviders {
     #[must_use]
     pub fn with_page_authenticator(mut self, authenticator: Arc<dyn Authenticator>) -> Self {
         self.page_authenticator = Some(authenticator);
+        self
+    }
+
+    /// Names the page authenticator by `id`, the ID a sign-in policy lists it by.
+    #[must_use]
+    pub fn with_page_authenticator_id(mut self, id: impl Into<String>) -> Self {
+        self.page_authenticator_id = Some(id.into());
         self
     }
 
@@ -1956,6 +2016,12 @@ impl Gateway {
             )
             .route("/v1/user/access/check", get(access_admin::check))
             .route(
+                "/v1/user/access/sign-in",
+                get(sign_in::read_policy)
+                    .put(sign_in::put_policy)
+                    .delete(sign_in::remove_policy),
+            )
+            .route(
                 "/v1/user/operations/{operation_id}/access",
                 get(access_admin::read_operation_policy),
             )
@@ -3584,28 +3650,36 @@ async fn issue_access_token(
 /// Says nothing about any account, so it needs no token.
 #[derive(Serialize)]
 struct AuthMethods {
-    /// `password`: a name and a secret. `proxy`: an identity the reverse proxy asserts.
-    methods: Vec<&'static str>,
+    /// What the sign-in policy offers this request: `password` (a name and a secret), `proxy` (an
+    /// identity the reverse proxy asserts), or any other method the policy names.
+    methods: Vec<String>,
 }
 
-async fn auth_methods(State(gateway): State<Gateway>) -> Result<Json<AuthMethods>, ApiError> {
-    let mut methods = Vec::new();
-    if let Some(providers) = &gateway.access {
-        for authenticator in providers.authenticators.clone() {
-            let described = tokio::task::spawn_blocking(move || authenticator.describe())
-                .await
-                .map_err(|_| ApiError::internal())?;
-            // An authenticator that says nothing, or cannot, is still asked for a name and a
-            // secret by `login`.
-            let takes = described.ok().and_then(|description| description.takes);
-            if takes.as_deref() != Some(ai6::directorates::m::access::takes::REQUEST)
-                && !methods.contains(&"password")
-            {
-                methods.push("password");
-            }
-        }
-        if providers.proxy_identity.is_some() {
-            methods.push("proxy");
+async fn auth_methods(
+    State(gateway): State<Gateway>,
+    connection: Option<Extension<ConnectInfo<SocketAddr>>>,
+    headers: HeaderMap,
+) -> Result<Json<AuthMethods>, ApiError> {
+    let Some(providers) = gateway.access.clone() else {
+        return Ok(Json(AuthMethods {
+            methods: Vec::new(),
+        }));
+    };
+    let context = gateway.sign_in_context(
+        ai6::directorates::m::access::purposes::SIGN_IN,
+        &headers,
+        connection.map(|Extension(ConnectInfo(address))| address),
+        sign_in::SERVICE,
+    );
+    let mut methods: Vec<String> = Vec::new();
+    for offer in gateway
+        .decide_sign_in(&providers, context)
+        .await
+        .map(|decision| decision.methods)
+        .unwrap_or_default()
+    {
+        if !methods.contains(&offer.method) {
+            methods.push(offer.method);
         }
     }
     Ok(Json(AuthMethods { methods }))
@@ -3629,10 +3703,66 @@ async fn login(
     );
     let wants_cookie = from_browser && request.session_cookie != Some(false);
     let providers = gateway.access.clone().ok_or_else(ApiError::unavailable)?;
-    let person = match proxy_person(&gateway, &providers, &headers).await? {
-        Some(person) => person,
-        None => authenticate_password(&gateway, &providers, &headers, connection, request).await?,
+    let address = connection.map(|Extension(ConnectInfo(address))| address);
+    // The method presented is decided before any provider is asked or any try is counted: a
+    // refusal costs the address nothing.
+    let proxied = providers
+        .proxy_identity
+        .as_ref()
+        .is_some_and(|proxy| headers.contains_key(&proxy.header));
+    let method = if proxied { "proxy" } else { "password" };
+    let context = gateway.sign_in_context(
+        ai6::directorates::m::access::purposes::SIGN_IN,
+        &headers,
+        address,
+        sign_in::SERVICE,
+    );
+    let offer = gateway
+        .decide_sign_in(&providers, context.clone())
+        .await
+        .and_then(|decision| {
+            decision
+                .methods
+                .into_iter()
+                .find(|offer| offer.method == method)
+        })
+        .ok_or_else(sign_in::not_accepted)?;
+    let (person, step) = if proxied {
+        let person = proxy_person(&gateway, &providers, &headers)
+            .await?
+            .ok_or_else(ApiError::unauthorized)?;
+        let step = sign_in::step(method, None, &person)?;
+        (person, step)
+    } else {
+        let (person, provider) = authenticate_password(
+            &gateway,
+            &providers,
+            &headers,
+            address,
+            request,
+            &offer.providers,
+        )
+        .await?;
+        let step = sign_in::step(method, provider.as_deref(), &person)?;
+        (person, step)
     };
+    // A valid factor is decided again with the person; anything but a complete sign-in is
+    // answered as a wrong password is.
+    let factors = vec![step];
+    let decided = gateway
+        .decide_sign_in(
+            &providers,
+            SignInContext {
+                done: Gateway::passed(&factors),
+                person: Some(person.clone()),
+                ..context
+            },
+        )
+        .await
+        .is_some_and(|decision| decision.complete);
+    if !decided {
+        return Err(ApiError::unauthorized());
+    }
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
     let table = &gateway.config.unex().gateway;
     let session_max = table.session_max;
@@ -3645,6 +3775,7 @@ async fn login(
                 issued_at,
                 session_max,
                 idle_seconds(table),
+                factors.clone(),
             )
             .await?,
         )
@@ -3663,6 +3794,7 @@ async fn login(
         },
         session_max,
         sign_in.clone(),
+        factors,
     )
     .await?;
     let page_cookie = from_browser
@@ -3752,7 +3884,8 @@ async fn resume(
     // Unlike a bearer, a cookie goes along by itself, so the origin is not optional here.
     require_origin(&gateway, &headers)?;
     let value = session_cookie(&headers).ok_or_else(ApiError::unauthorized)?;
-    if let Some((issued, sign_in)) = resumed_token(&gateway, &headers, value).await? {
+    let address = connection.map(|Extension(ConnectInfo(address))| address);
+    if let Some((issued, sign_in)) = resumed_token(&gateway, &headers, address, value).await? {
         let page_cookie = page_cookie_for(&gateway, &issued, Some(&sign_in));
         let mut response = (StatusCode::CREATED, Json(issued)).into_response();
         page_access::append(response.headers_mut(), page_cookie);
@@ -3760,10 +3893,7 @@ async fn resume(
     }
     // Judged before being counted: the value cannot be guessed, so the count only slows a client
     // hammering this route, and must not keep out a good cookie behind the same address.
-    let source = gateway.resume_guard.source(
-        &headers,
-        connection.map(|Extension(ConnectInfo(address))| address),
-    );
+    let source = gateway.resume_guard.source(&headers, address);
     let refusal = match gateway.resume_guard.tried_address(source) {
         Some(wait) => ApiError::too_many_attempts(wait),
         None => ApiError::unauthorized(),
@@ -3779,6 +3909,7 @@ async fn resume(
 async fn resumed_token(
     gateway: &Gateway,
     headers: &HeaderMap,
+    address: Option<SocketAddr>,
     value: &str,
 ) -> Result<Option<(IssuedAccessToken, String)>, ApiError> {
     let table = &gateway.config.unex().gateway;
@@ -3815,6 +3946,18 @@ async fn resumed_token(
     if asserted.is_some_and(|asserted| asserted.id != person.id) {
         return Ok(None);
     }
+    if !still_complete(
+        gateway,
+        &providers,
+        headers,
+        address,
+        &person,
+        cookie.factors(),
+    )
+    .await
+    {
+        return Ok(None);
+    }
     let now = unix_timestamp()?;
     // The sign-in's end as it was set, or sooner if `session_max` has been lowered since.
     let ends = cookie
@@ -3846,6 +3989,7 @@ async fn resumed_token(
         },
         table.session_max,
         Some(cookie.token_id().to_owned()),
+        cookie.factors().to_vec(),
     )
     .await?;
     Ok(Some((issued, cookie.token_id().to_owned())))
@@ -3854,12 +3998,16 @@ async fn resumed_token(
 /// `POST /v1/auth/renew`: moves the presented token's expiry on by `access_token_ttl`, up to
 /// `session_max` after it was issued. The value does not change, so what is bound to it keeps
 /// working; the person must still be in the directory, and it is no try at a password.
-async fn renew(State(gateway): State<Gateway>, headers: HeaderMap) -> Result<Response, ApiError> {
+async fn renew(
+    State(gateway): State<Gateway>,
+    connection: Option<Extension<ConnectInfo<SocketAddr>>>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
     if headers.contains_key(ORIGIN) {
         require_origin(&gateway, &headers)?;
     }
     let token = bearer(&headers)?;
-    resolve_user(&gateway, token).await?;
+    let person = resolve_user(&gateway, token).await?;
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
     let digest = access_token_digest(token);
     let record = tokio::task::spawn_blocking(move || registry.find_access_token(&digest))
@@ -3867,6 +4015,20 @@ async fn renew(State(gateway): State<Gateway>, headers: HeaderMap) -> Result<Res
         .map_err(|_| ApiError::internal())?
         .map_err(|_| ApiError::internal())?
         .ok_or_else(ApiError::unauthorized)?;
+    let providers = gateway.access.clone().ok_or_else(ApiError::unavailable)?;
+    let address = connection.map(|Extension(ConnectInfo(address))| address);
+    if !still_complete(
+        &gateway,
+        &providers,
+        &headers,
+        address,
+        &person,
+        record.factors(),
+    )
+    .await
+    {
+        return Err(ApiError::unauthorized());
+    }
     let table = &gateway.config.unex().gateway;
     let session_max = table.session_max;
     let now = unix_timestamp()?;
@@ -3917,21 +4079,65 @@ async fn renew(State(gateway): State<Gateway>, headers: HeaderMap) -> Result<Res
     Ok(response)
 }
 
+/// Whether the steps a sign-in was opened with still complete it, decided as it stands now: the
+/// policy in force, the person as the directory has them, the address of this request. A token no
+/// sign-in made holds no steps and is not decided here.
+async fn still_complete(
+    gateway: &Gateway,
+    providers: &AccessProviders,
+    headers: &HeaderMap,
+    address: Option<SocketAddr>,
+    person: &Person,
+    factors: &[SignInFactor],
+) -> bool {
+    if factors.is_empty() {
+        return true;
+    }
+    let context = SignInContext {
+        done: Gateway::passed(factors),
+        person: Some(person.clone()),
+        ..gateway.sign_in_context(
+            ai6::directorates::m::access::purposes::RESUME,
+            headers,
+            address,
+            sign_in::SERVICE,
+        )
+    };
+    gateway
+        .decide_sign_in(providers, context)
+        .await
+        .is_some_and(|decision| decision.complete)
+}
+
+/// The person a name and a password name, and the ID of the provider that accepted them when it
+/// has one. Only `offered` providers are asked, in that order; an empty list is every provider,
+/// in the gateway's own order.
 async fn authenticate_password(
     gateway: &Gateway,
     providers: &AccessProviders,
     headers: &HeaderMap,
-    connection: Option<Extension<ConnectInfo<SocketAddr>>>,
+    connection: Option<SocketAddr>,
     request: LoginRequest,
-) -> Result<Person, ApiError> {
+    offered: &[String],
+) -> Result<(Person, Option<String>), ApiError> {
+    let asked: Vec<Signer> = if offered.is_empty() {
+        providers.authenticators.clone()
+    } else {
+        offered
+            .iter()
+            .filter_map(|id| {
+                providers
+                    .authenticators
+                    .iter()
+                    .find(|signer| signer.id.as_deref() == Some(id))
+                    .cloned()
+            })
+            .collect()
+    };
     if providers.authenticators.is_empty() {
         return Err(ApiError::unauthorized());
     }
-    let authenticators = providers.authenticators.clone();
-    let source = gateway.login_guard.source(
-        headers,
-        connection.map(|Extension(ConnectInfo(address))| address),
-    );
+    let source = gateway.login_guard.source(headers, connection);
     if let Some(wait) = gateway.login_guard.tried(source, &request.name) {
         return Err(ApiError::too_many_attempts(wait));
     }
@@ -3940,31 +4146,33 @@ async fn authenticate_password(
         secret: Some(request.secret),
         peer: Some(source.to_string()),
         secure: Some(true),
+        method: Some("password".to_owned()),
         ..Attempt::default()
     };
     // Each provider answers for what it claims: `Unknown` is "not mine", asked of the next, and
     // `Invalid` is "mine, and refused".
     let verdict = tokio::task::spawn_blocking(move || {
-        for authenticator in authenticators {
-            match authenticator.authenticate(attempt.clone())? {
+        for signer in asked {
+            match signer.authenticator.authenticate(attempt.clone())? {
                 Verdict::Unknown => {}
-                decided => return Ok(decided),
+                decided => return Ok((decided, signer.id)),
             }
         }
-        Ok(Verdict::Unknown)
+        Ok((Verdict::Unknown, None))
     })
     .await
     .map_err(|_| ApiError::internal())?
     .map_err(|_: ai6::guatiao::library::ProviderError| ApiError::internal())?;
-    let Verdict::Valid(lookup) = verdict else {
+    let (Verdict::Valid(lookup), provider) = verdict else {
         return Err(ApiError::unauthorized());
     };
     let directory = providers.directory.clone();
-    tokio::task::spawn_blocking(move || directory.lookup(lookup))
+    let person = tokio::task::spawn_blocking(move || directory.lookup(lookup))
         .await
         .map_err(|_| ApiError::internal())?
         .map_err(|_| ApiError::internal())?
-        .ok_or_else(ApiError::unauthorized)
+        .ok_or_else(ApiError::unauthorized)?;
+    Ok((person, provider))
 }
 
 async fn issue_access_token_record(
@@ -3985,6 +4193,7 @@ async fn issue_access_token_record(
         },
         session_max,
         None,
+        Vec::new(),
     )
     .await
 }
@@ -4012,6 +4221,7 @@ async fn store_bearer(
     times: Times,
     session_max: TimeLimit,
     sign_in: Option<String>,
+    factors: Vec<SignInFactor>,
 ) -> Result<IssuedAccessToken, ApiError> {
     let Times {
         issued_at,
@@ -4030,7 +4240,8 @@ async fn store_bearer(
         expires_at,
         None,
     )
-    .map_err(|_| ApiError::bad_request())?;
+    .map_err(|_| ApiError::bad_request())?
+    .with_factors(factors);
     if let Some(sign_in) = sign_in {
         record = record
             .in_sign_in(sign_in)
@@ -4089,6 +4300,7 @@ async fn store_session_cookie(
     issued_at: f64,
     session_max: TimeLimit,
     idle: Option<f64>,
+    factors: Vec<SignInFactor>,
 ) -> Result<NewSessionCookie, ApiError> {
     let lifetime = session_max.as_secs_f64();
     // No bound leaves nothing to write down but the largest time there is. Past about a year a
@@ -4111,6 +4323,7 @@ async fn store_session_cookie(
         None,
     )
     .map_err(|_| ApiError::bad_request())?
+    .with_factors(factors)
     .into_session_cookie();
     tokio::task::spawn_blocking(move || registry.store_access_token(&record))
         .await

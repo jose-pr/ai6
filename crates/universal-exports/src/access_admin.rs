@@ -415,7 +415,7 @@ async fn read_current(live: &Arc<LiveAccess>) -> Result<Current, AdminError> {
 }
 
 /// The revision a write names: `If-Match`, else `?revision=` (what a proposal carries).
-fn revision_of(headers: &HeaderMap, query: &WriteQuery) -> Result<String, AdminError> {
+pub(crate) fn revision_of(headers: &HeaderMap, query: &WriteQuery) -> Result<String, AdminError> {
     headers
         .get("if-match")
         .and_then(|value| value.to_str().ok())
@@ -446,7 +446,7 @@ fn checked_name(gateway: &Gateway, name: &str) -> Result<(), AdminError> {
     }
 }
 
-async fn audit(
+pub(crate) async fn audit(
     gateway: &Gateway,
     person: &Person,
     action: &str,
