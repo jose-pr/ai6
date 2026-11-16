@@ -10,12 +10,12 @@
 //! When the roster's `[assistant]` gives people personal repositories, each message names the
 //! person's workspace (their repository, their groups' shared ones, their name for commits). A
 //! change to a shared repository is a proposal unless the group's repository is `write = true`.
-//! Her memory of the person needs none of it: rows in the Registry ([`memory`]), with the newest
-//! summaries in the context of each new harness.
+//! Her memory of the person needs none of it: Reports of kind `memory` in the Registry
+//! ([`knowledge`]), with the newest summaries in the context of each new harness.
 //!
 //! A conversation carries no exposure for what she reads: her gate is the person's confirmation, and
 //! exposure is for a Mission's Run. Tool results stay framed in `<ai6-data>`, which tells her
-//! what is data. Only a memory entry an exposed Run wrote leaves a mark on the conversation,
+//! what is data. Only a Report an exposed Run wrote leaves a mark on the conversation,
 //! which what she writes after it carries, so the mark is not washed out by passing through her.
 //!
 //! `show` and `navigate` only add an entry for the app: a view, or an app page offered as a
@@ -24,7 +24,6 @@
 //!
 //! Routes: `GET /v1/user/moneypenny` (the app's WebSocket), `POST /v1/moneypenny/mcp` (the
 //! harness's tools, with a token bound to the person and the conversation),
-//! `/v1/user/assistant/memory` (the person's memory, [`memory`]),
 //! `GET /v1/station/assistant/next`, `POST /v1/station/assistant/reports` and
 //! `GET /v1/station/assistant/cables` (the Stations).
 
@@ -34,9 +33,9 @@ mod checks;
 pub(crate) mod commands;
 mod guide;
 pub(crate) mod images;
+pub(crate) mod knowledge;
 pub(crate) mod log;
 pub(crate) mod mcp;
-pub(crate) mod memory;
 pub(crate) mod page_tools;
 pub(crate) mod pages;
 pub(crate) mod routes;
@@ -744,7 +743,7 @@ impl Assistant {
         };
         // Read again for every message, so a permission removed reaches her next turn.
         let cables = cables::grants(gateway, &person, self.config.limits.cable_grants).await;
-        let (remembered, marks) = memory::starting_headers(gateway, &person).await;
+        let (remembered, marks) = knowledge::starting_reports(gateway, &person).await;
         {
             let mut desk = self.desk();
             let conversation = desk
@@ -817,7 +816,7 @@ impl Assistant {
                     .get()
                     .unwrap_or(u64::MAX),
             };
-            context.extend(memory::starting_summaries(
+            context.extend(knowledge::starting_summaries(
                 &remembered,
                 Limit::at(room),
                 self.config.gateway.result_chars,

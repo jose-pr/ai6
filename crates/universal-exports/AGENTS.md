@@ -670,28 +670,28 @@ answer is taken only from the Station it was given to (`403` otherwise, and it w
 `cable_sent` event is audited `moneypenny.cable.sent` (actor the person, the Cable's Operation,
 target `CONVERSATION CABLE`).
 
-Memory. `/v1/user/memories` (route table) serves every scope through
-`ai6::directorates::m::memories`; `/v1/user/assistant/memory` is a person's own, and refuses an ID
-of another scope as not there. What a person holds (`memories::PersonCaller`): their own memory; an
-Operation's with `mission.read` there by the policy alone, or a compartment granting `memory.read`
-(`CompartmentAccess::through`, audited `compartment.read`); the global one always; `memory.write`
-on `operation:<id>` or `config:memory` to change and to decide proposals; a chief
-(`LiveAccess::effective().is_chief`) sees every entry whatever its compartments. Anything that
-does not answer is not held. `?person=<id>` on the person routes reads another person's memory only
-with `assistant.memory.admin` on `config:assistant` (`403` otherwise), audited `memory.read` before
-it is read; `PUT` and `DELETE` with another person are `403`. Every change is audited before it is
-made: `memory.write`, `memory.forget`, `memory.compartments`, `memory.mark_cleared`,
-`memory.proposed`, `memory.proposal.approved`, `memory.proposal.rejected` (an Operation's under its
-`operation`, the global under `config:memory`, a person's under `config:assistant` with target
-`PERSON ID`), and one that cannot be audited is not made (`503`). Her tools `memory_search`,
-`memory_read`, `memory_write` and `memory_forget` run as the person (`moneypenny:PERSON`, the
-conversation as run): her memory of the person at once, shown as a `notice` with `data.diff`;
-an Operation's or the global one as a proposal, told as a `notice`. An entry an exposed Run
-wrote that she is shown adds `memory:<id>` to the conversation (`Conversation::memory_marks`, at
-most `[registry.limits.runs] exposures`), which every later write of hers carries. A message's
-job holds the newest summaries of her memory of the person and of the global memory in `context`,
-fenced in `<ai6-data tool="memory_search">`, within `[assistant.gateway] memory_context_bytes` and
-what `context_bytes` leaves after the rest of the job's context and recap. An input with a hidden
+Knowledge. What AI6 knows is a Report of a known kind (`memory`, `tradecraft`, `rule`, `contact`),
+reached through `/v1/reports` (route table) and `ai6::directorates::m::knowledge`. What a person holds
+(`reports::PersonReader`): their own memory (`person:<id>`); an Operation's with `mission.read` there,
+or a compartment granting `memory.read` (`CompartmentAccess::through`, audited `compartment.read`);
+the global scope always; `memory.write` on `operation:<id>` or `config:memory` to change and to
+decide proposals. Each compartment of a Report must be read in to, nobody is exempt. Anything that
+does not answer is not held. `scope=person:<id>` of another person reads only with
+`assistant.memory.admin` on `config:assistant` (`403` otherwise), audited `memory.read` before it is
+read; a write to another person's memory is refused. Every change is audited before it is made:
+`memory.write`, `memory.forget`, `memory.compartments`, `memory.mark_cleared`, `memory.proposed`, and
+`report.assess` for a verdict (an Operation's under its `operation`, the global under
+`config:memory`, a person's under `config:assistant` with target `PERSON ID`), and one that cannot
+be audited is not made. Her tools `reports` (with `words`, `kind`, `topics`, `title` or `scope`; with
+none it is the unassessed listing), `read_report`, `file_report` (a memory unless it names another
+known kind) and `forget_report` run as the person (`moneypenny:PERSON`, a `Her` conversation as run, filer
+`Assistant`) in `moneypenny::knowledge`: her memory of the person at once, shown as a `notice` with
+`data.diff`; an Operation's or the global scope as a proposal, told as a `notice`. A Report an exposed
+Run wrote that she is shown adds `report:<id>` to the conversation (`Conversation::memory_marks`, at
+most `[registry.limits.runs] exposures`), which every later write of hers carries. A message's job
+holds the newest summaries of her memory of the person and of the global scope in `context`, fenced
+in `<ai6-data tool="reports">`, within `[assistant.gateway] memory_context_bytes` and what
+`context_bytes` leaves after the rest of the job's context and recap. An input with a hidden
 character is refused.
 
 The `show` tool takes `{"view": VIEW}` in the strict view schema version 1 (serde, unknown
@@ -1055,22 +1055,10 @@ client-supplied `X-Forwarded-Proto`, and set the header to `https`.
 | `GET /v1/user/moneypenny/commands[?conversation=ID]` | User bearer; what the composer offers after `/`: `{"commands":[{name, description, argument_hint, source}]}`, `source` `skill` (the person's catalog skills, less `user-invocable: false` ones, and none when every route of her Agent is Codex) or `harness` (what a Station last reported in an `EVENT_COMMANDS` event of that conversation; a skill of the same name wins). `404` for a conversation that is not the person's. A message opening with `/name` of one of those skills reaches her harness as an instruction to run `ai6:name`; the conversation shows what was typed. |
 | `GET /v1/station/assistant/images/{sha256}?station=&conversation=` | Station token; an image the person of a conversation the Station runs sent; `403` for a conversation another Station runs, `404` for an image not kept for that person. |
 | `POST /v1/moneypenny/mcp` | Moneypenny's tools (see Moneypenny, the assistant); bearer: a job's MCP token only. |
-| `GET /v1/user/assistant/memory[?person=ID][&q=TEXT]` | User bearer. `{"person","entries","total"}`, with no content: newest change first, or with `q` best first and at most `search_results`. Another person's needs `assistant.memory.admin` (`403`), audited `memory.read`. |
 | `GET /v1/user/assistant/conversations[?person=ID\|?everyone=true]` | User bearer. `{"conversations":[{conversation,person,first_at,last_at,entries,bytes}]}` from her conversation log, newest first: the person's own, or another's or everyone's with `audit.read` and `run.context` on `config:assistant` (`403`), audited `assistant.log.list`. |
 | `GET /v1/user/assistant/conversations/{id}/log` | User bearer. `{"conversation","person","entries"}`, each an `ai6::AssistantLogEntry` (with its `turn`). Another person's needs both actions above, audited `assistant.log.read` (resource `config:assistant`, target `<person> <id>`) before it is read; without them `404`, as for one not logged. |
 | `GET /v1/user/assistant/conversations/{id}/context` | User bearer. `{"conversation","person","contexts"}`, each as the Run context route gives it; another person's as for `/log`, audited `assistant.context.read`. |
 | `GET /v1/user/operations/{operation_id}/runs/{run_id}/context` | User bearer and `run.context` on the Operation (`403`). `{run,owner,station,handler,format,source,filed_at,cut_from?,bytes,content}`; audited `run.context.read` (resource `mission:<uid>`, target the Run); `404` for a Run of another Operation or with no context. |
-| `POST /v1/user/assistant/memory` | User bearer. Body `{"name"?, "summary", "content"}`; `201` with the entry's header. `400` out of bounds, `409` when the memory is full. |
-| `GET /v1/user/assistant/memory/{id}[?person=ID]` | User bearer. The entry with `content`; `404` for an ID that is not this person's, the same whoever's it is. |
-| `PUT /v1/user/assistant/memory/{id}` | User bearer, own memory only. Body `{"name"?, "summary", "content", "revision"}`; the header. `409` with `revision` when it has moved on. |
-| `DELETE /v1/user/assistant/memory/{id}[?revision=N]` | User bearer, own memory only. Forgets it and its prior versions; `{"id"}`. |
-| `GET /v1/user/assistant/memory/{id}/versions[?person=ID]` | User bearer. `{"versions"}`, what it held before, newest first. |
-| `GET /v1/user/memories[?scope=SCOPE][&q=TEXT]` | User bearer. One scope newest first, or a search best first across one scope or every one the person may read: `{"entries","total"}`, no content; what they may not see is neither listed nor counted. |
-| `POST /v1/user/memories` | User bearer. `{"scope","name"?,"summary","content","compartments"?}`; `201` with the header, `202` with the proposal when the caller may only propose, `403` without the scope's write or a read-in of a compartment it adds. |
-| `GET`, `PUT`, `DELETE /v1/user/memories/{id}` | User bearer. As the person routes, on any scope; `PUT` takes `compartments`, left out to keep them. `404` for what the person may not see, the same as a missing ID. |
-| `GET /v1/user/memories/{id}/versions` | User bearer. `{"versions"}`, newest first. |
-| `GET /v1/user/memories/proposals[?scope=SCOPE]` | User bearer. `{"proposals"}` the person may decide, oldest first. |
-| `POST /v1/user/memories/proposals/{id}` | User bearer. `{"approve"}`; `{"approved","entry"?}`. `404` for one they may not see, `409` when its entry moved on. |
 | `GET /v1/station/assistant/next?station=<id>&wait_ms=<n>` | Station bearer; `200` with the Station's next `ai6::AssistantJob` or `204` after `wait_ms` (default 1,000, at most `[assistant.gateway] max_wait`), held the same with Moneypenny off. |
 | `PUT /v1/reports/{id}/assessment` | User bearer; `{"assessment": "mission"|"duplicate"|"related"|"no_action"|"awaiting"|"later"|"decision", "reason", "of"?, "mission"?, "question"?, "ask"?, "via"?, "condition"?, "wait_seconds"?, "credibility"?, "priority"?, "likelihood"?, "confidence"?}`. Assesses an open Report (not only a Source item): `mission.control` on its Operation (`station.configure` for a Station's or M's scope) and reading its content. `404` for a scope the person may not read, `403` without the action or the content, `409` when the Report is not open, `400` for anything out of bounds (a mission not named, a likelihood without its confidence, a priority off the list, a tie across scopes the handling marks do not allow). Audited (`report.assess`) before it is recorded; a `decision` files green ink of kind `decision`; a `mission` of a Source item is queued by the Station that polls the Source. Answers the Report as the person may see it. |
 | `POST /v1/reports/{id}/reopen` | User bearer; `{"reason"}`. Opens an assessed or closed Report again (audited `report.reopen`); the same authority as assessing it. `409` for one already open. |

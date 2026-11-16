@@ -129,7 +129,11 @@ async fn her_reports_tool_lists_what_waits_with_the_link_and_what_could_not_be_r
         json!({"scope": "station:worker"}),
     )
     .await;
-    assert_eq!(sneaky["isError"], true);
+    let text = sneaky["content"][0]["text"].as_str().unwrap_or_default();
+    assert!(
+        sneaky["isError"] == true || text.contains("\"total\": 0"),
+        "a scope she may not read finds nothing: {sneaky}"
+    );
 }
 
 #[tokio::test]

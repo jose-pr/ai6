@@ -49,7 +49,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::compartments::CompartmentAccess;
-use crate::memories::{Refused, refused};
+use crate::refused::{Refused, refused};
 use crate::tree::{OperationTree, operation_request, resource_request};
 use crate::{
     ApiError, Gateway, authorize_resource_action, bearer, operation_tree, resolve_user,
@@ -80,8 +80,28 @@ fn actions_of(scope: &ReportScope) -> Option<(String, &'static str, &'static str
     }
 }
 
-/// A person asking about Reports, as granted for this request.
-struct PersonReader {
+/// Moneypenny asking for a person, in a conversation that may already carry marks.
+pub(crate) struct Her {
+    conversation: String,
+    /// How the conversation was marked before this call.
+    marks: Vec<String>,
+    /// The marked Reports this call showed her.
+    seen: Mutex<Vec<String>>,
+}
+
+impl Her {
+    /// A conversation with `marks` on it.
+    pub(crate) fn new(conversation: String, marks: Vec<String>) -> Self {
+        Self {
+            conversation,
+            marks,
+            seen: Mutex::default(),
+        }
+    }
+}
+
+/// A person, or Moneypenny for them, asking about Reports, as granted for this request.
+pub(crate) struct PersonReader {
     person: Person,
     access: Arc<CompartmentAccess>,
     tree: OperationTree,
@@ -92,9 +112,29 @@ struct PersonReader {
     registry: Arc<dyn RegistryBackend>,
     /// The other people whose memory this request crossed into, each audited once.
     crossed: Mutex<BTreeSet<String>>,
+    /// Set when Moneypenny asks for the person instead of the person.
+    her: Option<Her>,
 }
 
 impl PersonReader {
+    /// The Reports this call showed her that an exposed Run wrote.
+    pub(crate) fn seen_marks(&self) -> Vec<String> {
+        self.her
+            .as_ref()
+            .map(|her| {
+                her.seen
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .clone()
+            })
+            .unwrap_or_default()
+    }
+
+    /// How many marks a conversation keeps: `[registry.limits.runs] exposures`.
+    pub(crate) fn marks_limit(&self) -> ai6::Limit {
+        self.registry.limits().runs.exposures
+    }
+
     fn holds(&self, action: &str, resource: String) -> bool {
         self.access
             .authorize(resource_request(
@@ -154,7 +194,7 @@ impl PersonReader {
             .map_err(|_| "It could not be audited, so it was not done.".to_owned())
     }
 
-    fn rules(&self) -> ReportRules<'_> {
+    pub(crate) fn rules(&self) -> ReportRules<'_> {
         ReportRules::new(&self.settings, &self.clearances)
     }
 }
@@ -164,6 +204,8 @@ impl ReportReader for PersonReader {
         match scope {
             ReportScope::Global => true,
             ReportScope::Person(id) if *id == self.person.id => true,
+            // Moneypenny reads no other person's memory, whoever she asks for.
+            ReportScope::Person(_) if self.her.is_some() => false,
             // Another person's memory takes `assistant.memory.admin`, and is audited before it is
             // read, once for the request: one that cannot be audited is not read.
             ReportScope::Person(id) => {
@@ -189,6 +231,9 @@ impl ReportReader for PersonReader {
     }
 
     fn assesses(&self, scope: &ReportScope) -> bool {
+        if self.her.is_some() {
+            return false;
+        }
         match scope {
             ReportScope::Person(_) => false,
             ReportScope::Operation(_) | ReportScope::Global => {
@@ -199,7 +244,11 @@ impl ReportReader for PersonReader {
     }
 
     fn filed(&self, filer: &ReportFiler) -> bool {
-        matches!(filer, ReportFiler::Person { person } if *person == self.person.id)
+        matches!(
+            filer,
+            ReportFiler::Person { person } | ReportFiler::Assistant { person }
+                if *person == self.person.id
+        )
     }
 
     fn read_in(&self, compartment: &str) -> bool {
@@ -222,17 +271,22 @@ impl ReportReader for PersonReader {
 
 impl KnowledgeCaller for PersonReader {
     fn by(&self) -> String {
-        format!("person:{}", self.person.id)
+        match self.her {
+            Some(_) => format!("moneypenny:{}", self.person.id),
+            None => format!("person:{}", self.person.id),
+        }
     }
 
     fn filer(&self) -> ReportFiler {
-        ReportFiler::Person {
-            person: self.person.id.clone(),
+        let person = self.person.id.clone();
+        match self.her {
+            Some(_) => ReportFiler::Assistant { person },
+            None => ReportFiler::Person { person },
         }
     }
 
     fn run(&self) -> Option<String> {
-        None
+        self.her.as_ref().map(|her| her.conversation.clone())
     }
 
     fn writes_scope(&self, scope: &ReportScope) -> KnowledgeRight {
@@ -244,22 +298,37 @@ impl KnowledgeCaller for PersonReader {
             ReportScope::Global => self.policy_holds(MEMORY_WRITE, knowledge::GLOBAL_RESOURCE),
             _ => false,
         };
-        if holds {
-            KnowledgeRight::Write
-        } else {
-            KnowledgeRight::Refused
+        // What she keeps for one person alone is hers to keep; what others will read waits.
+        match (holds, &self.her, scope) {
+            (false, _, _) => KnowledgeRight::Refused,
+            (true, Some(_), ReportScope::Operation(_) | ReportScope::Global) => {
+                KnowledgeRight::Propose
+            }
+            (true, _, _) => KnowledgeRight::Write,
         }
     }
 
     fn acts_in_person(&self) -> bool {
-        true
+        self.her.is_none()
     }
 
     fn exposures(&self) -> Vec<String> {
-        Vec::new()
+        let Some(her) = &self.her else {
+            return Vec::new();
+        };
+        let mut marks = her.marks.clone();
+        marks.extend(self.seen_marks());
+        marks
     }
 
-    fn saw_marked(&self, _source: &str) {}
+    fn saw_marked(&self, source: &str) {
+        if let Some(her) = &self.her {
+            her.seen
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(source.to_owned());
+        }
+    }
 
     fn mark_bytes(&self) -> ai6::Limit {
         self.registry.limits().runs.exposure_source_bytes
@@ -312,6 +381,15 @@ async fn rules_now(gateway: &Gateway) -> Result<(ReportSettings, Vec<ReportClear
 
 async fn reader_of(gateway: &Gateway, headers: &HeaderMap) -> Result<PersonReader, Refused> {
     let person = resolve_user(gateway, bearer(headers)?).await?;
+    reader_for(gateway, person, None).await
+}
+
+/// Who asks about Reports for `person`: they, or Moneypenny when `her` is given.
+pub(crate) async fn reader_for(
+    gateway: &Gateway,
+    person: Person,
+    her: Option<Her>,
+) -> Result<PersonReader, Refused> {
     let (settings, clearances) = rules_now(gateway).await?;
     Ok(PersonReader {
         person,
@@ -321,10 +399,11 @@ async fn reader_of(gateway: &Gateway, headers: &HeaderMap) -> Result<PersonReade
         clearances,
         registry: registry_of(gateway)?,
         crossed: Mutex::default(),
+        her,
     })
 }
 
-fn registry_of(gateway: &Gateway) -> Result<Arc<dyn RegistryBackend>, Refused> {
+pub(crate) fn registry_of(gateway: &Gateway) -> Result<Arc<dyn RegistryBackend>, Refused> {
     gateway.registry.clone().ok_or_else(|| {
         refused(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -334,7 +413,7 @@ fn registry_of(gateway: &Gateway) -> Result<Arc<dyn RegistryBackend>, Refused> {
 }
 
 /// Runs `work` on the blocking pool, where the access policy and the Registry are asked.
-async fn blocking<T: Send + 'static>(
+pub(crate) async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, Refused> + Send + 'static,
 ) -> Result<T, Refused> {
     tokio::task::spawn_blocking(work)
@@ -474,13 +553,13 @@ async fn list_reports(
             .reports(&filter)
             .map_err(|_| Refused::from(ApiError::internal()))?;
         // What is known and not readable is not listed at all, as it is not found by a search.
+        let rules = reader.rules();
         let shown: Vec<Value> = reports
             .iter()
-            .map(|report| shown(registry.as_ref(), &reader, report))
-            .filter(|shown| {
-                !(shown["sight"] == "markings"
-                    && is_known_kind(shown["kind"].as_str().unwrap_or_default()))
+            .filter(|report| {
+                !(report.is_known() && sight(&reader, report, &rules) != ReportSight::Content)
             })
+            .map(|report| shown(registry.as_ref(), &reader, report))
             .collect();
         Ok(Json(json!({
             "reports": shown,
@@ -757,6 +836,9 @@ pub(crate) async fn show(
         let missing = || refused(StatusCode::NOT_FOUND, "No such report.");
         let report = registry.report(&id).ok().flatten().ok_or_else(missing)?;
         if !reader.reads_scope(&report.scope) {
+            return Err(missing());
+        }
+        if report.is_known() && sight(&reader, &report, &reader.rules()) != ReportSight::Content {
             return Err(missing());
         }
         let shown = shown(registry.as_ref(), &reader, &report);
@@ -1168,7 +1250,12 @@ fn controlled(
             scope => reader.files_in(scope),
         }
     };
-    if !holds || sight(reader, &report, &reader.rules()) != ReportSight::Content {
+    let seen = sight(reader, &report, &reader.rules());
+    // What is known and not readable is not there, as everywhere else.
+    if report.is_known() && seen != ReportSight::Content {
+        return Err(missing());
+    }
+    if !holds || seen != ReportSight::Content {
         return Err(refused(
             StatusCode::FORBIDDEN,
             "Assessing a report needs mission.control on its Operation (station.configure on a \

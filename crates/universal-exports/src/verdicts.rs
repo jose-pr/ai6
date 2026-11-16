@@ -17,7 +17,7 @@ use axum::http::{HeaderMap, StatusCode};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::memories::{self, Refused};
+use crate::refused::{self, Refused};
 use crate::{
     ApiError, Gateway, authorize_operation_action, bearer, ensure_operation_registered,
     named_mission, resolve_user, unix_timestamp,
@@ -52,9 +52,9 @@ pub struct GivenVerdict {
 fn refused_by(error: RunError) -> Refused {
     match error {
         RunError::NotFound => ApiError::not_found().into(),
-        RunError::Unsettled(_) => memories::refused(StatusCode::CONFLICT, error.to_string()),
+        RunError::Unsettled(_) => refused::refused(StatusCode::CONFLICT, error.to_string()),
         RunError::Io(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
-            memories::refused(StatusCode::BAD_REQUEST, error.to_string())
+            refused::refused(StatusCode::BAD_REQUEST, error.to_string())
         }
         _ => ApiError::internal().into(),
     }
@@ -72,7 +72,7 @@ pub(crate) async fn give(
     let word = OutcomeVerdict::from_name(&request.verdict)
         .filter(|word| *word != OutcomeVerdict::Redispatch)
         .ok_or_else(|| {
-            memories::refused(
+            refused::refused(
                 StatusCode::BAD_REQUEST,
                 "a verdict is confirmed, disputed or failed-verification".to_owned(),
             )
@@ -161,7 +161,7 @@ pub(crate) async fn verify(
     Json(request): Json<VerifyRequest>,
 ) -> Result<Json<GivenDecision>, Refused> {
     let Some(word) = VerifyingDecision::verdict_named(&request.decision) else {
-        return Err(memories::refused(
+        return Err(refused::refused(
             StatusCode::BAD_REQUEST,
             "a decision is done, redispatch or failed".to_owned(),
         ));
@@ -169,7 +169,7 @@ pub(crate) async fn verify(
     if request.reason.trim().is_empty()
         || (request.amendment.is_some() && word != OutcomeVerdict::Redispatch)
     {
-        return Err(memories::refused(
+        return Err(refused::refused(
             StatusCode::BAD_REQUEST,
             "a decision needs its reason, and only a redispatch takes an amendment".to_owned(),
         ));

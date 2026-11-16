@@ -28,7 +28,6 @@ mod libraries;
 #[cfg(all(test, feature = "cli"))]
 mod libraries_tests;
 mod login_limit;
-mod memories;
 mod models;
 mod moneypenny;
 mod orders;
@@ -40,6 +39,7 @@ mod principals_tests;
 #[cfg(test)]
 mod profile_tests;
 mod providers;
+mod refused;
 #[cfg(test)]
 mod rename_tests;
 mod reports;
@@ -2141,33 +2141,6 @@ impl Gateway {
                 get(moneypenny::station_image),
             )
             .route("/v1/moneypenny/mcp", post(moneypenny::mcp::endpoint))
-            .route("/v1/user/memories", get(memories::list).post(memories::add))
-            .route("/v1/user/memories/proposals", get(memories::proposals))
-            .route(
-                "/v1/user/memories/proposals/{id}",
-                post(memories::decide),
-            )
-            .route(
-                "/v1/user/memories/{id}",
-                get(memories::read)
-                    .put(memories::change)
-                    .delete(memories::forget),
-            )
-            .route("/v1/user/memories/{id}/versions", get(memories::versions))
-            .route(
-                "/v1/user/assistant/memory",
-                get(moneypenny::memory::list).post(moneypenny::memory::add),
-            )
-            .route(
-                "/v1/user/assistant/memory/{id}",
-                get(moneypenny::memory::read)
-                    .put(moneypenny::memory::change)
-                    .delete(moneypenny::memory::forget),
-            )
-            .route(
-                "/v1/user/assistant/memory/{id}/versions",
-                get(moneypenny::memory::versions),
-            )
             .route("/v1/user/charges", get(charges::list))
             .route("/v1/user/charges/{scope}", get(charges::show))
             .route("/v1/user/charges/{scope}/document", get(charges::document))
@@ -3399,7 +3372,7 @@ async fn rename_user_mission(
     headers: HeaderMap,
     Path((operation_id, mission_id)): Path<(String, String)>,
     Json(request): Json<RenameMissionRequest>,
-) -> Result<Json<RenamedMission>, memories::Refused> {
+) -> Result<Json<RenamedMission>, refused::Refused> {
     let person = resolve_user(&gateway, bearer(&headers)?).await?;
     let operation_id = OperationId::new(operation_id).map_err(|_| ApiError::bad_request())?;
     authorize_operation_action(&gateway, person.clone(), &operation_id, "mission.control").await?;
@@ -3428,9 +3401,9 @@ async fn rename_user_mission(
             std::io::ErrorKind::NotFound => StatusCode::NOT_FOUND,
             std::io::ErrorKind::InvalidInput => StatusCode::BAD_REQUEST,
             std::io::ErrorKind::AlreadyExists => StatusCode::CONFLICT,
-            _ => return memories::Refused::from(ApiError::internal()),
+            _ => return refused::Refused::from(ApiError::internal()),
         };
-        memories::refused(status, error.to_string())
+        refused::refused(status, error.to_string())
     })?;
     let at = unix_timestamp()?;
     let audit = AuditRecord {

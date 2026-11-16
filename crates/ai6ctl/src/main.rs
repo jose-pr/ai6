@@ -8,7 +8,6 @@ mod access;
 mod attach;
 mod compartments;
 mod keys;
-mod memories;
 mod reports;
 mod resources;
 mod reviews;
@@ -205,12 +204,6 @@ enum Command {
     Compartments {
         #[command(subcommand)]
         command: Option<compartments::CompartmentsCommand>,
-    },
-    /// Search, read and change the memory of a person, an Operation or everyone, and decide what
-    /// Agents proposed for it.
-    Memories {
-        #[command(subcommand)]
-        command: memories::MemoriesCommand,
     },
     /// File, list and show Reports: what people and Agents observed, each read as far as you are
     /// read in to it and cleared for it.
@@ -2106,10 +2099,6 @@ async fn run() -> Result<(), String> {
         Command::Compartments { command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             compartments::run(&client, &server, &token, command).await?;
-        }
-        Command::Memories { command } => {
-            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
-            memories::run(&client, &server, &token, command).await?;
         }
         Command::Reports { command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
