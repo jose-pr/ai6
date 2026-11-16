@@ -237,11 +237,14 @@ With no `sign_in_policy` nothing changes: each configured method alone is enough
 
 What is decided, and where:
 
-- `GET /v1/auth/methods` answers the policy's offer for its own request: its address (from
-  `client_address_header` or the connection, never a header the client chose), and its client, a
-  `browser` when the request names an origin and an `api` client otherwise. Outer Office's desktop
+- `GET /v1/auth/methods` answers the policy's offer for its own request: its address (see
+  [Behind a reverse proxy](#behind-a-reverse-proxy)), and its client, a `browser` when the request
+  names an origin or carries the `Sec-Fetch-Mode` or `Sec-Fetch-Site` a browser adds (a browser
+  sends no origin on a same-origin GET) and an `api` client otherwise. Outer Office's desktop
   builds reach the gateway the same way an API client does, so a rule for the `app` client never
-  matches here.
+  matches here. **A `clients` condition is advice about what to offer, never a barrier:** the
+  caller says which kind it is, and a caller holding a credential can present either, so a rule
+  must not rely on `clients` alone to refuse a method.
 - `POST /v1/auth/login` decides the method it was given before anything else: a method the policy does
   not offer from here is answered `403`, no sign-in provider is asked and no try is counted against the
   address or the name. Only the providers the offer lists are asked, in its order. A valid factor is
@@ -250,9 +253,17 @@ What is decided, and where:
 - A sign-in keeps the steps it passed. `POST /v1/auth/resume` and `POST /v1/auth/renew` decide again,
   with the person as the directory has them now, the policy now in force and the address of this
   request, and a sign-in the policy no longer completes ends: `401`. A token a Station issued for a
-  person holds no steps and is not decided here.
+  person is marked as that, is not decided here and gets no page cookie from a renewal. A sign-in
+  record that holds no steps and is not a Station's is not complete: after an upgrade each existing
+  sign-in signs in once more.
 - A page's viewer, named from the request by the page authenticator, is decided as the method
-  `certificate` (a certificate the gateway's own TLS proved) or `proxy`, for the service `pages`.
+  `certificate` (a certificate the gateway's own TLS proved) or `proxy`, for the service `pages`. A
+  viewer the policy refuses may still hold a page cookie, which is decided for `pages` the same way
+  by the steps its sign-in passed, so a rule for `services = ["pages"]` holds for cookies minted by a
+  login, a renewal or a page hand-off too.
+- The built-in proxy identity has no provider ID, so a `providers` condition never matches its
+  step; list `providers` only on rules for the methods a named provider answers. A policy listing a
+  provider no sign-in provider is configured under is refused.
 
 **Bearer API keys are outside the policy.** A key is scoped and revocable, is never a page sign-in, and
 is checked at the provider at every use. A policy never offers `key`, and none refuses one.
@@ -272,9 +283,18 @@ audited (`access.sign_in.update`, `.remove`, `.refused`).
 **A policy that offers no sign-in is accepted.** An empty rule list offers nothing to anyone: the
 gateway starts, says so plainly (`no sign-in is offered; API keys still work`), and everyone who is
 not already signed in is refused. That is stricter, not weaker, so it is not reported as a weakening.
-The way back is a key: `ai6ctl` with a key whose person holds `access.manage` at `config:access`
-reads and changes the policy, since keys are outside it; the `unex` record in the database is the
-last resort.
+The way back is a key: `ai6ctl access sign-in` with a key whose person holds `access.manage` at
+`config:access` reads and changes the policy, since keys are outside it (`--revision` sends the one
+`show` printed, so a change since is refused). With no key provider configured nothing is left but
+an edit to the database's `unex` record, and the start notice and the route say so.
+
+A policy the gateway cannot build (its provider library missing, a bad configuration, a listed
+provider that is not configured), whether at start or when the stored record changes, fails
+closed: at start the gateway refuses to run, and when the record changes under a running gateway
+it offers nothing, keys still work, the reason is logged and `GET /v1/user/access/sign-in` shows it
+as `invalid`; the older policy is never kept. Every gateway reads the stored record again under
+the lock a route's change holds, so a poll cannot put an older policy over a newer one. A route
+change is audited before it is stored.
 
 ## Signing in from a browser
 
@@ -421,8 +441,12 @@ every request under `/v1/` the proxy must:
   `/v1/socket/` answer `403` otherwise, and an app whose renewals are refused that way is signed out
   when its token ends;
 - pass `Cookie` and `Set-Cookie` as they are, which proxies do unless told otherwise;
-- name the client in the header `client_address_header` names, or all clients share one login
-  count;
+- set the header `client_address_header` names to the client's address, as its own line added
+  after any the client sent: the gateway reads the last line of that header and, in it, the
+  rightmost comma-separated entry, so a client's own earlier lines are ignored. Without it all
+  clients share one login count, and the sign-in policy sees no address at all: a request whose
+  header is missing or is not an address has none, never its peer's, so a rule on `networks` does
+  not match it. An IPv4-mapped IPv6 address (`::ffff:10.1.2.3`) is the IPv4 address;
 - speak HTTP/1.1 to the gateway, not buffer answers (`/v1/moneypenny/mcp` streams), and accept a
   body as large as the `unex` record's `frame_bytes` (256 KiB by default).
 

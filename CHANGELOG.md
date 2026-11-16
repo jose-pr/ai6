@@ -31,7 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   longer completes them; a page's viewer is decided as `certificate` or `proxy`. Bearer API keys stay
   outside the policy. `GET`, `PUT` and `DELETE /v1/user/access/sign-in` read and change it under
   `access.read` and `access.manage` at `config:access`, audited, and a change is in force at once on the
-  gateway that took it and on the others at their next poll. A policy that offers no sign-in is accepted:
+  gateway that took it and on the others at their next poll, each reading the stored record again under the
+  lock a change holds; a policy that cannot be built, or lists a provider that is not configured, offers nothing
+  rather than leaving an older one in force. The policy sees the address a reverse proxy gave in the last line of
+  `client_address_header` (none when it is missing, never the peer's), and a sign-in record with no steps, other
+  than a Station's, signs in once more. A policy that offers no sign-in is accepted:
   the gateway starts, says so, and only API keys work; `ai6ctl access sign-in show|set|clear` with a key holding
   `access.manage` changes it.
 - The gateway serves a brief, a green ink request, a held brief, a Mission's reviews, a charge's report and a
