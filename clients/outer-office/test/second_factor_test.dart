@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -199,6 +200,33 @@ void main() {
         1,
         reason: 'beginning is asked for once',
       );
+    });
+
+    testWidgets('copies the recovery codes only when asked', (tester) async {
+      final copied = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'Clipboard.setData') {
+            copied.add((call.arguments as Map)['text'] as String);
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      await section(tester);
+      await tester.tap(find.text('Set up'));
+      await tester.pumpAndSettle();
+      expect(find.text('AAAAA-BBBBB'), findsOneWidget);
+      expect(copied, isEmpty, reason: 'showing the codes copies nothing');
+      await tester.tap(find.text('Copy recovery codes'));
+      await tester.pumpAndSettle();
+      expect(copied, ['AAAAA-BBBBB\nCCCCC-DDDDD']);
     });
 
     testWidgets('says when the policy does not let this sign-in enrol', (
