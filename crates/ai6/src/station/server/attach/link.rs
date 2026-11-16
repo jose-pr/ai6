@@ -21,7 +21,7 @@ use crate::directorates::section_00::hub::{
     Attachment, HubCommand, HubDelivery, HubError, HubFrame, HubOp, RunHub, RunTarget,
 };
 use crate::station::limits::AttachLimits;
-use crate::station::publisher::gateway_agent;
+use crate::station::publisher::Agents;
 
 /// What became of a delivery.
 #[derive(Debug, PartialEq, Eq)]
@@ -44,9 +44,9 @@ struct Link {
     /// Where the `[attach]` table is read from each time it is used.
     config: Arc<crate::station::server::reload::LiveConfig>,
     /// The agent of the poll, whose calls may wait as long as `command_wait`.
-    polling: ureq::Agent,
+    polling: Arc<Agents>,
     /// The agent of every delivery.
-    delivering: ureq::Agent,
+    delivering: Arc<Agents>,
 }
 
 impl Link {
@@ -57,10 +57,9 @@ impl Link {
         station: String,
         config: Arc<crate::station::server::reload::LiveConfig>,
     ) -> Self {
-        let limits = config.limits().attach.clone();
         Self {
-            polling: gateway_agent(tls, limits.call_margin.0 + limits.command_wait.0),
-            delivering: gateway_agent(tls, limits.call_margin.0),
+            polling: Arc::new(Agents::new(tls.clone())),
+            delivering: Arc::new(Agents::new(tls.clone())),
             origin,
             token,
             station,
@@ -105,20 +104,20 @@ impl Link {
 
     /// Polls for requests and hands them to their clients' workers, until the Station stops.
     fn take_commands(&self, hub: &Arc<dyn RunHub>, stopping: &Arc<AtomicBool>) {
-        let Ok(mut endpoint) = self.origin.join("v1/station/hub/next") else {
-            return;
-        };
-        endpoint
-            .query_pairs_mut()
-            .append_pair("station", &self.station)
-            .append_pair(
-                "wait_ms",
-                &self.limits().command_wait.0.as_millis().to_string(),
-            );
         let workers = Workers::default();
         while !stopping.load(Ordering::Acquire) {
+            // The table is read for each poll, so a changed one is used from the next.
+            let limits = self.limits();
+            let Ok(mut endpoint) = self.origin.join("v1/station/hub/next") else {
+                return;
+            };
+            endpoint
+                .query_pairs_mut()
+                .append_pair("station", &self.station)
+                .append_pair("wait_ms", &limits.command_wait.0.as_millis().to_string());
             let response = self
                 .polling
+                .get(limits.call_margin.0 + limits.command_wait.0)
                 .get(endpoint.as_str())
                 .header("Authorization", &format!("Bearer {}", self.token))
                 .call();
@@ -329,6 +328,7 @@ impl Link {
             tried += 1;
             let sent = self
                 .delivering
+                .get(self.limits().call_margin.0)
                 .post(endpoint.as_str())
                 .header("Authorization", &format!("Bearer {}", self.token))
                 .send_json(&delivery);

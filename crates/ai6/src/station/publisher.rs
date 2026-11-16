@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex, Weak};
+use std::sync::{Arc, Condvar, Mutex, RwLock, Weak};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -35,8 +35,64 @@ pub(crate) const FRAME_MARGIN: u64 = 64 * 1024;
 pub struct Config {
     origin: Url,
     token: String,
-    limits: PublisherLimits,
+    limits: LiveLimits,
     tls: TlsConfig,
+}
+
+/// The `[publisher]` table as the Station runs by it now: whoever holds a handle reads the
+/// table where it uses a value, so a changed record reaches the next request or pause.
+#[derive(Clone)]
+pub(crate) struct LiveLimits(Arc<RwLock<Arc<PublisherLimits>>>);
+
+impl LiveLimits {
+    fn new(limits: PublisherLimits) -> Self {
+        Self(Arc::new(RwLock::new(Arc::new(limits))))
+    }
+
+    pub(crate) fn get(&self) -> Arc<PublisherLimits> {
+        self.0
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    fn set(&self, limits: PublisherLimits) {
+        *self
+            .0
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Arc::new(limits);
+    }
+}
+
+/// The agent of one link, rebuilt when the timeout a request is to have changes.
+pub(crate) struct Agents {
+    tls: TlsConfig,
+    current: Mutex<Option<(Duration, ureq::Agent)>>,
+}
+
+impl Agents {
+    pub(crate) fn new(tls: TlsConfig) -> Self {
+        Self {
+            tls,
+            current: Mutex::new(None),
+        }
+    }
+
+    /// An agent whose requests may take `timeout`.
+    pub(crate) fn get(&self, timeout: Duration) -> ureq::Agent {
+        let mut current = self
+            .current
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match &*current {
+            Some((held, agent)) if *held == timeout => agent.clone(),
+            _ => {
+                let agent = gateway_agent(&self.tls, timeout);
+                *current = Some((timeout, agent.clone()));
+                agent
+            }
+        }
+    }
 }
 
 impl Config {
@@ -68,7 +124,7 @@ impl Config {
         Ok(Self {
             origin,
             token,
-            limits: PublisherLimits::default(),
+            limits: LiveLimits::new(PublisherLimits::default()),
             tls: TlsConfig::default(),
         })
     }
@@ -83,8 +139,8 @@ impl Config {
     }
 
     /// Publishes within `limits`, the `station` record's `[publisher]` table.
-    pub(crate) fn with_limits(mut self, limits: PublisherLimits) -> Self {
-        self.limits = limits;
+    pub(crate) fn with_limits(self, limits: PublisherLimits) -> Self {
+        self.limits.set(limits);
         self
     }
 }
@@ -193,15 +249,18 @@ struct Waiting {
 
 /// The queue between a Station's Runs and its publish worker. A Run never waits on it.
 struct Outbox {
-    limits: PublisherLimits,
+    /// Events that wait; the queue is allocated when the Station starts, so this stays.
+    queue: usize,
+    limits: LiveLimits,
     waiting: Mutex<Waiting>,
     ready: Condvar,
     lost_bytes: AtomicU64,
 }
 
 impl Outbox {
-    fn new(limits: PublisherLimits) -> Self {
+    fn new(limits: LiveLimits) -> Self {
         Self {
+            queue: limits.get().queue,
             limits,
             waiting: Mutex::default(),
             ready: Condvar::new(),
@@ -216,10 +275,10 @@ impl Outbox {
         let Ok(mut waiting) = self.waiting.lock() else {
             return false;
         };
-        let room = self.limits.queue;
+        let room = self.queue;
         match command {
             Command::Terminal { run_id, bytes } => {
-                let frame = self.limits.terminal_bytes;
+                let frame = self.limits.get().terminal_bytes;
                 // Consecutive reads of one Run travel as one frame.
                 if let Some(Command::Terminal {
                     run_id: tail,
@@ -302,7 +361,7 @@ impl Outbox {
 pub(crate) struct Publisher {
     origin: Url,
     token: String,
-    limits: PublisherLimits,
+    limits: LiveLimits,
     tls: TlsConfig,
     outbox: Arc<Outbox>,
     running: Arc<AtomicBool>,
@@ -363,7 +422,8 @@ impl Publisher {
         let input_token = config.token.clone();
         let limits = config.limits.clone();
         let tls = config.tls.clone();
-        let agent = gateway_agent(&tls, limits.request_timeout.0);
+        let first = limits.get();
+        let agents = Agents::new(tls.clone());
         let outbox = Arc::new(Outbox::new(limits.clone()));
         let running = Arc::new(AtomicBool::new(true));
         let healthy = Arc::new(AtomicBool::new(true));
@@ -371,21 +431,21 @@ impl Publisher {
         let input_targets = Arc::new(Mutex::new(BTreeMap::new()));
         let mut publishing = Worker {
             config,
-            agent,
+            agents,
             outbox: outbox.clone(),
             running: running.clone(),
             healthy: healthy.clone(),
             error: error.clone(),
             runs: BTreeMap::new(),
-            pause: limits.publish_retry_delay.0,
+            pause: first.publish_retry_delay.0,
             away: false,
-            next_refresh: Instant::now() + limits.refresh_every.0,
+            next_refresh: Instant::now() + first.refresh_every.0,
             sent: 0,
         };
         let worker = thread::Builder::new()
             .name("ai6-publisher".to_owned())
             .spawn(move || publishing.run())?;
-        let input_agent = gateway_agent(&tls, limits.request_timeout.0 + limits.input_wait.0);
+        let input_agents = Agents::new(tls.clone());
         let input_running = running.clone();
         let input_targets_for_worker = input_targets.clone();
         let input_limits = limits.clone();
@@ -395,7 +455,7 @@ impl Publisher {
                 receive_inputs(
                     input_origin,
                     input_token,
-                    input_agent,
+                    input_agents,
                     &input_limits,
                     input_running,
                     input_targets_for_worker,
@@ -425,6 +485,13 @@ impl Publisher {
         }))
     }
 
+    /// Makes the Station publish by `limits` from now on: the pauses, timeouts and frame sizes of
+    /// the requests that follow. The queue of waiting events was sized when the Station started
+    /// and keeps its size.
+    pub(crate) fn set_limits(&self, limits: PublisherLimits) {
+        self.limits.set(limits);
+    }
+
     /// Starts taking the controls Universal Exports queued for `station_id`.
     ///
     /// Controls are handed over one at a time: the next is taken only after the previous
@@ -443,16 +510,13 @@ impl Publisher {
                 "this Station already takes its controls",
             ));
         }
-        let (deliveries, receiver) = tokio::sync::mpsc::channel(self.limits.control_queue);
-        let agent = gateway_agent(
-            &self.tls,
-            self.limits.request_timeout.0 + self.limits.control_wait.0,
-        );
+        let (deliveries, receiver) = tokio::sync::mpsc::channel(self.limits.get().control_queue);
+        let agents = Agents::new(self.tls.clone());
         let link = ControlLink {
             origin: self.origin.clone(),
             token: self.token.clone(),
             station: station_id.to_owned(),
-            agent,
+            agents,
             limits: self.limits.clone(),
         };
         let running = self.running.clone();
@@ -567,8 +631,8 @@ struct ControlLink {
     origin: Url,
     token: String,
     station: String,
-    agent: ureq::Agent,
-    limits: PublisherLimits,
+    agents: Agents,
+    limits: LiveLimits,
 }
 
 fn take_controls(
@@ -576,32 +640,29 @@ fn take_controls(
     running: &AtomicBool,
     deliveries: &tokio::sync::mpsc::Sender<ControlDelivery>,
 ) {
-    let Ok(mut endpoint) = link.origin.join("v1/station/controls/next") else {
-        return;
-    };
-    endpoint
-        .query_pairs_mut()
-        .append_pair("station", &link.station)
-        .append_pair(
-            "wait_ms",
-            &link.limits.control_wait.0.as_millis().to_string(),
-        );
     let Some(schema) = control_schema() else {
         return;
     };
-    let mut retry = Retry::new(link.limits.input_retry_delay.0, &link.limits);
-    // Controls this process never saw were handed to an earlier one, which did not report them.
-    let mut fresh = endpoint.clone();
-    fresh.query_pairs_mut().append_pair("fresh", "true");
+    let mut retry = Retry::new(&link.limits.get());
     let mut first = true;
     while running.load(Ordering::Acquire) {
-        let asked = if std::mem::take(&mut first) {
-            &fresh
-        } else {
-            &endpoint
+        // The table is read for each poll, so a changed one is used from the next.
+        let limits = link.limits.get();
+        retry.tune(&limits);
+        let Ok(mut asked) = link.origin.join("v1/station/controls/next") else {
+            return;
         };
+        asked
+            .query_pairs_mut()
+            .append_pair("station", &link.station)
+            .append_pair("wait_ms", &limits.control_wait.0.as_millis().to_string());
+        // Controls this process never saw were handed to an earlier one, which did not report them.
+        if std::mem::take(&mut first) {
+            asked.query_pairs_mut().append_pair("fresh", "true");
+        }
         let response = link
-            .agent
+            .agents
+            .get(limits.request_timeout.0 + limits.control_wait.0)
             .get(asked.as_str())
             .header("Authorization", &format!("Bearer {}", link.token))
             .call();
@@ -691,9 +752,11 @@ fn report_control(link: &ControlLink, control_id: &ControlId, outcome: &ControlO
             .push(control_id.as_str())
             .push("result");
     }
-    for _ in 0..link.limits.control_report_attempts {
+    let limits = link.limits.get();
+    for _ in 0..limits.control_report_attempts {
         let sent = link
-            .agent
+            .agents
+            .get(limits.request_timeout.0 + limits.control_wait.0)
             .post(url.as_str())
             .header("Authorization", &format!("Bearer {}", link.token))
             .send_json(ControlReport {
@@ -704,7 +767,7 @@ fn report_control(link: &ControlLink, control_id: &ControlId, outcome: &ControlO
         // cannot help.
         match sent {
             Ok(_) | Err(ureq::Error::StatusCode(_)) => return,
-            Err(_) => thread::sleep(link.limits.input_retry_delay.0),
+            Err(_) => thread::sleep(limits.input_retry_delay.0),
         }
     }
 }
@@ -842,7 +905,7 @@ impl RunTelemetry {
             self.publisher.fail("Run telemetry lock failed");
             return;
         };
-        let limits = &self.publisher.limits;
+        let limits = self.publisher.limits.get();
         for chunk in bytes.chunks(limits.terminal_bytes.or_max()) {
             if let Some(run_id) = &state.run_id {
                 self.publisher.send(Command::Terminal {
@@ -894,12 +957,19 @@ struct Retry {
 }
 
 impl Retry {
-    fn new(first: Duration, limits: &PublisherLimits) -> Self {
+    fn new(limits: &PublisherLimits) -> Self {
         Self {
-            first,
-            pause: first,
+            first: limits.input_retry_delay.0,
+            pause: limits.input_retry_delay.0,
             longest: limits.retry_max_delay.0,
         }
+    }
+
+    /// Follows `limits` from the next pause on.
+    fn tune(&mut self, limits: &PublisherLimits) {
+        self.first = limits.input_retry_delay.0;
+        self.longest = limits.retry_max_delay.0;
+        self.pause = self.pause.min(self.longest);
     }
 
     fn reset(&mut self) {
@@ -928,20 +998,24 @@ fn sleep_while_running(pause: Duration, running: &AtomicBool) {
 fn receive_inputs(
     origin: Url,
     token: String,
-    agent: ureq::Agent,
-    limits: &PublisherLimits,
+    agents: Agents,
+    live: &LiveLimits,
     running: Arc<AtomicBool>,
     targets: Arc<Mutex<BTreeMap<RunId, InputTargetRegistration>>>,
 ) {
-    let Ok(mut endpoint) = origin.join("v1/station/inputs/next") else {
-        return;
-    };
-    endpoint
-        .query_pairs_mut()
-        .append_pair("wait_ms", &limits.input_wait.0.as_millis().to_string());
-    let mut retry = Retry::new(limits.input_retry_delay.0, limits);
+    let mut retry = Retry::new(&live.get());
     while running.load(Ordering::Acquire) {
-        let response = agent
+        // The table is read for each poll, so a changed one is used from the next.
+        let limits = live.get();
+        retry.tune(&limits);
+        let Ok(mut endpoint) = origin.join("v1/station/inputs/next") else {
+            return;
+        };
+        endpoint
+            .query_pairs_mut()
+            .append_pair("wait_ms", &limits.input_wait.0.as_millis().to_string());
+        let response = agents
+            .get(limits.request_timeout.0 + limits.input_wait.0)
             .get(endpoint.as_str())
             .header("Authorization", &format!("Bearer {token}"))
             .call();
@@ -1110,7 +1184,7 @@ struct Published {
 /// Publishes one command at a time, holding it until the gateway has it or refuses it.
 struct Worker {
     config: Config,
-    agent: ureq::Agent,
+    agents: Agents,
     outbox: Arc<Outbox>,
     running: Arc<AtomicBool>,
     healthy: Arc<AtomicBool>,
@@ -1127,6 +1201,11 @@ struct Worker {
 }
 
 impl Worker {
+    /// The agent of a request, whose timeout is the table's now.
+    fn agent(&self) -> ureq::Agent {
+        self.agents.get(self.config.limits.get().request_timeout.0)
+    }
+
     fn run(&mut self) {
         while self.running.load(Ordering::Acquire) {
             if let Some((command, lost)) = self.outbox.next(Duration::from_millis(100)) {
@@ -1261,7 +1340,7 @@ impl Worker {
             .get(run_id)
             .ok_or(Failure::Refused("Run was not registered"))?;
         let (next, stated) = register(
-            &self.agent,
+            &self.agent(),
             &self.config,
             &run.operation_id,
             &run.mission_id,
@@ -1326,7 +1405,7 @@ impl Worker {
             .map(|run| (run.operation_id.clone(), run.mission_id.clone()))
             .ok_or(Failure::Refused("Run was not registered"))?;
         let sent = publish_lifecycle(
-            &self.agent,
+            &self.agent(),
             &self.config,
             run_id,
             sequence,
@@ -1348,11 +1427,11 @@ impl Worker {
                 .get(run_id)
                 .and_then(|run| run.terminal_bytes)
                 .unwrap_or(usize::MAX);
-            let most = stated.min(self.config.limits.terminal_bytes.or_max());
+            let most = stated.min(self.config.limits.get().terminal_bytes.or_max());
             let left = &bytes[self.sent..];
             let chunk = &left[..left.len().min(most.max(1))];
             let sequence = self.sequence(run_id)?;
-            let sent = publish_terminal(&self.agent, &self.config, run_id, sequence, chunk);
+            let sent = publish_terminal(&self.agent(), &self.config, run_id, sequence, chunk);
             if matches!(sent, Err(Publish::TooLarge)) {
                 // Its limit came down since it last said, or it says one it does not keep.
                 if chunk.len() == 1 {
@@ -1406,7 +1485,7 @@ impl Worker {
     /// Registers every Run again, which restores what a gateway restarted since the last
     /// event forgot; nothing else would tell an idle Run's Station it had restarted.
     fn refresh(&mut self) {
-        self.next_refresh = Instant::now() + self.config.limits.refresh_every.0;
+        self.next_refresh = Instant::now() + self.config.limits.get().refresh_every.0;
         let runs: Vec<RunId> = self.runs.keys().cloned().collect();
         for run_id in runs {
             let refreshed = match self.runs.get(&run_id) {
@@ -1442,7 +1521,7 @@ impl Worker {
             }
             self.next_refresh = Instant::now();
         }
-        self.pause = self.config.limits.publish_retry_delay.0;
+        self.pause = self.config.limits.get().publish_retry_delay.0;
         self.healthy.store(true, Ordering::Release);
         if let Ok(mut error) = self.error.lock() {
             *error = None;
@@ -1453,7 +1532,7 @@ impl Worker {
         self.pause = self
             .pause
             .saturating_mul(2)
-            .min(self.config.limits.retry_max_delay.0);
+            .min(self.config.limits.get().retry_max_delay.0);
     }
 
     fn report(&self, reason: &'static str) {
@@ -2571,6 +2650,43 @@ mod tests {
             refresh_every: crate::bounds::Seconds(Duration::from_millis(100)),
             ..PublisherLimits::default()
         }
+    }
+
+    #[test]
+    fn a_changed_publisher_table_reaches_the_next_request_but_not_the_queue() {
+        let silent = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/", silent.local_addr().unwrap());
+        let config = Config::try_new(&url, "token-for-the-test")
+            .unwrap()
+            .with_limits(PublisherLimits {
+                queue: 5,
+                ..quick()
+            });
+        let publisher = Publisher::start(config).unwrap();
+        assert_eq!(publisher.limits.get().queue, 5);
+        publisher.set_limits(PublisherLimits {
+            queue: 9,
+            terminal_bytes: crate::bounds::Limit::at(3),
+            request_timeout: crate::bounds::Seconds(Duration::from_millis(250)),
+            ..quick()
+        });
+        assert_eq!(
+            publisher.limits.get().terminal_bytes,
+            crate::bounds::Limit::at(3)
+        );
+        assert_eq!(publisher.outbox.queue, 5, "the queue was sized at start");
+
+        // The listener takes a connection and never answers, so a request ends by its timeout.
+        let agents = Agents::new(TlsConfig::default());
+        let timed = |timeout: Duration| {
+            let started = Instant::now();
+            let _ = agents.get(timeout).get(&url).call();
+            started.elapsed()
+        };
+        let short = timed(Duration::from_millis(200));
+        let long = timed(Duration::from_millis(900));
+        assert!(short < Duration::from_millis(800), "{short:?}");
+        assert!(long >= Duration::from_millis(800), "{long:?}");
     }
 
     #[test]

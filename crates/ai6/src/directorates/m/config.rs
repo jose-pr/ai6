@@ -852,13 +852,11 @@ impl StationRuntime {
         }
     }
 
-    /// Whether a key a running Station cannot change differs from `other`'s: the `[publisher]` table
-    /// and the attach link's two HTTP timeouts, which size the clients built when the link starts,
-    /// and the provider libraries' configuration.
+    /// Whether a key a running Station cannot change differs from `other`'s: the `[publisher]` queues, which are
+    /// allocated when the Station starts, and the provider libraries' configuration.
     pub fn restart_only_differs(&self, other: &Self) -> bool {
-        self.publisher != other.publisher
-            || self.attach.call_margin != other.attach.call_margin
-            || self.attach.command_wait != other.attach.command_wait
+        self.publisher.queue != other.publisher.queue
+            || self.publisher.control_queue != other.publisher.control_queue
             || self.providers != other.providers
     }
 

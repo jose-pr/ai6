@@ -417,6 +417,10 @@ fn poll_provider(state: &DaemonState) -> (bool, bool) {
             if let Some(applied) = applied {
                 let limits = applied.station.limits.clone();
                 state.hub.set_limits(limits.attach.clone());
+                #[cfg(feature = "publisher")]
+                if let Some(publisher) = &state.publisher {
+                    publisher.set_limits(limits.publisher.clone());
+                }
                 state.transports.set_limits(limits.clone());
                 state
                     .transports
@@ -1312,13 +1316,16 @@ queue = 3
 
         fs::write(
             root.path().join("station.toml"),
-            "resources_every = 5\n[attach]\nhistory_frames = 3\n[api]\nrefused_body_drain_bytes = 10\n\
+            "resources_every = 5\n[attach]\nhistory_frames = 3\ncall_margin = 5\ncommand_wait = 6\n[publisher]\nrequest_timeout = 9\n[api]\nrefused_body_drain_bytes = 10\n\
              [sources]\nreport_every = 2\n[transports]\nreprobe_after = 7\n",
         )
         .unwrap();
         poll(&state);
         let limits = state.config.limits();
         assert_eq!(limits.attach.history_frames, crate::bounds::Limit::at(3));
+        assert_eq!(limits.attach.call_margin.0, Duration::from_secs(5));
+        assert_eq!(limits.attach.command_wait.0, Duration::from_secs(6));
+        assert_eq!(limits.publisher.request_timeout.0, Duration::from_secs(9));
         assert_ne!(state.hub.limits().history_frames, before.0);
         assert_eq!(
             state.hub.limits().history_frames,
