@@ -1214,6 +1214,7 @@ fn api(state: DaemonState, token: String) -> Router {
     #[cfg(feature = "publisher")]
     let app = app.route("/internal/publisher", get(publisher_health));
     let bearer = crate::station::runner::Bearer::new(token, &state.station.limits().api);
+    state.config.follow_api_drain(bearer.drain_handle());
     app.route_layer(axum::middleware::from_fn_with_state(
         bearer,
         crate::station::runner::authorize,
@@ -1845,6 +1846,7 @@ async fn scheduler_loop(base: DaemonState) {
     let mut next_station_check_in = Instant::now();
     while !base.stopping.load(Ordering::Acquire) {
         let state = base.current();
+        desk.set_limits(state.station.limits().sources.clone());
         // Registry calls block on files or a database: they run on the blocking pool, so a
         // slow Registry never stalls the async workers that serve Runs.
         let check_in = Instant::now() >= next_station_check_in;

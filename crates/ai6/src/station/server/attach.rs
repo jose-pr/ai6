@@ -390,7 +390,7 @@ impl Room {
 /// The hub of this Station: the rooms of the Runs it drives.
 #[derive(Default)]
 pub(crate) struct LocalHub {
-    limits: AttachLimits,
+    limits: Mutex<AttachLimits>,
     rooms: Mutex<BTreeMap<String, Arc<Room>>>,
 }
 
@@ -398,9 +398,22 @@ impl LocalHub {
     /// A hub whose rooms follow `limits`.
     pub(crate) fn new(limits: AttachLimits) -> Self {
         Self {
-            limits,
+            limits: Mutex::new(limits),
             rooms: Mutex::default(),
         }
+    }
+
+    /// Makes the rooms opened from now on follow `limits`; one open keeps what it has.
+    pub(crate) fn set_limits(&self, limits: AttachLimits) {
+        *self.limits.lock().unwrap_or_else(PoisonError::into_inner) = limits;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn limits(&self) -> AttachLimits {
+        self.limits
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     fn rooms(&self) -> MutexGuard<'_, BTreeMap<String, Arc<Room>>> {
@@ -414,7 +427,14 @@ impl LocalHub {
         let mut rooms = self.rooms();
         let room = rooms
             .entry(target.key())
-            .or_insert_with(|| Arc::new(Room::new(self.limits.clone())))
+            .or_insert_with(|| {
+                Arc::new(Room::new(
+                    self.limits
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .clone(),
+                ))
+            })
             .clone();
         *room.port.lock().unwrap_or_else(PoisonError::into_inner) = Some(port);
         room

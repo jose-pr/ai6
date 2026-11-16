@@ -797,7 +797,7 @@ impl Hosted {
 #[derive(Clone)]
 pub(crate) struct Bearer {
     token: String,
-    drain: usize,
+    drain: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl Bearer {
@@ -805,8 +805,15 @@ impl Bearer {
     pub(crate) fn new(token: String, limits: &ApiLimits) -> Self {
         Self {
             token,
-            drain: limits.refused_body_drain_bytes.or_max(),
+            drain: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(
+                limits.refused_body_drain_bytes.or_max(),
+            )),
         }
+    }
+
+    /// The drain size, which whoever holds it may change for the requests that follow.
+    pub(crate) fn drain_handle(&self) -> std::sync::Arc<std::sync::atomic::AtomicUsize> {
+        self.drain.clone()
     }
 }
 
@@ -819,6 +826,7 @@ pub(crate) async fn authorize(
 ) -> axum::response::Response {
     use axum::response::IntoResponse as _;
     use subtle::ConstantTimeEq as _;
+    let drain = drain.load(std::sync::atomic::Ordering::Relaxed);
     let supplied = request
         .headers()
         .get(axum::http::header::AUTHORIZATION)

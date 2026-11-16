@@ -41,7 +41,8 @@ struct Link {
     origin: Url,
     token: String,
     station: String,
-    limits: AttachLimits,
+    /// Where the `[attach]` table is read from each time it is used.
+    config: Arc<crate::station::server::reload::LiveConfig>,
     /// The agent of the poll, whose calls may wait as long as `command_wait`.
     polling: ureq::Agent,
     /// The agent of every delivery.
@@ -54,16 +55,21 @@ impl Link {
         token: String,
         tls: &TlsConfig,
         station: String,
-        limits: AttachLimits,
+        config: Arc<crate::station::server::reload::LiveConfig>,
     ) -> Self {
+        let limits = config.limits().attach.clone();
         Self {
             polling: gateway_agent(tls, limits.call_margin.0 + limits.command_wait.0),
             delivering: gateway_agent(tls, limits.call_margin.0),
             origin,
             token,
             station,
-            limits,
+            config,
         }
+    }
+
+    fn limits(&self) -> AttachLimits {
+        self.config.limits().attach.clone()
     }
 }
 
@@ -79,7 +85,7 @@ pub(in super::super) fn spawn(state: &DaemonState) -> std::io::Result<()> {
         token,
         &tls,
         state.station_id.clone(),
-        state.station.limits().attach.clone(),
+        state.config.clone(),
     );
     let hub: Arc<dyn RunHub> = state.hub.clone();
     let stopping = state.stopping.clone();
@@ -91,9 +97,9 @@ pub(in super::super) fn spawn(state: &DaemonState) -> std::io::Result<()> {
 
 impl Link {
     fn pause(&self, stopping: &AtomicBool) {
-        let until = Instant::now() + self.limits.retry_delay.0;
+        let until = Instant::now() + self.limits().retry_delay.0;
         while !stopping.load(Ordering::Acquire) && Instant::now() < until {
-            std::thread::sleep(self.limits.pause_slice.0.min(self.limits.retry_delay.0));
+            std::thread::sleep(self.limits().pause_slice.0.min(self.limits().retry_delay.0));
         }
     }
 
@@ -107,7 +113,7 @@ impl Link {
             .append_pair("station", &self.station)
             .append_pair(
                 "wait_ms",
-                &self.limits.command_wait.0.as_millis().to_string(),
+                &self.limits().command_wait.0.as_millis().to_string(),
             );
         let workers = Workers::default();
         while !stopping.load(Ordering::Acquire) {
@@ -254,7 +260,7 @@ impl Link {
         client: &str,
         attachment: Attachment,
     ) {
-        let batch = self.limits.delivery_frames;
+        let batch = self.limits().delivery_frames;
         let Attachment { replay, live, .. } = attachment;
         let mut replay = replay.into_iter().map(|frame| frame.to(client)).peekable();
         while replay.peek().is_some() {
@@ -269,7 +275,7 @@ impl Link {
             }
         }
         while !stopping.load(Ordering::Acquire) {
-            let first = match live.recv_timeout(self.limits.poll_slice.0) {
+            let first = match live.recv_timeout(self.limits().poll_slice.0) {
                 Ok(frame) => frame,
                 Err(RecvTimeoutError::Timeout) => continue,
                 Err(RecvTimeoutError::Disconnected) => {
@@ -319,7 +325,7 @@ impl Link {
         };
         let delivery = HubDelivery::new(self.station.clone(), target.clone(), frames);
         let mut tried = 0_usize;
-        while self.limits.delivery_attempts.allows(tried + 1) {
+        while self.limits().delivery_attempts.allows(tried + 1) {
             tried += 1;
             let sent = self
                 .delivering
@@ -354,6 +360,17 @@ mod tests {
 
     use super::super::{LocalHub, RunPort};
     use super::*;
+
+    fn config_with(attach: AttachLimits) -> Arc<crate::station::server::reload::LiveConfig> {
+        Arc::new(
+            crate::station::server::reload::LiveConfig::default().with_station_limits(
+                crate::station::limits::StationLimits {
+                    attach,
+                    ..Default::default()
+                },
+            ),
+        )
+    }
     use crate::bounds::Seconds;
 
     /// What a stand-in Universal Exports hands the Station and was handed back.
@@ -450,11 +467,11 @@ mod tests {
             "station-token".to_owned(),
             &TlsConfig::default(),
             "hq".to_owned(),
-            AttachLimits {
+            config_with(AttachLimits {
                 command_wait: Seconds::new(1),
                 retry_delay: Seconds::new(1),
                 ..AttachLimits::default()
-            },
+            }),
         );
         let stopping = Arc::new(AtomicBool::new(false));
         let polling = std::thread::spawn({
@@ -558,10 +575,10 @@ mod tests {
             "station-token".to_owned(),
             &TlsConfig::default(),
             "hq".to_owned(),
-            AttachLimits {
+            config_with(AttachLimits {
                 command_wait: Seconds::new(1),
                 ..AttachLimits::default()
-            },
+            }),
         );
         let stopping = Arc::new(AtomicBool::new(false));
         let polling = std::thread::spawn({

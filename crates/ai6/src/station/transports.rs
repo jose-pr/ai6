@@ -22,9 +22,9 @@ pub(crate) struct Transports {
     entries: RwLock<BTreeMap<String, Arc<Entry>>>,
     /// How often a Theater other than the Station's own host is sampled for its resources;
     /// zero leaves only the full probe's sample.
-    resources_every: Duration,
+    resources_every: RwLock<Duration>,
     /// The `[transports]` and `[provision]` tables pace and bound the probes.
-    limits: Arc<StationLimits>,
+    limits: RwLock<Arc<StationLimits>>,
 }
 
 struct Entry {
@@ -68,23 +68,57 @@ impl Transports {
     pub(crate) fn none() -> Self {
         Self {
             entries: RwLock::new(BTreeMap::new()),
-            resources_every: crate::station::server::DEFAULT_RESOURCES_EVERY,
-            limits: Arc::default(),
+            resources_every: RwLock::new(crate::station::server::DEFAULT_RESOURCES_EVERY),
+            limits: RwLock::default(),
         }
     }
 
     /// Probes Theaters as the `station` record's tables say.
     #[must_use]
-    pub(crate) fn with_limits(mut self, limits: Arc<StationLimits>) -> Self {
-        self.limits = limits;
+    pub(crate) fn with_limits(self, limits: Arc<StationLimits>) -> Self {
+        self.set_limits(limits);
         self
+    }
+
+    /// Paces and bounds the probes by `limits` from now on.
+    pub(crate) fn set_limits(&self, limits: Arc<StationLimits>) {
+        *self
+            .limits
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = limits;
+    }
+
+    /// Samples Theaters every `every` from now on.
+    pub(crate) fn set_resources_every(&self, every: Duration) {
+        *self
+            .resources_every
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = every;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pacing(&self) -> (Duration, Arc<StationLimits>) {
+        self.paced()
+    }
+
+    fn paced(&self) -> (Duration, Arc<StationLimits>) {
+        (
+            *self
+                .resources_every
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            self.limits
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
+        )
     }
 
     /// Samples each Theater other than the Station's own host every `every`; zero leaves
     /// only the full probe's sample.
     #[must_use]
-    pub(crate) fn with_resources_every(mut self, every: Duration) -> Self {
-        self.resources_every = every;
+    pub(crate) fn with_resources_every(self, every: Duration) -> Self {
+        self.set_resources_every(every);
         self
     }
 
@@ -256,14 +290,19 @@ impl Transports {
             .unwrap_or_default();
         entries
             .iter()
-            .map(|entry| entry.summary(terminal_available, self.resources_every, &self.limits))
+            .map(|entry| {
+                let (every, limits) = self.paced();
+                entry.summary(terminal_available, every, &limits)
+            })
             .collect()
     }
 
     /// One Theater as published at check-in.
     pub(crate) fn summary(&self, id: &str, terminal_available: bool) -> Option<TheaterSummary> {
-        self.entry(id)
-            .map(|entry| entry.summary(terminal_available, self.resources_every, &self.limits))
+        self.entry(id).map(|entry| {
+            let (every, limits) = self.paced();
+            entry.summary(terminal_available, every, &limits)
+        })
     }
 }
 

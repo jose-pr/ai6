@@ -10,7 +10,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use crate::directorates::m::charges::ChargeScope;
@@ -1574,17 +1574,37 @@ pub(crate) struct SourceDesk {
     warned: Mutex<BTreeSet<String>>,
     /// This Station: the provenance of the briefs it queues names it.
     station: String,
-    limits: SourceLimits,
+    limits: RwLock<Arc<SourceLimits>>,
     /// How a charge is told of an item; without it, items wait for a person.
     cables: Option<Arc<CableRelay>>,
 }
 
 impl SourceDesk {
+    /// Makes the desk poll and report as `limits` says from its next beat.
+    pub(crate) fn set_limits(&self, limits: SourceLimits) {
+        *self
+            .limits
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Arc::new(limits);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn current_limits(&self) -> Arc<SourceLimits> {
+        self.limits()
+    }
+
+    fn limits(&self) -> Arc<SourceLimits> {
+        self.limits
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
     /// The desk of `station`, polling and reporting as `limits` says.
     pub(crate) fn new(station: impl Into<String>, limits: SourceLimits) -> Self {
         Self {
             station: station.into(),
-            limits,
+            limits: RwLock::new(Arc::new(limits)),
             cables: None,
             board: Arc::default(),
             busy: AtomicBool::new(false),
@@ -1676,7 +1696,7 @@ impl SourceDesk {
     ) {
         let now = Instant::now();
         for operation in roster.operations() {
-            let setups = source_setups(operation, &self.limits);
+            let setups = source_setups(operation, &self.limits());
             let providers: Vec<String> = setups
                 .iter()
                 .flatten()
@@ -1766,13 +1786,13 @@ impl SourceDesk {
             .map(|mut next| {
                 let due = *next <= now;
                 if due {
-                    *next = now + self.limits.report_every.0;
+                    *next = now + self.limits().report_every.0;
                 }
                 due
             })
             .unwrap_or(false);
         if report_due {
-            report_finished(registry, roster, &self.limits, unix_seconds() as f64);
+            report_finished(registry, roster, &self.limits(), unix_seconds() as f64);
         }
         let drain_due = self
             .next_drain
@@ -1780,7 +1800,7 @@ impl SourceDesk {
             .map(|mut next| {
                 let due = *next <= now;
                 if due {
-                    *next = now + self.limits.outbox_every.0;
+                    *next = now + self.limits().outbox_every.0;
                 }
                 due
             })
@@ -1791,7 +1811,7 @@ impl SourceDesk {
                 roster,
                 build_tracker,
                 &self.station,
-                &self.limits,
+                &self.limits(),
                 &self.drained,
                 unix_seconds() as f64,
             );
@@ -1802,7 +1822,7 @@ impl SourceDesk {
             .map(|mut next| {
                 let due = *next <= now;
                 if due {
-                    *next = now + self.limits.reply_every.0;
+                    *next = now + self.limits().reply_every.0;
                 }
                 due
             })
@@ -1822,13 +1842,19 @@ impl SourceDesk {
             .map(|mut next| {
                 let due = *next <= now;
                 if due {
-                    *next = now + self.limits.reopen_watch_every.0;
+                    *next = now + self.limits().reopen_watch_every.0;
                 }
                 due
             })
             .unwrap_or(false);
         if charge_due {
-            charge_settled(registry, roster, build_tracker, &self.station, &self.limits);
+            charge_settled(
+                registry,
+                roster,
+                build_tracker,
+                &self.station,
+                &self.limits(),
+            );
         }
         let sleepers_due = self
             .next_sleepers
@@ -1836,7 +1862,7 @@ impl SourceDesk {
             .map(|mut next| {
                 let due = *next <= now;
                 if due {
-                    *next = now + self.limits.sleeper_every.0;
+                    *next = now + self.limits().sleeper_every.0;
                 }
                 due
             })

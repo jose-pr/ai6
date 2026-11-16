@@ -852,15 +852,13 @@ impl StationRuntime {
         }
     }
 
-    /// Whether a key a running Station reads only when it starts differs from `other`'s: how often
-    /// Theaters are sampled, and the publisher, API, Source, transport, attach and provider tables.
+    /// Whether a key a running Station cannot change differs from `other`'s: the `[publisher]` table
+    /// and the attach link's two HTTP timeouts, which size the clients built when the link starts,
+    /// and the provider libraries' configuration.
     pub fn restart_only_differs(&self, other: &Self) -> bool {
-        self.resources_every != other.resources_every
-            || self.publisher != other.publisher
-            || self.api != other.api
-            || self.sources != other.sources
-            || self.transports != other.transports
-            || self.attach != other.attach
+        self.publisher != other.publisher
+            || self.attach.call_margin != other.attach.call_margin
+            || self.attach.command_wait != other.attach.command_wait
             || self.providers != other.providers
     }
 
@@ -1158,6 +1156,9 @@ impl UnexRecord {
         running.search = latest.search.clone();
         running.attach = latest.attach.clone();
         running.text = latest.text.clone();
+        running.assistant = latest.assistant;
+        running.assistant_agent = latest.assistant_agent.clone();
+        running.route_text_bytes = latest.route_text_bytes;
         running.gateway.board_runs = latest.gateway.board_runs;
         running.gateway.access_token_ttl = latest.gateway.access_token_ttl;
         running.gateway.access_token_max_ttl = latest.gateway.access_token_max_ttl;

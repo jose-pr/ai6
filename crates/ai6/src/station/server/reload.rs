@@ -50,6 +50,8 @@ pub(super) struct LiveConfig {
     base: Option<RuntimeParts>,
     /// Theaters the Station was given in code, declared with every revision of the provider's.
     extra_theaters: Vec<Theater>,
+    /// How much of a refused request the Station's API reads, which a changed `[api]` table updates.
+    api_drain: std::sync::OnceLock<Arc<std::sync::atomic::AtomicUsize>>,
     /// The Station whose view of the provider it reads.
     station: String,
     /// What the Station started with, to tell which restart-only families changed since.
@@ -100,6 +102,7 @@ impl LiveConfig {
             source: Some(source),
             base: None,
             extra_theaters: Vec::new(),
+            api_drain: std::sync::OnceLock::new(),
             station: station.to_owned(),
             started: Some(started),
             live: Mutex::new(Live {
@@ -112,6 +115,39 @@ impl LiveConfig {
                 ..Live::default()
             }),
         }
+    }
+
+    /// A configuration that runs by `limits`, for tests of what reads them.
+    #[cfg(test)]
+    pub(super) fn with_station_limits(self, limits: crate::station::limits::StationLimits) -> Self {
+        {
+            let mut live = self.lock();
+            let station = StationConfig {
+                limits: Arc::new(limits),
+                ..StationConfig::default()
+            };
+            live.applied = Some(RuntimeParts {
+                station,
+                watchdog: WatchdogConfig::default(),
+                capacity: 1,
+            });
+        }
+        self
+    }
+
+    /// Has a changed `[api]` table reach the API\x27s check of a refused request.
+    pub(super) fn follow_api_drain(&self, drain: Arc<std::sync::atomic::AtomicUsize>) {
+        let _ = self.api_drain.set(drain);
+    }
+
+    /// The tables of the `station` record this Station runs by now, each read where it is used
+    /// rather than copied when the Station started.
+    pub(super) fn limits(&self) -> Arc<crate::station::limits::StationLimits> {
+        self.lock()
+            .applied
+            .as_ref()
+            .map(|applied| applied.station.limits.clone())
+            .unwrap_or_default()
     }
 
     /// Makes the Station follow the provider's Theaters, declared with `extra` and starting as
@@ -379,6 +415,18 @@ fn poll_provider(state: &DaemonState) -> (bool, bool) {
             apply_theaters(state, &mut live, theaters);
             apply_tls(state, &mut live, &snapshot.settings);
             if let Some(applied) = applied {
+                let limits = applied.station.limits.clone();
+                state.hub.set_limits(limits.attach.clone());
+                state.transports.set_limits(limits.clone());
+                state
+                    .transports
+                    .set_resources_every(applied.station.resources_every);
+                if let Some(drain) = state.config.api_drain.get() {
+                    drain.store(
+                        limits.api.refused_body_drain_bytes.or_max(),
+                        Ordering::Relaxed,
+                    );
+                }
                 live.applied = Some(applied);
                 live.station = snapshot.settings.station.clone();
                 eprintln!("ai6: station settings applied");
@@ -1238,6 +1286,64 @@ queue = 3
             "a refused record changes nothing"
         );
         assert_eq!(state.config.status().refused.len(), 1);
+    }
+
+    #[test]
+    fn tables_read_where_they_are_used_follow_the_station_record_at_the_next_poll() {
+        let root = tempfile::tempdir().unwrap();
+        let mut state = test_state(root.path(), "", AGENTS);
+        live(
+            &mut state,
+            root.path(),
+            Arc::new(FileProvider::new(root.path())),
+            false,
+        );
+        let bearer = crate::station::runner::Bearer::new(
+            "token".to_owned(),
+            &crate::station::limits::ApiLimits::default(),
+        );
+        state.config.follow_api_drain(bearer.drain_handle());
+        let desk =
+            crate::station::sources::SourceDesk::new("test", state.config.limits().sources.clone());
+        let before = (
+            state.hub.limits().history_frames,
+            state.transports.pacing().0,
+        );
+
+        fs::write(
+            root.path().join("station.toml"),
+            "resources_every = 5\n[attach]\nhistory_frames = 3\n[api]\nrefused_body_drain_bytes = 10\n\
+             [sources]\nreport_every = 2\n[transports]\nreprobe_after = 7\n",
+        )
+        .unwrap();
+        poll(&state);
+        let limits = state.config.limits();
+        assert_eq!(limits.attach.history_frames, crate::bounds::Limit::at(3));
+        assert_ne!(state.hub.limits().history_frames, before.0);
+        assert_eq!(
+            state.hub.limits().history_frames,
+            crate::bounds::Limit::at(3)
+        );
+        assert_eq!(state.transports.pacing().0, Duration::from_secs(5));
+        assert_eq!(
+            state.transports.pacing().1.transports,
+            limits.transports,
+            "the transports probe by the record's tables"
+        );
+        assert_eq!(
+            bearer
+                .drain_handle()
+                .load(std::sync::atomic::Ordering::Relaxed),
+            10
+        );
+        desk.set_limits(limits.sources.clone());
+        assert_eq!(desk.current_limits().report_every.0, Duration::from_secs(2));
+        assert_ne!(before.1, Duration::from_secs(5));
+        assert_eq!(
+            state.config.status().needs_restart,
+            Vec::<String>::new(),
+            "none of these needs a restart"
+        );
     }
 
     #[test]
