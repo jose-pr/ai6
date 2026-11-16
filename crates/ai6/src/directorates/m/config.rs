@@ -1146,6 +1146,28 @@ impl Default for UnexRecord {
 }
 
 impl UnexRecord {
+    /// This record as a running gateway holds it, `self` being the one it started with and `latest`
+    /// the record now: `latest`'s `[controls]`, `[timeline]`, `[search]`, `[attach]` and `[text]`
+    /// tables and the `[gateway]` keys read per request, and `self`'s everything else. It differs
+    /// from `latest` exactly where only a restart applies.
+    #[must_use]
+    pub fn running_with(&self, latest: &Self) -> Self {
+        let mut running = self.clone();
+        running.controls = latest.controls.clone();
+        running.timeline = latest.timeline.clone();
+        running.search = latest.search.clone();
+        running.attach = latest.attach.clone();
+        running.text = latest.text.clone();
+        running.gateway.board_runs = latest.gateway.board_runs;
+        running.gateway.access_token_ttl = latest.gateway.access_token_ttl;
+        running.gateway.access_token_max_ttl = latest.gateway.access_token_max_ttl;
+        running.gateway.session_idle = latest.gateway.session_idle;
+        running.gateway.session_max = latest.gateway.session_max;
+        running.gateway.session_cookie = latest.gateway.session_cookie;
+        running.gateway.compartment_audit = latest.gateway.compartment_audit;
+        running
+    }
+
     /// Each value in a provider configuration whose key names a credential (`password`,
     /// `secret`, `token`, `key`) and that is written inline rather than as a file, worded for a
     /// log line.
@@ -2525,7 +2547,7 @@ mod tests {
             assert_eq!(ConfigScope::parse(unsafe_id), None, "{unsafe_id}");
         }
         assert_eq!(ConfigScope::of_station(""), ConfigScope::Global);
-        assert!(ConfigRecord::Theater.station_scoped() && !ConfigRecord::Theater.applies_live());
+        assert!(ConfigRecord::Plugin.station_scoped() && !ConfigRecord::Plugin.applies_live());
         assert!(!ConfigRecord::Agent.station_scoped() && ConfigRecord::Agent.applies_live());
         assert_eq!(
             ConfigRecord::from_name("assistant"),

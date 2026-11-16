@@ -141,7 +141,7 @@ pub struct GatewayConfig {
     attach_token_ttl: Duration,
     write_lease_ttl: Duration,
     login: LoginLimits,
-    unex: ai6::UnexLimits,
+    unex: std::sync::RwLock<std::sync::Arc<ai6::UnexLimits>>,
 }
 
 /// Finite state, payload, fanout and input limits for one gateway.
@@ -535,21 +535,34 @@ impl GatewayConfig {
             attach_token_ttl,
             write_lease_ttl,
             login: LoginLimits::default(),
-            unex: ai6::UnexLimits::default(),
+            unex: std::sync::RwLock::new(std::sync::Arc::default()),
         })
     }
 
     /// Replaces the default `[controls]`, `[timeline]` and `[text]` limits (and `[login]`'s
     /// pace) with the `unex` record's; the `[gateway]` table is `limits` of [`GatewayConfig::new`].
     #[must_use]
-    pub fn with_unex_limits(mut self, limits: ai6::UnexLimits) -> Self {
-        self.unex = limits;
+    pub fn with_unex_limits(self, limits: ai6::UnexLimits) -> Self {
+        self.set_unex_limits(limits);
         self
     }
 
-    /// The `unex` record's limit tables this gateway runs by.
-    pub(crate) fn unex(&self) -> &ai6::UnexLimits {
-        &self.unex
+    /// Makes the gateway run by `limits` from the next request on: the `[controls]`, `[timeline]`,
+    /// `[search]`, `[attach]` and `[text]` tables, and the `[gateway]` keys read per request. What
+    /// the gateway sized when it started (queues, slots, token lifetimes, `[login]`) keeps its size.
+    pub fn set_unex_limits(&self, limits: ai6::UnexLimits) {
+        *self
+            .unex
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = std::sync::Arc::new(limits);
+    }
+
+    /// The `unex` record's limit tables this gateway runs by now.
+    pub fn unex(&self) -> std::sync::Arc<ai6::UnexLimits> {
+        self.unex
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// Replaces the default limits on password and key tries at the login route.
@@ -574,7 +587,7 @@ impl fmt::Debug for GatewayConfig {
             .field("attach_token_ttl", &self.attach_token_ttl)
             .field("write_lease_ttl", &self.write_lease_ttl)
             .field("login", &self.login)
-            .field("unex", &self.unex)
+            .field("unex", &self.unex())
             .finish()
     }
 }
@@ -956,6 +969,11 @@ impl Gateway {
     pub fn with_accounts(mut self, accounts: Arc<dyn ai6::Accounts>) -> Self {
         self.accounts = Some(accounts);
         self
+    }
+
+    /// The limits and trusted origin this gateway runs by.
+    pub fn config(&self) -> &std::sync::Arc<GatewayConfig> {
+        &self.config
     }
 
     /// Serves Moneypenny, the operator's assistant: the app's conversation socket, her tools'

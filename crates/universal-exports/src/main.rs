@@ -338,7 +338,10 @@ async fn run(cli: Cli) -> Result<(), String> {
             live,
             sign_in,
             has_keys,
-            followed_registry,
+            Applied {
+                registry: followed_registry,
+                gateway: gateway.config().clone(),
+            },
             snapshot.clone(),
             poll,
         ));
@@ -401,9 +404,15 @@ fn own_tls(settings: &Settings) -> Result<Option<std::sync::Arc<rustls::ServerCo
         .map_err(|error| format!("[unex.tls]: {error}"))
 }
 
+/// What a followed record is applied to: the Registry and the gateway's limits.
+struct Applied {
+    registry: Arc<dyn ai6::RegistryBackend>,
+    gateway: Arc<universal_exports::GatewayConfig>,
+}
+
 /// Reads the provider every `every` and applies a changed `access` or `operation_access`
 /// record and the `unex` record's `sign_in_policy`, and gives `registry` the limits of a changed
-/// `registry` record; a changed record of a family only a restart applies (the rest of `unex`,
+/// `registry` record, and the `unex` limits read per request; a changed record of a family only a restart applies (the rest of `unex`,
 /// `plugin`) is logged as needing one. A configuration the provider refuses keeps the policy in
 /// force, and the access admin shows why.
 async fn follow_policy(
@@ -411,12 +420,13 @@ async fn follow_policy(
     live: Arc<LiveAccess>,
     sign_in: Option<Arc<LiveSignIn>>,
     has_keys: bool,
-    registry: Arc<dyn ai6::RegistryBackend>,
+    applied: Applied,
     started: ai6::ConfigSnapshot,
     every: Duration,
 ) {
     let mut since = started.revision;
     let mut limits = started.settings.registry.clone();
+    let mut unex_limits = started.settings.unex.limits();
     let started = Arc::new(started);
     let mut refused = None;
     let mut refused_policy: Option<String> = None;
@@ -434,7 +444,7 @@ async fn follow_policy(
                     Err(error) => return Err(error.to_string()),
                 };
                 // The sign-in policy is applied live; the rest of the record waits for a restart.
-                let mut unex = base.settings.unex.clone();
+                let mut unex = base.settings.unex.running_with(&snapshot.settings.unex);
                 unex.sign_in_policy = snapshot.settings.unex.sign_in_policy.clone();
                 let changed: Vec<ai6::ConfigRecord> = base
                     .changed_families(&snapshot)
@@ -458,13 +468,17 @@ async fn follow_policy(
                     snapshot.revision,
                     changed,
                     snapshot.settings.registry,
+                    base.settings
+                        .unex
+                        .running_with(&snapshot.settings.unex)
+                        .limits(),
                     policy,
                 )))
             })
             .await
         };
         match outcome {
-            Ok(Ok(Some((revision, changed, record, policy)))) => {
+            Ok(Ok(Some((revision, changed, record, running, policy)))) => {
                 since = revision;
                 refused = None;
                 match policy {
@@ -486,8 +500,13 @@ async fn follow_policy(
                         }
                     }
                 }
+                if running != unex_limits {
+                    applied.gateway.set_unex_limits(running.clone());
+                    eprintln!("universal-exports: limits applied");
+                    unex_limits = running;
+                }
                 if record != limits {
-                    record.apply_to(registry.as_ref());
+                    record.apply_to(applied.registry.as_ref());
                     eprintln!("universal-exports: Registry limits applied");
                     for weakening in record.weakenings() {
                         eprintln!("universal-exports: warning: {weakening}");
@@ -1076,6 +1095,60 @@ mod tests {
 
     use super::*;
     use clap::CommandFactory;
+
+    #[tokio::test]
+    async fn a_changed_unex_record_changes_a_running_gateways_limits_at_the_next_poll() {
+        let root = tempfile::tempdir().unwrap();
+        let provider: Arc<dyn ConfigProvider> = Arc::new(ai6::FileProvider::new(root.path()));
+        let started = provider.load("").unwrap();
+        let live = Arc::new(LiveAccess::new(provider.clone(), Vec::new(), None).unwrap());
+        let registry: Arc<dyn ai6::RegistryBackend> =
+            Arc::new(ai6::FileRegistry::open(root.path().join("registry")));
+        let record = &started.settings.unex;
+        let gateway = Arc::new(
+            GatewayConfig::new(
+                "https://gateway.test".to_owned(),
+                "a station token of enough length".to_owned(),
+                GatewayLimits::from(&record.gateway),
+                record.gateway.attach_token_ttl.0,
+                record.gateway.write_lease_ttl.0,
+            )
+            .unwrap()
+            .with_unex_limits(record.limits()),
+        );
+        let default_page = gateway.unex().timeline.page;
+        tokio::spawn(follow_policy(
+            provider,
+            live,
+            None,
+            false,
+            Applied {
+                registry,
+                gateway: gateway.clone(),
+            },
+            started,
+            Duration::from_millis(50),
+        ));
+
+        std::fs::write(
+            root.path().join("unex.toml"),
+            "[timeline]\npage = 7\n[gateway]\naccess_token_ttl = 90\nruns = 3\n",
+        )
+        .unwrap();
+        let mut waited = 0;
+        while gateway.unex().timeline.page == default_page && waited < 200 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            waited += 1;
+        }
+        let limits = gateway.unex();
+        assert_eq!(limits.timeline.page, 7);
+        assert_eq!(limits.gateway.access_token_ttl.0, Duration::from_secs(90));
+        assert_eq!(
+            limits.gateway.runs,
+            ai6::UnexLimits::default().gateway.runs,
+            "what the gateway sized when it started waits for a restart"
+        );
+    }
 
     #[test]
     fn command_definition_is_well_formed() {
