@@ -378,7 +378,7 @@ impl Gateway {
         SignInContext {
             purpose: purpose.to_owned(),
             address: self
-                .login_guard
+                .login_guard()
                 .address(headers, connection)
                 .map(|address| address.to_string()),
             client: Some(client.to_owned()),

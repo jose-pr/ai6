@@ -444,6 +444,7 @@ async fn follow_policy(
     let mut since = started.revision;
     let mut limits = started.settings.registry.clone();
     let mut unex_limits = started.settings.unex.limits();
+    let mut gateway_applied = gateway_live(&started.settings.unex).ok();
     let mut assistant_applied = (
         started.settings.unex.assistant,
         started
@@ -490,6 +491,7 @@ async fn follow_policy(
                         .map(|applied| (applied, sign_in.offers_nothing())),
                     None => Ok((false, false)),
                 };
+                let live_gateway = gateway_live(&snapshot.settings.unex);
                 let assistant = (
                     snapshot.settings.unex.assistant,
                     if snapshot.settings.unex.assistant {
@@ -507,13 +509,14 @@ async fn follow_policy(
                         .running_with(&snapshot.settings.unex)
                         .limits(),
                     assistant,
+                    live_gateway,
                     policy,
                 )))
             })
             .await
         };
         match outcome {
-            Ok(Ok(Some((revision, changed, record, running, assistant, policy)))) => {
+            Ok(Ok(Some((revision, changed, record, running, assistant, live_gateway, policy)))) => {
                 since = revision;
                 refused = None;
                 match policy {
@@ -546,6 +549,34 @@ async fn follow_policy(
                     }
                     (_, Err(reason)) => eprintln!(
                         "universal-exports: assistant settings refused, keeping the ones it runs: {reason}"
+                    ),
+                }
+                match live_gateway {
+                    Ok(next) => {
+                        if gateway_applied.as_ref() != Some(&next) {
+                            let refused = applied
+                                .gateway
+                                .set_lifetimes(next.lifetimes.0, next.lifetimes.1)
+                                .and_then(|()| {
+                                    applied
+                                        .gateway
+                                        .set_secret_limits(next.secrets.0, next.secrets.1)
+                                })
+                                .err();
+                            match refused {
+                                None => {
+                                    applied.server.set_login_limits(&next.login);
+                                    eprintln!("universal-exports: gateway settings applied");
+                                    gateway_applied = Some(next);
+                                }
+                                Some(error) => eprintln!(
+                                    "universal-exports: gateway settings refused, keeping the ones it runs: {error}"
+                                ),
+                            }
+                        }
+                    }
+                    Err(reason) => eprintln!(
+                        "universal-exports: gateway settings refused, keeping the ones it runs: {reason}"
                     ),
                 }
                 if running != unex_limits {
@@ -639,6 +670,29 @@ fn view_limits(record: &ai6::AssistantViewLimits) -> Result<ViewLimits, String> 
         }
     }
     Ok(limits)
+}
+
+/// What the gateway holds per use from `record`: the login counts, the token and lease lifetimes
+/// and the Station token and origin bounds.
+#[derive(Clone, PartialEq)]
+struct GatewayLive {
+    login: LoginLimits,
+    lifetimes: (Duration, Duration),
+    secrets: (usize, ai6::Limit),
+}
+
+fn gateway_live(record: &UnexRecord) -> Result<GatewayLive, String> {
+    Ok(GatewayLive {
+        login: login_limits(record)?,
+        lifetimes: (
+            record.gateway.attach_token_ttl.0,
+            record.gateway.write_lease_ttl.0,
+        ),
+        secrets: (
+            usize::try_from(record.gateway.station_token_min_bytes).unwrap_or(usize::MAX),
+            record.gateway.origin_bytes,
+        ),
+    })
 }
 
 fn login_limits(record: &UnexRecord) -> Result<LoginLimits, String> {
@@ -1185,7 +1239,7 @@ mod tests {
 
         std::fs::write(
             root.path().join("unex.toml"),
-            "[timeline]\npage = 7\n[gateway]\naccess_token_ttl = 90\nruns = 3\n",
+            "[timeline]\npage = 7\n[gateway]\naccess_token_ttl = 90\nattach_token_ttl = 11\nruns = 3\n",
         )
         .unwrap();
         let mut waited = 0;
@@ -1196,6 +1250,7 @@ mod tests {
         let limits = gateway.unex();
         assert_eq!(limits.timeline.page, 7);
         assert_eq!(limits.gateway.access_token_ttl.0, Duration::from_secs(90));
+        assert_eq!(gateway.attach_token_ttl(), Duration::from_secs(11));
         assert_eq!(
             limits.gateway.runs,
             ai6::UnexLimits::default().gateway.runs,

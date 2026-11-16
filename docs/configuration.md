@@ -949,16 +949,35 @@ library or a pool already allocated:
 | `ai6.cfg` | listener address, Station ID and identity, the provider and Registry location | They locate or name the process before it reads a record, and a bound listener has one address. |
 | `plugin` | the whole family | A loaded library is held open and, on Windows, locked, so it cannot be swapped under the Station. |
 | `station` | `[providers.<id>]` | Configures a provider library as it is loaded. |
-| `station` | the `[publisher]` table, and `[attach]` `call_margin` and `command_wait` | Pools already allocated: the publisher's outbox queue and the HTTP clients (connection pools with their timeouts) of the link to Universal Exports and of the attach link. |
-| `unex` | the sign-in providers, directory, authorizer and accounts, `proxy_*`, the access cache, `client_address_header`, `key_ttl`, `provider_config_depth` | Provider libraries are loaded and configured when the gateway starts. |
-| `unex` | `[login]`, and the `[gateway]` keys `runs`, `clients_per_run`, `scrollback_events`, `frame_bytes`, `input_frames_per_second`, `input_queue`, `fanout`, `buffer_budget_bytes`, `client_slots`, `attach_token_ttl`, `write_lease_ttl`, `station_token_min_bytes` and `origin_bytes` | Pools already allocated: the login guards' tables, and the gateway's per-Run buffers, queues and connection slots. |
+| `station` | `[publisher]` `queue` and `control_queue` | The queue of events waiting for Universal Exports and the channel of Mission controls are allocated when the Station starts. |
+| `unex` | the sign-in providers, directory, authorizer and accounts, `proxy_*`, the access cache, `key_ttl`, `provider_config_depth` | Provider libraries are loaded and configured when the gateway starts. |
+| `unex` | the `[gateway]` keys `runs`, `clients_per_run`, `scrollback_events`, `frame_bytes`, `input_frames_per_second`, `input_queue`, `fanout`, `buffer_budget_bytes` and `client_slots` | Pools already allocated: the gateway's per-Run buffers, queues and connection slots. |
 
-Applied at the next poll, with a turn or request already running finishing on what it started
-with: the `station` record's other keys and tables (capacity, watchdog, roles, labels, the
-scheduler, Sources, Theater probes and their pace, the API's refused-body drain, the attach hub's
-new rooms and the rest), `cables`, `theater`, `tls`, and in Universal Exports the sign-in
-policy, Moneypenny (on or off, her Agent, her limits and views, `route_text_bytes`), `[controls]`,
-`[timeline]`, `[search]`, `[attach]`, `[text]` and the other `[gateway]` keys.
+Applied at the next poll, with a request, turn or poll already running finishing on what it
+started with:
+
+- The `station` record's other keys and tables: capacity, watchdog, roles, labels, the scheduler,
+  Sources, Theater probes and their pace, the API's refused-body drain, the attach hub's new rooms,
+  and the HTTP timeouts and pauses of the links to Universal Exports (`[publisher]` apart from the
+  two queues, and `[attach]` `call_margin` and `command_wait`). A long poll in flight ends by the
+  timeout it began with; the next one uses the new one.
+- `cables`, `theater` and `tls`.
+- In Universal Exports: the sign-in policy; Moneypenny (on or off, her Agent, her limits and views,
+  `route_text_bytes`); `[controls]`, `[timeline]`, `[search]`, `[attach]` and `[text]`; the
+  `[gateway]` keys read per request (`board_runs`, the access-token and session keys,
+  `compartment_audit`); `attach_token_ttl` and `write_lease_ttl`, which last that long for the
+  tokens and leases issued after the change; and `station_token_min_bytes` and `origin_bytes`.
+- The `unex` record's `[login]` table, `login_tries_per_address`, `login_tries_per_name` and
+  `client_address_header`: the login and resume guards are rebuilt when any of them changes, so
+  the counts they hold start over and an address or name being held off is let through once.
+
+The gateway's Station token and public origin come from `ai6.cfg` and cannot change while it runs,
+so a `station_token_min_bytes` or `origin_bytes` they do not satisfy is refused and logged by Universal Exports,
+and the earlier values stay.
+
+Moneypenny is built when the gateway starts even while `assistant` is off, so that a later change
+can switch her on: the pages directory (`[unex.pages] dir`) is created at start whether or not she
+answers.
 
 The `tls` family applies to a connection made after the change: the policy a Station reports and
 warns of at check-in changes at the next poll, and a TLS client or the `ai6 peer` command reads

@@ -138,8 +138,8 @@ pub struct GatewayConfig {
     public_origin: String,
     station_token: String,
     limits: GatewayLimits,
-    attach_token_ttl: Duration,
-    write_lease_ttl: Duration,
+    lifetimes: std::sync::RwLock<(Duration, Duration)>,
+    secret_limits: std::sync::RwLock<(usize, ai6::Limit)>,
     login: LoginLimits,
     unex: std::sync::RwLock<std::sync::Arc<ai6::UnexLimits>>,
 }
@@ -532,8 +532,11 @@ impl GatewayConfig {
             public_origin: public_origin.trim_end_matches('/').to_owned(),
             station_token,
             limits,
-            attach_token_ttl,
-            write_lease_ttl,
+            lifetimes: std::sync::RwLock::new((attach_token_ttl, write_lease_ttl)),
+            secret_limits: std::sync::RwLock::new((
+                limits.station_token_min_bytes,
+                limits.origin_bytes,
+            )),
             login: LoginLimits::default(),
             unex: std::sync::RwLock::new(std::sync::Arc::default()),
         })
@@ -572,6 +575,69 @@ impl GatewayConfig {
         self
     }
 
+    /// How long an attach token lasts.
+    pub fn attach_token_ttl(&self) -> Duration {
+        self.lifetimes
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .0
+    }
+
+    /// How long a write lease lasts.
+    pub fn write_lease_ttl(&self) -> Duration {
+        self.lifetimes
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .1
+    }
+
+    /// Makes the attach tokens and write leases issued from now on last the given times; those
+    /// already issued keep theirs. A zero lifetime is refused and changes nothing.
+    pub fn set_lifetimes(
+        &self,
+        attach_token_ttl: Duration,
+        write_lease_ttl: Duration,
+    ) -> Result<(), GatewayError> {
+        if attach_token_ttl.is_zero() || write_lease_ttl.is_zero() {
+            return Err(GatewayError::InvalidConfiguration);
+        }
+        *self
+            .lifetimes
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            (attach_token_ttl, write_lease_ttl);
+        Ok(())
+    }
+
+    /// Holds the public origin and the Station token to `station_token_min_bytes` and
+    /// `origin_bytes` from now on. Both are fixed while the gateway runs, so a value they no
+    /// longer satisfy is refused and the earlier ones stay.
+    pub fn set_secret_limits(
+        &self,
+        station_token_min_bytes: usize,
+        origin_bytes: ai6::Limit,
+    ) -> Result<(), GatewayError> {
+        if self.station_token.len() < station_token_min_bytes
+            || !origin_bytes.allows(self.public_origin.len())
+        {
+            return Err(GatewayError::InvalidConfiguration);
+        }
+        *self
+            .secret_limits
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            (station_token_min_bytes, origin_bytes);
+        Ok(())
+    }
+
+    /// The `station_token_min_bytes` and `origin_bytes` the gateway holds its token and origin to.
+    pub fn secret_limits(&self) -> (usize, ai6::Limit) {
+        *self
+            .secret_limits
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     /// The origin browser requests must match exactly.
     pub fn public_origin(&self) -> &str {
         &self.public_origin
@@ -584,8 +650,8 @@ impl fmt::Debug for GatewayConfig {
             .field("public_origin", &self.public_origin)
             .field("station_token", &"[REDACTED]")
             .field("limits", &self.limits)
-            .field("attach_token_ttl", &self.attach_token_ttl)
-            .field("write_lease_ttl", &self.write_lease_ttl)
+            .field("attach_token_ttl", &self.attach_token_ttl())
+            .field("write_lease_ttl", &self.write_lease_ttl())
             .field("login", &self.login)
             .field("unex", &self.unex())
             .finish()
@@ -723,9 +789,9 @@ pub struct Gateway {
     access_admin: Option<Arc<access_admin::LiveAccess>>,
     compartment_reads: compartments::AuditMemory,
     accounts: Option<Arc<dyn ai6::Accounts>>,
-    login_guard: std::sync::Arc<LoginGuard>,
+    login_guard: std::sync::Arc<std::sync::RwLock<std::sync::Arc<LoginGuard>>>,
     /// Refused resumes, apart from `login_guard` so they cost nobody a try at their password.
-    resume_guard: std::sync::Arc<LoginGuard>,
+    resume_guard: std::sync::Arc<std::sync::RwLock<std::sync::Arc<LoginGuard>>>,
     controls: Arc<std::sync::Mutex<ControlBook>>,
     control_ready: Arc<tokio::sync::Notify>,
     assistant: Option<Arc<moneypenny::Assistant>>,
@@ -827,11 +893,40 @@ struct WriteLease {
 }
 
 impl Gateway {
+    pub(crate) fn login_guard(&self) -> std::sync::Arc<LoginGuard> {
+        self.login_guard
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    pub(crate) fn resume_guard(&self) -> std::sync::Arc<LoginGuard> {
+        self.resume_guard
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Makes the login and resume routes count tries by `limits` from now on. The counts held
+    /// so far start over, so an address or name that was being held off is let through once.
+    pub fn set_login_limits(&self, limits: &LoginLimits) {
+        for guard in [&self.login_guard, &self.resume_guard] {
+            *guard
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                std::sync::Arc::new(LoginGuard::new(limits));
+        }
+    }
+
     /// Creates the bounded gateway state and the one authenticated Station input queue.
     pub fn new(config: GatewayConfig) -> Self {
         let (input_tx, input_rx) = mpsc::channel(config.limits.input_queue_capacity);
-        let login_guard = std::sync::Arc::new(LoginGuard::new(&config.login));
-        let resume_guard = std::sync::Arc::new(LoginGuard::new(&config.login));
+        let login_guard = std::sync::Arc::new(std::sync::RwLock::new(std::sync::Arc::new(
+            LoginGuard::new(&config.login),
+        )));
+        let resume_guard = std::sync::Arc::new(std::sync::RwLock::new(std::sync::Arc::new(
+            LoginGuard::new(&config.login),
+        )));
         let controls = ControlBook::new(config.unex().controls.clone());
         Self {
             config: std::sync::Arc::new(config),
@@ -1441,7 +1536,7 @@ impl Gateway {
             token.clone(),
             TimedGrant {
                 grant,
-                expires: Instant::now() + self.config.attach_token_ttl,
+                expires: Instant::now() + self.config.attach_token_ttl(),
             },
         );
         Ok(token)
@@ -1502,7 +1597,7 @@ impl Gateway {
         }
         let connection_id = Uuid::new_v4().simple().to_string();
         let connection_expires = timed.expires;
-        let lease_expires = (now + self.config.write_lease_ttl).min(connection_expires);
+        let lease_expires = (now + self.config.write_lease_ttl()).min(connection_expires);
         if timed.grant.mode == AttachMode::Write {
             run.lease = Some(WriteLease {
                 connection_id: connection_id.clone(),
@@ -4039,8 +4134,9 @@ async fn resume(
     }
     // Judged before being counted: the value cannot be guessed, so the count only slows a client
     // hammering this route, and must not keep out a good cookie behind the same address.
-    let source = gateway.resume_guard.source(&headers, address);
-    let refusal = match gateway.resume_guard.tried_address(source) {
+    let resume_guard = gateway.resume_guard();
+    let source = resume_guard.source(&headers, address);
+    let refusal = match resume_guard.tried_address(source) {
         Some(wait) => ApiError::too_many_attempts(wait),
         None => ApiError::unauthorized(),
     };
@@ -4294,8 +4390,9 @@ async fn authenticate_password(
     if providers.authenticators.is_empty() {
         return Err(ApiError::unauthorized());
     }
-    let source = gateway.login_guard.source(headers, connection);
-    if let Some(wait) = gateway.login_guard.tried(source, &request.name) {
+    let login_guard = gateway.login_guard();
+    let source = login_guard.source(headers, connection);
+    if let Some(wait) = login_guard.tried(source, &request.name) {
         return Err(ApiError::too_many_attempts(wait));
     }
     let attempt = Attempt {
@@ -6338,7 +6435,7 @@ async fn exchange_attach_token(
     let ticket = gateway.exchange_attach_token(&request.token).await?;
     let cookie = format!(
         "ai6_attach={ticket}; Path=/v1/socket; HttpOnly; Secure; SameSite=Strict; Max-Age={}",
-        gateway.config.attach_token_ttl.as_secs().max(1)
+        gateway.config.attach_token_ttl().as_secs().max(1)
     );
     let mut response = StatusCode::NO_CONTENT.into_response();
     response.headers_mut().insert(
@@ -6886,6 +6983,55 @@ mod tests {
                 .map(|proxy| (proxy.header.as_str(), proxy.lookup_by.as_str())),
             Some(("x-forwarded-user", "name"))
         );
+    }
+
+    #[test]
+    fn a_running_gateway_follows_its_login_counts_lifetimes_and_secret_bounds() {
+        let gateway = gateway();
+        let source: std::net::IpAddr = "203.0.113.9".parse().unwrap();
+        let strict = LoginLimits {
+            per_address: std::num::NonZeroU32::MIN,
+            ..LoginLimits::default()
+        };
+        gateway.set_login_limits(&strict);
+        assert!(gateway.resume_guard().tried_address(source).is_none());
+        assert!(gateway.resume_guard().tried_address(source).is_some());
+        assert!(gateway.login_guard().tried(source, "ana").is_none());
+        assert!(gateway.login_guard().tried(source, "ana").is_some());
+        gateway.set_login_limits(&LoginLimits::default());
+        assert!(
+            gateway.resume_guard().tried_address(source).is_none(),
+            "a changed record starts the counts over"
+        );
+
+        gateway
+            .config
+            .set_lifetimes(Duration::from_secs(7), Duration::from_secs(8))
+            .unwrap();
+        assert_eq!(gateway.config.attach_token_ttl(), Duration::from_secs(7));
+        assert_eq!(gateway.config.write_lease_ttl(), Duration::from_secs(8));
+        assert!(
+            gateway
+                .config
+                .set_lifetimes(Duration::ZERO, Duration::from_secs(8))
+                .is_err()
+        );
+        assert_eq!(gateway.config.attach_token_ttl(), Duration::from_secs(7));
+
+        let (_, origin) = gateway.config.secret_limits();
+        assert!(gateway.config.set_secret_limits(8, origin).is_ok());
+        assert_eq!(gateway.config.secret_limits().0, 8);
+        assert!(
+            gateway.config.set_secret_limits(1000, origin).is_err(),
+            "a token shorter than the bound is refused"
+        );
+        assert!(
+            gateway
+                .config
+                .set_secret_limits(8, ai6::Limit::at(3))
+                .is_err()
+        );
+        assert_eq!(gateway.config.secret_limits().0, 8);
     }
 
     fn gateway() -> Gateway {

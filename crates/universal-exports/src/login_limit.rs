@@ -20,7 +20,7 @@ use governor::{Quota, RateLimiter};
 /// How many password or key tries the login route allows, and where it finds the address a
 /// try came from. Every field has a default that is safe for a gateway on the public
 /// internet; raise a count for an office behind one address.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoginLimits {
     /// Tries a minute from one address (an IPv6 address counts as its /64 network). Default 5.
     pub per_address: NonZeroU32,

@@ -1144,7 +1144,7 @@ impl Default for UnexRecord {
 impl UnexRecord {
     /// This record as a running gateway holds it, `self` being the one it started with and `latest`
     /// the record now: `latest`'s `[controls]`, `[timeline]`, `[search]`, `[attach]` and `[text]`
-    /// tables and the `[gateway]` keys read per request, and `self`'s everything else. It differs
+    /// tables and Moneypenny's keys, `[login]` with the tries and address header it counts by, and the `[gateway]` keys read per request or per token issued, and `self`'s everything else. It differs
     /// from `latest` exactly where only a restart applies.
     #[must_use]
     pub fn running_with(&self, latest: &Self) -> Self {
@@ -1157,6 +1157,14 @@ impl UnexRecord {
         running.assistant = latest.assistant;
         running.assistant_agent = latest.assistant_agent.clone();
         running.route_text_bytes = latest.route_text_bytes;
+        running.login = latest.login.clone();
+        running.login_tries_per_address = latest.login_tries_per_address;
+        running.login_tries_per_name = latest.login_tries_per_name;
+        running.client_address_header = latest.client_address_header.clone();
+        running.gateway.attach_token_ttl = latest.gateway.attach_token_ttl;
+        running.gateway.write_lease_ttl = latest.gateway.write_lease_ttl;
+        running.gateway.station_token_min_bytes = latest.gateway.station_token_min_bytes;
+        running.gateway.origin_bytes = latest.gateway.origin_bytes;
         running.gateway.board_runs = latest.gateway.board_runs;
         running.gateway.access_token_ttl = latest.gateway.access_token_ttl;
         running.gateway.access_token_max_ttl = latest.gateway.access_token_max_ttl;
