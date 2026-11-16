@@ -343,7 +343,16 @@ impl DecisionDesk {
     /// Source, vetted as any brief is. At `desk` clearance the charge assesses nothing and a
     /// person does.
     pub(in crate::station::server) fn assess(&self, call: AssessCall) -> Result<String, String> {
-        self.operation_only()?;
+        if self.any {
+            // M's charge decides what is proposed to the global scope, as a person with
+            // `memory.write` on `config:memory` may.
+            return ReportDesk::for_m(self.state.clone()).assess(
+                &self.reader(),
+                &call,
+                &self.by(),
+                DEFAULT_REQUEST_TTL,
+            );
+        }
         let clearance = agents::effective(&self.state, Some(&self.operation), &self.agent)
             .map_err(|error| error.to_string())?
             .clearance;

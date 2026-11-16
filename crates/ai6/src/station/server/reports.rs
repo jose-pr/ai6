@@ -68,6 +68,8 @@ struct RunReader<'a> {
     clearances: Vec<ReportClearance>,
     /// The Run, once the harness has reported it.
     run: Option<String>,
+    /// M's charge, which decides what is proposed to the global scope.
+    m: bool,
 }
 
 impl RunReader<'_> {
@@ -123,10 +125,15 @@ impl ReportReader for RunReader<'_> {
         vec![format!("agent:{}", self.reader.agent)]
     }
 
-    /// A charge, which has no Mission, decides what is proposed in its own Operation.
+    /// A charge, which has no Mission, decides what is proposed in its own Operation; M's
+    /// decides what is proposed to the global scope.
     fn assesses(&self, scope: &ReportScope) -> bool {
         self.reader.mission.is_none()
-            && matches!(scope, ReportScope::Operation(operation) if *operation == self.reader.operation)
+            && if self.m {
+                *scope == ReportScope::Global
+            } else {
+                matches!(scope, ReportScope::Operation(operation) if *operation == self.reader.operation)
+            }
     }
 
     fn filed(&self, filer: &ReportFiler) -> bool {
@@ -293,11 +300,18 @@ fn assessed_note(report: &Report) -> &'static str {
 #[derive(Clone)]
 pub(super) struct ReportDesk {
     state: DaemonState,
+    /// M's charge: it decides what is proposed to the global scope, and has no Operation.
+    m: bool,
 }
 
 impl ReportDesk {
     pub(super) fn new(state: DaemonState) -> Self {
-        Self { state }
+        Self { state, m: false }
+    }
+
+    /// The desk of M's charge.
+    pub(super) fn for_m(state: DaemonState) -> Self {
+        Self { state, m: true }
     }
 
     /// Bytes of a Report's title and of each name on it.
@@ -315,9 +329,13 @@ impl ReportDesk {
         work: impl FnOnce(&DaemonState, &RunReader<'_>) -> Value,
     ) -> Result<Value, String> {
         let state = self.state.current();
-        let clearance = agents::effective(&state, Some(&reader.operation), &reader.agent)
-            .map_err(|_| UNAVAILABLE.to_owned())?
-            .clearance;
+        let clearance = agents::effective(
+            &state,
+            (!self.m).then_some(reader.operation.as_str()),
+            &reader.agent,
+        )
+        .map_err(|_| UNAVAILABLE.to_owned())?
+        .clearance;
         let settings = state
             .config
             .report_settings()
@@ -341,6 +359,7 @@ impl ReportDesk {
             settings,
             clearances,
             run,
+            m: self.m,
         };
         Ok(work(&state, &caller))
     }
@@ -684,8 +703,12 @@ impl ReportDesk {
             Ok(Some(report)) => report,
             Ok(None) | Err(_) => return Err(refused("no such report")),
         };
-        let own = ReportScope::Operation(caller.reader.operation.clone());
-        if report.scope != own {
+        if self.m {
+            // M's charge decides only what is proposed to the global scope.
+            if report.scope != ReportScope::Global || !report.is_proposal() {
+                return Err(refused("no such report"));
+            }
+        } else if report.scope != ReportScope::Operation(caller.reader.operation.clone()) {
             return Err(refused("no such report"));
         }
         let rules = ReportRules::new(&caller.settings, &caller.clearances);

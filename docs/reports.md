@@ -180,7 +180,7 @@ and are never a person's or everyone's.
 | --- | --- | --- | --- |
 | `person:ID` | that person, and Moneypenny for them; another person only with `assistant.memory.admin` on `config:assistant`, audited before it is read | that person, and Moneypenny at once for them | no one: an Agent cannot propose into it |
 | `operation:ID` | `mission.read` there, or a compartment read-in (a crossing, audited) | a person with `memory.write` on the Operation; an Agent at the Operation's `memory_write` clearance or above | the Operation's charge, or a person with `memory.write` there |
-| `global` | every person and Agent | a person with `memory.write` on `config:memory`; an Agent never directly | a person with that write |
+| `global` | every person and Agent | a person with `memory.write` on `config:memory`; an Agent never directly | M's charge (`assess_report`, audited with it as the actor), or a person with that write |
 
 Written by someone who may write the scope, a known kind is `standing` at once. An Agent's write it may
 not make is filed `open` as a proposal, readable by those who decide it and by whoever filed it, and the

@@ -499,6 +499,8 @@ async fn open(state: &DaemonState, charge: &Charge, record: &ChargeRecord) -> Ar
                         charge.settings.agent.clone(),
                     ));
                     if is_m {
+                        endpoint
+                            .open_report_tools(super::reports::ReportDesk::for_m(state.clone()));
                         endpoint.open_decision_tools(decide::DecisionDesk::for_m(
                             state.clone(),
                             charge.settings.agent.clone(),

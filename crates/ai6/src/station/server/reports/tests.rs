@@ -401,3 +401,89 @@ fn an_agents_knowledge_waits_for_its_charge_and_a_search_finds_only_what_it_may_
     let outsider = reader("007", "B", "B-1");
     assert_eq!(search(&outsider, "brief", None)["total"], 0);
 }
+
+#[test]
+fn m_charge_decides_what_is_proposed_to_the_global_scope_and_nobody_else_but_its_filer_sees_it() {
+    use crate::directorates::m::knowledge::{KnowledgeChange, KnowledgeTarget};
+    use crate::station::server::charges::decide::DecisionDesk;
+
+    let root = tempfile::tempdir().unwrap();
+    let state = station(root.path(), ReportLimits::default());
+    let desk = ReportDesk::new(state.clone());
+    let m_desk = ReportDesk::for_m(state.clone());
+    let proposer = reader("007", "G", "mission-1");
+    let change = KnowledgeChange::new(
+        KnowledgeTarget::New {
+            scope: ReportScope::Global,
+            kind: "rule".to_owned(),
+        },
+        "Never force-push",
+        "Do not force-push shared branches.",
+    )
+    .summarised("A rule for every Agent");
+    let wrote = desk.write_known(&proposer, None, change).unwrap();
+    assert_eq!(wrote["state"], "open", "{wrote}");
+    let id = wrote["id"].as_str().unwrap().to_owned();
+    let found = |desk: &ReportDesk, who: &Reader, state: Option<&str>| {
+        let answer = desk
+            .search(who, None, None, Some("force"), None, &[], None, state)
+            .unwrap();
+        unfenced(&answer, "reports")["total"].as_u64().unwrap()
+    };
+    let m_reader = Reader {
+        agent: "licensed".to_owned(),
+        operation: String::new(),
+        mission: None,
+        exposure: ExposureGate::default(),
+    };
+    // Its filer and M's charge see it; a colleague and an Operation's charge do not.
+    assert_eq!(found(&desk, &proposer, Some("open")), 1);
+    assert_eq!(found(&m_desk, &m_reader, Some("open")), 1);
+    let colleague = reader("licensed", "G", "mission-2");
+    assert_eq!(found(&desk, &colleague, Some("open")), 0);
+    let operation_charge = Reader {
+        agent: "licensed".to_owned(),
+        operation: "G".to_owned(),
+        mission: None,
+        exposure: ExposureGate::default(),
+    };
+    assert_eq!(found(&desk, &operation_charge, Some("open")), 0);
+    // M's charge assesses it through the assess tool, audited as report.assess with it as the actor.
+    let call = AssessCall {
+        report: id.clone(),
+        assessment: "accepted".to_owned(),
+        reason: "correct".to_owned(),
+        ..AssessCall::default()
+    };
+    let m = DecisionDesk::for_m(state.clone(), "licensed".to_owned(), "m".to_owned());
+    let decided: Value = serde_json::from_str(&m.assess(call).unwrap()).unwrap();
+    assert_eq!(decided["state"], "standing", "{decided}");
+    assert!(
+        state
+            .intake
+            .audit_records()
+            .unwrap()
+            .iter()
+            .any(|record| { record.action == "report.assess" && record.actor == "charge:m" })
+    );
+    assert_eq!(
+        found(&desk, &colleague, None),
+        1,
+        "now current for everyone"
+    );
+    // It decides only what is proposed to the global scope.
+    let observed = filed(
+        &state,
+        &reader("007", "G", "mission-3"),
+        json!({"title": "A flaky test", "text": "x"}),
+    );
+    let refused = m
+        .assess(AssessCall {
+            report: observed,
+            assessment: "no_action".to_owned(),
+            reason: "no".to_owned(),
+            ..AssessCall::default()
+        })
+        .unwrap();
+    assert!(refused.contains("refused"), "{refused}");
+}
