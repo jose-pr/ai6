@@ -42,8 +42,18 @@ Mission → Run board, Mission briefs, live Run terminals, administration and au
   to open), the brief and the Timeline, the actions the person has and, for a queued
   Mission, the Operation's placement now (what it rules out; hidden when the gateway refuses
   the preview). Closing it returns focus to the row.
-- Mission brief view: the exact prompt and a sanitized launch manifest (environment
-  variable names only, never values).
+- Mission brief view: the brief as a document: its launch context (Agent, role, Station,
+  Theater, handler, model, environment variable names only, never values) as the frontmatter
+  panel, then the exact instructions as Markdown.
+- Documents: briefs, green ink requests, held briefs, a Mission's reviews and a Station's report
+  (its Head of Station's charge) are read from the gateway's document routes (`docs/documents.md`)
+  and drawn by `OoDocumentView` (`lib/shell/`) on `OoMarkdown`: the frontmatter panel, then the
+  body with its headings, tables and links. Each has **Copy as Markdown**, which copies the
+  document exactly as served; issue keys and Mission references open as the gateway resolved them
+  for the reader, other web addresses ask first. A Station card shows the first lines of its
+  report and **Read the report**; a held brief opens its document under **Show the brief
+  text**; a Mission's review section shows each gate's standing and, under it, the votes and
+  reasons as the document. Works the same in the web build.
 - Live terminals: read-only by default; **Request input lease** takes a write lease.
   Closing a view never stops the Run.
 - Mission actions: each Mission card's menu cancels, retries (optionally for another
@@ -135,7 +145,9 @@ Mission → Run board, Mission briefs, live Run terminals, administration and au
   (`approval.decide`), and the Operation's class authorisations with their uses, revoking
   the live ones (`approval.class`). A Run held for green ink shows `BLOCKED · GREEN INK`.
   Reasons are rendered as Markdown, what they name links to the Operation's Sources, and a request's
-  links follow them. The Expired tab lists what no one decided in time, and re-arms it. A Mission's
+  links follow them. A reason longer than eight lines shows its first lines and **Read all**,
+  which opens the request as a document (frontmatter, body, **Copy as Markdown**); a shorter one
+  has **Open as document**. The Expired tab lists what no one decided in time, and re-arms it. A Mission's
   page shows its Agent's final message and any verdict, and takes one with `mission.verify`.
   The Missions board counts `verifying` Missions, those waiting for a decision. Such a Mission's page
   shows each deliverable with the latest probe of it (found, missing, unprobed or failed), the final
