@@ -2012,7 +2012,7 @@ pub trait ChargeStore;        // each charge's record, lease and logbook (charge
 pub trait Limited { fn limits(&self) -> Arc<RegistryLimits>; fn set_limits(&self, limits: RegistryLimits); }
 pub trait RegistryBackend: Limited + AccountStore + AgentRecordStore + BriefStore + StationStore + AccessTokenStore + CableStore
     + AuditStore + AgentRoleStore + ApprovalStore + AssistantLogStore + ClearanceStore + LogbookStore
-    + QuarantineStore + ReportStore + RunContextStore + RunStore + SleeperStore + SourceStore + TimelineStore
+    + QuarantineStore + ReportStore + KnowledgeStore + RunContextStore + RunStore + SleeperStore + SourceStore + TimelineStore
     + UsageStore + VettingStore + ChargeStore + Send + Sync {}
 impl<T: /* every family */ + Send + Sync> RegistryBackend for T {}
 
@@ -2922,12 +2922,16 @@ Mission, brief or placement. General assessment and closing are not implemented:
 
 ```rust
 // ai6::directorates::registry::reports
-pub enum ReportScope { Operation(String), Station(String), M } // "operation:ID", "station:ID", "m"; Display, FromStr, serde
+pub enum ReportScope { Operation(String), Station(String), M, Person(String), Global }
+    // "operation:ID", "station:ID", "m", "person:ID", "global"; Display, FromStr, serde. Person and
+    // Global hold known kinds only (a Registry refusal otherwise)
 impl ReportScope { pub fn operation(&self) -> Option<&str>; }
-#[non_exhaustive] pub enum ReportState { Open, Assessed, Closed }     // snake_case; as_str, FromStr
+#[non_exhaustive] pub enum ReportState { Open, Assessed, Closed, Standing } // snake_case; as_str, FromStr;
+    // Standing: a known kind, current, which no verdict closes
 #[non_exhaustive] pub enum ReportFiler { Source { source, item }, Agent { agent, run /* provider
     Run, or the Mission's ID until known */, mission }, Person { person }, Probe { probe },
-    Review { mission }, Watchdog }       // serde tag "type"; is_person(), run(), source_key()
+    Review { mission }, Watchdog, Assistant { person } /* Moneypenny for a person: untrusted */ }
+    // serde tag "type"; is_person(), run(), source_key()
 #[non_exhaustive] pub enum ReportLinkKind { Mission, Report, Decision, Evidence } // as_str, FromStr
 pub struct ReportLink { pub kind: ReportLinkKind, pub id: String } // new(kind, id), mission(id)
 #[non_exhaustive] pub struct Tearline { pub text, pub classification: Option<String>, pub compartments: Vec<String> }
@@ -2943,11 +2947,22 @@ pub struct ReportLink { pub kind: ReportLinkKind, pub id: String } // new(kind, 
     pub from: Option<f64>, pub credibility: Option<u8> /* 1..=6, unset until assessed */,
     pub classification: Option<String>, pub handling: Option<String>, pub compartments: Vec<String>,
     pub tearline: Option<Tearline>, pub priority: Option<String>, pub deadline: Option<f64>,
-    pub state: ReportState, pub assessment, pub resolution, pub created: f64, pub updated: f64 }
+    pub summary: Option<String> /* one line, listed beside the title */, pub topics: Vec<String>,
+    pub state: ReportState, pub assessment, pub resolution, pub created: f64, pub updated: f64,
+    pub revision: u64 /* 1 when new; a write to a known kind names the one it read */,
+    pub updated_by: Option<String> /* person:ID, agent:CODENAME or moneypenny:ID */,
+    pub exposures: Vec<String> /* how the writing Run was exposed */,
+    pub proposes: Option<ReportProposes> /* what an open proposal changes */ }
+pub const KNOWN_KINDS: [&str; 4] /* memory, tradecraft, rule, contact */; pub const RETIRED: &str;
+pub fn is_known_kind(&str) -> bool;
+#[non_exhaustive] pub struct ReportProposes { pub target: String, pub revision: u64, pub forget: bool }
+    // rewrite(target, revision), forget(target, revision)
 impl Report { pub fn new(id, scope, kind, severity, title, text, filer, at) -> Self; // open
     /* linked, via, information_from, believed, classified, handled, in_compartments, with_tearline,
        prioritised, due */ pub fn untrusted(&self) -> bool /* all but a person's */;
     pub fn about_mission(&self, id) -> bool;
+    /* summarised, on_topics, exposed_by, proposing, standing */ pub fn is_known(&self) -> bool;
+    pub fn is_proposal(&self) -> bool /* a known kind, open */; pub fn size(&self) -> u64 /* title+summary+text */;
     pub fn validate(&self, &ReportLimits) -> io::Result<()>; } // InvalidInput: bounds, a tearline
     // compartment not the Report's, credibility 1 with no Report or Evidence link. The lists are
     // ReportSettings::check, not the Registry's
@@ -2980,7 +2995,12 @@ pub trait ReportStore {  // part of RegistryBackend; reports/SCOPE/ID.json, repo
 }
 pub struct ReportLimits { pub record_bytes, reports, text_bytes, name_bytes /* also the title */, links,
     page, per_run /* 20 */, per_operation /* 200 */: Limit, pub window: Seconds /* 3600 */,
-    pub keep_closed: TimeLimit /* none */ }   // [registry.limits.reports]: sizes, counts and rates only
+    pub keep_closed: TimeLimit /* none */,
+    pub versions /* 8: prior revisions of a known Report; 0 keeps none */, summary_bytes, topics,
+    scope_entries /* 1024: standing known Reports in a scope */, scope_bytes /* 8 MiB */,
+    proposals /* 64: open proposals in a scope */, index_bytes /* 512 KiB of words per Report */,
+    search_results /* 50 */, query_bytes /* 4 KiB */: Limit }
+    // [registry.limits.reports]: sizes, counts and rates only
 
 // ai6::directorates::m::reports
 #[non_exhaustive] pub struct ReportSettings { pub classifications /* unclassified, restricted,
@@ -3021,6 +3041,57 @@ impl ReportFiling { pub fn into_report(self, scope, filer, links, at, &ReportLim
     -> Result<Report, String>; }
 pub fn new_report_id() -> String;   // "report-" + 32 hex
 ```
+
+### Knowledge (`ai6::directorates::registry::knowledge`, `ai6::directorates::m::knowledge`)
+
+A memory, tradecraft, a rule and a contact are Reports of a known kind (`KNOWN_KINDS`): the same record and
+tables, `standing` when written by someone who may write the scope, `open` with an optional `proposes` when an
+Agent's write waits for the verdict `accepted` (`Verdict::Accepted`: it stands, or applied as its target's next
+revision, forgotten or retired, and the proposal closed, linked; `no_action` closes it). A scope's limits
+(`scope_entries`, `scope_bytes`, `proposals`) refuse a Report it cannot hold with `QuotaExceeded`, in words
+that say nothing of what it holds; `file_report` and `change_report` (to `standing`) apply them.
+
+```rust
+// ai6::directorates::registry::knowledge (RegistryBackend includes KnowledgeStore)
+pub enum ReportWriteError { Missing, Changed { revision: u64 }, Failed(io::Error) } // Failed: InvalidInput, QuotaExceeded
+pub struct ReportQuery { pub terms: Vec<String>, pub kind: Option<String>, pub topics: Vec<String>,
+    pub title: Vec<String>, pub scope: Option<ReportScope>, pub states: Option<Vec<ReportState>>,
+    pub asked_bytes: usize }  // words(text), of_kind, on_topic, titled, in_scope, in_state; Default.
+    // No states: a known kind is current only when standing, an observation any state
+pub fn matching(Vec<Report>, &ReportQuery) -> Vec<Report>; pub fn search_terms(&str) -> Vec<String>;
+    // rank: words held, then words in title/summary/topics, then newest `updated`, then ID
+pub trait KnowledgeStore {
+    fn write_report(&self, next: &Report, base: u64) -> Result<Report, ReportWriteError>;
+        // replaces the standing Report at revision `base` with `next` at base + 1; keeps `created`,
+        // keeps the replaced one (report-versions/, ai6_report_versions) up to `versions`
+    fn report_versions(&self, id) -> io::Result<Vec<Report>>;       // newest first
+    fn forget_report(&self, id, base: Option<u64>) -> Result<Report, ReportWriteError>; // a memory only
+    fn report_scopes(&self) -> io::Result<Vec<ReportScope>>;
+    fn report_candidates(&self, &[ReportScope], &ReportQuery) -> io::Result<Vec<Report>>; // not ranked,
+        // not filtered for the asker: FTS5 (ai6_reports_search) / tsvector (ai6_reports.search) narrow, a scan on files
+}
+
+// ai6::directorates::m::knowledge: who may do what, asked at every call
+pub trait KnowledgeCaller: ReportReader { fn by(&self) -> String; fn filer(&self) -> ReportFiler;
+    fn run(&self) -> Option<String>; fn writes_scope(&self, &ReportScope) -> KnowledgeRight /* Write | Propose | Refused */;
+    fn acts_in_person(&self) -> bool; fn exposures(&self) -> Vec<String>; fn saw_marked(&self, source);
+    fn mark_bytes(&self) -> Limit; fn now(&self) -> f64;
+    fn audit(&self, action, &ReportScope, target) -> Result<(), String>; } // ReportReader::assesses / filed
+pub fn read_report(store, caller, &ReportRules, id) -> Result<Report, KnowledgeRefusal>; // a mark exposes the caller
+pub fn prior_revisions(..) -> Result<Vec<Report>, _>; pub fn list_reports(.., &ReportScope) -> Result<Vec<Report>, _>;
+pub fn search_reports(store, caller, &ReportRules, &ReportQuery, &ReportLimits) -> Result<KnowledgeSearch { hits, total }, _>;
+    // readable scopes, candidates, filter by sight Content, THEN rank, count and cut to `search_results`
+pub fn write_report(store, caller, &ReportRules, KnowledgeChange) -> Result<KnowledgeOutcome /* Kept | Proposed */, _>;
+pub fn forget_report(store, caller, &ReportRules, id, Option<u64>) -> Result<KnowledgeForgotten /* Forgotten | Retired | Proposed */, _>;
+pub fn decide_proposal(store, caller, &ReportRules, id, accept: bool, reason) -> Result<Report, _>;
+pub enum KnowledgeRefusal { Missing, Forbidden(String), Invalid(String), Full(String), Changed { revision }, Failed(String) }
+pub fn knowledge_json(&Report) -> Value; pub fn brief_json(&Report) -> Value; pub fn summaries_for_a_model(..);
+```
+
+A proposal (an open known Report) is read only by those who decide its scope (`ReportReader::assesses`: a person
+with `memory.write`, or the Operation's charge) and by whoever filed it. Every compartment must be read in to
+(nobody is exempt, no chief). `memory.*` audit actions are `memory.write`, `.forget`, `.read`, `.compartments`,
+`.mark_cleared` and `.proposed`; a verdict is `report.assess`.
 
 Every Run (feature `cables-mcp`) has `file_report` (against its Mission's Operation, linked to
 its Mission; the Station charge's goes to the logbook, check-in and channel and is also a

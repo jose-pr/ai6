@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A Report can hold what AI6 knows: a `memory`, `tradecraft`, `rule` or `contact`, in the new scopes
+  `person:ID` and `global` as well as an Operation's, with a one-line `summary`, `topics`, a `revision` a write
+  names (refused once the Report has moved on), `updated_by`, the exposure mark a Run that reads it takes, a
+  `proposes` change for an Agent's write, the filer Moneypenny writes as, and the state `standing`. The verdict
+  `accepted` makes an Agent's proposal stand, or applies it as its target's next revision. Prior revisions are kept up
+  to `[registry.limits.reports] versions` (8), a memory forgotten goes with them, and tradecraft, a rule or a contact
+  is retired (closed, kept). `reports` searches words, kind, topics, title and scope over title, summary, topics and
+  text (FTS5 on SQLite, `tsvector` on PostgreSQL, a scan in the file Registry), filtering what the asker may not read
+  before it ranks or counts. The Report tools, the `/v1/reports` routes (`PUT`, `DELETE` and `/versions` too) and
+  `ai6ctl reports` take the new fields and filters. The memory store stays beside it until memories move in.
+
 - The gateway serves a brief, a green ink request, a held brief, a Mission's reviews, a charge's report and a
   Report as documents (`.../missions/{mission}/brief`, `.../green-ink/{id}/document`,
   `.../held-briefs/{key}/document`, `.../reviews/document`, `/v1/user/charges/{scope}/document`,

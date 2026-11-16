@@ -2,7 +2,8 @@
 
 A **Report** is one record of something observed: an Agent's finding along the way, a person's
 note, the Station charge's report. It is kept in the Registry against its **scope**, an
-Operation, a Station or M, and tied to what it is about. Filing a Report creates no Mission,
+Operation, a Station, M, a person or everyone, and tied to what it is about. What AI6 knows or was
+told is a Report too, of a known kind: see [Knowledge](#knowledge). Filing a Report creates no Mission,
 brief or placement: an Operation's charge or a person decides what, if anything, it becomes.
 
 A Report is filed `open`. The Operation's charge, or a person where there is none, **assesses** it
@@ -14,13 +15,16 @@ A Report is filed `open`. The Operation's charge, or a person where there is non
 | Field | What |
 | --- | --- |
 | `id` | `report-` and a random hex string |
-| `scope` | `operation:ID`, `station:ID` or `m` |
-| `kind`, `severity` | A short label (`finding` by default) and `info`, `warning` or `critical` |
+| `scope` | `operation:ID`, `station:ID`, `person:ID`, `global` or `m` |
+| `kind`, `severity` | A short label (`finding` by default; `memory`, `tradecraft`, `rule` and `contact` are [knowledge](#knowledge)) and `info`, `warning` or `critical` |
 | `title`, `text` | What the filer said. Untrusted unless a person filed it |
-| `filer` | A Source and its item, an Agent with its Run and Mission, a person, a probe, a review or the Watchdog |
+| `summary`, `topics` | One line a search lists beside the title, and free words a search and a facet use |
+| `filer` | A Source and its item, an Agent with its Run and Mission, a person, Moneypenny for a person, a probe, a review or the Watchdog; for knowledge, who wrote what it holds now |
+| `revision`, `updated_by` | How many times knowledge has been written (a write names the revision it read), and who made the current one (`person:ID`, `agent:CODENAME` or `moneypenny:ID`) |
+| `exposures`, `proposes` | How the Run that wrote it was exposed; what an open proposal asks to change in another Report |
 | `sub_source`, `from` | Who passed it on to the filer, and when the information is from; `created` is when it was reported |
 | `links` | Missions, other Reports, decisions (green ink requests) and evidence |
-| `state` | `open`, `assessed` or `closed`, with `assessment` (the assessor's verdict and comment, apart from the filed text) and `resolution` |
+| `state` | `open`, `assessed`, `closed` or `standing` (knowledge only), with `assessment` (the assessor's verdict and comment, apart from the filed text) and `resolution` |
 | `credibility` | `1` (confirmed by other sources) to `6` (cannot be judged); unset until assessed, and `1` is refused without a link to the corroborating Report or evidence |
 | `classification`, `handling`, `compartments` | The markings, from the lists in [Settings](#settings) |
 | `tearline` | A sanitised text with its own, lower, markings |
@@ -34,8 +38,10 @@ Reports list most urgent first: by priority, then deadline (sooner first), credi
 source's reliability, then age (oldest first). An unset priority, deadline or credibility comes
 after every set one.
 
-The file Registry keeps `reports/<scope>/<id>.json` and `report-sources/<key>.json`; SQL keeps
-the `ai6_reports`, `ai6_report_links` and `ai6_report_sources` tables.
+The file Registry keeps `reports/<scope>/<id>.json`, `report-versions/<id>/<revision>.json` and
+`report-sources/<key>.json`; SQL keeps the `ai6_reports`, `ai6_report_links`, `ai6_report_versions`
+and `ai6_report_sources` tables, and the words a search reads (an FTS5 table on SQLite, a generated
+`tsvector` on PostgreSQL).
 
 ## Who reads what
 
@@ -161,6 +167,59 @@ outcome (`mission_done`, `mission_failed`, `decision_approved`, `decision_reject
 `related`, `no_action`) counts toward its source if the deployment's rule says so, and the source is
 rated once enough have counted ([Settings](#settings)). `GET /v1/reports/sources/{key}` and
 `ai6ctl reports source` show the rating with the tally, the rule and the closed Reports behind it.
+
+## Knowledge
+
+A memory, tradecraft (how a thing is done in AI6), a rule an Agent follows and a contact are Reports of
+a known kind, in the same tables, read and written by the same tools and routes. They add the scopes
+`person:ID` (what is known of one person) and `global` (what everyone may read), and the state
+`standing`: known and current, which no verdict closes and a search lists. Observations never stand,
+and are never a person's or everyone's.
+
+| Scope | Read | Write | Decided by |
+| --- | --- | --- | --- |
+| `person:ID` | that person, and Moneypenny for them; another person only with `assistant.memory.admin` on `config:assistant`, audited before it is read | that person, and Moneypenny at once for them | no one: an Agent cannot propose into it |
+| `operation:ID` | `mission.read` there, or a compartment read-in (a crossing, audited) | a person with `memory.write` on the Operation; an Agent at the Operation's `memory_write` clearance or above | the Operation's charge, or a person with `memory.write` there |
+| `global` | every person and Agent | a person with `memory.write` on `config:memory`; an Agent never directly | a person with that write |
+
+Written by someone who may write the scope, a known kind is `standing` at once. An Agent's write it may
+not make is filed `open` as a proposal, readable by those who decide it and by whoever filed it, and the
+verdict `accepted` makes it `standing`, or, for a change to a standing Report, applies it as that
+Report's next revision and closes the proposal, linked to it (`no_action` closes it as for any Report;
+every verdict is audited as `report.assess`). Every compartment of a known Report must be read in
+for it to be read, as for every Report, and nobody hides a Report from themselves.
+
+A write names the revision it read and is refused (`409`, with the revision it is at) once the Report
+has moved on. Each revision it replaces is kept, up to `versions` of
+[`[registry.limits.reports]`](configuration.md) (8 by default; `0` keeps none). Forgetting a `memory`
+removes it with its revisions, and the audit keeps that it was forgotten and by whom, never its text.
+Tradecraft, a rule or a contact is retired instead: `closed` with the resolution `retired`, kept.
+
+A Report written by an exposed Run stays marked, and whoever reads it is told: a Run that reads one is
+exposed as `report:ID`, as by a Cable. A person's own edit clears the mark, audited.
+
+**Search** takes any of words, `kind`, `topics`, `title` and `scope`, over every scope the asker may
+read, and answers each Report's ID, kind, title and summary, best first: a Report ranks by how many of
+the words it holds, then how many of those are in its title, summary or topics, then its newest
+change. Words match whole words, whatever their case. A Report the asker may not read is neither listed,
+counted nor ranked: the filtering comes first. Without `state`, knowledge is current only when it is
+`standing`, and an observation is any state.
+
+```bash
+ai6ctl reports file operation:ID --kind tradecraft --title "Writing a brief" \
+    --summary "How a brief is written" --topics briefs,writing --text "Name the goal first."
+ai6ctl reports list --words "how to write a brief" --kind tradecraft
+ai6ctl reports revise REPORT-ID --revision 1 --title "Writing a brief" --text "Name the goal, then the checks."
+ai6ctl reports versions REPORT-ID
+ai6ctl reports forget REPORT-ID
+ai6ctl reports assess PROPOSAL-ID accepted --reason "checked"
+```
+
+The routes are `GET /v1/reports?words=&topics=&title=&kind=&scope=` (search), `POST /v1/reports` with a
+known `kind` (filed `201` standing, or `202` waiting for a verdict), `PUT /v1/reports/{id}` with the
+`revision` read, `DELETE /v1/reports/{id}[?revision=N]` and `GET /v1/reports/{id}/versions`. An Agent's
+`reports` tool takes `words`, `kind`, `topics`, `title` and `scope`, and its `file_report` takes `line`
+(the summary), `topics`, `scope`, and `revises` with `revision`.
 
 ## The Reports page
 

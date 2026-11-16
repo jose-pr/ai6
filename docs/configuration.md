@@ -498,6 +498,15 @@ global one.
 | `per_operation` | 200 | **Agent Reports per scope in the window.** Reports Agents together may file against one scope in the window. |
 | `window` | 3,600 | **Rate window.** Seconds the two counts above look back over. |
 | `keep_closed` | none | **Keep a closed Report for.** Seconds a closed Report is kept; `null` keeps it for good. |
+| `versions` | 8 | **Prior revisions of a Report.** Prior revisions kept of one Report; forgetting a memory removes them. `0` keeps none. |
+| `summary_bytes` | 1 KiB | **Longest Report summary.** Bytes of a Report's one-line summary. |
+| `topics` | 16 | **Topics on a Report.** Topics on one Report, each at most `name_bytes`. |
+| `scope_entries` | 1,024 | **Standing Reports in a scope.** Standing Reports of the known kinds (memory, tradecraft, rule, contact) in one scope. |
+| `scope_bytes` | 8 MiB | **All the standing Reports of a scope.** Bytes of every standing known-kind Report's title, summary and text in one scope. |
+| `proposals` | 64 | **Proposals waiting in a scope.** Proposals (open Reports of a known kind) waiting in one scope. |
+| `index_bytes` | 512 KiB | **Words of a Report in the text index.** Bytes of a Report's distinct words a database's text index holds. A word past it is found only by a search that matched another word of the Report, and PostgreSQL refuses an index of 1 MiB or more for one Report. |
+| `search_results` | 50 | **Reports a search answers.** Reports one search answers. |
+| `query_bytes` | 4 KiB | **Longest search.** Bytes of what one search asks for. |
 <!-- schema:record.registry.limits.reports:end -->
 
 `[registry.limits.runs]`
