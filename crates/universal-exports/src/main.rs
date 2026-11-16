@@ -883,9 +883,8 @@ fn sign_in_providers(
         if id == universal_exports::TOTP_PROVIDER {
             // Kept in the Registry so every gateway sharing it sees the same factors; never
             // asked for a first factor.
-            let totp =
-                universal_exports::totp_provider(registry, entry.config.as_ref(), sealer)
-                    .map_err(at)?;
+            let totp = universal_exports::totp_provider(registry, entry.config.as_ref(), sealer)
+                .map_err(at)?;
             second.push((id.to_owned(), totp));
             continue;
         }

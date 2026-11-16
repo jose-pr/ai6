@@ -17,6 +17,7 @@ mod controls;
 mod documents;
 #[cfg(test)]
 mod documents_tests;
+mod factor_seal;
 #[cfg(test)]
 mod follow_up_tests;
 mod green_ink;
@@ -51,13 +52,12 @@ mod run_attach_tests;
 mod search;
 #[cfg(test)]
 mod search_tests;
-mod factor_seal;
 mod second_factor;
 mod sign_in;
 mod source_reads;
 mod timeline;
-mod totp_store;
 mod tls;
+mod totp_store;
 mod transcripts;
 mod tree;
 mod unstarted;
@@ -112,6 +112,7 @@ pub use access_admin::{EitherAuthorizer, LiveAccess};
 pub use agents::{AgentRoute, AgentView, RetirementNotice};
 use controls::ControlBook;
 pub use controls::ControlStatus;
+pub use factor_seal::{FactorSealer, SealError};
 pub use held::{HeldBriefDecision, HeldBriefEntry};
 pub use issues::{EntryView, IssueView, IssueWrite, MissionIssues, QuestionView, ReplyCounts};
 pub use keys::KeyProvider;
@@ -120,7 +121,6 @@ pub use login_limit::LoginLimits;
 pub use moneypenny::{AssistantConfig, PagesConfig, ViewLimits};
 pub use pools::{BoardAccount, BoardClaim, BoardLogin, BoardLoginRequest, BoardWindow, PoolBoard};
 pub use roster::{EffectiveOperation, RosterChange, RosterRecord, RosterRecords};
-pub use factor_seal::{FactorSealer, SealError};
 pub use second_factor::{TOTP as TOTP_PROVIDER, totp_builder, totp_provider};
 pub use sign_in::{LiveSignIn, SignInLoader, nothing_offered};
 pub use timeline::{TimelineItem, TimelinePage};
@@ -3837,8 +3837,7 @@ async fn login(
         .await;
     match decision {
         Some(decision) if decision.complete => {
-            complete_login(&gateway, from_browser, wants_cookie, ttl, person, factors)
-                .await
+            complete_login(&gateway, from_browser, wants_cookie, ttl, person, factors).await
         }
         Some(decision) if !decision.methods.is_empty() => {
             let mut methods: Vec<String> = Vec::new();

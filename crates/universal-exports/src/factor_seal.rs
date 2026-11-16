@@ -123,7 +123,9 @@ impl FactorSealer {
     pub fn seal(&self, context: &str, plain: &str) -> Result<String, SealError> {
         let key = self.key.as_ref().ok_or(SealError::NoKey)?;
         let mut nonce = [0u8; NONCE_LEN];
-        self.random.fill(&mut nonce).map_err(|_| SealError::Sealing)?;
+        self.random
+            .fill(&mut nonce)
+            .map_err(|_| SealError::Sealing)?;
         let mut sealed = plain.as_bytes().to_vec();
         key.seal_in_place_append_tag(
             Nonce::assume_unique_for_key(nonce),
@@ -168,7 +170,9 @@ mod tests {
 
     #[test]
     fn a_secret_opens_only_under_its_key_and_its_account() {
-        let sealed = sealer("key one").seal("totp\0id-alice", "JBSWY3DPEHPK3PXP").unwrap();
+        let sealed = sealer("key one")
+            .seal("totp\0id-alice", "JBSWY3DPEHPK3PXP")
+            .unwrap();
         assert!(!sealed.contains("JBSWY3DPEHPK3PXP"), "{sealed}");
         assert_eq!(
             sealer("key one").open("totp\0id-alice", &sealed).unwrap(),
@@ -220,7 +224,14 @@ mod tests {
         assert!(!short.ready());
         assert_eq!(short.seal("c", "secret"), Err(SealError::NoKey));
         let reason = short.refusal().unwrap();
-        assert!(reason.contains("32") && !reason.contains("only a few"), "{reason}");
-        assert!(FactorSealer::new(Some(&"k".repeat(32)), 32).unwrap().ready());
+        assert!(
+            reason.contains("32") && !reason.contains("only a few"),
+            "{reason}"
+        );
+        assert!(
+            FactorSealer::new(Some(&"k".repeat(32)), 32)
+                .unwrap()
+                .ready()
+        );
     }
 }

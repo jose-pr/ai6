@@ -2931,7 +2931,8 @@ impl FileRegistry {
             {
                 continue;
             }
-            let bytes = serde_json::to_vec(&revoked_token(&record, now)?).map_err(io::Error::other)?;
+            let bytes =
+                serde_json::to_vec(&revoked_token(&record, now)?).map_err(io::Error::other)?;
             self.write_atomic(&path, &bytes)?;
             revoked += 1;
         }

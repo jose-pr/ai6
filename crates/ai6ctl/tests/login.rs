@@ -143,7 +143,10 @@ async fn login_asks_for_a_code_after_the_password_and_prints_only_the_token() {
     )
     .await;
     assert!(ok, "{err}");
-    assert_eq!(out, "token-1\n", "the token is the only thing on standard output");
+    assert_eq!(
+        out, "token-1\n",
+        "the token is the only thing on standard output"
+    );
     assert!(err.contains("Code: "), "{err}");
     assert!(!err.contains("pw") && !err.contains("123456"));
     let seen = seen.lock().unwrap();
@@ -203,7 +206,10 @@ async fn factors_set_up_show_codes_once_confirm_and_reset() {
     // Without the code on the command line it is read from standard input.
     let (ok, out, err) = ai6ctl(&server, &["factors", "confirm"], &token, "654321\n").await;
     assert!(ok, "{err}");
-    assert!(out.contains("enrolled") && err.contains("Code: "), "{out} {err}");
+    assert!(
+        out.contains("enrolled") && err.contains("Code: "),
+        "{out} {err}"
+    );
     let (ok, out, err) = ai6ctl(&server, &["factors", "reset", "id-alice"], &token, "").await;
     assert!(ok, "{err}");
     assert!(out.contains("second factor removed"));

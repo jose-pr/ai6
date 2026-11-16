@@ -105,8 +105,12 @@ pub(crate) async fn login(client: &Client, server: &Url, args: LoginArgs) -> Res
         (None, Ok(secret)) if !secret.is_empty() => secret,
         _ => read_line("Password: ")?,
     };
-    let (mut status, mut value) =
-        post(client, server, &json!({"name": args.name, "secret": secret})).await?;
+    let (mut status, mut value) = post(
+        client,
+        server,
+        &json!({"name": args.name, "secret": secret}),
+    )
+    .await?;
     let mut first_code = std::env::var(CODE_ENV).ok().filter(|code| !code.is_empty());
     while status == StatusCode::ACCEPTED {
         let pending = value["pending"]

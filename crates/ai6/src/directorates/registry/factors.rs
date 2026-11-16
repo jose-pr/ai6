@@ -60,12 +60,7 @@ pub trait FactorStore {
     ///
     /// What `edit` returns, `InvalidData` for a document past the size limit, and the
     /// store's own errors.
-    fn factor_update(
-        &self,
-        family: &str,
-        key: &str,
-        edit: &mut FactorEdit<'_>,
-    ) -> io::Result<()>;
+    fn factor_update(&self, family: &str, key: &str, edit: &mut FactorEdit<'_>) -> io::Result<()>;
 
     /// Removes every document of `family` that `keep` refuses, and answers how many went.
     ///
@@ -150,12 +145,7 @@ impl FactorStore for FileRegistry {
         Ok(found)
     }
 
-    fn factor_update(
-        &self,
-        family: &str,
-        key: &str,
-        edit: &mut FactorEdit<'_>,
-    ) -> io::Result<()> {
+    fn factor_update(&self, family: &str, key: &str, edit: &mut FactorEdit<'_>) -> io::Result<()> {
         validate_registry_key(family)?;
         validate_factor_key(key)?;
         let _lock = self.lock()?;
@@ -250,9 +240,7 @@ mod tests {
         for kept in [&cookie, &token, &other, &someone] {
             registry.store_access_token(kept).unwrap();
         }
-        let ended = registry
-            .revoke_person_logins("person-1", &[id(0)])
-            .unwrap();
+        let ended = registry.revoke_person_logins("person-1", &[id(0)]).unwrap();
         assert_eq!(ended, 1, "only the other sign-in");
         assert!(registry.find_access_token(&digest('b')).unwrap().is_some());
         assert!(registry.find_access_token(&digest('c')).unwrap().is_none());
@@ -341,7 +329,11 @@ mod tests {
             .unwrap();
         assert_eq!(removed, 1);
         assert_eq!(registry.factor_documents("pending").unwrap().len(), 1);
-        assert_eq!(registry.factor_documents("totp").unwrap().len(), 1, "its own family");
+        assert_eq!(
+            registry.factor_documents("totp").unwrap().len(),
+            1,
+            "its own family"
+        );
         assert_eq!(
             registry.factor_retain("none", &mut |_, _| false).unwrap(),
             0

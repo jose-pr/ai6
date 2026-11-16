@@ -843,7 +843,10 @@ impl Located<Bootstrap> {
                 "reverse-proxy secret",
                 self.value.unex.proxy_secret.as_ref(),
             ),
-            ("one-time code sealing key", self.value.unex.factor_key.as_ref()),
+            (
+                "one-time code sealing key",
+                self.value.unex.factor_key.as_ref(),
+            ),
             ("provider password", self.value.provider.password.as_ref()),
             ("Registry password", self.value.registry.password.as_ref()),
         ] {

@@ -594,7 +594,9 @@ mod tests {
         on_each_database(|location| {
             let registry = SqlRegistry::open(location).unwrap();
             registry
-                .factor_update("pending", "k", &mut |_| Ok(FactorChange::Put("v".to_owned())))
+                .factor_update("pending", "k", &mut |_| {
+                    Ok(FactorChange::Put("v".to_owned()))
+                })
                 .unwrap();
             let revision = clock_revision(&registry);
             for key in ["k", "nobody"] {

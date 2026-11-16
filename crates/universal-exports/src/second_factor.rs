@@ -196,8 +196,9 @@ async fn take_pending(
 }
 
 async fn end_pending(registry: Arc<dyn RegistryBackend>, key: String) {
-    let _ = blocking(move || registry.factor_update(PENDING, &key, &mut |_| Ok(FactorChange::Remove)))
-        .await;
+    let _ =
+        blocking(move || registry.factor_update(PENDING, &key, &mut |_| Ok(FactorChange::Remove)))
+            .await;
 }
 
 /// The method words of `decision`, once each.
@@ -342,16 +343,8 @@ pub(crate) async fn continue_login(
         require_origin(gateway, headers)?;
     }
     let providers = gateway.access.clone().ok_or_else(ApiError::unavailable)?;
-    let method = request
-        .method
-        .clone()
-        .ok_or_else(ApiError::bad_request)?;
-    let context = gateway.sign_in_context(
-        purposes::SIGN_IN,
-        headers,
-        connection,
-        sign_in::SERVICE,
-    );
+    let method = request.method.clone().ok_or_else(ApiError::bad_request)?;
+    let context = gateway.sign_in_context(purposes::SIGN_IN, headers, connection, sign_in::SERVICE);
     let registry = registry(gateway)?;
     let now = unix_timestamp()?;
     let Some(token) = request.pending.as_deref() else {
@@ -421,11 +414,25 @@ pub(crate) async fn continue_login(
     }
     let step = match method.as_str() {
         method_words::TOTP | method_words::RECOVERY_CODE => {
-            second_factor_step(&providers, &person, &method, &offer.providers, request.secret.clone(), source).await?
+            second_factor_step(
+                &providers,
+                &person,
+                &method,
+                &offer.providers,
+                request.secret.clone(),
+                source,
+            )
+            .await?
         }
         // A certificate the gateway's own TLS proved is named by the page authenticator.
         "certificate" if certificates.as_ref().is_some_and(|chain| !chain.is_empty()) => {
-            certificate_step(&providers, &person, certificates.unwrap_or_default(), source).await?
+            certificate_step(
+                &providers,
+                &person,
+                certificates.unwrap_or_default(),
+                source,
+            )
+            .await?
         }
         // `certificate` is only a chain the gateway's own TLS proved; a header never makes one.
         "certificate" => return Err(ApiError::unauthorized()),
@@ -712,10 +719,7 @@ pub(crate) struct Begin {
 }
 
 fn refused_because(reason: &str) -> AdminError {
-    AdminError::Api(ApiError::refused(
-        StatusCode::FORBIDDEN,
-        reason.to_owned(),
-    ))
+    AdminError::Api(ApiError::refused(StatusCode::FORBIDDEN, reason.to_owned()))
 }
 
 fn refused_here() -> AdminError {
@@ -796,7 +800,10 @@ async fn held_by(accounts: Arc<dyn Accounts>, id: String) -> Result<(bool, bool)
     tokio::task::spawn_blocking(move || {
         Ok::<_, ai6::guatiao::library::ProviderError>((
             accounts.accounts()?.iter().any(|info| info.id == id),
-            accounts.waiting()?.iter().any(|waiting| waiting.shown == id),
+            accounts
+                .waiting()?
+                .iter()
+                .any(|waiting| waiting.shown == id),
         ))
     })
     .await
@@ -905,8 +912,7 @@ async fn end_logins(
     )
     .await?;
     let (registry, person_id) = (registry(gateway)?, person_id.to_owned());
-    blocking(move || registry.revoke_person_logins(&person_id, &keep))
-        .await?;
+    blocking(move || registry.revoke_person_logins(&person_id, &keep)).await?;
     Ok(())
 }
 
@@ -1000,13 +1006,11 @@ pub(crate) async fn begin_enrolment(
         let fresh = unix_timestamp()? - signed.issued_at
             <= gateway.config.login.enrol_fresh_seconds.as_secs_f64();
         if !fresh {
-            let code = body
-                .and_then(|Json(begin)| begin.code)
-                .ok_or_else(|| {
-                    refused_because(
-                        "replacing your second factor needs a code from it, or a recent sign-in",
-                    )
-                })?;
+            let code = body.and_then(|Json(begin)| begin.code).ok_or_else(|| {
+                refused_because(
+                    "replacing your second factor needs a code from it, or a recent sign-in",
+                )
+            })?;
             code_shaped(&code)?;
             let providers = gateway.access.clone().ok_or_else(ApiError::unavailable)?;
             second_factor_step(

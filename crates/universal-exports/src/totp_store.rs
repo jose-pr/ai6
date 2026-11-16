@@ -242,7 +242,11 @@ pub(crate) fn accounts(
     registry: &Arc<dyn RegistryBackend>,
     sealer: &Arc<FactorSealer>,
 ) -> Arc<dyn Table<TotpRecord>> {
-    Arc::new(RegistryTable::new(registry.clone(), ACCOUNTS, sealer.clone()))
+    Arc::new(RegistryTable::new(
+        registry.clone(),
+        ACCOUNTS,
+        sealer.clone(),
+    ))
 }
 
 /// The enrolments table over `registry`.

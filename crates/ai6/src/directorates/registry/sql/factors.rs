@@ -35,12 +35,7 @@ impl FactorStore for SqlRegistry {
             .collect()
     }
 
-    fn factor_update(
-        &self,
-        family: &str,
-        key: &str,
-        edit: &mut FactorEdit<'_>,
-    ) -> io::Result<()> {
+    fn factor_update(&self, family: &str, key: &str, edit: &mut FactorEdit<'_>) -> io::Result<()> {
         validate_registry_key(family)?;
         validate_factor_key(key)?;
         self.write(|tx, revision| {
@@ -54,12 +49,7 @@ impl FactorStore for SqlRegistry {
             match edit(held.as_deref())? {
                 FactorChange::Keep => Ok(()),
                 FactorChange::Put(text) => {
-                    if !self
-                        .current_limits()
-                        .tokens
-                        .record_bytes
-                        .allows(text.len())
-                    {
+                    if !self.current_limits().tokens.record_bytes.allows(text.len()) {
                         return Err(invalid_data("a factor document exceeds the size limit"));
                     }
                     tx.execute(
