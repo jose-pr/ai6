@@ -37,6 +37,7 @@ required-features = ["cli"]
 [dependencies]
 ai6 = { path = "../ai6" }
 coqui-access-kit = { workspace = true, optional = true }
+coqui-access-signin = { workspace = true }
 axum = { workspace = true, features = ["form", "matched-path", "original-uri", "tower-log", "ws"] }
 clap = { workspace = true, optional = true, features = ["env", "error-context", "suggestions"] }
 futures-util = { workspace = true }
@@ -71,6 +72,8 @@ url = { workspace = true }
 webpki-root-certs = { workspace = true }
 
 [dev-dependencies]
+# The shared sign-in vectors every consumer of the policy runs.
+coqui-access-signin = { workspace = true, features = ["test-support"] }
 # The loopback HTTP endpoint unmodified A2A clients use, driven against Liaison in its tests.
 coqui-a2a = { workspace = true, features = ["loopback"] }
 rcgen = { workspace = true }
@@ -79,5 +82,6 @@ tempfile = { workspace = true }
 tokio-tungstenite = { workspace = true }
 # Libraries to load, never to link: depending on them has Cargo build each beside the test
 # binaries, where the page tests load the real page authenticators.
-coqui-access-mtls-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "d7f0f377e1b5d9bfb399e628592419a8ce0ed96d" }
-coqui-access-proxy-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "d7f0f377e1b5d9bfb399e628592419a8ce0ed96d" }
+coqui-access-mtls-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "97eed019f3df8783bb7e688f2c0889c39dc8c4f8" }
+coqui-access-proxy-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "97eed019f3df8783bb7e688f2c0889c39dc8c4f8" }
+coqui-access-signin-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "97eed019f3df8783bb7e688f2c0889c39dc8c4f8" }
