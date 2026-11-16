@@ -267,10 +267,7 @@ impl ConfigRecord {
     /// Whether a running Station, or Universal Exports for `access` and `operation_access`, applies a change
     /// without a restart.
     pub const fn applies_live(self) -> bool {
-        !matches!(
-            self,
-            Self::Theater | Self::Cables | Self::Plugin | Self::Station | Self::Tls | Self::Unex
-        )
+        !matches!(self, Self::Plugin)
     }
 }
 
@@ -853,6 +850,18 @@ impl StationRuntime {
             attach: self.attach.clone(),
             providers: self.providers.clone(),
         }
+    }
+
+    /// Whether a key a running Station reads only when it starts differs from `other`'s: how often
+    /// Theaters are sampled, and the publisher, API, Source, transport, attach and provider tables.
+    pub fn restart_only_differs(&self, other: &Self) -> bool {
+        self.resources_every != other.resources_every
+            || self.publisher != other.publisher
+            || self.api != other.api
+            || self.sources != other.sources
+            || self.transports != other.transports
+            || self.attach != other.attach
+            || self.providers != other.providers
     }
 
     /// A number of seconds as a duration; values were checked by [`validate`](Self::validate).

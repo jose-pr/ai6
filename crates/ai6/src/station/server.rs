@@ -650,12 +650,29 @@ fn apply_runtime(
     config: &mut ServeConfig,
     runtime: &crate::directorates::m::config::StationRuntime,
 ) -> io::Result<()> {
+    let mut parts = reload::RuntimeParts {
+        station: std::mem::take(&mut config.station),
+        watchdog: config.watchdog.clone(),
+        capacity: config.max_concurrent_missions,
+    };
+    let applied = apply_runtime_parts(&mut parts, runtime);
+    config.station = parts.station;
+    config.watchdog = parts.watchdog;
+    config.max_concurrent_missions = parts.capacity;
+    applied
+}
+
+/// Applies a `station` record over `parts`, the Station's configuration without it.
+fn apply_runtime_parts(
+    parts: &mut reload::RuntimeParts,
+    runtime: &crate::directorates::m::config::StationRuntime,
+) -> io::Result<()> {
     use crate::directorates::m::config::StationRuntime;
     let seconds = StationRuntime::duration;
     if let Some(capacity) = runtime.max_concurrent_missions {
-        config.max_concurrent_missions = capacity;
+        parts.capacity = capacity;
     }
-    let mut watchdog = config.watchdog.clone();
+    let mut watchdog = parts.watchdog.clone();
     if let Some(timeout) = seconds(runtime.stall_timeout) {
         watchdog = watchdog.with_stall_timeout(timeout);
     }
@@ -677,9 +694,9 @@ fn apply_runtime(
     if let Some(normalize) = runtime.normalize_digits {
         watchdog = watchdog.with_normalize_digits(normalize);
     }
-    config.watchdog = watchdog;
+    parts.watchdog = watchdog;
     if let Some(roles) = &runtime.roles {
-        config.station.roles = roles
+        parts.station.roles = roles
             .iter()
             .filter_map(|role| match role.as_str() {
                 "control" => Some(StationRole::Control),
@@ -689,24 +706,24 @@ fn apply_runtime(
             .collect();
     }
     for (key, value) in &runtime.labels {
-        config.station.labels.insert(key.clone(), value.clone());
+        parts.station.labels.insert(key.clone(), value.clone());
     }
     if let Some(terminal) = &runtime.terminal {
-        config.station.terminal = Some(terminal.clone());
+        parts.station.terminal = Some(terminal.clone());
     }
     if let Some(every) = seconds(runtime.resources_every) {
-        config.station.resources_every = every;
+        parts.station.resources_every = every;
     }
     if let Some(bytes) = runtime.partial_line_bytes {
-        config.watchdog = config.watchdog.clone().with_partial_line_bytes(bytes);
+        parts.watchdog = parts.watchdog.clone().with_partial_line_bytes(bytes);
     }
-    config.watchdog = config
+    parts.watchdog = parts
         .watchdog
         .clone()
         .with_csi_bytes(runtime.terminal_output.csi_bytes);
-    config.station.limits = Arc::new(runtime.limits());
+    parts.station.limits = Arc::new(runtime.limits());
     if let Some(caches) = &runtime.safe_house_caches {
-        config.station.hygiene = std::mem::take(&mut config.station.hygiene)
+        parts.station.hygiene = std::mem::take(&mut parts.station.hygiene)
             .with_caches(caches.clone())
             .map_err(|error| {
                 io::Error::new(
@@ -716,7 +733,7 @@ fn apply_runtime(
             })?;
     }
     if let Some(age) = seconds(runtime.safe_house_cache_age) {
-        config.station.hygiene = std::mem::take(&mut config.station.hygiene).with_cache_age(age);
+        parts.station.hygiene = std::mem::take(&mut parts.station.hygiene).with_cache_age(age);
     }
     Ok(())
 }
@@ -787,6 +804,11 @@ where
         )
     })?;
     let started = snapshot.clone();
+    let runtime_base = reload::RuntimeParts {
+        station: config.station.clone(),
+        watchdog: config.watchdog.clone(),
+        capacity: config.max_concurrent_missions,
+    };
     apply_runtime(&mut config, &snapshot.settings.station)?;
     if config.station.roles.is_empty() {
         return Err(io::Error::new(
@@ -851,6 +873,7 @@ where
     let snapshot_compartments = snapshot.settings.compartments.clone();
     let provider_loadouts = snapshot.settings.loadouts.clone();
     let roster = snapshot.roster;
+    let extra_theaters = config.station.extra_theaters.clone();
     let mut theaters = snapshot.settings.theaters;
     for theater in std::mem::take(&mut config.station.extra_theaters) {
         theaters.insert(theater).map_err(|error| {
@@ -918,13 +941,17 @@ where
         })
         .transpose()?;
     let roster = Arc::new(roster);
-    let live_config = Arc::new(reload::LiveConfig::new(
-        config_source,
-        &station_id,
-        started,
-        roster.clone(),
-        loadouts_from_provider.then(|| config.station.credentials.shared_catalog()),
-    ));
+    let live_config = Arc::new(
+        reload::LiveConfig::new(
+            config_source,
+            &station_id,
+            started,
+            roster.clone(),
+            loadouts_from_provider.then(|| config.station.credentials.shared_catalog()),
+        )
+        .with_runtime_base(runtime_base)
+        .with_theaters(config.station.theaters.clone(), extra_theaters),
+    );
     let missions = Arc::new(Mutex::new(missions));
     let runs = Arc::new(Mutex::new(BTreeMap::new()));
     let cable_live = live_config.clone();

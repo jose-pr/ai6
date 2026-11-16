@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
@@ -416,7 +416,7 @@ pub struct CablePolicy {
 }
 
 /// Strict TOML configuration for the daemon Cable relay.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CableConfig {
     #[serde(default)]
@@ -445,7 +445,7 @@ pub struct CableConfig {
     cross_operation: CrossOperation,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CableGrantConfig {
     agent: String,
@@ -842,13 +842,8 @@ type AuditSink = dyn Fn(&CableAuditRecord) + Send + Sync;
 type DurableAudit = dyn Fn(&CableAuditRecord) -> Result<(), String> + Send + Sync;
 type EndpointKey = (String, String, Option<String>, Option<String>);
 
-/// Authorizes sends and receives, snapshots broadcast audiences and stores accepted Cables.
-pub struct CableRelay {
-    registry: Arc<dyn RegistryBackend>,
-    policy: RwLock<CablePolicy>,
-    endpoints: Arc<EndpointSource>,
-    lineage: Arc<LineageSource>,
-    residents: Option<Arc<ResidentSource>>,
+#[derive(Clone)]
+struct Tuning {
     channels: BTreeMap<String, BTreeSet<String>>,
     max_fanout: usize,
     sender_rate: f64,
@@ -858,11 +853,21 @@ pub struct CableRelay {
     body_bytes: Limit,
     max_ttl: TimeLimit,
     default_ttl: Seconds,
+    cross_operation: CrossOperation,
+}
+
+/// Authorizes sends and receives, snapshots broadcast audiences and stores accepted Cables.
+pub struct CableRelay {
+    registry: Arc<dyn RegistryBackend>,
+    policy: RwLock<CablePolicy>,
+    endpoints: Arc<EndpointSource>,
+    lineage: Arc<LineageSource>,
+    residents: Option<Arc<ResidentSource>>,
+    tuning: RwLock<Arc<Tuning>>,
     now: Arc<dyn Fn() -> f64 + Send + Sync>,
     audit: Option<Arc<AuditSink>>,
     durable_audit: Option<Arc<DurableAudit>>,
     live_endpoints: Mutex<BTreeMap<EndpointKey, CableEndpoint>>,
-    cross_operation: CrossOperation,
     compartments: OnceLock<Arc<dyn CableCompartments>>,
 }
 
@@ -885,34 +890,36 @@ impl CableRelay {
             endpoints: Arc::new(endpoints),
             lineage: Arc::new(|_: &str| Vec::new()),
             residents: None,
-            channels,
-            max_fanout: MAX_CABLE_FANOUT,
-            sender_rate: DEFAULT_SENDER_RATE,
-            sender_burst: DEFAULT_SENDER_BURST,
-            scope_rate: DEFAULT_SCOPE_RATE,
-            scope_burst: DEFAULT_SCOPE_BURST,
-            body_bytes: default_body_bytes(),
-            max_ttl: default_max_ttl(),
-            default_ttl: default_default_ttl(),
+            tuning: RwLock::new(Arc::new(Tuning {
+                channels,
+                max_fanout: MAX_CABLE_FANOUT,
+                sender_rate: DEFAULT_SENDER_RATE,
+                sender_burst: DEFAULT_SENDER_BURST,
+                scope_rate: DEFAULT_SCOPE_RATE,
+                scope_burst: DEFAULT_SCOPE_BURST,
+                body_bytes: default_body_bytes(),
+                max_ttl: default_max_ttl(),
+                default_ttl: default_default_ttl(),
+                cross_operation: CrossOperation::default(),
+            })),
             now: Arc::new(system_time),
             audit: None,
             durable_audit: None,
             live_endpoints: Mutex::new(BTreeMap::new()),
-            cross_operation: CrossOperation::default(),
             compartments: OnceLock::new(),
         }
     }
 
     /// Sets what it takes for a Cable to reach another Operation.
     #[must_use]
-    pub fn with_cross_operation(mut self, cross_operation: CrossOperation) -> Self {
-        self.cross_operation = cross_operation;
+    pub fn with_cross_operation(self, cross_operation: CrossOperation) -> Self {
+        self.retune(|tuning| tuning.cross_operation = cross_operation);
         self
     }
 
     /// What it takes for a Cable to reach another Operation.
     pub fn cross_operation(&self) -> CrossOperation {
-        self.cross_operation
+        self.tuning().cross_operation
     }
 
     /// Gives the relay what compartments are asked of; until then none grants anything. It is
@@ -923,7 +930,7 @@ impl CableRelay {
 
     /// Sets bounded fan-out and persistent sender/scope token-bucket limits.
     pub fn with_limits(
-        mut self,
+        self,
         max_fanout: usize,
         sender_rate: f64,
         sender_burst: u32,
@@ -940,11 +947,13 @@ impl CableRelay {
         {
             return Err(CableError::new("Cable relay limits must be positive"));
         }
-        self.max_fanout = max_fanout;
-        self.sender_rate = sender_rate;
-        self.sender_burst = sender_burst;
-        self.scope_rate = scope_rate;
-        self.scope_burst = scope_burst;
+        self.retune(|tuning| {
+            tuning.max_fanout = max_fanout;
+            tuning.sender_rate = sender_rate;
+            tuning.sender_burst = sender_burst;
+            tuning.scope_rate = scope_rate;
+            tuning.scope_burst = scope_burst;
+        });
         Ok(self)
     }
 
@@ -1012,7 +1021,7 @@ impl CableRelay {
     ///
     /// A zero `default_ttl`, or one longer than `max_ttl`.
     pub fn with_message_limits(
-        mut self,
+        self,
         (body_bytes, max_ttl, default_ttl): (Limit, TimeLimit, Seconds),
     ) -> Result<Self, CableError> {
         if default_ttl.0.is_zero() || !max_ttl.allows(default_ttl.0) {
@@ -1020,15 +1029,17 @@ impl CableRelay {
                 "a Cable's default lifetime must be positive and within its maximum",
             ));
         }
-        self.body_bytes = body_bytes;
-        self.max_ttl = max_ttl;
-        self.default_ttl = default_ttl;
+        self.retune(|tuning| {
+            tuning.body_bytes = body_bytes;
+            tuning.max_ttl = max_ttl;
+            tuning.default_ttl = default_ttl;
+        });
         Ok(self)
     }
 
     /// The UTF-8 bytes a Cable's body may have, as the `cables` record says.
     pub fn body_bytes(&self) -> Limit {
-        self.body_bytes
+        self.tuning().body_bytes
     }
 
     /// Sets the relay clock, primarily for deterministic operation and tests.
@@ -1158,7 +1169,7 @@ impl CableRelay {
         if !crosses && !in_compartment {
             return Some(Ok(None));
         }
-        if !in_compartment && self.cross_operation == CrossOperation::StationGrants {
+        if !in_compartment && self.tuning().cross_operation == CrossOperation::StationGrants {
             return Some(Ok(None));
         }
         let compiled = self.compartments_now()?;
@@ -1218,6 +1229,64 @@ impl CableRelay {
         }
     }
 
+    /// The relay's limits and channels as the `cables` record sets them now.
+    fn tuning(&self) -> Arc<Tuning> {
+        self.tuning
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    fn retune(&self, change: impl FnOnce(&mut Tuning)) {
+        let mut guard = self.tuning.write().unwrap_or_else(PoisonError::into_inner);
+        let mut next = (**guard).clone();
+        change(&mut next);
+        *guard = Arc::new(next);
+    }
+
+    /// Makes the relay follow `config`: its grants, receive choices, channels, fan-out, rates,
+    /// message limits and cross-Operation rule, for the sends and deliveries that follow.
+    ///
+    /// # Errors
+    ///
+    /// When `config` holds a policy or a limit the relay refuses; nothing changes.
+    pub fn apply_config(&self, config: &CableConfig) -> Result<(), CableError> {
+        let policy = config.policy()?;
+        let (sender_rate, sender_burst, scope_rate, scope_burst) = config.quota_limits();
+        let (body_bytes, max_ttl, default_ttl) = config.message_limits();
+        if config.max_fanout() == 0
+            || !sender_rate.is_finite()
+            || sender_rate <= 0.0
+            || sender_burst == 0
+            || !scope_rate.is_finite()
+            || scope_rate <= 0.0
+            || scope_burst == 0
+        {
+            return Err(CableError::new("Cable relay limits must be positive"));
+        }
+        if default_ttl.0.is_zero() || !max_ttl.allows(default_ttl.0) {
+            return Err(CableError::new(
+                "a Cable's default lifetime must be positive and within its maximum",
+            ));
+        }
+        *self.policy.write().unwrap_or_else(PoisonError::into_inner) = policy;
+        self.retune(|tuning| {
+            *tuning = Tuning {
+                channels: config.channels().clone(),
+                max_fanout: config.max_fanout(),
+                sender_rate,
+                sender_burst,
+                scope_rate,
+                scope_burst,
+                body_bytes,
+                max_ttl,
+                default_ttl,
+                cross_operation: config.cross_operation(),
+            };
+        });
+        Ok(())
+    }
+
     /// Replaces relay policy; new send and delivery checks use the updated rules.
     pub fn update_policy(&self, policy: CablePolicy) -> Result<(), CableRelayError> {
         *self
@@ -1268,7 +1337,7 @@ impl CableRelay {
                     && !endpoint.conversation_only
                     && endpoint.station == principal.station
                     && (endpoint.operation == principal.operation
-                        || self.cross_operation == CrossOperation::StationGrants)
+                        || self.tuning().cross_operation == CrossOperation::StationGrants)
                     && self.allows(&policy, &endpoint.agent, CableAction::Receive, &station)
             })
             .collect::<Vec<_>>();
@@ -1371,7 +1440,11 @@ impl CableRelay {
                     f64::from(wakes_per_hour) / 3600.0,
                     wakes_per_hour,
                 ),
-                (agent_scope.as_str(), self.scope_rate, self.scope_burst),
+                (
+                    agent_scope.as_str(),
+                    self.tuning().scope_rate,
+                    self.tuning().scope_burst,
+                ),
             ];
             self.registry.take_quotas(&buckets, now).unwrap_or(false)
         };
@@ -1895,7 +1968,9 @@ impl CableRelay {
 
     /// The lifetime `request` asks for, else the relay's default, in seconds.
     fn ttl_of(&self, request: &CableSendRequest) -> f64 {
-        request.ttl.unwrap_or(self.default_ttl.0.as_secs_f64())
+        request
+            .ttl
+            .unwrap_or(self.tuning().default_ttl.0.as_secs_f64())
     }
 
     /// Authorizes, expands and persists one Cable without accepting caller-selected identity.
@@ -1905,14 +1980,14 @@ impl CableRelay {
         request: CableSendRequest,
     ) -> Result<Cable, CableRelayError> {
         let ttl = self.ttl_of(&request);
-        if !ttl.is_finite() || ttl <= 0.0 || !self.max_ttl.allows_secs(ttl) {
+        if !ttl.is_finite() || ttl <= 0.0 || !self.tuning().max_ttl.allows_secs(ttl) {
             return Err(CableRelayError::InvalidRequest);
         }
         if principal.on_behalf_of.is_some() && request.target.scope() == CableScope::Compartment {
             return Err(CableRelayError::Unavailable);
         }
         if request.body.trim().is_empty()
-            || !self.body_bytes.allows(request.body.len())
+            || !self.tuning().body_bytes.allows(request.body.len())
             || super::validate_text(
                 "Cable idempotency_key",
                 Some(&request.idempotency_key),
@@ -2058,7 +2133,7 @@ impl CableRelay {
             self.authorized_recipients(&policy, principal, &request, candidates)?;
         let fanout = compartment_limits
             .as_ref()
-            .map_or(Limit::at(self.max_fanout as u64), |limits| {
+            .map_or(Limit::at(self.tuning().max_fanout as u64), |limits| {
                 limits.max_fanout
             });
         if recipients.is_empty() || !fanout.allows(recipients.len()) {
@@ -2074,7 +2149,11 @@ impl CableRelay {
             Some(person) => format!("sender:{}:person:{person}", principal.agent),
             None => format!("sender:{}", principal.agent),
         };
-        let mut buckets = vec![(sender, self.sender_rate, self.sender_burst)];
+        let mut buckets = vec![(
+            sender,
+            self.tuning().sender_rate,
+            self.tuning().sender_burst,
+        )];
         match &compartment_limits {
             // The compartment's own bounds, counted across every Station on the Registry.
             Some(limits) => {
@@ -2093,7 +2172,11 @@ impl CableRelay {
                     ));
                 }
             }
-            None => buckets.push((format!("scope:{scope}"), self.scope_rate, self.scope_burst)),
+            None => buckets.push((
+                format!("scope:{scope}"),
+                self.tuning().scope_rate,
+                self.tuning().scope_burst,
+            )),
         }
         let borrowed = buckets
             .iter()
@@ -2173,7 +2256,7 @@ impl CableRelay {
             .map_err(|_| CableRelayError::InvalidRequest)?;
         let request = CableSendRequest::new(target.clone(), body, key.to_owned());
         if request.body.trim().is_empty()
-            || !self.body_bytes.allows(request.body.len())
+            || !self.tuning().body_bytes.allows(request.body.len())
             || super::validate_text("Cable idempotency_key", Some(key), 256, true).is_err()
         {
             return Err(CableRelayError::InvalidRequest);
@@ -2229,7 +2312,7 @@ impl CableRelay {
         recipients: Vec<CableRecipient>,
         now: f64,
     ) -> Result<CableDraft, CableRelayError> {
-        if !self.body_bytes.allows(request.body.len()) {
+        if !self.tuning().body_bytes.allows(request.body.len()) {
             return Err(CableRelayError::InvalidRequest);
         }
         let id = new_cable_id();
@@ -2304,7 +2387,8 @@ impl CableRelay {
             // from what is granted now.
             CableScope::Compartment => endpoints,
             CableScope::Channel => {
-                let members = self.channels.get(target.name().unwrap_or(""));
+                let tuning = self.tuning();
+                let members = tuning.channels.get(target.name().unwrap_or(""));
                 endpoints
                     .into_iter()
                     .filter(|endpoint| members.is_some_and(|set| set.contains(&endpoint.agent)))
@@ -2386,7 +2470,7 @@ impl CableRelay {
             return Err(CableRelayError::Unavailable);
         }
         let crossing_checked = in_compartment
-            || (self.cross_operation == CrossOperation::Compartments
+            || (self.tuning().cross_operation == CrossOperation::Compartments
                 && candidates
                     .iter()
                     .any(|endpoint| endpoint.operation != sender.operation));

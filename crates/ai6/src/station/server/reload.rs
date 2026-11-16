@@ -14,13 +14,15 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use super::{DaemonState, accounts, publish_station_check_in};
+use super::{DaemonState, StationConfig, accounts, publish_station_check_in};
 use crate::directorates::m::compartments::{self, CompiledCompartments};
 use crate::directorates::m::config::{
-    ConfigProvider, ConfigRevision, ConfigSnapshot, ConfigStatus,
+    ConfigProvider, ConfigRecord, ConfigRevision, ConfigSnapshot, ConfigStatus,
 };
 use crate::directorates::m::reports::{self, ReportSettings};
 use crate::directorates::m::roster::{Roster, RosterError, RosterErrorKind};
+use crate::directorates::m::theaters::{Theater, Theaters};
+use crate::directorates::medical::watchdog::WatchdogConfig;
 use crate::directorates::q::LoadoutCatalog;
 use crate::directorates::registry::store::AuditRecord;
 
@@ -30,11 +32,24 @@ const REFUSED_ACTION: &str = "config.refused";
 /// How often the poll task checks whether the Station is stopping.
 const STOP_CHECK: Duration = Duration::from_millis(250);
 
+/// The parts of a Station's configuration its `station` record sets.
+#[derive(Clone)]
+pub(super) struct RuntimeParts {
+    pub(super) station: StationConfig,
+    pub(super) watchdog: WatchdogConfig,
+    pub(super) capacity: usize,
+}
+
 /// The configuration a Station runs and where it reads it again, shared by every copy of the
 /// Station's state. The default holds nothing and reads nothing: each copy keeps its own.
 #[derive(Default)]
 pub(super) struct LiveConfig {
     source: Option<Arc<dyn ConfigProvider>>,
+    /// The Station's configuration without its `station` record, which each revision of the record
+    /// is applied over.
+    base: Option<RuntimeParts>,
+    /// Theaters the Station was given in code, declared with every revision of the provider's.
+    extra_theaters: Vec<Theater>,
     /// The Station whose view of the provider it reads.
     station: String,
     /// What the Station started with, to tell which restart-only families changed since.
@@ -47,12 +62,21 @@ struct Live {
     roster: Option<Arc<Roster>>,
     /// `Some` when the loadouts come from the provider, which then replaces them.
     catalog: Option<Option<Arc<LoadoutCatalog>>>,
+    /// The `station` record the Station applies now, and the configuration it makes.
+    station: crate::directorates::m::config::StationRuntime,
+    applied: Option<RuntimeParts>,
     revision: Option<ConfigRevision>,
     /// The roster revision refused last, and why.
     refused: Option<(ConfigRevision, String)>,
     needs_restart: BTreeSet<&'static str>,
     /// The `registry` record the Station's Registry applies now.
     registry: crate::directorates::m::config::RegistryRecord,
+    /// The Theaters the Station declares now; `None` when they were set in code.
+    theaters: Option<Theaters>,
+    /// The weakenings of the Station TLS policy it follows now, once a record has changed them.
+    tls_weakened: Option<Vec<String>>,
+    /// The `cables` record the Station's relay follows now.
+    cables: crate::directorates::registry::cables::CableConfig,
     /// The last failure to read the configuration, logged once.
     unavailable: Option<String>,
 }
@@ -70,17 +94,45 @@ impl LiveConfig {
     ) -> Self {
         let revision = started.revision;
         let registry = started.settings.registry.clone();
+        let started_station = started.settings.station.clone();
+        let started_cables = started.settings.cables.clone();
         Self {
             source: Some(source),
+            base: None,
+            extra_theaters: Vec::new(),
             station: station.to_owned(),
             started: Some(started),
             live: Mutex::new(Live {
                 roster: Some(roster),
                 catalog,
                 revision: Some(revision),
+                station: started_station,
+                cables: started_cables,
                 registry,
                 ..Live::default()
             }),
+        }
+    }
+
+    /// Makes the Station follow the provider's Theaters, declared with `extra` and starting as
+    /// `theaters`.
+    pub(super) fn with_theaters(mut self, theaters: Theaters, extra: Vec<Theater>) -> Self {
+        self.extra_theaters = extra;
+        self.lock().theaters = Some(theaters);
+        self
+    }
+
+    /// Makes the Station apply each revision of its `station` record over `base`.
+    pub(super) fn with_runtime_base(self, base: RuntimeParts) -> Self {
+        {
+            let mut live = self.lock();
+            let mut applied = base.clone();
+            let result = super::apply_runtime_parts(&mut applied, &live.station);
+            live.applied = result.is_ok().then_some(applied);
+        }
+        Self {
+            base: Some(base),
+            ..self
         }
     }
 
@@ -151,6 +203,22 @@ impl DaemonState {
         }
         if let Some(catalog) = &live.catalog {
             state.station.credentials.set_catalog(catalog.clone());
+        }
+        if let Some(theaters) = &live.theaters {
+            state.station.theaters = theaters.clone();
+        }
+        #[cfg(feature = "station-tls")]
+        if let Some(weakened) = &live.tls_weakened {
+            state.station.tls_weakened = weakened.clone();
+        }
+        if let Some(applied) = &live.applied {
+            state.station.roles = applied.station.roles.clone();
+            state.station.labels = applied.station.labels.clone();
+            state.station.terminal = applied.station.terminal.clone();
+            state.station.limits = applied.station.limits.clone();
+            state.station.hygiene = applied.station.hygiene.clone();
+            state.watchdog = applied.watchdog.clone();
+            state.max_concurrent_missions = applied.capacity;
         }
         state
     }
@@ -289,9 +357,17 @@ fn poll_provider(state: &DaemonState) -> (bool, bool) {
     }
     match source.load(station) {
         Ok(snapshot) => {
+            let applied = match applied_station(state, &snapshot) {
+                Ok(applied) => applied,
+                Err(reason) => return refused_revision(state, revision, &reason),
+            };
+            let theaters = match merged_theaters(state, &snapshot) {
+                Ok(theaters) => theaters,
+                Err(reason) => return refused_revision(state, revision, &reason),
+            };
             restart_families(state, &snapshot);
             let loadouts = (snapshot.settings.loadouts != LoadoutCatalog::default())
-                .then(|| Arc::new(snapshot.settings.loadouts));
+                .then(|| Arc::new(snapshot.settings.loadouts.clone()));
             let mut live = state.config.lock();
             let loadouts_changed =
                 live.catalog.is_some() && live.catalog.as_ref() != Some(&loadouts);
@@ -299,6 +375,14 @@ fn poll_provider(state: &DaemonState) -> (bool, bool) {
                 live.catalog = Some(loadouts);
             }
             apply_registry(state, &mut live, &snapshot.settings.registry);
+            apply_cables(state, &mut live, &snapshot.settings.cables);
+            apply_theaters(state, &mut live, theaters);
+            apply_tls(state, &mut live, &snapshot.settings);
+            if let Some(applied) = applied {
+                live.applied = Some(applied);
+                live.station = snapshot.settings.station.clone();
+                eprintln!("ai6: station settings applied");
+            }
             live.roster = Some(Arc::new(snapshot.roster));
             live.revision = Some(snapshot.revision);
             live.refused = None;
@@ -312,13 +396,38 @@ fn poll_provider(state: &DaemonState) -> (bool, bool) {
             unavailable(state, &error.to_string());
             (false, false)
         }
-        Err(error) => {
-            let reason = format!("configuration revision {}: {error}", revision.get());
-            state.config.lock().refused = Some((revision, reason.clone()));
-            refuse(state, &reason);
-            (false, false)
-        }
+        Err(error) => refused_revision(state, revision, &error.to_string()),
     }
+}
+
+/// Records that `revision` was refused for `reason`, logs and audits it, and reports that nothing
+/// changed.
+fn refused_revision(state: &DaemonState, revision: ConfigRevision, reason: &str) -> (bool, bool) {
+    let reason = format!("configuration revision {}: {reason}", revision.get());
+    state.config.lock().refused = Some((revision, reason.clone()));
+    refuse(state, &reason);
+    (false, false)
+}
+
+/// The configuration the revision's `station` record makes when it differs from the one applied, `None`
+/// when it is the same or the Station has no base to apply it over.
+fn applied_station(
+    state: &DaemonState,
+    snapshot: &ConfigSnapshot,
+) -> Result<Option<RuntimeParts>, String> {
+    let Some(base) = &state.config.base else {
+        return Ok(None);
+    };
+    if state.config.lock().station == snapshot.settings.station {
+        return Ok(None);
+    }
+    let mut parts = base.clone();
+    super::apply_runtime_parts(&mut parts, &snapshot.settings.station)
+        .map_err(|error| error.to_string())?;
+    if parts.station.roles.is_empty() {
+        return Err("a Station needs at least one role".to_owned());
+    }
+    Ok(Some(parts))
 }
 
 /// Gives the Station's Registry the limits of `record` when they are not the ones it applies,
@@ -340,6 +449,106 @@ fn apply_registry(
     }
 }
 
+/// The Theaters the snapshot declares and the Station was given in code, when the Station follows
+/// its provider's Theaters.
+fn merged_theaters(
+    state: &DaemonState,
+    snapshot: &ConfigSnapshot,
+) -> Result<Option<Theaters>, String> {
+    if state.config.lock().theaters.is_none() {
+        return Ok(None);
+    }
+    let mut theaters = snapshot.settings.theaters.clone();
+    for theater in &state.config.extra_theaters {
+        theaters
+            .insert(theater.clone())
+            .map_err(|error| format!("AI6 Theaters: {error}"))?;
+    }
+    Ok(Some(theaters))
+}
+
+/// Gives the Station the Theaters it declares now and builds the transport of each new or changed
+/// one. A Run already on a Theater keeps the transport it started with.
+fn apply_theaters(state: &DaemonState, live: &mut Live, theaters: Option<Theaters>) {
+    let Some(theaters) = theaters else {
+        return;
+    };
+    if live.theaters.as_ref() == Some(&theaters) {
+        return;
+    }
+    state.transports.reconcile(&theaters, &state.plugins);
+    for theater in theaters.reachable() {
+        for weakened in theater.weakenings() {
+            eprintln!("ai6: Theater {:?} is weakened: {weakened}", theater.id);
+        }
+    }
+    live.theaters = Some(theaters);
+    eprintln!("ai6: Theaters applied");
+}
+
+/// Makes the Station report, and warn of, the TLS policy it now follows. A connection made after
+/// the change is checked against the new policy; none already open is touched.
+fn apply_tls(
+    state: &DaemonState,
+    live: &mut Live,
+    settings: &crate::directorates::m::config::Settings,
+) {
+    #[cfg(feature = "station-tls")]
+    {
+        let Ok(policy) = settings.tls_policy() else {
+            return;
+        };
+        let weakened: Vec<String> = policy
+            .non_defaults_against(&coqui_peer_tls::Policy::default())
+            .into_iter()
+            .map(|weakening| {
+                format!(
+                    "{} = {} (default {})",
+                    weakening.setting, weakening.value, weakening.default
+                )
+            })
+            .collect();
+        let running = live
+            .tls_weakened
+            .as_ref()
+            .unwrap_or(&state.station.tls_weakened);
+        if *running == weakened {
+            return;
+        }
+        for weakening in &weakened {
+            eprintln!("ai6: warning: the Station TLS policy: {weakening}");
+        }
+        eprintln!("ai6: Station TLS policy applied");
+        live.tls_weakened = Some(weakened);
+    }
+    #[cfg(not(feature = "station-tls"))]
+    let _ = (state, live, settings);
+}
+
+/// Makes the Station's Cable relay follow `config` when it is not the one it follows. A relay that
+/// refuses it keeps what it had, and the refusal is logged.
+fn apply_cables(
+    state: &DaemonState,
+    live: &mut Live,
+    config: &crate::directorates::registry::cables::CableConfig,
+) {
+    if &live.cables == config {
+        return;
+    }
+    match state.cables.apply_config(config) {
+        Ok(()) => {
+            live.cables = config.clone();
+            eprintln!("ai6: Cable relay settings applied");
+            for weakened in config.weakenings() {
+                eprintln!("ai6: {weakened}");
+            }
+        }
+        Err(error) => {
+            eprintln!("ai6: Cable relay settings refused, keeping the ones it runs: {error}")
+        }
+    }
+}
+
 /// Notes each family only a restart applies whose records differ from what the Station
 /// started with.
 fn restart_families(state: &DaemonState, snapshot: &ConfigSnapshot) {
@@ -348,15 +557,32 @@ fn restart_families(state: &DaemonState, snapshot: &ConfigSnapshot) {
     };
     let changed = started.changed_families(snapshot);
     let mut live = state.config.lock();
-    for record in crate::directorates::m::config::ConfigRecord::ALL {
-        if record.applies_live() {
-            continue;
-        }
-        if !changed.contains(&record) {
+    for record in ConfigRecord::ALL {
+        let pending = if record.applies_live() {
+            partly_restart_only(started, snapshot, record)
+        } else {
+            changed.contains(&record)
+        };
+        if !pending {
             live.needs_restart.remove(record.name());
         } else if live.needs_restart.insert(record.name()) {
             eprintln!("ai6: {record} changed; restart the Station to apply it");
         }
+    }
+}
+
+/// Whether a family that applies live holds keys only a restart applies, and one of them changed.
+fn partly_restart_only(
+    started: &ConfigSnapshot,
+    snapshot: &ConfigSnapshot,
+    record: ConfigRecord,
+) -> bool {
+    match record {
+        ConfigRecord::Station => started
+            .settings
+            .station
+            .restart_only_differs(&snapshot.settings.station),
+        _ => false,
     }
 }
 
@@ -445,13 +671,21 @@ mod tests {
             .station
             .credentials
             .set_catalog(catalog.clone().flatten());
-        state.config = Arc::new(LiveConfig::new(
-            source,
-            &state.station_id,
-            snapshot,
-            state.roster.clone(),
-            catalog,
-        ));
+        state.config = Arc::new(
+            LiveConfig::new(
+                source,
+                &state.station_id,
+                snapshot,
+                state.roster.clone(),
+                catalog,
+            )
+            .with_runtime_base(RuntimeParts {
+                station: state.station.clone(),
+                watchdog: state.watchdog.clone(),
+                capacity: state.max_concurrent_missions,
+            })
+            .with_theaters(state.station.theaters.clone(), Vec::new()),
+        );
     }
 
     fn priority(state: &DaemonState) -> i64 {
@@ -928,6 +1162,189 @@ mod tests {
     }
 
     #[test]
+    fn a_changed_station_record_changes_a_running_station_at_the_next_poll() {
+        let root = tempfile::tempdir().unwrap();
+        let mut state = test_state(root.path(), "", AGENTS);
+        live(
+            &mut state,
+            root.path(),
+            Arc::new(FileProvider::new(root.path())),
+            false,
+        );
+        let current = state.current();
+        assert_eq!(current.max_concurrent_missions, 4);
+        let stall = current.watchdog.stall_timeout();
+        let station = root.path().join("station.toml");
+        fs::write(
+            &station,
+            "max_concurrent_missions = 2
+stall_timeout = 7
+roles = [\"execution\"]
+\n             [labels]
+zone = \"b\"
+[scheduler]
+check_in = 0.5
+",
+        )
+        .unwrap();
+        poll(&state);
+        let current = state.current();
+        assert_eq!(current.max_concurrent_missions, 2);
+        assert_eq!(current.watchdog.stall_timeout(), Duration::from_secs(7));
+        assert_eq!(
+            current.station.roles,
+            [crate::station::server::StationRole::Execution].into()
+        );
+        assert_eq!(
+            current.station.labels.get("zone").map(String::as_str),
+            Some("b")
+        );
+        assert_eq!(
+            current.station.limits().scheduler.check_in.0,
+            Duration::from_millis(500)
+        );
+        assert!(state.config.status().needs_restart.is_empty());
+
+        fs::remove_file(&station).unwrap();
+        poll(&state);
+        let current = state.current();
+        assert_eq!(
+            current.max_concurrent_missions, 4,
+            "unset keys return to the defaults"
+        );
+        assert_eq!(current.watchdog.stall_timeout(), stall);
+        assert!(current.station.labels.is_empty());
+
+        fs::write(
+            &station,
+            "[publisher]
+queue = 3
+",
+        )
+        .unwrap();
+        poll(&state);
+        assert_eq!(state.config.status().needs_restart, ["station"]);
+
+        fs::write(
+            &station,
+            "roles = [\"bogus\"]
+",
+        )
+        .unwrap();
+        poll(&state);
+        assert_eq!(
+            state.current().station.roles.len(),
+            2,
+            "a refused record changes nothing"
+        );
+        assert_eq!(state.config.status().refused.len(), 1);
+    }
+
+    #[test]
+    fn a_changed_cables_record_changes_a_running_relay_at_the_next_poll() {
+        let root = tempfile::tempdir().unwrap();
+        let mut state = test_state(root.path(), "", AGENTS);
+        live(
+            &mut state,
+            root.path(),
+            Arc::new(FileProvider::new(root.path())),
+            false,
+        );
+        let default_body = state.cables.body_bytes();
+        assert_eq!(
+            state.cables.cross_operation(),
+            crate::directorates::registry::cables::CrossOperation::default()
+        );
+        let cables = root.path().join("cables.toml");
+        fs::write(
+            &cables,
+            "body_bytes = 100\ncross_operation = \"station_grants\"\n",
+        )
+        .unwrap();
+        poll(&state);
+        assert!(!state.cables.body_bytes().allows(101));
+        assert!(state.cables.body_bytes().allows(100));
+        assert_eq!(
+            state.cables.cross_operation(),
+            crate::directorates::registry::cables::CrossOperation::StationGrants
+        );
+        assert!(state.config.status().needs_restart.is_empty());
+
+        fs::remove_file(&cables).unwrap();
+        poll(&state);
+        assert_eq!(state.cables.body_bytes(), default_body);
+    }
+
+    #[test]
+    fn a_changed_theater_record_declares_it_to_a_running_station_at_the_next_poll() {
+        let root = tempfile::tempdir().unwrap();
+        let mut state = test_state(root.path(), "", AGENTS);
+        live(
+            &mut state,
+            root.path(),
+            Arc::new(FileProvider::new(root.path())),
+            false,
+        );
+        assert!(state.transports.theater("box").is_none());
+        let theaters = root.path().join("theaters.toml");
+        fs::write(&theaters, "[theater.box]\naccess = \"local\"\n").unwrap();
+        poll(&state);
+        assert!(state.current().station.theaters.find("box").is_some());
+        assert!(state.transports.theater("box").is_some());
+        assert!(state.config.status().needs_restart.is_empty());
+
+        fs::write(
+            &theaters,
+            "[theater.box]\naccess = \"local\"\nlabels = { zone = \"b\" }\n",
+        )
+        .unwrap();
+        poll(&state);
+        assert!(
+            state
+                .transports
+                .theater("box")
+                .unwrap()
+                .labels
+                .contains_key("zone"),
+            "a changed Theater gets its new declaration"
+        );
+
+        fs::remove_file(&theaters).unwrap();
+        poll(&state);
+        assert!(state.current().station.theaters.find("box").is_none());
+        assert!(state.transports.theater("box").is_none());
+        assert!(
+            state.transports.theater("local").is_some(),
+            "the Station's own host stays"
+        );
+    }
+
+    #[cfg(feature = "station-tls")]
+    #[test]
+    fn a_changed_tls_record_changes_what_a_running_station_reports_at_the_next_poll() {
+        let root = tempfile::tempdir().unwrap();
+        let mut state = test_state(root.path(), "", AGENTS);
+        live(
+            &mut state,
+            root.path(),
+            Arc::new(FileProvider::new(root.path())),
+            false,
+        );
+        assert!(state.current().station.tls_weakened.is_empty());
+        let tls = root.path().join("tls.toml");
+        fs::write(&tls, "tls_versions = [\"1.3\"]\n").unwrap();
+        poll(&state);
+        let weakened = state.current().station.tls_weakened;
+        assert_eq!(weakened.len(), 1, "{weakened:?}");
+        assert!(weakened[0].starts_with("tls_versions"), "{weakened:?}");
+        assert!(state.config.status().needs_restart.is_empty());
+
+        fs::remove_file(&tls).unwrap();
+        poll(&state);
+        assert!(state.current().station.tls_weakened.is_empty());
+    }
+
+    #[test]
     fn restart_only_families_and_files_are_reported_as_needing_a_restart() {
         let root = tempfile::tempdir().unwrap();
         let mut state = test_state(root.path(), "", AGENTS);
@@ -937,24 +1354,20 @@ mod tests {
             Arc::new(FileProvider::new(root.path())),
             false,
         );
-        let theaters = root.path().join("theaters.toml");
-        fs::write(&theaters, "[theater.box]\naccess = \"local\"\n").unwrap();
+        let plugins = root.path().join("plugins.toml");
+        fs::write(
+            &plugins,
+            "[[library]]\nfile = \"a.so\"\npublisher = \"ed25519:0000000000000000000000000000000000000000000000000000000000000000\"\n",
+        )
+        .unwrap();
         poll(&state);
-        assert_eq!(state.config.status().needs_restart, ["theater"]);
-        assert!(
-            state.current().station.theaters.find("box").is_none(),
-            "a restart applies it, not a poll"
-        );
+        assert_eq!(state.config.status().needs_restart, ["plugin"]);
         let agents = root.path().join("agents.toml");
         fs::write(&agents, AGENTS.replace("priority = 1", "priority = 6")).unwrap();
         assert!(poll(&state), "an Agent applies live beside it");
         assert_eq!(priority(&state.current()), 6);
-        fs::remove_file(&theaters).unwrap();
+        fs::remove_file(&plugins).unwrap();
         poll(&state);
         assert!(state.config.status().needs_restart.is_empty());
-
-        fs::write(root.path().join("cables.toml"), "max_fanout = 3\n").unwrap();
-        poll(&state);
-        assert_eq!(state.config.status().needs_restart, ["cables"]);
     }
 }

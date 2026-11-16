@@ -112,6 +112,49 @@ impl Transports {
         transports
     }
 
+    /// Makes the transports those of `theaters`: a Theater that is new or changed gets a new
+    /// transport (and loses its probe), one unchanged keeps both, one no longer declared is
+    /// forgotten. A Theater made from an ephemeral template is left alone.
+    pub(crate) fn reconcile(&self, theaters: &Theaters, plugins: &Plugins) {
+        let wanted = theaters.reachable();
+        let changed = {
+            let entries = self
+                .entries
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut changed = Theaters::default();
+            let mut ids = Vec::new();
+            for theater in &wanted {
+                let same = entries
+                    .get(&theater.id)
+                    .is_some_and(|entry| entry.made.is_none() && entry.theater == *theater);
+                if !same {
+                    let _ = changed.insert(theater.clone());
+                    ids.push(theater.id.clone());
+                }
+            }
+            (changed, ids)
+        };
+        let (changed, ids) = changed;
+        let built = Self::build(&changed, plugins);
+        let built = built
+            .entries
+            .into_inner()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut entries = self
+            .entries
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        entries.retain(|id, entry| {
+            entry.made.is_some() || wanted.iter().any(|theater| theater.id == *id)
+        });
+        for (id, entry) in built {
+            if ids.contains(&id) {
+                entries.insert(id, entry);
+            }
+        }
+    }
+
     /// Adds a Theater with an already built transport, replacing one with the same ID.
     #[cfg(test)]
     pub(crate) fn with_transport(

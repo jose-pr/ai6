@@ -1386,7 +1386,7 @@ impl ConfigRecord {
     pub const fn is_singleton(self) -> bool;    // Assistant, Cables, Station, Tls, Access, Unex, Roster
     pub const fn is_whole_file(self) -> bool;   // the singletons but Assistant and Roster
     pub const fn station_scoped(self) -> bool;  // Theater, the loadout families, Cables, Plugin, Station, Tls
-    pub const fn applies_live(self) -> bool;    // all but Theater, Cables, Plugin, Station, Tls, Unex
+    pub const fn applies_live(self) -> bool;    // all but Plugin
 }
 #[non_exhaustive] #[derive(Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
 pub enum ConfigScope { Global, Station(String) }
