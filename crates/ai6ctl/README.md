@@ -21,6 +21,8 @@ Station directly. See the [command header](AGENTS.md).
   Mission decides and reports, and `ai6ctl` waits for its outcome.
 - Signs green ink: lists the steps Agents wait to take, approves, rejects or revokes them,
   and lists or revokes class authorisations.
+- Serves Liaison's A2A link as the standard A2A HTTP binding on loopback (`liaison loopback`).
+- Serves Liaison's A2A link as the standard A2A HTTP binding on loopback (`liaison loopback`).
 - Uses only a user bearer token; it never accepts M's credential or a
   terminal-attachment token.
 - HTTPS everywhere except loopback HTTP.

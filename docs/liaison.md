@@ -97,9 +97,14 @@ Two bindings carry the same exchange.
 links, the `a2a/1` binding of [coqui-a2a](https://github.com/Boriken-Dev/coqui-a2a). The gateway
 proves its link key (`identity`, made the first time), and a dialer must prove one of the
 configured `id`s, else nothing of its link is read. A peer with `a2a = false` stays paired and has
-its A2A streams refused. Unmodified A2A software uses a link through coqui-a2a's loopback command
-(`coqui-a2a loopback --url wss://gateway:7084/link --peer <the gateway's id>`), which serves the
-standard HTTP binding on its machine's loopback. The gateway prints its id at start.
+its A2A streams refused. Unmodified A2A software uses a link through `ai6ctl liaison loopback --url wss://gateway:7084/link
+--peer <the gateway's id>`, which serves the standard HTTP binding on its machine's loopback and
+prints its address (and the file holding its bearer token) on standard output. The gateway prints
+its id at start. `--identity` names this side's key file (default: the user's own), `--listen` the
+loopback address (default `127.0.0.1:0`), `--token-file` or `--no-token` the bearer token every
+request must present, `--origin` a page's Origin to allow, `--answer-timeout` how many seconds the
+peer has to answer an operation, and the global `--ca-file` the roots a `wss://` certificate must
+chain to.
 
 **HTTP JSON-RPC on the gateway.** `POST /v1/a2a`, with the card at
 `/v1/a2a/.well-known/agent-card.json`, takes A2A's standard JSON-RPC binding (Server-Sent Events

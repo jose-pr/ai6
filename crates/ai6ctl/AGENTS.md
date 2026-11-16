@@ -6,7 +6,7 @@ lives at <https://github.com/jose-pr/ai6>.
 
 ## Build
 
-No Cargo features. MSRV: Rust 1.89. Depends on clap, reqwest (rustls), tokio-tungstenite, tokio-rustls, serde and Tokio.
+No Cargo features. MSRV: Rust 1.89. Depends on clap, reqwest (rustls), tokio-tungstenite, tokio-rustls, serde and Tokio, and, for `liaison loopback`, `coqui-a2a` and the `coqui-agentic-peer` link crates.
 The crate has no library target.
 
 ## Commands
@@ -296,6 +296,22 @@ control's status route every `--poll-interval` (0.5 s) until the Station reports
   the attachment, and with a message when the connection fails or ends first. The token is sent in the first
   WebSocket frame only, never in the URL, and is printed nowhere. `https` gives `wss` with the same
   trust as the other commands (public roots and the CA file); `http` gives `ws`.
+- `ai6ctl liaison loopback --url <URL> (--peer <ID>... | --any-paired-peer) [--identity <FILE>] [--listen <ADDR>]
+  [--token-file <FILE> | --no-token] [--origin <ORIGIN>...] [--forward-header <NAME>...] [--answer-timeout <SECONDS>]`
+  serves the standard A2A HTTP binding on a loopback address and carries it over a proven coqui-agentic-peer
+  link to Liaison. It reads no Universal Exports origin or token and needs no sign-in. `--url` (env
+  `COQUI_A2A_URL`) is the link, `ws://` or `wss://`; `--peer` pins the remote's id, repeatable (the gateway
+  prints its id at start), and `--any-paired-peer` instead accepts every peer paired in the user's link trust
+  store; `--identity` is this side's key file (default: the user's, in the link home); `--listen` (env
+  `COQUI_A2A_LISTEN`) must be a loopback address, default `127.0.0.1:0`; the global `--ca-file` is the roots a
+  `wss://` certificate must chain to (without it the in-band proof alone decides who the remote is). Every
+  request must present the bearer token in `--token-file` (env `COQUI_A2A_TOKEN_FILE`; default
+  `a2a-loopback.token` in the link home, made the first time, refused when other users can read it);
+  `--no-token` serves without one. `--origin` (repeat) lets a page from that Origin use the endpoint,
+  `--forward-header` (repeat) passes a header to the remote, `--answer-timeout` is how long the remote has to
+  say anything to an operation (default: the library's). Standard output: the endpoint's URL, then the token
+  file's path unless `--no-token`; it runs until stopped and dials again after the link ends, backing off.
+  Exit `1` when the remote proves a key that is not a peer named, or its certificate is refused.
 - `ai6ctl exec <MISSION_ID|RUN_ID> [--agent <CODENAME>] [--message <TEXT>]` executes a Mission or a
   Run through the same controls: a Run ID found on the board resumes (`resume`, `--message`), anything else
   is a Mission and starts its next Run (`retry`, `--agent`). Needs `mission.control`. The Station takes both
