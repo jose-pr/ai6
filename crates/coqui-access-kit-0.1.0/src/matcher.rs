@@ -175,6 +175,8 @@ impl Filter {
         match self {
             Self::Lower => Some(value.to_lowercase()),
             Self::Upper => Some(value.to_uppercase()),
+            // A value with more than one `@` has no realm to strip: what is left of two is a name that holds an `@`.
+            _ if value.matches('@').count() > 1 => None,
             Self::Local => Some(
                 value
                     .rsplit_once('@')
@@ -297,9 +299,10 @@ struct Compiled {
 
 /// Whether `value` is `<something>@<domain>`, in any case.
 fn in_realm(value: &str, domain: &str) -> bool {
-    value
-        .rsplit_once('@')
-        .is_some_and(|(local, found)| !local.is_empty() && found.eq_ignore_ascii_case(domain))
+    value.matches('@').count() == 1
+        && value
+            .rsplit_once('@')
+            .is_some_and(|(local, found)| !local.is_empty() && found.eq_ignore_ascii_case(domain))
 }
 
 impl Compiled {

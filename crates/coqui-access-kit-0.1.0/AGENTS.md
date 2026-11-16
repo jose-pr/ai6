@@ -89,7 +89,7 @@ pub fn escape_filter_value(value: &str) -> String;
 - A rule using `local` must name `domain` (a realm: only claim values ending `@<domain>`, any case,
   count for it) or `pins`; `Matcher::new` refuses it otherwise, as it does a `domain` without `local`,
   or one that is empty or holds `@` or whitespace. Stripping the realm loses what ties a name to it.
-- Templates: `{claim}` and `{claim|filter|...}` (`lower`, `upper`, `local` = before the last `@`,
+- Templates: `{claim}` and `{claim|filter|...}` (`lower`, `upper`, `local` = before the last `@` (a value with two or more has none),
   `domain` = after), `{{` and `}}` for braces, claim names lowercase words with `.`, `_`, `-`. A
   template names at least one claim. A `filter` template is one balanced parenthesised group.
 - **In a `filter` rule every substituted value is escaped** with `escape_filter_value`: `*`, `(`,

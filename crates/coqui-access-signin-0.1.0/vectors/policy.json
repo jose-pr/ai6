@@ -1,0 +1,1362 @@
+{
+ "cases": [
+  {
+   "name": "the office is offered a password or a certificate",
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password"
+       ],
+       [
+        "certificate"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [],
+    "address": "10.1.2.3"
+   },
+   "expect": {
+    "methods": [
+     "password",
+     "certificate"
+    ],
+    "complete": false
+   }
+  },
+  {
+   "name": "an outside IPv4 address is offered the certificate alone",
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password"
+       ],
+       [
+        "certificate"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [],
+    "address": "203.0.113.7"
+   },
+   "expect": {
+    "methods": [
+     "certificate"
+    ],
+    "complete": false
+   }
+  },
+  {
+   "name": "an IPv6 address is offered the certificate alone",
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password"
+       ],
+       [
+        "certificate"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [],
+    "address": "2001:db8::1"
+   },
+   "expect": {
+    "methods": [
+     "certificate"
+    ],
+    "complete": false
+   }
+  },
+  {
+   "name": "an IPv4-mapped address is the IPv4 address",
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password"
+       ],
+       [
+        "certificate"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [],
+    "address": "::ffff:10.0.0.9"
+   },
+   "expect": {
+    "methods": [
+     "password",
+     "certificate"
+    ],
+    "complete": false
+   }
+  },
+  {
+   "name": "an unknown address falls to the strict rule",
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password"
+       ],
+       [
+        "certificate"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": []
+   },
+   "expect": {
+    "methods": [
+     "certificate"
+    ],
+    "complete": false
+   }
+  },
+  {
+   "name": "an address with a port is not an address",
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password"
+       ],
+       [
+        "certificate"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [],
+    "address": "10.1.2.3:443"
+   },
+   "expect": {
+    "methods": [
+     "certificate"
+    ],
+    "complete": false
+   }
+  },
+  {
+   "name": "the placeholder 0.0.0.0 is outside",
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password"
+       ],
+       [
+        "certificate"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [],
+    "address": "0.0.0.0"
+   },
+   "expect": {
+    "methods": [
+     "certificate"
+    ],
+    "complete": false
+   }
+  },
+  {
+   "name": "a session resumed from outside loses a password",
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password"
+       ],
+       [
+        "certificate"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "resume",
+    "done": [
+     {
+      "method": "password"
+     }
+    ],
+    "address": "203.0.113.7",
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    }
+   },
+   "expect": {
+    "methods": [],
+    "complete": false
+   }
+  },
+  {
+   "name": "a session resumed at the office keeps a password",
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password"
+       ],
+       [
+        "certificate"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "resume",
+    "done": [
+     {
+      "method": "password"
+     }
+    ],
+    "address": "10.2.3.4",
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    }
+   },
+   "expect": {
+    "methods": [],
+    "complete": true
+   }
+  },
+  {
+   "name": "a session resumed from outside keeps a certificate",
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password"
+       ],
+       [
+        "certificate"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "resume",
+    "done": [
+     {
+      "method": "certificate"
+     }
+    ],
+    "address": "203.0.113.7",
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    }
+   },
+   "expect": {
+    "methods": [],
+    "complete": true
+   }
+  },
+  {
+   "name": "a code is never offered before someone is named",
+   "config": {
+    "rule": [
+     {
+      "subjects": [
+       "group:admins"
+      ],
+      "allow": [
+       [
+        "password",
+        "totp"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [],
+    "address": "10.1.2.3"
+   },
+   "expect": {
+    "methods": [
+     "password"
+    ],
+    "complete": false
+   }
+  },
+  {
+   "name": "an administrator who gave a password is asked for a code",
+   "config": {
+    "rule": [
+     {
+      "subjects": [
+       "group:admins"
+      ],
+      "allow": [
+       [
+        "password",
+        "totp"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [
+     {
+      "method": "password"
+     }
+    ],
+    "address": "10.1.2.3",
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    }
+   },
+   "expect": {
+    "methods": [
+     "totp"
+    ],
+    "complete": false
+   }
+  },
+  {
+   "name": "an administrator with a password and a code is through",
+   "config": {
+    "rule": [
+     {
+      "subjects": [
+       "group:admins"
+      ],
+      "allow": [
+       [
+        "password",
+        "totp"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [
+     {
+      "method": "password"
+     },
+     {
+      "method": "totp"
+     }
+    ],
+    "address": "10.1.2.3",
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    }
+   },
+   "expect": {
+    "methods": [],
+    "complete": true
+   }
+  },
+  {
+   "name": "someone else needs the password alone",
+   "config": {
+    "rule": [
+     {
+      "subjects": [
+       "group:admins"
+      ],
+      "allow": [
+       [
+        "password",
+        "totp"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [
+     {
+      "method": "password"
+     }
+    ],
+    "address": "10.1.2.3",
+    "person": {
+     "id": "id-bob",
+     "name": "bob",
+     "groups": [],
+     "attributes": {}
+    }
+   },
+   "expect": {
+    "methods": [],
+    "complete": true
+   }
+  },
+  {
+   "name": "only the first rule that applies decides once someone is named",
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "certificate"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [
+     {
+      "method": "password"
+     }
+    ],
+    "address": "10.0.0.5",
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    }
+   },
+   "expect": {
+    "methods": [],
+    "complete": false
+   }
+  },
+  {
+   "name": "every method of a chain is needed",
+   "config": {
+    "rule": [
+     {
+      "allow": [
+       [
+        "password",
+        "totp"
+       ],
+       [
+        "certificate"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [
+     {
+      "method": "password"
+     }
+    ],
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    }
+   },
+   "expect": {
+    "methods": [
+     "totp"
+    ],
+    "complete": false
+   }
+  },
+  {
+   "name": "a chain not yet started offers all alternatives",
+   "config": {
+    "rule": [
+     {
+      "allow": [
+       [
+        "password",
+        "totp"
+       ],
+       [
+        "certificate"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [],
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    }
+   },
+   "expect": {
+    "methods": [
+     "password",
+     "totp",
+     "certificate"
+    ],
+    "complete": false
+   }
+  },
+  {
+   "name": "a step no chain holds is a refusal",
+   "config": {
+    "rule": [
+     {
+      "allow": [
+       [
+        "password",
+        "totp"
+       ],
+       [
+        "certificate"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [
+     {
+      "method": "key"
+     }
+    ],
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    }
+   },
+   "expect": {
+    "methods": [],
+    "complete": false
+   }
+  },
+  {
+   "name": "an enrolment rule accepts its own chain",
+   "config": {
+    "rule": [
+     {
+      "purposes": [
+       "enrol"
+      ],
+      "allow": [
+       [
+        "certificate"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "enrol",
+    "done": [
+     {
+      "method": "certificate"
+     }
+    ],
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    }
+   },
+   "expect": {
+    "methods": [],
+    "complete": true
+   }
+  },
+  {
+   "name": "an enrolment rule refuses a password",
+   "config": {
+    "rule": [
+     {
+      "purposes": [
+       "enrol"
+      ],
+      "allow": [
+       [
+        "certificate"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "enrol",
+    "done": [
+     {
+      "method": "password"
+     }
+    ],
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    }
+   },
+   "expect": {
+    "methods": [],
+    "complete": false
+   }
+  },
+  {
+   "name": "with no enrolment rule enrolment is refused",
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password"
+       ],
+       [
+        "certificate"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "enrol",
+    "done": [
+     {
+      "method": "password"
+     }
+    ],
+    "address": "10.1.2.3",
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    }
+   },
+   "expect": {
+    "methods": [],
+    "complete": false
+   }
+  },
+  {
+   "name": "the enrolment rule does not apply to a sign-in",
+   "config": {
+    "rule": [
+     {
+      "purposes": [
+       "enrol"
+      ],
+      "allow": [
+       [
+        "certificate"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [
+     {
+      "method": "password"
+     }
+    ],
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    }
+   },
+   "expect": {
+    "methods": [],
+    "complete": true
+   }
+  },
+  {
+   "name": "a purpose nobody knows matches nothing",
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password"
+       ],
+       [
+        "certificate"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "something_else",
+    "done": [],
+    "address": "10.1.2.3"
+   },
+   "expect": {
+    "methods": [],
+    "complete": false
+   }
+  },
+  {
+   "name": "no rule offers nothing",
+   "config": {
+    "rule": []
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [],
+    "address": "10.1.2.3"
+   },
+   "expect": {
+    "methods": [],
+    "complete": false
+   }
+  },
+  {
+   "name": "a client and a service narrow a rule",
+   "config": {
+    "rule": [
+     {
+      "clients": [
+       "api"
+      ],
+      "services": [
+       "unex"
+      ],
+      "allow": [
+       [
+        "key"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [],
+    "client": "api",
+    "service": "unex"
+   },
+   "expect": {
+    "methods": [
+     "key"
+    ],
+    "complete": false
+   }
+  },
+  {
+   "name": "an unsaid client does not match a rule that names one",
+   "config": {
+    "rule": [
+     {
+      "clients": [
+       "api"
+      ],
+      "allow": [
+       [
+        "key"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": []
+   },
+   "expect": {
+    "methods": [
+     "password"
+    ],
+    "complete": false
+   }
+  },
+  {
+   "name": "a rule that names providers offers only them",
+   "config": {
+    "rule": [
+     {
+      "providers": [
+       "ldap",
+       "local"
+      ],
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": []
+   },
+   "expect": {
+    "methods": [
+     "password"
+    ],
+    "complete": false,
+    "providers": {
+     "password": [
+      "ldap",
+      "local"
+     ]
+    }
+   }
+  },
+  {
+   "name": "a step by a provider the rule does not name does not count",
+   "config": {
+    "rule": [
+     {
+      "providers": [
+       "ldap"
+      ],
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "resume",
+    "done": [
+     {
+      "method": "password",
+      "provider": "local"
+     }
+    ],
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    }
+   },
+   "expect": {
+    "methods": [
+     "password"
+    ],
+    "complete": false,
+    "providers": {
+     "password": [
+      "ldap"
+     ]
+    }
+   }
+  },
+  {
+   "name": "a step by a named provider counts",
+   "config": {
+    "rule": [
+     {
+      "providers": [
+       "ldap"
+      ],
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "resume",
+    "done": [
+     {
+      "method": "password",
+      "provider": "ldap"
+     }
+    ],
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    }
+   },
+   "expect": {
+    "methods": [],
+    "complete": true
+   }
+  },
+  {
+   "name": "a subject rule that is unknown before a name adds its methods",
+   "config": {
+    "rule": [
+     {
+      "subjects": [
+       "account:alice"
+      ],
+      "allow": [
+       [
+        "key"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": []
+   },
+   "expect": {
+    "methods": [
+     "key",
+     "password"
+    ],
+    "complete": false
+   }
+  },
+  {
+   "name": "steps that name the same person count",
+   "config": {
+    "rule": [
+     {
+      "allow": [
+       [
+        "password",
+        "totp"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    },
+    "done": [
+     {
+      "method": "password",
+      "person": "id-alice"
+     }
+    ]
+   },
+   "expect": {
+    "methods": [
+     "totp"
+    ],
+    "complete": false
+   }
+  },
+  {
+   "name": "steps that name different people are refused",
+   "config": {
+    "rule": [
+     {
+      "allow": [
+       [
+        "password",
+        "totp"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    },
+    "done": [
+     {
+      "method": "password",
+      "person": "id-alice"
+     },
+     {
+      "method": "totp",
+      "person": "id-bob"
+     }
+    ]
+   },
+   "expect": {
+    "methods": [],
+    "complete": false
+   }
+  },
+  {
+   "name": "a step that names someone other than the person is refused",
+   "config": {
+    "rule": [
+     {
+      "allow": [
+       [
+        "password",
+        "totp"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    },
+    "done": [
+     {
+      "method": "password",
+      "person": "id-bob"
+     }
+    ]
+   },
+   "expect": {
+    "methods": [],
+    "complete": false
+   }
+  },
+  {
+   "name": "a step that names nobody is not held against the sign-in",
+   "config": {
+    "rule": [
+     {
+      "allow": [
+       [
+        "password",
+        "totp"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "resume",
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    },
+    "done": [
+     {
+      "method": "password"
+     },
+     {
+      "method": "totp",
+      "person": "id-alice"
+     }
+    ]
+   },
+   "expect": {
+    "methods": [],
+    "complete": true
+   }
+  }
+ ]
+}

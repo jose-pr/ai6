@@ -25,6 +25,9 @@ pub mod purposes {
     pub const RESUME: &str = "resume";
     /// A person sets up or changes a second step of their own.
     pub const ENROL: &str = "enrol";
+    /// A sign-in that has passed some steps asks to set up a second step it is waiting for, before any session exists.
+    /// Whoever holds those steps may reach it, so a policy allows it only by a rule that names it.
+    pub const ENROL_FIRST: &str = "enrol_first";
 }
 
 /// What kind of client signs in, as [`SignInContext::client`] says.

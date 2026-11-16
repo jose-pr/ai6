@@ -1,0 +1,1139 @@
+{
+ "stand_ins": {
+  "password": "valid for alice with the secret pw; the stand-in provider ldap rejects every password, local accepts alice/pw",
+  "certificate": "valid when name is alice or bob, naming that person",
+  "totp": "valid for the secret 123456 when name is the id of the person already named",
+  "people": {
+   "alice": {
+    "id": "id-alice",
+    "name": "alice",
+    "groups": [
+     "admins"
+    ],
+    "attributes": {}
+   },
+   "bob": {
+    "id": "id-bob",
+    "name": "bob",
+    "groups": [],
+    "attributes": {}
+   }
+  },
+  "recovery_code": "valid once for the secret RECOVER-1 when name is the id of the person already named",
+  "counting": "the stand-in consumer counts failed second-factor attempts per person id and, after 3, answers failed without asking the authenticator; a right second factor resets the count"
+ },
+ "flows": [
+  {
+   "name": "the offer for the page is the policy answer with nothing done",
+   "point": 1,
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password"
+       ],
+       [
+        "certificate"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ]
+      ]
+     }
+    ]
+   },
+   "steps": [
+    {
+     "action": "offer",
+     "address": "10.1.2.3",
+     "expect": {
+      "result": "methods",
+      "methods": [
+       "password",
+       "certificate"
+      ],
+      "authenticator_calls": 0,
+      "throttled": false
+     }
+    },
+    {
+     "action": "offer",
+     "address": "203.0.113.7",
+     "expect": {
+      "result": "methods",
+      "methods": [
+       "certificate"
+      ],
+      "authenticator_calls": 0,
+      "throttled": false
+     }
+    },
+    {
+     "action": "offer",
+     "expect": {
+      "result": "methods",
+      "methods": [
+       "certificate"
+      ],
+      "authenticator_calls": 0,
+      "throttled": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "a method not offered from here is refused, asks nobody and counts nowhere",
+   "point": 2,
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password"
+       ],
+       [
+        "certificate"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ]
+      ]
+     }
+    ]
+   },
+   "steps": [
+    {
+     "action": "present",
+     "address": "203.0.113.7",
+     "method": "password",
+     "name": "alice",
+     "secret": "pw",
+     "expect": {
+      "result": "refused_unasked",
+      "authenticator_calls": 0,
+      "throttled": false
+     }
+    },
+    {
+     "action": "present",
+     "address": "203.0.113.7",
+     "method": "password",
+     "name": "alice",
+     "secret": "wrong",
+     "expect": {
+      "result": "refused_unasked",
+      "authenticator_calls": 0,
+      "throttled": false
+     }
+    },
+    {
+     "action": "present",
+     "address": "203.0.113.7",
+     "method": "certificate",
+     "name": "alice",
+     "expect": {
+      "result": "signed_in",
+      "authenticator_calls": 1,
+      "throttled": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "only the offered providers are asked, in list order",
+   "point": 3,
+   "config": {
+    "rule": [
+     {
+      "providers": [
+       "ldap",
+       "local"
+      ],
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     }
+    ]
+   },
+   "steps": [
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "password",
+     "name": "alice",
+     "secret": "pw",
+     "expect": {
+      "result": "signed_in",
+      "authenticator_calls": 2,
+      "throttled": false,
+      "asked": [
+       "ldap",
+       "local"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "name": "a first factor opens a pending sign-in and the second completes it",
+   "point": 4,
+   "config": {
+    "rule": [
+     {
+      "subjects": [
+       "group:admins"
+      ],
+      "allow": [
+       [
+        "password",
+        "totp"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     }
+    ]
+   },
+   "steps": [
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "password",
+     "name": "alice",
+     "secret": "pw",
+     "expect": {
+      "result": "next",
+      "methods": [
+       "totp"
+      ],
+      "authenticator_calls": 1,
+      "throttled": false
+     }
+    },
+    {
+     "action": "offer",
+     "address": "10.1.2.3",
+     "expect": {
+      "result": "methods",
+      "methods": [
+       "totp"
+      ],
+      "authenticator_calls": 0,
+      "throttled": false
+     }
+    },
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "totp",
+     "name": "id-alice",
+     "secret": "123456",
+     "expect": {
+      "result": "signed_in",
+      "authenticator_calls": 1,
+      "throttled": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "a wrong code is counted like a wrong password",
+   "point": 4,
+   "config": {
+    "rule": [
+     {
+      "subjects": [
+       "group:admins"
+      ],
+      "allow": [
+       [
+        "password",
+        "totp"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     }
+    ]
+   },
+   "steps": [
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "password",
+     "name": "alice",
+     "secret": "pw",
+     "expect": {
+      "result": "next",
+      "methods": [
+       "totp"
+      ],
+      "authenticator_calls": 1,
+      "throttled": false
+     }
+    },
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "totp",
+     "name": "id-alice",
+     "secret": "000000",
+     "expect": {
+      "result": "failed",
+      "authenticator_calls": 1,
+      "throttled": true
+     }
+    },
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "password",
+     "name": "alice",
+     "secret": "pw",
+     "expect": {
+      "result": "refused_unasked",
+      "authenticator_calls": 0,
+      "throttled": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "a wrong password counts and a name nobody has answers the same",
+   "point": 4,
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password"
+       ],
+       [
+        "certificate"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ]
+      ]
+     }
+    ]
+   },
+   "steps": [
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "password",
+     "name": "alice",
+     "secret": "wrong",
+     "expect": {
+      "result": "failed",
+      "authenticator_calls": 1,
+      "throttled": true
+     }
+    },
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "password",
+     "name": "nobody",
+     "secret": "wrong",
+     "expect": {
+      "result": "failed",
+      "authenticator_calls": 1,
+      "throttled": true
+     }
+    }
+   ]
+  },
+  {
+   "name": "the next factor must name the same person",
+   "point": 5,
+   "config": {
+    "rule": [
+     {
+      "allow": [
+       [
+        "password",
+        "certificate"
+       ]
+      ]
+     }
+    ]
+   },
+   "steps": [
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "password",
+     "name": "alice",
+     "secret": "pw",
+     "expect": {
+      "result": "next",
+      "methods": [
+       "certificate"
+      ],
+      "authenticator_calls": 1,
+      "throttled": false
+     }
+    },
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "certificate",
+     "name": "bob",
+     "expect": {
+      "result": "failed",
+      "authenticator_calls": 1,
+      "throttled": true
+     }
+    }
+   ]
+  },
+  {
+   "name": "a session is decided again when it resumes",
+   "point": 6,
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password"
+       ],
+       [
+        "certificate"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ]
+      ]
+     }
+    ]
+   },
+   "steps": [
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "password",
+     "name": "alice",
+     "secret": "pw",
+     "expect": {
+      "result": "signed_in",
+      "authenticator_calls": 1,
+      "throttled": false
+     }
+    },
+    {
+     "action": "resume",
+     "address": "10.1.2.3",
+     "expect": {
+      "result": "signed_in",
+      "authenticator_calls": 0,
+      "throttled": false
+     }
+    },
+    {
+     "action": "resume",
+     "address": "203.0.113.7",
+     "expect": {
+      "result": "failed",
+      "authenticator_calls": 0,
+      "throttled": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "a code with nothing pending is not offered and asks nobody",
+   "point": 2,
+   "config": {
+    "rule": [
+     {
+      "subjects": [
+       "group:admins"
+      ],
+      "allow": [
+       [
+        "password",
+        "totp"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     }
+    ]
+   },
+   "steps": [
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "totp",
+     "name": "id-alice",
+     "secret": "123456",
+     "expect": {
+      "result": "refused_unasked",
+      "authenticator_calls": 0,
+      "throttled": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "a code naming another person's id fails and is counted",
+   "point": 5,
+   "config": {
+    "rule": [
+     {
+      "subjects": [
+       "group:admins"
+      ],
+      "allow": [
+       [
+        "password",
+        "totp"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     }
+    ]
+   },
+   "steps": [
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "password",
+     "name": "alice",
+     "secret": "pw",
+     "expect": {
+      "result": "next",
+      "methods": [
+       "totp"
+      ],
+      "authenticator_calls": 1,
+      "throttled": false
+     }
+    },
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "totp",
+     "name": "id-bob",
+     "secret": "123456",
+     "expect": {
+      "result": "failed",
+      "authenticator_calls": 1,
+      "throttled": true
+     }
+    }
+   ]
+  },
+  {
+   "name": "a valid password the policy then refuses is answered like a wrong one",
+   "point": 4,
+   "config": {
+    "rule": [
+     {
+      "subjects": [
+       "account:alice"
+      ],
+      "allow": [
+       [
+        "certificate"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     }
+    ]
+   },
+   "steps": [
+    {
+     "action": "offer",
+     "address": "10.1.2.3",
+     "expect": {
+      "result": "methods",
+      "methods": [
+       "certificate",
+       "password"
+      ],
+      "authenticator_calls": 0,
+      "throttled": false
+     }
+    },
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "password",
+     "name": "alice",
+     "secret": "pw",
+     "expect": {
+      "result": "failed",
+      "authenticator_calls": 1,
+      "throttled": true
+     }
+    }
+   ]
+  },
+  {
+   "name": "a session is not kept when the address is unknown at resume",
+   "point": 6,
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password"
+       ],
+       [
+        "certificate"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ]
+      ]
+     }
+    ]
+   },
+   "steps": [
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "password",
+     "name": "alice",
+     "secret": "pw",
+     "expect": {
+      "result": "signed_in",
+      "authenticator_calls": 1,
+      "throttled": false
+     }
+    },
+    {
+     "action": "resume",
+     "expect": {
+      "result": "failed",
+      "authenticator_calls": 0,
+      "throttled": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "a certificate session survives an unknown address at resume",
+   "point": 6,
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password"
+       ],
+       [
+        "certificate"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ]
+      ]
+     }
+    ]
+   },
+   "steps": [
+    {
+     "action": "present",
+     "address": "203.0.113.7",
+     "method": "certificate",
+     "name": "alice",
+     "expect": {
+      "result": "signed_in",
+      "authenticator_calls": 1,
+      "throttled": false
+     }
+    },
+    {
+     "action": "resume",
+     "expect": {
+      "result": "signed_in",
+      "authenticator_calls": 0,
+      "throttled": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "a recovery code completes the chain that names it",
+   "point": 4,
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password",
+        "totp"
+       ],
+       [
+        "password",
+        "recovery_code"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "password",
+        "totp"
+       ]
+      ]
+     }
+    ]
+   },
+   "steps": [
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "password",
+     "name": "alice",
+     "secret": "pw",
+     "expect": {
+      "result": "next",
+      "methods": [
+       "totp",
+       "recovery_code"
+      ],
+      "authenticator_calls": 1,
+      "throttled": false
+     }
+    },
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "recovery_code",
+     "name": "id-alice",
+     "secret": "RECOVER-1",
+     "expect": {
+      "result": "signed_in",
+      "authenticator_calls": 1,
+      "throttled": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "a recovery code is good once",
+   "point": 4,
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password",
+        "totp"
+       ],
+       [
+        "password",
+        "recovery_code"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "password",
+        "totp"
+       ]
+      ]
+     }
+    ]
+   },
+   "steps": [
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "password",
+     "name": "alice",
+     "secret": "pw",
+     "expect": {
+      "result": "next",
+      "methods": [
+       "totp",
+       "recovery_code"
+      ],
+      "authenticator_calls": 1,
+      "throttled": false
+     }
+    },
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "recovery_code",
+     "name": "id-alice",
+     "secret": "RECOVER-1",
+     "expect": {
+      "result": "signed_in",
+      "authenticator_calls": 1,
+      "throttled": false
+     }
+    },
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "password",
+     "name": "alice",
+     "secret": "pw",
+     "expect": {
+      "result": "next",
+      "methods": [
+       "totp",
+       "recovery_code"
+      ],
+      "authenticator_calls": 1,
+      "throttled": false
+     }
+    },
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "recovery_code",
+     "name": "id-alice",
+     "secret": "RECOVER-1",
+     "expect": {
+      "result": "failed",
+      "authenticator_calls": 1,
+      "throttled": true
+     }
+    }
+   ]
+  },
+  {
+   "name": "a recovery code is not offered from outside",
+   "point": 2,
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password",
+        "totp"
+       ],
+       [
+        "password",
+        "recovery_code"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "password",
+        "totp"
+       ]
+      ]
+     }
+    ]
+   },
+   "steps": [
+    {
+     "action": "present",
+     "address": "203.0.113.7",
+     "method": "password",
+     "name": "alice",
+     "secret": "pw",
+     "expect": {
+      "result": "next",
+      "methods": [
+       "totp"
+      ],
+      "authenticator_calls": 1,
+      "throttled": false
+     }
+    },
+    {
+     "action": "present",
+     "address": "203.0.113.7",
+     "method": "recovery_code",
+     "name": "id-alice",
+     "secret": "RECOVER-1",
+     "expect": {
+      "result": "refused_unasked",
+      "authenticator_calls": 0,
+      "throttled": false
+     }
+    }
+   ]
+  },
+  {
+   "name": "second-factor failures are counted per person and end further tries",
+   "point": 4,
+   "config": {
+    "rule": [
+     {
+      "subjects": [
+       "group:admins"
+      ],
+      "allow": [
+       [
+        "password",
+        "totp"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     }
+    ]
+   },
+   "steps": [
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "password",
+     "name": "alice",
+     "secret": "pw",
+     "expect": {
+      "result": "next",
+      "methods": [
+       "totp"
+      ],
+      "authenticator_calls": 1,
+      "throttled": false
+     }
+    },
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "totp",
+     "name": "id-alice",
+     "secret": "000000",
+     "expect": {
+      "result": "failed",
+      "authenticator_calls": 1,
+      "throttled": true
+     }
+    },
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "totp",
+     "name": "id-alice",
+     "secret": "000000",
+     "expect": {
+      "result": "failed",
+      "authenticator_calls": 1,
+      "throttled": true
+     }
+    },
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "totp",
+     "name": "id-alice",
+     "secret": "000000",
+     "expect": {
+      "result": "failed",
+      "authenticator_calls": 1,
+      "throttled": true
+     }
+    },
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "totp",
+     "name": "id-alice",
+     "secret": "123456",
+     "expect": {
+      "result": "failed",
+      "authenticator_calls": 0,
+      "throttled": true
+     }
+    }
+   ]
+  },
+  {
+   "name": "a person's count of wrong codes is forgotten after a quiet period",
+   "point": 4,
+   "config": {
+    "rule": [
+     {
+      "subjects": [
+       "group:admins"
+      ],
+      "allow": [
+       [
+        "password",
+        "totp"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     }
+    ]
+   },
+   "steps": [
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "password",
+     "name": "alice",
+     "secret": "pw",
+     "expect": {
+      "result": "next",
+      "methods": [
+       "totp"
+      ],
+      "authenticator_calls": 1,
+      "throttled": false
+     }
+    },
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "totp",
+     "name": "id-alice",
+     "secret": "000000",
+     "expect": {
+      "result": "failed",
+      "authenticator_calls": 1,
+      "throttled": true
+     }
+    },
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "totp",
+     "name": "id-alice",
+     "secret": "000000",
+     "expect": {
+      "result": "failed",
+      "authenticator_calls": 1,
+      "throttled": true
+     }
+    },
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "totp",
+     "name": "id-alice",
+     "secret": "000000",
+     "expect": {
+      "result": "failed",
+      "authenticator_calls": 1,
+      "throttled": true
+     }
+    },
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "totp",
+     "name": "id-alice",
+     "secret": "123456",
+     "expect": {
+      "result": "failed",
+      "authenticator_calls": 0,
+      "throttled": true
+     },
+     "after_seconds": 60
+    },
+    {
+     "action": "present",
+     "address": "10.1.2.3",
+     "method": "totp",
+     "name": "id-alice",
+     "secret": "123456",
+     "expect": {
+      "result": "signed_in",
+      "authenticator_calls": 1,
+      "throttled": false
+     },
+     "after_seconds": 901
+    }
+   ]
+  }
+ ]
+}
