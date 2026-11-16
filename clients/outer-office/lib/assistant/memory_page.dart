@@ -32,66 +32,79 @@ class MemoryShelf {
   int get hashCode => scope.hashCode;
 }
 
-/// One entry of a memory, without its text.
+/// One memory (a Report of kind `memory`), without its text.
 @immutable
 class MemorySummary {
   const MemorySummary({
     required this.id,
+    required this.title,
     required this.summary,
     required this.revision,
-    required this.bytes,
-    required this.updatedBy,
     required this.updatedAt,
-    required this.writtenBy,
     this.scope = '',
-    this.name,
-    this.exposures = const [],
+    this.updatedBy = '',
+    this.writtenBy = '',
+    this.exposed = false,
+    this.topics = const [],
     this.compartments = const [],
   });
 
-  /// A generated UUID; names and summaries may repeat.
+  /// A generated UUID; titles and summaries may repeat.
   final String id;
   final String scope;
-  final String? name;
+  final String title;
 
   /// One line saying what it is for.
   final String summary;
 
   /// The revision a change to it names.
   final int revision;
-  final int bytes;
+
+  /// Who made the revision it holds now; empty in a listing.
   final String updatedBy;
 
   /// Unix seconds.
   final double updatedAt;
 
-  /// Who wrote what it holds now.
+  /// Who filed it first; empty in a listing.
   final String writtenBy;
 
-  /// How what wrote it had read outside text; none means it had not.
-  final List<String> exposures;
+  /// What wrote it had read outside text.
+  final bool exposed;
 
-  /// It is visible only to those read into one of these.
+  /// Free words a search uses; a save sends them back as they were.
+  final List<String> topics;
+
+  /// It is visible only to those read into each of these.
   final List<String> compartments;
 
-  bool get exposed => exposures.isNotEmpty;
+  /// Who filed it, as the Report's filer reads: `person:ID`, `agent:CODENAME` or
+  /// `moneypenny:ID`.
+  static String filedBy(Map<String, dynamic>? filer) {
+    final id = filer?['person'] ?? filer?['agent'] ?? '';
+    return switch (filer?['type']) {
+      'person' => 'person:$id',
+      'assistant' => 'moneypenny:$id',
+      'agent' || 'charge' => 'agent:$id',
+      final String other => other,
+      _ => '',
+    };
+  }
 
   factory MemorySummary.fromJson(Map<String, dynamic> json) {
-    final source = json['source'] as Map<String, dynamic>? ?? const {};
     return MemorySummary(
       id: json['id'] as String,
       scope: json['scope'] as String? ?? '',
-      name: json['name'] as String?,
+      title: json['title'] as String? ?? '',
       summary: json['summary'] as String? ?? '',
       revision: (json['revision'] as num?)?.toInt() ?? 1,
-      bytes: (json['bytes'] as num?)?.toInt() ?? 0,
       updatedBy: json['updated_by'] as String? ?? '',
-      updatedAt: (json['updated_at'] as num?)?.toDouble() ?? 0,
-      writtenBy: source['by'] as String? ?? '',
-      exposures: [
-        for (final exposure
-            in source['exposures'] as List<dynamic>? ?? const [])
-          exposure as String,
+      updatedAt: (json['updated'] as num?)?.toDouble() ?? 0,
+      writtenBy: filedBy(json['filer'] as Map<String, dynamic>?),
+      exposed: json['exposed'] as bool? ?? false,
+      topics: [
+        for (final topic in json['topics'] as List<dynamic>? ?? const [])
+          topic as String,
       ],
       compartments: [
         for (final compartment
@@ -102,7 +115,7 @@ class MemorySummary {
   }
 }
 
-/// One entry with its text.
+/// One memory with its text.
 @immutable
 class MemoryRecord {
   const MemoryRecord({required this.summary, required this.content});
@@ -112,7 +125,7 @@ class MemoryRecord {
 
   factory MemoryRecord.fromJson(Map<String, dynamic> json) => MemoryRecord(
     summary: MemorySummary.fromJson(json),
-    content: json['content'] as String? ?? '',
+    content: json['text'] as String? ?? '',
   );
 }
 
@@ -129,7 +142,7 @@ class MemoryListing {
 
   factory MemoryListing.fromJson(Map<String, dynamic> json) {
     final entries = [
-      for (final entry in json['entries'] as List<dynamic>? ?? const [])
+      for (final entry in json['reports'] as List<dynamic>? ?? const [])
         MemorySummary.fromJson(entry as Map<String, dynamic>),
     ];
     return MemoryListing(
@@ -144,64 +157,59 @@ class MemoryListing {
     entries: [
       MemorySummary(
         id: '6f1e4a6a-9c55-4a0c-9d5c-2f8a0b6c1e11',
-        name: 'prefs',
+        title: 'prefs',
         summary: 'How the operator likes answers',
         revision: 2,
-        bytes: 58,
-        updatedBy: 'moneypenny:operator',
         updatedAt: 1760000000,
+        updatedBy: 'moneypenny:operator',
         writtenBy: 'moneypenny:operator',
       ),
       MemorySummary(
         id: '0c8b7a35-5a4b-4d7a-8f50-9d2c6e1f7a22',
+        title: 'On call',
         summary: 'Who is on call this quarter',
         revision: 1,
-        bytes: 41,
-        updatedBy: 'person:operator',
         updatedAt: 1759000000,
+        updatedBy: 'person:operator',
         writtenBy: 'person:operator',
       ),
     ],
   );
 }
 
-/// A change an Agent asked for, waiting for a person.
+/// A change an Agent asked for, waiting for a person: an open Report of kind `memory`.
 @immutable
 class MemoryProposalSummary {
   const MemoryProposalSummary({
     required this.id,
-    required this.summary,
+    required this.title,
     required this.content,
     required this.writtenBy,
     this.entry,
     this.forget = false,
-    this.exposures = const [],
+    this.exposed = false,
   });
 
   final String id;
-  final String summary;
+  final String title;
   final String content;
   final String writtenBy;
 
-  /// The entry it changes; `null` for a new one.
+  /// The memory it changes; `null` for a new one.
   final String? entry;
   final bool forget;
-  final List<String> exposures;
+  final bool exposed;
 
   factory MemoryProposalSummary.fromJson(Map<String, dynamic> json) {
-    final source = json['source'] as Map<String, dynamic>? ?? const {};
+    final proposes = json['proposes'] as Map<String, dynamic>?;
     return MemoryProposalSummary(
       id: json['id'] as String,
-      summary: json['summary'] as String? ?? '',
-      content: json['content'] as String? ?? '',
-      writtenBy: source['by'] as String? ?? '',
-      entry: json['entry'] as String?,
-      forget: json['forget'] as bool? ?? false,
-      exposures: [
-        for (final exposure
-            in source['exposures'] as List<dynamic>? ?? const [])
-          exposure as String,
-      ],
+      title: json['title'] as String? ?? '',
+      content: json['text'] as String? ?? '',
+      writtenBy: MemorySummary.filedBy(json['filer'] as Map<String, dynamic>?),
+      entry: proposes?['target'] as String?,
+      forget: proposes?['forget'] as bool? ?? false,
+      exposed: json['exposed'] as bool? ?? false,
     );
   }
 }
@@ -216,12 +224,10 @@ class MemoryRefused implements Exception {
   String toString() => message;
 }
 
-/// One line saying who wrote [writtenBy] and what it was marked with.
-String memorySource(String writtenBy, List<String> exposures) {
-  final written = 'Written by $writtenBy';
-  return exposures.isEmpty
-      ? written
-      : '$written, after reading outside text (${exposures.join(', ')})';
+/// One line saying who wrote [writtenBy] and whether it was marked.
+String memorySource(String writtenBy, bool exposed) {
+  final written = writtenBy.isEmpty ? 'Written' : 'Written by $writtenBy';
+  return exposed ? '$written, after reading outside text' : written;
 }
 
 /// The memories the signed-in person may read: what Moneypenny keeps of them, what everyone
@@ -320,11 +326,11 @@ class _MemoryPageState extends State<MemoryPage> {
   }
 
   Future<void> _forget(MemorySummary entry) async {
-    if (!await confirmForget(context, entry.summary) || !mounted) return;
+    if (!await confirmForget(context, entry.title) || !mounted) return;
     try {
       await widget.board.forgetMemory(entry.id, scope: _shelf.scope);
       if (!mounted) return;
-      _say('Forgotten: ${entry.summary}.');
+      _say('Forgotten: ${entry.title}.');
       await _load();
     } on Object catch (error) {
       if (mounted) setState(() => _error = '$error');
@@ -337,8 +343,8 @@ class _MemoryPageState extends State<MemoryPage> {
       if (!mounted) return;
       _say(
         approve
-            ? 'Approved: ${proposal.summary}.'
-            : 'Rejected: ${proposal.summary}.',
+            ? 'Approved: ${proposal.title}.'
+            : 'Rejected: ${proposal.title}.',
       );
       await _load();
     } on Object catch (error) {
@@ -429,20 +435,20 @@ class _MemoryPageState extends State<MemoryPage> {
                 key: Key('memory-proposal-${proposal.id}'),
                 child: ListTile(
                   leading: Icon(
-                    proposal.exposures.isNotEmpty
+                    proposal.exposed
                         ? Icons.warning_amber_outlined
                         : Icons.inbox_outlined,
                   ),
                   title: Text(
                     '${proposal.forget ? 'Forget' : 'Keep'}: '
-                    '${revealInvisible(proposal.summary)}',
+                    '${revealInvisible(proposal.title)}',
                   ),
                   subtitle: Text(
                     [
-                      memorySource(proposal.writtenBy, proposal.exposures),
+                      memorySource(proposal.writtenBy, proposal.exposed),
                       if (!proposal.forget) revealInvisible(proposal.content),
                     ].join('\n'),
-                    style: proposal.exposures.isNotEmpty
+                    style: proposal.exposed
                         ? TextStyle(color: error)
                         : null,
                   ),
@@ -450,12 +456,12 @@ class _MemoryPageState extends State<MemoryPage> {
                   trailing: Wrap(
                     children: [
                       IconButton(
-                        tooltip: 'Approve ${proposal.summary}',
+                        tooltip: 'Approve ${proposal.title}',
                         onPressed: () => unawaited(_decide(proposal, true)),
                         icon: const Icon(Icons.check),
                       ),
                       IconButton(
-                        tooltip: 'Reject ${proposal.summary}',
+                        tooltip: 'Reject ${proposal.title}',
                         onPressed: () => unawaited(_decide(proposal, false)),
                         icon: const Icon(Icons.close),
                       ),
@@ -490,21 +496,19 @@ class _MemoryPageState extends State<MemoryPage> {
                         ? Icons.lock_outline
                         : Icons.description_outlined,
                   ),
-                  title: Text(revealInvisible(entry.summary)),
+                  title: Text(revealInvisible(entry.title)),
                   subtitle: Text(
                     [
-                      if (entry.name case final name?) revealInvisible(name),
-                      memorySource(entry.writtenBy, entry.exposures),
-                      if (entry.compartments.isNotEmpty)
-                        'Only for ${entry.compartments.join(', ')}',
-                      '${entry.bytes} bytes',
+                      if (entry.summary.isNotEmpty) revealInvisible(entry.summary),
+                      if (entry.exposed) 'Written after reading outside text',
+                      'Revision ${entry.revision}',
                     ].join(' · '),
                   ),
                   onTap: () => unawaited(_open(entry)),
                   trailing: widget.board.demo
                       ? null
                       : IconButton(
-                          tooltip: 'Forget ${entry.summary}',
+                          tooltip: 'Forget ${entry.title}',
                           onPressed: () => unawaited(_forget(entry)),
                           icon: const Icon(Icons.delete_outline),
                         ),
@@ -570,7 +574,7 @@ class MemoryEditorPage extends StatefulWidget {
 }
 
 class _MemoryEditorPageState extends State<MemoryEditorPage> {
-  final _name = TextEditingController();
+  final _title = TextEditingController();
   final _summary = TextEditingController();
   final _content = TextEditingController();
   final _compartments = TextEditingController();
@@ -587,7 +591,7 @@ class _MemoryEditorPageState extends State<MemoryEditorPage> {
 
   @override
   void dispose() {
-    _name.dispose();
+    _title.dispose();
     _summary.dispose();
     _content.dispose();
     _compartments.dispose();
@@ -603,7 +607,7 @@ class _MemoryEditorPageState extends State<MemoryEditorPage> {
       if (!mounted) return;
       setState(() {
         _opened = record.summary;
-        _name.text = record.summary.name ?? '';
+        _title.text = record.summary.title;
         _summary.text = record.summary.summary;
         _content.text = record.content;
         _compartments.text = record.summary.compartments.join(', ');
@@ -626,7 +630,7 @@ class _MemoryEditorPageState extends State<MemoryEditorPage> {
       _problem = null;
     });
     try {
-      final name = _name.text.trim();
+      final title = _title.text.trim();
       final compartments = _named;
       final unchanged =
           _opened != null &&
@@ -636,14 +640,15 @@ class _MemoryEditorPageState extends State<MemoryEditorPage> {
         scope: widget.shelf.scope,
         id: widget.entry?.id,
         revision: _opened?.revision,
-        name: name.isEmpty ? null : name,
+        title: title,
         summary: _summary.text.trim(),
+        topics: _opened?.topics,
         content: _content.text,
         compartments: widget.shelf.scope == null || unchanged
             ? null
             : compartments,
       );
-      if (mounted) Navigator.of(context).pop('Saved ${_summary.text.trim()}.');
+      if (mounted) Navigator.of(context).pop('Saved $title.');
     } on Object catch (error) {
       if (mounted) setState(() => _problem = '$error');
     } finally {
@@ -652,7 +657,7 @@ class _MemoryEditorPageState extends State<MemoryEditorPage> {
   }
 
   Future<void> _forget() async {
-    final what = _opened?.summary ?? widget.entry!.summary;
+    final what = _opened?.title ?? widget.entry!.title;
     if (!await confirmForget(context, what) || !mounted) return;
     setState(() {
       _saving = true;
@@ -700,7 +705,7 @@ class _MemoryEditorPageState extends State<MemoryEditorPage> {
               Text(revealInvisible(problem), style: TextStyle(color: error)),
             if (opened != null)
               Text(
-                '${memorySource(opened.writtenBy, opened.exposures)}. Last changed by '
+                '${memorySource(opened.writtenBy, opened.exposed)}. Last changed by '
                 '${opened.updatedBy}, revision ${opened.revision}.'
                 '${opened.exposed ? ' Saving your edit clears the mark.' : ''}',
                 key: const Key('memory-source'),
@@ -709,21 +714,22 @@ class _MemoryEditorPageState extends State<MemoryEditorPage> {
                     : Theme.of(context).textTheme.bodySmall,
               ),
             TextField(
-              key: const Key('memory-summary'),
-              controller: _summary,
+              key: const Key('memory-title'),
+              controller: _title,
               enabled: !busy && !readOnly,
               decoration: const InputDecoration(
-                labelText: 'Summary',
-                helperText: 'One line saying what it is for; it is what a search shows.',
+                labelText: 'Title',
+                helperText: 'A short name; it may repeat.',
                 border: OutlineInputBorder(),
               ),
             ),
             TextField(
-              key: const Key('memory-name'),
-              controller: _name,
+              key: const Key('memory-summary'),
+              controller: _summary,
               enabled: !busy && !readOnly,
               decoration: const InputDecoration(
-                labelText: 'Name (optional)',
+                labelText: 'Summary (optional)',
+                helperText: 'One line saying what it is for; it is what a search shows.',
                 border: OutlineInputBorder(),
               ),
             ),

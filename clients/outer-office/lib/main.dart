@@ -2518,16 +2518,24 @@ class MissionBoard extends ChangeNotifier
     }
   }
 
-  /// A memory: Moneypenny's of the signed-in person with no [scope], else `global` or
-  /// `operation:<id>`; or what of it matches [query], best first. Throws [MemoryRefused] with the
+  /// The scope of a memory shelf: [scope] as the gateway names it, or the signed-in person's own.
+  String _memoryScope(String? scope) =>
+      scope ?? 'person:${userSession?.personId ?? ''}';
+
+  /// The memories (Reports of kind `memory`) of [scope], or of the signed-in person when it is
+  /// `null`: the newest, or what matches [query], best first. Throws [MemoryRefused] with the
   /// gateway's own words.
   Future<MemoryListing> loadMemory({String? scope, String? query}) async {
     if (demo) return MemoryListing.demo();
     final response = await _userRequest(
       'GET',
       Uri(
-        path: scope == null ? _memoryPath : _memoriesPath,
-        queryParameters: {'scope': ?scope, 'q': ?query},
+        path: _reportsPath,
+        queryParameters: {
+          'kind': 'memory',
+          'scope': _memoryScope(scope),
+          'words': query ?? '',
+        },
       ).toString(),
     );
     if (response.statusCode != 200) throw _memoryRefused(response);
@@ -2536,7 +2544,7 @@ class MissionBoard extends ChangeNotifier
     );
   }
 
-  /// One entry, by its ID, of the memory [scope] names as [loadMemory] does.
+  /// One memory, by its ID.
   Future<MemoryRecord> readMemory(String id, {String? scope}) async {
     if (demo) {
       return MemoryRecord(
@@ -2546,53 +2554,50 @@ class MissionBoard extends ChangeNotifier
         content: 'Prefers tables to prose, and the short version first.\n',
       );
     }
-    final response = await _userRequest(
-      'GET',
-      '${scope == null ? _memoryPath : _memoriesPath}/$id',
-    );
+    final response = await _userRequest('GET', '$_reportsPath/$id');
     if (response.statusCode != 200) throw _memoryRefused(response);
     return MemoryRecord.fromJson(
       jsonDecode(response.body) as Map<String, dynamic>,
     );
   }
 
-  /// Adds an entry to the memory [scope] names, or with [id] changes that one from [revision],
-  /// which is refused when the entry has moved on. [compartments], when given, protect it.
+  /// Files a memory in the scope [scope] names, or with [id] changes that one from [revision],
+  /// which is refused when it has moved on. [compartments], when given, protect it; [topics]
+  /// are kept as they were.
   Future<void> saveMemory({
-    required String summary,
+    required String title,
     required String content,
+    String summary = '',
     String? scope,
     String? id,
     int? revision,
-    String? name,
+    List<String>? topics,
     List<String>? compartments,
   }) async {
     if (demo) throw StateError('Memory changes are unavailable in preview.');
-    final base = scope == null ? _memoryPath : _memoriesPath;
     final body = {
-      if (id == null && scope != null) 'scope': scope,
-      'name': ?name,
-      'summary': summary,
-      'content': content,
+      if (id == null) 'scope': _memoryScope(scope),
+      if (id == null) 'kind': 'memory',
+      'title': title,
+      if (summary.isNotEmpty) 'summary': summary,
+      'text': content,
       'revision': ?revision,
+      'topics': ?topics,
       'compartments': ?compartments,
     };
     final response = id == null
-        ? await _userRequest('POST', base, body: body)
-        : await _userRequest('PUT', '$base/$id', body: body);
+        ? await _userRequest('POST', _reportsPath, body: body)
+        : await _userRequest('PUT', '$_reportsPath/$id', body: body);
     if (![200, 201, 202].contains(response.statusCode)) {
       throw _memoryRefused(response);
     }
   }
 
-  /// Forgets one entry of the memory [scope] names, with its earlier versions.
+  /// Forgets one memory, with its earlier revisions.
   Future<void> forgetMemory(String id, {String? scope}) async {
     if (demo) throw StateError('Memory changes are unavailable in preview.');
-    final response = await _userRequest(
-      'DELETE',
-      '${scope == null ? _memoryPath : _memoriesPath}/$id',
-    );
-    if (response.statusCode != 200) throw _memoryRefused(response);
+    final response = await _userRequest('DELETE', '$_reportsPath/$id');
+    if (![200, 202].contains(response.statusCode)) throw _memoryRefused(response);
   }
 
   /// What Agents proposed for the memory [scope] names that the person may decide, oldest first.
@@ -2601,25 +2606,28 @@ class MissionBoard extends ChangeNotifier
     final response = await _userRequest(
       'GET',
       Uri(
-        path: '$_memoriesPath/proposals',
-        queryParameters: {'scope': scope},
+        path: _reportsPath,
+        queryParameters: {'kind': 'memory', 'scope': scope, 'state': 'open'},
       ).toString(),
     );
     if (response.statusCode != 200) throw _memoryRefused(response);
     final json = jsonDecode(response.body) as Map<String, dynamic>;
     return [
-      for (final proposal in json['proposals'] as List<dynamic>? ?? const [])
+      for (final proposal in json['reports'] as List<dynamic>? ?? const [])
         MemoryProposalSummary.fromJson(proposal as Map<String, dynamic>),
     ];
   }
 
-  /// Approves a proposal, or rejects it.
+  /// Accepts a proposal, or closes it with no action.
   Future<void> decideMemoryProposal(String id, {required bool approve}) async {
     if (demo) throw StateError('Memory changes are unavailable in preview.');
     final response = await _userRequest(
-      'POST',
-      '$_memoriesPath/proposals/$id',
-      body: {'approve': approve},
+      'PUT',
+      '$_reportsPath/$id/assessment',
+      body: {
+        'assessment': approve ? 'accepted' : 'no_action',
+        'reason': approve ? 'Accepted in Outer Office.' : 'Declined in Outer Office.',
+      },
     );
     if (response.statusCode != 200) throw _memoryRefused(response);
   }
@@ -2634,8 +2642,7 @@ class MissionBoard extends ChangeNotifier
         operation.operationId,
   ];
 
-  static const _memoryPath = '/v1/user/assistant/memory';
-  static const _memoriesPath = '/v1/user/memories';
+  static const _reportsPath = '/v1/reports';
 
   /// Universal Exports' own words for a refused memory request, when it gave any.
   MemoryRefused _memoryRefused(http.Response response) {

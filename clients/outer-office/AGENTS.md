@@ -32,10 +32,11 @@ native windows build their app with `boardThemedApp`.
   the operator's Confirm. `test/fixtures/assistant_views.json` is shared with the gateway's
   tests: change both sides together.
 - The Memory page (`lib/assistant/memory_page.dart`, route `memory` with `scope=global` or
-  `operation_id`) shows one memory at a time: the signed-in person's through
-  `/v1/user/assistant/memory`, the global one and an Operation's through `/v1/user/memories`.
+  `operation_id`) shows one scope's memories at a time: Reports of kind `memory` of the signed-in person, the
+  global scope or an Operation, through `/v1/reports` (search with `words`, a save by `POST` or `PUT`, a forget
+  by `DELETE`, a proposal decided by `PUT ./assessment`).
   Rows by ID; a save names the revision it opened, and a refusal shows in Universal Exports' own
-  words. Each entry shows who wrote it, its compartments and any mark; proposals waiting for the
+  words. Each entry shows its summary and any mark, and the open one who wrote it and its compartments; proposals waiting for the
   person sit above the entries. `test/fixtures/assistant_routes.json` holds the route's cases.
 
 - `lib/forms/` renders any schema and form and names no kind of record, which
