@@ -48,7 +48,8 @@ struct ItemArgs {
 struct AssessArgs {
     /// The report's ID, from reports, source_items or the notice.
     report: String,
-    /// mission, duplicate, related, no_action, awaiting, later or decision.
+    /// mission, duplicate, related, no_action, awaiting, later or decision; for what an Agent
+    /// proposed of a known kind (memory, tradecraft, rule or contact), accepted or no_action.
     assessment: String,
     /// Why, from what you read; kept apart from the report's own words.
     reason: String,

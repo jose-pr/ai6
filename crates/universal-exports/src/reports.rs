@@ -21,9 +21,14 @@
 //! Station or on `config:reports`. A Report of a scope the person may not read answers `404`; one
 //! they may read but not see the content of answers `403` with its ID and markings.
 
-use std::sync::Arc;
+use std::collections::BTreeSet;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use ai6::DEFAULT_REQUEST_TTL;
+use ai6::directorates::m::knowledge::{
+    self, KnowledgeCaller, KnowledgeChange, KnowledgeForgotten, KnowledgeOutcome, KnowledgeRight,
+    KnowledgeTarget, knowledge_json,
+};
 use ai6::directorates::m::reports::{
     self, ReportFiling, ReportMarkings, ReportReader, ReportRules, ReportSettings, ReportSight,
     remark, report_json, sight,
@@ -32,10 +37,11 @@ use ai6::directorates::registry::assessments::{
     self, Assessment, Context, Judgement, Verdict, VerdictParts,
 };
 use ai6::directorates::registry::backend::*;
+use ai6::directorates::registry::knowledge::ReportQuery;
 use ai6::directorates::registry::reports::{
-    ReportClearance, ReportFiler, ReportFilter, ReportScope, ReportState,
+    ReportClearance, ReportFiler, ReportFilter, ReportScope, ReportState, is_known_kind,
 };
-use ai6::{Authorizer, Person};
+use ai6::{AuditRecord, AuthorizationRequest, Authorizer, Person};
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -44,7 +50,7 @@ use serde_json::{Value, json};
 
 use crate::compartments::CompartmentAccess;
 use crate::memories::{Refused, refused};
-use crate::tree::{OperationTree, resource_request};
+use crate::tree::{OperationTree, operation_request, resource_request};
 use crate::{
     ApiError, Gateway, authorize_resource_action, bearer, operation_tree, resolve_user,
     unix_timestamp,
@@ -53,12 +59,24 @@ use crate::{
 /// The resource M's own Reports are read and filed at.
 pub(crate) const M_RESOURCE: &str = "config:reports";
 
-/// Where a scope's Reports are authorized, what reads them and what files them.
-fn actions_of(scope: &ReportScope) -> (String, &'static str, &'static str) {
+/// The action that reads another person's memory, on `config:assistant`.
+const MEMORY_ADMIN: &str = "assistant.memory.admin";
+/// The action that changes an Operation's knowledge, or on `config:memory` the global one.
+const MEMORY_WRITE: &str = "memory.write";
+
+/// Where a scope's Reports are authorized, what reads them and what files them. A person's and
+/// the global scope are not authorized by an action on a resource of their own: see
+/// [`PersonReader::reads_scope`].
+fn actions_of(scope: &ReportScope) -> Option<(String, &'static str, &'static str)> {
     match scope {
-        ReportScope::Operation(id) => (format!("operation:{id}"), "mission.read", "mission.create"),
-        ReportScope::Station(id) => (format!("station:{id}"), "station.read", "station.configure"),
-        _ => (M_RESOURCE.to_owned(), "station.read", "station.configure"),
+        ReportScope::Operation(id) => {
+            Some((format!("operation:{id}"), "mission.read", "mission.create"))
+        }
+        ReportScope::Station(id) => {
+            Some((format!("station:{id}"), "station.read", "station.configure"))
+        }
+        ReportScope::M => Some((M_RESOURCE.to_owned(), "station.read", "station.configure")),
+        ReportScope::Person(_) | ReportScope::Global => None,
     }
 }
 
@@ -71,6 +89,9 @@ struct PersonReader {
     settings: ReportSettings,
     /// Every clearance, read for this request.
     clearances: Vec<ReportClearance>,
+    registry: Arc<dyn RegistryBackend>,
+    /// The other people whose memory this request crossed into, each audited once.
+    crossed: Mutex<BTreeSet<String>>,
 }
 
 impl PersonReader {
@@ -85,9 +106,52 @@ impl PersonReader {
             .is_ok_and(|decision| decision.allowed)
     }
 
+    /// Whether the access policy alone, without compartments, gives them `action` on `resource`.
+    fn policy_holds(&self, action: &str, resource: &str) -> bool {
+        let request = match resource.strip_prefix("operation:") {
+            Some(operation) => {
+                operation_request(self.person.clone(), action, operation, &self.tree)
+            }
+            None => AuthorizationRequest {
+                person: self.person.clone(),
+                action: action.to_owned(),
+                resource: resource.to_owned(),
+                ancestors: Vec::new(),
+            },
+        };
+        self.access
+            .policy_allows(request)
+            .is_ok_and(|decision| decision.allowed)
+    }
+
     fn files_in(&self, scope: &ReportScope) -> bool {
-        let (resource, _, file) = actions_of(scope);
-        self.holds(file, resource)
+        match actions_of(scope) {
+            Some((resource, _, file)) => self.holds(file, resource),
+            None => self.writes_scope(scope) == KnowledgeRight::Write,
+        }
+    }
+
+    fn record(
+        &self,
+        action: &str,
+        operation: String,
+        resource: Option<String>,
+        target: &str,
+    ) -> Result<(), String> {
+        self.registry
+            .record_audit(&AuditRecord {
+                id: uuid::Uuid::new_v4().to_string(),
+                actor: crate::actor_of(&self.person),
+                action: action.to_owned(),
+                operation,
+                resource,
+                target: knowledge::bounded(
+                    target,
+                    self.registry.limits().runs.exposure_source_bytes,
+                ),
+                at: unix_timestamp().unwrap_or(0.0),
+            })
+            .map_err(|_| "It could not be audited, so it was not done.".to_owned())
     }
 
     fn rules(&self) -> ReportRules<'_> {
@@ -97,8 +161,45 @@ impl PersonReader {
 
 impl ReportReader for PersonReader {
     fn reads_scope(&self, scope: &ReportScope) -> bool {
-        let (resource, read, _) = actions_of(scope);
-        self.holds(read, resource)
+        match scope {
+            ReportScope::Global => true,
+            ReportScope::Person(id) if *id == self.person.id => true,
+            // Another person's memory takes `assistant.memory.admin`, and is audited before it is
+            // read, once for the request: one that cannot be audited is not read.
+            ReportScope::Person(id) => {
+                if !self.holds(MEMORY_ADMIN, knowledge::PERSON_RESOURCE.to_owned()) {
+                    return false;
+                }
+                let mut crossed = self.crossed.lock().unwrap_or_else(PoisonError::into_inner);
+                crossed.contains(id)
+                    || (self
+                        .record(
+                            knowledge::AUDIT_READ,
+                            String::new(),
+                            Some(knowledge::PERSON_RESOURCE.to_owned()),
+                            &format!("{id} reports"),
+                        )
+                        .is_ok()
+                        && crossed.insert(id.clone()))
+            }
+            scope => {
+                actions_of(scope).is_some_and(|(resource, read, _)| self.holds(read, resource))
+            }
+        }
+    }
+
+    fn assesses(&self, scope: &ReportScope) -> bool {
+        match scope {
+            ReportScope::Person(_) => false,
+            ReportScope::Operation(_) | ReportScope::Global => {
+                self.writes_scope(scope) == KnowledgeRight::Write
+            }
+            _ => false,
+        }
+    }
+
+    fn filed(&self, filer: &ReportFiler) -> bool {
+        matches!(filer, ReportFiler::Person { person } if *person == self.person.id)
     }
 
     fn read_in(&self, compartment: &str) -> bool {
@@ -116,6 +217,74 @@ impl ReportReader for PersonReader {
                     .map(|group| format!("group:{group}")),
             )
             .collect()
+    }
+}
+
+impl KnowledgeCaller for PersonReader {
+    fn by(&self) -> String {
+        format!("person:{}", self.person.id)
+    }
+
+    fn filer(&self) -> ReportFiler {
+        ReportFiler::Person {
+            person: self.person.id.clone(),
+        }
+    }
+
+    fn run(&self) -> Option<String> {
+        None
+    }
+
+    fn writes_scope(&self, scope: &ReportScope) -> KnowledgeRight {
+        let holds = match scope {
+            ReportScope::Person(id) => *id == self.person.id,
+            ReportScope::Operation(operation) => {
+                self.policy_holds(MEMORY_WRITE, &format!("operation:{operation}"))
+            }
+            ReportScope::Global => self.policy_holds(MEMORY_WRITE, knowledge::GLOBAL_RESOURCE),
+            _ => false,
+        };
+        if holds {
+            KnowledgeRight::Write
+        } else {
+            KnowledgeRight::Refused
+        }
+    }
+
+    fn acts_in_person(&self) -> bool {
+        true
+    }
+
+    fn exposures(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn saw_marked(&self, _source: &str) {}
+
+    fn mark_bytes(&self) -> ai6::Limit {
+        self.registry.limits().runs.exposure_source_bytes
+    }
+
+    fn now(&self) -> f64 {
+        unix_timestamp().unwrap_or(0.0)
+    }
+
+    fn audit(&self, action: &str, scope: &ReportScope, target: &str) -> Result<(), String> {
+        let (operation, resource, target) = match scope {
+            ReportScope::Operation(operation) => (operation.clone(), None, target.to_owned()),
+            ReportScope::Global => (
+                String::new(),
+                Some(knowledge::GLOBAL_RESOURCE.to_owned()),
+                target.to_owned(),
+            ),
+            ReportScope::Person(id) => (
+                String::new(),
+                Some(knowledge::PERSON_RESOURCE.to_owned()),
+                format!("{id} {target}"),
+            ),
+            _ => (String::new(), None, target.to_owned()),
+        };
+        self.record(action, operation, resource, &target)
     }
 }
 
@@ -150,6 +319,8 @@ async fn reader_of(gateway: &Gateway, headers: &HeaderMap) -> Result<PersonReade
         tree: operation_tree(gateway).await?,
         settings,
         clearances,
+        registry: registry_of(gateway)?,
+        crossed: Mutex::default(),
     })
 }
 
@@ -189,10 +360,38 @@ fn shown(
     report_json(report, seen, source.as_ref())
 }
 
-/// `?scope=SCOPE&mission=ID&state=STATE&kind=KIND&limit=N`.
+impl From<knowledge::KnowledgeRefusal> for Refused {
+    fn from(refusal: knowledge::KnowledgeRefusal) -> Self {
+        use knowledge::KnowledgeRefusal as Why;
+        let status = match &refusal {
+            Why::Missing => StatusCode::NOT_FOUND,
+            Why::Forbidden(_) => StatusCode::FORBIDDEN,
+            Why::Invalid(_) => StatusCode::BAD_REQUEST,
+            Why::Full(_) | Why::Changed { .. } => StatusCode::CONFLICT,
+            _ => StatusCode::SERVICE_UNAVAILABLE,
+        };
+        let mut body = json!({"error": refusal.to_string()});
+        if let Why::Changed { revision } = refusal {
+            body["revision"] = Value::from(revision);
+        }
+        Self { status, body }
+    }
+}
+
+/// `?scope=SCOPE&mission=ID&state=STATE&kind=KIND&limit=N`, and to search what is known:
+/// `&words=TEXT&topics=A,B&title=WORDS`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Listing {
+    /// A search: words of the title, summary, topics and text.
+    #[serde(default)]
+    words: Option<String>,
+    /// A search: only Reports on each of these topics, comma separated.
+    #[serde(default)]
+    topics: Option<String>,
+    /// A search: only Reports whose title holds each of these words.
+    #[serde(default)]
+    title: Option<String>,
     #[serde(default)]
     scope: Option<String>,
     #[serde(default)]
@@ -227,6 +426,9 @@ async fn list_reports(
     let reader = reader_of(gateway, headers).await?;
     let registry = registry_of(gateway)?;
     blocking(move || {
+        if listing.words.is_some() || listing.topics.is_some() || listing.title.is_some() {
+            return search(registry.as_ref(), &reader, &listing);
+        }
         let mut filter = ReportFilter::all().ordered_by(reader.settings.priorities.clone());
         match (&listing.scope, &listing.mission) {
             (None, None) => {
@@ -271,9 +473,14 @@ async fn list_reports(
         let reports = registry
             .reports(&filter)
             .map_err(|_| Refused::from(ApiError::internal()))?;
+        // What is known and not readable is not listed at all, as it is not found by a search.
         let shown: Vec<Value> = reports
             .iter()
             .map(|report| shown(registry.as_ref(), &reader, report))
+            .filter(|shown| {
+                !(shown["sight"] == "markings"
+                    && is_known_kind(shown["kind"].as_str().unwrap_or_default()))
+            })
             .collect();
         Ok(Json(json!({
             "reports": shown,
@@ -283,6 +490,51 @@ async fn list_reports(
         })))
     })
     .await
+}
+
+/// Searches every scope the person reads, or `scope`, for the words, topics, title and kind
+/// asked: `{"reports": [{id, scope, kind, state, title, summary, topics, ...}], "total": N}`,
+/// best first, only what the person may read, counted after that.
+fn search(
+    registry: &dyn RegistryBackend,
+    reader: &PersonReader,
+    listing: &Listing,
+) -> Result<Json<Value>, Refused> {
+    let mut query = ReportQuery::words(listing.words.as_deref().unwrap_or_default());
+    if let Some(topics) = &listing.topics {
+        for topic in topics
+            .split(',')
+            .map(str::trim)
+            .filter(|topic| !topic.is_empty())
+        {
+            query = query.on_topic(topic);
+        }
+    }
+    if let Some(title) = &listing.title {
+        query = query.titled(title);
+    }
+    if let Some(kind) = &listing.kind {
+        query = query.of_kind(kind.clone());
+    }
+    if let Some(scope) = &listing.scope {
+        query = query.in_scope(scope_of(scope)?);
+    }
+    if let Some(state) = &listing.state {
+        query = query.in_state(
+            state
+                .parse::<ReportState>()
+                .map_err(|reason| refused(StatusCode::BAD_REQUEST, reason))?,
+        );
+    }
+    let mut limits = registry.limits().reports.clone();
+    if let Some(limit) = listing.limit {
+        limits.search_results = ai6::Limit::at(limit.min(limits.search_results.or_max()) as u64);
+    }
+    let found = knowledge::search_reports(registry, reader, &reader.rules(), &query, &limits)?;
+    Ok(Json(json!({
+        "reports": found.hits.iter().map(knowledge::brief_json).collect::<Vec<_>>(),
+        "total": found.total,
+    })))
 }
 
 /// `GET /v1/reports?scope=SCOPE|mission=ID[&state][&kind][&limit]`: `{"reports": [...],
@@ -306,6 +558,9 @@ pub(crate) async fn of_mission(
     Path(id): Path<String>,
 ) -> Result<Json<Value>, Refused> {
     let listing = Listing {
+        words: None,
+        topics: None,
+        title: None,
         scope: None,
         mission: Some(id),
         state: None,
@@ -355,6 +610,9 @@ pub(crate) async fn open_reports(
     let mut found = OpenReports::default();
     for scope in scopes {
         let listing = Listing {
+            words: None,
+            topics: None,
+            title: None,
             scope: Some(scope.clone()),
             mission: None,
             state: Some("open".to_owned()),
@@ -584,6 +842,9 @@ pub(crate) async fn file(
         .map_err(|error| refused(StatusCode::BAD_REQUEST, error.to_string()))?;
     let at = unix_timestamp()?;
     blocking(move || {
+        if filing.kind.as_deref().is_some_and(is_known_kind) {
+            return file_knowledge(registry.as_ref(), &reader, scope, filing);
+        }
         if !reader.files_in(&scope) {
             return Err(refused(
                 StatusCode::FORBIDDEN,
@@ -618,6 +879,171 @@ pub(crate) async fn file(
             StatusCode::CREATED,
             Json(shown(registry.as_ref(), &reader, &report)),
         ))
+    })
+    .await
+}
+
+/// What is known is filed as its title, text, summary, topics and compartments: the kinds'
+/// other markings are an observation's.
+fn file_knowledge(
+    registry: &dyn RegistryBackend,
+    reader: &PersonReader,
+    scope: ReportScope,
+    filing: ReportFiling,
+) -> Result<(StatusCode, Json<Value>), Refused> {
+    if filing.classification.is_some()
+        || filing.handling.is_some()
+        || filing.tearline.is_some()
+        || filing.priority.is_some()
+        || filing.deadline.is_some()
+        || filing.information_from.is_some()
+        || filing.sub_source.is_some()
+        || filing.severity.is_some()
+        || !filing.links.is_empty()
+    {
+        return Err(refused(
+            StatusCode::BAD_REQUEST,
+            "A memory, tradecraft, rule or contact takes a title, text, summary, topics and compartments.",
+        ));
+    }
+    let kind = filing.kind.clone().unwrap_or_default();
+    let mut change = KnowledgeChange::new(
+        KnowledgeTarget::New { scope, kind },
+        filing.title,
+        filing.text,
+    )
+    .on_topics(filing.topics)
+    .with_compartments((!filing.compartments.is_empty()).then_some(filing.compartments));
+    change.summary = filing.summary;
+    written(
+        knowledge::write_report(registry, reader, &reader.rules(), change)?,
+        true,
+    )
+}
+
+/// A write as the person sees it: `201` kept, or `202` waiting for a verdict.
+fn written(outcome: KnowledgeOutcome, created: bool) -> Result<(StatusCode, Json<Value>), Refused> {
+    Ok(match outcome {
+        KnowledgeOutcome::Kept(done) => (
+            if created {
+                StatusCode::CREATED
+            } else {
+                StatusCode::OK
+            },
+            Json(knowledge_json(&done.report)),
+        ),
+        KnowledgeOutcome::Proposed(proposal) => {
+            (StatusCode::ACCEPTED, Json(knowledge_json(&proposal)))
+        }
+    })
+}
+
+/// What a person revises a known Report to; `revision` is the one they read.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Revision {
+    revision: u64,
+    title: String,
+    text: String,
+    #[serde(default)]
+    summary: Option<String>,
+    #[serde(default)]
+    topics: Vec<String>,
+    /// `None` leaves them as they are.
+    #[serde(default)]
+    compartments: Option<Vec<String>>,
+}
+
+/// `PUT /v1/reports/{id}` with `{"revision", "title", "text", "summary", "topics",
+/// "compartments"}`: writes a memory, tradecraft, rule or contact as its next revision, when it is
+/// still at `revision` (`409` and the revision it is at otherwise). `200` kept, `202` waiting for a
+/// verdict where the person may only propose, `404` for what they may not read.
+pub(crate) async fn change(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(revision): Json<Revision>,
+) -> Result<(StatusCode, Json<Value>), Refused> {
+    let reader = reader_of(&gateway, &headers).await?;
+    let registry = registry_of(&gateway)?;
+    blocking(move || {
+        let mut change = KnowledgeChange::new(
+            KnowledgeTarget::Existing {
+                id,
+                revision: revision.revision,
+            },
+            revision.title,
+            revision.text,
+        )
+        .on_topics(revision.topics)
+        .with_compartments(revision.compartments);
+        change.summary = revision.summary;
+        written(
+            knowledge::write_report(registry.as_ref(), &reader, &reader.rules(), change)?,
+            false,
+        )
+    })
+    .await
+}
+
+/// `?revision=N`: the revision a forget was made from.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Forgetting {
+    #[serde(default)]
+    revision: Option<u64>,
+}
+
+/// `DELETE /v1/reports/{id}[?revision=N]`: forgets a memory with its revisions, or retires
+/// tradecraft, a rule or a contact (closed, resolution `retired`, kept). `202` where the person may
+/// only propose it. `404` for what they may not read.
+pub(crate) async fn forget(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(forgetting): Query<Forgetting>,
+) -> Result<(StatusCode, Json<Value>), Refused> {
+    let reader = reader_of(&gateway, &headers).await?;
+    let registry = registry_of(&gateway)?;
+    blocking(move || {
+        Ok(
+            match knowledge::forget_report(
+                registry.as_ref(),
+                &reader,
+                &reader.rules(),
+                &id,
+                forgetting.revision,
+            )? {
+                KnowledgeForgotten::Forgotten(gone) => {
+                    (StatusCode::OK, Json(json!({"forgotten": gone.id})))
+                }
+                KnowledgeForgotten::Retired(retired) => {
+                    (StatusCode::OK, Json(knowledge_json(&retired)))
+                }
+                KnowledgeForgotten::Proposed(proposal) => {
+                    (StatusCode::ACCEPTED, Json(knowledge_json(&proposal)))
+                }
+            },
+        )
+    })
+    .await
+}
+
+/// `GET /v1/reports/{id}/versions`: what a known Report held before its later revisions, newest
+/// first, as far as the person may read it.
+pub(crate) async fn versions(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, Refused> {
+    let reader = reader_of(&gateway, &headers).await?;
+    let registry = registry_of(&gateway)?;
+    blocking(move || {
+        let versions =
+            knowledge::prior_revisions(registry.as_ref(), &reader, &reader.rules(), &id)?;
+        Ok(Json(json!({
+            "versions": versions.iter().map(knowledge_json).collect::<Vec<_>>(),
+        })))
     })
     .await
 }
@@ -731,11 +1157,16 @@ fn controlled(
     if !reader.reads_scope(&report.scope) {
         return Err(missing());
     }
-    let holds = match &report.scope {
-        ReportScope::Operation(operation) => {
-            reader.holds("mission.control", format!("operation:{operation}"))
+    // What is proposed of a known kind is decided by who may write what is known there.
+    let holds = if report.is_known() {
+        reader.assesses(&report.scope)
+    } else {
+        match &report.scope {
+            ReportScope::Operation(operation) => {
+                reader.holds("mission.control", format!("operation:{operation}"))
+            }
+            scope => reader.files_in(scope),
         }
-        scope => reader.files_in(scope),
     };
     if !holds || sight(reader, &report, &reader.rules()) != ReportSight::Content {
         return Err(refused(
@@ -767,7 +1198,8 @@ fn store_refusal(error: &std::io::Error) -> Refused {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AssessRequest {
-    /// `mission`, `duplicate`, `related`, `no_action`, `awaiting`, `later` or `decision`.
+    /// `mission`, `duplicate`, `related`, `no_action`, `awaiting`, `later` or `decision`; for a
+    /// proposal of a known kind, `accepted` or `no_action`.
     assessment: String,
     /// Why, kept apart from the Report's own words.
     reason: String,

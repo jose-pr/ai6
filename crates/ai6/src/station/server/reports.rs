@@ -25,14 +25,19 @@ use crate::bounds::Limit;
 use crate::directorates::m::compartments::{
     CompartmentAction, CompartmentResource, CompiledCompartments, FieldPrincipal,
 };
+use crate::directorates::m::knowledge::{
+    self, GLOBAL_RESOURCE, KnowledgeCaller, KnowledgeChange, KnowledgeOutcome, KnowledgeRight,
+};
 use crate::directorates::m::memories::{bounded, fenced};
 use crate::directorates::m::reports::{
     ReportFiling, ReportReader, ReportRules, ReportSettings, ReportSight, report_json, sight,
 };
-use crate::directorates::medical::exposure::product_source;
+use crate::directorates::m::roster::clearance_rank;
+use crate::directorates::medical::exposure::{product_source, report_source};
 use crate::directorates::registry::assessments::{
     self, Assessment, Context, Judgement, Verdict, VerdictParts,
 };
+use crate::directorates::registry::knowledge::ReportQuery;
 use crate::directorates::registry::reports::{
     Report, ReportClearance, ReportFiler, ReportFilter, ReportLink, ReportLinkKind, ReportScope,
     ReportState,
@@ -61,6 +66,8 @@ struct RunReader<'a> {
     settings: ReportSettings,
     /// Every clearance, as the Registry holds them now.
     clearances: Vec<ReportClearance>,
+    /// The Run, once the harness has reported it.
+    run: Option<String>,
 }
 
 impl RunReader<'_> {
@@ -101,7 +108,8 @@ impl ReportReader for RunReader<'_> {
             ReportScope::Operation(operation) if *operation == self.reader.operation => true,
             ReportScope::Operation(operation) => self.crosses_into(operation),
             ReportScope::Station(station) => self.station == Some(station.as_str()),
-            ReportScope::M => false,
+            ReportScope::Global => true,
+            ReportScope::M | ReportScope::Person(_) => false,
         }
     }
 
@@ -113,6 +121,116 @@ impl ReportReader for RunReader<'_> {
 
     fn subjects(&self) -> Vec<String> {
         vec![format!("agent:{}", self.reader.agent)]
+    }
+
+    /// A charge, which has no Mission, decides what is proposed in its own Operation.
+    fn assesses(&self, scope: &ReportScope) -> bool {
+        self.reader.mission.is_none()
+            && matches!(scope, ReportScope::Operation(operation) if *operation == self.reader.operation)
+    }
+
+    fn filed(&self, filer: &ReportFiler) -> bool {
+        *filer == self.filer()
+    }
+}
+
+impl KnowledgeCaller for RunReader<'_> {
+    fn by(&self) -> String {
+        format!("agent:{}", self.reader.agent)
+    }
+
+    fn filer(&self) -> ReportFiler {
+        let agent = self.reader.agent.clone();
+        match &self.reader.mission {
+            Some(mission) => ReportFiler::Agent {
+                agent,
+                run: self.run.clone().unwrap_or_else(|| mission.clone()),
+                mission: mission.clone(),
+            },
+            None => {
+                let scope = format!("operation:{}", self.reader.operation);
+                ReportFiler::Charge {
+                    agent,
+                    run: self.run.clone().unwrap_or_else(|| scope.clone()),
+                    scope,
+                }
+            }
+        }
+    }
+
+    fn run(&self) -> Option<String> {
+        self.run.clone().or_else(|| self.reader.mission.clone())
+    }
+
+    fn writes_scope(&self, scope: &ReportScope) -> KnowledgeRight {
+        match scope {
+            ReportScope::Global => KnowledgeRight::Propose,
+            ReportScope::Operation(operation) if *operation == self.reader.operation => {
+                let allowed = self
+                    .state
+                    .roster
+                    .operation(operation)
+                    .ok()
+                    .and_then(|operation| operation.memory_write.clone())
+                    .is_some_and(|floor| {
+                        let held = clearance_rank(&self.principal.clearance).unwrap_or(0);
+                        clearance_rank(&floor).is_ok_and(|floor| held >= floor)
+                    });
+                if allowed {
+                    KnowledgeRight::Write
+                } else {
+                    KnowledgeRight::Propose
+                }
+            }
+            _ => KnowledgeRight::Refused,
+        }
+    }
+
+    fn acts_in_person(&self) -> bool {
+        false
+    }
+
+    fn exposures(&self) -> Vec<String> {
+        self.reader
+            .exposure
+            .exposures()
+            .into_iter()
+            .map(|exposure| exposure.source)
+            .collect()
+    }
+
+    fn saw_marked(&self, source: &str) {
+        self.reader.exposure.mark(source, self.now());
+    }
+
+    fn mark_bytes(&self) -> Limit {
+        self.state.intake.limits().runs.exposure_source_bytes
+    }
+
+    fn now(&self) -> f64 {
+        self.state.clock.now() as f64
+    }
+
+    fn audit(&self, action: &str, scope: &ReportScope, target: &str) -> Result<(), String> {
+        let (operation, resource) = match scope {
+            ReportScope::Operation(operation) => (operation.clone(), None),
+            _ => (
+                self.reader.operation.clone(),
+                Some(GLOBAL_RESOURCE.to_owned()),
+            ),
+        };
+        self.state
+            .intake
+            .record_audit(&AuditRecord {
+                id: format!("report-{}", Uuid::new_v4().simple()),
+                actor: format!("agent:{}", self.reader.agent),
+                action: action.to_owned(),
+                operation,
+                resource,
+                target: bounded(target, AUDIT_BYTES),
+                at: self.now(),
+            })
+            .map_err(|_| "it could not be audited, so it was not done".to_owned())
     }
 }
 
@@ -193,6 +311,7 @@ impl ReportDesk {
         &self,
         reader: &Reader,
         station: Option<&str>,
+        run: Option<String>,
         work: impl FnOnce(&DaemonState, &RunReader<'_>) -> Value,
     ) -> Result<Value, String> {
         let state = self.state.current();
@@ -221,6 +340,7 @@ impl ReportDesk {
             crossed: Mutex::default(),
             settings,
             clearances,
+            run,
         };
         Ok(work(&state, &caller))
     }
@@ -293,7 +413,7 @@ impl ReportDesk {
             (None, Some(_)) => None,
             (None, None) => Some(ReportScope::Operation(reader.operation.clone())),
         };
-        let answer = self.with_reader(reader, station, |state, caller| {
+        let answer = self.with_reader(reader, station, None, |state, caller| {
             if let Some(scope) = &scope {
                 if !caller.reads_scope(scope) {
                     return refused(format!("{scope} is not yours to read"));
@@ -333,8 +453,13 @@ impl ReportDesk {
                 Ok(reports) => reports,
                 Err(_) => return refused("the reports could not be read"),
             };
+            // What is known and not readable is not listed at all, as it is not found by a search.
+            let rules = ReportRules::new(&caller.settings, &caller.clearances);
             let shown: Vec<Value> = reports
                 .iter()
+                .filter(|report| {
+                    !(report.is_known() && sight(caller, report, &rules) != ReportSight::Content)
+                })
                 .map(|report| self.shown(state, caller, report))
                 .collect();
             json!({ "reports": shown })
@@ -353,7 +478,7 @@ impl ReportDesk {
         station: Option<&str>,
         id: &str,
     ) -> Result<String, String> {
-        let answer = self.with_reader(reader, station, |state, caller| {
+        let answer = self.with_reader(reader, station, None, |state, caller| {
             let report = match state.intake.report(id) {
                 Ok(Some(report)) => report,
                 Ok(None) | Err(_) => return refused("no such report"),
@@ -388,7 +513,7 @@ impl ReportDesk {
         by: &str,
         request_ttl: Duration,
     ) -> Result<String, String> {
-        let answer = self.with_reader(reader, None, |state, caller| {
+        let answer = self.with_reader(reader, None, None, |state, caller| {
             let report = match self.readable(state, caller, &call.report) {
                 Ok(report) => report,
                 Err(refusal) => return refusal,
@@ -441,6 +566,85 @@ impl ReportDesk {
         Ok(answer.to_string())
     }
 
+    /// Searches what the Run may read for `words`, `topics`, a `title` and a `kind`, in `scope`
+    /// (every scope it reads when left out): its ID, kind, title and one-line summary, best first,
+    /// fenced. What it may not read is neither listed nor counted.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn search(
+        &self,
+        reader: &Reader,
+        station: Option<&str>,
+        scope: Option<&str>,
+        words: Option<&str>,
+        kind: Option<&str>,
+        topics: &[String],
+        title: Option<&str>,
+        state_filter: Option<&str>,
+    ) -> Result<String, String> {
+        let mut query = ReportQuery::words(words.unwrap_or_default());
+        if let Some(kind) = kind {
+            query = query.of_kind(kind);
+        }
+        for topic in topics {
+            query = query.on_topic(topic.clone());
+        }
+        if let Some(title) = title {
+            query = query.titled(title);
+        }
+        if let Some(scope) = scope {
+            query = query.in_scope(scope.parse::<ReportScope>()?);
+        }
+        if let Some(wanted) = state_filter {
+            query = query.in_state(wanted.parse::<ReportState>()?);
+        }
+        let answer = self.with_reader(reader, station, None, |state, caller| {
+            let rules = ReportRules::new(&caller.settings, &caller.clearances);
+            let limits = state.intake.limits().reports.clone();
+            match knowledge::search_reports(state.intake.as_ref(), caller, &rules, &query, &limits)
+            {
+                Ok(found) => json!({
+                    "reports": found.hits.iter().map(knowledge::brief_json).collect::<Vec<_>>(),
+                    "total": found.total,
+                }),
+                Err(refusal) => refused(refusal.to_string()),
+            }
+        })?;
+        Ok(match answer.get("status") {
+            Some(_) => answer.to_string(),
+            None => fenced("reports", &answer),
+        })
+    }
+
+    /// Writes a Report of a known kind as the Run: kept at once where its clearance writes the
+    /// scope, otherwise filed `open` for a verdict.
+    pub(super) fn write_known(
+        &self,
+        reader: &Reader,
+        run: Option<String>,
+        change: KnowledgeChange,
+    ) -> Result<Value, String> {
+        self.with_reader(reader, None, run, |state, caller| {
+            let rules = ReportRules::new(&caller.settings, &caller.clearances);
+            match knowledge::write_report(state.intake.as_ref(), caller, &rules, change) {
+                Ok(KnowledgeOutcome::Kept(done)) => json!({
+                    "filed": true,
+                    "id": done.report.id,
+                    "scope": done.report.scope.to_string(),
+                    "state": done.report.state.as_str(),
+                    "revision": done.report.revision,
+                }),
+                Ok(KnowledgeOutcome::Proposed(proposal)) => json!({
+                    "filed": true,
+                    "id": proposal.id,
+                    "scope": proposal.scope.to_string(),
+                    "state": proposal.state.as_str(),
+                    "note": "it waits for a verdict from your Operation's charge or a person",
+                }),
+                Err(refusal) => refused(refusal.to_string()),
+            }
+        })
+    }
+
     /// Opens an assessed or closed Report of the Run's Operation again, for `why`: the answer to
     /// what it awaited, or the condition it waited for.
     pub(super) fn reopen(
@@ -450,7 +654,7 @@ impl ReportDesk {
         why: &str,
         by: &str,
     ) -> Result<String, String> {
-        let answer = self.with_reader(reader, None, |state, caller| {
+        let answer = self.with_reader(reader, None, None, |state, caller| {
             let report = match self.readable(state, caller, report) {
                 Ok(report) => report,
                 Err(refusal) => return refusal,
@@ -480,7 +684,8 @@ impl ReportDesk {
             Ok(Some(report)) => report,
             Ok(None) | Err(_) => return Err(refused("no such report")),
         };
-        if report.scope != ReportScope::Operation(caller.reader.operation.clone()) {
+        let own = ReportScope::Operation(caller.reader.operation.clone());
+        if report.scope != own {
             return Err(refused("no such report"));
         }
         let rules = ReportRules::new(&caller.settings, &caller.clearances);
@@ -501,6 +706,11 @@ impl ReportDesk {
             && operation != caller.reader.operation
         {
             let mark = product_source(operation, state.intake.limits().runs.exposure_source_bytes);
+            caller.reader.exposure.mark(&mark, state.clock.now() as f64);
+        }
+        // What an exposed Run wrote exposes whoever reads it.
+        if seen == ReportSight::Content && !report.exposures.is_empty() {
+            let mark = report_source(&report.id, state.intake.limits().runs.exposure_source_bytes);
             caller.reader.exposure.mark(&mark, state.clock.now() as f64);
         }
         let source = if seen == ReportSight::Content {

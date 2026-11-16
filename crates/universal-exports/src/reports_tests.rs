@@ -788,3 +788,217 @@ async fn a_person_assesses_any_report_reopens_it_and_reads_its_sources_standing(
         .unwrap();
     assert_eq!(counted["resolution"]["outcome"], "no_action");
 }
+
+/// `operator-007` writes what is known in G and the global scope; `viewer-007` only reads G.
+const KEEPER_ROLES: &str = r#"
+    [role.viewer]
+    actions = ["mission.read"]
+
+    [role.keeper]
+    actions = ["mission.read", "memory.write"]
+
+    [[rule]]
+    subject = "person:viewer-007"
+    scope = "operation:G"
+    role = "viewer"
+
+    [[rule]]
+    subject = "person:operator-007"
+    scope = "operation:G"
+    role = "keeper"
+
+    [role.memory]
+    actions = ["memory.write"]
+
+    [[rule]]
+    subject = "person:operator-007"
+    scope = "config:memory"
+    role = "memory"
+"#;
+
+#[tokio::test]
+async fn what_is_known_is_written_by_revision_searched_and_read_only_by_who_may() {
+    let fixture = fixture_with(KEEPER_ROLES).await;
+    let (operator, viewer) = (
+        fixture.served.operator.clone(),
+        fixture.served.viewer.clone(),
+    );
+    let known = |scope: &str, kind: &str, title: &str, text: &str| {
+        json!({
+            "scope": scope, "kind": kind, "title": title, "text": text,
+            "summary": "a line", "topics": ["Briefs"],
+        })
+    };
+    // The operator keeps a memory of G: standing at once, at revision 1.
+    let (status, memory) = fixture
+        .call(
+            &operator,
+            Method::POST,
+            "/v1/reports",
+            Some(known(
+                "operation:G",
+                "memory",
+                "Needle note",
+                "the haystack",
+            )),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{memory}");
+    assert_eq!(
+        (memory["state"].as_str(), memory["revision"].as_u64()),
+        (Some("standing"), Some(1))
+    );
+    let id = memory["id"].as_str().unwrap().to_owned();
+    // Someone who reads G and may not write it is refused, and one write names the revision it read.
+    let (status, _) = fixture
+        .call(
+            &viewer,
+            Method::POST,
+            "/v1/reports",
+            Some(known("operation:G", "memory", "Mine", "x")),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let revise = |revision: u64, text: &str| json!({"revision": revision, "title": "Needle note", "text": text, "summary": "a line", "topics": ["Briefs"]});
+    let (status, second) = fixture
+        .call(
+            &operator,
+            Method::PUT,
+            &format!("/v1/reports/{id}"),
+            Some(revise(1, "two")),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{second}");
+    assert_eq!(second["revision"], 2);
+    let (status, late) = fixture
+        .call(
+            &operator,
+            Method::PUT,
+            &format!("/v1/reports/{id}"),
+            Some(revise(1, "late")),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(late["revision"], 2, "it says what revision it is at");
+    let (status, versions) = fixture
+        .call(
+            &viewer,
+            Method::GET,
+            &format!("/v1/reports/{id}/versions"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{versions}");
+    assert_eq!(versions["versions"][0]["text"], "the haystack");
+    // The viewer finds it by words, topic and kind; a miss and a hidden scope count nothing.
+    let (status, found) = fixture
+        .call(
+            &viewer,
+            Method::GET,
+            "/v1/reports?words=needle%20zebra&topics=briefs&kind=memory",
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    assert_eq!(found["total"], 1);
+    assert_eq!(found["reports"][0]["id"], id);
+    assert_eq!(found["reports"][0]["summary"], "a line");
+    // A person's own memory is theirs: the operator's, filed in their own scope, is not found,
+    // read or written by anyone else, and a search by someone else says nothing of it.
+    let (status, own) = fixture
+        .call(
+            &operator,
+            Method::POST,
+            "/v1/reports",
+            Some(known(
+                "person:operator-007",
+                "memory",
+                "Private needle",
+                "mine",
+            )),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{own}");
+    let own_id = own["id"].as_str().unwrap().to_owned();
+    let (_, found) = fixture
+        .call(&viewer, Method::GET, "/v1/reports?words=needle", None)
+        .await;
+    assert_eq!(found["total"], 1, "only the one in G: {found}");
+    let (status, _) = fixture
+        .call(&viewer, Method::GET, &format!("/v1/reports/{own_id}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = fixture
+        .call(
+            &viewer,
+            Method::POST,
+            "/v1/reports",
+            Some(known("person:operator-007", "memory", "Into theirs", "x")),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (_, found) = fixture
+        .call(&operator, Method::GET, "/v1/reports?words=needle", None)
+        .await;
+    assert_eq!(found["total"], 2);
+    // Everyone reads the global scope; its tradecraft is retired, not forgotten, and what is
+    // retired is not current.
+    let (status, guide) = fixture
+        .call(
+            &operator,
+            Method::POST,
+            "/v1/reports",
+            Some(known(
+                "global",
+                "tradecraft",
+                "Writing a brief",
+                "Name the goal first.",
+            )),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{guide}");
+    let guide_id = guide["id"].as_str().unwrap().to_owned();
+    let (_, found) = fixture
+        .call(
+            &viewer,
+            Method::GET,
+            "/v1/reports?words=brief&kind=tradecraft",
+            None,
+        )
+        .await;
+    assert_eq!(found["total"], 1);
+    let (status, retired) = fixture
+        .call(
+            &operator,
+            Method::DELETE,
+            &format!("/v1/reports/{guide_id}"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{retired}");
+    assert_eq!(retired["state"], "closed");
+    let (_, found) = fixture
+        .call(
+            &viewer,
+            Method::GET,
+            "/v1/reports?words=brief&kind=tradecraft",
+            None,
+        )
+        .await;
+    assert_eq!(found["total"], 0);
+    // A memory forgotten is gone, with its revisions.
+    let (status, gone) = fixture
+        .call(
+            &operator,
+            Method::DELETE,
+            &format!("/v1/reports/{id}?revision=2"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{gone}");
+    assert_eq!(gone["forgotten"], id);
+    let (status, _) = fixture
+        .call(&viewer, Method::GET, &format!("/v1/reports/{id}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

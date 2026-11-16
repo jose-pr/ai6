@@ -1713,7 +1713,13 @@ impl Gateway {
                 axum::routing::put(reports::grant).delete(reports::revoke),
             )
             .route("/v1/reports/sources/{key}", get(reports::source))
-            .route("/v1/reports/{id}", get(reports::show))
+            .route(
+                "/v1/reports/{id}",
+                get(reports::show)
+                    .put(reports::change)
+                    .delete(reports::forget),
+            )
+            .route("/v1/reports/{id}/versions", get(reports::versions))
             .route("/v1/reports/{id}/document", get(reports::document))
             .route(
                 "/v1/reports/{id}/reopen",

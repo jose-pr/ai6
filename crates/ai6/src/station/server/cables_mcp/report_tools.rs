@@ -11,8 +11,10 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::CableTools;
+use crate::directorates::m::knowledge::{KnowledgeChange, KnowledgeTarget};
 use crate::directorates::m::reports::{LinkFiling, ReportFiling, TearlineFiling};
 use crate::directorates::registry::logbook::{Severity, StationFinding};
+use crate::directorates::registry::reports::{ReportScope, is_known_kind};
 use crate::station::server::reports::ReportDesk;
 
 #[derive(Deserialize, JsonSchema)]
@@ -81,16 +83,36 @@ struct FileReportArgs {
     /// What else it is tied to; your Mission is linked anyway.
     #[serde(default)]
     links: Vec<LinkArgs>,
+    /// One line saying what it is for, which a search lists beside the title.
+    line: Option<String>,
+    /// Free words a search and a facet use.
+    #[serde(default)]
+    topics: Vec<String>,
+    /// For a memory, tradecraft, rule or contact: operation:ID (your own by default) or global.
+    scope: Option<String>,
+    /// To revise a memory, tradecraft, rule or contact you read: its ID.
+    revises: Option<String>,
+    /// With revises: the revision you read. A write from an older one is refused.
+    revision: Option<u64>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 struct ReportsArgs {
-    /// operation:ID (your own by default), or station:ID for the Station's charge.
+    /// operation:ID (your own by default), global, or station:ID for the Station's charge.
     scope: Option<String>,
     /// Only reports tied to this Mission.
     mission: Option<String>,
-    /// open, assessed or closed.
+    /// open, assessed, closed or standing.
     state: Option<String>,
+    /// Search every scope you may read for these words, in the title, summary, topics and text.
+    words: Option<String>,
+    /// Search only this kind: memory, tradecraft, rule, contact or an observation's.
+    kind: Option<String>,
+    /// Search only reports on each of these topics.
+    #[serde(default)]
+    topics: Vec<String>,
+    /// Search only reports whose title holds each of these words.
+    title: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -127,6 +149,33 @@ fn text_of(summary: &str, text: Option<&str>, findings: &[(String, String, Strin
 }
 
 impl FileReportArgs {
+    /// The write of a memory, tradecraft, rule or contact these arguments make, in `own`
+    /// Operation unless they name `global`.
+    fn knowledge(self, name_bytes: usize, own: &str) -> Result<KnowledgeChange, String> {
+        let kind = self.kind.clone().unwrap_or_default();
+        let scope = match self.scope.as_deref() {
+            None => ReportScope::Operation(own.to_owned()),
+            Some(scope) => scope.parse::<ReportScope>()?,
+        };
+        let target = match (&self.revises, self.revision) {
+            (Some(id), Some(revision)) => KnowledgeTarget::Existing {
+                id: id.clone(),
+                revision,
+            },
+            (Some(_), None) => return Err("revises needs the revision you read".to_owned()),
+            (None, _) => KnowledgeTarget::New { scope, kind },
+        };
+        let mut change = KnowledgeChange::new(
+            target,
+            title_of(&self.summary, name_bytes),
+            text_of(&self.summary, self.text.as_deref(), &[]),
+        )
+        .on_topics(self.topics.clone())
+        .with_compartments((!self.compartments.is_empty()).then(|| self.compartments.clone()));
+        change.summary = self.line.clone();
+        Ok(change)
+    }
+
     /// The filing these arguments make, with the worst severity among the findings when none is
     /// named.
     fn filing(self, name_bytes: usize) -> Result<ReportFiling, String> {
@@ -142,6 +191,8 @@ impl FileReportArgs {
             ));
         }
         Ok(ReportFiling {
+            summary: self.line,
+            topics: self.topics,
             title: title_of(&self.summary, name_bytes),
             text: text_of(&self.summary, self.text.as_deref(), &findings),
             kind: self.kind,
@@ -265,6 +316,12 @@ impl CableTools {
         }
         let run = self.bound_run();
         self.with_reports(move |desk, reader, _| {
+            if args.kind.as_deref().is_some_and(is_known_kind) {
+                let change = args.knowledge(desk.name_bytes(), reader.operation.as_str())?;
+                return desk
+                    .write_known(reader, run, change)
+                    .map(|written| written.to_string());
+            }
             let filing = args.filing(desk.name_bytes())?;
             desk.file(reader, run, filing)
                 .map(|filed| filed.to_string())
@@ -278,6 +335,22 @@ impl CableTools {
     )]
     async fn reports(&self, Parameters(args): Parameters<ReportsArgs>) -> String {
         self.with_reports(move |desk, reader, station| {
+            if args.words.is_some()
+                || args.kind.is_some()
+                || args.title.is_some()
+                || !args.topics.is_empty()
+            {
+                return desk.search(
+                    reader,
+                    station,
+                    args.scope.as_deref(),
+                    args.words.as_deref(),
+                    args.kind.as_deref(),
+                    &args.topics,
+                    args.title.as_deref(),
+                    args.state.as_deref(),
+                );
+            }
             desk.list(
                 reader,
                 station,
@@ -331,6 +404,11 @@ mod tests {
             compartments: Vec::new(),
             tearline: None,
             links: Vec::new(),
+            line: None,
+            topics: Vec::new(),
+            scope: None,
+            revises: None,
+            revision: None,
         };
         let filing = args.filing(8).unwrap();
         assert_eq!(filing.title, "Disk is ");

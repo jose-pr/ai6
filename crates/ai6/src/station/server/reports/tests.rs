@@ -320,3 +320,84 @@ fn the_rate_limit_refuses_an_agents_storm() {
         )
         .unwrap();
 }
+
+#[test]
+fn an_agents_knowledge_waits_for_its_charge_and_a_search_finds_only_what_it_may_read() {
+    use crate::directorates::m::knowledge::{KnowledgeChange, KnowledgeTarget};
+
+    let root = tempfile::tempdir().unwrap();
+    let state = station(root.path(), ReportLimits::default());
+    let desk = ReportDesk::new(state.clone());
+    let proposer = reader("007", "G", "mission-1");
+    proposer.exposure.mark("tool:WebFetch", 1.0);
+    let change = KnowledgeChange::new(
+        KnowledgeTarget::New {
+            scope: ReportScope::Operation("G".to_owned()),
+            kind: "tradecraft".to_owned(),
+        },
+        "Writing a brief",
+        "Name the goal first.",
+    )
+    .summarised("How a brief is written")
+    .on_topics(["briefs"]);
+    let wrote = desk.write_known(&proposer, None, change).unwrap();
+    assert_eq!(wrote["state"], "open", "{wrote}");
+    let id = wrote["id"].as_str().unwrap().to_owned();
+    let search = |who: &Reader, words: &str, state: Option<&str>| {
+        let answer = desk
+            .search(who, None, None, Some(words), None, &[], None, state)
+            .unwrap();
+        unfenced(&answer, "reports")
+    };
+    // What waits is not current knowledge.
+    assert_eq!(search(&proposer, "brief", None)["total"], 0);
+    // Its filer and the Operation's charge see the proposal; a colleague does not.
+    assert_eq!(search(&proposer, "brief", Some("open"))["total"], 1);
+    let colleague = reader("licensed", "G", "mission-2");
+    assert_eq!(search(&colleague, "brief", Some("open"))["total"], 0);
+    assert_eq!(read(&state, &colleague, &id)["status"], "refused");
+    let charge = Reader {
+        agent: "licensed".to_owned(),
+        operation: "G".to_owned(),
+        mission: None,
+        exposure: ExposureGate::default(),
+    };
+    assert_eq!(search(&charge, "brief", Some("open"))["total"], 1);
+    // The charge decides it; it stands, still marked as what an exposed Run wrote.
+    let call = AssessCall {
+        report: id.clone(),
+        assessment: "accepted".to_owned(),
+        reason: "checked".to_owned(),
+        ..AssessCall::default()
+    };
+    let decided: Value = serde_json::from_str(
+        &desk
+            .assess(
+                &charge,
+                &call,
+                "charge:operation:G",
+                Duration::from_secs(60),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(decided["assessed"], "accepted", "{decided}");
+    assert_eq!(decided["state"], "standing");
+    let found = search(&colleague, "brief", None);
+    assert_eq!(found["total"], 1);
+    assert_eq!(found["reports"][0]["title"], "Writing a brief");
+    assert_eq!(found["reports"][0]["summary"], "How a brief is written");
+    // Reading it exposes the reader, as an exposed Run's writing does.
+    let shown = read(&state, &colleague, &id);
+    assert_eq!(shown["exposed"], true, "{shown}");
+    assert!(
+        colleague
+            .exposure
+            .exposures()
+            .iter()
+            .any(|exposure| exposure.source == format!("report:{id}"))
+    );
+    // Another Operation's Run finds nothing of it.
+    let outsider = reader("007", "B", "B-1");
+    assert_eq!(search(&outsider, "brief", None)["total"], 0);
+}

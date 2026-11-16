@@ -13,17 +13,69 @@ pub(crate) enum ReportsCommand {
     /// File a Report (needs mission.create on the Operation, or station.configure on the
     /// Station or on config:reports for m). It creates no Mission.
     File(Box<FileArgs>),
-    /// List Reports of a scope, or those tied to a Mission, most urgent first.
+    /// List Reports of a scope, or those tied to a Mission, most urgent first; or, with --words,
+    /// --topics or --title, search every scope you may read for what is known and observed,
+    /// best first (id, kind, title and summary).
     List {
-        /// operation:ID, station:ID or m.
-        #[arg(long, required_unless_present = "mission")]
+        /// operation:ID, station:ID, person:ID, global or m.
+        #[arg(
+            long,
+            required_unless_present_any = ["mission", "words", "topics", "title", "kind"]
+        )]
         scope: Option<String>,
         /// Only those tied to this Mission.
         #[arg(long)]
         mission: Option<String>,
-        /// open, assessed or closed.
+        /// open, assessed, closed or standing.
         #[arg(long)]
         state: Option<String>,
+        /// Search: words of the title, summary, topics and text.
+        #[arg(long)]
+        words: Option<String>,
+        /// Search: only Reports on each of these topics, comma separated.
+        #[arg(long)]
+        topics: Option<String>,
+        /// Search: only Reports whose title holds each of these words.
+        #[arg(long)]
+        title: Option<String>,
+        /// Search: only this kind (memory, tradecraft, rule, contact, finding, ...).
+        #[arg(long)]
+        kind: Option<String>,
+    },
+    /// Write a memory, tradecraft, rule or contact as its next revision, from the revision you
+    /// read (the write is refused once it has moved on).
+    Revise {
+        /// Its ID.
+        id: String,
+        /// The revision you read.
+        #[arg(long)]
+        revision: u64,
+        /// One line naming it.
+        #[arg(long)]
+        title: String,
+        /// Its whole new text.
+        #[arg(long)]
+        text: String,
+        /// One line saying what it is for.
+        #[arg(long)]
+        summary: Option<String>,
+        /// Topics, comma separated.
+        #[arg(long, value_delimiter = ',')]
+        topics: Vec<String>,
+    },
+    /// Forget a memory with its revisions, or retire tradecraft, a rule or a contact (closed,
+    /// resolution retired, kept). Where you may only propose it, it waits for a verdict.
+    Forget {
+        /// Its ID.
+        id: String,
+        /// The revision you read, when it must still be that one.
+        #[arg(long)]
+        revision: Option<u64>,
+    },
+    /// What a memory, tradecraft, rule or contact held before its later revisions.
+    Versions {
+        /// Its ID.
+        id: String,
     },
     /// Show one Report as far as you may read it.
     Show {
@@ -84,8 +136,9 @@ pub(crate) enum ClearanceCommand {
 pub(crate) struct AssessArgs {
     /// The Report's ID.
     id: String,
-    /// What it becomes.
-    #[arg(value_parser = ["mission", "duplicate", "related", "no_action", "awaiting", "later", "decision"])]
+    /// What it becomes: for what an Agent proposed of a known kind, `accepted` (it stands, or
+    /// becomes its target's next revision) or `no_action`.
+    #[arg(value_parser = ["mission", "duplicate", "related", "no_action", "awaiting", "later", "decision", "accepted"])]
     assessment: String,
     /// Why, kept apart from the Report's own words.
     #[arg(long)]
@@ -130,15 +183,22 @@ pub(crate) struct AssessArgs {
 /// What `ai6ctl reports file` takes.
 #[derive(Debug, Args)]
 pub(crate) struct FileArgs {
-    /// operation:ID, station:ID or m.
+    /// operation:ID, station:ID, person:ID, global or m.
     scope: String,
+    /// One line saying what it is for, which a search lists beside the title.
+    #[arg(long)]
+    summary: Option<String>,
+    /// Topics a search and a facet use, comma separated.
+    #[arg(long, value_delimiter = ',')]
+    topics: Vec<String>,
     /// One line naming it.
     #[arg(long)]
     title: String,
     /// What was observed.
     #[arg(long)]
     text: String,
-    /// A short label; finding by default.
+    /// A short label; finding by default. memory, tradecraft, rule and contact are what is
+    /// known: they stand at once where you may write the scope, otherwise they wait for a verdict.
     #[arg(long)]
     kind: Option<String>,
     /// info, warning or critical; info by default.
@@ -208,6 +268,22 @@ fn print_listed(listed: &Value) {
     }
 }
 
+fn print_found(found: &Value) {
+    println!("ID\tSCOPE\tKIND\tSTATE\tTITLE\tSUMMARY");
+    for report in found["reports"].as_array().into_iter().flatten() {
+        println!(
+            "{}\t{}\t{}\t{}\t{}\t{}",
+            text(&report["id"]),
+            text(&report["scope"]),
+            text(&report["kind"]),
+            text(&report["state"]),
+            text(&report["title"]),
+            text(&report["summary"]),
+        );
+    }
+    println!("{} found", number(&found["total"]));
+}
+
 fn markings(report: &Value) -> String {
     let mut marks = Vec::new();
     for key in ["classification", "handling"] {
@@ -232,6 +308,8 @@ pub(crate) async fn run(
         ReportsCommand::File(args) => {
             let FileArgs {
                 scope,
+                summary,
+                topics,
                 title,
                 text: body,
                 kind,
@@ -253,6 +331,8 @@ pub(crate) async fn run(
                 "scope": scope,
                 "title": title,
                 "text": body,
+                "summary": summary,
+                "topics": topics,
                 "kind": kind,
                 "severity": severity,
                 "priority": priority,
@@ -281,17 +361,99 @@ pub(crate) async fn run(
             scope,
             mission,
             state,
+            words,
+            topics,
+            title,
+            kind,
         } => {
+            let searching =
+                words.is_some() || topics.is_some() || title.is_some() || kind.is_some();
             let mut url = address(server, &["reports"])?;
             {
                 let mut query = url.query_pairs_mut();
-                for (key, value) in [("scope", scope), ("mission", mission), ("state", state)] {
+                for (key, value) in [
+                    ("scope", scope),
+                    ("mission", mission),
+                    ("state", state),
+                    ("words", words),
+                    ("topics", topics),
+                    ("title", title),
+                    ("kind", kind),
+                ] {
                     if let Some(value) = value {
                         query.append_pair(key, &value);
                     }
                 }
             }
-            print_listed(&exchange(client, token, Method::GET, url, None, None).await?);
+            let listed = exchange(client, token, Method::GET, url, None, None).await?;
+            if searching {
+                print_found(&listed);
+            } else {
+                print_listed(&listed);
+            }
+        }
+        ReportsCommand::Revise {
+            id,
+            revision,
+            title,
+            text: body,
+            summary,
+            topics,
+        } => {
+            let written = exchange(
+                client,
+                token,
+                Method::PUT,
+                address(server, &["reports", &id])?,
+                None,
+                Some(json!({
+                    "revision": revision,
+                    "title": title,
+                    "text": body,
+                    "summary": summary,
+                    "topics": topics,
+                })),
+            )
+            .await?;
+            println!(
+                "{}\t{}\t{}",
+                text(&written["id"]),
+                text(&written["state"]),
+                number(&written["revision"])
+            );
+        }
+        ReportsCommand::Forget { id, revision } => {
+            let mut url = address(server, &["reports", &id])?;
+            if let Some(revision) = revision {
+                url.query_pairs_mut()
+                    .append_pair("revision", &revision.to_string());
+            }
+            let gone = exchange(client, token, Method::DELETE, url, None, None).await?;
+            if gone["forgotten"].is_string() {
+                println!("{}\tforgotten", text(&gone["forgotten"]));
+            } else {
+                println!("{}\t{}", text(&gone["id"]), text(&gone["state"]));
+            }
+        }
+        ReportsCommand::Versions { id } => {
+            let held = exchange(
+                client,
+                token,
+                Method::GET,
+                address(server, &["reports", &id, "versions"])?,
+                None,
+                None,
+            )
+            .await?;
+            println!("REVISION\tUPDATED_BY\tTITLE");
+            for version in held["versions"].as_array().into_iter().flatten() {
+                println!(
+                    "{}\t{}\t{}",
+                    number(&version["revision"]),
+                    text(&version["updated_by"]),
+                    text(&version["title"])
+                );
+            }
         }
         ReportsCommand::Assess(args) => {
             let AssessArgs {
@@ -393,6 +555,20 @@ pub(crate) async fn run(
             ] {
                 println!("{key}\t{}", text(&report[key]));
             }
+            if !list(&report["topics"]).is_empty() {
+                println!("topics\t{}", list(&report["topics"]));
+            }
+            for key in ["summary", "updated_by"] {
+                if !report[key].is_null() {
+                    println!("{key}\t{}", text(&report[key]));
+                }
+            }
+            if let Some(revision) = report["revision"].as_u64() {
+                println!("revision\t{revision}");
+            }
+            if report["exposed"] == true {
+                println!("exposed\ttrue");
+            }
             println!("markings\t{}", markings(&report));
             println!("reliability\t{}", text(&report["reliability"]));
             if report["untrusted"] == true {
@@ -475,4 +651,11 @@ async fn run_clearance(
         }
     }
     Ok(())
+}
+
+/// A number as it prints; empty when it is not one.
+fn number(value: &Value) -> String {
+    value
+        .as_u64()
+        .map_or_else(String::new, |value| value.to_string())
 }
