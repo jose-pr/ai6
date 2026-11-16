@@ -23,6 +23,7 @@ Each provider takes a JSON object; every key is optional.
 | `coqui_access_mtls` | `source`, `waiting`, `max_records`, `waiting_per_source`, `waiting_total`, `waiting_rerecord_secs`, `trust` (`pinned`, `ca`, `pinned-or-ca`), `ca_file`, `subject`, `san`, `ip_in_dns`, `account`, `max_chain`, `record_limits` |
 | `coqui_access_ldap` | `url`, `start_tls`, `ca_file`, `base`, `bind`, `bind_password`, `user_filter`, `name_attribute`, `group_attribute`, `group_filter`, `group_base`, `nested_groups`, `timeout_seconds`, `cache` |
 | `coqui_access_proxy` | `trusted`, `user_header`, `certificate_header`, `certificate_encoding` (`pem-url`, `der-base64`, `xfcc`), `subject_header`, `account`, `max_certificate_bytes` |
+| `coqui_access_totp` | built into the gateway, over the Registry; `issuer`, `algorithm`, `digits`, `period`, `skew`, `recovery_codes`, `enrol_seconds`, `max_records`, `lockout_after`, `lockout_seconds`, `lockout_longest_seconds` ([a second step](#a-second-step)) |
 | `coqui_roles` | `scope_kinds`, `roles`, `rules`, `limits` |
 
 In a provider's configuration a bound such as `max_chain` or one of `record_limits` is a count or
@@ -248,8 +249,9 @@ What is decided, and where:
 - `POST /v1/auth/login` decides the method it was given before anything else: a method the policy does
   not offer from here is answered `403`, no sign-in provider is asked and no try is counted against the
   address or the name. Only the providers the offer lists are asked, in its order. A valid factor is
-  decided again with the person it named; anything short of a complete sign-in is answered as a wrong
-  password is.
+  decided again with the person it named. A complete sign-in is issued; one the policy offers more
+  steps to waits for them (`202`, [a second step](#a-second-step)); anything else is answered as a
+  wrong password is.
 - A sign-in keeps the steps it passed. `POST /v1/auth/resume` and `POST /v1/auth/renew` decide again,
   with the person as the directory has them now, the policy now in force and the address of this
   request, and a sign-in the policy no longer completes ends: `401`. A token a Station issued for a
@@ -295,6 +297,116 @@ it offers nothing, keys still work, the reason is logged and `GET /v1/user/acces
 as `invalid`; the older policy is never kept. Every gateway reads the stored record again under
 the lock a route's change holds, so a poll cannot put an older policy over a newer one. A route
 change is audited before it is stored.
+
+## Which ways in, from where
+
+A deployment says in one policy which ways in it allows, from which networks, and where a second
+step is asked. This one lets people in from the office with a password or the identity the reverse
+proxy asserts, asks administrators for a one-time code after the password, and from anywhere else
+accepts the proxy's identity alone:
+
+```toml
+# unex.toml. `proxy` is what the gateway calls a certificate its reverse proxy has checked.
+authenticators = [
+  { provider = "coqui_access_system" },
+  { provider = "coqui_access_totp", config = { issuer = "Example" } },
+]
+
+[[sign_in_policy.config.rule]]
+networks = ["10.0.0.0/8"]
+subjects = ["group:admins"]
+allow = [["password", "totp"], ["password", "recovery_code"], ["proxy"]]
+
+[[sign_in_policy.config.rule]]
+networks = ["10.0.0.0/8"]
+allow = [["password"], ["proxy"]]
+
+[[sign_in_policy.config.rule]]
+allow = [["proxy"]]
+
+# A signed-in person may set up or replace their own code app.
+[[sign_in_policy.config.rule]]
+purposes = ["enrol"]
+allow = [["password"], ["proxy"]]
+
+# A sign-in waiting for a code the person has none of yet may set one up, from the office only.
+[[sign_in_policy.config.rule]]
+purposes = ["enrol_first"]
+networks = ["10.0.0.0/8"]
+allow = [["password"]]
+```
+
+To grow it, add a rule above the others: a `subjects` condition narrows it to a group, `networks`
+and `clients` to where it is made, `providers` to who may be asked, and each chain in `allow`
+lists the methods that must all succeed for one person. Rules are walked in order and the
+strictest goes last, where an address that is not known falls. A rule for `enrol` or `enrol_first`
+is written out, since `purposes` defaults to `sign_in` and `resume`; with none, nobody
+sets up a factor for themselves.
+
+### A second step
+
+`coqui_access_totp` is listed under `authenticators` like any provider, and is never asked for a
+first factor: it checks a one-time code (`totp`) or a recovery code (`recovery_code`) for a person
+an earlier step named. It is built into the gateway, not loaded as a library, and keeps its
+accounts and enrolments in the Registry, so every gateway and Station sharing the database sees
+the same factors, spent codes and used recovery codes. Its configuration is every key the provider
+takes except where it keeps its records: `issuer`, `algorithm`, `digits`, `period`, `skew`,
+`recovery_codes`, `enrol_seconds`, `max_records`, `lockout_after`, `lockout_seconds` and
+`lockout_longest_seconds`. A code needs the secret, so it is kept, but **sealed**: AES-256-GCM
+under a key derived from `[unex] factor_key` in `ai6.cfg` (a secret reference, as `proxy_secret`
+is), with a fresh nonce per write and the account and kind of factor as associated data. Every
+gateway sharing the Registry names the same key. With no `factor_key`, nobody can set up a factor
+(`409`, naming the key) and nothing can be checked; a gateway whose key does not open the factors
+stored in the Registry refuses to start rather than skip the step. **Changing the key invalidates
+every enrolled factor**: there is no rotation, so reset them and enrol again. Recovery codes are
+kept as digests.
+
+When the policy offers a second step after the first, `POST /v1/auth/login` answers `202`:
+
+```json
+{ "pending": "…", "methods": ["totp", "recovery_code"], "expires_in": 300 }
+```
+
+The sign-in waits in the Registry, kept by a digest of `pending`, which only the person holds. The
+next step is `POST /v1/auth/login` with `{ "pending", "method", "secret" }` (`totp`,
+`recovery_code`, or `proxy` with the proxy's headers); it answers `201` with the token, `202` when
+a further step is offered, `403` when the method is not offered after the steps already passed,
+and `401` for a wrong code, the wrong person, or a sign-in that has ended. `GET /v1/auth/methods`
+with the header `X-AI6-Pending` says what is offered next (`{"step": "next", "methods": [...]}`).
+A sign-in completed this way records every step it passed, and is decided again by all of them
+when it renews or resumes. Only a browser continues what a browser began.
+
+Every try at a next step is counted three ways: against the account in the login limits (the same
+counts as its password, `429` past them), against the pending sign-in's own cap, and by the
+provider's delay after wrong codes. The `[login]` table of the `unex` record holds
+`pending_seconds` (how long a sign-in waits, default 300) and `pending_tries` (default 5); past
+the cap the sign-in ends and the person starts again. A sign-in is taken by one request, so a
+code is never spent twice.
+
+### Setting up a factor
+
+| Route | Needs |
+| --- | --- |
+| `GET /v1/user/factors` | a sign-in; says whether a factor is set up and whether the policy lets this sign-in set one up |
+| `POST /v1/user/factors/totp` | a sign-in the policy decides for `enrol`; answers `{ "uri", "recovery_codes" }` once |
+| `POST /v1/user/factors/totp/confirm` | the same, and `{ "code" }` from the app; until then the old factor, if any, stands |
+| `POST /v1/auth/enrol`, `POST /v1/auth/enrol/confirm` | a waiting sign-in (`pending`) the policy decides for `enrol_first`, by a rule that names it |
+| `DELETE /v1/user/access/factors/{person}` | `account.manage` at `config:accounts`; the person enrols again |
+
+The provisioning link (shown as a QR code) and the recovery codes are shown once and kept nowhere
+as themselves. Beginning, confirming and resetting are audited (`account.factor.enrol`,
+`account.factor.confirm`, `account.factor.reset`, the person's ID as the target) before they are
+made, and no code, secret or link is in any audit record or log. The code that confirms a factor
+is spent, so a sign-in that waits continues with the next one the app shows. Letting a sign-in set
+up its own second step (`enrol_first`) means whoever holds its first factor can; write that rule
+only for the networks that deserve it.
+
+`ai6ctl login --name NAME` signs in and prints the token, asking for the password
+(`UNEX_PASSWORD`, `--password-file` or the first line of standard input) and, when the gateway
+answers `202`, for a code (`UNEX_CODE` or the next line; `--recovery` presents a recovery code).
+`ai6ctl factors status|enrol|confirm CODE|reset PERSON` sets up and resets factors. Outer Office
+asks for the code after the password and has a **Second factor** section beside Keys that shows the
+QR code and the recovery codes once.
 
 ## Signing in from a browser
 
@@ -638,6 +750,7 @@ the writes answer `409`.
 | `PUT`, `DELETE /v1/user/access/roles/{role}`, `PUT /v1/user/access/{rules,delegable}` | `access.manage` at `config:access` |
 | `PUT /v1/user/access/chief` | the same, and a chief |
 | `GET`, `PUT`, `DELETE /v1/user/access/sign-in` | `access.read` / `access.manage` at `config:access` ([the sign-in policy](#the-sign-in-policy)) |
+| `DELETE /v1/user/access/factors/{person}` | `account.manage` at `config:accounts` ([setting up a factor](#setting-up-a-factor)) |
 | `GET /v1/user/access/check?subject=&action=&resource=` | `access.read` at the resource |
 | `GET /v1/user/operations/{op}/access`, `PUT`/`DELETE .../access/roles/{role}`, `PUT .../access/rules` | `access.read` / `access.manage` at the Operation |
 | `GET /v1/user/accounts`, `PUT /v1/user/accounts/{name}`, `POST /v1/user/accounts/{name}/secret` | `account.manage` at `config:accounts`; a `groups` change also `access.manage` at `config:access` |
