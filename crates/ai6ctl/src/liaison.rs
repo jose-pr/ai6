@@ -19,11 +19,6 @@ use coqui_transport_web::websocket::{Dialer, Frames};
 use coqui_transport_web::{Dialer as _, Kind};
 use url::Url;
 
-const DIAL_TIMEOUT: Duration = Duration::from_secs(10);
-const PROOF_TIMEOUT: Duration = Duration::from_secs(15);
-const HEARTBEAT_EVERY: Duration = Duration::from_secs(15);
-const HEARTBEAT_MISSES: u32 = 3;
-const LONGEST_WAIT: Duration = Duration::from_secs(30);
 /// The file under the link home that holds the token, unless another is named.
 const TOKEN_FILE: &str = "a2a-loopback.token";
 const TOKEN_BYTES: usize = 32;
@@ -83,6 +78,24 @@ pub(crate) struct LoopbackArgs {
     /// link's remote granted, and read the extended card.
     #[arg(long, conflicts_with = "token_file")]
     no_token: bool,
+    /// Seconds to wait for each connection to the link to open.
+    #[arg(long, value_name = "SECONDS", default_value_t = 10)]
+    dial_timeout_seconds: u64,
+    /// Seconds the remote has to finish proving itself once connected.
+    #[arg(long, value_name = "SECONDS", default_value_t = 15)]
+    proof_timeout_seconds: u64,
+    /// Seconds between the heartbeats asked of the remote on an open link.
+    #[arg(long, value_name = "SECONDS", default_value_t = 15)]
+    heartbeat_seconds: u64,
+    /// Heartbeat intervals with nothing heard after which the link is taken as lost.
+    #[arg(long, value_name = "COUNT", default_value_t = 3)]
+    heartbeat_misses: u32,
+    /// Seconds to wait before dialing again after a link fails or ends; doubles on each failure.
+    #[arg(long, value_name = "SECONDS", default_value_t = 1)]
+    backoff_start_seconds: u64,
+    /// Seconds the wait before dialing again grows to at most.
+    #[arg(long, value_name = "SECONDS", default_value_t = 30)]
+    backoff_max_seconds: u64,
 }
 
 /// Runs the command; it returns only with the reason it stopped.
@@ -144,19 +157,25 @@ fn loopback(args: &LoopbackArgs, ca_file: Option<&Path>) -> Result<(), String> {
     }
     let mut dialer = dialer.build().map_err(|error| error.to_string())?;
     let max_message = Limits::default().max_message;
-    let mut wait = Duration::from_secs(1);
+    let first_wait = Duration::from_secs(args.backoff_start_seconds);
+    let longest_wait = Duration::from_secs(args.backoff_max_seconds);
+    let mut wait = first_wait;
     loop {
-        match dialer.dial(Kind::WebSocket, &args.url, DIAL_TIMEOUT) {
+        match dialer.dial(
+            Kind::WebSocket,
+            &args.url,
+            Duration::from_secs(args.dial_timeout_seconds),
+        ) {
             Ok(channel) => {
                 let proved = auth::prove_out(
                     &method,
                     &channel,
-                    PROOF_TIMEOUT,
+                    Duration::from_secs(args.proof_timeout_seconds),
                     method.method().record_length(max_message),
                 );
                 match proved {
                     Ok(established) => {
-                        wait = Duration::from_secs(1);
+                        wait = first_wait;
                         let peer = established.peer;
                         eprintln!("connected to {peer}");
                         let sealed = Sealed::new(&channel, established.session);
@@ -168,7 +187,10 @@ fn loopback(args: &LoopbackArgs, ca_file: Option<&Path>) -> Result<(), String> {
                             None => sealed,
                         };
                         let mut limits = Limits::default();
-                        limits.heartbeat = Some(Heartbeat::new(HEARTBEAT_EVERY, HEARTBEAT_MISSES));
+                        limits.heartbeat = Some(Heartbeat::new(
+                            Duration::from_secs(args.heartbeat_seconds),
+                            args.heartbeat_misses,
+                        ));
                         Mux::run(&sealed, Side::Dialed, limits, None, |mux| hub.attach(mux));
                         sealed.close();
                         eprintln!("the link ended");
@@ -187,7 +209,7 @@ fn loopback(args: &LoopbackArgs, ca_file: Option<&Path>) -> Result<(), String> {
             Err(failure) => eprintln!("could not connect: {failure}"),
         }
         thread::sleep(wait);
-        wait = (wait * 2).min(LONGEST_WAIT);
+        wait = (wait * 2).min(longest_wait);
     }
 }
 

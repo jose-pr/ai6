@@ -310,7 +310,7 @@ control's status route every `--poll-interval` (0.5 s) until the Station reports
   `--no-token` serves without one. `--origin` (repeat) lets a page from that Origin use the endpoint,
   `--forward-header` (repeat) passes a header to the remote, `--answer-timeout` is how long the remote has to
   say anything to an operation (default: the library's). Standard output: the endpoint's URL, then the token
-  file's path unless `--no-token`; it runs until stopped and dials again after the link ends, backing off.
+  file's path unless `--no-token`; it runs until stopped and dials again after the link ends. Timings, all in whole seconds with no floor or ceiling: `--dial-timeout-seconds` (default 10), `--proof-timeout-seconds` (15), `--heartbeat-seconds` (15) with `--heartbeat-misses` (3 intervals unheard, a count) after which the link is taken as lost, and the wait before dialing again, `--backoff-start-seconds` (1) doubling up to `--backoff-max-seconds` (30).
   Exit `1` when the remote proves a key that is not a peer named, or its certificate is refused.
 - `ai6ctl exec <MISSION_ID|RUN_ID> [--agent <CODENAME>] [--message <TEXT>]` executes a Mission or a
   Run through the same controls: a Run ID found on the board resumes (`resume`, `--message`), anything else

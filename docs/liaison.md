@@ -103,7 +103,9 @@ prints its address (and the file holding its bearer token) on standard output. T
 its id at start. `--identity` names this side's key file (default: the user's own), `--listen` the
 loopback address (default `127.0.0.1:0`), `--token-file` or `--no-token` the bearer token every
 request must present, `--origin` a page's Origin to allow, `--answer-timeout` how many seconds the
-peer has to answer an operation, and the global `--ca-file` the roots a `wss://` certificate must
+peer has to answer an operation, `--dial-timeout-seconds` (default 10), `--proof-timeout-seconds` (15) and
+`--heartbeat-seconds` (15) with `--heartbeat-misses` (3) the link's timings, `--backoff-start-seconds` (1)
+and `--backoff-max-seconds` (30) the wait between dials, which doubles up to the larger, and the global `--ca-file` the roots a `wss://` certificate must
 chain to.
 
 **HTTP JSON-RPC on the gateway.** `POST /v1/a2a`, with the card at
