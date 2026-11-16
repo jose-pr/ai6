@@ -27,10 +27,17 @@ pub(crate) const ACCOUNTS: &str = "totp";
 /// The family of enrolments waiting for a first code.
 pub(crate) const ENROLMENTS: &str = "totp_enrolling";
 
+/// What stands for a secret that cannot be opened. It is a valid secret, and the record that
+/// holds it is disabled so no code is ever checked against it; it is never written back.
+const UNREADABLE: &str = "AAAAAAAAAAAAAAAA";
+
 /// A record that keeps a secret under a name.
 pub(crate) trait Sealable {
     fn name(&self) -> &str;
     fn secret_mut(&mut self) -> &mut String;
+    /// Makes the record one that stands for an unreadable one, when a record can be; `false`
+    /// when it cannot, and the record is then left out.
+    fn unreadable(&mut self) -> bool;
 }
 
 impl Sealable for TotpRecord {
@@ -40,6 +47,11 @@ impl Sealable for TotpRecord {
     fn secret_mut(&mut self) -> &mut String {
         &mut self.secret
     }
+    fn unreadable(&mut self) -> bool {
+        self.secret = UNREADABLE.to_owned();
+        self.disabled = true;
+        true
+    }
 }
 
 impl Sealable for PendingTotp {
@@ -48,6 +60,9 @@ impl Sealable for PendingTotp {
     }
     fn secret_mut(&mut self) -> &mut String {
         &mut self.secret
+    }
+    fn unreadable(&mut self) -> bool {
+        false
     }
 }
 
@@ -89,23 +104,40 @@ fn unavailable(_: io::Error) -> SourceError {
 }
 
 impl<T: Walk + FromWalk + Sealable + Clone> RegistryTable<T> {
-    fn decode(&self, text: &str) -> Result<T, SourceError> {
+    /// The record `text` holds, with its secret opened. `Ok(None)` for one that cannot be: it is
+    /// logged, and stands as a disabled account (or is left out) so that only its own person
+    /// fails, and the step is never skipped.
+    fn decode(&self, text: &str) -> Result<Option<T>, SourceError> {
         let mut record = from_deserializer::<T, _>(
             &mut serde_json::Deserializer::from_str(text),
             Presentation::new(),
         )
         .map_err(|_| SourceError::invalid("a stored record cannot be read"))?;
         let context = self.context(record.name());
-        let opened = self
-            .sealer
-            .open(&context, record.secret_mut())
-            .map_err(sealing)?;
-        *record.secret_mut() = opened;
-        Ok(record)
+        match self.sealer.open(&context, record.secret_mut()) {
+            Ok(opened) => {
+                *record.secret_mut() = opened;
+                Ok(Some(record))
+            }
+            // Nothing opens without a key: that is the whole table's refusal.
+            Err(SealError::NoKey) => Err(sealing(SealError::NoKey)),
+            Err(error) => {
+                eprintln!(
+                    "universal-exports: the one-time code record of {} cannot be opened: {error}",
+                    record.name()
+                );
+                Ok(record.unreadable().then_some(record))
+            }
+        }
     }
 
     fn encode(&self, record: &T) -> Result<String, SourceError> {
         let mut sealed = record.clone();
+        if sealed.secret_mut() == UNREADABLE {
+            return Err(SourceError::invalid(
+                "a record that cannot be opened is not rewritten",
+            ));
+        }
         let context = self.context(sealed.name());
         let text = self
             .sealer
@@ -136,7 +168,7 @@ where
             digest.update([0]);
             digest.update(text.as_bytes());
             digest.update([0]);
-            records.push(self.decode(text)?);
+            records.extend(self.decode(text)?);
         }
         let head: [u8; 8] = digest.finalize()[..8]
             .try_into()
@@ -173,10 +205,10 @@ where
     fn update(&self, make: &mut Update<'_, T>) -> Result<(), SourceError> {
         loop {
             let documents = self.documents()?;
-            let records = documents
-                .iter()
-                .map(|(_, text)| self.decode(text))
-                .collect::<Result<Vec<_>, _>>()?;
+            let mut records = Vec::with_capacity(documents.len());
+            for (_, text) in &documents {
+                records.extend(self.decode(text)?);
+            }
             let Some(record) = make(&records)? else {
                 return Ok(());
             };

@@ -1269,9 +1269,12 @@ fn code_at(link: &str, seconds: i64) -> String {
     format!("{:06}", number % 1_000_000)
 }
 
+/// A sealing key of the length the gateway asks for.
+const KEY: &str = "a key every gateway shares, long enough";
+
 /// The one-time code provider over `registry`, reading `clock` as the time.
 fn real_second(registry: &FileRegistry, clock: Arc<std::sync::atomic::AtomicI64>) -> SecondFactor {
-    second_sealed(registry, clock, Some("a key every gateway shares"))
+    second_sealed(registry, clock, Some(KEY))
 }
 
 /// As [`real_second`], sealing with `key`.
@@ -1281,7 +1284,7 @@ fn second_sealed(
     key: Option<&str>,
 ) -> SecondFactor {
     let shared: Arc<dyn ai6::RegistryBackend> = Arc::new(registry.clone());
-    let sealer = Arc::new(universal_exports::FactorSealer::new(key).unwrap());
+    let sealer = Arc::new(universal_exports::FactorSealer::new(key, 32).unwrap());
     let totp = Arc::new(
         universal_exports::totp_builder(&shared, None, &sealer)
             .unwrap()
@@ -1485,10 +1488,16 @@ async fn a_signed_in_person_enrols_under_an_enrol_rule_and_an_administrator_rese
     assert!(audited(&h, "account.factor.reset").is_empty());
     let (status, _) = send(&h, Method::DELETE, reset, None, Some(&alice), None).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
+    // A reset ends every sign-in of the person's, the one that asked for it among them.
+    let (status, _) = send(&h, Method::GET, "/v1/user/factors", None, Some(&alice), None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (_, again) = password(&h, None, "alice", "pw", true).await;
+    let alice = again["token"].as_str().unwrap().to_owned();
     let (_, state) = send(&h, Method::GET, "/v1/user/factors", None, Some(&alice), None).await;
     assert_eq!(state["enrolled"], false, "the person enrols again");
     let (status, _) = send(&h, Method::DELETE, reset, None, Some(&alice), None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(!audited(&h, "account.factor.revoke").is_empty());
     let resets = audited(&h, "account.factor.reset");
     assert_eq!(resets.len(), 2, "each reset asked for is recorded first");
     assert!(resets.iter().all(|record| record.target == "id-alice"));
@@ -1665,114 +1674,380 @@ async fn a_pending_sign_in_ends_at_its_try_cap_and_at_its_time() {
     assert_eq!(brief.counts.codes.load(Ordering::SeqCst), 0);
 }
 
-#[tokio::test]
-async fn enrolment_is_refused_with_no_factor_key_and_a_wrong_key_fails_the_sign_in() {
-    let clock = Arc::new(std::sync::atomic::AtomicI64::new(1_700_000_010));
-    let policy = json!({"rule": [
+fn open_policy() -> Value {
+    json!({"rule": [
         {"purposes": ["enrol"], "allow": [["password"]]},
         {"allow": [["password"]]}
-    ]});
-    // No key: nothing is set up, and the refusal says why.
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().to_path_buf();
-    let registry = FileRegistry::open(&path);
-    let keyless = second_sealed(&registry, clock.clone(), None);
-    let h = serve_on(
-        registry,
-        dir,
-        Some(policy),
-        false,
-        limits(50),
-        Some(keyless),
-    )
-    .await;
-    let (_, alice) = password(&h, None, "alice", "pw", true).await;
-    let alice = alice["token"].as_str().unwrap().to_owned();
-    let (status, refused) = send(
-        &h,
-        Method::POST,
-        "/v1/user/factors/totp",
-        None,
-        Some(&alice),
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
-    assert!(refused["error"].as_str().unwrap().contains("factor_key"));
-    assert!(audited(&h, "account.factor.enrol").is_empty());
-    assert!(h.registry.factor_documents("totp_enrolling").unwrap().is_empty());
+    ]})
+}
 
-    // A factor enrolled under one key, read by a gateway holding another: the step fails, and
-    // is never skipped.
-    let sealed = serve_on(
-        FileRegistry::open(&path),
-        tempfile::tempdir().unwrap(),
-        Some(json!({"rule": [
-            {"purposes": ["enrol"], "allow": [["password"]]},
-            {"allow": [["password", "totp"]]}
-        ]})),
-        false,
-        limits(50),
-        Some(second_sealed(
-            &FileRegistry::open(&path),
-            clock.clone(),
-            Some("the first key"),
-        )),
-    )
-    .await;
-    // Enrol through a policy that lets a password open a session, then read under another key.
-    let open = serve_on(
-        FileRegistry::open(&path),
-        tempfile::tempdir().unwrap(),
-        Some(json!({"rule": [{"purposes": ["enrol"], "allow": [["password"]]}, {"allow": [["password"]]}]})),
-        false,
-        limits(50),
-        Some(second_sealed(
-            &FileRegistry::open(&path),
-            clock.clone(),
-            Some("the first key"),
-        )),
-    )
-    .await;
-    let (_, token) = password(&open, None, "alice", "pw", true).await;
-    let token = token["token"].as_str().unwrap().to_owned();
-    let (status, begun) = send(
-        &open,
-        Method::POST,
-        "/v1/user/factors/totp",
-        None,
-        Some(&token),
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{begun}");
+#[tokio::test]
+async fn enrolment_is_refused_with_no_factor_key_or_a_short_one() {
+    let clock = Arc::new(std::sync::atomic::AtomicI64::new(1_700_000_010));
+    for (key, why) in [(None, "configured"), (Some("far too short"), "fewer than 32")] {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(dir.path());
+        let keyless = second_sealed(&registry, clock.clone(), key);
+        let h = serve_on(
+            registry,
+            dir,
+            Some(open_policy()),
+            false,
+            limits(50),
+            Some(keyless),
+        )
+        .await;
+        let (_, alice) = password(&h, None, "alice", "pw", true).await;
+        let alice = alice["token"].as_str().unwrap().to_owned();
+        let (status, refused) = send(
+            &h,
+            Method::POST,
+            "/v1/user/factors/totp",
+            None,
+            Some(&alice),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+        let reason = refused["error"].as_str().unwrap();
+        assert!(reason.contains("factor_key") && reason.contains(why), "{reason}");
+        assert!(!reason.contains("far too short"));
+        assert!(audited(&h, "account.factor.enrol").is_empty());
+        assert!(h.registry.factor_documents("totp_enrolling").unwrap().is_empty());
+    }
+}
+
+/// Signs `name` in and sets a factor up; the link it makes.
+async fn enrol_as(h: &Served, clock: &Arc<std::sync::atomic::AtomicI64>, name: &str) -> String {
+    let (_, body) = password(h, None, name, "pw", true).await;
+    let token = body["token"].as_str().unwrap().to_owned();
+    let (_, begun) = send(h, Method::POST, "/v1/user/factors/totp", None, Some(&token), None).await;
     let uri = begun["uri"].as_str().unwrap().to_owned();
-    let now = clock.load(Ordering::SeqCst);
     let (status, _) = send(
-        &open,
+        h,
         Method::POST,
         "/v1/user/factors/totp/confirm",
         None,
         Some(&token),
-        Some(json!({"code": code_at(&uri, now)})),
+        Some(json!({"code": code_at(&uri, clock.load(Ordering::SeqCst))})),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    uri
+}
+
+#[tokio::test]
+async fn a_record_another_key_sealed_fails_only_its_person_and_never_skips_the_step() {
+    let clock = Arc::new(std::sync::atomic::AtomicI64::new(1_700_000_010));
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().to_path_buf();
+    let serve_with_key = |key: &'static str, dir: tempfile::TempDir, policy: Value| {
+        let (path, clock) = (path.clone(), clock.clone());
+        async move {
+            let registry = FileRegistry::open(&path);
+            let second = second_sealed(&registry, clock, Some(key));
+            serve_on(registry, dir, Some(policy), false, limits(50), Some(second)).await
+        }
+    };
+    // Bob is enrolled under another key; Alice under this gateway's.
+    let elsewhere = serve_with_key("a different key held by another gateway", dir, open_policy()).await;
+    let bob = enrol_as(&elsewhere, &clock, "bob").await;
+    let mine = serve_with_key(KEY, tempfile::tempdir().unwrap(), open_policy()).await;
+    let alice = enrol_as(&mine, &clock, "alice").await;
+    let gateway = serve_with_key(
+        KEY,
+        tempfile::tempdir().unwrap(),
+        json!({"rule": [{"allow": [["password", "totp"]]}]}),
+    )
+    .await;
+    clock.fetch_add(30, Ordering::SeqCst);
+    let now = clock.load(Ordering::SeqCst);
+    let (_, body) = password(&gateway, None, "alice", "pw", true).await;
+    let code = json!({"pending": body["pending"], "method": "totp", "secret": code_at(&alice, now)});
+    let (status, _) = login_as_browser(&gateway, None, &[], &code).await;
+    assert_eq!(status, StatusCode::CREATED, "one unreadable record blocks nobody else");
+    let (_, body) = password(&gateway, None, "bob", "pw", true).await;
+    let code = json!({"pending": body["pending"], "method": "totp", "secret": code_at(&bob, now)});
+    let (status, _) = login_as_browser(&gateway, None, &[], &code).await;
+    assert_ne!(status, StatusCode::CREATED, "the step is not skipped");
+    // The record is left as it was, for the key that opens it.
+    assert_eq!(gateway.registry.factor_documents("totp").unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn a_person_who_has_a_factor_never_has_it_replaced_by_a_sign_in_that_has_only_its_first_step() {
+    let clock = Arc::new(std::sync::atomic::AtomicI64::new(1_700_000_010));
+    let dir = tempfile::tempdir().unwrap();
+    let registry = FileRegistry::open(dir.path());
+    let policy = json!({"rule": [
+        {"purposes": ["enrol_first"], "allow": [["password"]]},
+        {"allow": [["password", "totp"]]}
+    ]});
+    let second = real_second(&registry, clock.clone());
+    let h = serve_on(registry, dir, Some(policy), false, limits(50), Some(second)).await;
+    // Alice sets her factor up inside her first sign-in.
+    let (_, body) = password(&h, None, "alice", "pw", true).await;
+    let pending = body["pending"].clone();
+    let (_, begun) = send(&h, Method::POST, "/v1/auth/enrol", None, None, Some(json!({"pending": pending}))).await;
+    let uri = begun["uri"].as_str().unwrap().to_owned();
+    // An enrolment under way is not begun again over the top of it.
+    let (status, _) = send(&h, Method::POST, "/v1/auth/enrol", None, None, Some(json!({"pending": pending}))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "an enrolment waiting");
+    let now = clock.load(Ordering::SeqCst);
+    let (status, _) = send(
+        &h,
+        Method::POST,
+        "/v1/auth/enrol/confirm",
+        None,
+        None,
+        Some(json!({"pending": pending, "code": code_at(&uri, now)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // Later someone who holds only her password asks to set up a factor: refused, and hers works.
     clock.store(now + 30, Ordering::SeqCst);
-    let (_, body) = password(&sealed, None, "alice", "pw", true).await;
-    let right = json!({"pending": body["pending"], "method": "totp", "secret": code_at(&uri, now + 30)});
-    let (status, _) = login_as_browser(&sealed, None, &[], &right).await;
-    assert_eq!(status, StatusCode::CREATED, "its own key opens it");
-    // Another gateway whose key does not open the stored factors does not start: no sign-in
-    // can skip the step.
-    let shared: Arc<dyn ai6::RegistryBackend> = Arc::new(FileRegistry::open(&path));
-    let other = Arc::new(universal_exports::FactorSealer::new(Some("another key")).unwrap());
-    let refused = universal_exports::totp_builder(&shared, None, &other)
-        .unwrap()
-        .build()
-        .map(|_| ())
-        .unwrap_err();
-    assert!(refused.to_string().contains("factor_key"), "{refused}");
+    let (_, body) = password(&h, None, "alice", "pw", true).await;
+    let pending = body["pending"].clone();
+    let (status, _) = send(&h, Method::POST, "/v1/auth/enrol", None, None, Some(json!({"pending": pending}))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "a factor already set up");
+    let (status, _) = login_as_browser(
+        &h,
+        None,
+        &[],
+        &json!({"pending": pending, "method": "totp", "secret": code_at(&uri, now + 30)}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "her factor still works");
+    assert_eq!(h.registry.factor_documents("totp").unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn only_a_chain_the_gateways_own_tls_proved_is_a_certificate() {
+    let h = serve(
+        Some(json!({"rule": [{"allow": [["password", "certificate"]]}]})),
+        false,
+        50,
+    )
+    .await;
+    let (status, body) = password(&h, None, "alice", "pw", true).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    assert_eq!(body["methods"], json!(["certificate"]));
+    // A proxy's valid identity for her is not a certificate.
+    let (status, _) = login_as_browser(
+        &h,
+        None,
+        &[
+            ("x-forwarded-user", "alice"),
+            ("x-ai6-proxy-secret", PROXY_SECRET),
+        ],
+        &json!({"pending": body["pending"], "method": "certificate"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn a_sign_in_nobody_holds_costs_the_registry_nothing_and_its_address_a_try() {
+    let h = serve(Some(two_step()), false, 3).await;
+    let unknown = json!({"pending": "nobody-holds-this", "method": "totp", "secret": "123456"});
+    for _ in 0..3 {
+        let (status, _) = login_as_browser(&h, Some("203.0.113.5"), &[], &unknown).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+    let (status, _) = login_as_browser(&h, Some("203.0.113.5"), &[], &unknown).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    // What a page asks for with a sign-in nobody holds is counted the same way.
+    for _ in 0..3 {
+        let asked = browser(
+            reqwest::Client::new()
+                .get(format!("{}/v1/auth/methods", h.base))
+                .header("x-ai6-pending", "nobody-holds-this"),
+            Some("203.0.113.6"),
+        )
+        .send()
+        .await
+        .unwrap();
+        assert_eq!(asked.status(), StatusCode::UNAUTHORIZED);
+    }
+    let asked = browser(
+        reqwest::Client::new()
+            .get(format!("{}/v1/auth/methods", h.base))
+            .header("x-ai6-pending", "nobody-holds-this"),
+        Some("203.0.113.6"),
+    )
+    .send()
+    .await
+    .unwrap();
+    assert_eq!(asked.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert!(h.registry.factor_documents("pending").unwrap().is_empty());
+    assert_eq!(h.counts.codes.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn replacing_a_factor_needs_a_code_from_it_or_a_fresh_sign_in_and_ends_the_other_sign_ins() {
+    let clock = Arc::new(std::sync::atomic::AtomicI64::new(1_700_000_010));
+    let dir = tempfile::tempdir().unwrap();
+    let registry = FileRegistry::open(dir.path());
+    let second = real_second(&registry, clock.clone());
+    let h = serve_on(
+        registry,
+        dir,
+        Some(open_policy()),
+        false,
+        LoginLimits {
+            enrol_fresh_seconds: Duration::from_millis(400),
+            ..limits(50)
+        },
+        Some(second),
+    )
+    .await;
+    let token = |body: Value| body["token"].as_str().unwrap().to_owned();
+    let (_, first) = password(&h, None, "alice", "pw", true).await;
+    let (first, elsewhere) = (token(first), token(password(&h, None, "alice", "pw", true).await.1));
+    // The first factor needs no proof beyond the policy.
+    let (_, begun) = send(&h, Method::POST, "/v1/user/factors/totp", None, Some(&first), None).await;
+    let uri = begun["uri"].as_str().unwrap().to_owned();
+    let now = clock.load(Ordering::SeqCst);
+    let confirm = |uri: String, at: i64, token: String| {
+        let h = &h;
+        async move {
+            send(
+                h,
+                Method::POST,
+                "/v1/user/factors/totp/confirm",
+                None,
+                Some(&token),
+                Some(json!({"code": code_at(&uri, at)})),
+            )
+            .await
+            .0
+        }
+    };
+    assert_eq!(confirm(uri.clone(), now, first.clone()).await, StatusCode::OK);
+    // Once the sign-in is no longer fresh, a replacement needs a code from the factor.
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    let (status, _) = send(&h, Method::POST, "/v1/user/factors/totp", None, Some(&first), None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = send(
+        &h,
+        Method::POST,
+        "/v1/user/factors/totp",
+        None,
+        Some(&first),
+        Some(json!({"code": "000000"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "a wrong code");
+    clock.store(now + 30, Ordering::SeqCst);
+    let (status, begun) = send(
+        &h,
+        Method::POST,
+        "/v1/user/factors/totp",
+        None,
+        Some(&first),
+        Some(json!({"code": code_at(&uri, now + 30)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{begun}");
+    let replacement = begun["uri"].as_str().unwrap().to_owned();
+    // Another sign-in of hers stands until the replacement is confirmed, then ends; this one goes on.
+    let (status, _) = send(&h, Method::GET, "/v1/user/factors", None, Some(&elsewhere), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        confirm(replacement, now + 30, first.clone()).await,
+        StatusCode::OK
+    );
+    let (status, _) = send(&h, Method::GET, "/v1/user/factors", None, Some(&elsewhere), None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "her other sign-in ended");
+    let (status, _) = send(&h, Method::GET, "/v1/user/factors", None, Some(&first), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!audited(&h, "account.factor.revoke").is_empty());
+}
+
+#[tokio::test]
+async fn an_administrator_s_reset_ends_the_person_s_sign_ins() {
+    let clock = Arc::new(std::sync::atomic::AtomicI64::new(1_700_000_010));
+    let dir = tempfile::tempdir().unwrap();
+    let registry = FileRegistry::open(dir.path());
+    let second = real_second(&registry, clock.clone());
+    let h = serve_on(registry, dir, Some(open_policy()), false, limits(50), Some(second)).await;
+    let token = |body: Value| body["token"].as_str().unwrap().to_owned();
+    let alice = token(password(&h, None, "alice", "pw", true).await.1);
+    let bob = token(password(&h, None, "bob", "pw", true).await.1);
+    let bob_elsewhere = token(password(&h, None, "bob", "pw", true).await.1);
+    let (_, begun) = send(&h, Method::POST, "/v1/user/factors/totp", None, Some(&bob), None).await;
+    let uri = begun["uri"].as_str().unwrap().to_owned();
+    send(
+        &h,
+        Method::POST,
+        "/v1/user/factors/totp/confirm",
+        None,
+        Some(&bob),
+        Some(json!({"code": code_at(&uri, clock.load(Ordering::SeqCst))})),
+    )
+    .await;
+    let (status, _) = send(&h, Method::DELETE, "/v1/user/access/factors/id-bob", None, Some(&alice), None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    for ended in [&bob, &bob_elsewhere] {
+        let (status, _) = send(&h, Method::GET, "/v1/user/factors", None, Some(ended), None).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+    let (status, _) = send(&h, Method::GET, "/v1/user/factors", None, Some(&alice), None).await;
+    assert_eq!(status, StatusCode::OK, "the administrator's own goes on");
+    let revoked = audited(&h, "account.factor.revoke");
+    assert!(revoked.iter().any(|record| record.target == "id-bob"));
+}
+
+#[tokio::test]
+async fn enrolment_calls_are_counted_per_person_and_a_code_is_checked_for_its_shape_first() {
+    let clock = Arc::new(std::sync::atomic::AtomicI64::new(1_700_000_010));
+    let dir = tempfile::tempdir().unwrap();
+    let registry = FileRegistry::open(dir.path());
+    let second = real_second(&registry, clock);
+    let h = serve_on(
+        registry,
+        dir,
+        Some(open_policy()),
+        false,
+        LoginLimits {
+            per_name: std::num::NonZeroU32::new(3).unwrap(),
+            ..limits(50)
+        },
+        Some(second),
+    )
+    .await;
+    let (_, alice) = password(&h, None, "alice", "pw", true).await;
+    let alice = alice["token"].as_str().unwrap().to_owned();
+    // A code that cannot be one is refused before it is counted or recorded.
+    for bad in ["", &"9".repeat(65)] {
+        let (status, _) = send(
+            &h,
+            Method::POST,
+            "/v1/user/factors/totp/confirm",
+            None,
+            Some(&alice),
+            Some(json!({"code": bad})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+    assert!(audited(&h, "account.factor.confirm").is_empty());
+    let mut statuses = Vec::new();
+    for _ in 0..5 {
+        let (status, _) = send(&h, Method::POST, "/v1/user/factors/totp", None, Some(&alice), None).await;
+        statuses.push(status);
+    }
+    assert_eq!(
+        statuses,
+        [
+            StatusCode::OK,
+            StatusCode::OK,
+            StatusCode::OK,
+            StatusCode::TOO_MANY_REQUESTS,
+            StatusCode::TOO_MANY_REQUESTS
+        ]
+    );
+    assert_eq!(audited(&h, "account.factor.enrol").len(), 3, "refusals are not recorded");
 }
 
 /// A page authenticator that names alice by any certificate the gateway's own TLS proved.

@@ -609,6 +609,7 @@ fn login_limits(record: &UnexRecord) -> Result<LoginLimits, String> {
         name_window: record.login.name_window.0,
         pending_seconds: record.login.pending_seconds.0,
         pending_tries: u32::try_from(record.login.pending_tries).unwrap_or(u32::MAX),
+        enrol_fresh_seconds: record.login.enrol_fresh_seconds.0,
     })
 }
 
@@ -948,8 +949,15 @@ fn factor_sealer(settings: &Settings) -> Result<universal_exports::FactorSealer,
                 .map_err(|error| format!("[unex] factor_key: {error}"))
         })
         .transpose()?;
-    universal_exports::FactorSealer::new(key.as_ref().map(|key| key.as_str()))
-        .map_err(|error| format!("[unex] factor_key: {error}"))
+    let floor = usize::try_from(settings.located.factor_key_min_bytes()).unwrap_or(usize::MAX);
+    let sealer = universal_exports::FactorSealer::new(key.as_ref().map(|key| key.as_str()), floor)
+        .map_err(|error| format!("[unex] factor_key: {error}"))?;
+    if let Some(why) = sealer.refusal()
+        && key.is_some()
+    {
+        eprintln!("universal-exports: one-time codes cannot be set up: {why}");
+    }
+    Ok(sealer)
 }
 
 /// `[unex] proxy_secret_min_bytes`: the fewest bytes the proxy secret may hold.

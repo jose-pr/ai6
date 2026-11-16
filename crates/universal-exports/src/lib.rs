@@ -3720,9 +3720,8 @@ async fn auth_methods(
         .get(second_factor::PENDING_HEADER)
         .and_then(|value| value.to_str().ok())
     {
-        let methods = second_factor::offer_next(&gateway, &providers, &headers, address, token)
-            .await
-            .ok_or_else(ApiError::unauthorized)?;
+        let methods =
+            second_factor::offer_next(&gateway, &providers, &headers, address, token).await?;
         return Ok(Json(AuthMethods {
             methods,
             step: Some("next"),

@@ -315,9 +315,10 @@ pub universal_exports::EntryView::state: ai6::directorates::registry::mission_is
 pub universal_exports::EntryView::url: core::option::Option<alloc::string::String>
 pub struct universal_exports::FactorSealer
 impl universal_exports::FactorSealer
-pub fn universal_exports::FactorSealer::new(core::option::Option<&str>) -> core::result::Result<Self, alloc::string::String>
+pub fn universal_exports::FactorSealer::new(core::option::Option<&str>, usize) -> core::result::Result<Self, alloc::string::String>
 pub fn universal_exports::FactorSealer::open(&self, &str, &str) -> core::result::Result<alloc::string::String, universal_exports::SealError>
 pub fn universal_exports::FactorSealer::ready(&self) -> bool
+pub fn universal_exports::FactorSealer::refusal(&self) -> core::option::Option<alloc::string::String>
 pub fn universal_exports::FactorSealer::seal(&self, &str, &str) -> core::result::Result<alloc::string::String, universal_exports::SealError>
 impl core::fmt::Debug for universal_exports::FactorSealer
 pub fn universal_exports::FactorSealer::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -464,6 +465,7 @@ pub fn universal_exports::LiveSignIn::fmt(&self, &mut core::fmt::Formatter<'_>) 
 pub struct universal_exports::LoginLimits
 pub universal_exports::LoginLimits::address_header: core::option::Option<http::header::name::HeaderName>
 pub universal_exports::LoginLimits::address_window: core::time::Duration
+pub universal_exports::LoginLimits::enrol_fresh_seconds: core::time::Duration
 pub universal_exports::LoginLimits::forget_every: u32
 pub universal_exports::LoginLimits::name_bytes: usize
 pub universal_exports::LoginLimits::name_window: core::time::Duration

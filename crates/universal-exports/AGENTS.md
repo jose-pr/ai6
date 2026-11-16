@@ -70,6 +70,7 @@ pub struct LoginLimits {
     pub name_window: std::time::Duration,        // 600 s
     pub pending_seconds: std::time::Duration,    // 300 s a sign-in waits for its next step
     pub pending_tries: u32,                      // 5 tries at a waiting sign-in's next step
+    pub enrol_fresh_seconds: std::time::Duration, // 300 s a sign-in may replace its person's factor without a code from it
 }
 ```
 
@@ -1121,6 +1122,7 @@ The optional `cli` feature builds the service command:
 
 ### Second factors (`second_factor.rs`, `totp_store.rs`)
 
+`FactorSealer::new(key, min_bytes)` seals the secrets (`ready()`, `refusal()`, `seal`, `open`; a key under the floor seals nothing); a record it cannot open stands as a disabled account and is never rewritten.
 `pub const TOTP_PROVIDER` (`coqui_access_totp`), `totp_builder(registry, config)` and `totp_provider(registry, config)`
 build the one-time code provider over the Registry's `factors` documents (`FactorStore`), so every gateway sharing
 it sees the same accounts, enrolments, spent steps and recovery codes; the secret is sealed there (AES-256-GCM under `[unex] factor_key`; none, no factor). The
@@ -1129,7 +1131,7 @@ it sees the same accounts, enrolments, spent steps and recovery codes; the secre
 `POST /v1/auth/login` answers `202 {pending, methods, expires_in}` when the policy offers more steps; the next
 step is `{pending, method, secret}` (`totp`, `recovery_code`, `proxy`, `password`). The pending sign-in is a
 Registry document keyed by the digest of `pending`, with a try cap (`[login] pending_tries`), a time
-(`pending_seconds`) and the steps passed; a try is counted in the login guard under the person's ID first, and one
+(`pending_seconds`) and the steps passed (read without a write; the address is counted before it is read); a try is counted in the login guard under the person's ID first, and one
 request takes the sign-in. `GET /v1/auth/methods` with `X-AI6-Pending` answers `{step: "next", methods}`.
 `GET /v1/user/factors`, `POST /v1/user/factors/totp[/confirm]` (decided under `enrol`), `POST /v1/auth/enrol[/confirm]`
 (`enrol_first`, on a pending sign-in) and `DELETE /v1/user/access/factors/{person}` (`account.manage` at

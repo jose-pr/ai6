@@ -30,7 +30,7 @@ pub enum SealError {
 impl std::fmt::Display for SealError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::NoKey => "no [unex] factor_key is configured to seal one-time code secrets",
+            Self::NoKey => "no usable [unex] factor_key seals one-time code secrets",
             Self::Unreadable => "a one-time code secret cannot be opened with the factor_key",
             Self::Sealing => "a one-time code secret could not be sealed",
         })
@@ -50,6 +50,8 @@ impl KeyType for Key32 {
 /// The key that seals one-time code secrets, or none.
 pub struct FactorSealer {
     key: Option<LessSafeKey>,
+    /// Why a configured key is not used: the bytes it has and the fewest it needs.
+    too_short: Option<(usize, usize)>,
     random: SystemRandom,
 }
 
@@ -63,15 +65,21 @@ impl std::fmt::Debug for FactorSealer {
 }
 
 impl FactorSealer {
-    /// The sealer for `secret`, the configured key; none seals nothing.
+    /// The sealer for `secret`, the configured key; none seals nothing, and neither does one of
+    /// fewer than `min_bytes` bytes ([`refusal`](Self::refusal) says so).
     ///
     /// # Errors
     ///
     /// When `secret` is empty.
-    pub fn new(secret: Option<&str>) -> Result<Self, String> {
+    pub fn new(secret: Option<&str>, min_bytes: usize) -> Result<Self, String> {
+        let mut too_short = None;
         let key = match secret {
             None => None,
             Some("") => return Err("the one-time code sealing key is empty".to_owned()),
+            Some(secret) if secret.len() < min_bytes => {
+                too_short = Some((secret.len(), min_bytes));
+                None
+            }
             Some(secret) => {
                 let mut derived = [0u8; 32];
                 Salt::new(HKDF_SHA256, b"ai6 one-time code sealing")
@@ -86,13 +94,25 @@ impl FactorSealer {
         };
         Ok(Self {
             key,
+            too_short,
             random: SystemRandom::new(),
         })
     }
 
-    /// Whether a key is configured.
+    /// Whether a key is configured and long enough to seal with.
     pub fn ready(&self) -> bool {
         self.key.is_some()
+    }
+
+    /// Why nothing is sealed, when it is not; never the key.
+    pub fn refusal(&self) -> Option<String> {
+        if self.key.is_some() {
+            return None;
+        }
+        Some(match self.too_short {
+            Some((_, least)) => format!("[unex] factor_key holds fewer than {least} bytes"),
+            None => "no [unex] factor_key is configured".to_owned(),
+        })
     }
 
     /// `plain` sealed for `context`.
@@ -143,7 +163,7 @@ mod tests {
     use super::*;
 
     fn sealer(secret: &str) -> FactorSealer {
-        FactorSealer::new(Some(secret)).unwrap()
+        FactorSealer::new(Some(secret), 0).unwrap()
     }
 
     #[test]
@@ -186,10 +206,21 @@ mod tests {
 
     #[test]
     fn with_no_key_nothing_is_sealed_or_opened() {
-        let none = FactorSealer::new(None).unwrap();
+        let none = FactorSealer::new(None, 32).unwrap();
         assert!(!none.ready());
+        assert!(none.refusal().unwrap().contains("configured"));
         assert_eq!(none.seal("c", "secret"), Err(SealError::NoKey));
         assert_eq!(none.open("c", "aes256gcm1:AAAA"), Err(SealError::NoKey));
-        assert!(FactorSealer::new(Some("")).is_err());
+        assert!(FactorSealer::new(Some(""), 32).is_err());
+    }
+
+    #[test]
+    fn a_key_shorter_than_the_floor_seals_nothing_and_says_so() {
+        let short = FactorSealer::new(Some("only a few bytes"), 32).unwrap();
+        assert!(!short.ready());
+        assert_eq!(short.seal("c", "secret"), Err(SealError::NoKey));
+        let reason = short.refusal().unwrap();
+        assert!(reason.contains("32") && !reason.contains("only a few"), "{reason}");
+        assert!(FactorSealer::new(Some(&"k".repeat(32)), 32).unwrap().ready());
     }
 }

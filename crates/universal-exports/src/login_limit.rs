@@ -44,6 +44,9 @@ pub struct LoginLimits {
     pub pending_seconds: Duration,
     /// Tries at the next step one waiting sign-in allows before it ends. Default 5.
     pub pending_tries: u32,
+    /// How old a sign-in may be and still replace its person's second factor without a code from
+    /// it. Default five minutes.
+    pub enrol_fresh_seconds: Duration,
 }
 
 impl Default for LoginLimits {
@@ -59,6 +62,7 @@ impl Default for LoginLimits {
             name_window: table.name_window.0,
             pending_seconds: table.pending_seconds.0,
             pending_tries: u32::try_from(table.pending_tries).unwrap_or(u32::MAX),
+            enrol_fresh_seconds: table.enrol_fresh_seconds.0,
         }
     }
 }
@@ -146,6 +150,18 @@ impl LoginGuard {
         }
         // Counted only for a try the address was allowed, so an address held off cannot use
         // up a name's tries.
+        let refused = self.names.check_key(&called(name, self.name_bytes)).err()?;
+        Some(refused.wait_time_from(now))
+    }
+
+    /// Counts a try for the account `name` alone, whatever address it came from: a try already
+    /// counted against its address. `Some(wait)` when it is one too many.
+    pub(crate) fn tried_name(&self, name: &str) -> Option<Duration> {
+        if self.checks.fetch_add(1, Ordering::Relaxed) % self.forget_every == self.forget_every - 1
+        {
+            self.forget();
+        }
+        let now = self.clock.now();
         let refused = self.names.check_key(&called(name, self.name_bytes)).err()?;
         Some(refused.wait_time_from(now))
     }

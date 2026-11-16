@@ -114,13 +114,11 @@ async fn find_pending(
     key: String,
     now: f64,
 ) -> Result<Option<Pending>, ApiError> {
+    // A read writes nothing, so a request that names no sign-in costs the shared store nothing.
     blocking(move || {
-        let mut found = None;
-        registry.factor_update(PENDING, &key, &mut |held| {
-            found = held.and_then(|text| read_pending(text, now));
-            Ok(FactorChange::Keep)
-        })?;
-        Ok(found)
+        Ok(registry
+            .factor_get(PENDING, &key)?
+            .and_then(|text| read_pending(&text, now)))
     })
     .await
 }
@@ -287,12 +285,20 @@ pub(crate) async fn offer_next(
     headers: &HeaderMap,
     address: Option<SocketAddr>,
     token: &str,
-) -> Option<Vec<String>> {
-    let now = unix_timestamp().ok()?;
-    let pending = find_pending(registry(gateway).ok()?, access_token_digest(token), now)
-        .await
-        .ok()??;
-    let person = person_by_id(providers, pending.person.clone()).await.ok()??;
+) -> Result<Vec<String>, ApiError> {
+    // Counted against the address before the Registry is read, whether or not the sign-in is
+    // there: a client that names sign-ins at random is held off.
+    let source = gateway.login_guard.source(headers, address);
+    if let Some(wait) = gateway.login_guard.tried_address(source) {
+        return Err(ApiError::too_many_attempts(wait));
+    }
+    let now = unix_timestamp()?;
+    let pending = find_pending(registry(gateway)?, access_token_digest(token), now)
+        .await?
+        .ok_or_else(ApiError::unauthorized)?;
+    let person = person_by_id(providers, pending.person.clone())
+        .await?
+        .ok_or_else(ApiError::unauthorized)?;
     let context = SignInContext {
         done: Gateway::passed(&pending.factors),
         person: Some(person),
@@ -302,6 +308,7 @@ pub(crate) async fn offer_next(
         .decide_sign_in(providers, context)
         .await
         .map(|decision| method_names(&decision))
+        .ok_or_else(ApiError::unauthorized)
 }
 
 /// The second-factor providers a method is asked of: those the offer lists, else every one.
@@ -359,10 +366,15 @@ pub(crate) async fn continue_login(
             sign_in::not_accepted()
         });
     };
-    let key = access_token_digest(token);
+    // Counted against the address before the Registry is read, whether or not the sign-in is
+    // there, so a client naming sign-ins at random is held off and costs the store nothing.
     let source = gateway.login_guard.source(headers, connection);
+    if let Some(wait) = gateway.login_guard.tried_address(source) {
+        return Err(ApiError::too_many_attempts(wait));
+    }
+    let key = access_token_digest(token);
     let Some(pending) = find_pending(registry.clone(), key.clone(), now).await? else {
-        return Err(unknown_pending(gateway, source));
+        return Err(ApiError::unauthorized());
     };
     if pending.browser != from_browser {
         return Err(ApiError::unauthorized());
@@ -389,7 +401,7 @@ pub(crate) async fn continue_login(
     // Counted before anything is asked, under the account, whatever the address: a refusal is
     // not judged, and the right code along with the wrong ones.
     let by_password = method == "password";
-    if !by_password && let Some(wait) = gateway.login_guard.tried(source, &person.id) {
+    if !by_password && let Some(wait) = gateway.login_guard.tried_name(&person.id) {
         return Err(ApiError::too_many_attempts(wait));
     }
     match count_try(
@@ -415,7 +427,9 @@ pub(crate) async fn continue_login(
         "certificate" if certificates.as_ref().is_some_and(|chain| !chain.is_empty()) => {
             certificate_step(&providers, &person, certificates.unwrap_or_default(), source).await?
         }
-        "proxy" | "certificate" => {
+        // `certificate` is only a chain the gateway's own TLS proved; a header never makes one.
+        "certificate" => return Err(ApiError::unauthorized()),
+        "proxy" => {
             let named = crate::proxy_person(gateway, &providers, headers)
                 .await?
                 .ok_or_else(ApiError::unauthorized)?;
@@ -519,14 +533,6 @@ async fn certificate_step(
         providers.page_authenticator_id.as_deref(),
         &named,
     )
-}
-
-/// A pending sign-in nobody holds: counted against the address, which names no account.
-fn unknown_pending(gateway: &Gateway, source: std::net::IpAddr) -> ApiError {
-    match gateway.login_guard.tried_address(source) {
-        Some(wait) => ApiError::too_many_attempts(wait),
-        None => ApiError::unauthorized(),
-    }
 }
 
 /// Checks a code of `person`'s by the providers the offer lists.
@@ -696,11 +702,32 @@ pub(crate) struct Held {
     pending: String,
 }
 
-fn refused_here() -> AdminError {
+/// The proof a person who already has a factor gives to replace it, besides a fresh sign-in.
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Begin {
+    /// A code from the factor they have now.
+    #[serde(default)]
+    code: Option<String>,
+}
+
+fn refused_because(reason: &str) -> AdminError {
     AdminError::Api(ApiError::refused(
         StatusCode::FORBIDDEN,
-        "setting up a second factor is not accepted from here".to_owned(),
+        reason.to_owned(),
     ))
+}
+
+fn refused_here() -> AdminError {
+    refused_because("setting up a second factor is not accepted from here")
+}
+
+/// Refuses what cannot be a code before anything is counted or recorded.
+fn code_shaped(code: &str) -> Result<(), AdminError> {
+    if code.is_empty() || code.len() > 64 || code.chars().any(char::is_control) {
+        return Err(AdminError::Refused("that is not a code".to_owned()));
+    }
+    Ok(())
 }
 
 fn no_store(mut response: Response) -> Response {
@@ -710,11 +737,18 @@ fn no_store(mut response: Response) -> Response {
     response
 }
 
-/// The person and the steps the presented bearer's sign-in was opened with.
-async fn bearer_steps(
-    gateway: &Gateway,
-    headers: &HeaderMap,
-) -> Result<(Person, Vec<SignInFactor>), ApiError> {
+/// The person, and the sign-in the presented bearer belongs to.
+struct Signed {
+    person: Person,
+    /// The steps the sign-in was opened with.
+    factors: Vec<SignInFactor>,
+    /// When the sign-in was made, Unix seconds.
+    issued_at: f64,
+    /// The IDs of this sign-in's own records, which a revocation of the person's others keeps.
+    keep: Vec<String>,
+}
+
+async fn bearer_steps(gateway: &Gateway, headers: &HeaderMap) -> Result<Signed, ApiError> {
     let token = bearer(headers)?;
     let person = resolve_user(gateway, token).await?;
     let registry = registry(gateway)?;
@@ -726,7 +760,14 @@ async fn bearer_steps(
     if sign_in::from_station(&factors) {
         return Err(ApiError::forbidden());
     }
-    Ok((person, factors))
+    let mut keep = vec![record.token_id().to_owned()];
+    keep.extend(record.sign_in().map(str::to_owned));
+    Ok(Signed {
+        person,
+        factors,
+        issued_at: record.issued_at(),
+        keep,
+    })
 }
 
 /// Decides `purpose` for `person` with `factors`; whether the steps are enough.
@@ -750,24 +791,47 @@ async fn decided_for(
         .is_some_and(|decision| decision.complete))
 }
 
+/// Whether `id` has a factor, and whether one is being set up for them.
+async fn held_by(accounts: Arc<dyn Accounts>, id: String) -> Result<(bool, bool), ApiError> {
+    tokio::task::spawn_blocking(move || {
+        Ok::<_, ai6::guatiao::library::ProviderError>((
+            accounts.accounts()?.iter().any(|info| info.id == id),
+            accounts.waiting()?.iter().any(|waiting| waiting.shown == id),
+        ))
+    })
+    .await
+    .map_err(|_| ApiError::internal())?
+    .map_err(|_| ApiError::unavailable())
+}
+
 async fn begin(
     gateway: &Gateway,
     person: &Person,
     accounts: Arc<dyn Accounts>,
 ) -> Result<Response, AdminError> {
-    let sealed = gateway
+    let refusal = gateway
         .access
         .as_ref()
         .and_then(|providers| providers.factor_sealer.as_ref())
-        .is_some_and(|sealer| sealer.ready());
-    if !sealed {
-        return Err(AdminError::Conflict(
-            "one-time codes cannot be set up: no [unex] factor_key is configured to seal them"
-                .to_owned(),
-        ));
+        .map_or_else(
+            || Some("no [unex] factor_key is configured".to_owned()),
+            |sealer| sealer.refusal(),
+        );
+    if let Some(why) = refusal {
+        return Err(AdminError::Conflict(format!(
+            "one-time codes cannot be set up: {why}"
+        )));
     }
     // The record of it comes first: an enrolment that cannot be recorded is not made.
-    audit(gateway, person, "account.factor.enrol", None, CONFIG_ACCOUNTS, &person.id).await?;
+    audit(
+        gateway,
+        person,
+        "account.factor.enrol",
+        None,
+        CONFIG_ACCOUNTS,
+        &person.id,
+    )
+    .await?;
     let put = AccountPut {
         name: person.id.clone(),
         display_name: Some(person.name.clone()),
@@ -795,7 +859,15 @@ async fn confirm(
     accounts: Arc<dyn Accounts>,
     code: String,
 ) -> Result<Response, AdminError> {
-    audit(gateway, person, "account.factor.confirm", None, CONFIG_ACCOUNTS, &person.id).await?;
+    audit(
+        gateway,
+        person,
+        "account.factor.confirm",
+        None,
+        CONFIG_ACCOUNTS,
+        &person.id,
+    )
+    .await?;
     let put = AccountPut {
         name: person.id.clone(),
         secret: Some(code),
@@ -814,6 +886,28 @@ async fn confirm(
             _ => AdminError::Api(ApiError::unavailable()),
         })?;
     Ok(no_store(Json(json!({"enrolled": true})).into_response()))
+}
+
+/// Ends every sign-in of `person_id` but the ones in `keep`, audited first.
+async fn end_logins(
+    gateway: &Gateway,
+    actor: &Person,
+    person_id: &str,
+    keep: Vec<String>,
+) -> Result<(), AdminError> {
+    audit(
+        gateway,
+        actor,
+        "account.factor.revoke",
+        None,
+        CONFIG_ACCOUNTS,
+        person_id,
+    )
+    .await?;
+    let (registry, person_id) = (registry(gateway)?, person_id.to_owned());
+    blocking(move || registry.revoke_person_logins(&person_id, &keep))
+        .await?;
+    Ok(())
 }
 
 /// What `GET /v1/user/factors` says of the signed-in person.
@@ -835,7 +929,7 @@ pub(crate) async fn state(
     connection: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
 ) -> Result<Json<FactorState>, ApiError> {
-    let (person, factors) = bearer_steps(&gateway, &headers).await?;
+    let signed = bearer_steps(&gateway, &headers).await?;
     let Ok(accounts) = factors_of(&gateway) else {
         return Ok(Json(FactorState {
             configured: false,
@@ -849,20 +943,11 @@ pub(crate) async fn state(
         &headers,
         address_of(connection),
         purposes::ENROL,
-        &person,
-        &factors,
+        &signed.person,
+        &signed.factors,
     )
     .await?;
-    let id = person.id.clone();
-    let (enrolled, enrolling) = tokio::task::spawn_blocking(move || {
-        Ok::<_, ai6::guatiao::library::ProviderError>((
-            accounts.accounts()?.iter().any(|info| info.id == id),
-            accounts.waiting()?.iter().any(|waiting| waiting.shown == id),
-        ))
-    })
-    .await
-    .map_err(|_| ApiError::internal())?
-    .map_err(|_| ApiError::unavailable())?;
+    let (enrolled, enrolling) = held_by(accounts, signed.person.id.clone()).await?;
     Ok(Json(FactorState {
         configured: true,
         enrolled,
@@ -871,52 +956,95 @@ pub(crate) async fn state(
     }))
 }
 
+/// The signed-in person whom the policy lets set up a factor now (`purpose: enrol`), counted
+/// against the login guard per person and per address before anything is recorded.
 async fn enrolling_person(
     gateway: &Gateway,
     connection: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: &HeaderMap,
-) -> Result<(Person, Arc<dyn Accounts>), AdminError> {
+) -> Result<(Signed, Arc<dyn Accounts>, std::net::IpAddr), AdminError> {
     let accounts = factors_of(gateway)?;
-    let (person, factors) = bearer_steps(gateway, headers).await?;
+    let address = address_of(connection);
+    let signed = bearer_steps(gateway, headers).await?;
     if !decided_for(
         gateway,
         headers,
-        address_of(connection),
+        address,
         purposes::ENROL,
-        &person,
-        &factors,
+        &signed.person,
+        &signed.factors,
     )
     .await?
     {
         return Err(refused_here());
     }
-    Ok((person, accounts))
+    let source = gateway.login_guard.source(headers, address);
+    if let Some(wait) = gateway.login_guard.tried(source, &signed.person.id) {
+        return Err(AdminError::Api(ApiError::too_many_attempts(wait)));
+    }
+    Ok((signed, accounts, source))
 }
 
 /// `POST /v1/user/factors/totp`: begins an enrolment, or a rotation. Needs a sign-in the policy
-/// lets enrol (`purpose: enrol`).
+/// lets enrol (`purpose: enrol`). A person who has a factor replaces it only with a code from it
+/// (`{"code"}`) or from a sign-in made within `[login] enrol_fresh_seconds`.
 pub(crate) async fn begin_enrolment(
     State(gateway): State<Gateway>,
     connection: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
+    body: Option<Json<Begin>>,
 ) -> Result<Response, AdminError> {
-    let (person, accounts) = enrolling_person(&gateway, connection, &headers).await?;
-    begin(&gateway, &person, accounts).await
+    let (signed, accounts, source) = enrolling_person(&gateway, connection, &headers).await?;
+    let (enrolled, _) = held_by(accounts.clone(), signed.person.id.clone()).await?;
+    if enrolled {
+        let fresh = unix_timestamp()? - signed.issued_at
+            <= gateway.config.login.enrol_fresh_seconds.as_secs_f64();
+        if !fresh {
+            let code = body
+                .and_then(|Json(begin)| begin.code)
+                .ok_or_else(|| {
+                    refused_because(
+                        "replacing your second factor needs a code from it, or a recent sign-in",
+                    )
+                })?;
+            code_shaped(&code)?;
+            let providers = gateway.access.clone().ok_or_else(ApiError::unavailable)?;
+            second_factor_step(
+                &providers,
+                &signed.person,
+                method_words::TOTP,
+                &[],
+                code,
+                source,
+            )
+            .await
+            .map_err(|_| refused_because("that code is not right"))?;
+        }
+    }
+    begin(&gateway, &signed.person, accounts).await
 }
 
-/// `POST /v1/user/factors/totp/confirm`: the first code from the app makes the factor.
+/// `POST /v1/user/factors/totp/confirm`: the first code from the app makes the factor. Replacing
+/// a factor ends the person's other sign-ins.
 pub(crate) async fn confirm_enrolment(
     State(gateway): State<Gateway>,
     connection: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     Json(body): Json<Code>,
 ) -> Result<Response, AdminError> {
-    let (person, accounts) = enrolling_person(&gateway, connection, &headers).await?;
-    confirm(&gateway, &person, accounts, body.code).await
+    code_shaped(&body.code)?;
+    let (signed, accounts, _) = enrolling_person(&gateway, connection, &headers).await?;
+    let (replacing, _) = held_by(accounts.clone(), signed.person.id.clone()).await?;
+    let answered = confirm(&gateway, &signed.person, accounts, body.code).await?;
+    if replacing {
+        end_logins(&gateway, &signed.person, &signed.person.id, signed.keep).await?;
+    }
+    Ok(answered)
 }
 
 /// The pending sign-in `token` names and its person, when the sign-in policy lets it set up a
-/// factor now (`purpose: enrol_first`).
+/// factor now (`purpose: enrol_first`). The address is counted before the Registry is read, and
+/// the person's own count after the person is known.
 async fn enrolling_first(
     gateway: &Gateway,
     connection: Option<SocketAddr>,
@@ -931,11 +1059,14 @@ async fn enrolling_first(
     let accounts = factors_of(gateway)?;
     let providers = gateway.access.clone().ok_or_else(ApiError::unavailable)?;
     let source = gateway.login_guard.source(headers, connection);
+    if let Some(wait) = gateway.login_guard.tried_address(source) {
+        return Err(AdminError::Api(ApiError::too_many_attempts(wait)));
+    }
     let now = unix_timestamp()?;
     let key = access_token_digest(token);
     let registry = registry(gateway)?;
     let Some(pending) = find_pending(registry.clone(), key.clone(), now).await? else {
-        return Err(AdminError::Api(unknown_pending(gateway, source)));
+        return Err(AdminError::Api(ApiError::unauthorized()));
     };
     if pending.browser != from_browser {
         return Err(AdminError::Api(ApiError::unauthorized()));
@@ -955,24 +1086,23 @@ async fn enrolling_first(
     if !allowed {
         return Err(refused_here());
     }
+    if let Some(wait) = gateway.login_guard.tried_name(&person.id) {
+        return Err(AdminError::Api(ApiError::too_many_attempts(wait)));
+    }
     // A code tried here is a guess at the factor being made, so it is counted as any is.
     if counted {
-        if let Some(wait) = gateway.login_guard.tried(source, &person.id) {
-            return Err(AdminError::Api(ApiError::too_many_attempts(wait)));
-        }
         let cap = gateway.config.login.pending_tries;
         match count_try(registry, key, cap, now).await? {
             Tried::Held => {}
             Tried::Gone | Tried::Spent => return Err(AdminError::Api(ApiError::unauthorized())),
         }
-    } else if let Some(wait) = gateway.login_guard.tried_address(source) {
-        return Err(AdminError::Api(ApiError::too_many_attempts(wait)));
     }
     Ok((person, accounts))
 }
 
 /// `POST /v1/auth/enrol`: a sign-in that waits for a code begins setting one up, where a rule
-/// of the policy names `enrol_first`.
+/// of the policy names `enrol_first`. Whoever holds only the first factor never replaces a factor
+/// that is there or being made: it is refused.
 pub(crate) async fn begin_first(
     State(gateway): State<Gateway>,
     connection: Option<Extension<ConnectInfo<SocketAddr>>>,
@@ -987,6 +1117,13 @@ pub(crate) async fn begin_first(
         false,
     )
     .await?;
+    let (enrolled, enrolling) = held_by(accounts.clone(), person.id.clone()).await?;
+    if enrolled || enrolling {
+        return Err(refused_because(
+            "a second factor is already set up or being set up; sign in with it, or ask an \
+             administrator to reset it",
+        ));
+    }
     begin(&gateway, &person, accounts).await
 }
 
@@ -998,6 +1135,7 @@ pub(crate) async fn confirm_first(
     headers: HeaderMap,
     Json(body): Json<Code>,
 ) -> Result<Response, AdminError> {
+    code_shaped(&body.code)?;
     let token = body
         .pending
         .clone()
@@ -1008,7 +1146,7 @@ pub(crate) async fn confirm_first(
 }
 
 /// `DELETE /v1/user/access/factors/{person}`: an administrator's reset, after which the person
-/// enrols again. Needs `account.manage` at `config:accounts`.
+/// enrols again and every sign-in they have ends. Needs `account.manage` at `config:accounts`.
 pub(crate) async fn reset(
     State(gateway): State<Gateway>,
     headers: HeaderMap,
@@ -1035,12 +1173,14 @@ pub(crate) async fn reset(
         &person_id,
     )
     .await?;
-    tokio::task::spawn_blocking(move || accounts.remove(person_id))
+    let removed = person_id.clone();
+    tokio::task::spawn_blocking(move || accounts.remove(removed))
         .await
         .map_err(|_| AdminError::Api(ApiError::internal()))?
         .map_err(|error| match error.status {
             Status::GUATIAO_ERR_NOT_FOUND => AdminError::Api(ApiError::not_found()),
             _ => AdminError::Api(ApiError::unavailable()),
         })?;
+    end_logins(&gateway, &admin, &person_id, Vec::new()).await?;
     Ok(StatusCode::NO_CONTENT)
 }
