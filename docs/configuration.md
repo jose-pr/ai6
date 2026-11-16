@@ -1020,6 +1020,16 @@ in a provider's configuration is reported as a weakening: name a file there inst
 | `provider_config_depth` | 64 | **Deepest provider configuration.** How deeply nested a provider configuration may be. |
 <!-- schema:record.unex:end -->
 
+`[sign_in_policy]`, which methods a sign-in may use and from where ([the sign-in policy](access.md#the-sign-in-policy)).
+Unlike the tables below it applies as soon as the record changes, and a route edits it:
+
+<!-- schema:record.unex.sign_in_policy:begin -->
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `provider` | `coqui_signin_rules` | **Provider.** The sign-in policy provider ID, from those the gateway reports. Default: `coqui_signin_rules`, ordered rules. |
+| `config` | none | **Provider's configuration.** The provider's configuration, checked against the provider's own schema. |
+<!-- schema:record.unex.sign_in_policy:end -->
+
 ### Universal Exports limits
 
 The `unex` record's tables bound and pace the gateway, and apply at restart. They follow the

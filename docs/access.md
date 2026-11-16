@@ -205,12 +205,84 @@ scope = "config:assistant"
 role = "memory-admin"
 ```
 
+## The sign-in policy
+
+Which methods a sign-in may use, from where it is made, and what it still needs, is decided by a
+`coqui_sign_in_policy` provider, the [sign-in policy](https://boriken-dev.github.io/coqui-access/sign-in/)
+of coqui-access. The `unex` record's `sign_in_policy` names it: a `provider` (default
+`coqui_signin_rules`, ordered rules) and its `config`, checked against the provider's own schema when
+the gateway starts, and again whenever the record changes.
+
+```toml
+# unex.toml. From the office network a password or a proxy-asserted identity; from anywhere else, and when the
+# address is not known, the proxy-asserted identity alone.
+
+[[sign_in_policy.config.rule]]
+networks = ["10.0.0.0/8"]
+allow = [["password"], ["proxy"]]
+
+[[sign_in_policy.config.rule]]
+allow = [["proxy"]]
+```
+
+The methods this gateway meets are `password` (a name and a secret in the login body) and `proxy`
+(the identity the reverse proxy asserts). A rule may name `networks`, `clients`, `services` and
+`subjects`, and list the `providers` that may be asked for a method, by the ID each is listed under in
+`authenticators`. Order is the operator's tool: the strictest rule goes last, where an address that is
+not known falls.
+
+With no `sign_in_policy` nothing changes: each configured method alone is enough, from anywhere
+(`password` while a sign-in provider that takes a name and a password is listed, `proxy` with
+`proxy_user_header`).
+
+What is decided, and where:
+
+- `GET /v1/auth/methods` answers the policy's offer for its own request: its address (from
+  `client_address_header` or the connection, never a header the client chose), and its client, a
+  `browser` when the request names an origin and an `api` client otherwise. Outer Office's desktop
+  builds reach the gateway the same way an API client does, so a rule for the `app` client never
+  matches here.
+- `POST /v1/auth/login` decides the method it was given before anything else: a method the policy does
+  not offer from here is answered `403`, no sign-in provider is asked and no try is counted against the
+  address or the name. Only the providers the offer lists are asked, in its order. A valid factor is
+  decided again with the person it named; anything short of a complete sign-in is answered as a wrong
+  password is.
+- A sign-in keeps the steps it passed. `POST /v1/auth/resume` and `POST /v1/auth/renew` decide again,
+  with the person as the directory has them now, the policy now in force and the address of this
+  request, and a sign-in the policy no longer completes ends: `401`. A token a Station issued for a
+  person holds no steps and is not decided here.
+- A page's viewer, named from the request by the page authenticator, is decided as the method
+  `certificate` (a certificate the gateway's own TLS proved) or `proxy`, for the service `pages`.
+
+**Bearer API keys are outside the policy.** A key is scoped and revocable, is never a page sign-in, and
+is checked at the provider at every use. A policy never offers `key`, and none refuses one.
+
+A policy is edited in the `unex` record, or through a route:
+
+| Route | Needs |
+| --- | --- |
+| `GET /v1/user/access/sign-in` | `access.read` at `config:access` |
+| `PUT`, `DELETE /v1/user/access/sign-in` | `access.manage` at `config:access`, the revision read, in `If-Match` |
+
+`PUT` takes `{ "provider"?, "config"? }`. A policy that does not build is refused (`400`) before it is
+stored, and one that builds is stored in the `unex` record and put in force on this gateway at once;
+other gateways on the same database take it at their next poll. Every change, and every refusal, is
+audited (`access.sign_in.update`, `.remove`, `.refused`).
+
+**A policy that offers no sign-in is accepted.** An empty rule list offers nothing to anyone: the
+gateway starts, says so plainly (`no sign-in is offered; API keys still work`), and everyone who is
+not already signed in is refused. That is stricter, not weaker, so it is not reported as a weakening.
+The way back is a key: `ai6ctl` with a key whose person holds `access.manage` at `config:access`
+reads and changes the policy, since keys are outside it; the `unex` record in the database is the
+last resort.
+
 ## Signing in from a browser
 
 Outer Office on the web signs in at its own origin. `GET /v1/auth/methods`, which needs no
-token, says what `POST /v1/auth/login` accepts here: `password` (a name and a secret) or `proxy`
-(an identity the reverse proxy asserts). The sign-in page shows the form, the proxy's button or
-both; when the gateway does not answer it shows the form. A wrong password and an unknown
+token, says what `POST /v1/auth/login` accepts for this request, as [the sign-in policy](#the-sign-in-policy)
+offers it: `password` (a name and a secret) or `proxy` (an identity the reverse proxy asserts). The
+sign-in page shows the form, the proxy's button or both; when the gateway does not answer it shows the
+form. A wrong password and an unknown
 account read the same, a `429` counts its `Retry-After` down and holds **Continue** until then,
 and a `403` asks an administrator to check `public_origin` and the proxy. The token stays in the
 tab's memory, and signing out revokes it; a reload or a new tab gets a new one from the run
@@ -541,6 +613,7 @@ the writes answer `409`.
 | `GET /v1/user/access` | `access.read` at `config:access` |
 | `PUT`, `DELETE /v1/user/access/roles/{role}`, `PUT /v1/user/access/{rules,delegable}` | `access.manage` at `config:access` |
 | `PUT /v1/user/access/chief` | the same, and a chief |
+| `GET`, `PUT`, `DELETE /v1/user/access/sign-in` | `access.read` / `access.manage` at `config:access` ([the sign-in policy](#the-sign-in-policy)) |
 | `GET /v1/user/access/check?subject=&action=&resource=` | `access.read` at the resource |
 | `GET /v1/user/operations/{op}/access`, `PUT`/`DELETE .../access/roles/{role}`, `PUT .../access/rules` | `access.read` / `access.manage` at the Operation |
 | `GET /v1/user/accounts`, `PUT /v1/user/accounts/{name}`, `POST /v1/user/accounts/{name}/secret` | `account.manage` at `config:accounts`; a `groups` change also `access.manage` at `config:access` |
@@ -556,7 +629,8 @@ own rights.
 Universal Exports counts every password or key try against the client address and against
 the account name before an Authenticator is asked. A try past either count is refused with
 `429 Too Many Requests` and a `Retry-After`, even if its secret is right. The defaults are 5 a
-minute per address and 10 in ten minutes per name; the `unex` record's
+minute per address and 10 in ten minutes per name; a method the sign-in policy does not offer from here
+is refused before it is counted, so it costs its address and its name nothing; the `unex` record's
 `login_tries_per_address`, `login_tries_per_name` and `client_address_header` change them. The gateway listens on
 loopback behind a reverse proxy, so name the header the proxy fills with the client address
 (`x-forwarded-for` or `x-real-ip`) or all clients share one count.

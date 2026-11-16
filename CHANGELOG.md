@@ -20,6 +20,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   before it ranks or counts. The Report tools, the `/v1/reports` routes (`PUT`, `DELETE` and `/versions` too) and
   `ai6ctl reports` take the new fields and filters. The memory store stays beside it until memories move in.
 
+- The `unex` record's `sign_in_policy` (a `coqui_sign_in_policy` provider, default `coqui_signin_rules`,
+  and its configuration) decides which methods a sign-in may use, from where it is made and what it still
+  needs, and is checked at start as the authenticators are. With none, each configured method alone is
+  enough, from anywhere, as before. `GET /v1/auth/methods` answers the offer for its own request;
+  `POST /v1/auth/login` decides the method it was given before any provider is asked or any try is
+  counted, so a refused one is `403` and costs its address and name nothing, and asks only the providers
+  the offer lists (`AccessProviders::named`); a sign-in keeps the steps it passed
+  (`AccessTokenRecord::factors`), and `resume` and `renew` decide again with them, `401` when the policy no
+  longer completes them; a page's viewer is decided as `certificate` or `proxy`. Bearer API keys stay
+  outside the policy. `GET`, `PUT` and `DELETE /v1/user/access/sign-in` read and change it under
+  `access.read` and `access.manage` at `config:access`, audited, and a change is in force at once on the
+  gateway that took it and on the others at their next poll. A policy that offers no sign-in is accepted:
+  the gateway starts, says so, and only API keys work; `ai6ctl access sign-in show|set|clear` with a key holding
+  `access.manage` changes it.
 - The gateway serves a brief, a green ink request, a held brief, a Mission's reviews, a charge's report and a
   Report as documents (`.../missions/{mission}/brief`, `.../green-ink/{id}/document`,
   `.../held-briefs/{key}/document`, `.../reviews/document`, `/v1/user/charges/{scope}/document`,
