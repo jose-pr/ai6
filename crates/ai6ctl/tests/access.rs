@@ -51,6 +51,11 @@ async fn stand_in(
         ("GET", "/v1/user/access" | "/v1/user/operations/P/access") => {
             (StatusCode::OK, VIEW.to_owned()).into_response()
         }
+        ("GET", "/v1/user/access/sign-in") => axum::Json(json!({
+            "revision": "r1", "writable": true, "policy": {"config": {"rule": []}},
+            "in_force": true, "offers_nothing": true
+        }))
+        .into_response(),
         ("GET", "/v1/user/access/check") => axum::Json(
             json!({"allowed": true, "tier": "global", "rule_index": 0, "role": "operator"}),
         )
@@ -272,4 +277,52 @@ async fn accounts_list_create_groups_and_reset_print_the_secret_once() {
     assert!(ok && out.contains("groups of ann set"));
     let (ok, _, err) = ai6ctl(&server, &["accounts", "disable", "boss"]).await;
     assert!(!ok && err.contains("only a chief"), "{err}");
+}
+
+#[tokio::test]
+async fn the_sign_in_policy_is_shown_set_and_cleared_under_the_revision_read() {
+    let (server, seen) = serve().await;
+    let (ok, out, err) = ai6ctl(&server, &["access", "sign-in", "show"]).await;
+    assert!(ok, "{err}");
+    assert!(
+        out.contains("offers nothing\ttrue") && out.contains("in force\ttrue"),
+        "{out}"
+    );
+    assert!(out.contains(r#"policy	{"config":{"rule":[]}}"#), "{out}");
+
+    let file = std::env::temp_dir().join(format!("ai6ctl-sign-in-{}.json", std::process::id()));
+    std::fs::write(&file, r#"{"rule": [{"allow": [["password"]]}]}"#).unwrap();
+    let (ok, out, err) = ai6ctl(
+        &server,
+        &[
+            "access",
+            "sign-in",
+            "set",
+            "--config",
+            file.to_str().unwrap(),
+        ],
+    )
+    .await;
+    std::fs::remove_file(&file).unwrap();
+    assert!(ok, "{err}");
+    assert!(out.contains("sign-in policy set"), "{out}");
+    let (ok, out, err) = ai6ctl(&server, &["access", "sign-in", "clear"]).await;
+    assert!(ok && out.contains("cleared"), "{out}{err}");
+
+    let seen = seen.lock().unwrap();
+    let put = seen
+        .iter()
+        .find(|(method, uri, ..)| method == "PUT" && uri == "/v1/user/access/sign-in")
+        .expect("a PUT");
+    assert_eq!(put.2.as_deref(), Some("r1"));
+    assert_eq!(
+        put.3,
+        json!({"config": {"rule": [{"allow": [["password"]]}]}})
+    );
+    assert!(
+        seen.iter()
+            .any(|(method, uri, revision, _)| method == "DELETE"
+                && uri == "/v1/user/access/sign-in"
+                && revision.as_deref() == Some("r1"))
+    );
 }

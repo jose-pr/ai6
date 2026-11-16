@@ -154,7 +154,10 @@ origin leaves the public roots alone.
   [--description T] [--operation X]` and `access role remove NAME` read the revision, then write
   with it. `access rules export FILE` writes `revision = "…"` and `[[rule]]` entries; `access
   rules import FILE` sends the whole list under that revision and fails when the policy changed
-  since. `access delegable set a,b`, `access chief set SUBJECT…` (chief only) and `access check
+  since. `access sign-in show`, `access sign-in set [--provider ID] [--config FILE.json]` and
+  `access sign-in clear` read and change which methods a sign-in may use (`/v1/user/access/sign-in`,
+  `access.manage` at `config:access`; a key holding it still works when the policy offers no
+  sign-in). `access delegable set a,b`, `access chief set SUBJECT…` (chief only) and `access check
   SUBJECT ACTION RESOURCE` (prints `allowed|denied`, tier, rule and role). A refusal prints the
   gateway's reason and exits `1`.
 - `ai6ctl keys create --scope ACTION@SCOPE... [--expires 30d|never] [--name N] [--output FILE]`, `list [--all]` and `revoke ID` use `/v1/user/keys`; a created key's value is the only thing on standard output (or a new mode-600 file), shown once.

@@ -37,6 +37,13 @@ pub(crate) enum AccessCommand {
         #[command(subcommand)]
         command: ChiefCommand,
     },
+    /// Read or change which methods a sign-in may use, from where (needs access.read and
+    /// access.manage at config:access). A key holding access.manage reaches it however the policy
+    /// reads, so a policy that offers no sign-in is changed back here.
+    SignIn {
+        #[command(subcommand)]
+        command: SignInCommand,
+    },
     /// Explain whether a subject may take an action on a resource, and by which rule.
     Check {
         /// account:NAME, person:ID or group:NAME.
@@ -103,6 +110,23 @@ pub(crate) enum DelegableCommand {
         #[arg(value_delimiter = ',', required = true)]
         actions: Vec<String>,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum SignInCommand {
+    /// Show the stored policy and whether it offers any sign-in.
+    Show,
+    /// Store a policy and put it in force.
+    Set {
+        /// The policy provider (default: the one that reads ordered rules).
+        #[arg(long)]
+        provider: Option<String>,
+        /// A JSON file holding the provider's configuration.
+        #[arg(long, value_name = "FILE")]
+        config: Option<std::path::PathBuf>,
+    },
+    /// Remove the stored policy: each configured method alone is enough again.
+    Clear,
 }
 
 #[derive(Debug, Subcommand)]
@@ -453,6 +477,64 @@ pub(crate) async fn run_access(
             )
             .await?;
             println!("chief list set");
+        }
+        AccessCommand::SignIn { command } => {
+            let path = ["access", "sign-in"];
+            let view =
+                exchange(client, token, Method::GET, url(server, &path)?, None, None).await?;
+            let revision = text(&view["revision"]);
+            match command {
+                SignInCommand::Show => {
+                    println!("revision\t{revision}");
+                    println!("writable\t{}", view["writable"]);
+                    println!("in force\t{}", view["in_force"]);
+                    println!("offers nothing\t{}", view["offers_nothing"]);
+                    if let Some(reason) = view.get("invalid").and_then(Value::as_str) {
+                        println!("invalid\t{}", plain(reason));
+                    }
+                    match view.get("policy").filter(|policy| !policy.is_null()) {
+                        Some(policy) => println!("policy\t{}", plain(&policy.to_string())),
+                        None => println!("policy\t-"),
+                    }
+                }
+                SignInCommand::Set { provider, config } => {
+                    let mut body = json!({});
+                    if let Some(provider) = provider {
+                        body["provider"] = json!(provider);
+                    }
+                    if let Some(file) = config {
+                        let source = std::fs::read_to_string(&file)
+                            .map_err(|error| format!("{}: {error}", file.display()))?;
+                        body["config"] = serde_json::from_str(&source)
+                            .map_err(|error| format!("{}: {error}", file.display()))?;
+                    }
+                    let changed = exchange(
+                        client,
+                        token,
+                        Method::PUT,
+                        url(server, &path)?,
+                        Some(&revision),
+                        Some(body),
+                    )
+                    .await?;
+                    println!("sign-in policy set");
+                    if changed["offers_nothing"] == true {
+                        println!("no sign-in is offered; API keys still work");
+                    }
+                }
+                SignInCommand::Clear => {
+                    exchange(
+                        client,
+                        token,
+                        Method::DELETE,
+                        url(server, &path)?,
+                        Some(&revision),
+                        None,
+                    )
+                    .await?;
+                    println!("sign-in policy cleared");
+                }
+            }
         }
         AccessCommand::Check {
             subject,
