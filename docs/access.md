@@ -355,9 +355,13 @@ takes except where it keeps its records: `issuer`, `algorithm`, `digits`, `perio
 `lockout_longest_seconds`. A code needs the secret, so it is kept, but **sealed**: AES-256-GCM
 under a key derived from `[unex] factor_key` in `ai6.cfg` (a secret reference, as `proxy_secret`
 is), with a fresh nonce per write and the account and kind of factor as associated data. Every
-gateway sharing the Registry names the same key. With no `factor_key`, nobody can set up a factor
-(`409`, naming the key) and nothing can be checked; a gateway whose key does not open the factors
-stored in the Registry refuses to start rather than skip the step. **Changing the key invalidates
+gateway sharing the Registry names the same key. A key shorter than `[unex] factor_key_min_bytes`
+(default 32, a lower floor is reported at start as a weakening) is not used, so with that or no
+`factor_key` nobody can set up a factor (`409`, naming the key) and nothing can be checked. A
+record that the key does not open (sealed under another key, or damaged) is logged and stands as a
+disabled account: it fails its own person's sign-in, never skips the step and is never written
+back, and everybody else signs in as before. The provider reads the whole table at each check, so
+that is a cost of the table's size, not of one person's record. **Changing the key invalidates
 every enrolled factor**: there is no rotation, so reset them and enrol again. Recovery codes are
 kept as digests.
 
@@ -367,7 +371,10 @@ When the policy offers a second step after the first, `POST /v1/auth/login` answ
 { "pending": "…", "methods": ["totp", "recovery_code"], "expires_in": 300 }
 ```
 
-The sign-in waits in the Registry, kept by a digest of `pending`, which only the person holds. The
+The sign-in waits in the Registry, kept by a digest of `pending`. `pending` is a bearer secret:
+whoever holds it holds the sign-in's place, so it is long and random, lasts `pending_seconds`, and
+only the kind of client that began the sign-in (a browser, or not) continues it; it is no
+binding to one machine. The
 next step is `POST /v1/auth/login` with `{ "pending", "method", "secret" }` (`totp`,
 `recovery_code`, or `proxy` with the proxy's headers); it answers `201` with the token, `202` when
 a further step is offered, `403` when the method is not offered after the steps already passed,
@@ -376,37 +383,48 @@ with the header `X-AI6-Pending` says what is offered next (`{"step": "next", "me
 A sign-in completed this way records every step it passed, and is decided again by all of them
 when it renews or resumes. Only a browser continues what a browser began.
 
-Every try at a next step is counted three ways: against the account in the login limits (the same
-counts as its password, `429` past them), against the pending sign-in's own cap, and by the
-provider's delay after wrong codes. The `[login]` table of the `unex` record holds
-`pending_seconds` (how long a sign-in waits, default 300) and `pending_tries` (default 5); past
-the cap the sign-in ends and the person starts again. A sign-in is taken by one request, so a
-code is never spent twice.
+Every try at a next step is counted three ways: against the address and the account in the login
+limits (`429` past them), against the pending sign-in's own cap, and by the provider's delay after
+wrong codes. **The login limits are kept in each gateway's memory, so the per-person count is per
+process:** a person's wrong codes are bounded cluster-wide by the pending sign-in's try cap
+(`pending_tries`, in the Registry, so every gateway shares it) and by the provider's lockout (also
+in the Registry), not by the per-person count, which only tightens each gateway. A request that
+names a pending sign-in is counted against its address before the Registry is read, whether or
+not the sign-in exists, and a read of a pending sign-in writes nothing. The `[login]` table of the
+`unex` record holds `pending_seconds` (how long a sign-in waits, default 300), `pending_tries`
+(default 5) and `enrol_fresh_seconds` (below); past the cap the sign-in ends and the person starts
+again. A sign-in is taken by one request, so a code is never spent twice.
 
 ### Setting up a factor
 
 | Route | Needs |
 | --- | --- |
 | `GET /v1/user/factors` | a sign-in; says whether a factor is set up and whether the policy lets this sign-in set one up |
-| `POST /v1/user/factors/totp` | a sign-in the policy decides for `enrol`; answers `{ "uri", "recovery_codes" }` once |
-| `POST /v1/user/factors/totp/confirm` | the same, and `{ "code" }` from the app; until then the old factor, if any, stands |
+| `POST /v1/user/factors/totp` | a sign-in the policy decides for `enrol`; answers `{ "uri", "recovery_codes" }` once. A person who already has a factor replaces it only with `{ "code" }` from it, or from a sign-in made within `[login] enrol_fresh_seconds` (default 300) |
+| `POST /v1/user/factors/totp/confirm` | the same, and `{ "code" }` from the app; until then the old factor, if any, stands. Replacing a factor ends the person's other sign-ins |
 | `POST /v1/auth/enrol`, `POST /v1/auth/enrol/confirm` | a waiting sign-in (`pending`) the policy decides for `enrol_first`, by a rule that names it |
-| `DELETE /v1/user/access/factors/{person}` | `account.manage` at `config:accounts`; the person enrols again |
+| `DELETE /v1/user/access/factors/{person}` | `account.manage` at `config:accounts`; the person enrols again, and every sign-in they have ends |
 
 The provisioning link (shown as a QR code) and the recovery codes are shown once and kept nowhere
 as themselves. Beginning, confirming and resetting are audited (`account.factor.enrol`,
 `account.factor.confirm`, `account.factor.reset`, the person's ID as the target) before they are
 made, and no code, secret or link is in any audit record or log. The code that confirms a factor
 is spent, so a sign-in that waits continues with the next one the app shows. Letting a sign-in set
-up its own second step (`enrol_first`) means whoever holds its first factor can; write that rule
-only for the networks that deserve it.
+up its own second step (`enrol_first`) means whoever holds its first factor can set up a factor
+for a person who has none; it is refused (`403`) for a person who has a factor or an enrolment
+waiting, so it never replaces one. Write that rule only for the networks that deserve it. Ending
+the sign-ins is audited first as `account.factor.revoke`. Beginning, confirming and the first-step
+enrolment are counted per person and per address in the login limits (`429`), and a code that
+cannot be one is refused before it is counted or recorded.
 
 `ai6ctl login --name NAME` signs in and prints the token, asking for the password
 (`UNEX_PASSWORD`, `--password-file` or the first line of standard input) and, when the gateway
 answers `202`, for a code (`UNEX_CODE` or the next line; `--recovery` presents a recovery code).
-`ai6ctl factors status|enrol|confirm CODE|reset PERSON` sets up and resets factors. Outer Office
+`ai6ctl factors status|enrol|confirm|reset PERSON` sets up and resets factors; `confirm` asks for
+the code on standard input, which keeps it out of the shell history and the process list (it also
+takes it as an argument). Outer Office
 asks for the code after the password and has a **Second factor** section beside Keys that shows the
-QR code and the recovery codes once.
+QR code and the recovery codes once; it copies the recovery codes only when the button is pressed.
 
 ## Signing in from a browser
 
