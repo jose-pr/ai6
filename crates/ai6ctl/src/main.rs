@@ -8,6 +8,7 @@ mod access;
 mod attach;
 mod compartments;
 mod keys;
+mod login;
 mod reports;
 mod resources;
 mod reviews;
@@ -308,6 +309,15 @@ enum Command {
     Accounts {
         #[command(subcommand)]
         command: Option<access::AccountsCommand>,
+    },
+    /// Sign in with a password and, when the sign-in policy asks, a one-time code, and print
+    /// the token to use as UNEX_ACCESS_TOKEN.
+    Login(login::LoginArgs),
+    /// Your own second factor: set up a one-time code app, confirm it, and (needs
+    /// account.manage) reset a person's.
+    Factors {
+        #[command(subcommand)]
+        command: login::FactorsCommand,
     },
     /// Your own API keys: make one narrowed to some of what you may do, list yours, revoke
     /// one. A key is for automation that should act as you for one purpose.
@@ -2111,6 +2121,11 @@ async fn run() -> Result<(), String> {
         Command::Accounts { command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             access::run_accounts(&client, &server, &token, command).await?;
+        }
+        Command::Login(args) => login::login(&client, &server, args).await?,
+        Command::Factors { command } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            login::run(&client, &server, &token, command).await?;
         }
         Command::Keys { command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;

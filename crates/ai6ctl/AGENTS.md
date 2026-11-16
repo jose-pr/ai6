@@ -93,6 +93,12 @@ origin leaves the public roots alone.
   login). A change that needs a Station holding the login is queued (202) and made at its next
   check-in. `ai6ctl pools` also lists the logins' standing after the table: Stations, end, renewal,
   lease holder, last result, changes waiting and what a person must run.
+- `ai6ctl login --name NAME [--password-file FILE] [--recovery] [--output FILE]` signs in at `POST /v1/auth/login` and
+  prints the token (the only thing on standard output). The password is `UNEX_PASSWORD`, the file's first line or the
+  first line of standard input; on a `202` it asks for a code (`UNEX_CODE`, else the next line; `--recovery`
+  presents a recovery code). `ai6ctl factors status|enrol|confirm CODE|reset PERSON` use `/v1/user/factors` and
+  `DELETE /v1/user/access/factors/{person}` (`account.manage`); `enrol` prints the provisioning link and the
+  recovery codes once.
 - `ai6ctl missions [--operation <ID> [--subtree]]` lists visible Missions as `STATION MISSION
   RUNS NAME UID`: `MISSION` the handle (the ID when the gateway gives none), `NAME` the name
   beside it (`-` before a Station published one; an issue's title, as data) and `UID` the

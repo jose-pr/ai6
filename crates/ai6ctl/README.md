@@ -37,7 +37,7 @@ cargo install --path crates/ai6ctl
 
 ```console
 export UNEX_URL=https://exports.example   # or [unex] url in ai6.cfg
-export UNEX_ACCESS_TOKEN=...              # from POST /v1/auth/login
+export UNEX_ACCESS_TOKEN=...              # from POST /v1/auth/login, or `ai6ctl login --name NAME`
 ai6ctl health
 ai6ctl stations
 ai6ctl station station-007
