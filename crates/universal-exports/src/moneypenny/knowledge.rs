@@ -412,7 +412,7 @@ impl Assistant {
     }
 
     fn notice(&self, granted: &Granted, text: String, data: Option<Value>) {
-        let bounds = self.config.bounds();
+        let bounds = self.config().bounds();
         let mut desk = self.desk();
         if let Some(conversation) = desk
             .store

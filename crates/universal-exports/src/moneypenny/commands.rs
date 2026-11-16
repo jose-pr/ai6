@@ -79,12 +79,12 @@ pub(crate) async fn list(
     Query(query): Query<CommandsQuery>,
 ) -> Result<Json<Value>, ApiError> {
     let person = resolve_signed_in(&gateway, bearer(&headers)?).await?;
-    let assistant = gateway.assistant.clone().ok_or_else(ApiError::not_found)?;
+    let assistant = gateway.assistant().ok_or_else(ApiError::not_found)?;
     let settings = assistant_settings(&gateway)
         .await
         .map_err(|_| ApiError::unavailable())?;
     let mut commands: Vec<Value> = Vec::new();
-    if handler_runs_skills(&gateway, &assistant.config.agent_id).await {
+    if handler_runs_skills(&gateway, &assistant.config().agent_id).await {
         let paths: Vec<(String, String)> = settings
             .skills_for(&person.id, &person.groups)
             .into_iter()

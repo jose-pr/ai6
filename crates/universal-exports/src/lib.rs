@@ -971,6 +971,33 @@ impl Gateway {
         self
     }
 
+    /// Moneypenny when she is on: the same handle the gateway runs her by, so a change reaches
+    /// the next conversation or turn.
+    pub(crate) fn assistant(&self) -> Option<Arc<moneypenny::Assistant>> {
+        self.assistant
+            .clone()
+            .filter(|assistant| assistant.enabled())
+    }
+
+    /// The roster Agent that is Moneypenny while she is on, as a conversation or turn that starts
+    /// now would find her.
+    pub fn assistant_agent(&self) -> Option<String> {
+        self.assistant()
+            .map(|assistant| assistant.config().agent_id().to_owned())
+    }
+
+    /// Turns Moneypenny on or off and gives the conversations and turns that start from now on
+    /// `config` (when there is one to give); a turn already running finishes as it began. A
+    /// gateway built without [`Gateway::with_assistant`] has no one to change.
+    pub fn set_assistant(&self, enabled: bool, config: Option<AssistantConfig>) {
+        if let Some(assistant) = &self.assistant {
+            if let Some(config) = config {
+                assistant.set_config(config);
+            }
+            assistant.set_enabled(enabled);
+        }
+    }
+
     /// The limits and trusted origin this gateway runs by.
     pub fn config(&self) -> &std::sync::Arc<GatewayConfig> {
         &self.config
@@ -4853,7 +4880,7 @@ async fn user_profile(
         config,
         global_actions,
         reports,
-        moneypenny: gateway.assistant.is_some(),
+        moneypenny: gateway.assistant().is_some(),
     }))
 }
 

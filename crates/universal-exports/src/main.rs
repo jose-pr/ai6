@@ -265,21 +265,17 @@ async fn run(cli: Cli) -> Result<(), String> {
     gateway = gateway
         .with_roster(provider.clone())
         .with_job_poll_max_wait(snapshot.roster.assistant().gateway().max_wait.0);
-    if record.assistant {
+    // She is always wired in, so a later change to the record can switch her on, off or to another
+    // Agent; until it does, a disabled one answers as if absent.
+    {
         let assistant_record = snapshot.roster.assistant();
-        let (body_bytes, _, default_ttl) = snapshot.settings.cables.message_limits();
-        let mut assistant = AssistantConfig::new(record.assistant_agent.clone())
-            .map_err(|error| format!("the assistant Agent is not valid: {error}"))?
-            .with_view_limits(view_limits(assistant_record.views())?)
-            .with_limits(assistant_record.limits().clone())
-            .and_then(|assistant| assistant.with_gateway_limits(assistant_record.gateway().clone()))
-            .map_err(|error| format!("assistant: {error}"))?
-            .with_cable_limits(body_bytes, default_ttl);
-        if let Some(bytes) = record.route_text_bytes {
-            assistant =
-                assistant.with_route_text_bytes(usize::try_from(bytes).unwrap_or(usize::MAX));
-        }
-        gateway = gateway.with_assistant(assistant);
+        let configured = if record.assistant {
+            assistant_config(&snapshot)?
+        } else {
+            AssistantConfig::default()
+        };
+        gateway = gateway.with_assistant(configured);
+        gateway.set_assistant(record.assistant, None);
         let pages = &settings.located.value.unex.pages;
         let pages_dir = settings
             .located
@@ -341,6 +337,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             Applied {
                 registry: followed_registry,
                 gateway: gateway.config().clone(),
+                server: gateway.clone(),
             },
             snapshot.clone(),
             poll,
@@ -404,10 +401,30 @@ fn own_tls(settings: &Settings) -> Result<Option<std::sync::Arc<rustls::ServerCo
         .map_err(|error| format!("[unex.tls]: {error}"))
 }
 
+/// Moneypenny's settings from `snapshot`: the `unex` record's Agent and route text size, the
+/// roster's `[assistant]` limits and views, and the `cables` record's message limits.
+fn assistant_config(snapshot: &ai6::ConfigSnapshot) -> Result<AssistantConfig, String> {
+    let record = &snapshot.settings.unex;
+    let assistant_record = snapshot.roster.assistant();
+    let (body_bytes, _, default_ttl) = snapshot.settings.cables.message_limits();
+    let mut assistant = AssistantConfig::new(record.assistant_agent.clone())
+        .map_err(|error| format!("the assistant Agent is not valid: {error}"))?
+        .with_view_limits(view_limits(assistant_record.views())?)
+        .with_limits(assistant_record.limits().clone())
+        .and_then(|assistant| assistant.with_gateway_limits(assistant_record.gateway().clone()))
+        .map_err(|error| format!("assistant: {error}"))?
+        .with_cable_limits(body_bytes, default_ttl);
+    if let Some(bytes) = record.route_text_bytes {
+        assistant = assistant.with_route_text_bytes(usize::try_from(bytes).unwrap_or(usize::MAX));
+    }
+    Ok(assistant)
+}
+
 /// What a followed record is applied to: the Registry and the gateway's limits.
 struct Applied {
     registry: Arc<dyn ai6::RegistryBackend>,
     gateway: Arc<universal_exports::GatewayConfig>,
+    server: Gateway,
 }
 
 /// Reads the provider every `every` and applies a changed `access` or `operation_access`
@@ -427,6 +444,15 @@ async fn follow_policy(
     let mut since = started.revision;
     let mut limits = started.settings.registry.clone();
     let mut unex_limits = started.settings.unex.limits();
+    let mut assistant_applied = (
+        started.settings.unex.assistant,
+        started
+            .settings
+            .unex
+            .assistant
+            .then(|| assistant_config(&started).ok())
+            .flatten(),
+    );
     let started = Arc::new(started);
     let mut refused = None;
     let mut refused_policy: Option<String> = None;
@@ -464,6 +490,14 @@ async fn follow_policy(
                         .map(|applied| (applied, sign_in.offers_nothing())),
                     None => Ok((false, false)),
                 };
+                let assistant = (
+                    snapshot.settings.unex.assistant,
+                    if snapshot.settings.unex.assistant {
+                        assistant_config(&snapshot).map(Some)
+                    } else {
+                        Ok(None)
+                    },
+                );
                 Ok(Some((
                     snapshot.revision,
                     changed,
@@ -472,13 +506,14 @@ async fn follow_policy(
                         .unex
                         .running_with(&snapshot.settings.unex)
                         .limits(),
+                    assistant,
                     policy,
                 )))
             })
             .await
         };
         match outcome {
-            Ok(Ok(Some((revision, changed, record, running, policy)))) => {
+            Ok(Ok(Some((revision, changed, record, running, assistant, policy)))) => {
                 since = revision;
                 refused = None;
                 match policy {
@@ -499,6 +534,19 @@ async fn follow_policy(
                             refused_policy = Some(reason);
                         }
                     }
+                }
+                match assistant {
+                    (enabled, Ok(config)) => {
+                        let next = (enabled, config.or_else(|| assistant_applied.1.clone()));
+                        if next != assistant_applied {
+                            applied.server.set_assistant(next.0, next.1.clone());
+                            eprintln!("universal-exports: assistant settings applied");
+                            assistant_applied = next;
+                        }
+                    }
+                    (_, Err(reason)) => eprintln!(
+                        "universal-exports: assistant settings refused, keeping the ones it runs: {reason}"
+                    ),
                 }
                 if running != unex_limits {
                     applied.gateway.set_unex_limits(running.clone());
@@ -1105,7 +1153,7 @@ mod tests {
         let registry: Arc<dyn ai6::RegistryBackend> =
             Arc::new(ai6::FileRegistry::open(root.path().join("registry")));
         let record = &started.settings.unex;
-        let gateway = Arc::new(
+        let server = Gateway::with_registry(
             GatewayConfig::new(
                 "https://gateway.test".to_owned(),
                 "a station token of enough length".to_owned(),
@@ -1115,7 +1163,11 @@ mod tests {
             )
             .unwrap()
             .with_unex_limits(record.limits()),
-        );
+            registry.clone(),
+        )
+        .with_assistant(AssistantConfig::default());
+        server.set_assistant(record.assistant, None);
+        let gateway = server.config().clone();
         let default_page = gateway.unex().timeline.page;
         tokio::spawn(follow_policy(
             provider,
@@ -1125,6 +1177,7 @@ mod tests {
             Applied {
                 registry,
                 gateway: gateway.clone(),
+                server: server.clone(),
             },
             started,
             Duration::from_millis(50),
@@ -1148,6 +1201,46 @@ mod tests {
             ai6::UnexLimits::default().gateway.runs,
             "what the gateway sized when it started waits for a restart"
         );
+
+        assert_eq!(server.assistant_agent().as_deref(), Some("moneypenny"));
+        std::fs::write(
+            root.path().join("unex.toml"),
+            "assistant = true
+assistant_agent = \"first\"
+",
+        )
+        .unwrap();
+        let mut waited = 0;
+        while server.assistant_agent().as_deref() != Some("first") && waited < 200 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            waited += 1;
+        }
+        assert_eq!(server.assistant_agent().as_deref(), Some("first"));
+        std::fs::write(
+            root.path().join("unex.toml"),
+            "assistant = true
+assistant_agent = \"second\"
+",
+        )
+        .unwrap();
+        let mut waited = 0;
+        while server.assistant_agent().as_deref() != Some("second") && waited < 200 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            waited += 1;
+        }
+        assert_eq!(server.assistant_agent().as_deref(), Some("second"));
+        std::fs::write(
+            root.path().join("unex.toml"),
+            "assistant = false
+",
+        )
+        .unwrap();
+        let mut waited = 0;
+        while server.assistant_agent().is_some() && waited < 200 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            waited += 1;
+        }
+        assert_eq!(server.assistant_agent(), None);
     }
 
     #[test]

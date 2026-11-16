@@ -204,9 +204,9 @@ impl AssistantConfig {
 /// `[assistant.gateway]` of `gateway`'s assistant, the defaults without one.
 pub(crate) fn gateway_limits(gateway: &Gateway) -> AssistantGatewayLimits {
     gateway
-        .assistant
+        .assistant()
         .as_ref()
-        .map(|assistant| assistant.config.gateway.clone())
+        .map(|assistant| assistant.config().gateway.clone())
         .unwrap_or_default()
 }
 
@@ -436,7 +436,9 @@ fn trailer(conversation_id: &str) -> String {
 
 /// Moneypenny's state in one gateway.
 pub(crate) struct Assistant {
-    config: AssistantConfig,
+    /// What a conversation or turn that starts now runs by; one already running keeps the `Arc` it took.
+    config: std::sync::RwLock<Arc<AssistantConfig>>,
+    enabled: std::sync::atomic::AtomicBool,
     desk: Mutex<Desk>,
     ready: Notify,
     /// Told when a Station reports shared bases.
@@ -448,7 +450,7 @@ pub(crate) struct Assistant {
 impl fmt::Debug for Assistant {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Assistant")
-            .field("config", &self.config)
+            .field("config", &self.config())
             .finish_non_exhaustive()
     }
 }
@@ -465,14 +467,36 @@ fn now() -> f64 {
 }
 
 impl Assistant {
-    /// The settings it was started with.
-    pub(crate) fn config(&self) -> &AssistantConfig {
-        &self.config
+    /// The settings a conversation or turn that starts now runs by.
+    pub(crate) fn config(&self) -> Arc<AssistantConfig> {
+        self.config
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Makes the conversations and turns that start from now on run by `config`.
+    pub(crate) fn set_config(&self, config: AssistantConfig) {
+        *self
+            .config
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Arc::new(config);
+    }
+
+    /// Whether she answers; a turn already running finishes either way.
+    pub(crate) fn enabled(&self) -> bool {
+        self.enabled.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    pub(crate) fn set_enabled(&self, enabled: bool) {
+        self.enabled
+            .store(enabled, std::sync::atomic::Ordering::Release);
     }
 
     pub(crate) fn new(config: AssistantConfig) -> Self {
         Self {
-            config,
+            config: std::sync::RwLock::new(Arc::new(config)),
+            enabled: std::sync::atomic::AtomicBool::new(true),
             desk: Mutex::default(),
             ready: Notify::new(),
             based: Notify::new(),
@@ -483,7 +507,7 @@ impl Assistant {
     /// Keeps every conversation's entries in `registry` from now on.
     pub(crate) fn start_log(&self, registry: Arc<dyn ai6::RegistryBackend>) {
         self.log
-            .get_or_init(|| log::start(registry, &self.config.gateway));
+            .get_or_init(|| log::start(registry, &self.config().gateway));
     }
 
     /// Takes conversation `requested` back from the log when this gateway does not hold it and
@@ -504,17 +528,17 @@ impl Assistant {
         if rows.first().is_none_or(|first| first.person != person_id) {
             return;
         }
-        let limits = &self.config.gateway;
+        let limits = &self.config().gateway;
         let Some(mut conversation) = log::rebuild(
             &rows,
             bearer,
-            self.config.bounds(),
+            self.config().bounds(),
             usize::try_from(limits.event_buffer).unwrap_or(usize::MAX),
         ) else {
             return;
         };
         conversation.log = self.log.get().cloned();
-        conversation.agent = Some(self.config.agent_id.clone());
+        conversation.agent = Some(self.config().agent_id.clone());
         let mut desk = self.desk();
         if desk.store.conversations.contains_key(requested) {
             return;
@@ -537,7 +561,7 @@ impl Assistant {
         let Some(sink) = self.log.get().cloned() else {
             return;
         };
-        let timeout = self.config.gateway.log_flush_timeout;
+        let timeout = self.config().gateway.log_flush_timeout;
         let flushed = tokio::task::spawn_blocking(move || sink.flush(timeout)).await;
         match flushed {
             Ok(Ok(())) => {}
@@ -580,11 +604,11 @@ impl Assistant {
             conversation.bearer = bearer.to_owned();
             return (
                 conversation.id.clone(),
-                ready(conversation, &self.config.views, &self.config.gateway),
+                ready(conversation, &self.config().views, &self.config().gateway),
                 conversation.events.subscribe(),
             );
         }
-        let limits = &self.config.gateway;
+        let limits = &self.config().gateway;
         desk.store.make_room(
             person_id,
             now,
@@ -601,8 +625,8 @@ impl Assistant {
             usize::try_from(limits.event_buffer).unwrap_or(usize::MAX),
         );
         conversation.log = self.log.get().cloned();
-        conversation.agent = Some(self.config.agent_id.clone());
-        let shown = ready(&conversation, &self.config.views, limits);
+        conversation.agent = Some(self.config().agent_id.clone());
+        let shown = ready(&conversation, &self.config().views, limits);
         let events = conversation.events.subscribe();
         desk.store.conversations.insert(id.clone(), conversation);
         (id, shown, events)
@@ -621,8 +645,8 @@ impl Assistant {
     ) -> Result<(), (&'static str, String)> {
         // A job carries the message whole or not at all: the smaller bound applies.
         let most = match (
-            self.config.gateway.message_bytes.get(),
-            self.config.limits.message_bytes.get(),
+            self.config().gateway.message_bytes.get(),
+            self.config().limits.message_bytes.get(),
         ) {
             (Some(own), Some(job)) => Limit::at(own.min(job)),
             (Some(bound), None) | (None, Some(bound)) => Limit::at(bound),
@@ -645,7 +669,7 @@ impl Assistant {
             )
         })?;
         let kept = self.keep_images(gateway, person_id, images)?;
-        let message = match route.and_then(|route| page_line(route, self.config.route_limits())) {
+        let message = match route.and_then(|route| page_line(route, self.config().route_limits())) {
             Some(line) => format!("{line}\n\n{text}"),
             None => text.to_owned(),
         };
@@ -670,7 +694,7 @@ impl Assistant {
         if images.is_empty() {
             return Ok(Vec::new());
         }
-        let limits = &self.config.limits;
+        let limits = &self.config().limits;
         if !limits.images.allows(images.len()) {
             return Err((
                 "bad_request",
@@ -723,7 +747,7 @@ impl Assistant {
                 format!("Moneypenny cannot keep a workspace for you: {reason}"),
             )
         })?;
-        let workspace = workspace_for(&settings, &person, self.config.gateway.author_chars)
+        let workspace = workspace_for(&settings, &person, self.config().gateway.author_chars)
             .map_err(|reason| {
                 (
                     "unavailable",
@@ -736,13 +760,13 @@ impl Assistant {
         let skills = settings.skills_for(&person.id, &person.groups);
         // A skill the person ran with `/name` is handed to her harness as an instruction to
         // run it; the conversation shows what the person typed.
-        let invoked = if commands::handler_runs_skills(gateway, &self.config.agent_id).await {
+        let invoked = if commands::handler_runs_skills(gateway, &self.config().agent_id).await {
             commands::invocation(message, &skills)
         } else {
             None
         };
         // Read again for every message, so a permission removed reaches her next turn.
-        let cables = cables::grants(gateway, &person, self.config.limits.cable_grants).await;
+        let cables = cables::grants(gateway, &person, self.config().limits.cable_grants).await;
         let (remembered, marks) = knowledge::starting_reports(gateway, &person).await;
         {
             let mut desk = self.desk();
@@ -767,7 +791,7 @@ impl Assistant {
                 .map(|other| (other.updated_at, other.id.clone(), other.busy))
                 .collect();
             let over =
-                (others.len() + 1).saturating_sub(self.config.gateway.live_per_person.or_max());
+                (others.len() + 1).saturating_sub(self.config().gateway.live_per_person.or_max());
             if over > 0 {
                 others.retain(|(_, _, busy)| !busy);
                 if others.len() < over {
@@ -780,7 +804,7 @@ impl Assistant {
                 }
                 others.sort_by(|a, b| a.0.total_cmp(&b.0));
                 for (_, other, _) in others.into_iter().take(over) {
-                    desk.close_harness(&other, &self.config.agent_id);
+                    desk.close_harness(&other, &self.config().agent_id);
                 }
             }
             let conversation = desk
@@ -795,22 +819,22 @@ impl Assistant {
                 });
             conversation.note_memory_marks(marks, marks_kept);
             let mut context = guide::context();
-            let recap = recap(conversation, &self.config);
+            let recap = recap(conversation, &self.config());
             // What is left of the job's bound takes her memory's summaries; she searches for more.
             let used = context.iter().map(String::len).sum::<usize>()
                 + recap.as_ref().map_or(0, String::len);
-            let room = match self.config.limits.context_bytes.get() {
+            let room = match self.config().limits.context_bytes.get() {
                 Some(bound) => bound
                     .saturating_sub(u64::try_from(used).unwrap_or(u64::MAX))
                     .min(
-                        self.config
+                        self.config()
                             .gateway
                             .memory_context_bytes
                             .get()
                             .unwrap_or(u64::MAX),
                     ),
                 None => self
-                    .config
+                    .config()
                     .gateway
                     .memory_context_bytes
                     .get()
@@ -819,17 +843,17 @@ impl Assistant {
             context.extend(knowledge::starting_summaries(
                 &remembered,
                 Limit::at(room),
-                self.config.gateway.result_chars,
+                self.config().gateway.result_chars,
             ));
             let mut parts = std::mem::take(&mut conversation.notes);
             parts.push(invoked.unwrap_or_else(|| message.to_owned()));
             let job = AssistantJob {
                 job_id: Uuid::new_v4().to_string(),
                 conversation_id: conversation_id.to_owned(),
-                agent_id: self.config.agent_id.clone(),
+                agent_id: self.config().agent_id.clone(),
                 message: cut(
                     &parts.join("\n\n"),
-                    self.config.limits.message_bytes.or_max(),
+                    self.config().limits.message_bytes.or_max(),
                 ),
                 context,
                 recap,
@@ -871,7 +895,7 @@ impl Assistant {
                         at: now,
                         data: (!kept.is_empty()).then(|| images::KeptImage::data(kept)),
                     },
-                    self.config.bounds(),
+                    self.config().bounds(),
                 );
             }
             conversation.answered = false;
@@ -910,7 +934,7 @@ impl Assistant {
             .chain(healthy)
             .find(|station| !refused.contains(station));
         let mut desk = self.desk();
-        let max_entries = self.config.bounds();
+        let max_entries = self.config().bounds();
         let Some(conversation) = desk.store.conversations.get_mut(conversation_id) else {
             return;
         };
@@ -929,13 +953,13 @@ impl Assistant {
                     .filter(|(_, held_by, expires_at)| {
                         *held_by == station
                             && *expires_at
-                                > now + self.config.gateway.token_reuse_margin.0.as_secs_f64()
+                                > now + self.config().gateway.token_reuse_margin.0.as_secs_f64()
                     });
                 let (token, expires_at) = match reuse {
                     Some((token, _, expires_at)) => (token, expires_at),
                     None => (
                         format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
-                        now + self.config.gateway.token_ttl.0.as_secs_f64(),
+                        now + self.config().gateway.token_ttl.0.as_secs_f64(),
                     ),
                 };
                 conversation.token = Some((token.clone(), station.clone(), expires_at));
@@ -945,7 +969,7 @@ impl Assistant {
                 pending.taken_at = None;
                 pending.queued_at = now;
                 let person_id = conversation.person_id.clone();
-                let deadline = self.config.gateway.answer_deadline.0.as_secs_f64();
+                let deadline = self.config().gateway.answer_deadline.0.as_secs_f64();
                 let Desk { store, tokens, .. } = &mut *desk;
                 tokens.retain(|key, grant| {
                     let current = grant.expires_at > now
@@ -992,7 +1016,7 @@ impl Assistant {
     /// by every Station poll and by every open conversation socket, so a job is moved on
     /// even when no Station polls at all.
     async fn sweep(&self, gateway: &Gateway) {
-        let timeout = self.config.gateway.answer_timeout.0.as_secs_f64();
+        let timeout = self.config().gateway.answer_timeout.0.as_secs_f64();
         let now = now();
         let mut again = Vec::new();
         {
@@ -1013,8 +1037,8 @@ impl Assistant {
             }
             // An accepted message whose Station went quiet is given up, so the conversation
             // can take another message and be evicted like any idle one.
-            let deadline = self.config.gateway.answer_deadline.0.as_secs_f64();
-            let bounds = self.config.bounds();
+            let deadline = self.config().gateway.answer_deadline.0.as_secs_f64();
+            let bounds = self.config().bounds();
             for conversation in desk.store.conversations.values_mut() {
                 if conversation.busy
                     && conversation.pending.is_none()
@@ -1070,12 +1094,12 @@ impl Assistant {
 
     /// Applies a Station's report; `Err` with the HTTP status it earns.
     async fn report(&self, gateway: &Gateway, report: AssistantReport) -> Result<(), StatusCode> {
-        if !self.config.limits.events.allows(report.events.len())
+        if !self.config().limits.events.allows(report.events.len())
             || !ai6::directorates::section_00::assistant::valid_identity(&report.station_id)
         {
             return Err(StatusCode::BAD_REQUEST);
         }
-        let max_entries = self.config.bounds();
+        let max_entries = self.config().bounds();
         let mut refused = false;
         let mut based = false;
         let mut after = cables::After::default();
@@ -1157,7 +1181,7 @@ impl Assistant {
                         event,
                         &report.station_id,
                         max_entries,
-                        &self.config,
+                        &self.config(),
                         &mut after,
                     );
                 }
@@ -1211,7 +1235,8 @@ impl Assistant {
                 .filter(|event| report.job_id.is_none() || event.kind != EVENT_ACCEPTED)
             {
                 if !event.shared.is_empty() {
-                    conversation.keep_shared_bases(&event.shared, self.config.limits.shared_bases);
+                    conversation
+                        .keep_shared_bases(&event.shared, self.config().limits.shared_bases);
                     based = true;
                 }
                 match event.kind.as_str() {
@@ -1220,10 +1245,10 @@ impl Assistant {
                         event,
                         &report.station_id,
                         max_entries,
-                        &self.config,
+                        &self.config(),
                         &mut after,
                     ),
-                    EVENT_COMMANDS => conversation.commands = announced(event, &self.config),
+                    EVENT_COMMANDS => conversation.commands = announced(event, &self.config()),
                     _ => apply(conversation, event, max_entries),
                 }
             }
@@ -1231,7 +1256,7 @@ impl Assistant {
             if let Some(conversation) = desk.store.conversations.get(&report.conversation_id) {
                 let person = conversation.person_id.clone();
                 desk.store
-                    .trim_person(&person, self.config.gateway.person_bytes.or_max());
+                    .trim_person(&person, self.config().gateway.person_bytes.or_max());
             }
         }
         self.follow_up(gateway, after).await;
@@ -1254,7 +1279,7 @@ impl Assistant {
         let over = grant.expires_at <= now;
         let (conversation_id, person_id) = (grant.conversation_id.clone(), grant.person_id.clone());
         let conversation = desk.store.owned(&conversation_id, &person_id)?;
-        let deadline = self.config.gateway.answer_deadline.0.as_secs_f64();
+        let deadline = self.config().gateway.answer_deadline.0.as_secs_f64();
         if over && !conversation.outlasts_its_token(&key, now, deadline) {
             return None;
         }
@@ -1314,7 +1339,7 @@ impl Assistant {
             cable: None,
             evidence: actions::Evidence::default(),
         };
-        let max_entries = self.config.bounds();
+        let max_entries = self.config().bounds();
         {
             let mut desk = self.desk();
             let Some(conversation) = desk
@@ -1323,8 +1348,8 @@ impl Assistant {
             else {
                 return tools::Outcome::error("The conversation is gone.");
             };
-            if !record_proposal(conversation, proposal, max_entries, &self.config.gateway) {
-                return tools::Outcome::error(proposals_full(&self.config.gateway));
+            if !record_proposal(conversation, proposal, max_entries, &self.config().gateway) {
+                return tools::Outcome::error(proposals_full(&self.config().gateway));
             }
         }
         tools::Outcome {
@@ -1352,7 +1377,7 @@ impl Assistant {
                 .store
                 .owned(conversation_id, &person.id)
                 .ok_or(("not_found", "The conversation is gone.".to_owned()))?;
-            expire_proposals(conversation, &self.config.gateway);
+            expire_proposals(conversation, &self.config().gateway);
             let proposal = conversation
                 .proposals
                 .iter_mut()
@@ -1472,7 +1497,7 @@ impl Assistant {
                 let groups = Some(person.groups.clone());
                 desk.queue_commit(
                     conversation_id,
-                    &self.config.agent_id,
+                    &self.config().agent_id,
                     station,
                     (commit, groups),
                     Control::Commit {
@@ -1514,7 +1539,7 @@ impl Assistant {
         ids: std::collections::BTreeMap<String, String>,
     ) {
         if let Some(conversation) = self.desk().store.conversations.get_mut(conversation_id) {
-            conversation.note_read(tool, ids, &self.config.gateway);
+            conversation.note_read(tool, ids, &self.config().gateway);
         }
     }
 
@@ -1545,7 +1570,7 @@ impl Assistant {
         input: &Value,
     ) -> tools::Outcome {
         let (group, path, content, message) =
-            match actions::shared_change(input, &self.config.limits, &self.config.gateway) {
+            match actions::shared_change(input, &self.config().limits, &self.config().gateway) {
                 Ok(change) => change,
                 Err(outcome) => return outcome,
             };
@@ -1573,7 +1598,7 @@ impl Assistant {
                  call again."
             ));
         };
-        let (author_name, author_email) = author_of(&person, self.config.gateway.author_chars);
+        let (author_name, author_email) = author_of(&person, self.config().gateway.author_chars);
         let commit = AssistantCommit {
             repo: shared.repo().to_owned(),
             group: group.to_owned(),
@@ -1606,7 +1631,7 @@ impl Assistant {
             let mut desk = self.desk();
             desk.queue_commit(
                 &granted.conversation_id,
-                &self.config.agent_id,
+                &self.config().agent_id,
                 station,
                 (commit, Some(person.groups.clone())),
                 Control::Commit {
@@ -1635,7 +1660,7 @@ impl Assistant {
             commit,
         );
         let id = proposal.id.clone();
-        let bounds = self.config.bounds();
+        let bounds = self.config().bounds();
         let mut desk = self.desk();
         let Some(conversation) = desk
             .store
@@ -1643,8 +1668,8 @@ impl Assistant {
         else {
             return tools::Outcome::error("The conversation is gone.");
         };
-        if !record_proposal(conversation, proposal, bounds, &self.config.gateway) {
-            return tools::Outcome::error(proposals_full(&self.config.gateway));
+        if !record_proposal(conversation, proposal, bounds, &self.config().gateway) {
+            return tools::Outcome::error(proposals_full(&self.config().gateway));
         }
         tools::Outcome {
             text: format!(
@@ -1668,7 +1693,7 @@ impl Assistant {
         content: &str,
     ) -> Option<Option<String>> {
         let content = digest(content);
-        let deadline = tokio::time::Instant::now() + self.config.gateway.shared_base_wait.0;
+        let deadline = tokio::time::Instant::now() + self.config().gateway.shared_base_wait.0;
         loop {
             let notified = self.based.notified();
             tokio::pin!(notified);
@@ -1727,7 +1752,7 @@ impl Assistant {
                 let shown = format!(
                     "AI6 answered {}: {}",
                     status.as_u16(),
-                    tools::wrap(proposal.tool, &value, self.config.gateway.result_chars)
+                    tools::wrap(proposal.tool, &value, self.config().gateway.result_chars)
                 );
                 // The Mission is named by what AI6 answered, never by what she wrote.
                 let receipt = (proposal.tool == "propose_mission")
@@ -1742,7 +1767,7 @@ impl Assistant {
             Ok((status, value)) => Err(tools::refusal(
                 status,
                 &value,
-                self.config.gateway.result_chars,
+                self.config().gateway.result_chars,
             )),
             Err(error) => Err(format!("The request failed: {error}")),
         }
@@ -1751,7 +1776,7 @@ impl Assistant {
     /// Shows a view Moneypenny built, when it is exactly the view schema; otherwise tells her
     /// why and shows nothing.
     pub(crate) fn show(&self, granted: &Granted, input: &Value) -> tools::Outcome {
-        let view = match views::parse(input, &self.config.views, self.config.route_limits()) {
+        let view = match views::parse(input, &self.config().views, self.config().route_limits()) {
             Ok(view) => view,
             Err(reason) => {
                 return tools::Outcome::error(format!(
@@ -1760,7 +1785,7 @@ impl Assistant {
             }
         };
         let id = format!("view-{}", Uuid::new_v4().simple());
-        let max_entries = self.config.bounds();
+        let max_entries = self.config().bounds();
         let mut desk = self.desk();
         let Some(conversation) = desk
             .store
@@ -1780,7 +1805,7 @@ impl Assistant {
         );
         desk.store.trim_person(
             &granted.person_id,
-            self.config.gateway.person_bytes.or_max(),
+            self.config().gateway.person_bytes.or_max(),
         );
         tools::Outcome {
             text: format!("Shown to the person as {id}."),
@@ -1792,14 +1817,14 @@ impl Assistant {
     /// valid route; otherwise tells her why and offers nothing. It changes nothing, so it is
     /// not audited.
     pub(crate) fn navigate(&self, granted: &Granted, input: &Value) -> tools::Outcome {
-        let (route, label) = match navigation(input, &self.config) {
+        let (route, label) = match navigation(input, &self.config()) {
             Ok(navigation) => navigation,
             Err(reason) => {
                 return tools::Outcome::error(format!("Navigation refused: {reason}"));
             }
         };
         let id = format!("nav-{}", Uuid::new_v4().simple());
-        let max_entries = self.config.bounds();
+        let max_entries = self.config().bounds();
         let mut desk = self.desk();
         let Some(conversation) = desk
             .store
@@ -1819,7 +1844,7 @@ impl Assistant {
         );
         desk.store.trim_person(
             &granted.person_id,
-            self.config.gateway.person_bytes.or_max(),
+            self.config().gateway.person_bytes.or_max(),
         );
         tools::Outcome {
             text: format!("Offered to the person as {id}; the page opens when they choose it."),
@@ -1916,7 +1941,7 @@ impl Assistant {
         conversation_id: &str,
         person_id: &str,
     ) -> Result<bool, (&'static str, String)> {
-        let bounds = self.config.bounds();
+        let bounds = self.config().bounds();
         let mut desk = self.desk();
         let conversation = desk
             .store
@@ -1955,7 +1980,7 @@ impl Assistant {
         conversation.stopping = true;
         let job = control_job(
             conversation,
-            &self.config.agent_id,
+            &self.config().agent_id,
             &Control::Interrupt,
             None,
         );
@@ -1976,7 +2001,7 @@ impl Assistant {
     /// Counts one tool call of the conversation; `false` past the minute's allowance.
     pub(crate) fn count_call(&self, conversation_id: &str) -> bool {
         let mut desk = self.desk();
-        let limit = self.config.gateway.tool_calls_per_minute;
+        let limit = self.config().gateway.tool_calls_per_minute;
         // The minute of `tool_calls_per_minute`.
         desk.calls
             .retain(|_, (started, _)| started.elapsed() < Duration::from_secs(60));
@@ -2437,12 +2462,12 @@ fn problem(code: &str, message: &str) -> Value {
 /// `{"type":"hello","token":ACCESS_TOKEN,"conversation"?:ID}`; the token is the person's
 /// access token, sent in the socket rather than a header a browser cannot set.
 pub(crate) async fn socket(State(gateway): State<Gateway>, upgrade: WebSocketUpgrade) -> Response {
-    if gateway.assistant.is_none() {
+    if gateway.assistant().is_none() {
         return ApiError::unavailable().into_response();
     }
     // A message frame carries its images as base64, four characters for three bytes.
-    let images = gateway.assistant.as_ref().map_or(0, |assistant| {
-        let limits = &assistant.config.limits;
+    let images = gateway.assistant().as_ref().map_or(0, |assistant| {
+        let limits = &assistant.config().limits;
         limits
             .images
             .or_max()
@@ -2458,12 +2483,12 @@ pub(crate) async fn socket(State(gateway): State<Gateway>, upgrade: WebSocketUpg
 }
 
 async fn converse(socket: WebSocket, gateway: Gateway) {
-    let Some(assistant) = gateway.assistant.clone() else {
+    let Some(assistant) = gateway.assistant() else {
         return;
     };
     let (mut sender, mut receiver) = socket.split();
     let hello =
-        tokio::time::timeout(assistant.config.gateway.hello_timeout.0, receiver.next()).await;
+        tokio::time::timeout(assistant.config().gateway.hello_timeout.0, receiver.next()).await;
     let Ok(Some(Ok(Message::Text(hello)))) = hello else {
         let _ = sender.send(close(1008, "say hello first")).await;
         return;
@@ -2496,7 +2521,7 @@ async fn converse(socket: WebSocket, gateway: Gateway) {
     if sender.send(frame(&shown)).await.is_err() {
         return;
     }
-    let mut sweep = tokio::time::interval(assistant.config.gateway.sweep_every.0);
+    let mut sweep = tokio::time::interval(assistant.config().gateway.sweep_every.0);
     loop {
         tokio::select! {
             _ = sweep.tick() => assistant.sweep(&gateway).await,
@@ -2621,13 +2646,13 @@ pub(crate) async fn next(
     }
     // With Moneypenny off the poll is still held, so an idle Station does not ask in a loop.
     let max_wait = gateway
-        .assistant
+        .assistant()
         .as_ref()
         .map_or(gateway.job_poll_max_wait, |assistant| {
-            assistant.config.gateway.max_wait.0
+            assistant.config().gateway.max_wait.0
         });
     let wait = Duration::from_millis(query.wait_ms.unwrap_or(1_000)).min(max_wait);
-    let Some(assistant) = gateway.assistant.clone() else {
+    let Some(assistant) = gateway.assistant() else {
         tokio::time::sleep(wait).await;
         return Ok(StatusCode::NO_CONTENT.into_response());
     };
@@ -2663,7 +2688,7 @@ pub(crate) async fn cable_standing(
     Query(query): Query<StandingQuery>,
 ) -> Result<Json<Value>, ApiError> {
     gateway.authenticate_station(bearer(&headers)?)?;
-    let assistant = gateway.assistant.clone().ok_or_else(ApiError::not_found)?;
+    let assistant = gateway.assistant().ok_or_else(ApiError::not_found)?;
     assistant.run_by(&query.station, &query.conversation)?;
     // A harness cut off by a Stop sends and reads no Cable.
     let cut_off = assistant
@@ -2717,7 +2742,7 @@ pub(crate) async fn station_image(
     Query(query): Query<ImageQuery>,
 ) -> Result<Response, ApiError> {
     gateway.authenticate_station(bearer(&headers)?)?;
-    let assistant = gateway.assistant.clone().ok_or_else(ApiError::not_found)?;
+    let assistant = gateway.assistant().ok_or_else(ApiError::not_found)?;
     // The Station reads a message's images before its harness accepts the message, so the one
     // that took the job may read them as well as the one that runs the conversation.
     let person = {
@@ -2792,7 +2817,7 @@ pub(crate) async fn reports(
     Json(report): Json<AssistantReport>,
 ) -> Result<StatusCode, ApiError> {
     gateway.authenticate_station(bearer(&headers)?)?;
-    let Some(assistant) = gateway.assistant.clone() else {
+    let Some(assistant) = gateway.assistant() else {
         return Err(ApiError::not_found());
     };
     match assistant.report(&gateway, report).await {

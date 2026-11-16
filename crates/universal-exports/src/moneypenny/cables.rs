@@ -459,7 +459,7 @@ impl Assistant {
         let mut after = After::default();
         {
             let mut desk = self.desk();
-            let agent_id = self.config.agent_id.clone();
+            let agent_id = self.config().agent_id.clone();
             let Some(conversation) = desk.store.owned(conversation_id, &person.id) else {
                 return;
             };
@@ -474,7 +474,7 @@ impl Assistant {
                 });
                 // The Station refuses it once the answer timeout has passed, so a late one
                 // sends nothing; the proposal fails half as long again after that.
-                let timeout = self.config.gateway.answer_timeout.0.as_secs_f64();
+                let timeout = self.config().gateway.answer_timeout.0.as_secs_f64();
                 job.token_expires_at = now() + timeout;
                 desk.cable_deadlines.insert(
                     job.job_id.clone(),
@@ -530,7 +530,7 @@ impl Assistant {
     pub(super) fn discard_cable(&self, conversation_id: &str, proposal_id: &str, hold: CableHold) {
         {
             let mut desk = self.desk();
-            let agent_id = self.config.agent_id.clone();
+            let agent_id = self.config().agent_id.clone();
             let Some(conversation) = desk.store.conversations.get(conversation_id) else {
                 return;
             };

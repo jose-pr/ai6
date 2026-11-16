@@ -372,7 +372,7 @@ impl Served {
         }
         let (gateway, serving) =
             serve_gateway(&self.registry, &self.pages_dir, &self.denied, &self.setup).await;
-        self.assistant = gateway.assistant.clone().unwrap();
+        self.assistant = gateway.assistant().unwrap();
         self.gateway = gateway;
         self.base = serving.base;
         self.server = serving.server;
@@ -533,7 +533,7 @@ async fn served_setup(setup: Setup) -> Served {
         server: serving.server,
         pages_server: serving.pages_server,
         pages_dir,
-        assistant: gateway.assistant.clone().unwrap(),
+        assistant: gateway.assistant().unwrap(),
         gateway,
         denied,
         setup,

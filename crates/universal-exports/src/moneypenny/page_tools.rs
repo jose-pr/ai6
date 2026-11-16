@@ -282,7 +282,7 @@ impl Assistant {
             Ok(page) => page,
             Err(error) => return refused(format!("the page could not be stored: {error}")),
         };
-        let max_entries = self.config.bounds();
+        let max_entries = self.config().bounds();
         {
             let mut desk = self.desk();
             if let Some(conversation) = desk
@@ -365,7 +365,7 @@ impl Assistant {
             text: tools::wrap(
                 "pages",
                 &Value::Array(list),
-                self.config.gateway.result_chars,
+                self.config().gateway.result_chars,
             ),
             is_error: false,
         }
@@ -393,7 +393,7 @@ pub(crate) async fn upload(
     body: Body,
 ) -> Result<StatusCode, ApiError> {
     gateway.authenticate_station(bearer(&headers)?)?;
-    let assistant = gateway.assistant.clone().ok_or_else(ApiError::not_found)?;
+    let assistant = gateway.assistant().ok_or_else(ApiError::not_found)?;
     let store = gateway.pages.clone().ok_or_else(ApiError::not_found)?;
     assistant.run_by(&query.station, &query.conversation)?;
     let limits = page_limits(&gateway).await?;
@@ -430,7 +430,7 @@ pub(crate) async fn done(
     Json(done): Json<Done>,
 ) -> Result<StatusCode, ApiError> {
     gateway.authenticate_station(bearer(&headers)?)?;
-    let assistant = gateway.assistant.clone().ok_or_else(ApiError::not_found)?;
+    let assistant = gateway.assistant().ok_or_else(ApiError::not_found)?;
     let store = gateway.pages.clone().ok_or_else(ApiError::not_found)?;
     assistant.run_by(&query.station, &query.conversation)?;
     let limits = page_limits(&gateway).await?;

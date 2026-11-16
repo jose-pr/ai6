@@ -170,7 +170,7 @@ pub(crate) async fn endpoint(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ApiError> {
-    let assistant = gateway.assistant.clone().ok_or_else(ApiError::not_found)?;
+    let assistant = gateway.assistant().ok_or_else(ApiError::not_found)?;
     let granted = assistant
         .grant(bearer(&headers)?)
         .ok_or_else(ApiError::unauthorized)?;

@@ -940,17 +940,25 @@ audited as `config.refused`, and reported at check-in.
 #### What stays restart-only
 
 A change to one of these is stored and audited like any other, then logged and listed at check-in
-in `config.needs_restart` until the program restarts. Each is read once, because what it
-configures exists only once the program is running:
+in `config.needs_restart` until the program restarts. Every other key of every family applies at
+the next poll. These cannot, because what they configure is a listener, an identity, a loaded
+library or a pool already allocated:
 
 | Where | Keys | Why |
 | --- | --- | --- |
-| `station` | `resources_every` and the `[transports]` table | The probes of every Theater's transport are paced when the Station starts. |
-| `station` | the `[publisher]`, `[api]`, `[sources]` and `[attach]` tables | The connection to Universal Exports, the Station's own API token check, the Source poller and the attach hub are built at start with them. |
-| `station` | `[providers.<id>]` | A provider library is configured as it loads. |
+| `ai6.cfg` | listener address, Station ID and identity, the provider and Registry location | They locate or name the process before it reads a record, and a bound listener has one address. |
 | `plugin` | the whole family | A loaded library is held open and, on Windows, locked, so it cannot be swapped under the Station. |
-| `unex` | the sign-in providers, directory, authorizer and accounts, the access cache, `proxy_*`, `assistant`, `assistant_agent`, `route_text_bytes`, `provider_config_depth`, `[login]`, and the `[gateway]` keys that size what exists once the gateway runs (`runs`, `clients_per_run`, `scrollback_events`, `frame_bytes`, `input_frames_per_second`, `input_queue`, `fanout`, `buffer_budget_bytes`, `client_slots`, the attach and write-lease lifetimes, `station_token_min_bytes`, `origin_bytes`) | Providers are loaded and the assistant and sign-in are wired into the gateway when it starts, and its queues and slots are allocated then. The sign-in policy, `[controls]`, `[timeline]`, `[search]`, `[attach]`, `[text]` and the `[gateway]` keys read per request (`board_runs`, the access-token and session keys, `compartment_audit`) apply at the next poll. |
-| `ai6.cfg` | listener address, Station ID and identity, the provider and Registry location | They locate or name the process before it reads a record. |
+| `station` | `[providers.<id>]` | Configures a provider library as it is loaded. |
+| `station` | the `[publisher]` table, and `[attach]` `call_margin` and `command_wait` | Pools already allocated: the publisher's outbox queue and the HTTP clients (connection pools with their timeouts) of the link to Universal Exports and of the attach link. |
+| `unex` | the sign-in providers, directory, authorizer and accounts, `proxy_*`, the access cache, `client_address_header`, `key_ttl`, `provider_config_depth` | Provider libraries are loaded and configured when the gateway starts. |
+| `unex` | `[login]`, and the `[gateway]` keys `runs`, `clients_per_run`, `scrollback_events`, `frame_bytes`, `input_frames_per_second`, `input_queue`, `fanout`, `buffer_budget_bytes`, `client_slots`, `attach_token_ttl`, `write_lease_ttl`, `station_token_min_bytes` and `origin_bytes` | Pools already allocated: the login guards' tables, and the gateway's per-Run buffers, queues and connection slots. |
+
+Applied at the next poll, with a turn or request already running finishing on what it started
+with: the `station` record's other keys and tables (capacity, watchdog, roles, labels, the
+scheduler, Sources, Theater probes and their pace, the API's refused-body drain, the attach hub's
+new rooms and the rest), `cables`, `theater`, `tls`, and in Universal Exports the sign-in
+policy, Moneypenny (on or off, her Agent, her limits and views, `route_text_bytes`), `[controls]`,
+`[timeline]`, `[search]`, `[attach]`, `[text]` and the other `[gateway]` keys.
 
 The `tls` family applies to a connection made after the change: the policy a Station reports and
 warns of at check-in changes at the next poll, and a TLS client or the `ai6 peer` command reads
@@ -960,7 +968,7 @@ made under.
 The `cables` record applies to the Station's relay at the next poll: grants, inbound choices,
 channels, fan-out, rates, body size, lifetimes and `cross_operation` take effect for the sends and
 deliveries that follow, and a Cable already stored keeps what it was sent with. Universal Exports
-builds its own relay from the record when it starts.
+builds the relay it uses for a Liaison call from the record as it is when the call arrives.
 
 A changed `theater` record builds the transport of each new or changed Theater and forgets a
 removed one at the next poll; a Run already on a Theater keeps the transport it started with, and

@@ -1038,7 +1038,7 @@ pub(crate) async fn read(
     let empty = Map::new();
     let input = input.as_object().unwrap_or(&empty);
     let limits = gateway
-        .assistant
+        .assistant()
         .as_ref()
         .map(|assistant| assistant.config().route_limits())
         .unwrap_or_default();

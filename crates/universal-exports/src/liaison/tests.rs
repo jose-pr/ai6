@@ -36,6 +36,7 @@ use serde_json::{Value, json};
 
 use super::{Addressee, Liaison, LiaisonConfig, LiaisonPeer, LinkListener};
 use crate::{AccessProviders, Gateway, GatewayConfig, GatewayLimits};
+use ai6::ConfigProvider as _;
 
 const WAIT: Duration = Duration::from_secs(60);
 const TOKEN: &str = "m-token-that-is-long-enough-for-testing";
@@ -136,6 +137,7 @@ struct World {
     registry: FileRegistry,
     gateway: Gateway,
     listener: LinkListener,
+    provider: Arc<MemoryProvider>,
     acme: Identity,
     mute: Identity,
     rival: Identity,
@@ -177,8 +179,7 @@ impl World {
             .unwrap();
         let mut settings = ai6::Settings::default();
         settings.cables = cable_config();
-        let provider: Arc<dyn ai6::ConfigProvider> =
-            Arc::new(MemoryProvider::new(roster).with_settings(settings));
+        let provider = Arc::new(MemoryProvider::new(roster).with_settings(settings));
         let keys = directory.path().join("keys");
         let (acme, mute, rival, stranger) = (
             identity(&keys, "acme"),
@@ -222,7 +223,7 @@ impl World {
                 Arc::new(access_from_toml(ROLES, ai6::Limit::UNBOUNDED).unwrap()),
             ),
         )
-        .with_roster(provider)
+        .with_roster(provider.clone())
         .with_liaison(config);
         let listener = LinkListener::start(
             &gateway.liaison().unwrap(),
@@ -236,6 +237,7 @@ impl World {
             registry,
             gateway,
             listener,
+            provider,
             acme,
             mute,
             rival,
@@ -1316,4 +1318,24 @@ async fn the_official_a2a_javascript_sdk_completes_exchanges_on_both_bindings() 
     link.join().unwrap().unwrap();
     assert!(output.status.success(), "the SDK check failed:\n{printed}");
     assert_eq!(world.work_left(), Vec::<String>::new());
+}
+
+#[test]
+fn the_relay_follows_the_cables_record_as_it_is_when_a_call_arrives() {
+    let world = World::new();
+    let liaison = world.gateway.liaison().unwrap();
+    let body_bytes = |liaison: &Liaison| {
+        let snapshot = liaison.snapshot().unwrap();
+        liaison.relay(&snapshot, Vec::new()).unwrap().body_bytes()
+    };
+    assert!(body_bytes(&liaison).allows(101));
+
+    let snapshot = world.provider.load("").unwrap();
+    let mut settings = snapshot.settings.clone();
+    settings.cables = CableConfig::parse_toml("body_bytes = 100\n").unwrap();
+    world
+        .provider
+        .replace_all(snapshot.roster.clone(), settings);
+    let limit = body_bytes(&liaison);
+    assert!(limit.allows(100) && !limit.allows(101));
 }
