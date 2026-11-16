@@ -27,7 +27,9 @@ use crate::directorates::registry::bona_fides::{
 };
 use crate::providers::{FoundLibrary, ProviderEntry};
 
-use crate::directorates::m::access::{Accounts, Authenticator, Authorizer, Directory, KIND_PREFIX};
+use crate::directorates::m::access::{
+    Accounts, Authenticator, Authorizer, Directory, KIND_PREFIX, SignInPolicy,
+};
 use crate::directorates::q::ephemeral::TheaterProvider;
 use crate::directorates::q::safehouse::SafeHouseProvider;
 use crate::directorates::q::secret_kind::SecretProvider;
@@ -517,6 +519,11 @@ impl Plugins {
         providers(&self.registry, <dyn Authenticator>::NAME)
     }
 
+    /// Returns the providers that decide which methods a sign-in may use.
+    pub fn sign_in_policies(&self) -> Vec<ProviderInfo> {
+        providers(&self.registry, <dyn SignInPolicy>::NAME)
+    }
+
     /// Returns the configured identity directories.
     pub fn directories(&self) -> Vec<ProviderInfo> {
         providers(&self.registry, <dyn Directory>::NAME)
@@ -788,6 +795,15 @@ impl Plugins {
         config: Option<&Value>,
     ) -> Result<Box<dyn Authenticator>, PluginBuildError> {
         self.build::<dyn Authenticator>(provider, config)
+    }
+
+    /// Constructs a sign-in policy from its provider ID and optional Guatiao config.
+    pub fn sign_in_policy(
+        &self,
+        provider: &str,
+        config: Option<&Value>,
+    ) -> Result<Box<dyn SignInPolicy>, PluginBuildError> {
+        self.build::<dyn SignInPolicy>(provider, config)
     }
 
     /// Constructs a Directory from its provider ID and optional Guatiao config.

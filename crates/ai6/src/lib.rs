@@ -62,14 +62,16 @@ pub use directorates::m::config::SqlProvider;
 pub use directorates::m::config::{
     ConfigDefinitions, ConfigLimits, ConfigProvider, ConfigRecord, ConfigRevision, ConfigScope,
     ConfigSnapshot, ConfigStatus, FileProvider, MemoryProvider, ProviderConfig, RegistryRecord,
-    Settings, SignInProvider, StationRuntime, UnexRecord,
+    Settings, SignInPolicyProvider, SignInProvider, StationRuntime, UnexRecord,
 };
 pub use directorates::m::cover::{Cover, CoverError, Covers};
 pub use directorates::m::harness::{
     HarnessPolicy, PROJECT_DIRECTORIES, PROJECT_FILES, ProjectDecision, ProjectManifest,
     ProjectSettings,
 };
-pub use directorates::m::identity::{AccessTokenRecord, InvalidIdentity, MissionId, RunId};
+pub use directorates::m::identity::{
+    AccessTokenRecord, InvalidIdentity, MissionId, RunId, SignInFactor,
+};
 pub use directorates::m::issues::{SourcePage, source_pages};
 pub use directorates::m::placement::{
     AgentFacts, DEFAULT_MAX_CPU_PERCENT, DEFAULT_MIN_FREE_MEMORY_MB, ExecutionMode,

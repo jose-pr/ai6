@@ -392,8 +392,10 @@ pub use ai6::directorates::m::access::AuthorizationRequest
 pub use ai6::directorates::m::access::Authorizer
 pub use ai6::directorates::m::access::Description
 pub use ai6::directorates::m::access::Directory
+pub use ai6::directorates::m::access::Factor
 pub use ai6::directorates::m::access::KIND_PREFIX
 pub use ai6::directorates::m::access::Lookup
+pub use ai6::directorates::m::access::Offer
 pub use ai6::directorates::m::access::Person
 pub use ai6::directorates::m::access::PutOutcome
 pub use ai6::directorates::m::access::Role
@@ -402,9 +404,15 @@ pub use ai6::directorates::m::access::RoleAuthorizerBuilder
 pub use ai6::directorates::m::access::RolePolicy
 pub use ai6::directorates::m::access::RolePolicyError
 pub use ai6::directorates::m::access::Rule
+pub use ai6::directorates::m::access::SignInContext
+pub use ai6::directorates::m::access::SignInDecision
+pub use ai6::directorates::m::access::SignInPolicy
 pub use ai6::directorates::m::access::Subject
 pub use ai6::directorates::m::access::Verdict
 pub use ai6::directorates::m::access::Waiting
+pub use ai6::directorates::m::access::clients
+pub use ai6::directorates::m::access::methods
+pub use ai6::directorates::m::access::purposes
 pub use ai6::directorates::m::access::takes
 #[non_exhaustive] pub enum ai6::directorates::m::access::TierKind
 pub ai6::directorates::m::access::TierKind::Chief
@@ -1174,6 +1182,14 @@ pub ai6::directorates::m::config::Settings::unex: ai6::directorates::m::config::
 impl ai6::directorates::m::config::Settings
 pub fn ai6::directorates::m::config::Settings::access_policy(&self) -> core::result::Result<core::option::Option<ai6::AccessPolicy>, alloc::string::String>
 pub fn ai6::directorates::m::config::Settings::tls_policy(&self) -> core::result::Result<coqui_peer_tls::policy::Policy, alloc::string::String>
+#[non_exhaustive] pub struct ai6::directorates::m::config::SignInPolicyProvider
+pub ai6::directorates::m::config::SignInPolicyProvider::config: core::option::Option<ai6::directorates::m::config::ProviderConfig>
+pub ai6::directorates::m::config::SignInPolicyProvider::provider: alloc::string::String
+impl ai6::directorates::m::config::SignInPolicyProvider
+pub const ai6::directorates::m::config::SignInPolicyProvider::RULES: &'static str
+pub fn ai6::directorates::m::config::SignInPolicyProvider::config(self, ai6::directorates::m::config::ProviderConfig) -> Self
+pub fn ai6::directorates::m::config::SignInPolicyProvider::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::config::SignInPolicyProvider::rules(ai6::directorates::m::config::ProviderConfig) -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::config::SignInProvider
 pub ai6::directorates::m::config::SignInProvider::config: core::option::Option<ai6::directorates::m::config::ProviderConfig>
 pub ai6::directorates::m::config::SignInProvider::provider: alloc::string::String
@@ -1272,6 +1288,7 @@ pub ai6::directorates::m::config::UnexRecord::proxy_lookup_by: alloc::string::St
 pub ai6::directorates::m::config::UnexRecord::proxy_user_header: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::config::UnexRecord::route_text_bytes: core::option::Option<u64>
 pub ai6::directorates::m::config::UnexRecord::search: ai6::directorates::m::unex_limits::UnexSearchLimits
+pub ai6::directorates::m::config::UnexRecord::sign_in_policy: core::option::Option<ai6::directorates::m::config::SignInPolicyProvider>
 pub ai6::directorates::m::config::UnexRecord::text: ai6::directorates::m::unex_limits::TextLimits
 pub ai6::directorates::m::config::UnexRecord::timeline: ai6::directorates::m::unex_limits::UnexTimelineLimits
 impl ai6::directorates::m::config::UnexRecord
@@ -1450,6 +1467,7 @@ impl ai6::directorates::m::identity::AccessTokenRecord
 pub fn ai6::directorates::m::identity::AccessTokenRecord::active_at(&self, f64) -> bool
 pub fn ai6::directorates::m::identity::AccessTokenRecord::digest(&self) -> &str
 pub fn ai6::directorates::m::identity::AccessTokenRecord::expires_at(&self) -> f64
+pub fn ai6::directorates::m::identity::AccessTokenRecord::factors(&self) -> &[ai6::directorates::m::identity::SignInFactor]
 pub fn ai6::directorates::m::identity::AccessTokenRecord::in_sign_in(self, impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, ai6::directorates::m::identity::InvalidIdentity>
 pub fn ai6::directorates::m::identity::AccessTokenRecord::into_session_cookie(self) -> Self
 pub fn ai6::directorates::m::identity::AccessTokenRecord::is_session_cookie(&self) -> bool
@@ -1459,6 +1477,7 @@ pub fn ai6::directorates::m::identity::AccessTokenRecord::revoked_at(&self) -> c
 pub fn ai6::directorates::m::identity::AccessTokenRecord::sign_in(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::m::identity::AccessTokenRecord::token_id(&self) -> &str
 pub fn ai6::directorates::m::identity::AccessTokenRecord::try_new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, f64, f64, core::option::Option<f64>) -> core::result::Result<Self, ai6::directorates::m::identity::InvalidIdentity>
+pub fn ai6::directorates::m::identity::AccessTokenRecord::with_factors(self, alloc::vec::Vec<ai6::directorates::m::identity::SignInFactor>) -> Self
 impl core::fmt::Debug for ai6::directorates::m::identity::AccessTokenRecord
 pub fn ai6::directorates::m::identity::AccessTokenRecord::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct ai6::directorates::m::identity::InvalidIdentity
@@ -1511,6 +1530,12 @@ pub const ai6::directorates::m::identity::RunId::KINDS: guatiao::value::convert:
 pub fn ai6::directorates::m::identity::RunId::from_value(&guatiao::value::value::Value) -> core::result::Result<Self, guatiao::value::convert::MapError>
 impl guatiao::value::convert::ToValue for ai6::directorates::m::identity::RunId
 pub fn ai6::directorates::m::identity::RunId::to_value_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::value::error::ValueError>
+pub struct ai6::directorates::m::identity::SignInFactor
+impl ai6::directorates::m::identity::SignInFactor
+pub fn ai6::directorates::m::identity::SignInFactor::method(&self) -> &str
+pub fn ai6::directorates::m::identity::SignInFactor::person(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::m::identity::SignInFactor::provider(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::m::identity::SignInFactor::try_new(impl core::convert::Into<alloc::string::String>, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> core::result::Result<Self, ai6::directorates::m::identity::InvalidIdentity>
 pub const ai6::directorates::m::identity::MAX_ID_BYTES: usize
 pub mod ai6::directorates::m::inherit
 pub const ai6::directorates::m::inherit::NOT_INHERITED: [&str; 10]
@@ -10019,6 +10044,8 @@ pub fn ai6::station::plugins::Plugins::scan_summary(&self) -> &ai6::station::plu
 pub fn ai6::station::plugins::Plugins::scan_with(&[std::path::PathBuf], &ai6::station::plugins::PluginPolicy) -> Self
 pub fn ai6::station::plugins::Plugins::secret_provider(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::q::secret_kind::SecretProvider>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::secret_providers(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
+pub fn ai6::station::plugins::Plugins::sign_in_policies(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
+pub fn ai6::station::plugins::Plugins::sign_in_policy(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn coqui_access::kind::SignInPolicy>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::source(&self, &str, core::option::Option<&guatiao::value::value::Value>) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::registry::sources::Source>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::source_with(&self, &str, &toml::table::Table) -> core::result::Result<alloc::boxed::Box<dyn ai6::directorates::registry::sources::Source>, ai6::station::plugins::PluginBuildError>
 pub fn ai6::station::plugins::Plugins::sources(&self) -> alloc::vec::Vec<ai6::station::plugins::ProviderInfo>
@@ -10871,6 +10898,7 @@ impl ai6::directorates::m::identity::AccessTokenRecord
 pub fn ai6::directorates::m::identity::AccessTokenRecord::active_at(&self, f64) -> bool
 pub fn ai6::directorates::m::identity::AccessTokenRecord::digest(&self) -> &str
 pub fn ai6::directorates::m::identity::AccessTokenRecord::expires_at(&self) -> f64
+pub fn ai6::directorates::m::identity::AccessTokenRecord::factors(&self) -> &[ai6::directorates::m::identity::SignInFactor]
 pub fn ai6::directorates::m::identity::AccessTokenRecord::in_sign_in(self, impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, ai6::directorates::m::identity::InvalidIdentity>
 pub fn ai6::directorates::m::identity::AccessTokenRecord::into_session_cookie(self) -> Self
 pub fn ai6::directorates::m::identity::AccessTokenRecord::is_session_cookie(&self) -> bool
@@ -10880,6 +10908,7 @@ pub fn ai6::directorates::m::identity::AccessTokenRecord::revoked_at(&self) -> c
 pub fn ai6::directorates::m::identity::AccessTokenRecord::sign_in(&self) -> core::option::Option<&str>
 pub fn ai6::directorates::m::identity::AccessTokenRecord::token_id(&self) -> &str
 pub fn ai6::directorates::m::identity::AccessTokenRecord::try_new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, f64, f64, core::option::Option<f64>) -> core::result::Result<Self, ai6::directorates::m::identity::InvalidIdentity>
+pub fn ai6::directorates::m::identity::AccessTokenRecord::with_factors(self, alloc::vec::Vec<ai6::directorates::m::identity::SignInFactor>) -> Self
 impl core::fmt::Debug for ai6::directorates::m::identity::AccessTokenRecord
 pub fn ai6::directorates::m::identity::AccessTokenRecord::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct ai6::Account
@@ -14109,6 +14138,20 @@ pub fn ai6::directorates::m::assistant::SharedRepo::new(impl core::convert::Into
 pub fn ai6::directorates::m::assistant::SharedRepo::repo(&self) -> &str
 pub fn ai6::directorates::m::assistant::SharedRepo::writable(self, bool) -> Self
 pub fn ai6::directorates::m::assistant::SharedRepo::write(&self) -> bool
+pub struct ai6::SignInFactor
+impl ai6::directorates::m::identity::SignInFactor
+pub fn ai6::directorates::m::identity::SignInFactor::method(&self) -> &str
+pub fn ai6::directorates::m::identity::SignInFactor::person(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::m::identity::SignInFactor::provider(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::m::identity::SignInFactor::try_new(impl core::convert::Into<alloc::string::String>, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> core::result::Result<Self, ai6::directorates::m::identity::InvalidIdentity>
+#[non_exhaustive] pub struct ai6::SignInPolicyProvider
+pub ai6::SignInPolicyProvider::config: core::option::Option<ai6::directorates::m::config::ProviderConfig>
+pub ai6::SignInPolicyProvider::provider: alloc::string::String
+impl ai6::directorates::m::config::SignInPolicyProvider
+pub const ai6::directorates::m::config::SignInPolicyProvider::RULES: &'static str
+pub fn ai6::directorates::m::config::SignInPolicyProvider::config(self, ai6::directorates::m::config::ProviderConfig) -> Self
+pub fn ai6::directorates::m::config::SignInPolicyProvider::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::m::config::SignInPolicyProvider::rules(ai6::directorates::m::config::ProviderConfig) -> Self
 #[non_exhaustive] pub struct ai6::SignInProvider
 pub ai6::SignInProvider::config: core::option::Option<ai6::directorates::m::config::ProviderConfig>
 pub ai6::SignInProvider::provider: alloc::string::String
@@ -14969,6 +15012,7 @@ pub ai6::UnexRecord::proxy_lookup_by: alloc::string::String
 pub ai6::UnexRecord::proxy_user_header: core::option::Option<alloc::string::String>
 pub ai6::UnexRecord::route_text_bytes: core::option::Option<u64>
 pub ai6::UnexRecord::search: ai6::directorates::m::unex_limits::UnexSearchLimits
+pub ai6::UnexRecord::sign_in_policy: core::option::Option<ai6::directorates::m::config::SignInPolicyProvider>
 pub ai6::UnexRecord::text: ai6::directorates::m::unex_limits::TextLimits
 pub ai6::UnexRecord::timeline: ai6::directorates::m::unex_limits::UnexTimelineLimits
 impl ai6::directorates::m::config::UnexRecord

@@ -1304,6 +1304,7 @@ impl StationRuntime { pub fn validate(&self) -> Result<(), String>;   // include
     pub fn limits(&self) -> StationLimits;                             // the tables and providers
     pub fn duration(seconds: Option<f64>) -> Option<Duration>; }
 pub struct SignInProvider { provider: String, config: Option<ProviderConfig> }   // new(), config()
+pub struct SignInPolicyProvider { provider: String /* default "coqui_signin_rules" = RULES */, config: Option<ProviderConfig> }   // new(), rules(config), config()
 /// Personal API keys. The Registry holds the record (`ApiKeyRecord`: id = the key provider's
 /// account ID, account, owner, owner_name, name, scopes `ACTION@SCOPE`, created_at, expires_at,
 /// last_used_at); the secret and its hash are the key provider's. `ApiKeyStore`: `put_api_key`,
@@ -1319,7 +1320,8 @@ pub struct SignInProvider { provider: String, config: Option<ProviderConfig> }  
 /// stamps `KEY_SCOPES_ATTRIBUTE`/`KEY_ID_ATTRIBUTE` on a `Person`, `key_permits` judges a request,
 /// `KeyNarrowed` wraps an `Authorizer` with it, `EffectiveAccess` applies it and is never chief for
 /// a narrowed person, `clear_key` removes it.
-pub struct UnexRecord { authenticators: Vec<SignInProvider> /* ordered; each answers the credentials it claims */, key_ttl /* None: 90 days; 0 never */, directory, directory_config,
+pub struct UnexRecord { authenticators: Vec<SignInProvider> /* ordered; each answers the credentials it claims */,
+    sign_in_policy: Option<SignInPolicyProvider> /* None: each configured method alone is enough; bearer keys are outside it */, key_ttl /* None: 90 days; 0 never */, directory, directory_config,
     authorizer, authorizer_config, proxy_user_header, proxy_lookup_by /* "name" */,
     page_authenticator, page_authenticator_config /* the pages' request-taking authenticator */,
     login_tries_per_address, login_tries_per_name, client_address_header, access_cache_ttl,
@@ -4433,7 +4435,9 @@ state directory).
 canonical UUID revocation ID, SHA-256 digest, authoritative Directory person ID, and issue,
 expiry and optional revocation times; its debug output redacts the digest. `into_session_cookie()`
 marks a record as a sign-in's session cookie (`is_session_cookie()`) and `in_sign_in(token_id)` a
-bearer token as belonging to that sign-in (`sign_in()`).
+bearer token as belonging to that sign-in (`sign_in()`). `with_factors(Vec<SignInFactor>)` and `factors()` keep the
+steps a sign-in passed (`SignInFactor`: `try_new(method, provider?, person?)`, `method()`, `provider()`, `person()`),
+so a renewal is decided again by them; a token no sign-in made has none.
 `AccessTokenStore` (`store_access_token`; `find_access_token`, which never answers with a run
 cookie, nor with a token whose sign-in was revoked; `find_session_cookie`, the converse;
 `login_by_id`, an active session cookie or bearer record (whose sign-in stands) by its ID;
@@ -6393,9 +6397,10 @@ the Mission and finished by the daemon, under the Station's state directory
 `ai6_agent_handler`, `ai6_terminal`, `ai6_safehouse`, `ai6_source` and the three access kinds
 before mapping them and retains the registry for the daemon process lifetime. `handlers()`,
 `terminals()`, `safehouses()`, `sources()`, `authenticators()`, `directories()` and
-`authorizers()` list providers and their availability. `handler(provider, config)`,
+`authorizers()` and `sign_in_policies()` list providers and their availability. `handler(provider, config)`,
 `terminal(provider, config)`, `safehouse(provider, config)`, `source(provider, config)`,
-`authenticator(provider, config)`, `directory(provider, config)` and
+`authenticator(provider, config)`, `directory(provider, config)`,
+`sign_in_policy(provider, config)` and
 `authorizer(provider, config)` construct typed providers, validating a supplied `Value`
 against the provider's schema. `None` builds a provider's default instance, or the provider
 with every setting at its default (the `claude` and `codex` handlers); a provider with a

@@ -23,8 +23,9 @@ use std::path::Path;
 
 pub use coqui_access::{
     AccountInfo, AccountPut, Accounts, Attempt, Authenticator, AuthorizationDecision,
-    AuthorizationRequest, Authorizer, Description, Directory, KIND_PREFIX, Lookup, Person,
-    PutOutcome, Subject, Verdict, Waiting, takes,
+    AuthorizationRequest, Authorizer, Description, Directory, Factor, KIND_PREFIX, Lookup, Offer,
+    Person, PutOutcome, SignInContext, SignInDecision, SignInPolicy, Subject, Verdict, Waiting,
+    clients, methods, purposes, takes,
 };
 pub use coqui_roles::{
     Role, RoleAuthorizer, RoleAuthorizerBuilder, RolePolicy, RolePolicyError, Rule,
@@ -388,6 +389,7 @@ mod tests {
         assert_eq!(<dyn Directory>::NAME, "coqui_directory");
         assert_eq!(<dyn Authorizer>::NAME, "coqui_authorizer");
         assert_eq!(<dyn Accounts>::NAME, "coqui_accounts");
+        assert_eq!(<dyn SignInPolicy>::NAME, "coqui_sign_in_policy");
     }
 
     #[cfg(feature = "daemon")]

@@ -762,6 +762,12 @@ fn a_provider_choice_is_a_closed_choice_with_the_settings_beside_it() {
         "provider:coqui_authenticator"
     );
     assert_eq!(sign_in["config"]["format"], "settings-of:provider");
+    let policy = &unex.schema["properties"]["sign_in_policy"]["properties"];
+    assert_eq!(
+        policy["provider"]["format"],
+        "provider:coqui_sign_in_policy"
+    );
+    assert_eq!(policy["config"]["format"], "settings-of:provider");
     for record in FAMILIES {
         let form = record.form().unwrap().unwrap();
         assert!(
@@ -1099,4 +1105,46 @@ fn a_limit_keeps_its_three_spellings() {
     }
     assert!(from_json::<RosterSettings>(&json!({"max_operation_depth": "deep"})).is_err());
     assert!(from_json::<RosterSettings>(&json!({"max_operation_depth": -1})).is_err());
+}
+
+#[test]
+fn the_unex_record_reads_a_sign_in_policy_whose_provider_defaults_to_the_rules() {
+    let record: crate::UnexRecord =
+        crate::directorates::m::records::from_json(&serde_json::json!({
+            "sign_in_policy": {"config": {"rule": [{"allow": [["password"]]}]}}
+        }))
+        .unwrap();
+    let policy = record.sign_in_policy.expect("a policy");
+    assert_eq!(policy.provider, "coqui_signin_rules");
+    assert_eq!(
+        serde_json::Value::Object(policy.config.unwrap().0),
+        serde_json::json!({"rule": [{"allow": [["password"]]}]})
+    );
+    let none: crate::UnexRecord =
+        crate::directorates::m::records::from_json(&serde_json::json!({})).unwrap();
+    assert!(none.sign_in_policy.is_none());
+    assert!(
+        crate::directorates::m::records::from_json::<crate::UnexRecord>(
+            &serde_json::json!({"sign_in_policy": {"rule": []}})
+        )
+        .is_err(),
+        "a key the policy does not have is refused"
+    );
+}
+
+#[test]
+fn a_credential_written_inline_in_a_sign_in_policys_configuration_is_a_weakening() {
+    let record: crate::UnexRecord =
+        crate::directorates::m::records::from_json(&serde_json::json!({
+            "sign_in_policy": {"provider": "other", "config": {"token": "hunter2"}}
+        }))
+        .unwrap();
+    assert!(
+        record
+            .weakenings()
+            .iter()
+            .any(|line| line.contains("sign_in_policy.config.token")),
+        "{:?}",
+        record.weakenings()
+    );
 }

@@ -4277,6 +4277,7 @@ mod tests {
         access_tokens_are_shared_by_registries_and_revocation_is_immediate,
         an_access_token_is_extended_never_shortened,
         a_session_cookie_is_no_bearer_and_revoking_ends_its_whole_sign_in,
+        a_sign_ins_steps_stay_with_its_token_and_cookie_through_an_extension,
     );
 
     fn operation_agent_role_overrides_are_validated_and_isolated(store: &dyn Store) {
@@ -5365,6 +5366,75 @@ mod tests {
                 .extend_access_token(over.token_id(), later)
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    fn a_sign_ins_steps_stay_with_its_token_and_cookie_through_an_extension(store: &dyn Store) {
+        let registry = store.handle();
+        let now = unix_time().unwrap();
+        let digest = |secret: &str| {
+            Sha256::digest(secret.as_bytes())
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        };
+        let steps = vec![
+            crate::SignInFactor::try_new(
+                "password",
+                Some("ldap".to_owned()),
+                Some("p-1".to_owned()),
+            )
+            .unwrap(),
+            crate::SignInFactor::try_new("proxy", None, Some("p-1".to_owned())).unwrap(),
+        ];
+        let sign_in = "e1111111-1111-4111-8111-111111111111";
+        let cookie = crate::AccessTokenRecord::try_new(
+            sign_in,
+            digest("cookie"),
+            "p-1",
+            now,
+            now + 3_600.0,
+            None,
+        )
+        .unwrap()
+        .with_factors(steps.clone())
+        .into_session_cookie();
+        let token = crate::AccessTokenRecord::try_new(
+            "e2222222-2222-4222-8222-222222222222",
+            digest("token"),
+            "p-1",
+            now,
+            now + 3_600.0,
+            None,
+        )
+        .unwrap()
+        .with_factors(steps.clone())
+        .in_sign_in(sign_in)
+        .unwrap();
+        registry.store_access_token(&cookie).unwrap();
+        registry.store_access_token(&token).unwrap();
+        let found = store
+            .handle()
+            .find_access_token(token.digest())
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.factors(), steps.as_slice());
+        let moved = registry
+            .extend_access_token(token.token_id(), now + 7_200.0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(moved.factors(), steps.as_slice(), "an extension keeps them");
+        let cookie = store
+            .handle()
+            .find_session_cookie(cookie.digest())
+            .unwrap()
+            .unwrap();
+        assert_eq!(cookie.factors(), steps.as_slice());
+        assert_eq!(cookie.factors()[0].provider(), Some("ldap"));
+        assert_eq!(cookie.factors()[1].provider(), None);
+        assert!(
+            crate::SignInFactor::try_new("", None, None).is_err(),
+            "a step names its method"
         );
     }
 

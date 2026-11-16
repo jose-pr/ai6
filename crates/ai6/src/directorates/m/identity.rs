@@ -40,6 +40,60 @@ pub struct MissionId(String);
 #[serde(try_from = "String", into = "String")]
 pub struct RunId(String);
 
+/// One step of a sign-in that passed, kept with the sign-in so that a later renewal is decided
+/// again by the steps it was opened with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SignInFactor {
+    method: String,
+    /// The provider that accepted it, by the ID the sign-in policy lists it under.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provider: Option<String>,
+    /// The person the step named.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    person: Option<String>,
+}
+
+impl SignInFactor {
+    /// A step presented as `method`, accepted by `provider`, naming `person`.
+    pub fn try_new(
+        method: impl Into<String>,
+        provider: Option<String>,
+        person: Option<String>,
+    ) -> Result<Self, InvalidIdentity> {
+        let method = method.into();
+        let sound = |text: &str| {
+            !text.is_empty() && text.len() <= MAX_ID_BYTES && !text.chars().any(char::is_control)
+        };
+        if !sound(&method)
+            || provider.as_deref().is_some_and(|text| !sound(text))
+            || person.as_deref().is_some_and(|text| !sound(text))
+        {
+            return Err(InvalidIdentity);
+        }
+        Ok(Self {
+            method,
+            provider,
+            person,
+        })
+    }
+
+    /// The method word the step was presented as.
+    pub fn method(&self) -> &str {
+        &self.method
+    }
+
+    /// The provider that accepted it, when it is known.
+    pub fn provider(&self) -> Option<&str> {
+        self.provider.as_deref()
+    }
+
+    /// The person it named.
+    pub fn person(&self) -> Option<&str> {
+        self.person.as_deref()
+    }
+}
+
 /// Shared metadata for one host-issued device token; it never contains the bearer secret.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -56,6 +110,9 @@ pub struct AccessTokenRecord {
     /// This record is a sign-in's session cookie, whose secret is no bearer.
     #[serde(default, skip_serializing_if = "core::ops::Not::not")]
     session_cookie: bool,
+    /// The steps the sign-in passed; empty for a token no sign-in made.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    factors: Vec<SignInFactor>,
 }
 
 impl AccessTokenRecord {
@@ -96,7 +153,20 @@ impl AccessTokenRecord {
             revoked_at,
             sign_in: None,
             session_cookie: false,
+            factors: Vec::new(),
         })
+    }
+
+    /// The same record as the result of a sign-in that passed `factors`.
+    #[must_use]
+    pub fn with_factors(mut self, factors: Vec<SignInFactor>) -> Self {
+        self.factors = factors;
+        self
+    }
+
+    /// The steps the sign-in passed; empty when no sign-in made this token.
+    pub fn factors(&self) -> &[SignInFactor] {
+        &self.factors
     }
 
     /// The same record as a sign-in's session cookie. [`find_access_token`] never answers with
@@ -143,6 +213,7 @@ impl AccessTokenRecord {
             Some(sign_in) => record.in_sign_in(sign_in)?,
             None => record,
         };
+        let record = record.with_factors(self.factors.clone());
         Ok(if self.session_cookie {
             record.into_session_cookie()
         } else {
@@ -211,6 +282,7 @@ impl fmt::Debug for AccessTokenRecord {
             .field("revoked_at", &self.revoked_at)
             .field("sign_in", &self.sign_in)
             .field("session_cookie", &self.session_cookie)
+            .field("factors", &self.factors.len())
             .finish()
     }
 }

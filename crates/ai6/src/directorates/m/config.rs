@@ -908,6 +908,66 @@ impl SignInProvider {
     }
 }
 
+/// The provider that decides which methods a sign-in may use, from where it is made, and what it
+/// still needs: a `coqui_sign_in_policy` provider and its configuration.
+#[non_exhaustive]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    guatiao::ToValue,
+    guatiao::FromValue,
+    guatiao::Schema,
+    guatiao_intake::Form,
+)]
+#[map(deny_unknown_fields)]
+pub struct SignInPolicyProvider {
+    /// The sign-in policy provider ID, from those the gateway reports. Default:
+    /// `coqui_signin_rules`, ordered rules.
+    #[schema(title = "Provider", format = "provider:coqui_sign_in_policy")]
+    #[map(default = SignInPolicyProvider::default_provider())]
+    pub provider: String,
+    /// The provider's configuration, checked against the provider's own schema. Default: none.
+    #[schema(
+        title = "Provider's configuration",
+        format = "settings-of:provider",
+        sensitive
+    )]
+    pub config: Option<ProviderConfig>,
+}
+
+impl SignInPolicyProvider {
+    /// The ID of the provider that reads ordered rules.
+    pub const RULES: &'static str = "coqui_signin_rules";
+
+    /// The rules provider with `config`.
+    pub fn rules(config: ProviderConfig) -> Self {
+        Self {
+            provider: Self::RULES.to_owned(),
+            config: Some(config),
+        }
+    }
+
+    /// The provider `provider` with no configuration.
+    pub fn new(provider: impl Into<String>) -> Self {
+        Self {
+            provider: provider.into(),
+            config: None,
+        }
+    }
+
+    /// Sets the provider's configuration.
+    #[must_use]
+    pub fn config(mut self, config: ProviderConfig) -> Self {
+        self.config = Some(config);
+        self
+    }
+
+    fn default_provider() -> String {
+        Self::RULES.to_owned()
+    }
+}
+
 /// Universal Exports' settings that are not host-local, the `unex` record.
 #[non_exhaustive]
 #[derive(
@@ -928,6 +988,13 @@ pub struct UnexRecord {
     #[map(default)]
     #[form(form = SignInProvider)]
     pub authenticators: Vec<SignInProvider>,
+    /// Which methods a sign-in may use, from where it is made, and what it still needs. Bearer
+    /// API keys are outside it. Default: none; each configured method alone is enough, from
+    /// anywhere (`password` with a sign-in provider, `proxy` with a proxy identity). A policy that
+    /// offers no sign-in is accepted: only API keys then work.
+    #[schema(title = "Sign-in policy")]
+    #[form(form = SignInPolicyProvider)]
+    pub sign_in_policy: Option<SignInPolicyProvider>,
     /// The Directory provider ID; required when user access is configured. Default: none.
     #[schema(title = "Directory provider")]
     pub directory: Option<String>,
@@ -1036,6 +1103,7 @@ impl Default for UnexRecord {
     fn default() -> Self {
         Self {
             authenticators: Vec::new(),
+            sign_in_policy: None,
             directory: None,
             directory_config: None,
             authorizer: None,
@@ -1102,6 +1170,17 @@ impl UnexRecord {
             }
         }
         let mut found = Vec::new();
+        if let Some(config) = self
+            .sign_in_policy
+            .as_ref()
+            .and_then(|policy| policy.config.as_ref())
+        {
+            inline(
+                "sign_in_policy.config",
+                &serde_json::Value::Object(config.0.clone()),
+                &mut found,
+            );
+        }
         for (index, entry) in self.authenticators.iter().enumerate() {
             if let Some(config) = &entry.config {
                 inline(
