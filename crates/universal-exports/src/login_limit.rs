@@ -89,26 +89,40 @@ impl LoginGuard {
         }
     }
 
-    /// The address a request came from: the proxy's header when one is configured and holds
-    /// an address, else the connection's; `None` when neither tells.
+    /// What the proxy configured by `address_header` said: its last line, which is the proxy's
+    /// own (a client's lines come before it), and that line's rightmost entry.
+    fn forwarded(&self, headers: &HeaderMap) -> Option<IpAddr> {
+        let name = self.address_header.as_ref()?;
+        headers
+            .get_all(name)
+            .iter()
+            .next_back()
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.rsplit(',').next())
+            .and_then(|entry| parse_address(entry.trim()))
+    }
+
+    /// The address a request came from, for a sign-in policy: with a header configured only what
+    /// the proxy said in it, so a request that bypassed the proxy has none (never the peer's);
+    /// else the connection's. An IPv4-mapped IPv6 address is the IPv4 address.
     pub(crate) fn address(
         &self,
         headers: &HeaderMap,
         connection: Option<SocketAddr>,
     ) -> Option<IpAddr> {
-        self.address_header
-            .as_ref()
-            .and_then(|name| headers.get(name))
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.rsplit(',').next())
-            .and_then(|entry| parse_address(entry.trim()))
-            .or_else(|| connection.map(|address| address.ip()))
+        let found = if self.address_header.is_some() {
+            self.forwarded(headers)
+        } else {
+            connection.map(|address| address.ip())
+        };
+        found.map(unmapped)
     }
 
-    /// What a request is counted against: its address, else a single shared bucket for the
-    /// unknown.
+    /// What a request is counted against: the proxy's address, else the connection's, else a
+    /// single shared bucket for the unknown.
     pub(crate) fn source(&self, headers: &HeaderMap, connection: Option<SocketAddr>) -> IpAddr {
-        self.address(headers, connection)
+        self.forwarded(headers)
+            .or_else(|| connection.map(|address| address.ip()))
             .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
     }
 
@@ -161,6 +175,14 @@ fn parse_address(text: &str) -> Option<IpAddr> {
     text.parse::<IpAddr>()
         .or_else(|_| text.parse::<SocketAddr>().map(|address| address.ip()))
         .ok()
+}
+
+/// An IPv4-mapped IPv6 address as the IPv4 address it stands for.
+fn unmapped(address: IpAddr) -> IpAddr {
+    match address {
+        IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(address, IpAddr::V4),
+        v4 => v4,
+    }
 }
 
 /// What a try is counted against for an address: itself, or for IPv6 the /64 network it is in,
@@ -295,6 +317,57 @@ mod tests {
         assert_eq!(
             plain.source(&headers, Some(connection)),
             address("127.0.0.1")
+        );
+    }
+
+    #[test]
+    fn the_policy_reads_the_last_line_and_rightmost_entry_of_the_address_header() {
+        let guard = LoginGuard::new(&LoginLimits {
+            address_header: Some(HeaderName::from_static("x-forwarded-for")),
+            ..limits(5, 10)
+        });
+        let mut headers = HeaderMap::new();
+        // The client's own line comes first; the proxy's, last, is the one that counts.
+        headers.append("x-forwarded-for", "6.6.6.6".parse().unwrap());
+        headers.append("x-forwarded-for", "203.0.113.7, 10.1.2.3".parse().unwrap());
+        assert_eq!(guard.address(&headers, None), Some(address("10.1.2.3")));
+    }
+
+    #[test]
+    fn a_missing_or_unreadable_header_is_no_address_to_the_policy_whatever_the_peer() {
+        let guard = LoginGuard::new(&LoginLimits {
+            address_header: Some(HeaderName::from_static("x-forwarded-for")),
+            ..limits(5, 10)
+        });
+        let peer: SocketAddr = "127.0.0.1:5000".parse().unwrap();
+        let mut headers = HeaderMap::new();
+        assert_eq!(guard.address(&headers, Some(peer)), None);
+        headers.insert("x-forwarded-for", "not an address".parse().unwrap());
+        assert_eq!(guard.address(&headers, Some(peer)), None);
+        // Counting keeps its shared bucket for the peer.
+        assert_eq!(guard.source(&headers, Some(peer)), address("127.0.0.1"));
+        // With no header configured the peer is the address.
+        let plain = LoginGuard::new(&limits(5, 10));
+        assert_eq!(
+            plain.address(&headers, Some(peer)),
+            Some(address("127.0.0.1"))
+        );
+    }
+
+    #[test]
+    fn an_ipv4_mapped_address_is_the_ipv4_address_to_the_policy() {
+        let guard = LoginGuard::new(&LoginLimits {
+            address_header: Some(HeaderName::from_static("x-forwarded-for")),
+            ..limits(5, 10)
+        });
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", "::ffff:10.1.2.3".parse().unwrap());
+        assert_eq!(guard.address(&headers, None), Some(address("10.1.2.3")));
+        let plain = LoginGuard::new(&limits(5, 10));
+        let peer: SocketAddr = "[::ffff:10.9.9.9]:5000".parse().unwrap();
+        assert_eq!(
+            plain.address(&HeaderMap::new(), Some(peer)),
+            Some(address("10.9.9.9"))
         );
     }
 }
