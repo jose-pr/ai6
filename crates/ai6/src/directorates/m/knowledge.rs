@@ -22,6 +22,7 @@ use std::collections::BTreeSet;
 use std::io;
 
 use crate::bounds::Limit;
+use crate::directorates::m::guides;
 use crate::directorates::m::reports::{
     ReportReader, ReportRules, ReportSight, new_report_id, sight,
 };
@@ -187,10 +188,9 @@ fn find(
     rules: &ReportRules<'_>,
     id: &str,
 ) -> Result<Report, KnowledgeRefusal> {
-    let report = store
-        .report(id)
-        .ok()
-        .flatten()
+    let report = guides::find(id)
+        .cloned()
+        .or_else(|| store.report(id).ok().flatten())
         .ok_or(KnowledgeRefusal::Missing)?;
     if !caller.reads_known_scope(&report.scope) || !readable(caller, rules, &report) {
         return Err(KnowledgeRefusal::Missing);
@@ -256,6 +256,23 @@ pub fn search_reports(
     query: &ReportQuery,
     limits: &ReportLimits,
 ) -> Result<KnowledgeSearch, KnowledgeRefusal> {
+    search_reports_among(store, caller, rules, query, limits, &[])
+}
+
+/// [`search_reports`] over `extra` as well: Reports that are not stored, read as the guides the
+/// build ships are, by whoever reads `global`.
+///
+/// # Errors
+///
+/// As [`search_reports`].
+pub fn search_reports_among(
+    store: &dyn RegistryBackend,
+    caller: &dyn KnowledgeCaller,
+    rules: &ReportRules<'_>,
+    query: &ReportQuery,
+    limits: &ReportLimits,
+    extra: &[Report],
+) -> Result<KnowledgeSearch, KnowledgeRefusal> {
     if !limits.query_bytes.allows(query.asked_bytes) {
         return Err(KnowledgeRefusal::Invalid(format!(
             "A search asks for at most {} bytes.",
@@ -272,8 +289,11 @@ pub fn search_reports(
             None => caller.reads_scope(scope) || caller.reads_known_scope(scope),
         })
         .collect();
-    let seen: Vec<Report> = store
-        .report_candidates(&readable_scopes, query)?
+    let mut candidates = store.report_candidates(&readable_scopes, query)?;
+    if caller.reads_known_scope(&ReportScope::Global) {
+        candidates.extend(guides::built_in().iter().chain(extra).cloned());
+    }
+    let seen: Vec<Report> = candidates
         .into_iter()
         .filter(|report| readable(caller, rules, report))
         .collect();

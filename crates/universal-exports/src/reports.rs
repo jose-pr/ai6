@@ -867,7 +867,10 @@ pub(crate) async fn show(
     let registry = registry_of(&gateway)?;
     blocking(move || {
         let missing = || refused(StatusCode::NOT_FOUND, "No such report.");
-        let report = registry.report(&id).ok().flatten().ok_or_else(missing)?;
+        let report = ai6::directorates::m::guides::find(&id)
+            .cloned()
+            .or_else(|| registry.report(&id).ok().flatten())
+            .ok_or_else(missing)?;
         if !reader.reads_report(&report) {
             return Err(missing());
         }

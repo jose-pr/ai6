@@ -1,3 +1,9 @@
+---
+kind: tradecraft
+topics: [compartment, need-to-know, read in, exposure]
+summary: Need-to-know access to other Operations' work, what a compartment is and who is read in.
+---
+
 # Compartments
 
 A **Compartment** is need-to-know access to other Operations' work. It says what may be known of,

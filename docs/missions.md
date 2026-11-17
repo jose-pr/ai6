@@ -1,3 +1,9 @@
+---
+kind: tradecraft
+topics: [mission, brief, placement, cancel]
+summary: How a Mission is briefed, placed, run, cancelled and settled.
+---
+
 # Missions and intake
 
 AI6 does not bundle tracker integrations. A user or external integration supplies a

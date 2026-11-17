@@ -1,3 +1,9 @@
+---
+kind: tradecraft
+topics: [operation, workspace, safe house, roster]
+summary: An Operation is a registered project, with its roster, clearance and workspace.
+---
+
 # Operations
 
 An Operation is a registered project or workspace and its policy. Operations are global:

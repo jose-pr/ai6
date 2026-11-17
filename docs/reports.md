@@ -1,3 +1,9 @@
+---
+kind: tradecraft
+topics: [reports, assessment, knowledge, memory, tradecraft]
+summary: What a Report is, how it is filed, assessed and read, and the kinds of knowledge it holds.
+---
+
 # Reports
 
 A **Report** is one record of something observed: an Agent's finding along the way, a person's
@@ -204,6 +210,13 @@ the words it holds, then how many of those are in its title, summary or topics, 
 change. Words match whole words, whatever their case. A Report the asker may not read is neither listed,
 counted nor ranked: the filtering comes first. Without `state`, knowledge is current only when it is
 `standing`, and an observation is any state.
+
+**Built-in guides.** The build ships guides as `global` Reports of kind `tradecraft` or `rule`: how to write
+a brief, how access works, how to search, what a repository is to AI6, and the guides of this site written for
+Agents. Each is listed and read like any `global` Report, by whoever reads `global`, with an ID that begins
+`built-in.` and its revision `1`. They are not stored, so they cannot be edited, retired or assessed, and they
+change with the build. A Report a deployment stores with the same title is listed before the built-in one:
+write it to replace a guide for this deployment.
 
 ```bash
 ai6ctl reports file operation:ID --kind tradecraft --title "Writing a brief" \

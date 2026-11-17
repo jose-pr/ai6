@@ -951,7 +951,7 @@ async fn what_is_known_is_written_by_revision_searched_and_read_only_by_who_may(
             Some(known(
                 "global",
                 "tradecraft",
-                "Writing a brief",
+                "Raising a periscope",
                 "Name the goal first.",
             )),
         )
@@ -962,7 +962,7 @@ async fn what_is_known_is_written_by_revision_searched_and_read_only_by_who_may(
         .call(
             &viewer,
             Method::GET,
-            "/v1/reports?words=brief&kind=tradecraft",
+            "/v1/reports?words=periscope&kind=tradecraft",
             None,
         )
         .await;
@@ -981,7 +981,7 @@ async fn what_is_known_is_written_by_revision_searched_and_read_only_by_who_may(
         .call(
             &viewer,
             Method::GET,
-            "/v1/reports?words=brief&kind=tradecraft",
+            "/v1/reports?words=periscope&kind=tradecraft",
             None,
         )
         .await;

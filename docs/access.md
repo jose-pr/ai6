@@ -1,3 +1,9 @@
+---
+kind: tradecraft
+topics: [access, sign-in, authenticator, authorizer]
+summary: Who may sign in and what they may do, with authenticators, directories and authorizers.
+---
+
 # Access and sign-in
 
 Who may do what is three questions, each a Guatiao provider kind from the shared

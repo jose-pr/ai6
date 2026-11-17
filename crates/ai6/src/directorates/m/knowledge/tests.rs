@@ -408,7 +408,7 @@ fn a_protected_report_answers_as_a_missing_id_to_who_is_not_read_in() {
             &registry,
             &holder,
             &rules,
-            new_in(&global(), "secret needle", "the secret")
+            new_in(&global(), "hushed needle", "the hush")
                 .with_compartments(Some(vec!["KESTREL".to_owned()])),
         )
         .unwrap(),
@@ -458,7 +458,7 @@ fn a_protected_report_answers_as_a_missing_id_to_who_is_not_read_in() {
         };
         let found = search("needle");
         assert_eq!((found.hits.len(), found.total), (1, 1), "nothing counts it");
-        assert_eq!(search("secret").total, 0);
+        assert_eq!(search("hushed").total, 0);
         assert!(outsider.audited.borrow().is_empty());
     }
     // Being read in to one of two is not being read in: every compartment counts, for every Report.
@@ -812,7 +812,7 @@ fn tradecraft_is_retired_not_forgotten_and_a_proposal_to_forget_it_retires_it() 
     let (settings, clearances) = rules();
     let rules = ReportRules::new(&settings, &clearances);
     let person = Holds::of(&global());
-    let mut change = new_in(&global(), "Writing a brief", "Name the goal first.");
+    let mut change = new_in(&global(), "Raising a periscope", "Check the mast first.");
     change.target = KnowledgeTarget::New {
         scope: global(),
         kind: "tradecraft".to_owned(),
@@ -834,7 +834,7 @@ fn tradecraft_is_retired_not_forgotten_and_a_proposal_to_forget_it_retires_it() 
             &registry,
             &person,
             &rules,
-            &ReportQuery::words("brief"),
+            &ReportQuery::words("periscope"),
             &ReportLimits::default()
         )
         .unwrap()

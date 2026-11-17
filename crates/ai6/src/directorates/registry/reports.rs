@@ -231,6 +231,8 @@ pub enum ReportFiler {
     },
     /// The Watchdog.
     Watchdog,
+    /// AI6 itself: a guide the build ships, which no one files, edits or retires.
+    BuiltIn,
 }
 
 impl ReportFiler {
@@ -258,6 +260,7 @@ impl ReportFiler {
             Self::Probe { probe } => format!("probe:{probe}"),
             Self::Review { .. } => "review".to_owned(),
             Self::Watchdog => "watchdog".to_owned(),
+            Self::BuiltIn => "built-in".to_owned(),
         }
     }
 
@@ -273,7 +276,7 @@ impl ReportFiler {
             Self::Person { person } | Self::Assistant { person } => vec![person],
             Self::Probe { probe } => vec![probe],
             Self::Review { mission } => vec![mission],
-            Self::Watchdog => Vec::new(),
+            Self::Watchdog | Self::BuiltIn => Vec::new(),
         }
     }
 }
@@ -773,9 +776,9 @@ impl Report {
         self
     }
 
-    /// Whether its text is untrusted: everything but a person's.
+    /// Whether its text is untrusted: everything but a person's and the build's own.
     pub fn untrusted(&self) -> bool {
-        !self.filer.is_person()
+        !(self.filer.is_person() || self.filer == ReportFiler::BuiltIn)
     }
 
     /// Whether it is tied to the Mission `id`.

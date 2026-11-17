@@ -20,7 +20,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use super::limits::ReportLimits;
-use super::reports::{Report, ReportScope, ReportState};
+use super::reports::{Report, ReportFiler, ReportScope, ReportState};
 use super::store::{FileRegistry, validate_registry_key};
 use crate::bounds::Limit;
 
@@ -234,7 +234,38 @@ pub fn matching(reports: Vec<Report>, query: &ReportQuery) -> Vec<Report> {
             .then(right.2.updated.total_cmp(&left.2.updated))
             .then_with(|| left.2.id.cmp(&right.2.id))
     });
-    ranked.into_iter().map(|(_, _, report)| report).collect()
+    behind_overrides(ranked.into_iter().map(|(_, _, report)| report).collect())
+}
+
+/// `ranked` with each guide the build ships listed after a Report of the same title a deployment
+/// stores, whatever the words ranked: the local version is the one to read first.
+fn behind_overrides(ranked: Vec<Report>) -> Vec<Report> {
+    let shipped = |report: &Report| report.filer == ReportFiler::BuiltIn;
+    let title = |report: &Report| report.title.trim().to_lowercase();
+    let mut ordered = Vec::with_capacity(ranked.len());
+    let mut waiting: Vec<Report> = Vec::new();
+    for (at, report) in ranked.iter().enumerate() {
+        if shipped(report) {
+            let wanted = title(report);
+            let overridden = ranked[at + 1..]
+                .iter()
+                .any(|later| !shipped(later) && title(later) == wanted);
+            if overridden {
+                waiting.push(report.clone());
+            } else {
+                ordered.push(report.clone());
+            }
+            continue;
+        }
+        let own = title(report);
+        ordered.push(report.clone());
+        let (behind, rest): (Vec<Report>, Vec<Report>) = std::mem::take(&mut waiting)
+            .into_iter()
+            .partition(|held| title(held) == own);
+        ordered.extend(behind);
+        waiting = rest;
+    }
+    ordered
 }
 
 /// What a full scope says, telling nothing of what it holds.

@@ -335,11 +335,11 @@ fn an_agents_knowledge_waits_for_its_charge_and_a_search_finds_only_what_it_may_
             scope: ReportScope::Operation("G".to_owned()),
             kind: "tradecraft".to_owned(),
         },
-        "Writing a brief",
-        "Name the goal first.",
+        "Raising a periscope",
+        "Check the mast first.",
     )
-    .summarised("How a brief is written")
-    .on_topics(["briefs"]);
+    .summarised("How a periscope is raised")
+    .on_topics(["periscopes"]);
     let wrote = desk.write_known(&proposer, None, change).unwrap();
     assert_eq!(wrote["state"], "open", "{wrote}");
     let id = wrote["id"].as_str().unwrap().to_owned();
@@ -350,11 +350,11 @@ fn an_agents_knowledge_waits_for_its_charge_and_a_search_finds_only_what_it_may_
         unfenced(&answer, "reports")
     };
     // What waits is not current knowledge.
-    assert_eq!(search(&proposer, "brief", None)["total"], 0);
+    assert_eq!(search(&proposer, "periscope", None)["total"], 0);
     // Its filer and the Operation's charge see the proposal; a colleague does not.
-    assert_eq!(search(&proposer, "brief", Some("open"))["total"], 1);
+    assert_eq!(search(&proposer, "periscope", Some("open"))["total"], 1);
     let colleague = reader("licensed", "G", "mission-2");
-    assert_eq!(search(&colleague, "brief", Some("open"))["total"], 0);
+    assert_eq!(search(&colleague, "periscope", Some("open"))["total"], 0);
     assert_eq!(read(&state, &colleague, &id)["status"], "refused");
     let charge = Reader {
         agent: "licensed".to_owned(),
@@ -362,7 +362,7 @@ fn an_agents_knowledge_waits_for_its_charge_and_a_search_finds_only_what_it_may_
         mission: None,
         exposure: ExposureGate::default(),
     };
-    assert_eq!(search(&charge, "brief", Some("open"))["total"], 1);
+    assert_eq!(search(&charge, "periscope", Some("open"))["total"], 1);
     // The charge decides it; it stands, still marked as what an exposed Run wrote.
     let call = AssessCall {
         report: id.clone(),
@@ -383,10 +383,10 @@ fn an_agents_knowledge_waits_for_its_charge_and_a_search_finds_only_what_it_may_
     .unwrap();
     assert_eq!(decided["assessed"], "accepted", "{decided}");
     assert_eq!(decided["state"], "standing");
-    let found = search(&colleague, "brief", None);
+    let found = search(&colleague, "periscope", None);
     assert_eq!(found["total"], 1);
-    assert_eq!(found["reports"][0]["title"], "Writing a brief");
-    assert_eq!(found["reports"][0]["summary"], "How a brief is written");
+    assert_eq!(found["reports"][0]["title"], "Raising a periscope");
+    assert_eq!(found["reports"][0]["summary"], "How a periscope is raised");
     // Reading it exposes the reader, as an exposed Run's writing does.
     let shown = read(&state, &colleague, &id);
     assert_eq!(shown["exposed"], true, "{shown}");
@@ -399,7 +399,7 @@ fn an_agents_knowledge_waits_for_its_charge_and_a_search_finds_only_what_it_may_
     );
     // Another Operation's Run finds nothing of it.
     let outsider = reader("007", "B", "B-1");
-    assert_eq!(search(&outsider, "brief", None)["total"], 0);
+    assert_eq!(search(&outsider, "periscope", None)["total"], 0);
 }
 
 #[test]
@@ -417,8 +417,8 @@ fn m_charge_decides_what_is_proposed_to_the_global_scope_and_nobody_else_but_its
             scope: ReportScope::Global,
             kind: "rule".to_owned(),
         },
-        "Never force-push",
-        "Do not force-push shared branches.",
+        "Never wedge a hatch",
+        "Do not wedge a hatch shut.",
     )
     .summarised("A rule for every Agent");
     let wrote = desk.write_known(&proposer, None, change).unwrap();
@@ -426,7 +426,7 @@ fn m_charge_decides_what_is_proposed_to_the_global_scope_and_nobody_else_but_its
     let id = wrote["id"].as_str().unwrap().to_owned();
     let found = |desk: &ReportDesk, who: &Reader, state: Option<&str>| {
         let answer = desk
-            .search(who, None, None, Some("force"), None, &[], None, state)
+            .search(who, None, None, Some("wedge"), None, &[], None, state)
             .unwrap();
         unfenced(&answer, "reports")["total"].as_u64().unwrap()
     };
@@ -1048,4 +1048,120 @@ mod knowledge_of_a_run {
             client.cancel().await.unwrap();
         }
     }
+}
+
+fn standing(id: &str, scope: ReportScope, title: &str, summary: &str, text: &str) -> Report {
+    let mut report = Report::new(
+        id,
+        scope,
+        "tradecraft",
+        crate::directorates::registry::logbook::Severity::Info,
+        title,
+        text,
+        ReportFiler::Person {
+            person: "chief".to_owned(),
+        },
+        50.0,
+    )
+    .summarised(summary)
+    .standing();
+    report.revision = 1;
+    report
+}
+
+#[test]
+fn a_search_of_every_kind_lists_the_shipped_guide_first_and_a_deployments_own_before_it() {
+    let root = tempfile::tempdir().unwrap();
+    let state = station(root.path(), ReportLimits::default());
+    let desk = ReportDesk::new(state.clone());
+    let run = reader("007", "G", "mission-1");
+    let search = |words: &str| {
+        let answer = desk
+            .search(&run, None, None, Some(words), None, &[], None, None)
+            .unwrap();
+        unfenced(&answer, "reports")
+    };
+    let found = search("how to write a brief");
+    let first = &found["reports"][0];
+    assert_eq!(first["title"], "Writing a brief", "{found}");
+    assert_eq!(first["kind"], "tradecraft");
+    assert_eq!(first["scope"], "global");
+    assert!(first["summary"].as_str().unwrap().contains("brief"));
+    assert!(
+        first.get("text").is_none(),
+        "a listing never holds the text"
+    );
+    let shipped = first["id"].as_str().unwrap().to_owned();
+    // Read by its ID, whole, and not editable: it is not stored.
+    let guide = read(&state, &run, &shipped);
+    assert_eq!(guide["title"], "Writing a brief");
+    assert!(
+        guide["text"]
+            .as_str()
+            .unwrap()
+            .contains("How it is checked")
+    );
+    assert!(state.intake.report(&shipped).unwrap().is_none());
+    // Reports the Run may not read are neither listed nor counted.
+    let before = found["total"].as_u64().unwrap();
+    for (id, operation, compartments) in [
+        ("hidden-operation", "B", Vec::new()),
+        ("hidden-compartment", "G", vec!["KESTREL".to_owned()]),
+    ] {
+        let mut observed = Report::new(
+            id,
+            ReportScope::Operation(operation.to_owned()),
+            "finding",
+            crate::directorates::registry::logbook::Severity::Info,
+            "How to write a brief that leaks",
+            "how to write a brief",
+            ReportFiler::Watchdog,
+            60.0,
+        );
+        observed.compartments = compartments;
+        state.intake.file_report(&observed).unwrap();
+    }
+    let again = search("how to write a brief");
+    assert_eq!(again["total"].as_u64().unwrap(), before, "{again}");
+    assert!(!again.to_string().contains("leaks"), "{again}");
+    // The deployment's own Report of the same title lists before the shipped one.
+    state
+        .intake
+        .file_report(&standing(
+            "our-brief",
+            ReportScope::Global,
+            "Writing a brief",
+            "Our way",
+            "Name the Operation first.",
+        ))
+        .unwrap();
+    let own = search("how to write a brief");
+    let ids: Vec<&str> = own["reports"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|each| each["id"].as_str().unwrap())
+        .collect();
+    let ours = ids.iter().position(|id| *id == "our-brief").unwrap();
+    assert_eq!(
+        ids.iter().position(|id| *id == shipped),
+        Some(ours + 1),
+        "{ids:?}"
+    );
+    assert!(ours < ids.iter().position(|id| *id == shipped).unwrap());
+    // A kind narrows it: rules list apart from tradecraft.
+    let rules = desk
+        .search(
+            &run,
+            None,
+            None,
+            Some("instructions"),
+            Some("rule"),
+            &[],
+            None,
+            None,
+        )
+        .unwrap();
+    let rules = unfenced(&rules, "reports");
+    assert_eq!(rules["reports"][0]["kind"], "rule", "{rules}");
 }

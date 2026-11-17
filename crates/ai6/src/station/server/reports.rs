@@ -514,9 +514,12 @@ impl ReportDesk {
         id: &str,
     ) -> Result<String, String> {
         let answer = self.with_reader(reader, station, None, |state, caller| {
-            let report = match state.intake.report(id) {
-                Ok(Some(report)) => report,
-                Ok(None) | Err(_) => return refused("no such report"),
+            let report = match crate::directorates::m::guides::find(id) {
+                Some(shipped) => shipped.clone(),
+                None => match state.intake.report(id) {
+                    Ok(Some(report)) => report,
+                    Ok(None) | Err(_) => return refused("no such report"),
+                },
             };
             // A Report of a scope the Run may not read answers as one that does not exist.
             let reads = if report.is_known() {
