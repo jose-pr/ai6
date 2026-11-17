@@ -34,14 +34,14 @@ coqui-aos = { git = "https://github.com/Boriken-Dev/coqui-aos", rev = "c4babfd9f
 anycfg = { git = "https://github.com/jose-pr/anycfg-rs", rev = "bf71f7097a550037972a0651e8bd35747b8dcd11" }
 # Shared access kinds, models, role authorizer and the five access providers, pinned to the
 # same guatiao revision as above so kinds and plugins agree.
-coqui-access = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "c2a7cd9b5c17cce7fc8fc6369ef1e1d82f186bef" }
-coqui-roles = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "c2a7cd9b5c17cce7fc8fc6369ef1e1d82f186bef" }
+coqui-access = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "8f4a7ba478e338ad17b3b54cf61145d0dc3feb3d" }
+coqui-roles = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "8f4a7ba478e338ad17b3b54cf61145d0dc3feb3d" }
 # Short-lived caches in front of the Directory and Authorizer a gateway loads.
-coqui-access-kit = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "c2a7cd9b5c17cce7fc8fc6369ef1e1d82f186bef", features = ["cache"] }
+coqui-access-kit = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "8f4a7ba478e338ad17b3b54cf61145d0dc3feb3d", features = ["cache"] }
 # One-time codes (TOTP) as a second step, with enrolment and recovery codes.
-coqui-access-totp = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "c2a7cd9b5c17cce7fc8fc6369ef1e1d82f186bef" }
+coqui-access-totp = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "8f4a7ba478e338ad17b3b54cf61145d0dc3feb3d" }
 # The sign-in policy: which methods a sign-in may use, from where, and what it still needs.
-coqui-access-signin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "c2a7cd9b5c17cce7fc8fc6369ef1e1d82f186bef" }
+coqui-access-signin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "8f4a7ba478e338ad17b3b54cf61145d0dc3feb3d" }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
 clap = { version = "4", default-features = false, features = ["derive", "help", "std", "usage"] }
 serde = { version = "1", default-features = false, features = ["derive"] }
