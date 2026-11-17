@@ -52,7 +52,7 @@ RUN Invoke-WebRequest -UseBasicParsing \"https://static.rust-lang.org/rustup/arc
 # deps' pub/ is the pub cache, its cdn/ is what tool/cdn_files.dart fill --deps reads, and its
 # crates/ is the vendor directory that `crates.py use "$AI6_SDK_DEPS"` points cargo at.
 ARG DEPS_GIT_URL=https://github.com/jose-pr/ai6.git
-ARG DEPS_REF=ff459b523a2adc12f80e91426ac075fa72d62015
+ARG DEPS_REF=906b78132e872045ec1151c419f6f48b93421d2b
 RUN git init -q C:\deps; `
     git -C C:\deps fetch -q --depth 1 $env:DEPS_GIT_URL $env:DEPS_REF; `
     if ($LASTEXITCODE -ne 0) { throw \"DEPS_REF $env:DEPS_REF is not in $env:DEPS_GIT_URL\" }; `
