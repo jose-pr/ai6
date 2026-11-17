@@ -65,6 +65,7 @@ pub struct LoginLimits {
     pub per_name: std::num::NonZeroU32,          // tries in ten minutes for one name; default 10
     pub address_header: Option<axum::http::HeaderName>,  // default None
     pub name_bytes: usize,                       // 64: a longer name is counted by its first bytes
+    pub max_pins: usize,                         // 4 certificate pins, and as many map entries, per account
     pub forget_every: u32,                       // 256 tries between sweeps, at least 1
     pub address_window: std::time::Duration,     // 60 s
     pub name_window: std::time::Duration,        // 600 s
@@ -1136,6 +1137,15 @@ request takes the sign-in. `GET /v1/auth/methods` with `X-AI6-Pending` answers `
 `GET /v1/user/factors`, `POST /v1/user/factors/totp[/confirm]` (decided under `enrol`), `POST /v1/auth/enrol[/confirm]`
 (`enrol_first`, on a pending sign-in) and `DELETE /v1/user/access/factors/{person}` (`account.manage` at
 `config:accounts`) set up and reset factors, audited first as `account.factor.enrol`, `.confirm`, `.reset`.
+
+### Certificate pins (`account_pins.rs`)
+
+`GET`/`POST /v1/user/accounts/{name}/pins` (`account.manage` at `config:accounts`; a chief's account needs a chief) show and change
+what the Registry keeps for the account (`ai6::PinStore`): `{ pins, matches, max_pins }`; the POST body is `{ add, remove, match_add,
+match_remove }` (pins as `sha256:<64 hex>` or `spki-sha256:<64 hex>`, entries as `{ field, value }`), removals first. Past
+`[login] max_pins` the change is refused whole (400). Each entry is audited first as `account.pin.add`, `.remove`,
+`account.pin.map.add`, `.map.remove`. The binary wraps the directory in `ai6`'s `CertificateDirectory`, so a certificate's claims
+sign in through those pins on every gateway sharing the Registry.
 
 ### The sign-in policy (`sign_in.rs`)
 

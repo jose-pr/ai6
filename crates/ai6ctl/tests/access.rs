@@ -70,6 +70,12 @@ async fn stand_in(
         ("POST", "/v1/user/accounts/ann/secret") => {
             axum::Json(json!({"account": {}, "secret": "n3w-s3cret"})).into_response()
         }
+        ("GET" | "POST", "/v1/user/accounts/ann/pins") => axum::Json(json!({
+            "pins": ["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+            "matches": [{"field": "san.email", "value": "ann@example.org"}],
+            "max_pins": 4
+        }))
+        .into_response(),
         ("PUT", "/v1/user/accounts/boss") => {
             refused("only a chief changes an account that is chief")
         }
@@ -277,6 +283,50 @@ async fn accounts_list_create_groups_and_reset_print_the_secret_once() {
     assert!(ok && out.contains("groups of ann set"));
     let (ok, _, err) = ai6ctl(&server, &["accounts", "disable", "boss"]).await;
     assert!(!ok && err.contains("only a chief"), "{err}");
+}
+
+#[tokio::test]
+async fn an_accounts_pins_are_listed_and_changed_in_one_request() {
+    let (server, seen) = serve().await;
+    let (ok, out, err) = ai6ctl(&server, &["accounts", "pins", "ann"]).await;
+    assert!(ok, "{err}");
+    assert!(out.contains("pin\tsha256:aaaa"), "{out}");
+    assert!(out.contains("map\tsan.email=ann@example.org"), "{out}");
+    assert!(out.contains("max\t4"), "{out}");
+    let pin = format!("sha256:{}", "b".repeat(64));
+    let (ok, _, err) = ai6ctl(
+        &server,
+        &[
+            "accounts",
+            "pins",
+            "ann",
+            "--add",
+            &pin,
+            "--map-remove",
+            "san.email=old@example.org",
+        ],
+    )
+    .await;
+    assert!(ok, "{err}");
+    let (_, _, _, body) = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|(method, ..)| method == "POST")
+        .cloned()
+        .unwrap();
+    assert_eq!(body["add"], json!([pin]));
+    assert_eq!(
+        body["match_remove"],
+        json!([{"field": "san.email", "value": "old@example.org"}])
+    );
+    let (ok, _, err) = ai6ctl(
+        &server,
+        &["accounts", "pins", "ann", "--map-add", "nonsense"],
+    )
+    .await;
+    assert!(!ok && err.contains("not field=value"), "{err}");
 }
 
 #[tokio::test]

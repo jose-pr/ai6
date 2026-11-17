@@ -170,6 +170,9 @@ origin leaves the public roots alone.
 - `ai6ctl accounts [list]`, `create NAME [--groups g,h]`, `disable NAME`, `enable NAME`, `groups
   NAME g,h` and `reset-password NAME` use `/v1/user/accounts`; a generated password is printed
   once as `password\t…`, to stdout only. Accounts are never deleted through the API.
+- `ai6ctl accounts pins NAME [--add PIN] [--remove PIN] [--map-add field=value] [--map-remove field=value]` shows an account's
+  certificate pins and explicit map (`pin\t…`, `map\tfield=value`, `max\tN`), or changes them, removing first and then adding
+  (`/v1/user/accounts/{name}/pins`, `account.manage`).
 - `ai6ctl mission <MISSION_ID> [--operation <ID>]` shows a Mission (the `missions` row), its
   runs (`RUN STATUS ROUTE`, `RUN` the run's handle, else its UID) and its Runs
   (`RUN STATE REASON SEQUENCE EXPOSURE`; `REASON` is the lifecycle reason the Station

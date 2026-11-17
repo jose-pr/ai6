@@ -551,6 +551,35 @@ Neither provider has a default `account` pick: with none, a certificate is answe
 
 ```
 
+### Certificate pins
+
+The gateway ties a certificate that answers by its claims to an account through the pins the
+database holds, so every gateway and Station sharing the database reads the same ones (and sees a
+change at its next sign-in; nothing is cached). An account holds:
+
+- **Pins**: `sha256:<64 hex>` (the SHA-256 of a whole certificate) or `spki-sha256:<64 hex>` (of its
+  public key, which a renewed certificate on the same key keeps). The certificate's UPN, email
+  address or common name only nominates an account; the account must also hold a pin of this
+  certificate, so a name a certificate carries is never enough alone.
+- **Explicit map entries**: a certificate field and a value (`san.email` and `alice@example.org`,
+  compared without regard to case) that name the account without a pin. Two accounts naming one
+  certificate refuse it.
+
+An account holds at most `[login] max_pins` pins (default 4) and as many entries; there is no
+floor, so `0` allows none. A change that would pass it is refused whole. A chief's account is
+changed only by a chief.
+
+| Route | Needs |
+| --- | --- |
+| `GET /v1/user/accounts/{name}/pins` | `account.manage` at `config:accounts`; `{ "pins", "matches", "max_pins" }` |
+| `POST /v1/user/accounts/{name}/pins` | the same; `{ "add", "remove", "match_add", "match_remove" }`, removals first, each list optional |
+
+Each pin and entry added or removed is audited first (`account.pin.add`, `account.pin.remove`,
+`account.pin.map.add`, `account.pin.map.remove`; the account and the pin or entry as the target; a
+refusal as `account.refused`). `ai6ctl accounts pins NAME` lists them, and `--add`, `--remove`,
+`--map-add field=value` and `--map-remove field=value` change them. Outer Office shows them from
+the Accounts tab (the certificate button on an account's row), on the web as on the desktop.
+
 A browser holding certificates offers them when it connects, prompting where it cannot choose.
 A page on an origin of its own (`[unex.pages] origin`) has no sign-in to set the cookie there,
 so the page authenticator or an app's [hand-off](assistant.md#pages-she-publishes) names its
@@ -772,6 +801,7 @@ the writes answer `409`.
 | `GET /v1/user/access/check?subject=&action=&resource=` | `access.read` at the resource |
 | `GET /v1/user/operations/{op}/access`, `PUT`/`DELETE .../access/roles/{role}`, `PUT .../access/rules` | `access.read` / `access.manage` at the Operation |
 | `GET /v1/user/accounts`, `PUT /v1/user/accounts/{name}`, `POST /v1/user/accounts/{name}/secret` | `account.manage` at `config:accounts`; a `groups` change also `access.manage` at `config:access` |
+| `GET`, `POST /v1/user/accounts/{name}/pins` | `account.manage` at `config:accounts` ([certificate pins](#certificate-pins)) |
 
 Accounts are made, disabled and reset, never deleted through the API; a new password is
 shown once and is in no audit record or log. `ai6ctl access` and `ai6ctl

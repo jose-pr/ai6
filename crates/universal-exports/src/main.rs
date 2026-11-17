@@ -731,6 +731,7 @@ fn login_limits(record: &UnexRecord) -> Result<LoginLimits, String> {
         pending_seconds: record.login.pending_seconds.0,
         pending_tries: u32::try_from(record.login.pending_tries).unwrap_or(u32::MAX),
         enrol_fresh_seconds: record.login.enrol_fresh_seconds.0,
+        max_pins: usize::try_from(record.login.max_pins).unwrap_or(usize::MAX),
     })
 }
 
@@ -877,6 +878,10 @@ fn configured_access(
     let directory: Arc<dyn Directory> = plugins
         .cached_directory(directory_id, directory_config.as_ref(), cache)
         .map_err(|error| error.to_string())?;
+    // A certificate's claims are tied to an account through the Registry's pins, never cached.
+    let directory: Arc<dyn Directory> = Arc::new(
+        ai6::directorates::m::access::CertificateDirectory::new(directory, registry.clone()),
+    );
     let authorizer: Arc<dyn Authorizer> = match &record.authorizer {
         Some(provider) => Arc::new(EitherAuthorizer {
             live: live.clone(),

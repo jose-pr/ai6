@@ -773,3 +773,130 @@ async fn with_a_plugin_authorizer_the_chief_still_applies_and_the_routes_decline
     let (status, _) = call(&h, &nobody, Method::GET, "/v1/user/access", None, None).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn certificate_pins_are_managed_audited_capped_and_read_by_another_gateway() {
+    let h = staffed_sql(&["account:boss"], false).await;
+    let acc = login(&h.base, "acc").await;
+    let aud = login(&h.base, "aud").await;
+    let path = "/v1/user/accounts/guest/pins";
+    let pin = |digit: char| format!("sha256:{}", digit.to_string().repeat(64));
+
+    let (status, _) = call(&h, &aud, Method::GET, path, None, None).await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "reading needs account.manage"
+    );
+    let (status, _) = call(
+        &h,
+        &aud,
+        Method::POST,
+        path,
+        None,
+        Some(json!({"add": [pin('a')]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "so does changing");
+
+    let (status, held) = call(
+        &h,
+        &acc,
+        Method::POST,
+        path,
+        None,
+        Some(json!({
+            "add": [pin('a'), pin('b')],
+            "match_add": [{"field": "san.email", "value": "guest@example.org"}],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{held}");
+    assert_eq!(held["pins"], json!([pin('a'), pin('b')]));
+    assert_eq!(held["max_pins"], 4);
+
+    // Another gateway on the same Registry signs the certificate in; a removed pin refuses it.
+    let claims = |digest: String| ai6::Lookup {
+        by: "claims".to_owned(),
+        value: "certificate".to_owned(),
+        claims: Some(coqui_claims(&digest)),
+    };
+    let other = ai6::directorates::m::access::CertificateDirectory::new(
+        h.table.clone(),
+        Arc::new(h.registry.clone()),
+    );
+    let who = |lookup: ai6::Lookup| other.lookup(lookup).unwrap().map(|person| person.name);
+    assert_eq!(who(claims(pin('a'))).as_deref(), Some("guest"));
+    let (status, _) = call(
+        &h,
+        &acc,
+        Method::POST,
+        path,
+        None,
+        Some(json!({"remove": [pin('a')], "match_remove": [{"field": "san.email", "value": "guest@example.org"}]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(who(claims(pin('a'))), None, "a removed pin and entry");
+    let (_, listed) = call(&h, &acc, Method::GET, path, None, None).await;
+    assert_eq!(listed["pins"], json!([pin('b')]));
+
+    // Past max_pins nothing is added.
+    let more: Vec<String> = ['c', 'd', 'e', 'f'].map(pin).into();
+    let (status, body) = call(
+        &h,
+        &acc,
+        Method::POST,
+        path,
+        None,
+        Some(json!({"add": more})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    let (_, listed) = call(&h, &acc, Method::GET, path, None, None).await;
+    assert_eq!(listed["pins"], json!([pin('b')]), "refused whole");
+    // Malformed pins, unknown accounts and a chief's account are refused.
+    for (name, body, wanted) in [
+        (
+            "guest",
+            json!({"add": ["sha256:short"]}),
+            StatusCode::BAD_REQUEST,
+        ),
+        ("guest", json!({}), StatusCode::BAD_REQUEST),
+        (
+            "nobody-here",
+            json!({"add": [pin('f')]}),
+            StatusCode::NOT_FOUND,
+        ),
+        ("boss", json!({"add": [pin('f')]}), StatusCode::BAD_REQUEST),
+    ] {
+        let (status, body) = call(
+            &h,
+            &acc,
+            Method::POST,
+            &format!("/v1/user/accounts/{name}/pins"),
+            None,
+            Some(body),
+        )
+        .await;
+        assert_eq!(status, wanted, "{name}: {body}");
+    }
+
+    // Every change is audited, and an audit holds no more than the account and the entry.
+    // The two added, and the four a refused change named: audited first, then refused.
+    assert_eq!(audits(&h, "account.pin.add").len(), 6);
+    assert_eq!(audits(&h, "account.pin.remove").len(), 1);
+    assert_eq!(audits(&h, "account.pin.map.add").len(), 1);
+    assert_eq!(audits(&h, "account.pin.map.remove").len(), 1);
+    assert!(!audits(&h, "account.refused").is_empty());
+}
+
+fn coqui_claims(fingerprint: &str) -> ai6::Claims {
+    ai6::Claims {
+        values: BTreeMap::from([
+            ("fingerprint".to_owned(), vec![fingerprint.to_owned()]),
+            ("subject.cn".to_owned(), vec!["guest".to_owned()]),
+        ]),
+        ..ai6::Claims::default()
+    }
+}

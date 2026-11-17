@@ -182,6 +182,36 @@ pub(crate) enum AccountsCommand {
         /// The account name.
         name: String,
     },
+    /// Show an account's certificate pins and explicit map, or change them (needs
+    /// account.manage); removals are made first.
+    Pins {
+        /// The account name.
+        name: String,
+        /// A pin to add: `sha256:<hex>` (a certificate) or `spki-sha256:<hex>` (its public key).
+        #[arg(long)]
+        add: Vec<String>,
+        /// A pin to take away.
+        #[arg(long)]
+        remove: Vec<String>,
+        /// A certificate field that names the account, as `field=value`, such as
+        /// `san.email=alice@example.org`.
+        #[arg(long)]
+        map_add: Vec<String>,
+        /// An explicit map entry to take away, as `field=value`.
+        #[arg(long)]
+        map_remove: Vec<String>,
+    },
+}
+
+/// Each `field=value` as a map entry.
+fn map_entries(list: &[String]) -> Result<Vec<Value>, String> {
+    list.iter()
+        .map(|text| {
+            text.split_once('=')
+                .map(|(field, value)| json!({ "field": field, "value": value }))
+                .ok_or_else(|| format!("{} is not field=value", plain(text)))
+        })
+        .collect()
 }
 
 /// The rule list as a file holds it.
@@ -680,6 +710,51 @@ pub(crate) async fn run_accounts(
             )
             .await?;
             show_secret(&answer);
+        }
+        AccountsCommand::Pins {
+            name,
+            add,
+            remove,
+            map_add,
+            map_remove,
+        } => {
+            let changing = ![&add, &remove, &map_add, &map_remove]
+                .iter()
+                .all(|list| list.is_empty());
+            let answer = if changing {
+                let body = json!({
+                    "add": add,
+                    "remove": remove,
+                    "match_add": map_entries(&map_add)?,
+                    "match_remove": map_entries(&map_remove)?,
+                });
+                exchange(
+                    client,
+                    token,
+                    Method::POST,
+                    account_url(&name, &["pins"])?,
+                    None,
+                    Some(body),
+                )
+                .await?
+            } else {
+                exchange(
+                    client,
+                    token,
+                    Method::GET,
+                    account_url(&name, &["pins"])?,
+                    None,
+                    None,
+                )
+                .await?
+            };
+            for pin in answer["pins"].as_array().into_iter().flatten() {
+                println!("pin\t{}", text(pin));
+            }
+            for entry in answer["matches"].as_array().into_iter().flatten() {
+                println!("map\t{}={}", text(&entry["field"]), text(&entry["value"]));
+            }
+            println!("max\t{}", answer["max_pins"]);
         }
     }
     Ok(())

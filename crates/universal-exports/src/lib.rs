@@ -4,6 +4,7 @@
 #![warn(missing_docs)]
 
 mod access_admin;
+mod account_pins;
 mod accounts;
 mod agents;
 mod attention;
@@ -2254,6 +2255,10 @@ impl Gateway {
             .route(
                 "/v1/user/accounts/{name}/secret",
                 post(accounts::reset_secret),
+            )
+            .route(
+                "/v1/user/accounts/{name}/pins",
+                get(account_pins::pins_of).post(account_pins::change_pins),
             )
             .route("/v1/user/providers", get(providers::all))
             .route(

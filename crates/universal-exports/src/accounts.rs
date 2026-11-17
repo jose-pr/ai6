@@ -60,14 +60,14 @@ pub(crate) struct AccountBody {
     expires_unix: Option<i64>,
 }
 
-fn provider(gateway: &Gateway) -> Result<Arc<dyn Accounts>, AdminError> {
+pub(crate) fn provider(gateway: &Gateway) -> Result<Arc<dyn Accounts>, AdminError> {
     gateway
         .accounts
         .clone()
         .ok_or_else(|| AdminError::Conflict("no account provider".to_owned()))
 }
 
-async fn audit(
+pub(crate) async fn audit(
     gateway: &Gateway,
     person: &Person,
     action: &str,
@@ -92,7 +92,7 @@ async fn audit(
         .map_err(|_| AdminError::Api(ApiError::internal()))
 }
 
-async fn listed(accounts: Arc<dyn Accounts>) -> Result<Vec<AccountInfo>, AdminError> {
+pub(crate) async fn listed(accounts: Arc<dyn Accounts>) -> Result<Vec<AccountInfo>, AdminError> {
     tokio::task::spawn_blocking(move || accounts.accounts())
         .await
         .map_err(|_| AdminError::Api(ApiError::internal()))?
@@ -143,7 +143,7 @@ fn person_of(info: &AccountInfo, groups: &[String]) -> Person {
 
 /// Refuses a change that touches a chief unless a chief makes it: the account is a chief
 /// subject now, or would be after the change.
-fn chief_guard(
+pub(crate) fn chief_guard(
     effective: &ai6::EffectiveAccess,
     editor: &Editor,
     before: Option<&AccountInfo>,
@@ -352,7 +352,7 @@ async fn changed_account(
         .ok_or(AdminError::Api(ApiError::internal()))
 }
 
-fn checked_name(gateway: &Gateway, name: &str) -> Result<(), AdminError> {
+pub(crate) fn checked_name(gateway: &Gateway, name: &str) -> Result<(), AdminError> {
     if name.starts_with(crate::keys::PERSONAL_PREFIX) {
         return Err(AdminError::Refused(format!(
             "an account name may not start with {:?}, which is a personal key's",

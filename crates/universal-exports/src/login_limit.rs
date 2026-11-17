@@ -47,6 +47,9 @@ pub struct LoginLimits {
     /// How old a sign-in may be and still replace its person's second factor without a code from
     /// it. Default five minutes.
     pub enrol_fresh_seconds: Duration,
+    /// The most certificate pins one account may hold, and the most certificate-field entries.
+    /// Default 4.
+    pub max_pins: usize,
 }
 
 impl Default for LoginLimits {
@@ -63,6 +66,7 @@ impl Default for LoginLimits {
             pending_seconds: table.pending_seconds.0,
             pending_tries: u32::try_from(table.pending_tries).unwrap_or(u32::MAX),
             enrol_fresh_seconds: table.enrol_fresh_seconds.0,
+            max_pins: usize::try_from(table.max_pins).unwrap_or(usize::MAX),
         }
     }
 }
