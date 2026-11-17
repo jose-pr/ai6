@@ -811,10 +811,12 @@ async fn held_by(accounts: Arc<dyn Accounts>, id: String) -> Result<(bool, bool)
     .map_err(|_| ApiError::unavailable())
 }
 
+/// Begins a secret for `person`; `proved_current` says the caller proved the secret it replaces.
 async fn begin(
     gateway: &Gateway,
     person: &Person,
     accounts: Arc<dyn Accounts>,
+    proved_current: bool,
 ) -> Result<Response, AdminError> {
     let refusal = gateway
         .access
@@ -842,6 +844,7 @@ async fn begin(
     let put = AccountPut {
         name: person.id.clone(),
         display_name: Some(person.name.clone()),
+        proved_current,
         ..AccountPut::default()
     };
     let outcome = tokio::task::spawn_blocking(move || accounts.put(put))
@@ -1025,7 +1028,8 @@ pub(crate) async fn begin_enrolment(
             .map_err(|_| refused_because("that code is not right"))?;
         }
     }
-    begin(&gateway, &signed.person, accounts).await
+    // An enrolled person got here only with a current code or a fresh sign-in.
+    begin(&gateway, &signed.person, accounts, enrolled).await
 }
 
 /// `POST /v1/user/factors/totp/confirm`: the first code from the app makes the factor. Replacing
@@ -1128,7 +1132,7 @@ pub(crate) async fn begin_first(
              administrator to reset it",
         ));
     }
-    begin(&gateway, &person, accounts).await
+    begin(&gateway, &person, accounts, false).await
 }
 
 /// `POST /v1/auth/enrol/confirm`: the first code from the app. The sign-in then continues with

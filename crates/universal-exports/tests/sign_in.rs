@@ -2057,6 +2057,13 @@ async fn replacing_a_factor_needs_a_code_from_it_or_a_fresh_sign_in_and_ends_the
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "a wrong code");
+    assert!(
+        h.registry
+            .factor_documents("totp_enrolling")
+            .unwrap()
+            .is_empty(),
+        "a refused rotation writes no enrolment"
+    );
     clock.store(now + 30, Ordering::SeqCst);
     let (status, begun) = send(
         &h,
