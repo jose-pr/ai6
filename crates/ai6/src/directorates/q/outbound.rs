@@ -85,6 +85,9 @@ pub enum Refusal {
     TooLong,
     /// The text is empty.
     Empty,
+    /// The text is only a file path: a post must carry what it says, not point at a file the
+    /// reader cannot open.
+    BarePath,
 }
 
 impl Refusal {
@@ -97,6 +100,7 @@ impl Refusal {
             Self::LinkHost => "link-host",
             Self::TooLong => "too-long",
             Self::Empty => "empty",
+            Self::BarePath => "bare-path",
         }
     }
 }
@@ -110,6 +114,7 @@ impl fmt::Display for Refusal {
             Self::LinkHost => "the text links to a host this Operation does not allow",
             Self::TooLong => "the text is longer than this Operation allows",
             Self::Empty => "the text is empty",
+            Self::BarePath => "the text is only a file path, not what the file holds",
         };
         write!(f, "{text} (rule {})", self.rule())
     }
@@ -159,6 +164,28 @@ fn invisible(character: char) -> bool {
         || (0xE0000..=0xE007F).contains(&code)
 }
 
+/// Whether `text` is nothing but a file path: one token that starts at a root, a home or a
+/// relative directory, or a drive letter, or that holds a path separator and a file extension.
+fn is_bare_path(text: &str) -> bool {
+    let text = text.trim().trim_matches(['`', '"', '\'']);
+    if text.is_empty() || text.contains(char::is_whitespace) || text.contains("://") {
+        return false;
+    }
+    let bytes = text.as_bytes();
+    let drive = bytes.len() > 2
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'/' | b'\\');
+    let rooted =
+        text.starts_with(['/', '~', '\\']) || text.starts_with("./") || text.starts_with("../");
+    let has_separator = text.contains(['/', '\\']);
+    let has_extension = text
+        .rsplit(['/', '\\'])
+        .next()
+        .is_some_and(|name| name.contains('.') && !name.ends_with('.'));
+    drive || rooted || (has_separator && has_extension)
+}
+
 fn host_of(address: &str) -> Option<String> {
     let rest = address.split_once("://")?.1;
     let authority = rest.split(['/', '?', '#']).next()?;
@@ -190,6 +217,9 @@ pub fn check(
     }
     if !max_bytes.allows(text.len()) {
         return Err(Refusal::TooLong);
+    }
+    if is_bare_path(text) {
+        return Err(Refusal::BarePath);
     }
     if text.chars().any(invisible) {
         return Err(Refusal::InvisibleCharacters);
@@ -269,8 +299,42 @@ mod tests {
         let token = ["gh", "p_", "0123456789abcdefghij0123456789abcdef"].concat();
         let shown = screen_target(&format!("curl -H {token} é"), Limit::UNBOUNDED);
         assert_eq!(shown, "curl -H [redacted] é");
-        assert_eq!(screen_target("aéb", Limit::at(2)), "a…", "never inside a character");
+        assert_eq!(
+            screen_target("aéb", Limit::at(2)),
+            "a…",
+            "never inside a character"
+        );
         assert_eq!(screen_target("a\u{202e}b", Limit::at(10)), "ab");
+    }
+
+    #[test]
+    fn a_post_that_is_only_a_path_is_refused_and_prose_naming_one_is_not() {
+        let check = |text: &str| {
+            check(
+                text,
+                &SecretSet::default(),
+                &LinkRule::any(),
+                Limit::UNBOUNDED,
+                OnSecret::Refuse,
+            )
+        };
+        for path in [
+            "/tmp/notes.md",
+            "~/notes",
+            "./out/report.txt",
+            "C:\\work\\report.txt",
+            "`docs/report.md`",
+        ] {
+            assert_eq!(check(path).unwrap_err(), Refusal::BarePath, "{path}");
+        }
+        for text in [
+            "Wrote /tmp/notes.md with the findings.",
+            "done",
+            "see https://x.example/a/b.md",
+        ] {
+            assert!(check(text).is_ok(), "{text}");
+        }
+        assert_eq!(check("  \n").unwrap_err(), Refusal::Empty);
     }
 
     #[test]

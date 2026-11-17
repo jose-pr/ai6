@@ -20,7 +20,7 @@ use crate::directorates::m::approvals::{
     ActionScope, ISSUE_ASSIGN, ISSUE_CLOSE, ISSUE_COMMENT, ISSUE_CREATE,
 };
 use crate::directorates::m::cover::Disclosure;
-use crate::directorates::m::issues::{IssueCreate, IssuePolicy, LinkHosts, OnTimeout};
+use crate::directorates::m::issues::{IssueCreate, IssuePolicy, IssueWrites, LinkHosts, OnTimeout};
 use crate::directorates::m::mission::MissionState;
 use crate::directorates::medical::exposure::{ExposureGate, issue_source};
 use crate::directorates::q::outbound::{self, LinkRule, SecretSet};
@@ -294,6 +294,7 @@ impl IssueDesk {
             return Ok(answer);
         }
         let policy = self.policy(caller)?.clone();
+        self.allow_write(caller, &policy)?;
         let text = self.prepared(caller, &link, &setup, body, &policy)?;
         self.take_post_quota(caller, &policy)?;
         let gate = if caller
@@ -321,6 +322,39 @@ impl IssueDesk {
             retry_key,
             gate.into_iter().collect(),
         )
+    }
+
+    /// Whether the Operation lets this Agent write a comment now: never under `none`, and under
+    /// `final` only while the Mission has none of its own in the tracker's outbox.
+    fn allow_write(&self, caller: &Caller, policy: &IssuePolicy) -> Result<(), Refusal> {
+        match policy.writes {
+            IssueWrites::Any => Ok(()),
+            IssueWrites::None => Err(
+                "this Operation does not let Agents write to issues ([issues] writes = \"none\")"
+                    .to_owned(),
+            ),
+            IssueWrites::Final => {
+                let written = self
+                    .state
+                    .intake
+                    .outbox_entries(Some(&caller.mission))
+                    .map_err(|error| error.to_string())?
+                    .iter()
+                    .any(|entry| {
+                        entry.actor.starts_with("agent:")
+                            && entry.kind == OutboxKind::Comment
+                            && entry.state != OutboxState::Refused
+                    });
+                if written {
+                    Err(
+                        "this Mission has made its one comment ([issues] writes = \"final\")"
+                            .to_owned(),
+                    )
+                } else {
+                    Ok(())
+                }
+            }
+        }
     }
 
     /// Asks a question on a linked issue and blocks the Mission until it is answered.
@@ -1061,7 +1095,33 @@ impl IssueDesk {
             .cover(&operation.cover)
             .map_or(Disclosure::Hidden, |cover| cover.disclosure());
         let shown = super::current_handle(&self.state, &caller.mission);
-        with_footer(text, disclosure, &shown, &caller.agent)
+        with_footer(text, disclosure, &shown, &self.author(caller))
+    }
+
+    /// Who the footer names: the Agent's codename, then the model its Run resolved to and the
+    /// role the Mission works in, each as the records hold them.
+    fn author(&self, caller: &Caller) -> String {
+        let model = self
+            .state
+            .intake
+            .latest_run(&caller.mission)
+            .ok()
+            .flatten()
+            .and_then(|run| run.launch?.model);
+        let role = self
+            .state
+            .missions
+            .lock()
+            .ok()
+            .and_then(|missions| missions.get(&caller.mission)?.role_id.clone());
+        let mut author = format!("Agent {}", caller.agent);
+        if let Some(model) = model {
+            author.push_str(&format!(", model {model}"));
+        }
+        if let Some(role) = role {
+            author.push_str(&format!(", role {role}"));
+        }
+        author
     }
 
     /// The secret values the Station holds for the Mission: the Run's own environment (its
@@ -1433,12 +1493,13 @@ fn allowed_hosts(setup: &SourceSetup, link: &IssueLink, remote: Option<&str>) ->
 }
 
 /// The footer the cover policy allows: nothing under `covert`, the Mission under `partial`, the
-/// Agent too under `overt`. The Station writes it; the Agent never does.
-fn with_footer(text: String, disclosure: Disclosure, mission: &str, agent: &str) -> String {
+/// Agent too (`author`: its codename, model and role) under `overt`. The Station writes it; the
+/// Agent never does.
+fn with_footer(text: String, disclosure: Disclosure, mission: &str, author: &str) -> String {
     match disclosure {
         Disclosure::Hidden => text,
         Disclosure::Assisted => format!("{text}\n\n---\nAI-assisted work, Mission `{mission}`."),
-        _ => format!("{text}\n\n---\nPosted by AI6 for Mission `{mission}` (Agent {agent})."),
+        _ => format!("{text}\n\n---\nPosted by AI6 for Mission `{mission}` ({author})."),
     }
 }
 
@@ -1815,6 +1876,93 @@ mod tests {
     }
 
     #[test]
+    fn the_footer_names_the_model_and_role_the_records_hold_beside_the_codename() {
+        use crate::directorates::registry::runs::{NewRun, RunLaunch};
+        let root = tempfile::tempdir().unwrap();
+        let (state, mission, desk) = station(root.path(), "footer", "");
+        let who = caller(&mission, "007");
+        assert_eq!(desk.author(&who), "Agent 007", "before a Run and a role");
+        state
+            .intake
+            .open_run(
+                NewRun::new("run-footer", mission.clone(), "s-1").with_launch(
+                    RunLaunch::new("mock-recorder", "pipe", "/work")
+                        .with_model(Some("model-x".to_owned()), None),
+                ),
+                std::time::Duration::from_secs(60),
+            )
+            .unwrap();
+        let other = format!("{mission}-role");
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .create(
+                MissionId::try_new(&other).unwrap(),
+                Some("G".to_owned()),
+                "fix it".to_owned(),
+                Some("007".to_owned()),
+                Some("case-officer".to_owned()),
+            )
+            .unwrap();
+        assert_eq!(desk.author(&who), "Agent 007, model model-x");
+        assert_eq!(
+            desk.author(&caller(&other, "007")),
+            "Agent 007, role case-officer"
+        );
+        assert_eq!(
+            with_footer(
+                "hi".to_owned(),
+                Disclosure::Full,
+                "m-1",
+                "Agent 007, model model-x"
+            ),
+            "hi\n\n---\nPosted by AI6 for Mission `m-1` (Agent 007, model model-x)."
+        );
+    }
+
+    #[test]
+    fn an_agent_writes_as_the_operation_allows_and_never_a_bare_path() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, mission, desk) = station(root.path(), "writes", "");
+        let who = caller(&mission, "007");
+        for bare in ["/tmp/notes.md", "", "  "] {
+            let refused = desk.comment(&who, "gh:o/r#1", bare, "k0").unwrap_err();
+            assert!(
+                refused.contains("file path") || refused.contains("empty"),
+                "{bare:?}: {refused}"
+            );
+        }
+        assert!(entries(&state, &mission).is_empty(), "nothing was queued");
+        desk.comment(&who, "gh:o/r#1", "All done: the fix is in.", "k1")
+            .unwrap();
+        let second = desk
+            .comment(&who, "gh:o/r#1", "One more thing.", "k2")
+            .unwrap_err();
+        assert!(second.contains("writes = \"final\""), "{second}");
+
+        let root = tempfile::tempdir().unwrap();
+        let (state, mission, desk) = station(root.path(), "writes-none", "writes = \"none\"");
+        let refused = desk
+            .comment(&caller(&mission, "007"), "gh:o/r#1", "hello there", "k1")
+            .unwrap_err();
+        assert!(refused.contains("writes = \"none\""), "{refused}");
+        assert!(entries(&state, &mission).is_empty());
+
+        let root = tempfile::tempdir().unwrap();
+        let (_state, mission, desk) = station(root.path(), "writes-any", "writes = \"any\"");
+        for key in ["k1", "k2"] {
+            desk.comment(
+                &caller(&mission, "007"),
+                "gh:o/r#1",
+                &format!("a note {key}"),
+                key,
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
     fn a_field_agent_comments_a_desk_agent_cannot_and_a_link_it_lacks_is_unknown() {
         let root = tempfile::tempdir().unwrap();
         let (state, mission, desk) = station(root.path(), "comment", "");
@@ -2078,7 +2226,7 @@ mod tests {
     #[test]
     fn an_exposed_run_posts_directly_only_where_its_text_came_from() {
         let root = tempfile::tempdir().unwrap();
-        let (state, mission, desk) = station(root.path(), "exposed", "");
+        let (state, mission, desk) = station(root.path(), "exposed", "writes = \"any\"");
         let mut me = caller(&mission, "007");
         assert!(me.exposure.mark("tool:WebFetch", 1.0));
         assert!(me.exposure.restricts(Restriction::Issues));
@@ -2105,7 +2253,7 @@ mod tests {
         let (_state, mission, desk) = station(
             root.path(),
             "quota",
-            "post_burst = 2\nposts_per_mission = 3",
+            "writes = \"any\"\npost_burst = 2\nposts_per_mission = 3",
         );
         let me = caller(&mission, "007");
         assert!(desk.comment(&me, "gh:o/r#1", "one", "q1").is_ok());
@@ -2117,7 +2265,7 @@ mod tests {
         let (_state, mission, desk) = station(
             other.path(),
             "quota-total",
-            "posts_per_mission = 1\npost_burst = 9\nposts_per_hour = \"none\"",
+            "writes = \"any\"\nposts_per_mission = 1\npost_burst = 9\nposts_per_hour = \"none\"",
         );
         let me = caller(&mission, "007");
         assert!(desk.comment(&me, "gh:o/r#1", "one", "t1").is_ok());

@@ -65,6 +65,21 @@ pub enum OnSecret {
     Redact,
 }
 
+/// When an Agent may write to the tracker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(rename_all = "snake_case")]
+pub enum IssueWrites {
+    /// Once per Mission: its closing note. A second comment is refused.
+    #[schema(label = "Once, as the closing note")]
+    Final,
+    /// Whenever it likes, within the post limits.
+    #[schema(label = "Whenever it likes")]
+    Any,
+    /// Never: Agents read issues and the Station writes for them.
+    #[schema(label = "Never")]
+    None,
+}
+
 /// Where links and images in an Agent's text may point.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ToValue, FromValue, Schema)]
 #[map(rename_all = "snake_case")]
@@ -107,6 +122,11 @@ pub struct IssuePolicy {
     #[schema(title = "Automatic updates")]
     #[map(default = IssuePolicy::default().updates)]
     pub updates: IssueUpdates,
+    /// `final`: an Agent comments once per Mission, as its closing note; `any`: whenever, within
+    /// the post limits; `none`: never.
+    #[schema(title = "When an Agent writes")]
+    #[map(default = IssuePolicy::default().writes)]
+    pub writes: IssueWrites,
     /// Bytes of one posted comment.
     #[schema(title = "Size of a post", format = "bytes")]
     #[map(default = IssuePolicy::default().max_body_bytes)]
@@ -189,6 +209,7 @@ impl Default for IssuePolicy {
         Self {
             preset: IssuePreset::Strict,
             updates: IssueUpdates::Milestones,
+            writes: IssueWrites::Final,
             max_body_bytes: Limit::at(8192),
             posts_per_hour: Limit::at(6),
             post_burst: Limit::at(3),
