@@ -114,12 +114,20 @@ fn start(args: &[&str], url: &str) -> (Running, Vec<String>) {
         .args(["liaison", "loopback", "--url", url])
         .args(args)
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .unwrap();
     let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
-    let printed = lines.next().expect("the endpoint was printed").unwrap();
-    (Running(child), vec![printed])
+    let Some(printed) = lines.next() else {
+        // The command ended before printing its endpoint: its own error says why.
+        let mut said = String::new();
+        let _ = std::io::Read::read_to_string(&mut child.stderr.take().unwrap(), &mut said);
+        panic!("no endpoint was printed; the command said: {said}");
+    };
+    // Drained so a full pipe never stalls the command while it runs.
+    let mut stderr = child.stderr.take().unwrap();
+    thread::spawn(move || std::io::copy(&mut stderr, &mut std::io::sink()));
+    (Running(child), vec![printed.unwrap()])
 }
 
 async fn until_answered(http: &reqwest::Client, base: &str, token: Option<&str>) -> Value {
