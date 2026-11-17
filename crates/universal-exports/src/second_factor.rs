@@ -289,8 +289,8 @@ pub(crate) async fn offer_next(
 ) -> Result<Vec<String>, ApiError> {
     // Counted against the address before the Registry is read, whether or not the sign-in is
     // there: a client that names sign-ins at random is held off.
-    let source = gateway.login_guard.source(headers, address);
-    if let Some(wait) = gateway.login_guard.tried_address(source) {
+    let source = gateway.login_guard().source(headers, address);
+    if let Some(wait) = gateway.login_guard().tried_address(source) {
         return Err(ApiError::too_many_attempts(wait));
     }
     let now = unix_timestamp()?;
@@ -361,8 +361,8 @@ pub(crate) async fn continue_login(
     };
     // Counted against the address before the Registry is read, whether or not the sign-in is
     // there, so a client naming sign-ins at random is held off and costs the store nothing.
-    let source = gateway.login_guard.source(headers, connection);
-    if let Some(wait) = gateway.login_guard.tried_address(source) {
+    let source = gateway.login_guard().source(headers, connection);
+    if let Some(wait) = gateway.login_guard().tried_address(source) {
         return Err(ApiError::too_many_attempts(wait));
     }
     let key = access_token_digest(token);
@@ -394,7 +394,7 @@ pub(crate) async fn continue_login(
     // Counted before anything is asked, under the account, whatever the address: a refusal is
     // not judged, and the right code along with the wrong ones.
     let by_password = method == "password";
-    if !by_password && let Some(wait) = gateway.login_guard.tried_name(&person.id) {
+    if !by_password && let Some(wait) = gateway.login_guard().tried_name(&person.id) {
         return Err(ApiError::too_many_attempts(wait));
     }
     match count_try(
@@ -984,8 +984,8 @@ async fn enrolling_person(
     {
         return Err(refused_here());
     }
-    let source = gateway.login_guard.source(headers, address);
-    if let Some(wait) = gateway.login_guard.tried(source, &signed.person.id) {
+    let source = gateway.login_guard().source(headers, address);
+    if let Some(wait) = gateway.login_guard().tried(source, &signed.person.id) {
         return Err(AdminError::Api(ApiError::too_many_attempts(wait)));
     }
     Ok((signed, accounts, source))
@@ -1062,8 +1062,8 @@ async fn enrolling_first(
     }
     let accounts = factors_of(gateway)?;
     let providers = gateway.access.clone().ok_or_else(ApiError::unavailable)?;
-    let source = gateway.login_guard.source(headers, connection);
-    if let Some(wait) = gateway.login_guard.tried_address(source) {
+    let source = gateway.login_guard().source(headers, connection);
+    if let Some(wait) = gateway.login_guard().tried_address(source) {
         return Err(AdminError::Api(ApiError::too_many_attempts(wait)));
     }
     let now = unix_timestamp()?;
@@ -1090,7 +1090,7 @@ async fn enrolling_first(
     if !allowed {
         return Err(refused_here());
     }
-    if let Some(wait) = gateway.login_guard.tried_name(&person.id) {
+    if let Some(wait) = gateway.login_guard().tried_name(&person.id) {
         return Err(AdminError::Api(ApiError::too_many_attempts(wait)));
     }
     // A code tried here is a guess at the factor being made, so it is counted as any is.
