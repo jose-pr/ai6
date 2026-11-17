@@ -525,3 +525,23 @@ fn a_rule_that_reaches_down_needs_the_action_held_down_there_too() {
     check_change(&before, &narrow, &lite, &access, &lineage)
         .expect("held at P, and the rule stays at P");
 }
+
+#[test]
+fn a_chief_entry_naming_any_signed_in_is_refused_with_its_field() {
+    let stored = compile(&seeded_with(&[], &["any:signed-in"]), &[]).unwrap_err();
+    let stored = stored.to_string();
+    assert!(stored.starts_with("chief:"), "{stored}");
+    assert!(stored.contains("named person"), "{stored}");
+    let host = compile(
+        &seeded_with(&[], &["person:ada"]),
+        &["any:signed-in".to_owned()],
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(host.starts_with("[unex.access] chief:"), "{host}");
+    compile(
+        &seeded_with(&[], &["person:ada"]),
+        &["group:ops".to_owned()],
+    )
+    .expect("named chiefs still work");
+}

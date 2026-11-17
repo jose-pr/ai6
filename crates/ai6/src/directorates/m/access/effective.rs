@@ -164,6 +164,16 @@ impl Tier {
     }
 }
 
+/// A chief entry of `field`: a named person, account or group, never `any:signed-in`.
+fn chief_subject(field: &str, text: &str) -> Result<Subject, AccessPolicyError> {
+    match text.parse::<Subject>() {
+        Ok(Subject::AnySignedIn) | Err(_) => Err(AccessPolicyError(format!(
+            "{field}: chief subject {text:?} must be a named person, account or group: account:<name>, person:<id> or group:<name>"
+        ))),
+        Ok(subject) => Ok(subject),
+    }
+}
+
 /// The actions of `actions` that exist at an Operation, or the placeholder when none does.
 pub(super) fn operation_copy(actions: &[String]) -> Vec<String> {
     let kept: Vec<String> = actions
@@ -277,12 +287,13 @@ pub(super) fn compile_with_actions(
         Vec::with_capacity(policy.chief.len() + chief_from_host.len() + policy.rules.len());
     let mut chiefs = Vec::new();
     let mut seen = BTreeSet::new();
-    for subject in policy.chief.iter().chain(chief_from_host) {
-        let parsed: Subject = subject.parse().map_err(|_| {
-            AccessPolicyError(format!(
-                "chief subject {subject:?} must be account:<name>, person:<id> or group:<name>"
-            ))
-        })?;
+    let listed = policy.chief.iter().map(|subject| ("chief", subject)).chain(
+        chief_from_host
+            .iter()
+            .map(|subject| ("[unex.access] chief", subject)),
+    );
+    for (field, subject) in listed {
+        let parsed = chief_subject(field, subject)?;
         if seen.insert(subject.clone()) {
             rules.push(TierRule {
                 subject: subject.clone(),

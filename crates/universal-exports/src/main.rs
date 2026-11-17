@@ -244,12 +244,7 @@ async fn run(cli: Cli) -> Result<(), String> {
     }
     let followed_registry = registry.clone();
     let host_chiefs = settings.located.value.unex.access.chief.clone();
-    for subject in &host_chiefs {
-        subject.parse::<ai6::Subject>().map_err(|_| {
-            "[unex.access] chief: an entry is not account:<name>, person:<id> or group:<name>"
-                .to_owned()
-        })?;
-    }
+    check_host_chiefs(&host_chiefs)?;
     let live = Arc::new(
         LiveAccess::new(provider.clone(), host_chiefs, record.authorizer.clone())
             .map_err(|error| format!("user access configuration failed: {error}"))?,
@@ -1225,8 +1220,31 @@ fn public_pages_weakening(own_origin: bool, public: bool) -> Option<&'static str
     )
 }
 
+/// Refuses a `[unex.access] chief` entry that is not a named person, account or group.
+fn check_host_chiefs(chiefs: &[String]) -> Result<(), String> {
+    for subject in chiefs {
+        if !matches!(
+            subject.parse::<ai6::Subject>(),
+            Ok(ai6::Subject::Account(_) | ai6::Subject::Person(_) | ai6::Subject::Group(_))
+        ) {
+            return Err(format!(
+                "[unex.access] chief: {subject:?} must be a named person, account or group: account:<name>, person:<id> or group:<name>"
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_host_chief_must_be_named_and_any_signed_in_is_refused_with_the_field() {
+        let error = super::check_host_chiefs(&["any:signed-in".to_owned()]).unwrap_err();
+        assert!(error.contains("[unex.access] chief"), "{error}");
+        assert!(error.contains("named person"), "{error}");
+        assert!(super::check_host_chiefs(&["person:ada".to_owned()]).is_ok());
+    }
+
     #[test]
     fn a_public_link_on_the_apis_own_origin_is_a_weakening() {
         assert!(super::public_pages_weakening(false, true).is_some());
