@@ -1047,6 +1047,102 @@ mod knowledge_of_a_run {
             assert!(forgotten.contains("forgotten"), "{forgotten}");
             client.cancel().await.unwrap();
         }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn an_overlays_knowledge_is_listed_read_and_searched_through_coqui_aos() {
+            use crate::station::overlays::RunKnowledge;
+            use coqui_aos::{Document, KnowledgeOverlay, KnowledgeSettings, KnowledgeTree};
+
+            let root = tempfile::tempdir().unwrap();
+            let state = settled(root.path(), "memory_write = \"field\"");
+            let tree = KnowledgeTree::new()
+                .with_text(
+                    "kb/greeting.md",
+                    "# Raising a periscope\n\nThis is the ${AOS_OVERLAY_NAME} way.\n",
+                )
+                .with_text(
+                    "rules/hatch.md",
+                    "#!raw\nNever wedge ${AOS_OVERLAY_NAME}.\n",
+                );
+            let overlay = KnowledgeOverlay::new("acme", Document::default(), tree);
+            let knowledge = RunKnowledge {
+                overlays: vec![overlay],
+                settings: KnowledgeSettings::default(),
+            };
+
+            // Without overlay knowledge the Run has no kb tools.
+            let bare = unbound(&state, "007", ExposureGate::default()).await;
+            let client = connect(&bare).await;
+            let listed = client.list_all_tools().await.unwrap();
+            assert!(listed.iter().all(|tool| !tool.name.starts_with("kb_")));
+            client.cancel().await.unwrap();
+
+            let identity = CablePrincipal::try_new(
+                "007".to_owned(),
+                "G".to_owned(),
+                None,
+                state.station_id.clone(),
+                None,
+                Some("G-1".to_owned()),
+            )
+            .unwrap();
+            let endpoint = Endpoint::start_with_exposure(
+                state.cables.clone(),
+                identity,
+                state.intake.clone(),
+                false,
+                ExposureGate::default(),
+            )
+            .await
+            .unwrap();
+            endpoint.open_report_tools(ReportDesk::new(state.clone()).with_knowledge(knowledge));
+            let client = connect(&endpoint).await;
+            let names: Vec<String> = client
+                .list_all_tools()
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|tool| tool.name.to_string())
+                .collect();
+            for tool in ["kb_list", "kb_read", "kb_search"] {
+                assert!(names.iter().any(|name| name == tool), "{tool}: {names:?}");
+            }
+            let listing = call(&client, "kb_list", serde_json::json!({})).await;
+            assert!(listing.contains("kb/greeting.md"), "{listing}");
+            assert!(listing.contains("rules/hatch.md"), "{listing}");
+            // The template is rendered for this call by coqui-aos; a raw file is served as written.
+            let read = call(
+                &client,
+                "kb_read",
+                serde_json::json!({"path": "kb/greeting.md"}),
+            )
+            .await;
+            assert!(read.contains("This is the acme way."), "{read}");
+            let raw = call(
+                &client,
+                "kb_read",
+                serde_json::json!({"path": "rules/hatch.md"}),
+            )
+            .await;
+            assert!(raw.contains("Never wedge ${AOS_OVERLAY_NAME}."), "{raw}");
+            let missing = call(
+                &client,
+                "kb_read",
+                serde_json::json!({"path": "kb/none.md"}),
+            )
+            .await;
+            assert!(!missing.contains("acme way"), "{missing}");
+            // The search ranks files as the Report search does.
+            let found = call(
+                &client,
+                "kb_search",
+                serde_json::json!({"query": "periscope"}),
+            )
+            .await;
+            assert!(found.contains("kb/greeting.md"), "{found}");
+            assert!(!found.contains("rules/hatch.md"), "{found}");
+            client.cancel().await.unwrap();
+        }
     }
 }
 

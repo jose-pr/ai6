@@ -122,6 +122,40 @@ struct ReadReportArgs {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct KbListArgs {
+    /// Only this overlay's files.
+    overlay: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct KbReadArgs {
+    /// The file's path, relative to its overlay, as kb_list gave it.
+    path: String,
+    /// The first line to read, from 1.
+    from: Option<u64>,
+    /// The last line to read.
+    to: Option<u64>,
+    /// The overlay, when more than one holds the path.
+    overlay: Option<String>,
+    /// What a template in the file may read of this call, as an object.
+    context: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct KbSearchArgs {
+    /// The words to search for.
+    query: String,
+    /// The most passages to give.
+    top: Option<u64>,
+    /// Only this overlay.
+    overlay: Option<String>,
+    /// auto or words.
+    mode: Option<String>,
+    /// Only this file, or this folder.
+    path: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct ForgetReportArgs {
     /// The report's ID, as reports gave it.
     id: String,
@@ -389,6 +423,79 @@ impl CableTools {
             desk.forget(reader, run, &args.id, args.revision)
                 .map(|answer| answer.to_string())
         })
+        .await
+    }
+}
+
+impl CableTools {
+    /// `tool` of the Run's overlay knowledge with the arguments that are set.
+    async fn knowledge(&self, tool: &'static str, arguments: serde_json::Value) -> String {
+        let Some(desk) = self.report_desk.get().cloned() else {
+            return "Knowledge tools are unavailable to this Run".to_owned();
+        };
+        let mut caller = coqui_aos::CallerFacts::new().profile(self.identity.agent());
+        if let Some(role) = self.mission_role.get() {
+            caller = caller.role(role.as_str());
+        }
+        let arguments = serde_json::Value::Object(
+            arguments
+                .as_object()
+                .into_iter()
+                .flatten()
+                .filter(|(_, value)| !value.is_null())
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
+        );
+        tokio::task::spawn_blocking(move || desk.overlay_knowledge().call(tool, arguments, &caller))
+            .await
+            .unwrap_or_else(|_| "the knowledge call failed".to_owned())
+    }
+}
+
+#[tool_router(router = knowledge_router, vis = "pub(super)")]
+impl CableTools {
+    /// List the knowledge files of the Run's overlays.
+    #[tool(
+        description = "List the knowledge files your overlays serve: each overlay's kb, flows, references, rules and context files, with their sizes and lines. Read one with kb_read; search them with kb_search."
+    )]
+    async fn kb_list(&self, Parameters(args): Parameters<KbListArgs>) -> String {
+        self.knowledge("kb_list", serde_json::json!({ "overlay": args.overlay }))
+            .await
+    }
+
+    /// Read one knowledge file.
+    #[tool(
+        description = "Read a knowledge file of your overlays by its path as kb_list gave it, by lines when it is long. Its templates are rendered for this call."
+    )]
+    async fn kb_read(&self, Parameters(args): Parameters<KbReadArgs>) -> String {
+        self.knowledge(
+            "kb_read",
+            serde_json::json!({
+                "path": args.path,
+                "from": args.from,
+                "to": args.to,
+                "overlay": args.overlay,
+                "context": args.context,
+            }),
+        )
+        .await
+    }
+
+    /// Search the knowledge files.
+    #[tool(
+        description = "Search the knowledge files of your overlays by words: the passages that match best, each with its file and lines to read on from."
+    )]
+    async fn kb_search(&self, Parameters(args): Parameters<KbSearchArgs>) -> String {
+        self.knowledge(
+            "kb_search",
+            serde_json::json!({
+                "query": args.query,
+                "top": args.top,
+                "overlay": args.overlay,
+                "mode": args.mode,
+                "path": args.path,
+            }),
+        )
         .await
     }
 }

@@ -82,6 +82,16 @@ pub(crate) struct Delivered {
     pub(crate) digests: Vec<IssuedDigest>,
     /// What is reported each time they are issued.
     pub(crate) weakenings: Vec<Reported>,
+    /// What the Run reads of its overlays through `kb_list`, `kb_read` and `kb_search`.
+    pub(crate) knowledge: RunKnowledge,
+}
+
+/// The knowledge files of a Run's overlays, read from the Station's store, and what bounds them.
+#[derive(Debug, Default, Clone)]
+#[cfg_attr(not(feature = "cables-mcp"), allow(dead_code))]
+pub(crate) struct RunKnowledge {
+    pub(crate) overlays: Vec<coqui_aos::KnowledgeOverlay>,
+    pub(crate) settings: coqui_aos::KnowledgeSettings,
 }
 
 /// One tree in the store.
@@ -963,6 +973,33 @@ fn restore(environment: &mut BTreeMap<String, String>, run: &BTreeMap<String, St
 }
 
 impl Prepared {
+    /// The knowledge files of the overlays, in composition order. An overlay whose files cannot be
+    /// read serves none: the Run starts without it.
+    fn knowledge(&self) -> RunKnowledge {
+        let settings = self.limits.knowledge_settings();
+        let reading = self.limits.settings();
+        let overlays = self
+            .overlays
+            .iter()
+            .filter_map(|ready| {
+                let manifest = ready.stored.read.manifest.clone();
+                let served =
+                    coqui_aos::knowledge_plan(&manifest, &ready.stored.read.tree(), None).served;
+                coqui_aos::KnowledgeOverlay::read(
+                    ready.issued.identity.clone(),
+                    manifest,
+                    &StdFs,
+                    &ready.stored.root,
+                    &reading,
+                    &settings,
+                )
+                .ok()
+                .map(|overlay| overlay.served(served))
+            })
+            .collect();
+        RunKnowledge { overlays, settings }
+    }
+
     /// The digests issued, in composition order.
     pub(crate) fn digests(&self) -> Vec<IssuedDigest> {
         self.overlays
@@ -1052,6 +1089,7 @@ impl Prepared {
             },
             digests: self.digests(),
             weakenings,
+            knowledge: self.knowledge(),
         };
         let skills = self.skills(
             run.handler,

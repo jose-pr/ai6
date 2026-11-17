@@ -1431,6 +1431,14 @@ a Run. `unpinned = true` is a weakening, named each time such an overlay is issu
 | `fetch_timeout` | 300 | **Longest overlay fetch.** Seconds a fetch of one overlay's Git source may take. |
 | `deps_timeout` | 600 | **Longest dependency install.** Seconds installing one overlay's dependency file may take. |
 | `output_bytes` | 1 MiB | **Largest output of an overlay's step.** Bytes of each output stream kept from an overlay's setup, env script or package manager. |
+| `knowledge_file_bytes` | 1 MiB | **Largest knowledge file.** Bytes of one knowledge file an overlay serves to a Run; a larger one is skipped. |
+| `knowledge_read_bytes` | 64 KiB | **Largest knowledge read.** Bytes of one `kb_read` answer; a longer file is read in lines. |
+| `knowledge_rendered_bytes` | 1 MiB | **Largest rendered knowledge file.** Bytes of a knowledge file after its templates are rendered. |
+| `knowledge_query_characters` | 1,000 | **Longest knowledge search.** Characters of a `kb_search` query. |
+| `knowledge_top` | 100 | **Most knowledge passages.** Passages one `kb_search` may ask for. |
+| `knowledge_context_bytes` | 16 KiB | **Largest knowledge call context.** Bytes of the context a `kb_read` call gives a template. |
+| `knowledge_context_depth` | 8 | **Deepest knowledge call context.** Nesting of the context a `kb_read` call gives a template. |
+| `knowledge_include_depth` | 5 | **Deepest knowledge include.** Nesting of `@path` includes and partials in a knowledge file. |
 | `dotagents_pyz` | none | **dotagents for overlay commands.** The `dotagents.pyz` on the Station that runs the `cmds/` of an overlay holding them. An overlay with `cmds/` is refused without it. |
 | `dotagents_pin` | none | **Pin of dotagents.** The SHA-256 `dotagents_pyz` must have, `sha256:<hex>`; a mismatch refuses. Without one it is refused unless `unpinned` allows it. |
 <!-- schema:record.station.overlays:end -->

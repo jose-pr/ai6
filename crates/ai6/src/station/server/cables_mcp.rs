@@ -1821,8 +1821,11 @@ impl CableTools {
         if compartment_desk.get().is_some() {
             tool_router += Self::compartment_router();
         }
-        if report_desk.get().is_some() {
+        if let Some(desk) = report_desk.get() {
             tool_router += Self::report_router();
+            if !desk.overlay_knowledge().is_empty() {
+                tool_router += Self::knowledge_router();
+            }
         }
         if let Some(desk) = decision_desk.get() {
             tool_router += if desk.is_any() {

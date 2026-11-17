@@ -10209,6 +10209,170 @@
               "description": "Bytes of each output stream kept from an overlay's setup, env script or package manager.",
               "default": 1048576
             },
+            "knowledge_file_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Largest knowledge file",
+              "description": "Bytes of one knowledge file an overlay serves to a Run; a larger one is skipped.",
+              "default": 1048576
+            },
+            "knowledge_read_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Largest knowledge read",
+              "description": "Bytes of one `kb_read` answer; a longer file is read in lines.",
+              "default": 65536
+            },
+            "knowledge_rendered_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Largest rendered knowledge file",
+              "description": "Bytes of a knowledge file after its templates are rendered.",
+              "default": 1048576
+            },
+            "knowledge_query_characters": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Longest knowledge search",
+              "description": "Characters of a `kb_search` query.",
+              "default": 1000
+            },
+            "knowledge_top": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Most knowledge passages",
+              "description": "Passages one `kb_search` may ask for.",
+              "default": 100
+            },
+            "knowledge_context_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Largest knowledge call context",
+              "description": "Bytes of the context a `kb_read` call gives a template.",
+              "default": 16384
+            },
+            "knowledge_context_depth": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Deepest knowledge call context",
+              "description": "Nesting of the context a `kb_read` call gives a template.",
+              "default": 8
+            },
+            "knowledge_include_depth": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Deepest knowledge include",
+              "description": "Nesting of `@path` includes and partials in a knowledge file.",
+              "default": 5
+            },
             "dotagents_pyz": {
               "type": [
                 "string",
@@ -10239,7 +10403,15 @@
             "context_bytes": 24576,
             "fetch_timeout": 300.0,
             "deps_timeout": 600.0,
-            "output_bytes": 1048576
+            "output_bytes": 1048576,
+            "knowledge_file_bytes": 1048576,
+            "knowledge_read_bytes": 65536,
+            "knowledge_rendered_bytes": 1048576,
+            "knowledge_query_characters": 1000,
+            "knowledge_top": 100,
+            "knowledge_context_bytes": 16384,
+            "knowledge_context_depth": 8,
+            "knowledge_include_depth": 5
           }
         },
         "provision": {

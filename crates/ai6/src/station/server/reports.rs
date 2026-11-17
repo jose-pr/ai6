@@ -318,16 +318,25 @@ pub(super) struct ReportDesk {
     state: DaemonState,
     /// M's charge: it decides what is proposed to the global scope, and has no Operation.
     m: bool,
+    /// What the Run's overlays serve as knowledge.
+    knowledge: overlay::OverlayKnowledge,
 }
 
 impl ReportDesk {
     pub(super) fn new(state: DaemonState) -> Self {
-        Self { state, m: false }
+        Self {
+            state,
+            m: false,
+            knowledge: overlay::OverlayKnowledge::default(),
+        }
     }
 
     /// The desk of M's charge.
     pub(super) fn for_m(state: DaemonState) -> Self {
-        Self { state, m: true }
+        Self {
+            m: true,
+            ..Self::new(state)
+        }
     }
 
     /// Bytes of a Report's title and of each name on it.
@@ -801,5 +810,6 @@ impl ReportDesk {
     }
 }
 
+mod overlay;
 #[cfg(test)]
 mod tests;

@@ -5415,6 +5415,7 @@ async fn start_mission(
     // Before what is the Station's to set, which an overlay's environment does not override.
     let mut issued_overlays = crate::directorates::section_00::agent::RunOverlays::default();
     let mut issued_digests = Vec::new();
+    let mut issued_knowledge = crate::station::overlays::RunKnowledge::default();
     let mut theater_environment = None;
     if let Some((issued, fit)) = issued {
         let (worker_environment, worker_handler, worker_directory, worker_mission) = (
@@ -5457,6 +5458,7 @@ async fn start_mission(
         initial_context.extend(delivered.context);
         issued_overlays = delivered.overlays;
         issued_digests = delivered.digests;
+        issued_knowledge = delivered.knowledge;
     }
     if !review
         && let Some(briefing) = configure_station_cover(
@@ -5515,7 +5517,9 @@ async fn start_mission(
             endpoint.open_plan_tools(review::PlanDesk::new(state.clone(), mission_id.clone()));
         }
         endpoint.open_compartment_tools(compartments::CompartmentDesk::new(state.clone()));
-        endpoint.open_report_tools(reports::ReportDesk::new(state.clone()));
+        endpoint.open_report_tools(
+            reports::ReportDesk::new(state.clone()).with_knowledge(issued_knowledge),
+        );
         if let Some(role) = mission.role_id.as_deref() {
             endpoint.set_mission_role(role);
         }
@@ -5570,6 +5574,8 @@ async fn start_mission(
     // Only the Theater tools hand the overlays' environment to commands.
     #[cfg(not(feature = "cables-mcp"))]
     drop(theater_environment);
+    #[cfg(not(feature = "cables-mcp"))]
+    drop(issued_knowledge);
     let working_directory = area.path.clone();
     // Leased last, so every failure after it goes through `start_failure`, which revokes.
     let site = accounts::Site {
@@ -6385,6 +6391,7 @@ async fn resume_mission(
     // A harness started again is given its overlays again; one still running keeps what it has.
     let mut resumed_overlays = crate::directorates::section_00::agent::RunOverlays::default();
     let mut resumed_digests = None;
+    let mut resumed_knowledge = crate::station::overlays::RunKnowledge::default();
     let mut resumed_context = None;
     let mut resumed_theater_environment = None;
     if !review && reattach.is_none() {
@@ -6464,6 +6471,7 @@ async fn resume_mission(
             resumed_theater_environment = delivered.theater_environment;
             resumed_context = delivered.context;
             resumed_overlays = delivered.overlays;
+            resumed_knowledge = delivered.knowledge;
             // The overlays' environment does not override what is the Station's to set.
             configure_station_cover(
                 &state.roster,
@@ -6559,7 +6567,9 @@ async fn resume_mission(
             endpoint.open_plan_tools(review::PlanDesk::new(state.clone(), mission_id.clone()));
         }
         endpoint.open_compartment_tools(compartments::CompartmentDesk::new(state.clone()));
-        endpoint.open_report_tools(reports::ReportDesk::new(state.clone()));
+        endpoint.open_report_tools(
+            reports::ReportDesk::new(state.clone()).with_knowledge(resumed_knowledge),
+        );
         if let Some(role) = mission.role_id.as_deref() {
             endpoint.set_mission_role(role);
         }
@@ -6605,6 +6615,9 @@ async fn resume_mission(
     }
     #[cfg(not(feature = "cables-mcp"))]
     drop(resumed_theater_environment);
+    // Only the Cable tools serve what the overlays hold as knowledge.
+    #[cfg(not(feature = "cables-mcp"))]
+    drop(resumed_knowledge);
     let forward = Arc::new(Mutex::new(None));
     #[cfg(feature = "cables-mcp")]
     let cable = if resume_wrapped {

@@ -1,3 +1,9 @@
+---
+kind: tradecraft
+topics: [agent, clearance, role, handler]
+summary: Agents, clearance, roles, handlers and account pools.
+---
+
 # Agents and clearance
 
 An **Agent** is a configured codename that AI6 can post to a Mission. It is separate
@@ -1327,6 +1333,23 @@ tools or injected command.
 - **Secrets** reach an overlay only by reference (`{ secret = "name" }` or
   `{ provider = "env", key = "VAR" }` in `env` or an `aos` env file, never in dotenv), and only
   when granted to that overlay; a placeholder never reads a secret.
+
+### Knowledge
+
+An overlay's `kb/`, `flows/`, `references/` and `rules/` files, `CONTEXT.md` and the files its manifest
+names are its knowledge. A Run whose overlays serve any has three more tools beside `reports`:
+
+- `kb_list` lists the files, by overlay, with their sizes and lines.
+- `kb_read` reads one by its path, by lines when it is long. A file whose first line names a template
+  format (`#!envsubst`, `#!mustache`, or `aos`, the default, with `@path` includes and `${NAME}`) is rendered for
+  the call by [coqui-aos](https://boriken-dev.github.io/agent-overlay-spec/), never by AI6; one that
+  names `#!raw` or `#!markdown` is read as written.
+- `kb_search` finds the files that hold the words, best first, ranked as the Report search ranks Reports.
+
+What they may read and how much is bounded by the `knowledge_*` settings of
+`[overlays]` of the `station` record ([Configuration](configuration.md)) (`knowledge_file_bytes`, `knowledge_read_bytes`,
+`knowledge_rendered_bytes`, `knowledge_query_characters`, `knowledge_top`, `knowledge_context_bytes`,
+`knowledge_context_depth` and `knowledge_include_depth`).
 
 ### What a Run gets
 

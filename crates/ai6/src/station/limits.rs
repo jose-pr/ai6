@@ -829,6 +829,38 @@ pub struct OverlayLimits {
     #[schema(title = "Largest output of an overlay's step", format = "bytes")]
     #[map(default = OverlayLimits::default().output_bytes)]
     pub output_bytes: Limit,
+    /// Bytes of one knowledge file an overlay serves to a Run; a larger one is skipped.
+    #[schema(title = "Largest knowledge file", format = "bytes")]
+    #[map(default = OverlayLimits::default().knowledge_file_bytes)]
+    pub knowledge_file_bytes: Limit,
+    /// Bytes of one `kb_read` answer; a longer file is read in lines.
+    #[schema(title = "Largest knowledge read", format = "bytes")]
+    #[map(default = OverlayLimits::default().knowledge_read_bytes)]
+    pub knowledge_read_bytes: Limit,
+    /// Bytes of a knowledge file after its templates are rendered.
+    #[schema(title = "Largest rendered knowledge file", format = "bytes")]
+    #[map(default = OverlayLimits::default().knowledge_rendered_bytes)]
+    pub knowledge_rendered_bytes: Limit,
+    /// Characters of a `kb_search` query.
+    #[schema(title = "Longest knowledge search")]
+    #[map(default = OverlayLimits::default().knowledge_query_characters)]
+    pub knowledge_query_characters: Limit,
+    /// Passages one `kb_search` may ask for.
+    #[schema(title = "Most knowledge passages")]
+    #[map(default = OverlayLimits::default().knowledge_top)]
+    pub knowledge_top: Limit,
+    /// Bytes of the context a `kb_read` call gives a template.
+    #[schema(title = "Largest knowledge call context", format = "bytes")]
+    #[map(default = OverlayLimits::default().knowledge_context_bytes)]
+    pub knowledge_context_bytes: Limit,
+    /// Nesting of the context a `kb_read` call gives a template.
+    #[schema(title = "Deepest knowledge call context")]
+    #[map(default = OverlayLimits::default().knowledge_context_depth)]
+    pub knowledge_context_depth: Limit,
+    /// Nesting of `@path` includes and partials in a knowledge file.
+    #[schema(title = "Deepest knowledge include")]
+    #[map(default = OverlayLimits::default().knowledge_include_depth)]
+    pub knowledge_include_depth: Limit,
     /// The `dotagents.pyz` on the Station that runs the `cmds/` of an overlay holding them. An
     /// overlay with `cmds/` is refused without it. Default: none.
     #[schema(title = "dotagents for overlay commands")]
@@ -853,6 +885,14 @@ impl Default for OverlayLimits {
             fetch_timeout: Seconds::new(300),
             deps_timeout: Seconds::new(600),
             output_bytes: Limit::at(MIB),
+            knowledge_file_bytes: Limit::at(MIB),
+            knowledge_read_bytes: Limit::at(64 * 1024),
+            knowledge_rendered_bytes: Limit::at(MIB),
+            knowledge_query_characters: Limit::at(1000),
+            knowledge_top: Limit::at(100),
+            knowledge_context_bytes: Limit::at(16 * 1024),
+            knowledge_context_depth: Limit::at(8),
+            knowledge_include_depth: Limit::at(5),
             dotagents_pyz: None,
             dotagents_pin: None,
         }
@@ -860,6 +900,24 @@ impl Default for OverlayLimits {
 }
 
 impl OverlayLimits {
+    /// The bounds on what an overlay serves as knowledge.
+    pub fn knowledge_settings(&self) -> coqui_aos::KnowledgeSettings {
+        let bound = |limit: Limit| {
+            limit
+                .get()
+                .map_or(coqui_aos::Limit::UNBOUNDED, coqui_aos::Limit::at)
+        };
+        coqui_aos::KnowledgeSettings::default()
+            .max_file_bytes(bound(self.knowledge_file_bytes))
+            .max_read_bytes(bound(self.knowledge_read_bytes))
+            .max_rendered_bytes(bound(self.knowledge_rendered_bytes))
+            .max_query_characters(bound(self.knowledge_query_characters))
+            .max_top(bound(self.knowledge_top))
+            .max_context_bytes(bound(self.knowledge_context_bytes))
+            .max_context_depth(bound(self.knowledge_context_depth))
+            .max_include_depth(bound(self.knowledge_include_depth))
+    }
+
     /// The AOS reader's settings: the bounds on an overlay's tree and manifest. Every other bound is
     /// the reader's default.
     pub fn settings(&self) -> coqui_aos::Settings {
