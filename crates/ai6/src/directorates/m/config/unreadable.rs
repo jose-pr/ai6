@@ -78,28 +78,60 @@ pub(super) fn without_unreadable(
         ConfigRecord::Role,
         roster::unreadable_roles(&definitions(view, ConfigRecord::Role), source),
     );
-    // What belongs to a refused Operation goes with it, or the rest would be refused for it.
-    let operations: Vec<String> = refused
+    // What names a refused record goes with it, and what names that in turn: the rest would be
+    // refused for them, and a start must not exit on a stored record. A record names another as
+    // the family's convention has it (`places_naming`), a charge by its `operation:<id>` key, and
+    // an Operation's access record by its key.
+    let mut frontier: Vec<(ConfigRecord, String)> = refused
         .iter()
-        .filter(|record| record.family == ConfigRecord::Operation.name())
-        .map(|record| record.key.clone())
+        .filter_map(|record| {
+            ConfigRecord::from_name(&record.family).map(|family| (family, record.key.clone()))
+        })
         .collect();
-    for operation in operations {
-        let reason = format!("its Operation {operation:?} is refused");
-        let scope = format!("operation:{operation}");
-        for (record, key) in [
-            (ConfigRecord::Charge, scope.as_str()),
-            (ConfigRecord::OperationAccess, operation.as_str()),
-        ] {
-            if kept
-                .get_mut(&record)
-                .is_some_and(|records| records.remove(key).is_some())
-            {
+    while let Some((family, key)) = frontier.pop() {
+        for other in ConfigRecord::ALL {
+            if other.is_singleton() || other.is_whole_file() {
+                continue;
+            }
+            let Some(records) = kept.get(&other) else {
+                continue;
+            };
+            let dependents: Vec<String> = records
+                .iter()
+                .filter(|(name, definition)| {
+                    if other == family && **name == key {
+                        return false;
+                    }
+                    let keyed = family == ConfigRecord::Operation
+                        && match other {
+                            ConfigRecord::Charge => **name == format!("operation:{key}"),
+                            ConfigRecord::OperationAccess => **name == key,
+                            _ => false,
+                        };
+                    let mut places = Vec::new();
+                    if !family.is_singleton() && !family.is_whole_file() {
+                        super::places_naming(
+                            definition,
+                            &key,
+                            "",
+                            &super::NOT_RECORD_NAMES,
+                            &mut places,
+                        );
+                    }
+                    keyed || !places.is_empty()
+                })
+                .map(|(name, _)| name.clone())
+                .collect();
+            for name in dependents {
+                if let Some(records) = kept.get_mut(&other) {
+                    records.remove(&name);
+                }
                 refused.push(RefusedRecord {
-                    family: record.name().to_owned(),
-                    key: key.to_owned(),
-                    reason: reason.clone(),
+                    family: other.name().to_owned(),
+                    key: name.clone(),
+                    reason: format!("it names {} {key:?}, which is refused", family.name()),
                 });
+                frontier.push((other, name));
             }
         }
     }
