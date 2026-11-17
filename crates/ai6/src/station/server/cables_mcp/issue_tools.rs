@@ -26,6 +26,10 @@ struct CommentArgs {
     /// The comment, as Markdown. Do not include secrets; links go only to the tracker's and
     /// the repository's own hosts.
     body: String,
+    /// Why you make this call, in your own words. When green ink is needed, the person who
+    /// decides reads this; say what the step is for, not what it is.
+    #[serde(default)]
+    reason: Option<String>,
     /// Stable retry key; calling again with it returns the first answer and posts nothing.
     retry_key: String,
 }
@@ -36,6 +40,10 @@ struct AskArgs {
     issue: String,
     /// What you need to know to go on.
     question: String,
+    /// Why you make this call, in your own words. When green ink is needed, the person who
+    /// decides reads this; say what the step is for, not what it is.
+    #[serde(default)]
+    reason: Option<String>,
     /// Stable retry key, as for `issue_comment`.
     retry_key: String,
 }
@@ -62,6 +70,10 @@ struct UpdateArgs {
     /// Assignees to add. Needs green ink.
     #[serde(default)]
     assignees: Vec<String>,
+    /// Why you make this call, in your own words. When green ink is needed, the person who
+    /// decides reads this; say what the step is for, not what it is.
+    #[serde(default)]
+    reason: Option<String>,
     /// Stable retry key, as for `issue_comment`.
     retry_key: String,
 }
@@ -147,6 +159,7 @@ impl CableTools {
             run: run.to_owned(),
             agent: principal.agent().to_owned(),
             exposure: self.exposure.clone(),
+            reason: None,
         })
     }
 
@@ -197,7 +210,12 @@ impl CableTools {
     )]
     async fn issue_comment(&self, Parameters(args): Parameters<CommentArgs>) -> String {
         self.with_issues(move |desk, caller| {
-            desk.comment(caller, &args.issue, &args.body, &args.retry_key)
+            desk.comment(
+                &caller.because(args.reason),
+                &args.issue,
+                &args.body,
+                &args.retry_key,
+            )
         })
         .await
     }
@@ -208,7 +226,12 @@ impl CableTools {
     )]
     async fn issue_request_info(&self, Parameters(args): Parameters<AskArgs>) -> String {
         self.with_issues(move |desk, caller| {
-            desk.request_info(caller, &args.issue, &args.question, &args.retry_key)
+            desk.request_info(
+                &caller.because(args.reason),
+                &args.issue,
+                &args.question,
+                &args.retry_key,
+            )
         })
         .await
     }
@@ -227,7 +250,12 @@ impl CableTools {
                 reopen: args.reopen,
                 assignees: args.assignees,
             };
-            desk.update(caller, &args.issue, &request, &args.retry_key)
+            desk.update(
+                &caller.because(args.reason),
+                &args.issue,
+                &request,
+                &args.retry_key,
+            )
         })
         .await
     }

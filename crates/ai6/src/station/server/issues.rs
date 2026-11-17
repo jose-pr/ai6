@@ -46,6 +46,18 @@ pub(super) struct Caller {
     pub(super) run: String,
     pub(super) agent: String,
     pub(super) exposure: ExposureGate,
+    /// Why the Agent makes this call, in its own words; a gate it files carries it.
+    pub(super) reason: Option<String>,
+}
+
+impl Caller {
+    /// This caller, giving `reason` for the call.
+    pub(super) fn because(&self, reason: Option<String>) -> Self {
+        Self {
+            reason,
+            ..self.clone()
+        }
+    }
 }
 
 /// What an Agent asked to change on an issue.
@@ -306,7 +318,10 @@ impl IssueDesk {
                 caller,
                 ISSUE_COMMENT,
                 &link,
-                "posting on an issue its Run did not read",
+                &format!(
+                    "Post this comment on {}, which its Run did not read:\n\n{text}",
+                    link.name()
+                ),
                 retry_key,
                 true,
             )?)
@@ -396,7 +411,10 @@ impl IssueDesk {
                 caller,
                 ISSUE_COMMENT,
                 &link,
-                "asking on an issue its Run did not read",
+                &format!(
+                    "Ask this on {}, which its Run did not read:\n\n{text}",
+                    link.name()
+                ),
                 retry_key,
                 true,
             )?)
@@ -502,7 +520,7 @@ impl IssueDesk {
                     caller,
                     kind,
                     &link,
-                    "changing the state or assignees of an issue",
+                    &describe_update(&link, request),
                     retry_key,
                     caller
                         .exposure
@@ -1266,7 +1284,11 @@ impl IssueDesk {
             agent: caller.agent.clone(),
             kind: kind.to_owned(),
             target: link.name(),
-            reason: reason.to_owned(),
+            reason: gate_reason(
+                caller.reason.as_deref(),
+                reason,
+                self.state.intake.limits().approvals.reason_bytes,
+            ),
             links: Vec::new(),
             idempotency_key: key[..key.len().min(64)].to_owned(),
             exposed: always,
@@ -1337,6 +1359,40 @@ impl IssueDesk {
 enum Gate {
     Free,
     Pending(String),
+}
+
+/// What the approver reads: the Agent's own reason first, then what the Station knows of the step.
+/// Cut at the Registry's reason bound, on a character boundary.
+fn gate_reason(said: Option<&str>, step: &str, bound: crate::bounds::Limit) -> String {
+    let said = said.map(str::trim).filter(|said| !said.is_empty());
+    let mut text = said.map_or_else(|| step.to_owned(), |said| format!("{said}\n\n{step}"));
+    let most = bound.or_max();
+    if text.len() > most {
+        let mut end = most;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.truncate(end);
+    }
+    text
+}
+
+/// A sentence saying what an update changes, for a gate whose Agent gave no reason.
+fn describe_update(link: &IssueLink, request: &UpdateRequest) -> String {
+    let mut parts = Vec::new();
+    if request.close {
+        parts.push("close it".to_owned());
+    }
+    if request.reopen {
+        parts.push("reopen it".to_owned());
+    }
+    if let Some(name) = &request.transition {
+        parts.push(format!("move it by the workflow transition {name:?}"));
+    }
+    if !request.assignees.is_empty() {
+        parts.push(format!("assign {}", request.assignees.join(", ")));
+    }
+    format!("Change {}: {}.", link.name(), parts.join("; "))
 }
 
 fn proposal_answer(proposal: &IssueProposal) -> serde_json::Value {
@@ -1868,6 +1924,7 @@ mod tests {
             run: "provider-id-direct".to_owned(),
             agent: agent.to_owned(),
             exposure: ExposureGate::default(),
+            reason: None,
         }
     }
 
@@ -2108,6 +2165,48 @@ mod tests {
             .unwrap();
         assert_eq!(ok["status"], "queued");
         assert!(entries(&state, &mission)[0].body.contains("`@maint`"));
+    }
+
+    #[test]
+    fn a_gate_carries_the_reason_the_agent_gave_and_a_summary_otherwise() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, mission, desk) = station(root.path(), "reason", "");
+        let me = caller(&mission, "007");
+        let request = UpdateRequest {
+            close: true,
+            ..UpdateRequest::default()
+        };
+        let given = me.because(Some("The fix merged; the issue is done.".to_owned()));
+        desk.update(&given, "gh:o/r#1", &request, "r1").unwrap();
+        let assign = UpdateRequest {
+            assignees: vec!["sam".to_owned()],
+            ..UpdateRequest::default()
+        };
+        desk.update(&me, "gh:o/r#1", &assign, "r2").unwrap();
+        let reasons: Vec<String> = state
+            .intake
+            .mission_approvals("G", &mission, state.clock.now() as f64)
+            .unwrap()
+            .iter()
+            .map(|status| status.request().reason.clone())
+            .collect();
+        assert!(
+            reasons
+                .iter()
+                .any(|reason| reason.starts_with("The fix merged; the issue is done.")),
+            "{reasons:?}"
+        );
+        assert!(
+            reasons
+                .iter()
+                .any(|reason| reason.contains("assign sam") && reason.contains("gh:o/r#1")),
+            "{reasons:?}"
+        );
+        assert!(
+            reasons
+                .iter()
+                .all(|reason| !reason.contains("changing the state"))
+        );
     }
 
     #[test]
