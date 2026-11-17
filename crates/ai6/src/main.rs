@@ -700,12 +700,16 @@ async fn serve(args: ServeArgs) -> ExitCode {
     for weakening in &weakenings {
         eprintln!("ai6: warning: {weakening}");
     }
+    for refused in &located.refused {
+        eprintln!("ai6: starting degraded, {refused}");
+    }
     let station_config = ai6::StationConfig::default()
         .with_state_dir(&opened.state_dir)
         .with_protected_path(&opened.identity_dir)
         .with_sealing_dir(&opened.identity_dir)
         .with_protected_path(&opened.config_dir)
         .with_bootstrap_weakenings(weakenings)
+        .with_bootstrap_refusals(bootstrap_refusals(&located))
         .with_config_poll(located.value.provider.poll())
         .with_headquarters_lease(opened.lease);
     let mut config = ai6::ServeConfig::new(located.listen())
@@ -736,7 +740,23 @@ async fn serve(args: ServeArgs) -> ExitCode {
 
 /// The bootstrap file `--config` names, else the one the search finds, else the defaults.
 fn load_bootstrap(bootstrap: &BootstrapArg) -> Result<Located<Bootstrap>, String> {
-    Bootstrap::find(bootstrap.config.as_deref()).map_err(|error| error.to_string())
+    Bootstrap::find_degraded(bootstrap.config.as_deref()).map_err(|error| error.to_string())
+}
+
+/// What a degraded read of the bootstrap file left out, as the Station reports it.
+fn bootstrap_refusals(located: &Located<Bootstrap>) -> Vec<ai6::Degradation> {
+    located
+        .refused
+        .iter()
+        .map(|field| {
+            ai6::Degradation::new(
+                "bootstrap",
+                format!("{}: {}", field.file.display(), field.field),
+                field.reason.clone(),
+                vec![format!("what `{}` would have set", field.field)],
+            )
+        })
+        .collect()
 }
 
 /// What a Station opens from its bootstrap file before it serves.

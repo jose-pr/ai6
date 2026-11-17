@@ -64,7 +64,7 @@ struct Settings {
 }
 
 fn settings(cli: &Cli) -> Result<Settings, String> {
-    let mut located = ai6::bootstrap::Bootstrap::find(cli.config.as_deref())
+    let mut located = ai6::bootstrap::Bootstrap::find_degraded(cli.config.as_deref())
         .map_err(|error| error.to_string())?;
     let value = &mut located.value;
     if let Some(provider) = &cli.provider {
@@ -89,6 +89,15 @@ fn settings(cli: &Cli) -> Result<Settings, String> {
 /// read. Each is journaled; the gateway reports them to a person who reads Stations.
 fn degradations(settings: &Settings, snapshot: &ai6::ConfigSnapshot) -> Vec<ai6::Degradation> {
     let mut degraded = Vec::new();
+    for field in &settings.located.refused {
+        eprintln!("universal-exports: starting degraded, {field}");
+        degraded.push(ai6::Degradation::new(
+            "bootstrap",
+            format!("{}: {}", field.file.display(), field.field),
+            field.reason.clone(),
+            vec![format!("what `{}` would have set", field.field)],
+        ));
+    }
     for record in &snapshot.refused {
         eprintln!("universal-exports: configuration record refused, serving without it: {record}");
         degraded.push(ai6::Degradation::new(
@@ -1246,17 +1255,32 @@ mod tests {
             .expect("the gateway starts without the record");
         assert!(snapshot.roster.operation("G").is_ok());
 
-        let settings = Settings {
+        let mut settings = Settings {
             located: ai6::bootstrap::Located::default(),
             state_dir: PathBuf::new(),
         };
+        settings.located.refused.push(ai6::bootstrap::RefusedField {
+            file: PathBuf::from("ai6.cfg"),
+            field: "watch".to_owned(),
+            reason: "is not read here: `[watch]` is now `[charge]`".to_owned(),
+        });
         let degraded = degradations(&settings, &snapshot);
         let subjects: Vec<(&str, &str)> = degraded
             .iter()
             .map(|one| (one.kind.as_str(), one.subject.as_str()))
             .collect();
-        assert_eq!(subjects, [("config-record", "operation H")]);
-        assert!(degraded[0].reason.contains("mystery"), "{}", degraded[0].reason);
+        assert_eq!(
+            subjects,
+            [
+                ("bootstrap", "ai6.cfg: watch"),
+                ("config-record", "operation H")
+            ]
+        );
+        assert!(
+            degraded[1].reason.contains("mystery"),
+            "{}",
+            degraded[1].reason
+        );
     }
 
     #[tokio::test]

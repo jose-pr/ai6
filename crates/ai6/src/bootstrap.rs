@@ -923,6 +923,32 @@ pub struct Located<T> {
     pub value: T,
     /// The file it was read from; `None` when no file was found and every key is a default.
     pub path: Option<PathBuf>,
+    /// The tables and fields of the file left out because this release does not declare them
+    /// (only a degraded read, [`Bootstrap::find_degraded`], leaves any out).
+    pub refused: Vec<RefusedField>,
+}
+
+/// A table or field of a bootstrap file that a degraded read left out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefusedField {
+    /// The file it is in.
+    pub file: PathBuf,
+    /// Its dotted path in the file.
+    pub field: String,
+    /// Why it was left out: a rename names the new place.
+    pub reason: String,
+}
+
+impl fmt::Display for RefusedField {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{}: `{}` {}",
+            self.file.display(),
+            self.field,
+            self.reason
+        )
+    }
 }
 
 impl<T> Located<T> {
@@ -1038,6 +1064,97 @@ fn refuse_moved_limits(path: &Path) -> Result<(), BootstrapError> {
             moved.join("; ")
         ),
     ))
+}
+
+/// The dotted path of the field `message` says is not declared, found in `document`.
+/// The message names the field, and the whole path to it below the top.
+fn undeclared_path(message: &str, document: &serde_json::Value) -> Option<Vec<String>> {
+    let marker = "' is not a declared field";
+    let end = message.find(marker)?;
+    let name = message[..end].rsplit('\'').next()?;
+    // Below the top the message names the whole path, joined by dots.
+    let named: Vec<String> = name.split('.').map(str::to_owned).collect();
+    if named.len() > 1
+        && named
+            .iter()
+            .try_fold(document, |node, key| node.get(key.as_str()))
+            .is_some()
+    {
+        return Some(named);
+    }
+    let mut paths = Vec::new();
+    collect_paths(document, &mut Vec::new(), name, &mut paths);
+    // A bare name is the top-level one, the shortest path that has it.
+    paths.into_iter().min_by_key(Vec::len)
+}
+
+fn collect_paths(
+    node: &serde_json::Value,
+    at: &mut Vec<String>,
+    name: &str,
+    found: &mut Vec<Vec<String>>,
+) {
+    let Some(table) = node.as_object() else {
+        return;
+    };
+    for (key, child) in table {
+        at.push(key.clone());
+        if key == name {
+            found.push(at.clone());
+        }
+        collect_paths(child, at, name, found);
+        at.pop();
+    }
+}
+
+fn remove_path(document: &mut serde_json::Value, path: &[String]) -> bool {
+    let Some((last, parents)) = path.split_last() else {
+        return false;
+    };
+    let mut node = document;
+    for key in parents {
+        match node.get_mut(key.as_str()) {
+            Some(child) => node = child,
+            None => return false,
+        }
+    }
+    node.as_object_mut()
+        .is_some_and(|table| table.remove(last).is_some())
+}
+
+/// What `path` holds with every table or field this release does not declare taken out, and each
+/// one named, when taking them out is all `first` needs; `None` for any other fault.
+fn without_undeclared(
+    path: &Path,
+    first: &BootstrapError,
+) -> Option<(Bootstrap, Vec<RefusedField>)> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let parsed = format::parse(path, &text).ok()?;
+    let mut document = serde_json::to_value(guatiao_serde::Serializable::from(&parsed)).ok()?;
+    let mut refused = Vec::new();
+    let mut message = first.to_string();
+    loop {
+        let field = undeclared_path(&message, &document)?;
+        if !remove_path(&mut document, &field) {
+            return None;
+        }
+        let reason = match crate::directorates::m::config::RENAMED_TABLES
+            .iter()
+            .find(|(old, _)| field.len() == 1 && *old == field[0])
+        {
+            Some((old, new)) => format!("is not read here: `[{old}]` is now `[{new}]`"),
+            None => "is not a declared field of this release and is ignored".to_owned(),
+        };
+        refused.push(RefusedField {
+            file: path.to_owned(),
+            field: field.join("."),
+            reason,
+        });
+        match format::read_json::<Bootstrap>(&document) {
+            Ok(value) => return Bootstrap::resolved(path, value).ok().map(|v| (v, refused)),
+            Err(error) => message = error.to_string(),
+        }
+    }
 }
 
 /// Reads a bootstrap document of type `T` from `path`, in the format its extension names.
@@ -1226,6 +1343,7 @@ impl Bootstrap {
             Some(path) => Ok(Located {
                 value: Self::read(&path)?,
                 path: Some(path),
+                refused: Vec::new(),
             }),
             None => Ok(Located::default()),
         }
@@ -1239,7 +1357,47 @@ impl Bootstrap {
     /// As [`read_file`]; and `InvalidData` when `[unex] url` is empty.
     pub fn read(path: &Path) -> Result<Self, BootstrapError> {
         refuse_moved_limits(path)?;
-        let mut value: Self = read_file(path)?;
+        Self::resolved(path, read_file(path)?)
+    }
+
+    /// As [`Bootstrap::find`], but a table or field the file has and this release does not
+    /// declare is left out and named in [`Located::refused`], so the program starts degraded
+    /// instead of refusing to start. Any other fault is as [`Bootstrap::find`] reports it.
+    ///
+    /// # Errors
+    ///
+    /// As [`Bootstrap::find`], for everything but an undeclared field.
+    pub fn find_degraded(explicit: Option<&Path>) -> Result<Located<Self>, BootstrapError> {
+        Self::find_degraded_in(&SearchPath::new(FILE_NAME, CONFIG_ENV, explicit))
+    }
+
+    /// As [`Bootstrap::find_degraded`], along a given search path.
+    ///
+    /// # Errors
+    ///
+    /// As [`Bootstrap::find_degraded`].
+    pub fn find_degraded_in(search: &SearchPath) -> Result<Located<Self>, BootstrapError> {
+        let Some(path) = search.locate()? else {
+            return Ok(Located::default());
+        };
+        match Self::read(&path) {
+            Ok(value) => Ok(Located {
+                value,
+                path: Some(path),
+                refused: Vec::new(),
+            }),
+            Err(first) => match without_undeclared(&path, &first) {
+                Some((value, refused)) => Ok(Located {
+                    value,
+                    path: Some(path),
+                    refused,
+                }),
+                None => Err(first),
+            },
+        }
+    }
+
+    fn resolved(path: &Path, mut value: Self) -> Result<Self, BootstrapError> {
         let dir = path.parent().unwrap_or(Path::new("."));
         value.provider.resolve(dir);
         value.registry.resolve(dir);
@@ -1596,6 +1754,62 @@ mod tests {
             crate::bounds::TimeLimit::secs(9)
         );
         assert!(set.weakenings().is_empty());
+    }
+
+    #[test]
+    fn a_table_or_field_this_release_does_not_declare_is_left_out_and_named() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(FILE_NAME);
+        std::fs::write(
+            &path,
+            "[registry]\nheadquarters_lease = 30\n\
+             [watch.\"operation:X\"]\nagent = \"007\"\n\
+             [station]\nbogus = 1\nid = \"hq\"\n",
+        )
+        .unwrap();
+        let refusal = Bootstrap::find(Some(&path)).unwrap_err().to_string();
+        assert!(
+            refusal.contains("watch"),
+            "the strict read still refuses: {refusal}"
+        );
+
+        let degraded = Bootstrap::find_degraded(Some(&path)).unwrap();
+        let named: Vec<(&str, &str)> = degraded
+            .refused
+            .iter()
+            .map(|field| (field.field.as_str(), field.reason.as_str()))
+            .collect();
+        assert_eq!(named.len(), 2, "{named:?}");
+        assert!(
+            named.iter().any(|(field, reason)| *field == "watch"
+                && reason.contains("`[watch]` is now `[charge]`")),
+            "{named:?}"
+        );
+        assert!(
+            named.iter().any(|(field, _)| *field == "station.bogus"),
+            "{named:?}"
+        );
+        assert!(degraded.refused.iter().all(|field| field.file == path));
+        assert_eq!(
+            degraded.value.station.id.as_deref(),
+            Some("hq"),
+            "the rest is read"
+        );
+        assert_eq!(
+            degraded.value.registry.headquarters_lease(),
+            std::time::Duration::from_secs(30)
+        );
+
+        // Anything but an undeclared field is still refused.
+        std::fs::write(&path, "[station]\nid = 3\n").unwrap();
+        assert!(Bootstrap::find_degraded(Some(&path)).is_err());
+        std::fs::write(&path, "[station]\nid = \"a\"\n").unwrap();
+        assert!(
+            Bootstrap::find_degraded(Some(&path))
+                .unwrap()
+                .refused
+                .is_empty()
+        );
     }
 
     #[test]

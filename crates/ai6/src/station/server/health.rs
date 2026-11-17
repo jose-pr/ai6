@@ -255,6 +255,7 @@ pub(super) fn degradations(state: &DaemonState) -> Vec<Degradation> {
             ));
         }
     }
+    found.extend(state.station.bootstrap_refused.iter().cloned());
     found.extend(super::reload::record_degradations(state));
     for ((station, key), failure) in lock(&CLAIM_FAILURES).iter() {
         if *station == state.station_id {

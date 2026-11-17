@@ -95,8 +95,8 @@ use crate::directorates::m::mission::{
     Denial, LaunchManifest, Mission, MissionError, MissionState, MissionStore, RunHold,
 };
 use crate::directorates::m::placement::{
-    self, ExecutionMode, OperationPolicy, PlacementChoice, PlacementRequest, ResourceLimits,
-    StationFacts,
+    self, Degradation, ExecutionMode, OperationPolicy, PlacementChoice, PlacementRequest,
+    ResourceLimits, StationFacts,
 };
 use crate::directorates::m::roster;
 use crate::directorates::m::roster::AgentRole;
@@ -206,6 +206,8 @@ pub struct StationConfig {
     overlay_keeper: Arc<crate::station::overlays::Keeper>,
     /// What the bootstrap file gives up against the defaults, reported at check-in.
     bootstrap_weakened: Vec<String>,
+    /// What the bootstrap file holds that this release does not declare, and left out.
+    bootstrap_refused: Vec<Degradation>,
     /// The Station's own directories an assistant's interpreters may never read.
     protected_paths: Vec<PathBuf>,
     /// What the Station TLS policy gives up against the library's default, reported at
@@ -233,6 +235,15 @@ impl StationConfig {
     #[must_use]
     pub fn with_bootstrap_weakenings(mut self, weakenings: Vec<String>) -> Self {
         self.bootstrap_weakened = weakenings;
+        self
+    }
+
+    /// Reports `refused`, the tables and fields of the bootstrap file this release does not
+    /// declare and left out ([`Located::refused`](crate::bootstrap::Located::refused)), at every
+    /// check-in under `degraded`.
+    #[must_use]
+    pub fn with_bootstrap_refusals(mut self, refused: Vec<Degradation>) -> Self {
+        self.bootstrap_refused = refused;
         self
     }
 
@@ -403,6 +414,7 @@ impl Default for StationConfig {
             overlay_base: None,
             overlay_keeper: Arc::default(),
             bootstrap_weakened: Vec::new(),
+            bootstrap_refused: Vec::new(),
             protected_paths: Vec::new(),
             tls_weakened: Vec::new(),
             runner_pins: None,

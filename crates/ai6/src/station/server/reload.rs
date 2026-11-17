@@ -897,6 +897,25 @@ mod tests {
         assert!(state.current().roster.operation("H").is_ok());
     }
 
+    #[test]
+    fn what_the_bootstrap_file_left_out_is_reported_with_the_rest() {
+        let root = tempfile::tempdir().unwrap();
+        let mut state = test_state(root.path(), "", AGENTS);
+        state.station.bootstrap_refused = vec![Degradation::new(
+            "bootstrap",
+            "ai6.cfg: watch",
+            "is not read here: `[watch]` is now `[charge]`",
+            Vec::new(),
+        )];
+        let degraded = super::super::health::degradations(&state);
+        assert!(
+            degraded
+                .iter()
+                .any(|degradation| degradation.subject == "ai6.cfg: watch"),
+            "{degraded:?}"
+        );
+    }
+
     fn profiles_of(state: &DaemonState) -> Vec<String> {
         state
             .intake

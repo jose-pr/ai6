@@ -311,6 +311,17 @@ pub fn read<T: FromValue>(path: &Path, text: &str) -> Result<T, FormatError> {
     T::from_value(&parse(path, text)?).map_err(|error| FormatError::of(&error))
 }
 
+/// A `T` from a document already read into JSON, as [`read`] reads one from text.
+///
+/// # Errors
+///
+/// A [`FormatError`] naming the first key `T` refuses.
+pub fn read_json<T: FromValue>(document: &serde_json::Value) -> Result<T, FormatError> {
+    let value = guatiao_serde::adapt::to_value_in(document, Alloc::rust())
+        .map_err(|error| FormatError::of(&error))?;
+    T::from_value(&table_or_empty(value)).map_err(|error| FormatError::of(&error))
+}
+
 /// Reads `text` as `format`, whatever its first line says, into a serde type.
 ///
 /// # Errors
