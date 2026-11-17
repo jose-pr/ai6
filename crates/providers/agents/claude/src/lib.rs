@@ -4248,7 +4248,7 @@ denied_tools = [\"Bash(rm *)\"]
             json!([
                 {"tool": "Write", "target": "/w/a.txt"},
                 {"tool": "Bash", "target": "ls"},
-                {"tool": "Write", "target": "/w/a.txt"},
+                {"tool": "Write", "target": null},
             ]),
             "only the target of each call, never the rest of its input"
         );
