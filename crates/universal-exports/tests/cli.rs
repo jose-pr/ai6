@@ -118,7 +118,7 @@ fn ai6_cfg_and_the_provider_alone_start_the_gateway_on_the_listener_it_names() {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     let mut healthy = false;
     while std::time::Instant::now() < deadline {
-        if let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", port)) {
+        if let Some(mut stream) = connect_to(port) {
             use std::io::{Read, Write};
             let _ = stream
                 .write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
@@ -165,6 +165,23 @@ fn free_port() -> u16 {
         .port()
 }
 
+/// A connection to the gateway's port, or none while nothing listens there. Before the gateway
+/// binds the port, Windows may hand the client that same port and connect it to itself, which
+/// would then wait forever for its own answer, so such a stream is dropped, and reads time out.
+fn connect_to(port: u16) -> Option<std::net::TcpStream> {
+    let stream = std::net::TcpStream::connect(("127.0.0.1", port)).ok()?;
+    if stream.local_addr().ok()? == stream.peer_addr().ok()? {
+        return None;
+    }
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+        .ok()?;
+    stream
+        .set_write_timeout(Some(std::time::Duration::from_secs(10)))
+        .ok()?;
+    Some(stream)
+}
+
 /// What a program said as it stopped: its exit code and standard error. A program that goes on
 /// serving past the deadline is killed, and has no exit code to report.
 fn stopped(command: &mut Command) -> (Option<i32>, String) {
@@ -198,7 +215,7 @@ fn the_gateway_starts_from_the_one_file_every_program_shares() {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
     let mut listening = false;
     while std::time::Instant::now() < deadline && gateway.try_wait().unwrap().is_none() {
-        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+        if connect_to(port).is_some() {
             listening = true;
             break;
         }

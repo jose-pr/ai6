@@ -554,7 +554,10 @@ fn starts(dir: &Path, config: &Path, env: &[(&str, &str)]) -> String {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
     let mut listening = false;
     while std::time::Instant::now() < deadline && station.try_wait().unwrap().is_none() {
-        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+        // A client given the target port as its own connects to itself; that is not the Station.
+        if std::net::TcpStream::connect(("127.0.0.1", port))
+            .is_ok_and(|s| s.local_addr().ok() != s.peer_addr().ok())
+        {
             listening = true;
             break;
         }

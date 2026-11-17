@@ -149,7 +149,10 @@ echo started
             // The server is ready when the port answers.
             let deadline = Instant::now() + Duration::from_secs(15);
             while Instant::now() < deadline {
-                if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                // A client given the target port as its own connects to itself; that is not sshd.
+                if TcpStream::connect(("127.0.0.1", port))
+                    .is_ok_and(|s| s.local_addr().ok() != s.peer_addr().ok())
+                {
                     let pin = output_of(&format!(
                         "awk '{{print $2}}' {dir}/host_key.pub | base64 -d | sha256sum | cut -d' ' -f1"
                     ))?;
