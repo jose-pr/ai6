@@ -1450,6 +1450,7 @@ pub fn ai6::directorates::m::deliverables::declared(&[alloc::string::String], &a
 pub fn ai6::directorates::m::deliverables::parse_all(&[alloc::string::String]) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::deliverables::Deliverable>, ai6::directorates::m::deliverables::InvalidDeliverable>
 pub mod ai6::directorates::m::guides
 pub const ai6::directorates::m::guides::ID_PREFIX: &str
+pub fn ai6::directorates::m::guides::body(&str) -> &str
 pub fn ai6::directorates::m::guides::built_in() -> &'static [ai6::directorates::registry::reports::Report]
 pub fn ai6::directorates::m::guides::find(&str) -> core::option::Option<&'static ai6::directorates::registry::reports::Report>
 pub fn ai6::directorates::m::guides::kind_of(&str) -> core::option::Option<&'static str>
