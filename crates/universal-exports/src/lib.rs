@@ -811,6 +811,9 @@ pub struct Gateway {
     liaison: Option<Arc<liaison::LiaisonConfig>>,
     /// The providers this gateway process has loaded, reported beside each Station's.
     own_providers: Arc<Vec<ai6::providers::ProviderEntry>>,
+    /// What keeps this gateway from being whole while it serves: the stored records it left out
+    /// because they cannot be read, and the parts of its settings file it refused.
+    degraded: Arc<Vec<ai6::Degradation>>,
     /// What was last written for each person seen signing in.
     sightings: Arc<principals::Sightings>,
     /// Sign-ins that have waited for a next step, which paces the sweep of stale ones.
@@ -954,6 +957,7 @@ impl Gateway {
             images: None,
             liaison: None,
             own_providers: Arc::default(),
+            degraded: Arc::default(),
             sightings: Arc::default(),
             pending_begun: Arc::default(),
         }
@@ -1056,6 +1060,14 @@ impl Gateway {
     #[must_use]
     pub fn with_own_providers(mut self, providers: Vec<ai6::providers::ProviderEntry>) -> Self {
         self.own_providers = Arc::new(providers);
+        self
+    }
+
+    /// Reports what keeps this gateway from being whole, on `/v1/stations` to a person who reads a
+    /// Station.
+    #[must_use]
+    pub fn with_degraded(mut self, degraded: Vec<ai6::Degradation>) -> Self {
+        self.degraded = Arc::new(degraded);
         self
     }
 
@@ -2492,8 +2504,20 @@ async fn stations(
         .map_err(|_| ApiError::internal())?
         .as_secs_f64();
     let tree = OperationTree::from_check_ins(&station_records);
+    let degraded = gateway.degraded.clone();
     let visible = tokio::task::spawn_blocking(move || {
         let mut stations = Vec::new();
+        // The gateway is read as a Station is: by a rule that reads Stations at `*`, which holds
+        // when no Station has checked in.
+        let mut reads_any_station = authorizer
+            .authorize(AuthorizationRequest {
+                person: person.clone(),
+                action: "station.read".to_owned(),
+                resource: "station:gateway".to_owned(),
+                ancestors: Vec::new(),
+            })
+            .map_err(|_| ApiError::internal())?
+            .allowed;
         let mut readable = BTreeSet::new();
         for station in station_records {
             let reads_station = authorizer
@@ -2537,6 +2561,7 @@ async fn stations(
             }
             operations.sort();
             operations.dedup();
+            reads_any_station |= reads_station;
             let mut board = board_station(&station, &operations, now, headquarters.as_ref(), dark);
             // The report covers every Operation on the Station: it is the Station's to read.
             if !reads_station {
@@ -2582,9 +2607,15 @@ async fn stations(
                         .any(|station| station.station_id == lease.station())
             })
             .map(|lease| lease.station().to_owned());
+        let gateway_degraded = if reads_any_station {
+            degraded.as_ref().clone()
+        } else {
+            Vec::new()
+        };
         Ok::<_, ApiError>(StationBoard {
             stations,
             headquarters_station,
+            gateway_degraded,
             operations,
         })
     })
@@ -6094,6 +6125,11 @@ pub struct StationBoard {
     pub stations: Vec<BoardStation>,
     /// Current elected Headquarters Station, when visible and its lease is live.
     pub headquarters_station: Option<String>,
+    /// What keeps the gateway itself from being whole while it serves: a stored record it left
+    /// out, a part of its settings file it refused. Empty when it is whole, and for a person who
+    /// reads no Station.
+    #[serde(default)]
+    pub gateway_degraded: Vec<ai6::Degradation>,
     /// The Operations the person may read, from the Stations and the tree of Operations they
     /// publish, each with its nearest readable ancestor.
     pub operations: Vec<BoardOperation>,
@@ -9429,7 +9465,13 @@ mod tests {
             .with_proxy_identity(HeaderName::from_static("x-forwarded-user"), "name")
             .with_proxy_secret(PROXY_TEST_SECRET, 32)
             .unwrap(),
-        );
+        )
+        .with_degraded(vec![ai6::Degradation::new(
+            "config-record",
+            "operation H",
+            "refused, it cannot be read: workspace.mystery is not a declared field",
+            Vec::new(),
+        )]);
         for (station, mission, run) in [("G", "mission-g", "run-g"), ("L", "mission-l", "run-l")] {
             gateway
                 .register_run(
@@ -10093,6 +10135,11 @@ mod tests {
         assert_eq!(station_board.status(), StatusCode::OK);
         let station_board: serde_json::Value = station_board.json().await.unwrap();
         assert!(station_board["headquarters_station"].is_null());
+        assert_eq!(
+            station_board["gateway_degraded"],
+            serde_json::json!([]),
+            "a person who reads no Station is not told what is wrong with the gateway"
+        );
         assert_eq!(station_board["stations"].as_array().unwrap().len(), 1);
         assert_eq!(station_board["stations"][0]["station_id"], "worker");
         assert_eq!(station_board["stations"][0]["healthy"], true);
@@ -10125,6 +10172,14 @@ mod tests {
             .expect("station.read shows a Station that holds no checkout");
         assert_eq!(control["operations"], serde_json::json!([]));
         assert_eq!(operator_board["headquarters_station"], "hq");
+        assert_eq!(
+            operator_board["gateway_degraded"][0]["kind"],
+            "config-record"
+        );
+        assert_eq!(
+            operator_board["gateway_degraded"][0]["subject"],
+            "operation H"
+        );
         assert_eq!(
             worker["head_of_station"],
             serde_json::json!({

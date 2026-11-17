@@ -9,7 +9,8 @@ use sha2::{Digest, Sha256};
 
 use super::{
     ConfigDefinitions, ConfigProvider, ConfigRecord, ConfigRevision, ConfigScope, ConfigSnapshot,
-    Layer, assemble, check_placement, conflict, merged, provider_limits,
+    Layer, RENAMED_FILES, assemble, assemble_loading, check_placement, conflict, merged,
+    provider_limits, unknown_table,
 };
 use crate::bootstrap::format::{self, EXTENSIONS, Format};
 use crate::directorates::m::roster::{RosterError, RosterErrorKind, error, error_of};
@@ -66,6 +67,16 @@ impl FileProvider {
             .into_iter()
             .map(ConfigRecord::file)
             .collect();
+        for (old, new) in RENAMED_FILES {
+            for extension in EXTENSIONS {
+                if dir.join(format!("{old}.{extension}")).is_file() {
+                    return Err(error(format!(
+                        "{}: the family file `{old}` is now `{new}`",
+                        dir.join(format!("{old}.{extension}")).display()
+                    )));
+                }
+            }
+        }
         for stem in stems {
             let mut present = Vec::new();
             for extension in EXTENSIONS {
@@ -126,6 +137,20 @@ impl FileProvider {
         Ok(ConfigRevision::new(u64::from_le_bytes(number)))
     }
 
+    /// `station`'s view built by `assemble`.
+    fn build(&self, station: &str, assemble: Assembler) -> Result<ConfigSnapshot, RosterError> {
+        // The revision is taken before the files are parsed, so a file changed in between
+        // shows up as a change on the next poll rather than being missed.
+        let revision = self.digest(station)?;
+        let global = self.layer(&ConfigScope::Global)?;
+        let view = if station.is_empty() {
+            global
+        } else {
+            merged(&global, &self.layer(&ConfigScope::of_station(station))?)
+        };
+        assemble(revision, &view, Some(&self.root), &self.root.display())
+    }
+
     /// The records of every family file at `scope`.
     fn layer(&self, scope: &ConfigScope) -> Result<Layer, RosterError> {
         let mut layer = Layer::new();
@@ -135,6 +160,14 @@ impl FileProvider {
         Ok(layer)
     }
 }
+
+/// [`assemble`] or [`assemble_loading`]: what builds a view into a snapshot.
+type Assembler = fn(
+    ConfigRevision,
+    &Layer,
+    Option<&Path>,
+    &dyn std::fmt::Display,
+) -> Result<ConfigSnapshot, RosterError>;
 
 fn unavailable(path: &Path, failure: &io::Error) -> RosterError {
     error_of(
@@ -204,7 +237,7 @@ fn read_family(
     for (name, value) in document {
         let record = ConfigRecord::from_name(&name)
             .filter(|record| record.file() == stem)
-            .ok_or_else(|| in_file(&format!("unknown table `{name}`")))?;
+            .ok_or_else(|| in_file(&unknown_table(&name)))?;
         let records = layer.entry(record).or_default();
         if record.is_singleton() {
             if !value.is_object() {
@@ -442,16 +475,11 @@ impl ConfigProvider for FileProvider {
     }
 
     fn load(&self, station: &str) -> Result<ConfigSnapshot, RosterError> {
-        // The revision is taken before the files are parsed, so a file changed in between
-        // shows up as a change on the next poll rather than being missed.
-        let revision = self.digest(station)?;
-        let global = self.layer(&ConfigScope::Global)?;
-        let view = if station.is_empty() {
-            global
-        } else {
-            merged(&global, &self.layer(&ConfigScope::of_station(station))?)
-        };
-        assemble(revision, &view, Some(&self.root), &self.root.display())
+        self.build(station, assemble)
+    }
+
+    fn load_degraded(&self, station: &str) -> Result<ConfigSnapshot, RosterError> {
+        self.build(station, assemble_loading)
     }
 
     fn changes_since(
@@ -555,6 +583,95 @@ mod tests {
                 .changes_since("", changed.revision)
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn a_file_record_a_release_cannot_read_is_refused_alone_and_an_old_shape_is_migrated() {
+        let root = tempfile::tempdir().unwrap();
+        let provider = FileProvider::new(root.path());
+        write(
+            root.path(),
+            "operations.toml",
+            "[operation.G.workspace]\nprovider = \"git\"\nbase = \"trunk\"\n\
+             [operation.H.workspace]\nmystery = 1\n[operation.J]\nparent = \"H\"\n",
+        );
+        assert!(
+            provider.load("").is_err(),
+            "a running Station refuses the whole revision"
+        );
+        let loaded = provider
+            .load_degraded("")
+            .expect("the rest of the configuration loads");
+        assert_eq!(
+            loaded.roster.operation("G").unwrap().workspace.base,
+            "trunk"
+        );
+        assert!(loaded.roster.operation("H").is_err());
+        let refused: Vec<(&str, &str)> = loaded
+            .refused
+            .iter()
+            .map(|record| (record.family.as_str(), record.key.as_str()))
+            .collect();
+        assert_eq!(
+            refused,
+            [("operation", "H"), ("operation", "J")],
+            "its child goes with it"
+        );
+        assert!(
+            loaded.refused[0].reason.contains("mystery"),
+            "{:?}",
+            loaded.refused
+        );
+        assert_eq!(loaded.migrated.len(), 1, "{:?}", loaded.migrated);
+        assert_eq!(loaded.migrated[0].key, "G");
+
+        // What cannot be repaired by leaving records out is still an error.
+        write(
+            root.path(),
+            "agents.toml",
+            "[agent.007]\nhandler = 3\n[agent.008]\nextends = \"nobody\"\n",
+        );
+        assert!(provider.load_degraded("").is_err());
+    }
+
+    #[test]
+    fn a_renamed_table_or_family_file_is_refused_by_name_and_never_ignored() {
+        let root = tempfile::tempdir().unwrap();
+        let provider = FileProvider::new(root.path());
+        write(
+            root.path(),
+            "operations.toml",
+            "[operation.G]\n[watch.\"operation:G\"]\nagent = \"007\"\n",
+        );
+        let refused = provider.load("").unwrap_err().to_string();
+        assert!(refused.contains("`[watch]` is now `[charge]`"), "{refused}");
+
+        let root = tempfile::tempdir().unwrap();
+        write(
+            root.path(),
+            "watches.toml",
+            "[watch.\"operation:G\"]\nagent = \"007\"\n",
+        );
+        let refused = FileProvider::new(root.path())
+            .load("")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            refused.contains("watches") && refused.contains("is now `charges`"),
+            "{refused}"
+        );
+
+        let imported = crate::directorates::m::config::parse_document(
+            Path::new("watches.toml"),
+            None,
+            "[watch.\"operation:G\"]\nagent = \"007\"\n",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            imported.contains("`[watch]` is now `[charge]`"),
+            "{imported}"
         );
     }
 

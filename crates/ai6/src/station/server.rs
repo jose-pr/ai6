@@ -801,12 +801,13 @@ where
         .take()
         .unwrap_or_else(|| daemon_station_id(&state_dir));
     crate::directorates::registry::store::validate_station_id(&station_id)?;
-    let snapshot = config_source.load(&station_id).map_err(|error| {
+    let snapshot = config_source.load_degraded(&station_id).map_err(|error| {
         io::Error::new(
             io::ErrorKind::InvalidData,
             format!("AI6 configuration: {error}"),
         )
     })?;
+    reload::log_record_notes(&snapshot);
     let started = snapshot.clone();
     let runtime_base = reload::RuntimeParts {
         station: config.station.clone(),

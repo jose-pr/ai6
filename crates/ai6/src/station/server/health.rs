@@ -255,6 +255,7 @@ pub(super) fn degradations(state: &DaemonState) -> Vec<Degradation> {
             ));
         }
     }
+    found.extend(super::reload::record_degradations(state));
     for ((station, key), failure) in lock(&CLAIM_FAILURES).iter() {
         if *station == state.station_id {
             found.push(Degradation::new(

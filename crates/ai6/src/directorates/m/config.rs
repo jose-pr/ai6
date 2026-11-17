@@ -18,12 +18,16 @@
 //! new revision of the families that apply live without a restart.
 
 mod file;
+mod migrate;
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
 mod sql;
+mod unreadable;
 
 pub use file::FileProvider;
+pub use migrate::MigratedRecord;
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
 pub use sql::SqlProvider;
+pub use unreadable::RefusedRecord;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -1309,6 +1313,11 @@ pub struct ConfigSnapshot {
     pub roster: Roster,
     /// Everything else.
     pub settings: Settings,
+    /// The records a provider left out because they cannot be read, each with why. A snapshot
+    /// built with one is degraded: everything else is in it.
+    pub refused: Vec<RefusedRecord>,
+    /// The records read in the shape an earlier release stored, as they were migrated.
+    pub migrated: Vec<MigratedRecord>,
     /// A digest of each family's records in this view, to tell which families a later
     /// snapshot changed.
     fingerprints: BTreeMap<ConfigRecord, [u8; 32]>,
@@ -1321,6 +1330,8 @@ impl ConfigSnapshot {
             revision,
             roster,
             settings,
+            refused: Vec::new(),
+            migrated: Vec::new(),
             fingerprints: BTreeMap::new(),
         }
     }
@@ -1349,6 +1360,19 @@ pub trait ConfigProvider: Send + Sync {
     ///
     /// Returns an error when the configuration cannot be read or is not acceptable.
     fn load(&self, station: &str) -> Result<ConfigSnapshot, RosterError>;
+
+    /// As [`load`](ConfigProvider::load), for a program that starts with no configuration to
+    /// fall back on: a stored record that cannot be read is left out and named in
+    /// [`ConfigSnapshot::refused`], and the rest is the snapshot. A running Station keeps
+    /// using `load`, which refuses the whole revision and keeps the one it runs.
+    ///
+    /// # Errors
+    ///
+    /// As [`load`](ConfigProvider::load), when leaving records out does not make the
+    /// configuration acceptable.
+    fn load_degraded(&self, station: &str) -> Result<ConfigSnapshot, RosterError> {
+        self.load(station)
+    }
 
     /// The configuration of `station` again when the provider is no longer at revision
     /// `since`, else `None`.
@@ -1922,6 +1946,21 @@ fn whole_file_family(path: &Path, document: serde_json::Value) -> serde_json::Va
     }
 }
 
+/// Tables and family files a release renamed, old name first: the old one is refused by name,
+/// never ignored, so a deployment applying what it kept sees why nothing took effect.
+pub(crate) const RENAMED_TABLES: [(&str, &str); 1] = [("watch", "charge")];
+
+/// Family files renamed with them, old stem first.
+pub(crate) const RENAMED_FILES: [(&str, &str); 1] = [("watches", "charges")];
+
+/// The refusal of a table no family has: the rename that explains it when there is one.
+pub(crate) fn unknown_table(name: &str) -> RosterError {
+    match RENAMED_TABLES.iter().find(|(old, _)| *old == name) {
+        Some((old, new)) => error(format!("`[{old}]` is now `[{new}]`")),
+        None => error(format!("unknown table `{name}`")),
+    }
+}
+
 /// The records a configuration document holds, in the order they are stored. Each top-level
 /// table names a family: a table family's entries are its records, a singleton's or
 /// whole-file family's table is its one record, and `[[library]]` entries are `plugin` records
@@ -1974,7 +2013,7 @@ pub fn document_records(
         }
         let record = ConfigRecord::from_name(&name)
             .filter(|record| *record != ConfigRecord::Plugin)
-            .ok_or_else(|| error(format!("unknown table `{name}`")))?;
+            .ok_or_else(|| unknown_table(&name))?;
         let serde_json::Value::Object(entries) = value else {
             return Err(error(format!("`{name}` is not a table")));
         };
@@ -2139,6 +2178,38 @@ pub(crate) fn check_placement(
     Ok(())
 }
 
+/// [`assemble`] for a provider's `load`: a view some of whose records cannot be read is built
+/// without them, and the snapshot names them in `refused`. Only a record that is refused alone
+/// is left out; a view that still fails without them fails as a whole, with the first error.
+pub(crate) fn assemble_loading(
+    revision: ConfigRevision,
+    view: &Layer,
+    base: Option<&Path>,
+    source: &dyn fmt::Display,
+) -> Result<ConfigSnapshot, RosterError> {
+    let first = match assemble(revision, view, base, source) {
+        Ok(snapshot) => return Ok(snapshot),
+        Err(first) => first,
+    };
+    // Judged on the migrated records, as `assemble` reads them.
+    let moved = migrate::migrated(view);
+    let readable = moved.as_ref().map_or(view, |(layer, _)| layer);
+    let (kept, refused) = unreadable::without_unreadable(readable, source);
+    if refused.is_empty() {
+        return Err(first);
+    }
+    match assemble(revision, &kept, base, source) {
+        Ok(mut snapshot) => {
+            snapshot.refused = refused;
+            if let Some((_, migrated)) = moved {
+                snapshot.migrated = migrated;
+            }
+            Ok(snapshot)
+        }
+        Err(_) => Err(first),
+    }
+}
+
 /// Builds and checks the configuration of one view: the roster, every Agent resolved, and the
 /// settings. A relative path in the assistant settings is resolved against `base`.
 pub(crate) fn assemble(
@@ -2147,6 +2218,11 @@ pub(crate) fn assemble(
     base: Option<&Path>,
     source: &dyn fmt::Display,
 ) -> Result<ConfigSnapshot, RosterError> {
+    let moved = migrate::migrated(view);
+    let (view, migrated) = match &moved {
+        Some((layer, migrated)) => (layer, migrated.clone()),
+        None => (view, Vec::new()),
+    };
     let registry = registry_record(view).map_err(|reason| error(format!("{source}: {reason}")))?;
     let limits = &registry.provider;
     let family = |record: ConfigRecord| -> Vec<(String, serde_json::Value)> {
@@ -2316,6 +2392,8 @@ pub(crate) fn assemble(
         })
         .collect();
     Ok(ConfigSnapshot {
+        refused: Vec::new(),
+        migrated,
         revision,
         roster,
         settings: Settings {

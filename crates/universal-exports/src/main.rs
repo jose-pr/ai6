@@ -84,6 +84,30 @@ fn settings(cli: &Cli) -> Result<Settings, String> {
     Ok(Settings { located, state_dir })
 }
 
+/// What keeps the gateway from being whole while it serves: what its settings file holds that
+/// this release does not declare, and the stored records it left out because they cannot be
+/// read. Each is journaled; the gateway reports them to a person who reads Stations.
+fn degradations(settings: &Settings, snapshot: &ai6::ConfigSnapshot) -> Vec<ai6::Degradation> {
+    let mut degraded = Vec::new();
+    for record in &snapshot.refused {
+        eprintln!("universal-exports: configuration record refused, serving without it: {record}");
+        degraded.push(ai6::Degradation::new(
+            "config-record",
+            format!("{} {}", record.family, record.key),
+            format!("refused, it cannot be read: {}", record.reason),
+            vec![format!("what depends on this {}", record.family)],
+        ));
+    }
+    for record in &snapshot.migrated {
+        eprintln!(
+            "universal-exports: {} {:?} was stored in an older shape and is read as migrated \
+             ({}); saving it stores the new shape",
+            record.family, record.key, record.migration
+        );
+    }
+    degraded
+}
+
 /// SQL options from `[registry]` (timeouts) and the password `secret` refers to.
 fn sql_options(
     settings: &Settings,
@@ -168,7 +192,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         .map_err(|error| format!("[unex] station_token: {error}"))?;
     let provider = open_provider(&settings)?;
     let snapshot = provider
-        .load("")
+        .load_degraded("")
         .map_err(|error| format!("the configuration provider: {error}"))?;
     let record = snapshot.settings.unex.clone();
     for weakening in record.weakenings() {
@@ -233,7 +257,7 @@ async fn run(cli: Cli) -> Result<(), String> {
         };
         if seeded {
             snapshot = provider
-                .load("")
+                .load_degraded("")
                 .map_err(|error| format!("the configuration provider: {error}"))?;
         }
     }
@@ -264,6 +288,7 @@ async fn run(cli: Cli) -> Result<(), String> {
     };
     gateway = gateway
         .with_roster(provider.clone())
+        .with_degraded(degradations(&settings, &snapshot))
         .with_job_poll_max_wait(snapshot.roster.assistant().gateway().max_wait.0);
     // She is always wired in, so a later change to the record can switch her on, off or to another
     // Agent; until it does, a disabled one answers as if absent.
@@ -1202,6 +1227,37 @@ mod tests {
 
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn a_stored_record_the_gateway_cannot_read_is_left_out_and_reported_degraded() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("operations.toml"),
+            "[operation.G]\n[operation.H.workspace]\nmystery = 1\n",
+        )
+        .unwrap();
+        let provider = ai6::FileProvider::new(root.path());
+        assert!(
+            provider.load("").is_err(),
+            "a change is still checked whole"
+        );
+        let snapshot = provider
+            .load_degraded("")
+            .expect("the gateway starts without the record");
+        assert!(snapshot.roster.operation("G").is_ok());
+
+        let settings = Settings {
+            located: ai6::bootstrap::Located::default(),
+            state_dir: PathBuf::new(),
+        };
+        let degraded = degradations(&settings, &snapshot);
+        let subjects: Vec<(&str, &str)> = degraded
+            .iter()
+            .map(|one| (one.kind.as_str(), one.subject.as_str()))
+            .collect();
+        assert_eq!(subjects, [("config-record", "operation H")]);
+        assert!(degraded[0].reason.contains("mystery"), "{}", degraded[0].reason);
+    }
 
     #[tokio::test]
     async fn a_changed_unex_record_changes_a_running_gateways_limits_at_the_next_poll() {

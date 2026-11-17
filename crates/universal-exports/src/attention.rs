@@ -909,6 +909,7 @@ fn empty_board() -> StationBoard {
     StationBoard {
         stations: Vec::new(),
         headquarters_station: None,
+        gateway_degraded: Vec::new(),
         operations: Vec::new(),
     }
 }

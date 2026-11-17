@@ -7,7 +7,7 @@ use std::io;
 
 use super::{
     ConfigDefinitions, ConfigProvider, ConfigRecord, ConfigRevision, ConfigScope, ConfigSnapshot,
-    Layer, assemble, check_placement, conflict, merged,
+    Layer, RENAMED_TABLES, assemble, assemble_loading, check_placement, conflict, merged,
 };
 use crate::directorates::m::roster::{RosterError, RosterErrorKind, error, error_of};
 use crate::directorates::registry::sql::SqlOptions;
@@ -47,6 +47,22 @@ struct Records {
     rows: Vec<(ConfigRecord, Row)>,
 }
 
+/// A table of a family a release renamed that still holds records: they would be ignored, so
+/// the rename is named instead.
+fn refuse_renamed_tables(tx: &mut Tx<'_>) -> io::Result<()> {
+    let present = crate::directorates::registry::sql::db::schema_objects(tx)?;
+    for (old, new) in RENAMED_TABLES {
+        let name = format!("ai6_config_{old}");
+        if present.contains(&name) && !tx.query(&format!("SELECT 1 FROM {name}"), &[])?.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{SOURCE}: `[{old}]` is now `[{new}]`; the records in {name} are not read"),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn records(tx: &mut Tx<'_>) -> io::Result<Records> {
     // The revision is read first: a write landing between the statements shows up as a
     // change on the next poll rather than being missed.
@@ -83,8 +99,13 @@ fn revision_of(number: i64) -> Result<ConfigRevision, RosterError> {
         .map_err(|_| error(format!("{SOURCE}: invalid revision")))
 }
 
-/// `station`'s view (`""`: global only), checked and built.
-fn snapshot(records: &Records, station: &str) -> Result<ConfigSnapshot, RosterError> {
+/// `station`'s view (`""`: global only), checked and built. A view that is loaded leaves out
+/// the records it cannot read; one that checks a change refuses it whole.
+fn snapshot(
+    records: &Records,
+    station: &str,
+    loading: bool,
+) -> Result<ConfigSnapshot, RosterError> {
     let layers = layers(records)?;
     let global = layers
         .get(&ConfigScope::Global)
@@ -94,7 +115,8 @@ fn snapshot(records: &Records, station: &str) -> Result<ConfigSnapshot, RosterEr
         Some(own) if !station.is_empty() => merged(&global, own),
         _ => global,
     };
-    assemble(revision_of(records.revision)?, &view, None, &SOURCE)
+    let build = if loading { assemble_loading } else { assemble };
+    build(revision_of(records.revision)?, &view, None, &SOURCE)
 }
 
 fn failed(reason: io::Error) -> RosterError {
@@ -195,7 +217,11 @@ impl SqlProvider {
             };
             let mut revision = None;
             for station in stations {
-                revision = Some(snapshot(&records, &station).map_err(invalid)?.revision);
+                revision = Some(
+                    snapshot(&records, &station, false)
+                        .map_err(invalid)?
+                        .revision,
+                );
             }
             if !keep {
                 return Err(io::Error::new(io::ErrorKind::NotFound, "checked"));
@@ -257,7 +283,25 @@ impl SqlProvider {
 
 impl ConfigProvider for SqlProvider {
     fn load(&self, station: &str) -> Result<ConfigSnapshot, RosterError> {
-        snapshot(&self.db.read(records).map_err(failed)?, station)
+        let rows = self
+            .db
+            .read(|tx| {
+                refuse_renamed_tables(tx)?;
+                records(tx)
+            })
+            .map_err(failed)?;
+        snapshot(&rows, station, false)
+    }
+
+    fn load_degraded(&self, station: &str) -> Result<ConfigSnapshot, RosterError> {
+        let rows = self
+            .db
+            .read(|tx| {
+                refuse_renamed_tables(tx)?;
+                records(tx)
+            })
+            .map_err(failed)?;
+        snapshot(&rows, station, true)
     }
 
     fn changes_since(
@@ -914,6 +958,115 @@ mod tests {
     #[test]
     fn a_record_that_cannot_be_read_stops_the_search_on_every_database() {
         run(a_record_that_cannot_be_read_stops_the_search);
+    }
+
+    fn store_raw(provider: &SqlProvider, table: &str, key: &str, definition: &str) {
+        let (table, key, definition) = (table.to_owned(), key.to_owned(), definition.to_owned());
+        provider
+            .db
+            .write(Clock::Config, move |tx, revision| {
+                tx.execute(
+                    &format!("DELETE FROM {table} WHERE key = $1"),
+                    &[key.as_str().into()],
+                )?;
+                tx.execute(
+                    &format!(
+                        "INSERT INTO {table} (scope, key, definition, revision) \
+                         VALUES ('', $1, $2, $3)"
+                    ),
+                    &[
+                        key.as_str().into(),
+                        definition.as_str().into(),
+                        crate::directorates::registry::sql::db::Value::Int(revision),
+                    ],
+                )
+            })
+            .unwrap();
+    }
+
+    /// An Operation a release stored with its workspace fields where an earlier one declared
+    /// them, and one it cannot read at all.
+    fn a_stored_record_a_release_cannot_read_is_refused_alone_and_an_old_shape_is_migrated(
+        location: &str,
+    ) {
+        let provider = SqlProvider::open(location).unwrap();
+        seed(&provider);
+        store_raw(
+            &provider,
+            "ai6_config_operation",
+            "G",
+            r#"{"roster": ["007"], "workspace": {"provider": "git", "base": "trunk"}}"#,
+        );
+        store_raw(
+            &provider,
+            "ai6_config_operation",
+            "H",
+            r#"{"roster": ["007"], "workspace": {"mystery": 1}}"#,
+        );
+        assert!(
+            provider.load("").is_err(),
+            "a running Station refuses the whole revision"
+        );
+        let loaded = provider
+            .load_degraded("")
+            .expect("the gateway and Station still start");
+        assert_eq!(
+            loaded.roster.operation("G").unwrap().workspace.base,
+            "trunk",
+            "the old shape is read as the new one"
+        );
+        assert!(loaded.roster.operation("H").is_err(), "left out");
+        assert_eq!(loaded.refused.len(), 1, "{:?}", loaded.refused);
+        let refused = &loaded.refused[0];
+        assert_eq!(
+            (refused.family.as_str(), refused.key.as_str()),
+            ("operation", "H")
+        );
+        assert!(refused.reason.contains("mystery"), "{}", refused.reason);
+        assert_eq!(loaded.migrated.len(), 1);
+        assert_eq!(loaded.migrated[0].key, "G");
+
+        // A change is still checked whole: the unreadable record is no reason to take it.
+        let refusal = provider
+            .put(
+                ConfigRecord::Operation,
+                &GLOBAL,
+                "J",
+                &json!({"workspace": {"mystery": 1}}),
+            )
+            .unwrap_err();
+        assert_eq!(refusal.kind(), RosterErrorKind::Invalid, "{refusal}");
+    }
+
+    #[test]
+    fn a_sql_record_a_release_cannot_read_is_refused_alone_and_an_old_shape_is_migrated() {
+        run(a_stored_record_a_release_cannot_read_is_refused_alone_and_an_old_shape_is_migrated);
+    }
+
+    fn a_stored_family_a_release_renamed_is_refused_by_name(location: &str) {
+        let provider = SqlProvider::open(location).unwrap();
+        seed(&provider);
+        assert!(provider.load("").is_ok());
+        provider
+            .db
+            .write(Clock::Config, |tx, _| {
+                tx.execute(
+                    "CREATE TABLE ai6_config_watch (scope TEXT NOT NULL DEFAULT '', \
+                     key TEXT NOT NULL, definition TEXT NOT NULL, revision BIGINT NOT NULL, \
+                     PRIMARY KEY (scope, key))",
+                    &[],
+                )
+            })
+            .unwrap();
+        assert!(provider.load("").is_ok(), "an empty old table says nothing");
+        store_raw(&provider, "ai6_config_watch", "operation:G", "{}");
+        let refused = provider.load("").unwrap_err().to_string();
+        assert!(refused.contains("`[watch]` is now `[charge]`"), "{refused}");
+    }
+
+    #[test]
+    fn a_stored_family_a_release_renamed_is_refused_by_name_on_every_database() {
+        run(a_stored_family_a_release_renamed_is_refused_by_name);
     }
 
     #[test]

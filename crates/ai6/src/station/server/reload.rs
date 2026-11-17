@@ -19,6 +19,7 @@ use crate::directorates::m::compartments::{self, CompiledCompartments};
 use crate::directorates::m::config::{
     ConfigProvider, ConfigRecord, ConfigRevision, ConfigSnapshot, ConfigStatus,
 };
+use crate::directorates::m::placement::Degradation;
 use crate::directorates::m::reports::{self, ReportSettings};
 use crate::directorates::m::roster::{Roster, RosterError, RosterErrorKind};
 use crate::directorates::m::theaters::{Theater, Theaters};
@@ -70,6 +71,8 @@ struct Live {
     revision: Option<ConfigRevision>,
     /// The roster revision refused last, and why.
     refused: Option<(ConfigRevision, String)>,
+    /// The stored records the revision this Station runs left out because they cannot be read.
+    unreadable: Vec<crate::directorates::m::config::RefusedRecord>,
     needs_restart: BTreeSet<&'static str>,
     /// The `registry` record the Station's Registry applies now.
     registry: crate::directorates::m::config::RegistryRecord,
@@ -98,6 +101,7 @@ impl LiveConfig {
         let registry = started.settings.registry.clone();
         let started_station = started.settings.station.clone();
         let started_cables = started.settings.cables.clone();
+        let started_unreadable = started.refused.clone();
         Self {
             source: Some(source),
             base: None,
@@ -109,6 +113,7 @@ impl LiveConfig {
                 roster: Some(roster),
                 catalog,
                 revision: Some(revision),
+                unreadable: started_unreadable,
                 station: started_station,
                 cables: started_cables,
                 registry,
@@ -343,6 +348,47 @@ pub(super) fn poll(state: &DaemonState) -> bool {
     true
 }
 
+/// Logs the records `snapshot` left out because they cannot be read, and those it read in an
+/// older shape.
+pub(super) fn log_record_notes(snapshot: &ConfigSnapshot) {
+    for record in &snapshot.refused {
+        eprintln!("ai6: configuration record refused, the rest is applied: {record}");
+    }
+    for record in &snapshot.migrated {
+        eprintln!(
+            "ai6: {} {:?} was stored in an older shape and is read as migrated ({}); \
+             saving it stores the new shape",
+            record.family, record.key, record.migration
+        );
+    }
+}
+
+/// What the configuration this Station runs left out or refused, for its health.
+pub(super) fn record_degradations(state: &DaemonState) -> Vec<Degradation> {
+    let live = state.config.lock();
+    let mut found: Vec<Degradation> = live
+        .unreadable
+        .iter()
+        .map(|record| {
+            Degradation::new(
+                "config-record",
+                format!("{} {}", record.family, record.key),
+                format!("refused, it cannot be read: {}", record.reason),
+                vec![format!("what depends on this {}", record.family)],
+            )
+        })
+        .collect();
+    if let Some((revision, reason)) = &live.refused {
+        found.push(Degradation::new(
+            "config",
+            format!("revision {}", revision.get()),
+            format!("refused, the Station keeps the one it runs: {reason}"),
+            vec!["changes made since".to_owned()],
+        ));
+    }
+    found
+}
+
 /// Logs each compartment limit looser than its default, and a record that grants nothing because
 /// it cannot be read.
 pub(super) fn log_compartment_weakenings(state: &DaemonState) {
@@ -434,6 +480,10 @@ fn poll_provider(state: &DaemonState) -> (bool, bool) {
                 live.applied = Some(applied);
                 live.station = snapshot.settings.station.clone();
                 eprintln!("ai6: station settings applied");
+            }
+            if live.unreadable != snapshot.refused {
+                log_record_notes(&snapshot);
+                live.unreadable = snapshot.refused.clone();
             }
             live.roster = Some(Arc::new(snapshot.roster));
             live.revision = Some(snapshot.revision);
@@ -713,7 +763,7 @@ mod tests {
         source: Arc<dyn ConfigProvider>,
         loadouts: bool,
     ) {
-        let snapshot = source.load(&state.station_id).unwrap();
+        let snapshot = source.load_degraded(&state.station_id).unwrap();
         let catalog = loadouts.then(|| {
             (snapshot.settings.loadouts != LoadoutCatalog::default())
                 .then(|| Arc::new(snapshot.settings.loadouts.clone()))
@@ -792,6 +842,59 @@ mod tests {
         assert!(poll(&state));
         assert_eq!(priority(&state.current()), 8);
         assert!(state.config.status().refused.is_empty());
+    }
+
+    #[test]
+    fn a_stored_record_a_release_cannot_read_starts_the_station_degraded_naming_it() {
+        let root = tempfile::tempdir().unwrap();
+        let mut state = test_state(root.path(), "", AGENTS);
+        let operations = root.path().join("operations.toml");
+        let checkout = root.path().join("checkout");
+        let good = format!("[operation.G]\npath = {:?}\n", checkout.to_string_lossy());
+        fs::write(
+            &operations,
+            format!("{good}[operation.H.workspace]\nmystery = 1\n"),
+        )
+        .unwrap();
+        let source = Arc::new(FileProvider::new(root.path()));
+        let snapshot = source.load_degraded(&state.station_id).unwrap();
+        assert_eq!(snapshot.refused.len(), 1);
+        live(&mut state, root.path(), source, false);
+
+        let degraded = super::super::health::degradations(&state);
+        let named: Vec<_> = degraded
+            .iter()
+            .filter(|degradation| degradation.kind == "config-record")
+            .collect();
+        assert_eq!(named.len(), 1, "{degraded:?}");
+        assert_eq!(named[0].subject, "operation H");
+        assert!(named[0].reason.contains("mystery"), "{}", named[0].reason);
+        assert!(state.roster.operation("G").is_ok(), "the rest runs");
+        assert!(!poll(&state), "nothing changed, and nothing exits");
+
+        // A later revision with the record still unreadable is refused whole, and named too.
+        fs::write(
+            &operations,
+            format!("{good}[operation.H.workspace]\nmystery = 2\n"),
+        )
+        .unwrap();
+        assert!(!poll(&state));
+        assert!(
+            super::super::health::degradations(&state)
+                .iter()
+                .any(|degradation| degradation.kind == "config"),
+            "the refused revision is named"
+        );
+
+        // Mending the record clears it.
+        fs::write(&operations, format!("{good}[operation.H]\n")).unwrap();
+        assert!(poll(&state));
+        assert!(
+            super::super::health::degradations(&state)
+                .iter()
+                .all(|degradation| !degradation.kind.starts_with("config")),
+        );
+        assert!(state.current().roster.operation("H").is_ok());
     }
 
     fn profiles_of(state: &DaemonState) -> Vec<String> {

@@ -1917,6 +1917,94 @@ fn resolve_operations(
     Ok(operations)
 }
 
+/// The `roster` record's settings, every unset one at its default.
+pub(crate) fn roster_settings(
+    definition: Option<&serde_json::Value>,
+    source: &dyn fmt::Display,
+) -> Result<RosterSettings, RosterError> {
+    let Some(definition) = definition else {
+        return Ok(RosterSettings::default());
+    };
+    let settings: RosterSettings = records::from_json(definition)
+        .map_err(|reason| error(format!("{source}: roster: {reason}")))?;
+    settings
+        .validate()
+        .map_err(|reason| error(format!("{source}: {reason}")))?;
+    Ok(settings)
+}
+
+/// The Operation records that cannot be read, each with why. An Operation is probed with the
+/// ancestors it inherits from, so one whose parent is unreadable is unreadable too.
+pub(crate) fn unreadable_operations(
+    definitions: &[(String, serde_json::Value)],
+    settings: &RosterSettings,
+    source: &dyn fmt::Display,
+) -> Vec<(String, String)> {
+    let by_id: BTreeMap<&str, &serde_json::Value> = definitions
+        .iter()
+        .map(|(id, definition)| (id.as_str(), definition))
+        .collect();
+    let mut unreadable = Vec::new();
+    for (id, definition) in definitions {
+        let mut chain = vec![(id.clone(), definition.clone())];
+        let mut seen = BTreeSet::from([id.as_str()]);
+        let mut current = definition;
+        while let Some(parent) = current.get("parent").and_then(serde_json::Value::as_str)
+            && seen.insert(parent)
+            && let Some(next) = by_id.get(parent)
+        {
+            chain.push((parent.to_owned(), (*next).clone()));
+            current = next;
+        }
+        if let Err(reason) = resolve_operations(chain, settings, source) {
+            unreadable.push((id.clone(), reason.to_string()));
+        }
+    }
+    unreadable
+}
+
+/// The Agent records that cannot be read as an Agent, each with why.
+pub(crate) fn unreadable_agents(
+    definitions: &[(String, serde_json::Value)],
+) -> Vec<(String, String)> {
+    definitions
+        .iter()
+        .filter_map(|(id, definition)| {
+            let read = records::from_json::<AgentDefinition>(definition)
+                .map_err(|reason| reason.to_string())
+                .and_then(|definition| {
+                    definition
+                        .budget
+                        .resolve()
+                        .map(|_| ())
+                        .map_err(|message| message.to_string())
+                });
+            read.err().map(|reason| (id.clone(), reason))
+        })
+        .collect()
+}
+
+/// The role records that cannot be read, each with why.
+pub(crate) fn unreadable_roles(
+    definitions: &[(String, serde_json::Value)],
+    source: &dyn fmt::Display,
+) -> Vec<(String, String)> {
+    definitions
+        .iter()
+        .filter_map(|(id, definition)| {
+            let read = records::from_json::<AgentRoleDefinition>(definition)
+                .map_err(|reason| reason.to_string())
+                .and_then(|definition| {
+                    definition
+                        .resolve(id.clone(), source)
+                        .map(|_| ())
+                        .map_err(|reason| reason.to_string())
+                });
+            read.err().map(|reason| (id.clone(), reason))
+        })
+        .collect()
+}
+
 #[derive(Debug, Default, FromValue)]
 #[map(deny_unknown_fields)]
 struct AgentsDocument {
