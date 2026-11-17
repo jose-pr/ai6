@@ -210,6 +210,12 @@ pub struct SchedulerLimits {
     #[schema(title = "A Station that gave a brief back is left out for")]
     #[map(default = SchedulerLimits::default().claim_exclusion)]
     pub claim_exclusion: Seconds,
+    /// Seconds before a brief whose claim the Registry failed with an error is claimed again; each
+    /// failure in a row doubles the wait, up to `retry_backoff_max`. `0` retries on the next
+    /// round. Each failure is logged with the Registry's error.
+    #[schema(title = "Retry a failed brief claim after")]
+    #[map(default = SchedulerLimits::default().claim_backoff)]
+    pub claim_backoff: Seconds,
     /// Seconds the Station waits for each of its loops when it stops.
     #[schema(title = "Wait for each loop when stopping")]
     #[map(default = SchedulerLimits::default().shutdown_wait)]
@@ -231,6 +237,7 @@ impl Default for SchedulerLimits {
             found_libraries: Limit::at(64),
             claim_progress: TimeLimit::secs(30 * 60),
             claim_exclusion: Seconds::new(15 * 60),
+            claim_backoff: Seconds::new(5),
             shutdown_wait: Seconds::new(2),
         }
     }

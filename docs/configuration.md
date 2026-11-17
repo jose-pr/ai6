@@ -1269,6 +1269,7 @@ provider applied before it was a key; the provider's API header lists them with 
 | `found_libraries` | 64 | **Most unloaded libraries listed.** Libraries found on the plugin paths but not loaded that a check-in lists for a person to approve; past it, the rest are left out. |
 | `claim_progress` | 1,800 | **A claim may make no progress for.** Seconds a Run this Station holds may make no progress (no output, no event with content) before the Station gives its brief back to be placed again; `none` never does. |
 | `claim_exclusion` | 900 | **A Station that gave a brief back is left out for.** Seconds a Station that gave a brief back for making no progress is left out when the brief is placed again. |
+| `claim_backoff` | 5 | **Retry a failed brief claim after.** Seconds before a brief whose claim the Registry failed with an error is claimed again; each failure in a row doubles the wait, up to `retry_backoff_max`. `0` retries on the next round. Each failure is logged with the Registry's error. |
 | `shutdown_wait` | 2 | **Wait for each loop when stopping.** Seconds the Station waits for each of its loops when it stops. |
 <!-- schema:record.station.scheduler:end -->
 

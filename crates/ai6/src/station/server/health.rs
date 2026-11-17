@@ -24,6 +24,60 @@ pub(super) struct Canary {
     pub(super) failed: Option<String>,
 }
 
+/// A brief whose claim the Registry refused with an error, and when it may be tried again.
+#[derive(Debug, Clone, PartialEq)]
+struct ClaimFailure {
+    /// Failures in a row.
+    failures: u32,
+    /// Unix seconds before which the claim is not tried again.
+    retry_at: f64,
+    /// What the Registry said.
+    reason: String,
+}
+
+/// The claims that failed on a Registry error, by Station and brief key.
+static CLAIM_FAILURES: Mutex<BTreeMap<(String, String), ClaimFailure>> =
+    Mutex::new(BTreeMap::new());
+
+/// Whether the claim of brief `key` is still backing off from a Registry error.
+pub(super) fn claim_backed_off(state: &DaemonState, key: &str) -> bool {
+    lock(&CLAIM_FAILURES)
+        .get(&(state.station_id.clone(), key.to_owned()))
+        .is_some_and(|failure| failure.retry_at > unix_now())
+}
+
+/// Journals a claim that failed on a Registry error and holds it off for `[scheduler]
+/// claim_backoff`, doubled for each failure in a row up to `retry_backoff_max`.
+pub(super) fn claim_failed(state: &DaemonState, key: &str, error: &std::io::Error) {
+    let scheduler = &state.station.limits().scheduler;
+    let mut failures = lock(&CLAIM_FAILURES);
+    let entry = failures
+        .entry((state.station_id.clone(), key.to_owned()))
+        .or_insert(ClaimFailure {
+            failures: 0,
+            retry_at: 0.0,
+            reason: String::new(),
+        });
+    entry.failures = entry.failures.saturating_add(1);
+    let wait = scheduler
+        .claim_backoff
+        .0
+        .saturating_mul(2u32.saturating_pow(entry.failures - 1))
+        .min(scheduler.retry_backoff_max.0.max(scheduler.claim_backoff.0));
+    entry.retry_at = unix_now() + wait.as_secs_f64();
+    entry.reason = error.to_string();
+    eprintln!(
+        "ai6: claiming brief {key} failed {} time(s) in a row, trying again in {:.0} s: {error}",
+        entry.failures,
+        wait.as_secs_f64()
+    );
+}
+
+/// Forgets the failures of the claim of brief `key`: it was claimed.
+pub(super) fn claim_succeeded(state: &DaemonState, key: &str) {
+    lock(&CLAIM_FAILURES).remove(&(state.station_id.clone(), key.to_owned()));
+}
+
 /// The write checks by Station and `operation/instance`.
 static CANARIES: Mutex<BTreeMap<(String, String), Canary>> = Mutex::new(BTreeMap::new());
 
@@ -198,6 +252,19 @@ pub(super) fn degradations(state: &DaemonState) -> Vec<Degradation> {
                 source.clone(),
                 why.clone(),
                 vec!["reports and comments to this tracker".to_owned()],
+            ));
+        }
+    }
+    for ((station, key), failure) in lock(&CLAIM_FAILURES).iter() {
+        if *station == state.station_id {
+            found.push(Degradation::new(
+                "claim",
+                key.clone(),
+                format!(
+                    "the Registry failed its claim {} time(s) in a row: {}",
+                    failure.failures, failure.reason
+                ),
+                vec!["this brief being placed".to_owned()],
             ));
         }
     }

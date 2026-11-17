@@ -2010,6 +2010,9 @@ fn schedule_intake_once(state: &DaemonState) -> bool {
         let Ok(mission_id) = mission_id_for_brief(&brief) else {
             continue;
         };
+        if health::claim_backed_off(state, &brief.key()) {
+            continue;
+        }
         if !matches!(
             vetting.admit(&brief, mission_id.as_str()),
             vetting::Admission::Place
@@ -2023,12 +2026,16 @@ fn schedule_intake_once(state: &DaemonState) -> bool {
                     "mission_id".to_owned(),
                     serde_json::json!(mission_id.as_str()),
                 )]);
-                if let Ok(Some(lease)) = state.intake.claim_with_lease(
+                let claimed = state.intake.claim_with_lease(
                     Some(&brief.key()),
                     station,
                     state.mission_lease(),
                     meta,
-                ) {
+                );
+                if let Err(error) = &claimed {
+                    health::claim_failed(state, &brief.key(), error);
+                }
+                if let Ok(Some(lease)) = claimed {
                     let _ = finish_intake_claim(
                         state,
                         &lease,
@@ -2069,13 +2076,21 @@ fn schedule_intake_once(state: &DaemonState) -> bool {
         meta.insert("operation".to_owned(), serde_json::json!(operation_id));
         meta.insert("agent".to_owned(), serde_json::json!(agent_id));
         meta.insert("role".to_owned(), serde_json::json!(role_id));
-        let Ok(Some(lease)) = state.intake.claim_with_lease(
+        let lease = match state.intake.claim_with_lease(
             Some(&brief.key()),
             &execution_station,
             state.mission_lease(),
             meta,
-        ) else {
-            continue;
+        ) {
+            Ok(Some(lease)) => {
+                health::claim_succeeded(state, &brief.key());
+                lease
+            }
+            Ok(None) => continue,
+            Err(error) => {
+                health::claim_failed(state, &brief.key(), &error);
+                continue;
+            }
         };
         if lease.station() == station
             && let Err(error) = create_intake_mission(
@@ -11665,6 +11680,65 @@ queue = 1
             .expect("the brief is placed rather than failed for want of a local handler");
         assert_eq!(lease.station(), "worker-b");
         assert_eq!(lease.meta()["agent"], "007");
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[test]
+    fn a_claim_the_registry_fails_is_journaled_and_backed_off_not_retried_every_round() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = control_only_state(dir.path(), "remote-harness");
+        let database = dir.path().join("registry.db");
+        state.intake =
+            Arc::new(crate::SqlRegistry::open(&format!("sqlite:{}", database.display())).unwrap());
+        publish_station_check_in(&state);
+        worker_check_in(&state, "worker-b", (0, 2), &["remote-harness"]);
+        let key = queue_brief(&state, "doomed", None);
+        // A database whose leases table refuses every new row, as a leftover NOT NULL column does.
+        let other = rusqlite::Connection::open(&database).unwrap();
+        other
+            .execute_batch(
+                "CREATE TRIGGER refuse_leases BEFORE INSERT ON ai6_brief_leases \
+                 BEGIN SELECT RAISE(ABORT, 'NOT NULL constraint failed: ai6_brief_leases.attempt'); END",
+            )
+            .unwrap();
+        let failures = |state: &DaemonState| {
+            health::degradations(state)
+                .into_iter()
+                .find(|degradation| degradation.kind == "claim" && degradation.subject == key)
+        };
+
+        assert!(schedule_intake_once(&state));
+        assert!(state.intake.lease(&key).unwrap().is_none());
+        assert!(health::claim_backed_off(&state, &key));
+        let first = failures(&state).expect("the failed claim is reported degraded");
+        assert!(first.reason.contains("1 time(s)"), "{}", first.reason);
+        assert!(first.reason.contains("NOT NULL"), "{}", first.reason);
+
+        assert!(schedule_intake_once(&state));
+        let waiting = failures(&state).unwrap();
+        assert!(
+            waiting.reason.contains("1 time(s)"),
+            "the next round leaves it alone while it backs off: {}",
+            waiting.reason
+        );
+
+        // With no wait the claim is tried on the next round, and each failure is still counted.
+        health::claim_succeeded(&state, &key);
+        std::sync::Arc::make_mut(&mut state.station.limits)
+            .scheduler
+            .claim_backoff = crate::bounds::Seconds::new(0);
+        assert!(schedule_intake_once(&state));
+        assert!(failures(&state).unwrap().reason.contains("1 time(s)"));
+        assert!(schedule_intake_once(&state));
+        assert!(failures(&state).unwrap().reason.contains("2 time(s)"));
+
+        other.execute_batch("DROP TRIGGER refuse_leases").unwrap();
+        assert!(schedule_intake_once(&state));
+        assert!(
+            state.intake.lease(&key).unwrap().is_some(),
+            "claimed once it can be"
+        );
+        assert!(failures(&state).is_none());
     }
 
     #[test]
