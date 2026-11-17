@@ -37,6 +37,7 @@ fn issue_policy_example() -> Value {
     json!({
         "preset": "licensed",
         "updates": "all",
+        "writes": "any",
         "max_body_bytes": 4096,
         "posts_per_hour": 3,
         "post_burst": 2,

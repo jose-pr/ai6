@@ -2480,7 +2480,9 @@ fn fence_out(state: &DaemonState, mission_id: &str) {
 fn check_in_round(state: &DaemonState) {
     renew_run_leases(state);
     health::surrender_stuck(state);
-    if holds_headquarters_now(state) {
+    // The Registry is asked who holds Headquarters only when a check is due, so a check-in's
+    // statements do not grow with it.
+    if health::canary_due(state, unix_now()) && holds_headquarters_now(state) {
         health::run_canaries(state, unix_now());
     }
     publish_station_check_in(state);

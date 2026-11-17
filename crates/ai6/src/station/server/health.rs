@@ -27,6 +27,25 @@ pub(super) struct Canary {
 /// The write checks by Station and `operation/instance`.
 static CANARIES: Mutex<BTreeMap<(String, String), Canary>> = Mutex::new(BTreeMap::new());
 
+/// When this Station last looked into running its write checks, by Station.
+static ASKED: Mutex<BTreeMap<String, f64>> = Mutex::new(BTreeMap::new());
+
+/// Whether `[sources] canary_every` has passed since this Station last looked into its write
+/// checks; answering yes starts the next period.
+pub(super) fn canary_due(state: &DaemonState, now: f64) -> bool {
+    let Some(every) = state.station.limits().sources.canary_every.get() else {
+        return false;
+    };
+    let mut asked = lock(&ASKED);
+    let due = asked
+        .get(&state.station_id)
+        .is_none_or(|last| *last + every.as_secs_f64() <= now);
+    if due {
+        asked.insert(state.station_id.clone(), now);
+    }
+    due
+}
+
 fn lock<T>(held: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     held.lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
