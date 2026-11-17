@@ -1346,7 +1346,7 @@ dependencies = [
 [[package]]
 name = "coqui-aos"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-aos?rev=5176974f30f664a4a9c382fdd467d4a1ab87765b#5176974f30f664a4a9c382fdd467d4a1ab87765b"
+source = "git+https://github.com/Boriken-Dev/coqui-aos?rev=c4babfd9f15347a7d35d0fc25fa28cbe398ac02f#c4babfd9f15347a7d35d0fc25fa28cbe398ac02f"
 dependencies = [
  "base64 0.22.1",
  "granit-parser 2.0.0",
@@ -1354,6 +1354,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "toml 1.1.8+spec-1.1.0",
+ "tplx-rs",
  "unicode-general-category",
 ]
 
@@ -2036,7 +2037,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3918,7 +3919,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4411,7 +4412,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5197,7 +5198,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5495,6 +5496,15 @@ name = "tower-service"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
+
+[[package]]
+name = "tplx-rs"
+version = "0.1.0"
+source = "git+https://github.com/jose-pr/tplx-rs?rev=0298ec416a1676d088abf4f8519812ec4b5eb1e1#0298ec416a1676d088abf4f8519812ec4b5eb1e1"
+dependencies = [
+ "serde_json",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "tracing"
@@ -5991,7 +6001,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

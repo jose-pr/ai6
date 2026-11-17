@@ -29,7 +29,7 @@ guatiao-intake = { git = "https://github.com/Boriken-Dev/guatiao", rev = "e0136d
 guatiao-serde = { git = "https://github.com/Boriken-Dev/guatiao", rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e", default-features = false }
 # The Agent Overlay Spec: reading, validating, composing and the tree digest of overlays, on the
 # same guatiao revision as above.
-coqui-aos = { git = "https://github.com/Boriken-Dev/coqui-aos", rev = "5176974f30f664a4a9c382fdd467d4a1ab87765b" }
+coqui-aos = { git = "https://github.com/Boriken-Dev/coqui-aos", rev = "c4babfd9f15347a7d35d0fc25fa28cbe398ac02f" }
 # Chooses a configuration document's format and hands it to a codec over guatiao's value.
 anycfg = { git = "https://github.com/jose-pr/anycfg-rs", rev = "bf71f7097a550037972a0651e8bd35747b8dcd11" }
 # Shared access kinds, models, role authorizer and the five access providers, pinned to the
