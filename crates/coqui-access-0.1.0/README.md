@@ -59,7 +59,7 @@ impl Authenticator for Always {
 | --- | --- |
 | `Authenticator`, `Directory`, `Authorizer`, `Accounts`, `SignInPolicy` | The five kinds. |
 | `Attempt`, `Verdict`, `Lookup`, `Person` | Authentication and lookup models. |
-| `Subject` | `account:<name>`, `person:<id>` or `group:<name>`, as policies write who they name. |
+| `Subject` | `account:<name>`, `person:<id>`, `group:<name>` or `any:signed-in`, as policies write who they name. |
 | `AuthorizationRequest`, `AuthorizationDecision` | Authorization models. |
 | `AccountInfo`, `AccountPut`, `PutOutcome`, `Waiting` | Account management models. |
 | `SignInContext`, `SignInDecision`, `Factor`, `Offer` | Sign-in policy models. |

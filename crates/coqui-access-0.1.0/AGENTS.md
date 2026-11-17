@@ -123,19 +123,24 @@ pub mod takes    { /* PASSWORD, KEY, REQUEST, */ pub const OTP: &str; }   // "ot
 
 ```rust
 #[non_exhaustive]
-pub enum Subject { Account(String), Person(String), Group(String) }  // Clone, Eq, Ord, Hash
+pub enum Subject { Account(String), Person(String), Group(String), AnySignedIn }  // Clone, Eq, Ord, Hash
 impl Subject {
-    pub fn kind(&self) -> &'static str;          // "account" | "person" | "group"
-    pub fn value(&self) -> &str;
+    pub fn kind(&self) -> &'static str;          // "account" | "person" | "group" | "any"
+    pub fn value(&self) -> &str;                 // "signed-in" for AnySignedIn
     pub fn matches(&self, person: &Person) -> bool;
 }
-impl FromStr for Subject { type Err = SubjectError; }   // "account:<name>", "person:<id>", "group:<name>"
+impl FromStr for Subject { type Err = SubjectError; }   // "account:<name>", "person:<id>", "group:<name>", "any:signed-in"
 impl Display for Subject;                               // the same text
 pub struct SubjectError;                                // non_exhaustive, Error
 ```
 
 - `Account` matches `Person::name`, `Person` matches `Person::id`, `Group` any of
-  `Person::groups`; all compare exact strings.
+  `Person::groups`; all compare exact strings. `AnySignedIn` matches every person whose
+  `Person::id` is not empty, so an anonymous caller never matches; it grants nothing by itself.
+- `any:signed-in` is the only reserved `any:` name: every other text starting `any:` is a
+  `SubjectError` (`group:any:signed-in` is still a group, since the kind comes first).
+  `Debug` shows `Subject(any:signed-in)` whole, since it names no one. Everything that reads a
+  `Subject` (roles, ACL principals, sign-in rule subjects) accepts it.
 - The value after the first colon may hold colons; empty or holding a control character is
   refused. Policies add their own length and character rules.
 - `Debug` shows the kind only: the value is an identity.

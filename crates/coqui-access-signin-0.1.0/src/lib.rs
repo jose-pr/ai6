@@ -693,7 +693,7 @@ fn compile(
         .map_err(|_| {
             rule_fail(
                 index,
-                "a subject is not account:<name>, person:<id> or group:<name>",
+                "a subject is not account:<name>, person:<id>, group:<name> or any:signed-in",
             )
         })?;
     if rule.allow.is_empty() || !limits.chains.allows(rule.allow.len()) {

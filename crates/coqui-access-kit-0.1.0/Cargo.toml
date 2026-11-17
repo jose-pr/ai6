@@ -1,4 +1,4 @@
-# coqui-access/crates/coqui-access-kit at c2a7cd9b5c17cce7fc8fc6369ef1e1d82f186bef, with what it inherits written out.
+# coqui-access/crates/coqui-access-kit at 8f4a7ba478e338ad17b3b54cf61145d0dc3feb3d, with what it inherits written out.
 [package]
 name = "coqui-access-kit"
 description = "Building blocks for access providers: typed tables, key and password hashing, generated secrets and private atomic files"

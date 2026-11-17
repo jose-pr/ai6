@@ -40,7 +40,7 @@ use guatiao_builder::Described;
 use coqui_access::guatiao::Provider;
 use coqui_access::guatiao::library::ProviderError;
 use coqui_access::{
-    AuthorizationDecision, AuthorizationRequest, Authorizer, Limit, Person, Subject, error,
+    AuthorizationDecision, AuthorizationRequest, Authorizer, Limit, Subject, error,
 };
 
 /// Bounds on a policy, each a [`Limit`] the caller can change or lift ([`Limit::UNBOUNDED`]).
@@ -310,32 +310,11 @@ impl Default for RoleAuthorizer {
 
 #[derive(Clone)]
 struct CompiledRule {
-    subject: Who,
+    subject: Subject,
     scope: String,
     role: String,
     propagate: bool,
 }
-
-/// Whom a rule names.
-#[derive(Clone)]
-enum Who {
-    Subject(Subject),
-    /// Any subject that carries an identity: a resolved person has a directory id, and an
-    /// anonymous caller has none.
-    AnySignedIn,
-}
-
-impl Who {
-    fn matches(&self, person: &Person) -> bool {
-        match self {
-            Self::Subject(subject) => subject.matches(person),
-            Self::AnySignedIn => !person.id.is_empty(),
-        }
-    }
-}
-
-/// The reserved subject that names every signed-in subject.
-const ANY_SIGNED_IN: &str = "any:signed-in";
 
 /// An invalid role policy.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -439,19 +418,16 @@ impl RoleAuthorizer {
 
         let mut rules = Vec::with_capacity(policy.rules.len());
         for rule in policy.rules {
-            let subject = if rule.subject == ANY_SIGNED_IN {
-                Who::AnySignedIn
-            } else if rule.subject.starts_with("any:") {
-                return Err(fail("the only any: subject is any:signed-in"));
-            } else {
-                let subject: Subject = rule.subject.parse().map_err(|_| {
+            let subject: Subject = rule.subject.parse().map_err(|_| {
+                if rule.subject.starts_with("any:") {
+                    fail("the only any: subject is any:signed-in")
+                } else {
                     fail("rule subject must be account, person or group:<value>, or any:signed-in")
-                })?;
-                if !name(subject.value()) {
-                    return Err(fail("rule subject value is invalid"));
                 }
-                Who::Subject(subject)
-            };
+            })?;
+            if subject != Subject::AnySignedIn && !name(subject.value()) {
+                return Err(fail("rule subject value is invalid"));
+            }
             if rule.scope != "*" {
                 let allowed = rule.scope.split_once(':').is_some_and(|(kind, id)| {
                     name(id)
@@ -536,6 +512,7 @@ fn name(value: &str, most: Limit) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use coqui_access::Person;
 
     fn person(id: &str, name: &str, groups: &[&str]) -> Person {
         Person {

@@ -1,4 +1,4 @@
-# coqui-access/crates/coqui-access-signin at c2a7cd9b5c17cce7fc8fc6369ef1e1d82f186bef, with what it inherits written out.
+# coqui-access/crates/coqui-access-signin at 8f4a7ba478e338ad17b3b54cf61145d0dc3feb3d, with what it inherits written out.
 [package]
 name = "coqui-access-signin"
 description = "Sign-in rules: which methods a sign-in may use from where it is made, and what it still needs"

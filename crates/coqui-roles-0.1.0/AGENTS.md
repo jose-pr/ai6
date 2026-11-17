@@ -55,9 +55,9 @@ pub struct RolePolicyError;                     // Display, Error
 impl From<RolePolicyError> for ProviderError;   // GUATIAO_ERR_BAD_VALUE
 ```
 
-- `subject` is `account:<name>` | `person:<id>` | `group:<name>`, read as `coqui_access::Subject`
-  (the value also has no whitespace and is at most 256 bytes), or the reserved `any:signed-in`:
-  it matches every subject a sign-in or key resolved (a directory person or a key or other
+- `subject` is `account:<name>` | `person:<id>` | `group:<name>` | `any:signed-in`, read as
+  `coqui_access::Subject` (a name's value also has no whitespace and is at most 256 bytes).
+  `any:signed-in` matches every subject a sign-in or key resolved (a directory person or a key or other
   provider's account) and never one with an empty `Person::id`, which is how an anonymous
   caller reaches an authorizer. It grants nothing by itself: the rule's role does, and rules
   stay first-match. Any other `any:` name (`any:person`, `any:other`) is refused when the
