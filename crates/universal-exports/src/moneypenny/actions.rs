@@ -918,13 +918,18 @@ static WRITE_TOOLS: &[WriteTool] = &[
                       brief for them to edit, where it would run, and Confirm; nothing \
                       changes until they confirm it. You are then told AI6's answer with \
                       the Mission's ID: read it with `mission` to say how it stands. \
-                      Needs mission.create.",
+                      Draft the brief in Markdown. Needs mission.create.",
         schema: || {
             object(
                 &[
                     operation(),
                     ("title", text("A short title.")),
-                    ("prompt", text("The brief: what the Agent should do.")),
+                    (
+                        "prompt",
+                        text(
+                            "The brief: what the Agent should do, in Markdown; cite an issue by its key (OPS-12, owner/repo#12) and a Mission by its ID.",
+                        ),
+                    ),
                     ("agent_id", text("Only this Agent.")),
                     ("role", text("The role the Mission needs.")),
                     ("stations", strings("Only these Stations.")),
@@ -1156,6 +1161,15 @@ static WRITE_TOOLS: &[WriteTool] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_brief_proposal_asks_for_markdown() {
+        let tool = write_tools()
+            .iter()
+            .find(|tool| tool.name == "propose_mission")
+            .unwrap();
+        assert!(tool.description.contains("brief in Markdown"));
+    }
 
     #[test]
     fn the_access_tools_name_the_revision_and_the_scope() {
