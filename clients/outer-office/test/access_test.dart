@@ -311,4 +311,46 @@ void main() {
       );
     },
   );
+
+  testWidgets('an account manager sees an account\'s pins and adds and removes '
+      'them', (tester) async {
+    const held =
+        'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const added =
+        'spki-sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    final pins = <String>[held];
+    final matches = <Map<String, String>>[];
+    final requests = <http.Request>[];
+    final controller = board(requests, ['account.manage'], (request) {
+      if (request.url.path.endsWith('/pins')) {
+        if (request.method == 'POST') {
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          pins.removeWhere((pin) => (body['remove'] as List).contains(pin));
+          pins.addAll((body['add'] as List).cast<String>());
+          matches.addAll(
+            (body['match_add'] as List).cast<Map<String, String>>(),
+          );
+        }
+        return json({'pins': pins, 'matches': matches, 'max_pins': 4});
+      }
+      return json([
+        {'name': 'ann', 'groups': <String>[], 'disabled': false},
+      ]);
+    });
+    await openAccess(tester, controller);
+    await tester.tap(find.byTooltip('Certificate pins of ann'));
+    await tester.pumpAndSettle();
+    expect(find.text(held), findsOneWidget);
+    expect(find.textContaining('1 of 4'), findsWidgets);
+    await tester.enterText(find.widgetWithText(TextField, 'New pin'), added);
+    await tester.tap(find.text('Add pin'));
+    await tester.pumpAndSettle();
+    expect(find.text(added), findsOneWidget);
+    final post = requests.lastWhere((r) => r.method == 'POST');
+    expect(jsonDecode(post.body)['add'], [added]);
+    await tester.tap(find.byTooltip('Remove $held'));
+    await tester.pumpAndSettle();
+    expect(find.text(held), findsNothing);
+    expect(pins, [added]);
+  });
 }

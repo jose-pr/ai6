@@ -8,6 +8,7 @@ import '../routes/oo_route.dart';
 import '../widgets/oo_data_table.dart';
 import '../widgets/oo_principals.dart';
 import 'access_api.dart';
+import 'account_pins_dialog.dart';
 
 /// A row of the Accounts table: a local account, or a person a directory knows who has signed in.
 class AccountRow {
@@ -223,7 +224,7 @@ class _AccountsTabState extends State<AccountsTab> {
               OoColumn(
                 id: 'actions',
                 label: 'Actions',
-                width: 360,
+                width: 400,
                 cell: (context, row) {
                   final account = row.account;
                   if (account == null) return const SizedBox.shrink();
@@ -246,6 +247,17 @@ class _AccountsTabState extends State<AccountsTab> {
                           icon: const Icon(Icons.group_outlined),
                           onPressed: () => _groups(account),
                         ),
+                      IconButton(
+                        tooltip: 'Certificate pins of ${account.name}',
+                        icon: const Icon(Icons.badge_outlined),
+                        onPressed: () => showDialog<void>(
+                          context: context,
+                          builder: (context) => AccountPinsDialog(
+                            api: widget.api,
+                            name: account.name,
+                          ),
+                        ),
+                      ),
                       TextButton(
                         onPressed: () => _reset(account.name),
                         child: const Text('Reset password'),

@@ -229,6 +229,51 @@ class AccountEntry {
   );
 }
 
+/// A certificate field value that names an account, such as `san.email` and an address.
+@immutable
+class PinMatch {
+  const PinMatch(this.field, this.value);
+
+  final String field;
+  final String value;
+
+  Map<String, String> toJson() => {'field': field, 'value': value};
+
+  @override
+  bool operator ==(Object other) =>
+      other is PinMatch && other.field == field && other.value == value;
+
+  @override
+  int get hashCode => Object.hash(field, value);
+}
+
+/// What an account holds: its certificate pins, its explicit map entries, and how many of each
+/// the gateway allows.
+@immutable
+class AccountPins {
+  const AccountPins({
+    required this.pins,
+    required this.matches,
+    required this.maxPins,
+  });
+
+  final List<String> pins;
+  final List<PinMatch> matches;
+  final int maxPins;
+
+  factory AccountPins.fromJson(Map<String, dynamic> json) => AccountPins(
+    pins: (json['pins'] as List<dynamic>? ?? const []).cast<String>(),
+    matches: [
+      for (final entry in json['matches'] as List<dynamic>? ?? const [])
+        PinMatch(
+          (entry as Map<String, dynamic>)['field'] as String,
+          entry['value'] as String,
+        ),
+    ],
+    maxPins: json['max_pins'] as int? ?? 0,
+  );
+}
+
 /// The answer of the check route: whether, and by which tier, rule and role.
 @immutable
 class AccessAnswer {
@@ -370,6 +415,39 @@ class AccessApi {
       ),
     );
   }
+
+  /// The certificate pins and explicit map entries [name] holds.
+  Future<AccountPins> pins(String name) async => AccountPins.fromJson(
+    _ok(
+      await board.accessRequest(
+        'GET',
+        '/v1/user/accounts/${Uri.encodeComponent(name)}/pins',
+      ),
+    ),
+  );
+
+  /// Takes away what [remove] and [matchRemove] name, then adds [add] and [matchAdd]; answers
+  /// what the account holds after.
+  Future<AccountPins> changePins(
+    String name, {
+    List<String> add = const [],
+    List<String> remove = const [],
+    List<PinMatch> matchAdd = const [],
+    List<PinMatch> matchRemove = const [],
+  }) async => AccountPins.fromJson(
+    _ok(
+      await board.accessRequest(
+        'POST',
+        '/v1/user/accounts/${Uri.encodeComponent(name)}/pins',
+        body: {
+          'add': add,
+          'remove': remove,
+          'match_add': [for (final entry in matchAdd) entry.toJson()],
+          'match_remove': [for (final entry in matchRemove) entry.toJson()],
+        },
+      ),
+    ),
+  );
 
   /// The new password, shown once by the caller and kept nowhere.
   Future<String> resetPassword(String name) async {
