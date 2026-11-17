@@ -171,6 +171,12 @@ async fn an_a2a_client_reaches_the_agent_through_the_loopback_command() {
     );
     let token_file = keys.path().join("token");
     std::fs::write(&token_file, "loopback-token-for-the-test\n").unwrap();
+    // The command refuses a token file other users can read.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&token_file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
     let url = format!("ws://{address}/link");
     let (running, printed) = start(
         &[
