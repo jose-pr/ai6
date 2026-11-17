@@ -157,7 +157,7 @@ The same file holds the gateway's part of `[unex]` and Outer Office's `[oo]`
   Protocol, authenticated; a Station that reaches the host through a transport talks to the
   runner this way. It exits `3` when no runner answers.
 - `ai6 theater dial --url URL --peer GATEWAY_ID [--code CODE [--label LABEL]] [--identity FILE] [--method noise|webcrypto]
-  [--max-backoff-seconds N] -- COMMAND ARGS...` offers a local stdio ACP agent over a gateway's agent link, dialing out
+  [--max-backoff-seconds N] -- COMMAND ARGS...` offers a local stdio ACP agent over a gateway's agent link (`/v1/assistant/agent-link`, which the gateway does not serve yet), dialing out
   so a firewall or NAT in between is no matter. It makes or reads this user's link identity (Noise by default), proves
   it in-band, opens an `acp/1` stream (the first time carrying `{code, label}`) and passes the agent's lines unread, dialing
   again with backoff after a lost link. It ends with the agent's status, or 2 when the remote proves another key, does not

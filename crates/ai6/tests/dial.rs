@@ -25,8 +25,25 @@ enum Seen {
     Answered(usize, String),
 }
 
-/// The agent program the fake-agent crate builds beside the test binaries.
+/// The scripted agent: built once with Cargo, which finds the target directory this test runs
+/// from, then looked for beside the test binary.
 fn fake_agent() -> PathBuf {
+    static BUILT: std::sync::Once = std::sync::Once::new();
+    const BUILD: &str = "cargo build -p ai6-agent-acp --bin ai6-acp-fake-agent";
+    BUILT.call_once(|| {
+        let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+        let status = Command::new(cargo)
+            .args([
+                "build",
+                "-p",
+                "ai6-agent-acp",
+                "--bin",
+                "ai6-acp-fake-agent",
+            ])
+            .status()
+            .unwrap_or_else(|error| panic!("`{BUILD}` could not start: {error}"));
+        assert!(status.success(), "`{BUILD}` failed");
+    });
     let name = format!("ai6-acp-fake-agent{}", std::env::consts::EXE_SUFFIX);
     let exe = std::env::current_exe().unwrap();
     exe.ancestors()
@@ -34,7 +51,7 @@ fn fake_agent() -> PathBuf {
         .take(3)
         .map(|dir| dir.join(&name))
         .find(|path| path.is_file())
-        .expect("build it first: cargo build -p ai6-agent-acp --bin ai6-acp-fake-agent")
+        .unwrap_or_else(|| panic!("{name} is not beside the test binary; build it with `{BUILD}`"))
 }
 
 /// Sends one request over the stream and returns the agent's answer and the text of any

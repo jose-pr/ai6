@@ -1093,22 +1093,23 @@ and a proxy that strips the sandbox header.
 
 ## Your own agent
 
-A person can offer an agent that runs on their own machine, in place of the Stations' pool. The machine dials
-out to the gateway, so it needs no open port; `ai6 theater dial` starts the agent and relays its Agent Client
-Protocol lines over the gateway's agent link, unread. The page that creates the link shows a code and the
-gateway's peer ID:
+`ai6 theater dial` offers an agent that runs on a person's own machine. The machine dials out to a
+gateway's agent link, `/v1/assistant/agent-link`, so it needs no open port; the command starts the agent
+and relays its Agent Client Protocol lines over that link, unread. **The gateway does not serve that
+endpoint yet**, and no page shows a code or the gateway's peer ID, so the command has no gateway to
+reach outside tests, which dial an in-process listener.
 
 ```sh
 ai6 theater dial --url wss://ORIGIN/v1/assistant/agent-link --peer GATEWAY_ID     --code CODE --label "my laptop" -- AGENT_COMMAND ARGS...
 ```
 
-The first time, the code and label bind this machine's key to the person; every later start proves the key
-alone, so `--code` and `--label` are left out. The key is the person's link identity (`--identity FILE`, else
-the one in their home directory, made the first time; Noise unless `--method webcrypto`). `--peer` pins the
-gateway, which is what keeps the agent from being handed to another remote; `--any-paired-peer` accepts the
-peers this person has paired instead. The command dials again with a growing wait (`--backoff-start-seconds`,
-`--max-backoff-seconds`) after a lost link and keeps the agent running meanwhile. It ends with the agent's exit
-status, or 2 when the remote proves another key or does not accept the agent.
+The first link carries `--code` and `--label` in the `acp/1` stream's metadata; later starts prove the key
+alone and leave them out. The key is the person's link identity (`--identity FILE`, else the one in their
+home directory, made the first time; Noise unless `--method webcrypto`). `--peer` pins the gateway, so the
+agent is not handed to another remote; `--any-paired-peer` accepts the peers this person has paired
+instead. After a lost link the command dials again with a growing wait (`--backoff-start-seconds`,
+`--max-backoff-seconds`) and keeps the agent running meanwhile. It ends with the agent's exit status, or 2
+when the remote proves another key or does not accept the agent.
 
 ## In the app
 
