@@ -93,6 +93,6 @@ sha1 = "0.11"
 tokio-tungstenite = { workspace = true }
 # Libraries to load, never to link: depending on them has Cargo build each beside the test
 # binaries, where the page tests load the real page authenticators.
-coqui-access-mtls-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "97eed019f3df8783bb7e688f2c0889c39dc8c4f8" }
-coqui-access-proxy-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "97eed019f3df8783bb7e688f2c0889c39dc8c4f8" }
-coqui-access-signin-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "97eed019f3df8783bb7e688f2c0889c39dc8c4f8" }
+coqui-access-mtls-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "c2a7cd9b5c17cce7fc8fc6369ef1e1d82f186bef" }
+coqui-access-proxy-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "c2a7cd9b5c17cce7fc8fc6369ef1e1d82f186bef" }
+coqui-access-signin-plugin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "c2a7cd9b5c17cce7fc8fc6369ef1e1d82f186bef" }
