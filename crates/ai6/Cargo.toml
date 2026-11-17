@@ -29,7 +29,7 @@ station-tls = ["dep:coqui-peer-tls", "dep:coqui-builder", "dep:rustls", "dep:bas
 sqlite = ["dep:rusqlite"]
 # A Registry and roster kept in PostgreSQL, shared by every Station of an HA deployment.
 postgres = ["dep:tokio-postgres", "dep:tokio", "tokio/sync", "tokio/time", "dep:tokio-rustls", "dep:rustls", "dep:rustls-native-certs"]
-cli = ["daemon", "publisher", "cables-mcp", "station-tls", "sqlite", "postgres", "dep:clap", "tokio/signal"]
+cli = ["daemon", "publisher", "cables-mcp", "station-tls", "sqlite", "postgres", "dep:clap", "tokio/signal", "dep:coqui-acp-bridge", "dep:coqui-agentic-peer", "dep:coqui-transport", "dep:coqui-transport-web", "dep:coqui-peer-webcrypto"]
 
 [[bin]]
 name = "ai6"
@@ -61,6 +61,11 @@ path = "tests/ha.rs"
 required-features = ["cli"]
 
 [[test]]
+name = "dial"
+path = "tests/dial.rs"
+required-features = ["cli"]
+
+[[test]]
 name = "shared_logins"
 path = "tests/shared_logins.rs"
 required-features = ["cli"]
@@ -68,6 +73,11 @@ required-features = ["cli"]
 [dependencies]
 agent-client-protocol = { workspace = true, optional = true }
 coqui-acp = { workspace = true, optional = true }
+coqui-acp-bridge = { workspace = true, optional = true }
+coqui-agentic-peer = { workspace = true, optional = true }
+coqui-transport = { workspace = true, optional = true }
+coqui-transport-web = { workspace = true, optional = true }
+coqui-peer-webcrypto = { workspace = true, optional = true }
 coqui-acp-api.workspace = true
 coqui-acp-provider.workspace = true
 futures = { workspace = true, optional = true }

@@ -8,6 +8,8 @@ use ai6::bootstrap::{Bootstrap, Located, SecretRef, is_sql_location};
 use ai6::station::identity;
 use clap::{Args, Parser, Subcommand};
 
+mod dial;
+
 #[derive(Debug, Parser)]
 #[command(
     name = "ai6",
@@ -272,6 +274,11 @@ enum TheaterCommand {
         #[arg(long, value_name = "PROFILE")]
         plugin_profile: Option<ai6::PluginProfile>,
     },
+    /// Offer a local stdio ACP agent over a gateway's agent link, dialing out so a firewall or
+    /// NAT in between is no matter. Proves this machine's key, relays the agent's lines
+    /// unread, and dials again after a lost link. Ends with the agent's status, or 2 when the
+    /// remote is not accepted.
+    Dial(Box<dial::DialArgs>),
 }
 
 /// How a runner checks provider libraries before they load.
@@ -1499,14 +1506,27 @@ async fn runner_command(command: RunnerCommand) -> ExitCode {
 
 /// Runs `ai6 theater …`. Blocks on the Theater's transport.
 fn theater_command(command: TheaterCommand) -> ExitCode {
-    let TheaterCommand::Provision {
-        theater,
-        check,
-        bootstrap,
-        plugin_paths,
-        plugin_profile,
-    } = command;
-    let mut located = match load_bootstrap(&bootstrap) {
+    match command {
+        TheaterCommand::Provision {
+            theater,
+            check,
+            bootstrap,
+            plugin_paths,
+            plugin_profile,
+        } => provision_command(&theater, check, &bootstrap, plugin_paths, plugin_profile),
+        TheaterCommand::Dial(args) => dial::run(&args),
+    }
+}
+
+/// Runs `ai6 theater provision`.
+fn provision_command(
+    theater: &str,
+    check: bool,
+    bootstrap: &BootstrapArg,
+    plugin_paths: Vec<PathBuf>,
+    plugin_profile: Option<ai6::PluginProfile>,
+) -> ExitCode {
+    let mut located = match load_bootstrap(bootstrap) {
         Ok(located) => located,
         Err(error) => {
             eprintln!("ai6: {error}");
@@ -1531,7 +1551,7 @@ fn theater_command(command: TheaterCommand) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let Some(declared) = snapshot.settings.theaters.find(&theater) else {
+    let Some(declared) = snapshot.settings.theaters.find(theater) else {
         eprintln!("ai6: the configuration declares no Theater {theater:?}");
         return ExitCode::FAILURE;
     };
