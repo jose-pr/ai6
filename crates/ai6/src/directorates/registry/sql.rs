@@ -759,6 +759,140 @@ mod tests {
         });
     }
 
+    /// Puts the four tables the Session-to-Run rename changed back as that release found them,
+    /// each with one row holding its old column.
+    fn back_before_the_run_rename(registry: &SqlRegistry) {
+        for sql in [
+            "INSERT INTO ai6_briefs (key, state, brief, revision) VALUES ('b', 'new', '{}', 1)",
+            "ALTER TABLE ai6_briefs DROP COLUMN claims",
+            "ALTER TABLE ai6_briefs ADD COLUMN attempts BIGINT NOT NULL DEFAULT 0",
+            "UPDATE ai6_briefs SET attempts = 4",
+            "INSERT INTO ai6_brief_leases (key, station, expires, number, meta, revision) \
+             VALUES ('b', 's', 10, 3, '{}', 1)",
+            "ALTER TABLE ai6_brief_leases DROP COLUMN number",
+            "ALTER TABLE ai6_brief_leases ADD COLUMN attempt BIGINT NOT NULL DEFAULT 0",
+            "UPDATE ai6_brief_leases SET attempt = 3",
+            "INSERT INTO ai6_reports (id, scope, state, kind, run_id, source_key, priority, \
+             created, updated, record, revision) \
+             VALUES ('r', 'x', 'new', 'k', 'run-1', 's', '', 1, 1, '{}', 1)",
+            "ALTER TABLE ai6_reports DROP COLUMN run_id",
+            "ALTER TABLE ai6_reports ADD COLUMN session_id TEXT NOT NULL DEFAULT ''",
+            "UPDATE ai6_reports SET session_id = 'run-1'",
+            "DROP TABLE ai6_final_reports",
+            "CREATE TABLE ai6_final_reports (session_id TEXT PRIMARY KEY, \
+             mission_id TEXT NOT NULL, record TEXT NOT NULL, revision BIGINT NOT NULL)",
+            "INSERT INTO ai6_final_reports VALUES ('run-1', 'm', '{}', 1)",
+            "DELETE FROM ai6_schema_steps",
+        ] {
+            alter(registry, sql);
+        }
+    }
+
+    fn one_int(registry: &SqlRegistry, sql: &str) -> i64 {
+        registry
+            .db
+            .read(|tx| {
+                tx.query_opt(sql, &[])?
+                    .ok_or_else(|| io::Error::other("no row"))?
+                    .int(0)
+            })
+            .unwrap()
+    }
+
+    fn one_text(registry: &SqlRegistry, sql: &str) -> String {
+        registry
+            .db
+            .read(|tx| {
+                tx.query_opt(sql, &[])?
+                    .ok_or_else(|| io::Error::other("no row"))?
+                    .text(0)
+            })
+            .unwrap()
+    }
+
+    fn answers(registry: &SqlRegistry, sql: &str) -> bool {
+        registry.db.read(|tx| tx.query_opt(sql, &[])).is_ok()
+    }
+
+    #[test]
+    fn a_database_with_the_session_columns_rolls_forward_filled_and_takes_a_claim() {
+        on_each_database(|location| {
+            let old = SqlRegistry::open(location).unwrap();
+            back_before_the_run_rename(&old);
+
+            let again = SqlRegistry::open(location).expect("no hand ALTER is needed");
+            assert_eq!(step_names(&again), every_step());
+            assert_eq!(
+                one_int(&again, "SELECT claims FROM ai6_briefs WHERE key = 'b'"),
+                4
+            );
+            assert_eq!(
+                one_int(
+                    &again,
+                    "SELECT number FROM ai6_brief_leases WHERE key = 'b'"
+                ),
+                3
+            );
+            assert_eq!(
+                one_text(&again, "SELECT run_id FROM ai6_reports WHERE id = 'r'"),
+                "run-1"
+            );
+            assert_eq!(
+                one_text(
+                    &again,
+                    "SELECT run_id FROM ai6_final_reports WHERE mission_id = 'm'"
+                ),
+                "run-1"
+            );
+            for legacy in [
+                "SELECT attempts FROM ai6_briefs",
+                "SELECT attempt FROM ai6_brief_leases",
+                "SELECT session_id FROM ai6_reports",
+                "SELECT session_id FROM ai6_final_reports",
+            ] {
+                assert!(!answers(&again, legacy), "{legacy} is gone");
+            }
+            // A legacy NOT NULL column with no default would refuse a new lease or report.
+            alter(
+                &again,
+                "INSERT INTO ai6_brief_leases (key, station, expires, number, meta, revision) \
+                 VALUES ('c', 's', 10, 1, '{}', 2)",
+            );
+            let third = SqlRegistry::open(location).unwrap();
+            assert_eq!(step_names(&third), every_step(), "nothing more runs");
+        });
+    }
+
+    #[test]
+    fn a_database_altered_by_hand_keeps_its_data_and_still_loses_the_old_columns() {
+        on_each_database(|location| {
+            let old = SqlRegistry::open(location).unwrap();
+            back_before_the_run_rename(&old);
+            // The operator's ALTER: the new columns, filled, with the legacy ones left behind.
+            alter(
+                &old,
+                "ALTER TABLE ai6_briefs ADD COLUMN claims BIGINT NOT NULL DEFAULT 0",
+            );
+            alter(&old, "UPDATE ai6_briefs SET claims = 9");
+            alter(
+                &old,
+                "ALTER TABLE ai6_reports ADD COLUMN run_id TEXT NOT NULL DEFAULT 'by-hand'",
+            );
+
+            let again = SqlRegistry::open(location).unwrap();
+            assert_eq!(
+                one_int(&again, "SELECT claims FROM ai6_briefs WHERE key = 'b'"),
+                9
+            );
+            assert_eq!(
+                one_text(&again, "SELECT run_id FROM ai6_reports WHERE id = 'r'"),
+                "by-hand"
+            );
+            assert!(!answers(&again, "SELECT attempts FROM ai6_briefs"));
+            assert!(!answers(&again, "SELECT session_id FROM ai6_reports"));
+        });
+    }
+
     #[test]
     fn a_database_from_before_handles_gains_the_column_once() {
         on_each_database(|location| {
@@ -850,6 +984,7 @@ mod tests {
             name: "test.counted",
             table: "ai6_stations",
             column: "counted",
+            retires: false,
             #[cfg(feature = "sqlite")]
             sqlite: "ALTER TABLE ai6_stations ADD COLUMN counted TEXT; \
                      UPDATE ai6_clock SET revision = revision + 1 WHERE name = 'config'",
@@ -990,7 +1125,7 @@ mod tests {
     }
 
     #[test]
-    fn every_step_adds_a_column_both_schemas_make() {
+    fn every_step_names_a_column_both_schemas_make_or_a_retired_one_they_do_not() {
         let names: std::collections::BTreeSet<_> = steps::STEPS.iter().map(|s| s.name).collect();
         assert_eq!(names.len(), steps::STEPS.len(), "each name once");
         for schema in [
@@ -1003,9 +1138,10 @@ mod tests {
                     .iter()
                     .find(|s| s.creates.as_deref() == Some(step.table))
                     .and_then(|s| s.columns.as_ref());
-                assert!(
-                    made.is_some_and(|columns| columns.iter().any(|c| c == step.column)),
-                    "{} names a column its table is made with",
+                let made = made.is_some_and(|columns| columns.iter().any(|c| c == step.column));
+                assert_eq!(
+                    made, !step.retires,
+                    "{}: a column its table is made with, or a retired one it is not",
                     step.name
                 );
             }

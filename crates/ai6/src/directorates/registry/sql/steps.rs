@@ -1,12 +1,12 @@
 //! Schema steps: the changes an open makes to a table that already exists, which `CREATE TABLE
 //! IF NOT EXISTS` leaves as it is.
 //!
-//! A step adds one column. The schema files make each table with every column, so a database
-//! made by this build has the column already and records the step without running it; one made
-//! before the column existed runs the step once and records it in `ai6_schema_steps`. A column
+//! A step adds one column, or retires one a rename left behind. The schema files make each
+//! table with every column, so a database made by this build has the
+//! column already and records the step without running it; one made before the column existed runs the step once and records it in `ai6_schema_steps`. A column
 //! someone added by hand is recorded the same way, without running. A step's name is never
 //! reused, a new step goes at the end, and an index on its column goes in the schema files,
-//! which make indexes after the steps have run.
+//! which make indexes after the steps have run. A retiring step runs while its column is there.
 
 use super::db::Dialect;
 
@@ -19,6 +19,9 @@ pub(super) struct Step {
     pub(super) table: &'static str,
     /// The column it adds; when the table has it, the step is recorded without running.
     pub(super) column: &'static str,
+    /// Set on a step that retires `column`, a legacy column a rename left behind: it runs only
+    /// while the table still has it.
+    pub(super) retires: bool,
     /// Its statements on SQLite.
     #[cfg(feature = "sqlite")]
     pub(super) sqlite: &'static str,
@@ -47,6 +50,7 @@ pub(super) const STEPS: &[Step] = &[
         name: "mission_ids.handle",
         table: "ai6_mission_ids",
         column: "handle",
+        retires: false,
         #[cfg(feature = "sqlite")]
         sqlite: "ALTER TABLE ai6_mission_ids ADD COLUMN handle TEXT NOT NULL",
         #[cfg(feature = "postgres")]
@@ -58,6 +62,7 @@ pub(super) const STEPS: &[Step] = &[
         name: "reports.words",
         table: "ai6_reports",
         column: "words",
+        retires: false,
         #[cfg(feature = "sqlite")]
         sqlite: "ALTER TABLE ai6_reports ADD COLUMN words TEXT NOT NULL DEFAULT ''",
         #[cfg(feature = "postgres")]
@@ -68,9 +73,115 @@ pub(super) const STEPS: &[Step] = &[
         name: "briefs.cancel_requested_at",
         table: "ai6_briefs",
         column: "cancel_requested_at",
+        retires: false,
         #[cfg(feature = "sqlite")]
         sqlite: "ALTER TABLE ai6_briefs ADD COLUMN cancel_requested_at REAL",
         #[cfg(feature = "postgres")]
         postgres: "ALTER TABLE ai6_briefs ADD COLUMN cancel_requested_at DOUBLE PRECISION",
+    },
+    // The Session-to-Run rename moved four populated columns. Each is added, filled from the
+    // column it replaces and then that column is dropped, since a legacy NOT NULL column with
+    // no default refuses every insert. A database someone altered by hand has the new column
+    // already and only has the old one retired.
+    Step {
+        name: "briefs.claims",
+        table: "ai6_briefs",
+        column: "claims",
+        retires: false,
+        #[cfg(feature = "sqlite")]
+        sqlite: "ALTER TABLE ai6_briefs ADD COLUMN claims INTEGER NOT NULL DEFAULT 0; \
+                 UPDATE ai6_briefs SET claims = attempts",
+        #[cfg(feature = "postgres")]
+        postgres: "ALTER TABLE ai6_briefs ADD COLUMN claims BIGINT NOT NULL DEFAULT 0; \
+                   UPDATE ai6_briefs SET claims = attempts",
+    },
+    Step {
+        name: "briefs.retire_attempts",
+        table: "ai6_briefs",
+        column: "attempts",
+        retires: true,
+        #[cfg(feature = "sqlite")]
+        sqlite: "ALTER TABLE ai6_briefs DROP COLUMN attempts",
+        #[cfg(feature = "postgres")]
+        postgres: "ALTER TABLE ai6_briefs DROP COLUMN attempts",
+    },
+    Step {
+        name: "brief_leases.number",
+        table: "ai6_brief_leases",
+        column: "number",
+        retires: false,
+        #[cfg(feature = "sqlite")]
+        sqlite: "ALTER TABLE ai6_brief_leases ADD COLUMN number INTEGER NOT NULL DEFAULT 0; \
+                 UPDATE ai6_brief_leases SET number = attempt",
+        #[cfg(feature = "postgres")]
+        postgres: "ALTER TABLE ai6_brief_leases ADD COLUMN number BIGINT NOT NULL DEFAULT 0; \
+                   UPDATE ai6_brief_leases SET number = attempt",
+    },
+    Step {
+        name: "brief_leases.retire_attempt",
+        table: "ai6_brief_leases",
+        column: "attempt",
+        retires: true,
+        #[cfg(feature = "sqlite")]
+        sqlite: "ALTER TABLE ai6_brief_leases DROP COLUMN attempt",
+        #[cfg(feature = "postgres")]
+        postgres: "ALTER TABLE ai6_brief_leases DROP COLUMN attempt",
+    },
+    Step {
+        name: "reports.run_id",
+        table: "ai6_reports",
+        column: "run_id",
+        retires: false,
+        #[cfg(feature = "sqlite")]
+        sqlite: "ALTER TABLE ai6_reports ADD COLUMN run_id TEXT NOT NULL DEFAULT ''; \
+                 UPDATE ai6_reports SET run_id = session_id",
+        #[cfg(feature = "postgres")]
+        postgres: "ALTER TABLE ai6_reports ADD COLUMN run_id TEXT NOT NULL DEFAULT ''; \
+                   UPDATE ai6_reports SET run_id = session_id",
+    },
+    Step {
+        name: "reports.retire_session_id",
+        table: "ai6_reports",
+        column: "session_id",
+        retires: true,
+        #[cfg(feature = "sqlite")]
+        sqlite: "ALTER TABLE ai6_reports DROP COLUMN session_id",
+        #[cfg(feature = "postgres")]
+        postgres: "ALTER TABLE ai6_reports DROP COLUMN session_id",
+    },
+    // The final report's key was its primary key, which neither database adds or drops in place.
+    Step {
+        name: "final_reports.run_id",
+        table: "ai6_final_reports",
+        column: "run_id",
+        retires: false,
+        #[cfg(feature = "sqlite")]
+        sqlite: "ALTER TABLE ai6_final_reports ADD COLUMN run_id TEXT NOT NULL DEFAULT ''; \
+                 UPDATE ai6_final_reports SET run_id = session_id",
+        #[cfg(feature = "postgres")]
+        postgres: "ALTER TABLE ai6_final_reports ADD COLUMN run_id TEXT NOT NULL DEFAULT ''; \
+                   UPDATE ai6_final_reports SET run_id = session_id",
+    },
+    Step {
+        name: "final_reports.retire_session_id",
+        table: "ai6_final_reports",
+        column: "session_id",
+        retires: true,
+        #[cfg(feature = "sqlite")]
+        sqlite: "CREATE TABLE ai6_final_reports_rebuilt (run_id TEXT PRIMARY KEY, \
+                 mission_id TEXT NOT NULL, record TEXT NOT NULL, revision INTEGER NOT NULL); \
+                 INSERT INTO ai6_final_reports_rebuilt \
+                 SELECT COALESCE(NULLIF(run_id, ''), session_id), mission_id, record, revision \
+                 FROM ai6_final_reports; \
+                 DROP TABLE ai6_final_reports; \
+                 ALTER TABLE ai6_final_reports_rebuilt RENAME TO ai6_final_reports",
+        #[cfg(feature = "postgres")]
+        postgres: "UPDATE ai6_final_reports SET run_id = session_id WHERE run_id = ''; \
+                   ALTER TABLE ai6_final_reports DROP COLUMN session_id; \
+                   DO $$ BEGIN \
+                   IF NOT EXISTS (SELECT 1 FROM pg_index WHERE indisprimary \
+                   AND indrelid = 'ai6_final_reports'::regclass) THEN \
+                   ALTER TABLE ai6_final_reports ADD PRIMARY KEY (run_id); \
+                   END IF; END $$",
     },
 ];

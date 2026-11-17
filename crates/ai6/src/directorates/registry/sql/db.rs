@@ -365,7 +365,7 @@ fn made_columns(text: &str) -> io::Result<Vec<String>> {
 
 /// The tables and indexes of the schema statements create in, as `CREATE ... IF NOT EXISTS`
 /// looks for them; reading them needs no right beyond connecting.
-pub(super) fn schema_objects(tx: &mut Tx<'_>) -> io::Result<BTreeSet<String>> {
+pub(crate) fn schema_objects(tx: &mut Tx<'_>) -> io::Result<BTreeSet<String>> {
     let sql = match &tx.inner {
         #[cfg(feature = "sqlite")]
         TxInner::Sqlite(_) => "SELECT name FROM sqlite_master WHERE type IN ('table', 'index')",
@@ -690,7 +690,8 @@ fn apply_step(tx: &mut Tx<'_>, dialect: Dialect, step: &Step) -> io::Result<()> 
     let has_column = table_columns(tx)?
         .get(step.table)
         .is_some_and(|columns| columns.contains(step.column));
-    if !has_column {
+    // An adding step runs while the column is missing, a retiring one while it is still there.
+    if has_column == step.retires {
         let (role, schema) = where_we_are(tx)?;
         tx.batch(step.statements(dialect)).map_err(|failure| {
             let what = format!(
