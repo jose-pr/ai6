@@ -692,6 +692,9 @@ fn apply_step(tx: &mut Tx<'_>, dialect: Dialect, step: &Step) -> io::Result<()> 
         .is_some_and(|columns| columns.contains(step.column));
     // An adding step runs while the column is missing, a retiring one while it is still there.
     if has_column == step.retires {
+        if !step.into.is_empty() {
+            refuse_two_tables(tx, step)?;
+        }
         let (role, schema) = where_we_are(tx)?;
         tx.batch(step.statements(dialect)).map_err(|failure| {
             let what = format!(
@@ -716,6 +719,23 @@ fn apply_step(tx: &mut Tx<'_>, dialect: Dialect, step: &Step) -> io::Result<()> 
         "INSERT INTO ai6_schema_steps (name, applied_micros) VALUES ($1, $2)",
         &[step.name.into(), Value::Int(micros)],
     )?;
+    Ok(())
+}
+
+/// A renamed table's old and new tables both holding rows is a choice no statement makes.
+fn refuse_two_tables(tx: &mut Tx<'_>, step: &Step) -> io::Result<()> {
+    let rows = |tx: &mut Tx<'_>, table: &str| -> io::Result<i64> {
+        tx.query_opt(&format!("SELECT count(*) FROM {table}"), &[])?
+            .ok_or_else(|| invalid("a table could not be counted"))?
+            .int(0)
+    };
+    if rows(tx, step.table)? > 0 && rows(tx, step.into)? > 0 {
+        return Err(invalid(format!(
+            "schema step {}: both {} and {}, which replaced it, hold rows; keep the rows of one, \
+             empty the other and start again",
+            step.name, step.table, step.into
+        )));
+    }
     Ok(())
 }
 

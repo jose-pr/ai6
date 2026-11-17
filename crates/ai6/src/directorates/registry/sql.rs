@@ -893,6 +893,78 @@ mod tests {
         });
     }
 
+    /// Gives the database the three tables the Session-to-Run and watch-to-charge release
+    /// renamed, each with a row, beside the new ones, which are empty.
+    fn back_before_the_table_renames(registry: &SqlRegistry) {
+        for sql in [
+            "CREATE TABLE ai6_sessions (session_id TEXT PRIMARY KEY, mission_id TEXT NOT NULL, \
+             record TEXT NOT NULL, revision BIGINT NOT NULL)",
+            "INSERT INTO ai6_sessions VALUES ('run-1', 'm', '{}', 1)",
+            "CREATE TABLE ai6_session_contexts (session TEXT PRIMARY KEY, \
+             conversation TEXT NOT NULL, operation TEXT NOT NULL, filed_micros BIGINT NOT NULL, \
+             record TEXT NOT NULL, content TEXT NOT NULL, revision BIGINT NOT NULL)",
+            "INSERT INTO ai6_session_contexts VALUES ('run-1', 'c', 'G', 5, '{}', 'text', 1)",
+            "CREATE TABLE ai6_watches (scope TEXT PRIMARY KEY, record TEXT NOT NULL, \
+             revision BIGINT NOT NULL)",
+            "INSERT INTO ai6_watches VALUES ('operation:G', '{}', 1)",
+            "DELETE FROM ai6_schema_steps",
+        ] {
+            alter(registry, sql);
+        }
+    }
+
+    #[test]
+    fn rows_in_the_tables_a_release_renamed_move_to_the_new_ones_and_the_old_go() {
+        on_each_database(|location| {
+            let old = SqlRegistry::open(location).unwrap();
+            back_before_the_table_renames(&old);
+            let again = SqlRegistry::open(location).expect("no hand copy is needed");
+            assert_eq!(step_names(&again), every_step());
+            assert_eq!(
+                one_text(
+                    &again,
+                    "SELECT mission_id FROM ai6_runs WHERE run_id = 'run-1'"
+                ),
+                "m"
+            );
+            assert_eq!(
+                one_text(
+                    &again,
+                    "SELECT content FROM ai6_run_contexts WHERE run = 'run-1'"
+                ),
+                "text"
+            );
+            assert_eq!(
+                one_text(&again, "SELECT scope FROM ai6_charges"),
+                "operation:G"
+            );
+            for gone in ["ai6_sessions", "ai6_session_contexts", "ai6_watches"] {
+                assert!(!answers(&again, &format!("SELECT 1 FROM {gone}")), "{gone}");
+            }
+            SqlRegistry::open(location).expect("and nothing more runs");
+        });
+    }
+
+    #[test]
+    fn rows_in_both_a_renamed_table_and_its_replacement_are_refused_naming_both() {
+        on_each_database(|location| {
+            let old = SqlRegistry::open(location).unwrap();
+            back_before_the_table_renames(&old);
+            alter(&old, "INSERT INTO ai6_runs VALUES ('run-2', 'm', '{}', 1)");
+            let refused = SqlRegistry::open(location).unwrap_err().to_string();
+            assert!(
+                refused.contains("ai6_sessions") && refused.contains("ai6_runs"),
+                "{refused}"
+            );
+            assert_eq!(
+                one_int(&old, "SELECT count(*) FROM ai6_sessions"),
+                1,
+                "nothing was dropped"
+            );
+            assert_eq!(one_int(&old, "SELECT count(*) FROM ai6_runs"), 1);
+        });
+    }
+
     #[test]
     fn a_database_from_before_handles_gains_the_column_once() {
         on_each_database(|location| {
@@ -985,6 +1057,7 @@ mod tests {
             table: "ai6_stations",
             column: "counted",
             retires: false,
+            into: "",
             #[cfg(feature = "sqlite")]
             sqlite: "ALTER TABLE ai6_stations ADD COLUMN counted TEXT; \
                      UPDATE ai6_clock SET revision = revision + 1 WHERE name = 'config'",

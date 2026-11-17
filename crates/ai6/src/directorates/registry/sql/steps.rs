@@ -22,6 +22,9 @@ pub(super) struct Step {
     /// Set on a step that retires `column`, a legacy column a rename left behind: it runs only
     /// while the table still has it.
     pub(super) retires: bool,
+    /// Set on a step that moves a renamed table's rows: the table they move to. The step refuses
+    /// while both tables hold rows, since neither is the one to keep.
+    pub(super) into: &'static str,
     /// Its statements on SQLite.
     #[cfg(feature = "sqlite")]
     pub(super) sqlite: &'static str,
@@ -51,6 +54,7 @@ pub(super) const STEPS: &[Step] = &[
         table: "ai6_mission_ids",
         column: "handle",
         retires: false,
+        into: "",
         #[cfg(feature = "sqlite")]
         sqlite: "ALTER TABLE ai6_mission_ids ADD COLUMN handle TEXT NOT NULL",
         #[cfg(feature = "postgres")]
@@ -63,6 +67,7 @@ pub(super) const STEPS: &[Step] = &[
         table: "ai6_reports",
         column: "words",
         retires: false,
+        into: "",
         #[cfg(feature = "sqlite")]
         sqlite: "ALTER TABLE ai6_reports ADD COLUMN words TEXT NOT NULL DEFAULT ''",
         #[cfg(feature = "postgres")]
@@ -74,6 +79,7 @@ pub(super) const STEPS: &[Step] = &[
         table: "ai6_briefs",
         column: "cancel_requested_at",
         retires: false,
+        into: "",
         #[cfg(feature = "sqlite")]
         sqlite: "ALTER TABLE ai6_briefs ADD COLUMN cancel_requested_at REAL",
         #[cfg(feature = "postgres")]
@@ -88,6 +94,7 @@ pub(super) const STEPS: &[Step] = &[
         table: "ai6_briefs",
         column: "claims",
         retires: false,
+        into: "",
         #[cfg(feature = "sqlite")]
         sqlite: "ALTER TABLE ai6_briefs ADD COLUMN claims INTEGER NOT NULL DEFAULT 0; \
                  UPDATE ai6_briefs SET claims = attempts",
@@ -100,6 +107,7 @@ pub(super) const STEPS: &[Step] = &[
         table: "ai6_briefs",
         column: "attempts",
         retires: true,
+        into: "",
         #[cfg(feature = "sqlite")]
         sqlite: "ALTER TABLE ai6_briefs DROP COLUMN attempts",
         #[cfg(feature = "postgres")]
@@ -110,6 +118,7 @@ pub(super) const STEPS: &[Step] = &[
         table: "ai6_brief_leases",
         column: "number",
         retires: false,
+        into: "",
         #[cfg(feature = "sqlite")]
         sqlite: "ALTER TABLE ai6_brief_leases ADD COLUMN number INTEGER NOT NULL DEFAULT 0; \
                  UPDATE ai6_brief_leases SET number = attempt",
@@ -122,6 +131,7 @@ pub(super) const STEPS: &[Step] = &[
         table: "ai6_brief_leases",
         column: "attempt",
         retires: true,
+        into: "",
         #[cfg(feature = "sqlite")]
         sqlite: "ALTER TABLE ai6_brief_leases DROP COLUMN attempt",
         #[cfg(feature = "postgres")]
@@ -132,6 +142,7 @@ pub(super) const STEPS: &[Step] = &[
         table: "ai6_reports",
         column: "run_id",
         retires: false,
+        into: "",
         #[cfg(feature = "sqlite")]
         sqlite: "ALTER TABLE ai6_reports ADD COLUMN run_id TEXT NOT NULL DEFAULT ''; \
                  UPDATE ai6_reports SET run_id = session_id",
@@ -144,6 +155,7 @@ pub(super) const STEPS: &[Step] = &[
         table: "ai6_reports",
         column: "session_id",
         retires: true,
+        into: "",
         #[cfg(feature = "sqlite")]
         sqlite: "ALTER TABLE ai6_reports DROP COLUMN session_id",
         #[cfg(feature = "postgres")]
@@ -155,6 +167,7 @@ pub(super) const STEPS: &[Step] = &[
         table: "ai6_final_reports",
         column: "run_id",
         retires: false,
+        into: "",
         #[cfg(feature = "sqlite")]
         sqlite: "ALTER TABLE ai6_final_reports ADD COLUMN run_id TEXT NOT NULL DEFAULT ''; \
                  UPDATE ai6_final_reports SET run_id = session_id",
@@ -167,6 +180,7 @@ pub(super) const STEPS: &[Step] = &[
         table: "ai6_final_reports",
         column: "session_id",
         retires: true,
+        into: "",
         #[cfg(feature = "sqlite")]
         sqlite: "CREATE TABLE ai6_final_reports_rebuilt (run_id TEXT PRIMARY KEY, \
                  mission_id TEXT NOT NULL, record TEXT NOT NULL, revision INTEGER NOT NULL); \
@@ -183,5 +197,56 @@ pub(super) const STEPS: &[Step] = &[
                    AND indrelid = 'ai6_final_reports'::regclass) THEN \
                    ALTER TABLE ai6_final_reports ADD PRIMARY KEY (run_id); \
                    END IF; END $$",
+    },
+    // The same release renamed three tables. The rows move to the new table, with the renamed
+    // column mapped, and the old table goes; a database that holds rows in both is refused.
+    Step {
+        name: "runs.from_sessions",
+        table: "ai6_sessions",
+        column: "mission_id",
+        retires: true,
+        into: "ai6_runs",
+        #[cfg(feature = "sqlite")]
+        sqlite: "INSERT INTO ai6_runs (run_id, mission_id, record, revision) \
+                 SELECT session_id, mission_id, record, revision FROM ai6_sessions; \
+                 DROP TABLE ai6_sessions",
+        #[cfg(feature = "postgres")]
+        postgres: "INSERT INTO ai6_runs (run_id, mission_id, record, revision) \
+                   SELECT session_id, mission_id, record, revision FROM ai6_sessions; \
+                   DROP TABLE ai6_sessions",
+    },
+    Step {
+        name: "run_contexts.from_session_contexts",
+        table: "ai6_session_contexts",
+        column: "conversation",
+        retires: true,
+        into: "ai6_run_contexts",
+        #[cfg(feature = "sqlite")]
+        sqlite: "INSERT INTO ai6_run_contexts \
+                 (run, conversation, operation, filed_micros, record, content, revision) \
+                 SELECT session, conversation, operation, filed_micros, record, content, revision \
+                 FROM ai6_session_contexts; \
+                 DROP TABLE ai6_session_contexts",
+        #[cfg(feature = "postgres")]
+        postgres: "INSERT INTO ai6_run_contexts \
+                   (run, conversation, operation, filed_micros, record, content, revision) \
+                   SELECT session, conversation, operation, filed_micros, record, content, revision \
+                   FROM ai6_session_contexts; \
+                   DROP TABLE ai6_session_contexts",
+    },
+    Step {
+        name: "charges.from_watches",
+        table: "ai6_watches",
+        column: "scope",
+        retires: true,
+        into: "ai6_charges",
+        #[cfg(feature = "sqlite")]
+        sqlite: "INSERT INTO ai6_charges (scope, record, revision) \
+                 SELECT scope, record, revision FROM ai6_watches; \
+                 DROP TABLE ai6_watches",
+        #[cfg(feature = "postgres")]
+        postgres: "INSERT INTO ai6_charges (scope, record, revision) \
+                   SELECT scope, record, revision FROM ai6_watches; \
+                   DROP TABLE ai6_watches",
     },
 ];

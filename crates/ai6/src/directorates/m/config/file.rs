@@ -636,6 +636,70 @@ mod tests {
     }
 
     #[test]
+    fn what_names_an_unreadable_operation_is_left_out_with_it_and_the_rest_works() {
+        let root = tempfile::tempdir().unwrap();
+        let provider = FileProvider::new(root.path());
+        write(
+            root.path(),
+            "operations.toml",
+            "[operation.G]\nroster = [\"007\"]\n\
+             [operation.H.workspace]\nmystery = 1\n",
+        );
+        write(
+            root.path(),
+            "agents.toml",
+            "[agent.007]\nhandler = \"mock-agent\"\n\
+             [agent.008]\nhandler = \"mock-agent\"\n[agent.008.handler_settings]\nworkspace = \"H\"\n",
+        );
+        write(
+            root.path(),
+            "compartments.toml",
+            "[compartment.ops]\ndescription = \"x\"\nactions = [\"mission.status\"]\n\
+             covers = [{ operation = \"H\" }]\n\
+             [compartment.fine]\ndescription = \"y\"\nactions = [\"mission.status\"]\n\
+             covers = [{ operation = \"G\" }]\n",
+        );
+        write(
+            root.path(),
+            "charges.toml",
+            "[charge.\"operation:H\"]\nagent = \"007\"\n",
+        );
+        assert!(
+            provider.load("").is_err(),
+            "a revision is still refused whole"
+        );
+        let loaded = provider
+            .load_degraded("")
+            .expect("the Station starts without them");
+        let named: Vec<(&str, &str)> = loaded
+            .refused
+            .iter()
+            .map(|record| (record.family.as_str(), record.key.as_str()))
+            .collect();
+        for expected in [
+            ("operation", "H"),
+            ("agent", "008"),
+            ("compartment", "ops"),
+            ("charge", "operation:H"),
+        ] {
+            assert!(named.contains(&expected), "{expected:?} in {named:?}");
+        }
+        assert!(
+            !named.contains(&("compartment", "fine")),
+            "a record that names a readable Operation stays: {named:?}"
+        );
+        assert!(loaded.roster.operation("G").is_ok());
+        assert!(loaded.roster.operation("H").is_err());
+        assert!(loaded.roster.agent(Some("G"), "007").is_ok());
+        assert!(
+            loaded
+                .refused
+                .iter()
+                .any(|record| record.reason.contains("\"H\""))
+        );
+    }
+
+    #[test]
     fn a_renamed_table_or_family_file_is_refused_by_name_and_never_ignored() {
         let root = tempfile::tempdir().unwrap();
         let provider = FileProvider::new(root.path());
