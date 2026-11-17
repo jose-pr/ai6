@@ -156,6 +156,7 @@ mod tests {
             theaters,
             resources: None,
             limits: Default::default(),
+            declined: Vec::new(),
         }
     }
 

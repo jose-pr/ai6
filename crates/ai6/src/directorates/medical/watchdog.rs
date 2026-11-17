@@ -325,6 +325,30 @@ impl Watchdog {
         self.lock_state().last_activity = Instant::now();
     }
 
+    /// Records a provider event as Run activity only when it carries something: text, data, a
+    /// tool call, a limit, or the end of a turn. An event with none says the stream is open, which
+    /// is not progress, so a harness waiting on a socket still stalls.
+    #[cfg_attr(
+        not(feature = "daemon"),
+        allow(dead_code, reason = "used only by the daemon")
+    )]
+    pub(crate) fn record_event(&self, event: &crate::AgentEvent) {
+        let says_something = event
+            .text
+            .as_deref()
+            .is_some_and(|text| !text.trim().is_empty())
+            || event.data.as_ref().is_some_and(|data| !data.is_empty())
+            || !event.tools.is_empty()
+            || event.limit.is_some()
+            || matches!(
+                event.kind.as_str(),
+                "completed" | "failed" | "cancelled" | crate::DENIED_EVENT | crate::LIMIT_EVENT
+            );
+        if says_something {
+            self.record_activity();
+        }
+    }
+
     #[cfg_attr(
         not(feature = "daemon"),
         allow(dead_code, reason = "used only by the daemon")
@@ -531,6 +555,23 @@ fn trim_ascii_end(bytes: &[u8]) -> &[u8] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_event_that_says_nothing_is_an_open_stream_not_progress() {
+        let monitor = Watchdog::new(Duration::from_secs(60));
+        monitor.backdate(Duration::from_secs(61));
+        assert!(monitor.is_stalled());
+        let silent = crate::AgentEvent::new("working", None);
+        monitor.record_event(&silent);
+        let usage_only = crate::AgentEvent::new("usage", Some("  ".to_owned()));
+        monitor.record_event(&usage_only);
+        assert!(
+            monitor.is_stalled(),
+            "an open connection with no bytes stalls"
+        );
+        monitor.record_event(&crate::AgentEvent::new("text", Some("hello".to_owned())));
+        assert!(!monitor.is_stalled(), "words are progress");
+    }
 
     #[test]
     fn watchdog_configuration_and_monitor_are_send_and_sync() {

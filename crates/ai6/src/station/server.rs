@@ -31,6 +31,7 @@ mod ephemeral;
 mod green_ink;
 mod harness;
 mod head_of_station;
+mod health;
 #[cfg(feature = "cables-mcp")]
 mod issues;
 #[cfg(test)]
@@ -64,6 +65,7 @@ mod usage_watch;
 mod verdicts;
 mod verification;
 mod vetting;
+#[cfg(feature = "cables-mcp")]
 mod window_delta;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -2477,11 +2479,26 @@ fn fence_out(state: &DaemonState, mission_id: &str) {
 /// rest of the round is slow on a distant Registry and must not make them late.
 fn check_in_round(state: &DaemonState) {
     renew_run_leases(state);
+    health::surrender_stuck(state);
+    if holds_headquarters_now(state) {
+        health::run_canaries(state, unix_now());
+    }
     publish_station_check_in(state);
     accounts::tend(state);
     recovery::checkpoint_due(state);
     ephemeral::sweep(state);
     agents::enforce_clearances(state);
+}
+
+/// Whether this Station holds the Headquarters lease now.
+fn holds_headquarters_now(state: &DaemonState) -> bool {
+    let now = unix_now();
+    state
+        .intake
+        .headquarters()
+        .ok()
+        .flatten()
+        .is_some_and(|lease| lease.station() == state.station_id && lease.expires() > now)
 }
 
 /// Extends the lease on every Run this Station holds, fencing out any it has lost.
@@ -2707,10 +2724,11 @@ fn publish_station_check_in(state: &DaemonState) {
     );
     info.insert("providers".to_owned(), provider_catalog(state));
     info.insert("found_libraries".to_owned(), found_libraries(state));
-    let degraded = degradations(state);
+    let degraded = health::degradations(state);
     if !degraded.is_empty() {
         info.insert("degraded".to_owned(), serde_json::json!(degraded));
     }
+    health::check_in_facts(state, &mut info);
     let mut theaters = state
         .transports
         .summaries(station_terminal(state, HarnessStdio::Terminal).is_ok());
@@ -3480,6 +3498,7 @@ fn place_brief(
             brief.tags.clone()
         },
         deciding_station: Some(state.station_id.clone()),
+        brief: Some(brief.key()),
     };
     place_request(state, operation_id, request, leases)
 }
@@ -3525,12 +3544,17 @@ fn placement_of(
         .iter()
         .map(|record| {
             let load = station_load(state, leases, record);
-            StationFacts::from_record(
+            let mut facts = StationFacts::from_record(
                 record,
                 now,
                 state.intake.limits().stations.gone_dark_after.0,
                 load,
-            )
+            );
+            // This Station's own record is as fresh as its last give-back, not its last check-in.
+            if record.station() == state.station_id {
+                facts.declined = health::declined_here(state, now).into_keys().collect();
+            }
+            facts
         })
         .collect();
     Ok((placement::place(&policy, request, &stations), stations))
@@ -3802,20 +3826,6 @@ fn found_libraries(state: &DaemonState) -> serde_json::Value {
         );
     }
     serde_json::json!(found.iter().take(limit.or_max()).collect::<Vec<_>>())
-}
-
-/// Everything that keeps this Station from being whole, as the check-in reports it.
-fn degradations(state: &DaemonState) -> Vec<crate::directorates::m::placement::Degradation> {
-    let agents: Vec<_> = state
-        .roster
-        .agent_ids()
-        .filter_map(|id| state.roster.agent(None, id).ok())
-        .collect();
-    super::degraded::refused_libraries(
-        &state.plugins.scan_summary().found,
-        &agents,
-        &available_handlers(state),
-    )
 }
 
 fn available_handlers(state: &DaemonState) -> Vec<String> {
@@ -5686,6 +5696,7 @@ async fn start_mission(
         }
     }
     // What its source issue gained since the last window that ended done.
+    #[cfg(feature = "cables-mcp")]
     let comments_through = match window_run
         .as_ref()
         .and_then(|_| window_delta::of(&state, mission_id.as_str()))
@@ -5696,6 +5707,8 @@ async fn start_mission(
         }
         None => None,
     };
+    #[cfg(not(feature = "cables-mcp"))]
+    let comments_through: Option<String> = None;
     let task = mission.task();
     let prompt_record = PromptRecord::new(
         &task,
@@ -7367,7 +7380,7 @@ fn spawn_event_pump_with_monitor(
             }
             match result {
                 Ok((Some(event), run_id)) => {
-                    monitor.record_activity();
+                    monitor.record_event(&event);
                     attached.room.publish_event(&event);
                     tape.record(&event);
                     if run_id.is_some() {

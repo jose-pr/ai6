@@ -200,6 +200,16 @@ pub struct SchedulerLimits {
     #[schema(title = "Most unloaded libraries listed")]
     #[map(default = SchedulerLimits::default().found_libraries)]
     pub found_libraries: Limit,
+    /// Seconds a Run this Station holds may make no progress (no output, no event with content)
+    /// before the Station gives its brief back to be placed again; `none` never does.
+    #[schema(title = "A claim may make no progress for")]
+    #[map(default = SchedulerLimits::default().claim_progress)]
+    pub claim_progress: TimeLimit,
+    /// Seconds a Station that gave a brief back for making no progress is left out when the brief
+    /// is placed again.
+    #[schema(title = "A Station that gave a brief back is left out for")]
+    #[map(default = SchedulerLimits::default().claim_exclusion)]
+    pub claim_exclusion: Seconds,
     /// Seconds the Station waits for each of its loops when it stops.
     #[schema(title = "Wait for each loop when stopping")]
     #[map(default = SchedulerLimits::default().shutdown_wait)]
@@ -219,6 +229,8 @@ impl Default for SchedulerLimits {
             role_catalog_bytes: Limit::at(512 * KIB),
             provider_catalog_bytes: Limit::at(512 * KIB),
             found_libraries: Limit::at(64),
+            claim_progress: TimeLimit::secs(30 * 60),
+            claim_exclusion: Seconds::new(15 * 60),
             shutdown_wait: Seconds::new(2),
         }
     }
@@ -373,6 +385,15 @@ pub struct SourceLimits {
     #[schema(title = "Longest live tracker read asked for", format = "bytes")]
     #[map(default = SourceLimits::default().read_bytes)]
     pub read_bytes: Limit,
+    /// Poll intervals a Source may go without a finished poll before the Station is degraded and
+    /// names it; `none` never flags one.
+    #[schema(title = "Polls a Source may miss")]
+    #[map(default = SourceLimits::default().missed_polls)]
+    pub missed_polls: Limit,
+    /// Seconds between checks that each tracker instance still takes writes; `none` never checks.
+    #[schema(title = "Check a tracker's write path every")]
+    #[map(default = SourceLimits::default().canary_every)]
+    pub canary_every: TimeLimit,
 }
 
 impl Default for SourceLimits {
@@ -392,6 +413,8 @@ impl Default for SourceLimits {
             reopen_watch: Limit::at(20),
             read_wait: Seconds::new(20),
             read_bytes: Limit::at(16 * 1024),
+            missed_polls: Limit::at(3),
+            canary_every: TimeLimit::secs(15 * 60),
         }
     }
 }

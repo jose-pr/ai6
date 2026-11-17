@@ -1537,6 +1537,19 @@ impl PollBoard {
         }
     }
 
+    /// Every Source the board follows, with how its polls are going.
+    pub(crate) fn snapshot(&self) -> Vec<(String, PollHealth)> {
+        self.polls
+            .lock()
+            .map(|polls| {
+                polls
+                    .iter()
+                    .map(|(source, health)| (source.clone(), health.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Forgets the Sources `keep` does not name: one removed from the configuration is not frozen.
     pub(crate) fn retain(&self, keep: impl Fn(&str) -> bool) {
         if let Ok(mut polls) = self.polls.lock() {

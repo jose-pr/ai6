@@ -377,6 +377,9 @@ pub struct StationFacts {
     /// When it and its Theaters are too short of resources for new Missions.
     #[serde(default)]
     pub limits: ResourceLimits,
+    /// The briefs it gave back for making no progress and may not take yet, by Registry key.
+    #[serde(default)]
+    pub declined: Vec<String>,
 }
 
 impl StationFacts {
@@ -446,6 +449,17 @@ impl StationFacts {
                 .get("resource_limits")
                 .and_then(|value| serde_json::from_value(value.clone()).ok())
                 .unwrap_or_default(),
+            declined: info
+                .get("declined")
+                .and_then(serde_json::Value::as_object)
+                .map(|declined| {
+                    declined
+                        .iter()
+                        .filter(|(_, until)| until.as_f64().is_some_and(|until| until > now))
+                        .map(|(key, _)| key.clone())
+                        .collect()
+                })
+                .unwrap_or_default(),
         }
     }
 }
@@ -469,6 +483,10 @@ pub struct PlacementRequest {
     /// The Station doing the placing; it wins a tie on load.
     #[serde(default)]
     pub deciding_station: Option<String>,
+    /// The brief being placed, by Registry key: a Station that gave it back for making no
+    /// progress is left out while its exclusion lasts.
+    #[serde(default)]
+    pub brief: Option<String>,
 }
 
 /// Where the agent harness runs relative to the Theater it works on.
@@ -774,6 +792,13 @@ fn station_rejection(
     }
     if station.capacity == 0 {
         return Some("it accepts no Missions (capacity 0)".to_owned());
+    }
+    if request
+        .brief
+        .as_ref()
+        .is_some_and(|brief| station.declined.contains(brief))
+    {
+        return Some("it gave this brief back for making no progress".to_owned());
     }
     if station.occupied() >= station.capacity {
         return Some(format!(
@@ -1116,6 +1141,7 @@ mod tests {
             theaters: vec![TheaterSummary::local()],
             resources: None,
             limits: ResourceLimits::default(),
+            declined: Vec::new(),
         }
     }
 
@@ -1177,6 +1203,36 @@ mod tests {
             .filter(|r| r.station.as_deref() == Some(station))
             .map(|r| r.reason.clone())
             .collect()
+    }
+
+    #[test]
+    fn a_brief_a_station_gave_back_is_placed_on_another_while_the_exclusion_lasts() {
+        let mut stuck = station("a", 0);
+        stuck.declined = vec!["brief-1".to_owned()];
+        let other = station("b", 0);
+        let request = PlacementRequest {
+            brief: Some("brief-1".to_owned()),
+            deciding_station: Some("a".to_owned()),
+            ..PlacementRequest::default()
+        };
+        let placement = place(&policy(), &request, &[stuck.clone(), other.clone()]);
+        assert_eq!(placement.choices[0].station, "b", "{placement:?}");
+        assert!(
+            placement
+                .rejections
+                .iter()
+                .any(|rejection| rejection.station.as_deref() == Some("a")
+                    && rejection.reason.contains("gave this brief back"))
+        );
+        let elsewhere = PlacementRequest {
+            brief: Some("brief-2".to_owned()),
+            ..request
+        };
+        let placement = place(&policy(), &elsewhere, &[stuck, other]);
+        assert_eq!(
+            placement.choices[0].station, "a",
+            "another brief is not refused it"
+        );
     }
 
     #[test]

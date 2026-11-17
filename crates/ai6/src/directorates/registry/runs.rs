@@ -1877,6 +1877,17 @@ impl FileRegistry {
     }
 }
 
+/// A fresh record of run `number` of `mission`, for tests of what reads Run records.
+#[cfg(test)]
+pub(crate) fn opened_for_test(mission: &str, number: u32) -> RunRecord {
+    opened(
+        NewRun::new(format!("{mission}.{number}"), mission, "s-1").with_number(number, None),
+        Duration::from_secs(60),
+        0.0,
+        1,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2661,15 +2672,4 @@ mod tests {
         }
         assert!(registry.run("../escape").is_err());
     }
-}
-
-/// A fresh record of run `number` of `mission`, for tests of what reads Run records.
-#[cfg(test)]
-pub(crate) fn opened_for_test(mission: &str, number: u32) -> RunRecord {
-    opened(
-        NewRun::new(format!("{mission}.{number}"), mission, "s-1").with_number(number, None),
-        Duration::from_secs(60),
-        0.0,
-        1,
-    )
 }

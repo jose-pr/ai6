@@ -140,6 +140,7 @@ fn place(
         role: None,
         tags: Vec::new(),
         deciding_station: Some(state.station_id.clone()),
+        brief: None,
     };
     let leases = state.intake.leases().unwrap_or_default();
     let (placed, stations) = super::placement_of(state, operation, &request, &leases)?;
