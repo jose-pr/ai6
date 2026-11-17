@@ -511,8 +511,61 @@ def patch_ring(name: str, kept: dict[str, bytes], refused: dict[str, bytes]) -> 
     kept["build.rs"] = (fixed.rstrip("\n") + "\n" + RING_FN).encode("utf-8")
 
 
+WINDOWS_LIB = re.compile(r"^lib/[^/]+\.lib$")
+WINDOWS_BUILD = """fn main() {
+    let dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+
+    println!(
+        "cargo:rustc-link-search=native={}",
+        std::path::Path::new(&dir).join("lib").display()
+    );
+}
+"""
+WINDOWS_BUILD_TEXT = """use std::{env, fs, path::Path};
+
+/// Writes each `lib/<name>.lib.hex` below `OUT_DIR` as `<name>.lib` and points the linker there.
+fn main() {
+    let dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+    let out = env::var("OUT_DIR").unwrap();
+    for entry in fs::read_dir(Path::new(&dir).join("lib")).unwrap() {
+        let path = entry.unwrap().path();
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let Some(lib) = name.strip_suffix(".hex") else { continue };
+        println!("cargo:rerun-if-changed={}", path.display());
+        let text = fs::read_to_string(&path).unwrap();
+        let digits: Vec<u8> = text.bytes().filter(|b| b.is_ascii_hexdigit()).collect();
+        let bytes: Vec<u8> = digits
+            .chunks(2)
+            .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+            .collect();
+        fs::write(Path::new(&out).join(lib), bytes).unwrap();
+    }
+    println!("cargo:rustc-link-search=native={out}");
+}
+"""
+
+
+def patch_windows_msvc(name: str, kept: dict[str, bytes], refused: dict[str, bytes]) -> None:
+    """Keeps a windows_*_msvc crate's import libraries as hex, decoded into OUT_DIR by build.rs."""
+    libs = sorted(p for p in refused if WINDOWS_LIB.match(p))
+    if not libs:
+        return
+    if kept.get("build.rs", b"").decode("utf-8", "replace").replace("\r\n", "\n") != WINDOWS_BUILD:
+        raise Problem(f"{name}: build.rs no longer links its import libraries as crates.py expects")
+    for path in libs:
+        digits = refused.pop(path).hex()
+        lines = [digits[i : i + 128] for i in range(0, len(digits), 128)]
+        kept[f"{path}.hex"] = ("\n".join(lines) + "\n").encode("ascii")
+    kept["build.rs"] = WINDOWS_BUILD_TEXT.encode("utf-8")
+
+
 # Crates whose build links binary files that cannot be inlined, by crate name.
-PATCHES = {"ring": patch_ring}
+PATCHES = {
+    "ring": patch_ring,
+    "windows_aarch64_msvc": patch_windows_msvc,
+    "windows_i686_msvc": patch_windows_msvc,
+    "windows_x86_64_msvc": patch_windows_msvc,
+}
 
 
 def include_closure(files: dict[str, bytes]) -> dict[str, bytes]:

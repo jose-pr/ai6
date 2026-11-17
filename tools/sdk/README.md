@@ -79,6 +79,8 @@ fixtures are left out, as is any file that is not text or an image (archives, ex
 wasm, object files, binary tables). A binary a build reads is rewritten as text: an
 `include_bytes!` of it becomes an array literal, and `ring`'s prebuilt objects become hex that its
 `build.rs` decodes; one that only tests read, or that only another byte order reads, is dropped.
+The `windows_*_msvc` crates' import libraries (`lib/*.lib`) are kept the same way, as `lib/<name>.lib.hex`;
+their `build.rs` decodes them into `OUT_DIR` and links from there, so an offline MSVC build needs no binary in git.
 `refresh` makes the same tree every time. `crates.py`, which needs
 Python 3.11.4 or later, works on a checkout of that branch. Installing the SDKs needs the network once;
 the build after this does not:
