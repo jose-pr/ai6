@@ -1736,6 +1736,201 @@ mod tests {
         );
     }
 
+    /// Every key `ai6.cfg` accepts, with why it is read before the configuration provider is
+    /// reached. A runtime setting does not belong here: it is a record, edited live. A new key
+    /// fails `the_bootstrap_holds_only_what_reaches_the_database` until it is listed with its reason.
+    const BOOTSTRAP_KEYS: &[(&str, &str)] = &[
+        (
+            ".provider",
+            "the table that says where the configuration provider is",
+        ),
+        (".provider.location", "where the configuration provider is"),
+        (
+            ".provider.password",
+            "the database password, needed to connect",
+        ),
+        (
+            ".provider.poll",
+            "how often a process asks the provider for changes, set before the first ask",
+        ),
+        (
+            ".provider.retry_first",
+            "the wait before reopening a provider that is not up yet, set before it opens",
+        ),
+        (".provider.retry_factor", "growth of that wait"),
+        (".provider.retry_longest", "longest of those waits"),
+        (
+            ".provider.retry_for",
+            "how long to keep trying to open the provider",
+        ),
+        (".registry", "the table that says where the Registry is"),
+        (".registry.location", "where the Registry is"),
+        (
+            ".registry.password",
+            "the Registry database's password, needed to connect",
+        ),
+        (
+            ".registry.headquarters_lease",
+            "the lease is taken while starting, before any record is read",
+        ),
+        (
+            ".registry.sqlite_busy_timeout",
+            "applies to the connection as it opens",
+        ),
+        (".station", "the table naming this Station's process"),
+        (".station.id", "the Station's own identity"),
+        (".station.state_dir", "the host's state directory"),
+        (".station.listen", "a bound listener has one address"),
+        (
+            ".station.plugins",
+            "the table for provider libraries loaded at start",
+        ),
+        (
+            ".station.plugins.paths",
+            "where libraries are found, before any is loaded",
+        ),
+        (
+            ".station.plugins.profile",
+            "how libraries are verified, before any is loaded",
+        ),
+        (
+            ".station.plugins.keep_verified",
+            "verified copies of libraries are made at load",
+        ),
+        (
+            ".station.identity",
+            "the table for the Station's certificate identity",
+        ),
+        (
+            ".station.identity.dir",
+            "the identity directory, read before the Station can sign in",
+        ),
+        (".station.secrets", "the table for the host's secret files"),
+        (
+            ".station.secrets.dir",
+            "the secrets directory, read before any record is",
+        ),
+        (".unex", "the table for the gateway process"),
+        (".unex.url", "where a Station finds the gateway"),
+        (
+            ".unex.ca_file",
+            "the CA a process trusts when it reaches the gateway",
+        ),
+        (
+            ".unex.station_token",
+            "the credential a Station presents to the gateway",
+        ),
+        (".unex.listen", "a bound listener has one address"),
+        (
+            ".unex.public_origin",
+            "the origin the gateway is reached at, fixed while it runs",
+        ),
+        (
+            ".unex.proxy_secret",
+            "a secret reference read when the gateway starts",
+        ),
+        (
+            ".unex.proxy_secret_min_bytes",
+            "the floor for that secret, checked as it is read",
+        ),
+        (
+            ".unex.factor_key",
+            "a secret reference read when the gateway starts",
+        ),
+        (
+            ".unex.factor_key_min_bytes",
+            "the floor for that key, checked as it is read",
+        ),
+        (".unex.state_dir", "the gateway's state directory"),
+        (
+            ".unex.plugins",
+            "the table for sign-in libraries loaded at start",
+        ),
+        (
+            ".unex.plugins.paths",
+            "where libraries are found, before any is loaded",
+        ),
+        (
+            ".unex.plugins.profile",
+            "how libraries are verified, before any is loaded",
+        ),
+        (
+            ".unex.plugins.keep_verified",
+            "verified copies of libraries are made at load",
+        ),
+        (".unex.access", "the table for the first chief"),
+        (
+            ".unex.access.chief",
+            "seeds an empty access policy, so a lost policy cannot lock everyone out",
+        ),
+        (".unex.pages", "the table for the pages' own server"),
+        (".unex.pages.dir", "the pages directory, created at start"),
+        (
+            ".unex.pages.origin",
+            "the pages' origin, fixed while the gateway runs",
+        ),
+        (".unex.pages.listen", "a bound listener has one address"),
+        (".unex.tls", "the table for the gateway's own certificate"),
+        (
+            ".unex.tls.certificate",
+            "the certificate the listener is bound with",
+        ),
+        (".unex.tls.key", "the key the listener is bound with"),
+        (".unex.liaison", "the table for the link listener"),
+        (".unex.liaison.listen", "a bound listener has one address"),
+        (
+            ".unex.liaison.identity",
+            "the link key, read when the listener starts",
+        ),
+        (".unex.liaison.poll", "the link's pace, read when it starts"),
+        (
+            ".unex.liaison.max_links",
+            "slots allocated when the listener starts",
+        ),
+        (
+            ".unex.liaison.plain_beyond_loopback",
+            "decides how the listener binds",
+        ),
+        (".unex.liaison.peer", "peers the link dials when it starts"),
+    ];
+
+    #[test]
+    fn the_bootstrap_holds_only_what_reaches_the_database() {
+        let schema = schema_of::<Bootstrap>();
+        let mut found = Vec::new();
+        writable("", &schema, &mut found);
+        // `oo` is Outer Office's own display preferences on this host, free-form here; a secret
+        // reference's own fields (`provider`, `key`, `secret`) are one key, the reference.
+        let references = [
+            ".provider.password",
+            ".registry.password",
+            ".unex.factor_key",
+            ".unex.proxy_secret",
+            ".unex.station_token",
+        ];
+        let mut keys: Vec<&str> = found
+            .iter()
+            .map(|(path, _, _)| path.as_str())
+            .filter(|path| *path != ".oo" && !path.starts_with(".oo."))
+            .filter(|path| {
+                !references.iter().any(|reference| {
+                    path.strip_prefix(reference)
+                        .is_some_and(|rest| rest.starts_with('.'))
+                })
+            })
+            .collect();
+        keys.sort_unstable();
+        keys.dedup();
+        let mut listed: Vec<&str> = BOOTSTRAP_KEYS.iter().map(|(path, _)| *path).collect();
+        listed.sort_unstable();
+        assert_eq!(
+            keys, listed,
+            "a bootstrap key was added or removed: a setting read while running is a record of the \
+             configuration provider, not a key here; list a true bootstrap key in BOOTSTRAP_KEYS \
+             with its reason"
+        );
+    }
+
     #[test]
     fn no_setting_is_required_by_the_file_itself() {
         let schema = schema_of::<Bootstrap>();
