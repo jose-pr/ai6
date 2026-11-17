@@ -1,0 +1,36 @@
+# tplx-rs/. at 0298ec416a1676d088abf4f8519812ec4b5eb1e1, with what it inherits written out.
+[package]
+name = "tplx-rs"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.81"
+description = "Template engines behind one call: envsubst (GNU, a8m and drone dialects), standard Mustache, and raw. No I/O, builds for wasm32."
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/jose-pr/tplx-rs"
+keywords = ["template", "mustache", "envsubst", "sandbox"]
+categories = ["template-engine", "no-std"]
+exclude = [".*", "*.local.*"]
+[package.metadata]
+[package.metadata.docs]
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+[lib]
+name = "tplx_rs"
+[dependencies]
+[dependencies.serde_json]
+version = "1"
+default-features = false
+features = ["alloc"]
+[dependencies.thiserror]
+version = "2"
+default-features = false
+[features]
+default = ["std"]
+std = ["serde_json/std", "thiserror/std"]
+[lints]
+[lints.rust]
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+unsafe_code = "forbid"

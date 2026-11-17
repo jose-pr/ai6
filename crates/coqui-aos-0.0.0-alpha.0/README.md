@@ -29,6 +29,7 @@ declares. Documentation: <https://boriken-dev.github.io/coqui-aos/>.
   and semantic rules, overlay identities, `[git+]<location>[@<ref>][#<path>]` sources, the tree
   digest, `requires` and the composition order, defaults from an overlay's files, the order of
   application with substitution, and setup phases and package environments as pure functions.
+- **Knowledge served through MCP**: `kb_read`, `kb_list` and `KnowledgeSession` answer the specification's knowledge tools from a request, with no transport and no I/O: which files are knowledge, lines, a template rendered per call from the caller's facts, and the checks on a search answer. The `index` feature adds an on-disk index (passages, BM25, vectors) as a search backend, and `embeddings` an OpenAI-compatible client.
 - **Held to the specification's vectors.** `vectors/` carries them byte for byte.
 
 ## Installation
@@ -39,6 +40,8 @@ cargo add coqui-aos --git https://github.com/Boriken-Dev/coqui-aos
 
 | Feature | Adds | Needed for | Default |
 | --- | --- | --- | --- |
+| `index` | `coqui_aos::index`: an on-disk index of an overlay's knowledge and `IndexSearch`, a search backend over it | searching knowledge | off |
+| `embeddings` | `index::HttpEmbedder`, an OpenAI-compatible embeddings client | search by meaning | off |
 | `fs` | `StdFs`, the operating system's files as a `FileSystem` | reading a directory with `std::fs` | on |
 
 ## Quick start
@@ -92,6 +95,8 @@ assert!(tree.digest.to_string().starts_with("sha256:"));
 | `read_catalog`, `list_catalogs`, `read_icon` | catalogs, their listing and icons |
 | `resolve_skills`, `read_fetched_skill`, `SkillSource` | skills through catalogs, pins and fetching |
 | `hook_plan`, `read_hook_output`, `fire_event` | hooks: which, with what, and what applies |
+| `kb_read`, `kb_list`, `KnowledgeSession`, `KnowledgeOverlay`, `CallerFacts` | the knowledge tools, a request in and a result out |
+| `index::Index`, `index::IndexSearch` | an index of an overlay's knowledge as a search backend (`index` feature) |
 | `Settings`, `Limit`, `Error` | every limit, and the one error type |
 
 ## Development

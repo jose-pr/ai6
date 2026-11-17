@@ -220,3 +220,24 @@ pub fn skill_text(data: &[u8], values: &Template, settings: &Settings) -> Result
     out.push_str(&template(utf8(&data[offset..])?, values));
     Ok(out)
 }
+
+impl Template {
+    /// The template with `name` replaced by `value`, in place of any text it had.
+    #[must_use]
+    pub(crate) fn with(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.values.insert(name.into(), value.into());
+        self
+    }
+}
+
+impl Template {
+    /// The names and their text as a JSON object, for an engine that reads its names from data.
+    pub(crate) fn to_object(&self) -> serde_json::Value {
+        serde_json::Value::Object(
+            self.values
+                .iter()
+                .map(|(name, value)| (name.clone(), serde_json::Value::String(value.clone())))
+                .collect(),
+        )
+    }
+}

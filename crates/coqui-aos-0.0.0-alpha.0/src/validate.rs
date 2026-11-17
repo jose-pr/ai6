@@ -446,6 +446,7 @@ impl Check {
                 "harness" => self.harness(value, &at),
                 "hooks" => self.hooks(value, &at),
                 "about" => self.about(value, &at),
+                "knowledge" => self.knowledge(value, &at),
                 _ => {}
             }
         }
@@ -919,6 +920,16 @@ impl Check {
                     _ => {}
                 }
             }
+        }
+    }
+
+    /// The `[knowledge]` table: one boolean hint, no other key.
+    fn knowledge(&mut self, value: &Data, at: &str) {
+        let Some(map) = self.object(value, at, &["serve"]) else {
+            return;
+        };
+        for (key, value) in map {
+            self.boolean(value, &join(at, key));
         }
     }
 

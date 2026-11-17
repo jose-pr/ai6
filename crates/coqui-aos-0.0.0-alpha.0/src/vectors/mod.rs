@@ -11,6 +11,7 @@
 mod catalog;
 mod front_matter;
 mod hooks;
+mod knowledge;
 mod reading;
 mod skills;
 mod support;
@@ -84,13 +85,15 @@ impl fmt::Debug for Runner {
 
 impl Runner {
     /// The vector files this crate runs.
-    pub const FILES: [&'static str; 12] = [
+    pub const FILES: [&'static str; 14] = [
         "catalog.json",
         "compose.json",
         "digest.json",
         "effective.json",
         "front_matter.json",
         "hooks.json",
+        "knowledge.json",
+        "knowledge_search.json",
         "names.json",
         "reading.json",
         "skills.json",
@@ -177,6 +180,8 @@ impl Runner {
             "effective.json" => reading::effective_vectors(self),
             "front_matter.json" => front_matter::front_matter(self),
             "hooks.json" => hooks::hooks(self),
+            "knowledge.json" => knowledge::knowledge(self),
+            "knowledge_search.json" => knowledge::knowledge_search(self),
             "names.json" => reading::names(self),
             "reading.json" => reading::reading(self),
             "skills.json" => skills::skills_from_elsewhere(self),

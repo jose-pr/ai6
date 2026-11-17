@@ -1,5 +1,5 @@
-# coqui-aos/rust at 5176974f30f664a4a9c382fdd467d4a1ab87765b, with what it inherits written out.
-test = [{ name = "tree", required-features = ["fs"] }]
+# coqui-aos/rust at c4babfd9f15347a7d35d0fc25fa28cbe398ac02f, with what it inherits written out.
+test = [{ name = "tree", required-features = ["fs"] }, { name = "knowledge_index", required-features = ["index"] }]
 [package]
 name = "coqui-aos"
 version = "0.0.0-alpha.0"
@@ -24,6 +24,8 @@ default = ["fs"]
 fs = []
 test-support = ["dep:base64"]
 serde = ["dep:serde"]
+index = ["dep:serde", "dep:globset", "dep:data-encoding"]
+embeddings = ["index", "dep:ureq"]
 [dependencies]
 unicode-general-category = "1"
 [dependencies.guatiao]
@@ -49,6 +51,24 @@ optional = true
 [dependencies.sha2]
 version = "0.10"
 default-features = false
+[dependencies.tplx-rs]
+git = "https://github.com/jose-pr/tplx-rs"
+rev = "0298ec416a1676d088abf4f8519812ec4b5eb1e1"
+default-features = false
+[dependencies.globset]
+version = "0.4"
+default-features = false
+optional = true
+[dependencies.data-encoding]
+version = "2"
+default-features = false
+features = ["std"]
+optional = true
+[dependencies.ureq]
+version = "3.5"
+default-features = false
+features = ["rustls", "platform-verifier"]
+optional = true
 [dependencies.toml]
 version = "1"
 default-features = false
