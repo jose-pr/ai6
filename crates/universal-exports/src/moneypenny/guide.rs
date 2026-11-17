@@ -68,7 +68,7 @@ pub(crate) fn guide(topic: &str) -> Option<&'static str> {
     GUIDES
         .iter()
         .find(|(name, _)| *name == topic)
-        .map(|(_, text)| *text)
+        .map(|(_, text)| ai6::directorates::m::guides::body(text))
 }
 
 /// The context a new harness starts with: the instructions and the field dictionary.
@@ -95,5 +95,6 @@ mod tests {
             assert!(text.starts_with('#') || text.contains("\n#"), "{topic}");
         }
         assert!(guide("missions").is_some() && guide("nowhere").is_none());
+        assert!(!guide("access").unwrap().starts_with("---"));
     }
 }

@@ -143,6 +143,18 @@ pub fn report_of(id: impl Into<String>, path: &str, text: &str) -> Option<Report
     Some(report)
 }
 
+/// `text` without its leading front-matter block: what a reader is shown of a guide.
+pub fn body(text: &str) -> &str {
+    let read = read_front_matter(text.as_bytes(), &Settings::default());
+    match (read.case, read.body_offset) {
+        (Case::Mapping, Some(offset)) => text
+            .get(offset..)
+            .unwrap_or(text)
+            .trim_start_matches(['\r', '\n']),
+        _ => text,
+    }
+}
+
 /// Every guide the build ships, by path.
 pub fn built_in() -> &'static [Report] {
     static GUIDES: OnceLock<Vec<Report>> = OnceLock::new();
@@ -188,6 +200,35 @@ mod tests {
         );
         assert_eq!(find("built-in.docs.reports").unwrap().title, "Reports");
         assert!(find("kb/writing_a_brief").is_none());
+    }
+
+    #[test]
+    fn a_guide_feeds_its_report_from_its_front_matter_and_shows_only_its_body() {
+        let text = include_str!("../../../../../docs/access.md");
+        let shown = body(text);
+        assert!(
+            text.starts_with(
+                "---
+"
+            ) && !shown.contains("kind: tradecraft")
+        );
+        assert!(
+            shown.starts_with("# Access and sign-in"),
+            "{}",
+            &shown[..40]
+        );
+        let report = find("built-in.docs.access").unwrap();
+        assert_eq!(report.kind, "tradecraft");
+        assert!(
+            report
+                .summary
+                .as_deref()
+                .unwrap()
+                .starts_with("Who may sign in")
+        );
+        assert!(report.topics.iter().any(|topic| topic == "sign-in"));
+        assert!(!report.text.starts_with("---"));
+        assert_eq!(body("no front matter"), "no front matter");
     }
 
     #[test]

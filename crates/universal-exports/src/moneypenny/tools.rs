@@ -482,7 +482,7 @@ static READ_TOOLS: &[Tool] = &[
             guide::GUIDES
                 .iter()
                 .find(|(name, _)| *name == topic)
-                .map(|(_, text)| Plan::Guide(text))
+                .map(|(_, text)| Plan::Guide(ai6::directorates::m::guides::body(text)))
                 .ok_or_else(|| format!("there is no guide {topic:?}"))
         },
         post: None,
