@@ -174,7 +174,7 @@ fn rule_outcome(
     set: &AccessSet<'_>,
     delegable: &BTreeSet<String>,
 ) -> Result<Vec<String>, String> {
-    if rule.subject != "any:signed-in" && rule.subject.parse::<Subject>().is_err() {
+    if rule.subject.parse::<Subject>().is_err() {
         return Err(
             "a subject is account:<name>, person:<id>, group:<name> or any:signed-in".into(),
         );
