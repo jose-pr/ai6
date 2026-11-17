@@ -237,6 +237,7 @@ pub universal_exports::BoardRun::updated_at: core::option::Option<f64>
 #[non_exhaustive] pub struct universal_exports::BoardStation
 pub universal_exports::BoardStation::capacity: usize
 pub universal_exports::BoardStation::config: core::option::Option<ai6::directorates::m::config::ConfigStatus>
+pub universal_exports::BoardStation::degraded: alloc::vec::Vec<ai6::directorates::m::placement::Degradation>
 pub universal_exports::BoardStation::handlers: alloc::vec::Vec<alloc::string::String>
 pub universal_exports::BoardStation::head_of_station: core::option::Option<ai6::directorates::registry::logbook::StationReport>
 pub universal_exports::BoardStation::headquarters: bool

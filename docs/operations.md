@@ -241,6 +241,7 @@ posts_per_hour = 6
 | --- | --- | --- |
 | `preset` | `strict` | **Preset.** `strict`, or `licensed`, which lets `00` Agents close and reopen without green ink. |
 | `updates` | `milestones` | **Automatic updates.** `outcome`: only the report when the Mission ends; `milestones`: one status comment kept current on the source issue (working, waiting, paused) plus the report; `all`: also on every other linked issue. |
+| `writes` | `final` | **When an Agent writes.** `final`: an Agent comments once per Mission, as its closing note; `any`: whenever, within the post limits; `none`: never. |
 | `max_body_bytes` | 8 KiB | **Size of a post.** Bytes of one posted comment. |
 | `posts_per_hour` | 6 | **Posts an hour, per Mission.** Agent and person posts per hour per Mission (the bucket's refill). |
 | `post_burst` | 3 | **Burst of posts.** Posts a Mission may make in a burst. |

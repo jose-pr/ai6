@@ -647,6 +647,22 @@
               "description": "`outcome`: only the report when the Mission ends; `milestones`: one status comment kept current on the source issue (working, waiting, paused) plus the report; `all`: also on every other linked issue.",
               "default": "milestones"
             },
+            "writes": {
+              "type": "string",
+              "enum": [
+                "final",
+                "any",
+                "none"
+              ],
+              "x-enum-labels": {
+                "final": "Once, as the closing note",
+                "any": "Whenever it likes",
+                "none": "Never"
+              },
+              "title": "When an Agent writes",
+              "description": "`final`: an Agent comments once per Mission, as its closing note; `any`: whenever, within the post limits; `none`: never.",
+              "default": "final"
+            },
             "max_body_bytes": {
               "anyOf": [
                 {
@@ -953,6 +969,7 @@
           "default": {
             "preset": "strict",
             "updates": "milestones",
+            "writes": "final",
             "max_body_bytes": 8192,
             "posts_per_hour": 6,
             "post_burst": 3,
@@ -8757,6 +8774,36 @@
               "description": "Libraries found on the plugin paths but not loaded that a check-in lists for a person to approve; past it, the rest are left out.",
               "default": 64
             },
+            "claim_progress": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "format": "seconds"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "seconds",
+              "title": "A claim may make no progress for",
+              "description": "Seconds a Run this Station holds may make no progress (no output, no event with content) before the Station gives its brief back to be placed again; `none` never does.",
+              "default": 1800.0
+            },
+            "claim_exclusion": {
+              "type": "number",
+              "minimum": 0,
+              "format": "seconds",
+              "title": "A Station that gave a brief back is left out for",
+              "description": "Seconds a Station that gave a brief back for making no progress is left out when the brief is placed again.",
+              "default": 900.0
+            },
             "shutdown_wait": {
               "type": "number",
               "minimum": 0,
@@ -8780,6 +8827,8 @@
             "role_catalog_bytes": 524288,
             "provider_catalog_bytes": 524288,
             "found_libraries": 64,
+            "claim_progress": 1800.0,
+            "claim_exclusion": 900.0,
             "shutdown_wait": 2.0
           }
         },
@@ -9102,6 +9151,48 @@
               "title": "Longest live tracker read asked for",
               "description": "The most bytes of one live tracker read Universal Exports asks for.",
               "default": 16384
+            },
+            "missed_polls": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Polls a Source may miss",
+              "description": "Poll intervals a Source may go without a finished poll before the Station is degraded and names it; `none` never flags one.",
+              "default": 3
+            },
+            "canary_every": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "format": "seconds"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "seconds",
+              "title": "Check a tracker's write path every",
+              "description": "Seconds between checks that each tracker instance still takes writes; `none` never checks.",
+              "default": 900.0
             }
           },
           "additionalProperties": false,
@@ -9121,7 +9212,9 @@
             "reopen_watch_every": 300.0,
             "reopen_watch": 20,
             "read_wait": 20.0,
-            "read_bytes": 16384
+            "read_bytes": 16384,
+            "missed_polls": 3,
+            "canary_every": 900.0
           }
         },
         "transports": {
@@ -11233,6 +11326,59 @@
             "call_margin": 30.0,
             "poll_slice": 0.25,
             "pause_slice": 0.05
+          }
+        },
+        "denials": {
+          "type": "object",
+          "properties": {
+            "kept": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Refused calls kept",
+              "description": "Refused calls a Mission keeps of its last turn; past it the rest are counted and left out.",
+              "default": 20
+            },
+            "target_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "bytes",
+              "title": "Longest target of a refused call",
+              "description": "Bytes of what a refused call reached (a path, a command, an address) that are kept; the rest is cut, and a credential in it is replaced first.",
+              "default": 200
+            }
+          },
+          "additionalProperties": false,
+          "title": "Refused calls",
+          "description": "`[denials]`: the calls a harness refused, as a Run's outcome keeps them.",
+          "default": {
+            "kept": 20,
+            "target_bytes": 200
           }
         },
         "partial_line_bytes": {

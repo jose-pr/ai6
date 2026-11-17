@@ -1267,6 +1267,8 @@ provider applied before it was a key; the provider's API header lists them with 
 | `role_catalog_bytes` | 512 KiB | **Largest role catalog and placement policies.** Bytes of the Agent role catalog and of the placement policies a check-in carries; past it, each is left out. |
 | `provider_catalog_bytes` | 512 KiB | **Largest provider catalog.** Bytes of the provider catalog (each loaded provider with its configuration's schema and form) a check-in carries; past it, the schemas and forms are left out. |
 | `found_libraries` | 64 | **Most unloaded libraries listed.** Libraries found on the plugin paths but not loaded that a check-in lists for a person to approve; past it, the rest are left out. |
+| `claim_progress` | 1,800 | **A claim may make no progress for.** Seconds a Run this Station holds may make no progress (no output, no event with content) before the Station gives its brief back to be placed again; `none` never does. |
+| `claim_exclusion` | 900 | **A Station that gave a brief back is left out for.** Seconds a Station that gave a brief back for making no progress is left out when the brief is placed again. |
 | `shutdown_wait` | 2 | **Wait for each loop when stopping.** Seconds the Station waits for each of its loops when it stops. |
 <!-- schema:record.station.scheduler:end -->
 
@@ -1308,6 +1310,8 @@ provider applied before it was a key; the provider's API header lists them with 
 | `reopen_watch` | 20 | **Settled items read per round.** Settled items read in each of those rounds, per tracker instance, newest first; each is one request to the tracker. |
 | `read_wait` | 20 | **Wait for a live tracker read.** Seconds one ask for a live tracker read waits at Universal Exports before asking again. |
 | `read_bytes` | 16 KiB | **Longest live tracker read asked for.** The most bytes of one live tracker read Universal Exports asks for. |
+| `missed_polls` | 3 | **Polls a Source may miss.** Poll intervals a Source may go without a finished poll before the Station is degraded and names it; `none` never flags one. |
+| `canary_every` | 900 | **Check a tracker's write path every.** Seconds between checks that each tracker instance still takes writes; `none` never checks. |
 <!-- schema:record.station.sources:end -->
 
 `[transports]`

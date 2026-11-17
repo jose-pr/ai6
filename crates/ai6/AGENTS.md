@@ -5232,10 +5232,13 @@ closes the Run.
 
 A handler reports calls its harness refused by its permission rules in a turn as an event of kind
 `DENIED_EVENT`, before that turn's `completed` or `failed`: `text` names the tools, separated by
-`, `, and `tools` stays empty, since they did not run. The daemon records them in
-`Mission.denied_tools`, logs them, keeps the event, publishes the Mission's end with the reason
-`permission-denied`, and gives them to a source Mission's outcome (`denied_tools`), which the CX
-report quotes unless the disclosure is `Hidden`. The Mission's state is whatever the turn ended in.
+`, `, and `tools` stays empty, since they did not run; `data`, when set, is a JSON list of
+`{"tool", "target"}`. The daemon records them in `Mission.denials` (`Denial { tool, target, policy }`,
+at most `[denials] kept`, each target screened for credentials and cut to `[denials] target_bytes`),
+logs them, keeps the event, publishes a Mission that FAILED after them with the reason
+`permission-denied`, and gives them to a source Mission's outcome (`denials`), which the CX
+report quotes ("N tool calls denied", with "(permission denied)" only when it failed) unless the
+disclosure is `Hidden`. The Mission's state is whatever the turn ended in.
 
 `report` is what the provider reported with the event (Claude Code on `result`, Codex on its
 token-usage notification): the run's `spend` is running totals for the provider process, which a
@@ -5365,7 +5368,7 @@ queued Mission another Agent. `block_for(id, reason)` blocks an active Mission a
 fails a queued Mission whose harness cannot be started and records `Mission.failure`
 (`Option<String>`, serde default, cleared by the next state change or a retry), which its brief's
 outcome carries as `reason`;
-`note_denied_tools(id, tools)` records `Mission.denied_tools` (`Vec<String>`, serde default empty,
+`note_denials(id, denials)` records `Mission.denials` (`Vec<Denial>`, serde default empty,
 cleared by a transition to `Working`); `expose(id, sources)`
 records `Mission.exposure`, the untrusted input the Mission itself came from;
 `record_provenance(id, provenance)` records `Mission.provenance` (`Option<Provenance>`, the
@@ -6508,3 +6511,25 @@ declare (or a value it does not accept), naming the provider and the key. `handl
   `--handler` must be its pool's. Each act is audited first (`pool.login.add|replace|station.add|
   station.remove|sign_out|forget`) and a refused audit refuses it. Nothing it prints holds a login.
 - User-facing management goes through Universal Exports and the separate `ai6ctl` command.
+
+## Station health (check-in)
+
+`Degradation { kind, subject, reason, depends }` (`ai6::Degradation`) is one thing that keeps a
+Station from being whole; the check-in carries them as `degraded`, `/v1/stations` as
+`degraded` (only for a person who may read the Station), `ai6ctl stations` as HEALTH `degraded`, and
+the Stations view as "Degraded". Kinds: `library` (a pin set refused a found library; `depends` names
+the Agents without a loaded handler), `source-poll` (no finished poll for `[sources] missed_polls`
+intervals), `source-write` (a tracker's write check failed, every `[sources] canary_every`, run by the
+Headquarters Station only: its provider builds, answers `capabilities` and says it can comment) and
+`sessions` (Runs held, none progressing). The check-in also carries `sessions`
+(`{running, progressing}`), `source_polls` (each Source's `last_completed`) and `declined` (briefs this
+Station gave back, with when it may take them again). A Run quiet for `[scheduler] claim_progress` has
+its brief given back; placement leaves that Station out for `[scheduler] claim_exclusion`
+(`PlacementRequest.brief`, `StationFacts.declined`). A provider event with no text, data, tool call or
+end does not reset the stall clock (`Watchdog::record_event`).
+
+A standing window's brief carries the source-issue comments newer than the latest `RunRecord.comments_through`
+of a run that ended done (`station/server/window_delta.rs`). `[operation.X.issues] writes` is `final` (one
+Agent comment per Mission, the default), `any` or `none`; a post that is only a file path is refused
+(`Refusal::BarePath`). A brief held only for the rate returns to the queue once `[vetting] rate_window`
+has rolled.

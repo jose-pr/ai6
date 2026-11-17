@@ -1237,6 +1237,7 @@ pub ai6::directorates::m::config::StationRuntime::approvals: ai6::station::limit
 pub ai6::directorates::m::config::StationRuntime::attach: ai6::station::limits::AttachLimits
 pub ai6::directorates::m::config::StationRuntime::audit: ai6::station::limits::AuditLimits
 pub ai6::directorates::m::config::StationRuntime::blocked_after: core::option::Option<f64>
+pub ai6::directorates::m::config::StationRuntime::denials: ai6::station::limits::DenialLimits
 pub ai6::directorates::m::config::StationRuntime::detached: ai6::station::limits::DetachedLimits
 pub ai6::directorates::m::config::StationRuntime::green_ink: ai6::station::limits::GreenInkLimits
 pub ai6::directorates::m::config::StationRuntime::harness: ai6::station::limits::HarnessLimits
@@ -1576,6 +1577,10 @@ pub enum ai6::directorates::m::issues::IssueUpdates
 pub ai6::directorates::m::issues::IssueUpdates::All
 pub ai6::directorates::m::issues::IssueUpdates::Milestones
 pub ai6::directorates::m::issues::IssueUpdates::Outcome
+pub enum ai6::directorates::m::issues::IssueWrites
+pub ai6::directorates::m::issues::IssueWrites::Any
+pub ai6::directorates::m::issues::IssueWrites::Final
+pub ai6::directorates::m::issues::IssueWrites::None
 pub enum ai6::directorates::m::issues::LinkHosts
 pub ai6::directorates::m::issues::LinkHosts::Any
 pub ai6::directorates::m::issues::LinkHosts::Tracker
@@ -1607,6 +1612,7 @@ pub ai6::directorates::m::issues::IssuePolicy::reply_ttl_secs: u64
 pub ai6::directorates::m::issues::IssuePolicy::status_interval_secs: u64
 pub ai6::directorates::m::issues::IssuePolicy::tracker_posts_per_hour: ai6::bounds::Limit
 pub ai6::directorates::m::issues::IssuePolicy::updates: ai6::directorates::m::issues::IssueUpdates
+pub ai6::directorates::m::issues::IssuePolicy::writes: ai6::directorates::m::issues::IssueWrites
 impl ai6::directorates::m::issues::IssuePolicy
 pub fn ai6::directorates::m::issues::IssuePolicy::closes_without_ink(&self, &str) -> bool
 pub fn ai6::directorates::m::issues::IssuePolicy::validate(&self) -> core::result::Result<(), alloc::string::String>
@@ -1740,6 +1746,12 @@ pub ai6::directorates::m::mission::MissionState::Verifying
 pub ai6::directorates::m::mission::MissionState::Working
 impl ai6::directorates::m::mission::MissionState
 pub fn ai6::directorates::m::mission::MissionState::as_str(self) -> &'static str
+pub struct ai6::directorates::m::mission::Denial
+pub ai6::directorates::m::mission::Denial::policy: alloc::string::String
+pub ai6::directorates::m::mission::Denial::target: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::mission::Denial::tool: alloc::string::String
+impl ai6::directorates::m::mission::Denial
+pub fn ai6::directorates::m::mission::Denial::named(&str, core::option::Option<alloc::string::String>, &str) -> Self
 pub struct ai6::directorates::m::mission::Mission
 pub ai6::directorates::m::mission::Mission::after_failure: bool
 pub ai6::directorates::m::mission::Mission::agent_id: core::option::Option<alloc::string::String>
@@ -1747,7 +1759,7 @@ pub ai6::directorates::m::mission::Mission::amendments: alloc::vec::Vec<alloc::s
 pub ai6::directorates::m::mission::Mission::blocked_reason: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::mission::Mission::brief_digest: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::mission::Mission::cover: core::option::Option<ai6::directorates::m::cover::CoverReport>
-pub ai6::directorates::m::mission::Mission::denied_tools: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::mission::Mission::denials: alloc::vec::Vec<ai6::directorates::m::mission::Denial>
 pub ai6::directorates::m::mission::Mission::exposure: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::mission::Mission::failure: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::mission::Mission::handle: core::option::Option<alloc::string::String>
@@ -1786,7 +1798,7 @@ pub fn ai6::directorates::m::mission::MissionStore::forget_queued(&mut self, &st
 pub fn ai6::directorates::m::mission::MissionStore::get(&self, &str) -> core::option::Option<&ai6::directorates::m::mission::Mission>
 pub fn ai6::directorates::m::mission::MissionStore::hold_for(&mut self, &str, &str) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::list(&self) -> alloc::vec::Vec<ai6::directorates::m::mission::Mission>
-pub fn ai6::directorates::m::mission::MissionStore::note_denied_tools(&mut self, &str, alloc::vec::Vec<alloc::string::String>) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
+pub fn ai6::directorates::m::mission::MissionStore::note_denials(&mut self, &str, alloc::vec::Vec<ai6::directorates::m::mission::Denial>) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::open(impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<Self>
 pub fn ai6::directorates::m::mission::MissionStore::park(&mut self, &str, i64) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::park_on(&mut self, &str, i64, core::option::Option<ai6::directorates::m::mission::ParkedOn>) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
@@ -1832,6 +1844,13 @@ pub ai6::directorates::m::placement::AgentFacts::routes: alloc::vec::Vec<ai6::di
 pub ai6::directorates::m::placement::AgentFacts::tags: alloc::vec::Vec<alloc::string::String>
 impl core::convert::From<&ai6::directorates::m::roster::Agent> for ai6::directorates::m::placement::AgentFacts
 pub fn ai6::directorates::m::placement::AgentFacts::from(&ai6::directorates::m::roster::Agent) -> Self
+#[non_exhaustive] pub struct ai6::directorates::m::placement::Degradation
+pub ai6::directorates::m::placement::Degradation::depends: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::placement::Degradation::kind: alloc::string::String
+pub ai6::directorates::m::placement::Degradation::reason: alloc::string::String
+pub ai6::directorates::m::placement::Degradation::subject: alloc::string::String
+impl ai6::directorates::m::placement::Degradation
+pub fn ai6::directorates::m::placement::Degradation::new(&str, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, alloc::vec::Vec<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::placement::OperationPolicy
 pub ai6::directorates::m::placement::OperationPolicy::agents: alloc::vec::Vec<ai6::directorates::m::placement::AgentFacts>
 pub ai6::directorates::m::placement::OperationPolicy::checkout: bool
@@ -1864,6 +1883,7 @@ pub ai6::directorates::m::placement::PlacementRejection::station: core::option::
 pub ai6::directorates::m::placement::PlacementRejection::theater: core::option::Option<alloc::string::String>
 #[non_exhaustive] pub struct ai6::directorates::m::placement::PlacementRequest
 pub ai6::directorates::m::placement::PlacementRequest::agent: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::placement::PlacementRequest::brief: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::placement::PlacementRequest::deciding_station: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::placement::PlacementRequest::role: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::placement::PlacementRequest::stations: alloc::vec::Vec<alloc::string::String>
@@ -1890,6 +1910,7 @@ impl core::cmp::Eq for ai6::directorates::m::placement::Resources
 #[non_exhaustive] pub struct ai6::directorates::m::placement::StationFacts
 pub ai6::directorates::m::placement::StationFacts::capacity: usize
 pub ai6::directorates::m::placement::StationFacts::checkouts: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::placement::StationFacts::declined: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::placement::StationFacts::handlers: core::option::Option<alloc::vec::Vec<alloc::string::String>>
 pub ai6::directorates::m::placement::StationFacts::healthy: bool
 pub ai6::directorates::m::placement::StationFacts::labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
@@ -3256,6 +3277,7 @@ pub fn ai6::directorates::q::logins::run_leases(&ai6::directorates::q::sealing::
 pub fn ai6::directorates::q::logins::sealed_name(&ai6::directorates::registry::accounts::AccountRef) -> alloc::string::String
 pub mod ai6::directorates::q::outbound
 pub enum ai6::directorates::q::outbound::Refusal
+pub ai6::directorates::q::outbound::Refusal::BarePath
 pub ai6::directorates::q::outbound::Refusal::CredentialPattern
 pub ai6::directorates::q::outbound::Refusal::Empty
 pub ai6::directorates::q::outbound::Refusal::InvisibleCharacters
@@ -3275,6 +3297,7 @@ impl ai6::directorates::q::outbound::SecretSet
 pub fn ai6::directorates::q::outbound::SecretSet::new(impl core::iter::traits::collect::IntoIterator<Item = alloc::string::String>, u64) -> Self
 pub fn ai6::directorates::q::outbound::check(&str, &ai6::directorates::q::outbound::SecretSet, &ai6::directorates::q::outbound::LinkRule, ai6::bounds::Limit, ai6::directorates::m::issues::OnSecret) -> core::result::Result<alloc::string::String, ai6::directorates::q::outbound::Refusal>
 pub fn ai6::directorates::q::outbound::check_person(&str, ai6::bounds::Limit) -> core::result::Result<alloc::string::String, ai6::directorates::q::outbound::Refusal>
+pub fn ai6::directorates::q::outbound::screen_target(&str, ai6::bounds::Limit) -> alloc::string::String
 pub mod ai6::directorates::q::overlays
 #[non_exhaustive] pub enum ai6::directorates::q::overlays::OverlayFrom
 pub ai6::directorates::q::overlays::OverlayFrom::Path(std::path::PathBuf)
@@ -7407,6 +7430,7 @@ pub fn ai6::directorates::registry::runs::NewRun::new(impl core::convert::Into<a
 pub fn ai6::directorates::registry::runs::NewRun::next_run(self) -> core::option::Option<Self>
 pub fn ai6::directorates::registry::runs::NewRun::number(&self) -> u32
 pub fn ai6::directorates::registry::runs::NewRun::with_account(self, ai6::directorates::registry::accounts::AccountRef) -> Self
+pub fn ai6::directorates::registry::runs::NewRun::with_comments_through(self, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::runs::NewRun::with_exposure(self, alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>) -> Self
 pub fn ai6::directorates::registry::runs::NewRun::with_handle(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::runs::NewRun::with_launch(self, ai6::directorates::registry::runs::RunLaunch) -> Self
@@ -7448,6 +7472,7 @@ pub ai6::directorates::registry::runs::RunRecord::account: core::option::Option<
 pub ai6::directorates::registry::runs::RunRecord::checkpoint: core::option::Option<ai6::directorates::q::safehouse::SafeHouseCheckpoint>
 pub ai6::directorates::registry::runs::RunRecord::checkpointed_at: core::option::Option<f64>
 pub ai6::directorates::registry::runs::RunRecord::closed_at: core::option::Option<f64>
+pub ai6::directorates::registry::runs::RunRecord::comments_through: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::runs::RunRecord::deliverables: alloc::vec::Vec<ai6::directorates::m::deliverables::Deliverable>
 pub ai6::directorates::registry::runs::RunRecord::evidence: alloc::vec::Vec<ai6::directorates::registry::runs::Evidence>
 pub ai6::directorates::registry::runs::RunRecord::exposure: alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>
@@ -9586,6 +9611,11 @@ pub ai6::station::limits::AuditLimits::names_detail_chars: ai6::bounds::Limit
 pub ai6::station::limits::AuditLimits::target_bytes: ai6::bounds::Limit
 impl core::default::Default for ai6::station::limits::AuditLimits
 pub fn ai6::station::limits::AuditLimits::default() -> Self
+#[non_exhaustive] pub struct ai6::station::limits::DenialLimits
+pub ai6::station::limits::DenialLimits::kept: ai6::bounds::Limit
+pub ai6::station::limits::DenialLimits::target_bytes: ai6::bounds::Limit
+impl core::default::Default for ai6::station::limits::DenialLimits
+pub fn ai6::station::limits::DenialLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::station::limits::DetachedLimits
 pub ai6::station::limits::DetachedLimits::name_chars: ai6::bounds::Limit
 pub ai6::station::limits::DetachedLimits::poll: ai6::bounds::Seconds
@@ -9705,6 +9735,8 @@ impl core::default::Default for ai6::station::limits::RunnerLimits
 pub fn ai6::station::limits::RunnerLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::station::limits::SchedulerLimits
 pub ai6::station::limits::SchedulerLimits::check_in: ai6::bounds::Seconds
+pub ai6::station::limits::SchedulerLimits::claim_exclusion: ai6::bounds::Seconds
+pub ai6::station::limits::SchedulerLimits::claim_progress: ai6::bounds::TimeLimit
 pub ai6::station::limits::SchedulerLimits::event_queue: ai6::bounds::Limit
 pub ai6::station::limits::SchedulerLimits::found_libraries: ai6::bounds::Limit
 pub ai6::station::limits::SchedulerLimits::intake_runs: u32
@@ -9724,7 +9756,9 @@ pub ai6::station::limits::SecretLimits::min_matched_bytes: u64
 impl core::default::Default for ai6::station::limits::SecretLimits
 pub fn ai6::station::limits::SecretLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::station::limits::SourceLimits
+pub ai6::station::limits::SourceLimits::canary_every: ai6::bounds::TimeLimit
 pub ai6::station::limits::SourceLimits::min_poll: ai6::bounds::Seconds
+pub ai6::station::limits::SourceLimits::missed_polls: ai6::bounds::Limit
 pub ai6::station::limits::SourceLimits::outbox_batch: ai6::bounds::Limit
 pub ai6::station::limits::SourceLimits::outbox_every: ai6::bounds::Seconds
 pub ai6::station::limits::SourceLimits::poll: ai6::bounds::Seconds
@@ -9746,6 +9780,7 @@ pub ai6::station::limits::StationLimits::api: ai6::station::limits::ApiLimits
 pub ai6::station::limits::StationLimits::approvals: ai6::station::limits::ApprovalLimits
 pub ai6::station::limits::StationLimits::attach: ai6::station::limits::AttachLimits
 pub ai6::station::limits::StationLimits::audit: ai6::station::limits::AuditLimits
+pub ai6::station::limits::StationLimits::denials: ai6::station::limits::DenialLimits
 pub ai6::station::limits::StationLimits::detached: ai6::station::limits::DetachedLimits
 pub ai6::station::limits::StationLimits::green_ink: ai6::station::limits::GreenInkLimits
 pub ai6::station::limits::StationLimits::harness: ai6::station::limits::HarnessLimits
@@ -12078,6 +12113,13 @@ pub struct ai6::CronError(_)
 impl core::error::Error for ai6::directorates::registry::sleepers::CronError
 impl core::fmt::Display for ai6::directorates::registry::sleepers::CronError
 pub fn ai6::directorates::registry::sleepers::CronError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct ai6::Degradation
+pub ai6::Degradation::depends: alloc::vec::Vec<alloc::string::String>
+pub ai6::Degradation::kind: alloc::string::String
+pub ai6::Degradation::reason: alloc::string::String
+pub ai6::Degradation::subject: alloc::string::String
+impl ai6::directorates::m::placement::Degradation
+pub fn ai6::directorates::m::placement::Degradation::new(&str, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, alloc::vec::Vec<alloc::string::String>) -> Self
 pub struct ai6::DirEntry
 pub ai6::DirEntry::kind: alloc::string::String
 pub ai6::DirEntry::name: alloc::string::String
@@ -12841,6 +12883,7 @@ pub fn ai6::directorates::registry::runs::NewRun::new(impl core::convert::Into<a
 pub fn ai6::directorates::registry::runs::NewRun::next_run(self) -> core::option::Option<Self>
 pub fn ai6::directorates::registry::runs::NewRun::number(&self) -> u32
 pub fn ai6::directorates::registry::runs::NewRun::with_account(self, ai6::directorates::registry::accounts::AccountRef) -> Self
+pub fn ai6::directorates::registry::runs::NewRun::with_comments_through(self, core::option::Option<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::runs::NewRun::with_exposure(self, alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>) -> Self
 pub fn ai6::directorates::registry::runs::NewRun::with_handle(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::runs::NewRun::with_launch(self, ai6::directorates::registry::runs::RunLaunch) -> Self
@@ -12999,6 +13042,7 @@ pub ai6::PlacementRejection::station: core::option::Option<alloc::string::String
 pub ai6::PlacementRejection::theater: core::option::Option<alloc::string::String>
 #[non_exhaustive] pub struct ai6::PlacementRequest
 pub ai6::PlacementRequest::agent: core::option::Option<alloc::string::String>
+pub ai6::PlacementRequest::brief: core::option::Option<alloc::string::String>
 pub ai6::PlacementRequest::deciding_station: core::option::Option<alloc::string::String>
 pub ai6::PlacementRequest::role: core::option::Option<alloc::string::String>
 pub ai6::PlacementRequest::stations: alloc::vec::Vec<alloc::string::String>
@@ -13598,6 +13642,7 @@ pub ai6::RunRecord::account: core::option::Option<ai6::directorates::registry::a
 pub ai6::RunRecord::checkpoint: core::option::Option<ai6::directorates::q::safehouse::SafeHouseCheckpoint>
 pub ai6::RunRecord::checkpointed_at: core::option::Option<f64>
 pub ai6::RunRecord::closed_at: core::option::Option<f64>
+pub ai6::RunRecord::comments_through: core::option::Option<alloc::string::String>
 pub ai6::RunRecord::deliverables: alloc::vec::Vec<ai6::directorates::m::deliverables::Deliverable>
 pub ai6::RunRecord::evidence: alloc::vec::Vec<ai6::directorates::registry::runs::Evidence>
 pub ai6::RunRecord::exposure: alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>
@@ -14373,6 +14418,7 @@ pub fn ai6::station::server::StationConfig::default() -> Self
 #[non_exhaustive] pub struct ai6::StationFacts
 pub ai6::StationFacts::capacity: usize
 pub ai6::StationFacts::checkouts: alloc::vec::Vec<alloc::string::String>
+pub ai6::StationFacts::declined: alloc::vec::Vec<alloc::string::String>
 pub ai6::StationFacts::handlers: core::option::Option<alloc::vec::Vec<alloc::string::String>>
 pub ai6::StationFacts::healthy: bool
 pub ai6::StationFacts::labels: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
@@ -14426,6 +14472,7 @@ pub ai6::StationRuntime::approvals: ai6::station::limits::ApprovalLimits
 pub ai6::StationRuntime::attach: ai6::station::limits::AttachLimits
 pub ai6::StationRuntime::audit: ai6::station::limits::AuditLimits
 pub ai6::StationRuntime::blocked_after: core::option::Option<f64>
+pub ai6::StationRuntime::denials: ai6::station::limits::DenialLimits
 pub ai6::StationRuntime::detached: ai6::station::limits::DetachedLimits
 pub ai6::StationRuntime::green_ink: ai6::station::limits::GreenInkLimits
 pub ai6::StationRuntime::harness: ai6::station::limits::HarnessLimits
