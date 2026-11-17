@@ -2827,7 +2827,8 @@ impl ReportScope { pub fn operation(&self) -> Option<&str>; }
     // Standing: a known kind, current, which no verdict closes
 #[non_exhaustive] pub enum ReportFiler { Source { source, item }, Agent { agent, run /* provider
     Run, or the Mission's ID until known */, mission }, Person { person }, Probe { probe },
-    Review { mission }, Watchdog, Assistant { person } /* Moneypenny for a person: untrusted */ }
+    Review { mission }, Watchdog, Assistant { person } /* Moneypenny for a person: untrusted */,
+    BuiltIn /* a guide the build ships (`m::guides`): never stored, its text not untrusted */ }
     // serde tag "type"; is_person(), run(), source_key()
 #[non_exhaustive] pub enum ReportLinkKind { Mission, Report, Decision, Evidence } // as_str, FromStr
 pub struct ReportLink { pub kind: ReportLinkKind, pub id: String } // new(kind, id), mission(id)
@@ -2978,12 +2979,29 @@ pub fn read_report(store, caller, &ReportRules, id) -> Result<Report, KnowledgeR
 pub fn prior_revisions(..) -> Result<Vec<Report>, _>; pub fn list_reports(.., &ReportScope) -> Result<Vec<Report>, _>;
 pub fn search_reports(store, caller, &ReportRules, &ReportQuery, &ReportLimits) -> Result<KnowledgeSearch { hits, total }, _>;
     // readable scopes, candidates, filter by sight Content, THEN rank, count and cut to `search_results`
+pub fn search_reports_among(.., extra: &[Report]) -> Result<KnowledgeSearch, _>; // also searches `extra`, which are not stored
+    // search_reports and read_report also take the shipped guides (below) for whoever reads `global`
 pub fn write_report(store, caller, &ReportRules, KnowledgeChange) -> Result<KnowledgeOutcome /* Kept | Proposed */, _>;
 pub fn forget_report(store, caller, &ReportRules, id, Option<u64>) -> Result<KnowledgeForgotten /* Forgotten | Retired | Proposed */, _>;
 pub fn decide_proposal(store, caller, &ReportRules, id, accept: bool, reason) -> Result<Report, _>;
 pub enum KnowledgeRefusal { Missing, Forbidden(String), Invalid(String), Full(String), Changed { revision }, Failed(String) }
 pub fn knowledge_json(&Report) -> Value; pub fn brief_json(&Report) -> Value; pub fn summaries_for_a_model(..);
 ```
+
+```rust
+// ai6::directorates::m::guides: the guides the build ships, as Reports
+pub const ID_PREFIX: &str = "built-in.";               // an ID is `built-in.<dir>.<file>`: `built-in.kb.writing_a_brief`
+pub fn built_in() -> &'static [Report];                // global, standing, ReportFiler::BuiltIn, revision 1, never stored
+pub fn find(id: &str) -> Option<&'static Report>;
+pub fn kind_of(path: &str) -> Option<&'static str>;     // rules/ -> rule; kb/, flows/, references/, docs/ -> tradecraft
+pub fn report_of(id, path: &str, text: &str) -> Option<Report>; // front matter: kind, title, topics, summary; else heading
+```
+
+The shipped guides are `crates/ai6/knowledge/{kb,rules}/*.md` and the front-matter docs listed in `m/guides.rs`. A
+Report a deployment stores with the same title lists before the shipped one (`matching`), and a shipped guide is
+refused every write, retirement and verdict, as a Report that is not there. A Run whose overlays serve knowledge
+(`station.overlays.knowledge_*` bound it) has `kb_list`, `kb_read` and `kb_search` beside `reports`: coqui-aos
+(`KnowledgeSession`) renders and answers, and `kb_search` ranks the served files with `matching`.
 
 A proposal (an open known Report) is read only by those who decide its scope (`ReportReader::assesses`: a person
 with `memory.write`, or the Operation's charge) and by whoever filed it. Every compartment must be read in to

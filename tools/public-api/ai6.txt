@@ -1448,6 +1448,12 @@ pub fn ai6::directorates::m::deliverables::InvalidDeliverable::fmt(&self, &mut c
 pub const ai6::directorates::m::deliverables::BRIEF_DELIVERABLES_KEY: &str
 pub fn ai6::directorates::m::deliverables::declared(&[alloc::string::String], &alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::deliverables::Deliverable>, ai6::directorates::m::deliverables::InvalidDeliverable>
 pub fn ai6::directorates::m::deliverables::parse_all(&[alloc::string::String]) -> core::result::Result<alloc::vec::Vec<ai6::directorates::m::deliverables::Deliverable>, ai6::directorates::m::deliverables::InvalidDeliverable>
+pub mod ai6::directorates::m::guides
+pub const ai6::directorates::m::guides::ID_PREFIX: &str
+pub fn ai6::directorates::m::guides::built_in() -> &'static [ai6::directorates::registry::reports::Report]
+pub fn ai6::directorates::m::guides::find(&str) -> core::option::Option<&'static ai6::directorates::registry::reports::Report>
+pub fn ai6::directorates::m::guides::kind_of(&str) -> core::option::Option<&'static str>
+pub fn ai6::directorates::m::guides::report_of(impl core::convert::Into<alloc::string::String>, &str, &str) -> core::option::Option<ai6::directorates::registry::reports::Report>
 pub mod ai6::directorates::m::harness
 #[non_exhaustive] pub enum ai6::directorates::m::harness::ProjectSettings
 pub ai6::directorates::m::harness::ProjectSettings::Ignore
@@ -1707,6 +1713,7 @@ pub fn ai6::directorates::m::knowledge::list_reports(&dyn ai6::directorates::reg
 pub fn ai6::directorates::m::knowledge::prior_revisions(&dyn ai6::directorates::registry::backend::RegistryBackend, &dyn ai6::directorates::m::knowledge::KnowledgeCaller, &ai6::directorates::m::reports::ReportRules<'_>, &str) -> core::result::Result<alloc::vec::Vec<ai6::directorates::registry::reports::Report>, ai6::directorates::m::knowledge::KnowledgeRefusal>
 pub fn ai6::directorates::m::knowledge::read_report(&dyn ai6::directorates::registry::backend::RegistryBackend, &dyn ai6::directorates::m::knowledge::KnowledgeCaller, &ai6::directorates::m::reports::ReportRules<'_>, &str) -> core::result::Result<ai6::directorates::registry::reports::Report, ai6::directorates::m::knowledge::KnowledgeRefusal>
 pub fn ai6::directorates::m::knowledge::search_reports(&dyn ai6::directorates::registry::backend::RegistryBackend, &dyn ai6::directorates::m::knowledge::KnowledgeCaller, &ai6::directorates::m::reports::ReportRules<'_>, &ai6::directorates::registry::knowledge::ReportQuery, &ai6::directorates::registry::limits::ReportLimits) -> core::result::Result<ai6::directorates::m::knowledge::KnowledgeSearch, ai6::directorates::m::knowledge::KnowledgeRefusal>
+pub fn ai6::directorates::m::knowledge::search_reports_among(&dyn ai6::directorates::registry::backend::RegistryBackend, &dyn ai6::directorates::m::knowledge::KnowledgeCaller, &ai6::directorates::m::reports::ReportRules<'_>, &ai6::directorates::registry::knowledge::ReportQuery, &ai6::directorates::registry::limits::ReportLimits, &[ai6::directorates::registry::reports::Report]) -> core::result::Result<ai6::directorates::m::knowledge::KnowledgeSearch, ai6::directorates::m::knowledge::KnowledgeRefusal>
 pub fn ai6::directorates::m::knowledge::summaries_for_a_model(&[ai6::directorates::registry::reports::Report], ai6::bounds::Limit, impl core::ops::function::Fn(&serde_json::value::Value) -> alloc::string::String) -> core::option::Option<alloc::string::String>
 pub fn ai6::directorates::m::knowledge::write_report(&dyn ai6::directorates::registry::backend::RegistryBackend, &dyn ai6::directorates::m::knowledge::KnowledgeCaller, &ai6::directorates::m::reports::ReportRules<'_>, ai6::directorates::m::knowledge::KnowledgeChange) -> core::result::Result<ai6::directorates::m::knowledge::KnowledgeOutcome, ai6::directorates::m::knowledge::KnowledgeRefusal>
 pub mod ai6::directorates::m::limits
@@ -7045,6 +7052,7 @@ pub ai6::directorates::registry::reports::ReportFiler::Agent::mission: alloc::st
 pub ai6::directorates::registry::reports::ReportFiler::Agent::run: alloc::string::String
 pub ai6::directorates::registry::reports::ReportFiler::Assistant
 pub ai6::directorates::registry::reports::ReportFiler::Assistant::person: alloc::string::String
+pub ai6::directorates::registry::reports::ReportFiler::BuiltIn
 pub ai6::directorates::registry::reports::ReportFiler::Charge
 pub ai6::directorates::registry::reports::ReportFiler::Charge::agent: alloc::string::String
 pub ai6::directorates::registry::reports::ReportFiler::Charge::run: alloc::string::String
@@ -9648,11 +9656,20 @@ pub ai6::station::limits::OverlayLimits::dotagents_pyz: core::option::Option<all
 pub ai6::station::limits::OverlayLimits::fetch_timeout: ai6::bounds::Seconds
 pub ai6::station::limits::OverlayLimits::file_bytes: ai6::bounds::Limit
 pub ai6::station::limits::OverlayLimits::files: ai6::bounds::Limit
+pub ai6::station::limits::OverlayLimits::knowledge_context_bytes: ai6::bounds::Limit
+pub ai6::station::limits::OverlayLimits::knowledge_context_depth: ai6::bounds::Limit
+pub ai6::station::limits::OverlayLimits::knowledge_file_bytes: ai6::bounds::Limit
+pub ai6::station::limits::OverlayLimits::knowledge_include_depth: ai6::bounds::Limit
+pub ai6::station::limits::OverlayLimits::knowledge_query_characters: ai6::bounds::Limit
+pub ai6::station::limits::OverlayLimits::knowledge_read_bytes: ai6::bounds::Limit
+pub ai6::station::limits::OverlayLimits::knowledge_rendered_bytes: ai6::bounds::Limit
+pub ai6::station::limits::OverlayLimits::knowledge_top: ai6::bounds::Limit
 pub ai6::station::limits::OverlayLimits::manifest_bytes: ai6::bounds::Limit
 pub ai6::station::limits::OverlayLimits::manifest_depth: ai6::bounds::Limit
 pub ai6::station::limits::OverlayLimits::output_bytes: ai6::bounds::Limit
 pub ai6::station::limits::OverlayLimits::unpinned: bool
 impl ai6::station::limits::OverlayLimits
+pub fn ai6::station::limits::OverlayLimits::knowledge_settings(&self) -> coqui_aos::knowledge::settings::KnowledgeSettings
 pub fn ai6::station::limits::OverlayLimits::settings(&self) -> coqui_aos::limits::Settings
 pub fn ai6::station::limits::OverlayLimits::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::station::limits::OverlayLimits
