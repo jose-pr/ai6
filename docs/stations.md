@@ -167,7 +167,12 @@ order, and records each with the time. A step whose column is there already, mad
 added by hand, is recorded without running. The first, `mission_ids.handle`, adds the handle
 book's `handle` column to a database from before Mission handles; a handle book with rows refuses
 it, naming the step, since those Missions need UIDs. On PostgreSQL only the table's owner may run
-a step, so another role stops at start naming itself and the step. Then every table is compared with the columns this
+a step, so another role stops at start naming itself and the step. A column a rename leaves
+behind is retired by a step too, which runs while the table still has that column: the
+Session-to-Run rename adds `briefs.claims`, `brief_leases.number`, `reports.run_id` and
+`final_reports.run_id`, fills each from `attempts`, `attempt` and `session_id`, and drops the old
+column, so a database that still holds them rolls forward on its next open with no hand `ALTER`.
+Then every table is compared with the columns this
 build makes it with: one that lacks a column, such as one dropped by hand, stops the Station naming
 table and column, while a column the build does not know, as a later build leaves after a
 rollback, is allowed.

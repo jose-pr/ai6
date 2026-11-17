@@ -1200,12 +1200,19 @@ impl StartRetry { pub fn next_wait(&self, last: Option<Duration>, waited: Durati
 impl RegistrySettings { pub fn headquarters_lease(&self) -> Duration;      // DEFAULT_LEASE
                         pub fn sqlite_busy_timeout(&self) -> Duration; }   // 30 s
 
-pub struct Located<T> { pub value: T, pub path: Option<PathBuf> }      // None: defaults
+pub struct Located<T> { pub value: T, pub path: Option<PathBuf>, pub refused: Vec<RefusedField> }   // path None: defaults
+pub struct RefusedField { pub file: PathBuf, pub field: String, pub reason: String }   // a table or field left out; Display
 impl<T> Located<T> { pub fn dir(&self) -> Option<&Path>; }
 impl Bootstrap {
     pub fn find(explicit: Option<&Path>) -> Result<Located<Self>, BootstrapError>;
     pub fn find_in(search: &SearchPath) -> Result<Located<Self>, BootstrapError>;
     pub fn read(path: &Path) -> Result<Self, BootstrapError>;
+    /// `find`, but a table or field the file has and this release does not declare is left out and
+    /// named in `refused` (a renamed table says what it is now), so a Station or gateway starts
+    /// degraded rather than exiting; any other fault is `find`'s. `ai6 serve` and `universal-exports`
+    /// read the file this way; `ai6ctl` stays strict.
+    pub fn find_degraded(explicit: Option<&Path>) -> Result<Located<Self>, BootstrapError>;
+    pub fn find_degraded_in(search: &SearchPath) -> Result<Located<Self>, BootstrapError>;
 }
 impl Located<Bootstrap> {
     pub fn state_dir(&self) -> Result<PathBuf, BootstrapError>;          // [station] state_dir, else platform_state_dir()
@@ -1245,7 +1252,8 @@ pub fn platform_state_dir() -> Result<PathBuf, BootstrapError>;   // %LOCALAPPDA
 `StationConfig::with_state_dir`, `with_protected_path` (a directory an assistant's
 interpreters may never read; the state and secrets directories always are, sent as
 `AssistantMode::station_paths`) and `with_bootstrap_weakenings` (sent at check-in as
-`bootstrap_weakened`), and `ServeConfig::with_secrets_dir`, carry the file into a Station.
+`bootstrap_weakened`), `with_bootstrap_refusals` (the `Degradation`s of `Located::refused`, sent as
+`degraded`), and `ServeConfig::with_secrets_dir`, carry the file into a Station.
 
 ## Configuration providers (`ai6::directorates::m::config`)
 
@@ -1343,7 +1351,13 @@ impl UnexLimits { pub fn validate(&self) -> Result<(), String>;   // zeros where
     pub fn weakenings(&self) -> Vec<String>; }
 // bootstrap: UnexSettings.proxy_secret_min_bytes (32, DEFAULT_PROXY_SECRET_MIN_BYTES), smaller is a weakening
 #[non_exhaustive] #[derive(Clone)]
-pub struct ConfigSnapshot { pub revision: ConfigRevision, pub roster: Roster, pub settings: Settings }
+pub struct ConfigSnapshot {
+    pub revision: ConfigRevision, pub roster: Roster, pub settings: Settings,
+    pub refused: Vec<RefusedRecord>,    // stored records `load_degraded` left out, each with why; empty from `load`
+    pub migrated: Vec<MigratedRecord>,  // records read in an older shape and migrated (see Record migrations)
+}
+pub struct RefusedRecord { pub family: String, pub key: String, pub reason: String }   // Display
+pub struct MigratedRecord { pub family: String, pub key: String, pub migration: String }
 impl ConfigSnapshot {
     pub fn new(revision: ConfigRevision, roster: Roster, settings: Settings) -> Self;
     /// Families whose records differ; snapshots built with `new` carry none and differ in none.
@@ -1352,6 +1366,12 @@ impl ConfigSnapshot {
 pub trait ConfigProvider: Send + Sync {
     /// `station`'s view; "" is the global records only.
     fn load(&self, station: &str) -> Result<ConfigSnapshot, RosterError>;
+    /// For a program that starts with nothing to fall back on (`ai6 serve`, `universal-exports`):
+    /// an Operation, Agent or role record that cannot be read (and the charge and access record of a
+    /// refused Operation) is left out and named in `refused`; the rest loads. A view that still fails
+    /// fails with `load`'s error. A running Station keeps `load`, which refuses the revision whole.
+    /// Default: `load`.
+    fn load_degraded(&self, station: &str) -> Result<ConfigSnapshot, RosterError> { self.load(station) }
     fn changes_since(&self, station: &str, since: ConfigRevision) -> Result<Option<ConfigSnapshot>, RosterError>;
     fn revision(&self, station: &str) -> Result<ConfigRevision, RosterError>;
     /// One family's records at one scope as JSON objects, for an administrator; default ReadOnly.
@@ -6530,6 +6550,17 @@ declare (or a value it does not accept), naming the provider and the key. `handl
   station.remove|sign_out|forget`) and a refused audit refuses it. Nothing it prints holds a login.
 - User-facing management goes through Universal Exports and the separate `ai6ctl` command.
 
+### Record migrations and renamed tables
+
+A family whose declared fields move ships a migration in `directorates::m::config::migrate`; a stored
+record in the old shape is migrated each time it is read (`ConfigSnapshot::migrated` names it, and the
+Station and gateway journal it), so nothing hand-edits a database. The first: an Operation's
+`workspace.base`, `branch`, `isolate`, `checkpoint_remote` and `checkpoint_secs` move under
+`workspace.settings` (a key already there wins). A renamed table is refused by name: `[watch]` is now
+`[charge]` wherever a document is imported (`parse_document`, `ai6ctl apply`) or a family file is read
+(`FileProvider`, including a `watches.*` file, "now `charges`"), and `SqlProvider` refuses a
+non-empty `ai6_config_watch`.
+
 ## Station health (check-in)
 
 `Degradation { kind, subject, reason, depends }` (`ai6::Degradation`) is one thing that keeps a
@@ -6539,7 +6570,12 @@ the Stations view as "Degraded". Kinds: `library` (a pin set refused a found lib
 the Agents without a loaded handler), `source-poll` (no finished poll for `[sources] missed_polls`
 intervals), `source-write` (a tracker's write check failed, every `[sources] canary_every`, run by the
 Headquarters Station only: its provider builds, answers `capabilities` and says it can comment) and
-`sessions` (Runs held, none progressing). The check-in also carries `sessions`
+`sessions` (Runs held, none progressing), `config-record` (a stored record the Station started
+without, named `<family> <key>`), `config` (a revision refused whole; the Station keeps the one it runs),
+`bootstrap` (a table or field of `ai6.cfg` this release does not declare, left out) and `claim` (a
+brief whose claim the Registry failed with an error: journaled with the error, and not tried again
+for `[scheduler] claim_backoff` seconds, doubled for each failure in a row up to `retry_backoff_max`;
+`0` retries on the next round). The check-in also carries `sessions`
 (`{running, progressing}`), `source_polls` (each Source's `last_completed`) and `declined` (briefs this
 Station gave back, with when it may take them again). A Run quiet for `[scheduler] claim_progress` has
 its brief given back; placement leaves that Station out for `[scheduler] claim_exclusion`

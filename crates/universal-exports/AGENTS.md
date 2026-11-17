@@ -226,6 +226,7 @@ pub struct MissionRun {
 pub struct StationBoard {
     pub stations: Vec<BoardStation>,
     pub headquarters_station: Option<String>,
+    pub gateway_degraded: Vec<ai6::Degradation>,   // what keeps the gateway itself from being whole (a stored record or `ai6.cfg` field it left out); only for a person who reads a Station
     pub operations: Vec<BoardOperation>,   // every Operation the person may read, in ID order
 }
 
@@ -792,6 +793,7 @@ impl Gateway {
     /// routes answer 503. The command opens `ai6.cfg`'s provider with ai6's config::open_with.
     #[must_use]
     pub fn with_roster(self, source: Arc<dyn ai6::ConfigProvider>) -> Self;
+    pub fn with_degraded(self, degraded: Vec<ai6::Degradation>) -> Self;   // shown as `StationBoard::gateway_degraded`
     /// How long a Station's assistant job poll is held while Moneypenny is not served
     /// (`[assistant.gateway] max_wait`); once she is, her config decides.
     #[must_use]
