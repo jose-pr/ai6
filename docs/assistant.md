@@ -1091,6 +1091,25 @@ and opening with the network off are the tighter options. On the API's own origi
 bar shows the app's host, so a page can draw a faithful sign-in: a separate origin removes that
 and a proxy that strips the sandbox header.
 
+## Your own agent
+
+A person can offer an agent that runs on their own machine, in place of the Stations' pool. The machine dials
+out to the gateway, so it needs no open port; `ai6 theater dial` starts the agent and relays its Agent Client
+Protocol lines over the gateway's agent link, unread. The page that creates the link shows a code and the
+gateway's peer ID:
+
+```sh
+ai6 theater dial --url wss://ORIGIN/v1/assistant/agent-link --peer GATEWAY_ID     --code CODE --label "my laptop" -- AGENT_COMMAND ARGS...
+```
+
+The first time, the code and label bind this machine's key to the person; every later start proves the key
+alone, so `--code` and `--label` are left out. The key is the person's link identity (`--identity FILE`, else
+the one in their home directory, made the first time; Noise unless `--method webcrypto`). `--peer` pins the
+gateway, which is what keeps the agent from being handed to another remote; `--any-paired-peer` accepts the
+peers this person has paired instead. The command dials again with a growing wait (`--backoff-start-seconds`,
+`--max-backoff-seconds`) after a lost link and keeps the agent running meanwhile. It ends with the agent's exit
+status, or 2 when the remote proves another key or does not accept the agent.
+
 ## In the app
 
 With `assistant = false` in the `unex` record she is not served: the profile says so

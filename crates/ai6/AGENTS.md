@@ -37,7 +37,8 @@ node that runs them: `station::server` (daemon service and `serve*`), `station::
 (provider host), `station::safehouse` (opens a Mission's safe house through a provider),
 `station::runner` (the field runner), `station::publisher` (`publisher` feature) and
 `station::identity` (`station-tls` feature). The command exposes `ai6 serve`,
-`ai6 runner serve|connect`, `ai6 identity`, `ai6 peer waiting|accept` and `ai6 config path`.
+`ai6 runner serve|connect`, `ai6 theater provision|dial`, `ai6 identity`, `ai6 peer waiting|accept`
+and `ai6 config path`.
 Each reads the bootstrap file `ai6.cfg` (`ai6::bootstrap`, below; `--config PATH`). `ai6
 serve --provider LOCATION` and `--registry LOCATION` take a directory, `sqlite:PATH` or a
 `postgres://` URL over its `[provider]` and `[registry] location`; `[registry]

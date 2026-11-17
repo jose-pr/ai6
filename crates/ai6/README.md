@@ -156,6 +156,13 @@ The same file holds the gateway's part of `[unex]` and Outer Office's `[oo]`
   the background. `ai6 runner connect` relays standard input and output to it over the Agent Client
   Protocol, authenticated; a Station that reaches the host through a transport talks to the
   runner this way. It exits `3` when no runner answers.
+- `ai6 theater dial --url URL --peer GATEWAY_ID [--code CODE [--label LABEL]] [--identity FILE] [--method noise|webcrypto]
+  [--max-backoff-seconds N] -- COMMAND ARGS...` offers a local stdio ACP agent over a gateway's agent link, dialing out
+  so a firewall or NAT in between is no matter. It makes or reads this user's link identity (Noise by default), proves
+  it in-band, opens an `acp/1` stream (the first time carrying `{code, label}`) and passes the agent's lines unread, dialing
+  again with backoff after a lost link. It ends with the agent's status, or 2 when the remote proves another key, does not
+  accept the agent or the arguments do not fit. Every timing is a flag (`--dial-timeout-seconds`, `--proof-timeout-seconds`,
+  `--heartbeat-seconds`, `--heartbeat-misses`, `--backoff-start-seconds`, `--agent-write-seconds`), with no floor.
 - `ai6 identity` creates or prints this Station's certificate fingerprint.
 - `ai6 peer waiting` lists certificates a peer-trust listener rejected; `ai6 peer accept`
   pins one of them.
