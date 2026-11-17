@@ -149,7 +149,15 @@ fn option_of(offered: &[Mode], current: Option<Mode>) -> ConfigOption {
     let values: Vec<OptionValue> = Mode::ALL
         .into_iter()
         .filter(|mode| offered.contains(mode) || Some(*mode) == current)
-        .map(|mode| OptionValue::new(mode.id(), mode.name(), Some(mode.description().to_string())))
+        .map(|mode| {
+            let value =
+                OptionValue::new(mode.id(), mode.name(), Some(mode.description().to_string()));
+            if offered.contains(&mode) {
+                value
+            } else {
+                value.in_use_only()
+            }
+        })
         .collect();
     ConfigOption::new(OPTION_ID, "Mode", current.map_or("", Mode::id), values).category("mode")
 }
@@ -195,6 +203,19 @@ mod tests {
     fn a_mode_in_use_is_listed_even_when_not_offered_for_choosing() {
         let option = option(Mode::Bypass, &[Mode::Manual]);
         assert!(option.values.iter().any(|value| value.id == "bypass"));
+    }
+
+    #[test]
+    fn a_mode_listed_only_because_it_is_in_use_cannot_be_chosen() {
+        let option = option(Mode::Bypass, &[Mode::Manual]);
+        let selectable: Vec<(&str, bool)> = option
+            .values
+            .iter()
+            .map(|value| (value.id.as_str(), value.selectable))
+            .collect();
+        assert_eq!(selectable, [("manual", true), ("bypass", false)]);
+        let both = super::option(Mode::Manual, &[Mode::Manual]);
+        assert!(both.values.iter().all(|value| value.selectable));
     }
 
     #[test]

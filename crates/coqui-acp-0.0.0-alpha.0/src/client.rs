@@ -39,7 +39,7 @@ use crate::event::Event;
 use crate::state::{Step, TEXT_FLUSH, TOOL_KINDS, Turn, kind_name};
 
 const PROTOCOL_VERSION: u64 = 1;
-/// What `coqui-acp-bridge serve --linger` sends when it dropped output while nobody was connected.
+/// What the bridge's `serve --linger` sends when it dropped output while nobody was connected.
 const OUTPUT_LOST: &str = "_dev.boriken.coqui.acp/output_lost";
 
 /// An `authenticate` call to make before the first session request.

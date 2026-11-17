@@ -18,7 +18,9 @@ use coqui_acp_api::{
 };
 use serde_json::json;
 
-use super::{Credential, Endpoint, HarnessDef, KindDef, Setting};
+use coqui_acp_api::standard;
+
+use super::{AcceptDef, Credential, Endpoint, HarnessDef, KindDef, Setting, SlotDef};
 use crate::cli::address_in;
 use crate::login::reason;
 use crate::process::{Exit, Launch};
@@ -142,6 +144,7 @@ pub static DEF: HarnessDef = HarnessDef {
     kinds: &[
         KindDef {
             id: LOGIN,
+            provides: &[standard::GROK],
             title: "Grok login",
             description: "A login made by `grok login`, kept in `auth.json` of Grok's home directory.",
             credentials: &[Credential {
@@ -164,6 +167,7 @@ pub static DEF: HarnessDef = HarnessDef {
         },
         KindDef {
             id: API_KEY,
+            provides: &[standard::XAI_API],
             title: "xAI API key",
             description: "A key read from `XAI_API_KEY`, with Grok started in a directory of its own so that no login in `auth.json` and no endpoint in the person's own `config.toml` overrides it.",
             credentials: &[Credential {
@@ -189,6 +193,7 @@ pub static DEF: HarnessDef = HarnessDef {
         },
         KindDef {
             id: OIDC,
+            provides: &[standard::GROK],
             title: "Grok through an identity provider",
             description: "A login through the person's own OpenID Connect provider; Grok signs in on its first start and keeps the tokens in `auth.json`.",
             credentials: &[Credential {
@@ -212,6 +217,35 @@ pub static DEF: HarnessDef = HarnessDef {
             home_variable: Some("GROK_HOME"),
             file: Some((AUTH_FILE, "auth_json")),
             renew_unsupported: "",
+        },
+    ],
+    own_standard: Some(standard::GROK),
+    accepts: &[
+        AcceptDef {
+            standard: standard::GROK,
+            slots: &[SlotDef {
+                credential: "auth_json",
+                kind: LOGIN,
+                variable: None,
+                file: Some(AUTH_FILE),
+                base_url_setting: None,
+                base_url_variable: None,
+                dir_variable: Some("GROK_HOME"),
+                settings: &[],
+            }],
+        },
+        AcceptDef {
+            standard: standard::XAI_API,
+            slots: &[SlotDef {
+                credential: "api_key",
+                kind: API_KEY,
+                variable: Some("XAI_API_KEY"),
+                file: None,
+                base_url_setting: Some("xai_api_base_url"),
+                base_url_variable: Some("GROK_XAI_API_BASE_URL"),
+                dir_variable: Some("GROK_HOME"),
+                settings: &[],
+            }],
         },
     ],
     variables: VARIABLES,

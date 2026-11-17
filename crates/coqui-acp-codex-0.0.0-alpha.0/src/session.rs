@@ -140,6 +140,16 @@ impl Default for CodexSettings {
     }
 }
 
+/// What [`CodexSession::read_models`] found.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ModelRead {
+    /// The models Codex listed; `None` when it listed none at all.
+    pub models: Option<Vec<Model>>,
+    /// Whether Codex said nobody is signed in and it needs a login (`account` null with `requiresOpenaiAuth`).
+    pub signed_out: bool,
+}
+
 /// A model Codex offers, from `model/list`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -325,24 +335,33 @@ impl CodexSession {
     }
 
     /// Lists the models with no thread and no turn: starts `codex app-server` as `launch` says, initializes it, asks
-    /// `model/list` page by page, and ends it. `None` when Codex listed none at all.
+    /// `model/list` page by page and whether anyone is signed in, and ends it.
     ///
     /// # Errors
     ///
-    /// As [`CodexSession::start`] up to the handshake. A failed `model/list` is no error: nothing is listed.
+    /// As [`CodexSession::start`] up to the handshake. A failed `model/list` or `account/read` is no error: nothing is
+    /// listed, or nobody is said to be signed out.
     pub fn read_models(
         launch: &CodexLaunch,
         spawn: &dyn Spawn,
         settings: CodexSettings,
-    ) -> Result<Option<Vec<Model>>, Error> {
+    ) -> Result<ModelRead, Error> {
         let mut session = Self::connect(launch, spawn, settings, |_| true)?;
         let handshake = session.handshake(launch);
+        let mut signed_out = false;
         if handshake.is_ok() {
             session.list_models();
+            let limit = session.settings.request_timeout;
+            signed_out = session
+                .request("account/read", json!({"refreshToken": false}), limit)
+                .is_ok_and(|answer| {
+                    answer.get("account").is_none_or(Value::is_null)
+                        && answer.get("requiresOpenaiAuth") == Some(&Value::Bool(true))
+                });
         }
         let models = session.models.clone();
         session.close();
-        handshake.map(|()| models)
+        handshake.map(|()| ModelRead { models, signed_out })
     }
 
     /// Starts the process and its readers, with no request made yet.

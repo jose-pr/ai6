@@ -1,7 +1,7 @@
-# coqui-acp/crates/coqui-acp-api at af005f0f1b49e0b0ec5dff6a6e9b0bca206d3e83, with what it inherits written out.
-bin = [{ name = "acp-harness-check", required-features = ["contract"] }]
-example = [{ name = "echo_harness", crate-type = ["cdylib"] }]
-test = [{ name = "echo", required-features = ["contract"] }, { name = "check", required-features = ["contract"] }]
+# coqui-acp/crates/coqui-acp-api at d099e4b71690ef6a1d77c70d1efd94de9f4f5c8c, with what it inherits written out.
+bin = [{ name = "acp-harness-check", required-features = ["contract"] }, { name = "acp-account-check", required-features = ["contract"] }]
+example = [{ name = "echo_harness", crate-type = ["cdylib"] }, { name = "echo_account_provider", crate-type = ["cdylib"] }]
+test = [{ name = "echo", required-features = ["contract"] }, { name = "check", required-features = ["contract"] }, { name = "account_provider", required-features = ["contract"] }]
 [package]
 name = "coqui-acp-api"
 description = "coqui-acp's Guatiao kinds: acp_harness, an Agent Client Protocol agent driver written in any language Guatiao hosts and started over a channel of ACP messages, and the spawner its programs start through"
@@ -22,6 +22,7 @@ publish = false
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 [features]
+reader = ["dep:serde_json", "dep:ureq"]
 contract = ["dep:serde_json", "dep:guatiao-serde", "dep:coqui-acp", "dep:rustix", "dep:win32job", "guatiao/load"]
 [dependencies]
 [dependencies.guatiao]
@@ -40,6 +41,11 @@ path = "../coqui-acp"
 optional = true
 [dependencies.serde_json]
 version = "1"
+optional = true
+[dependencies.ureq]
+version = "3.5"
+default-features = false
+features = ["rustls"]
 optional = true
 [dependencies.guatiao-serde]
 git = "https://github.com/Boriken-Dev/guatiao"
@@ -70,6 +76,7 @@ rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
 default-features = false
 [dev-dependencies.serde_json]
 version = "1"
+features = ["preserve_order"]
 [dev-dependencies.uuid]
 version = "1"
 default-features = false

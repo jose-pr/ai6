@@ -10,12 +10,13 @@ use alloc::vec::Vec;
 
 use coqui_acp_api::guatiao::library::ProviderError;
 use coqui_acp_api::guatiao::{Status, Wipe};
+use coqui_acp_api::standard::{CODEX, OPENAI_API};
 use coqui_acp_api::{
-    ASK, AUTH, AccountCatalog, AccountGrant, AccountKindInfo, AccountRef, EndpointSlot,
-    HARNESS_LOGIN, LoginMethodInfo, MODEL_API, OPEN_URL, USER_CODE,
+    ASK, AUTH, Accepted, AcceptedSlot, AccountCatalog, AccountGrant, AccountKindInfo, AccountRef,
+    EndpointSlot, HARNESS_LOGIN, LoginMethodInfo, MODEL_API, OPEN_URL, PASTE_CODE, USER_CODE,
 };
 use coqui_acp_harness::account::{Watched, jwt_expiry};
-use coqui_acp_harness::provider::{credential, schema, to_json};
+use coqui_acp_harness::provider::{credential, resolve, schema, to_json};
 use serde_json::{Value, json};
 
 /// The kind of a ChatGPT login made by `codex login`, kept in `auth.json` of `CODEX_HOME`.
@@ -146,10 +147,11 @@ pub fn catalog() -> AccountCatalog {
     let mut web = method(
         CHATGPT_METHOD,
         "Sign in with ChatGPT",
-        "Runs `codex login`: a page to open, whose callback comes back to the machine where Codex runs.",
+        "Runs `codex login`: a page to open, whose callback comes back to the machine where Codex runs. From another machine, paste the address the browser ends on.",
         CHATGPT,
     );
-    web.steps = vec![OPEN_URL.to_string()];
+    web.steps = vec![OPEN_URL.to_string(), PASTE_CODE.to_string()];
+    web.remote = true;
     let mut device = method(
         DEVICE_METHOD,
         "Sign in with ChatGPT by a code",
@@ -175,8 +177,47 @@ pub fn catalog() -> AccountCatalog {
     access.steps = vec![ASK.to_string()];
     access.remote = true;
     catalog.logins = vec![web, device, api, access];
+    for kind in &mut catalog.kinds {
+        let standard = if kind.id == API_KEY {
+            OPENAI_API
+        } else {
+            CODEX
+        };
+        kind.provides = vec![standard.to_string()];
+    }
+    catalog.accepts = accepts();
     catalog.credential_variables = VARIABLES.iter().map(|v| (*v).to_string()).collect();
     catalog
+}
+
+/// The standards Codex starts on, and how each is applied: a Codex login (`auth.json` in `CODEX_HOME`, or an access token
+/// saved there by `codex login --with-access-token`), or an OpenAI API key (saved there by `codex login --with-api-key`,
+/// its endpoint the `openai_base_url` configuration key). Codex's home is the grant's private directory in each.
+fn accepts() -> Vec<Accepted> {
+    vec![
+        Accepted::new(CODEX)
+            .slot(
+                AcceptedSlot::new(FILE_KEY, CHATGPT)
+                    .file(AUTH_FILE)
+                    .dir_variable("CODEX_HOME")
+                    .base_url("chatgpt_base_url", None),
+            )
+            .slot(
+                AcceptedSlot::new("access_token", ACCESS_TOKEN)
+                    .dir_variable("CODEX_HOME")
+                    .base_url("chatgpt_base_url", None),
+            ),
+        Accepted::new(OPENAI_API).slot(
+            AcceptedSlot::new("api_key", API_KEY)
+                .dir_variable("CODEX_HOME")
+                .base_url("openai_base_url", None),
+        ),
+    ]
+}
+
+/// The grant of Codex's own kind that applies `grant`, when `grant` is an account of an accepted standard.
+pub(crate) fn resolved(grant: &AccountGrant) -> Result<AccountGrant, ProviderError> {
+    resolve(&catalog(), grant)
 }
 
 fn bad(why: &str) -> ProviderError {
@@ -184,7 +225,7 @@ fn bad(why: &str) -> ProviderError {
 }
 
 /// The endpoint setting `key` of `settings`: absent, or a plain `http(s)` address.
-fn endpoint(
+pub(crate) fn endpoint(
     settings: &coqui_acp_api::guatiao::Value,
     key: &str,
 ) -> Result<Option<String>, ProviderError> {
@@ -269,10 +310,11 @@ fn settings_key(kind: &str) -> &'static str {
 
 /// Why a reference to an account is not one the provider takes.
 pub(crate) fn check(account: &AccountRef) -> Result<(), ProviderError> {
-    account.check_id()?;
     let catalog = catalog();
+    catalog.accepts_reference(account)?;
     let Some(info) = catalog.kind(&account.kind) else {
-        return Err(bad("this harness takes no account of that kind"));
+        // An account of an accepted standard: `plan` reads its credential and settings.
+        return Ok(());
     };
     if info.id == HARNESS_LOGIN {
         if !to_json(&account.settings)
@@ -297,6 +339,7 @@ pub(crate) fn check(account: &AccountRef) -> Result<(), ProviderError> {
 /// `BAD_VALUE`: an id that is not one, a kind not listed, settings the kind refuses, a credential missing, empty or
 /// one the kind does not take, a missing directory.
 pub(crate) fn plan(grant: &AccountGrant) -> Result<Option<Applied>, ProviderError> {
+    let grant = &resolved(grant)?;
     check(&grant.reference())?;
     let credentials = grant.credentials.expose();
     if grant.kind == HARNESS_LOGIN {
@@ -414,5 +457,98 @@ impl Drop for Applied {
         for (_, value) in &mut self.set {
             value.wipe();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use coqui_acp_api::guatiao::Value as GValue;
+
+    const CANARY: &str = "sk-canary-9d2e";
+
+    fn foreign(standards: &[&str], key: &str) -> AccountGrant {
+        AccountGrant::new("a", "someone-elses-kind")
+            .provides(standards.iter().copied())
+            .credentials(coqui_acp_api::Credentials::from_iter([(key, CANARY)]))
+            .state_dir("/some/dir")
+    }
+
+    fn settings(json: &Value) -> GValue {
+        coqui_acp_harness::provider::schema(json)
+    }
+
+    #[test]
+    fn every_kind_says_what_it_provides_and_every_standard_is_applied_by_a_listed_kind() {
+        let catalog = catalog();
+        for id in [CHATGPT, ACCESS_TOKEN, HARNESS_LOGIN] {
+            assert_eq!(catalog.kind(id).expect(id).provides, [CODEX], "{id}");
+        }
+        assert_eq!(catalog.kind(API_KEY).expect("key").provides, [OPENAI_API]);
+        let standards: Vec<&str> = catalog
+            .accepts
+            .iter()
+            .map(|a| a.standard.as_str())
+            .collect();
+        assert_eq!(standards, [CODEX, OPENAI_API]);
+        for slot in catalog.accepts.iter().flat_map(|a| &a.slots) {
+            assert!(catalog.kind(&slot.kind).is_some(), "{}", slot.kind);
+        }
+    }
+
+    #[test]
+    fn an_openai_api_key_from_elsewhere_is_saved_by_login_into_codexs_home() {
+        let grant = foreign(&[OPENAI_API], "api_key")
+            .settings(settings(&json!({"base_url": "https://gateway.example/v1"})));
+        let applied = plan(&grant).expect("accepted").expect("something to apply");
+        assert!(
+            applied
+                .set
+                .iter()
+                .any(|(n, v)| n == "CODEX_HOME" && v == "/some/dir")
+        );
+        let login = applied.login.as_ref().expect("a login by standard input");
+        assert_eq!(login.flag, "--with-api-key");
+        assert_eq!(login.secret, CANARY);
+        assert_eq!(
+            applied.config,
+            [(
+                "openai_base_url".to_string(),
+                json!("https://gateway.example/v1")
+            )]
+        );
+        assert!(applied.remove.contains(&"OPENAI_API_KEY".to_string()));
+    }
+
+    #[test]
+    fn a_codex_login_or_token_from_elsewhere_is_applied_as_codexs_own() {
+        let token = plan(&foreign(&[CODEX], "access_token"))
+            .expect("accepted")
+            .expect("apply");
+        assert_eq!(
+            token.login.as_ref().expect("login").flag,
+            "--with-access-token"
+        );
+        let file = plan(&foreign(&[CODEX], FILE_KEY))
+            .expect("accepted")
+            .expect("apply");
+        assert_eq!(file.watched.len(), 1);
+        assert_eq!(file.watched[0].path, AUTH_FILE);
+    }
+
+    #[test]
+    fn an_account_of_a_standard_it_does_not_accept_is_refused_saying_which() {
+        for standards in [&["anthropic-api"][..], &["claude-code"][..], &[][..]] {
+            let grant = foreign(standards, "api_key");
+            let error = plan(&grant).expect_err("not accepted");
+            let said = error.message().to_string();
+            assert!(
+                said.contains("codex") && said.contains("openai-api"),
+                "{said}"
+            );
+            assert!(!said.contains(CANARY), "{said}");
+            assert!(check(&grant.reference()).is_err());
+        }
+        assert!(plan(&foreign(&[OPENAI_API], "access_token")).is_err());
     }
 }

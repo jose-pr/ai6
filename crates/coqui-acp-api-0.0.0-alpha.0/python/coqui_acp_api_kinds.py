@@ -207,6 +207,9 @@ class AccountKeeper(KindProtocol, Protocol, kind="account_keeper", floor_hash=70
     (every `renew_poll_ms`, 30000 by default) and after each import, export, models call and close,
     and reports a changed file here. A file deleted or blanked is [`lost`](Self::lost), never
     [`renewed`](Self::renewed).
+
+    An [`AccountProvider`](crate::AccountProvider) is handed one by `watch` and by `usage`, and tells
+    it the same events of the accounts it keeps.
     """
 
     @required
@@ -494,4 +497,134 @@ class AcpHarness(KindProtocol, Protocol, kind="acp_harness", floor_hash=41111182
         ...
 
 
-__all__ = ["SpawnedProcess", "ProcessSpawner", "ChannelSink", "AccountKeeper", "Channel", "LoginPrompter", "AcpHarness"]
+class AccountWatch(KindProtocol, Protocol, kind="account_watch", floor_hash=589148782, is_object=True):
+    """A watch of one account, from [`AccountProvider::watch`]. Destroying it stops it, as
+    [`stop`](Self::stop) does.
+    """
+
+    @required
+    @fallible
+    def stop(self) -> None:
+        """Ends the watch: no keeper call starts after it answers, one under way has finished, and the
+        spawner and the keeper it was handed are destroyed. Stopping it twice is no error.
+        """
+        ...
+
+
+class AccountProvider(KindProtocol, Protocol, kind="account_provider", floor_hash=767683853):
+    """Owns accounts: the kinds it makes, the sign-in that makes one, the renewal and watching of its
+    credentials, and the usage of its plan.
+
+    An account provider does not run an agent. A harness (`acp_harness`) applies an account the
+    host hands it when the account's `provides` meets what the harness accepts, and never asks how
+    the account was made. The host owns which accounts exist, their secrets at rest and who holds
+    one; the provider owns every fact about how its kinds sign in, renew, rotate and report.
+
+    Every method answers for the provider as configured: a host builds an instance from the
+    provider's settings and asks it. Every method is synchronous; a host calls them from a thread
+    of its own. Every object a method is handed (`spawner`, `prompter`, `keeper`) is the provider's
+    from then on, and it destroys each, even when it refuses.
+
+    A credential crosses only as a secret, and nothing a provider answers carries one: not an
+    answer, a refusal, an error, a log line or an argument vector.
+    """
+
+    @required
+    @fallible
+    def describe(self) -> ValueAnswer:
+        """Who the provider is, for a host listing its providers. Cheap, and the same on every call."""
+        ...
+
+    @required
+    @fallible
+    def offers(self) -> ValueAnswer:
+        """The kinds of account it makes, the ways to sign in, and which kinds report usage. Cheap,
+        the same on every call, and answered as configured.
+        """
+        ...
+
+    @required
+    @fallible
+    def login(self, request: Ref, spawner: Taken[ProcessSpawner], prompter: Taken[LoginPrompter]) -> ValueAnswer:
+        """Signs in to make an account of the kind the method `request.method` produces. The provider
+        runs the sign-in in `request.state_dir` (a program on a terminal where it needs one)
+        through `spawner`, reads what it prints and relays each step through `prompter`, and at the
+        end reads the files it wrote into the outcome's credentials. `spawner` and `prompter` are
+        handed over: the provider destroys both before it answers, a timeout excepted (see below).
+
+        The sign-in is one call that ends in the outcome, a refusal or a cancel. Its steps reach the
+        person through `prompter`: `say` and `open_url` show them what the sign-in prints, `ask`
+        takes back what they type or paste, and `cancelled` is how the person ends it.
+
+        When the person cancels (`prompter.cancelled()` true, or a prompter call answering
+        `GUATIAO_ERR_GONE`), or `request.timeout_ms` passes, the provider kills the program's whole
+        tree and answers `GUATIAO_ERR_GONE` with `login cancelled` or `login timed out` within two
+        seconds. It runs a watchdog of its own: at the deadline it kills the tree and answers even
+        if a prompter call has not returned (the call is then left to end by itself, and the
+        prompter destroyed when it does), so a host's `ask` should return by `timeout_ms`. It also
+        checks the deadline after every prompter call and before it answers an outcome. A key the
+        program refused is `GUATIAO_ERR_BAD_VALUE` with `login refused: ` and its reason; any other
+        failure `GUATIAO_ERR_INTERNAL` with a reason that holds no input value and no URL query. A
+        method the provider does not list is `GUATIAO_ERR_BAD_VALUE`; a provider with no login
+        method answers `GUATIAO_ERR_UNSUPPORTED` with the reason.
+        """
+        ...
+
+    @required
+    @fallible
+    def renew(self, request: Ref, spawner: Taken[ProcessSpawner]) -> ValueAnswer:
+        """Renews the credentials of `request.account` with no model turn. Answers the new
+        credentials, or why nothing changed. `GUATIAO_ERR_UNSUPPORTED`, with the reason, for a
+        kind whose entry says `renews` false; `GUATIAO_ERR_BAD_VALUE` for a kind it does not list,
+        an id that is not 1 to 128 bytes without a control character, or a credential that is
+        missing. `spawner` is handed over as `login`'s is. A refused renewal that lost the login is
+        `GUATIAO_ERR_GONE` with the reason, and the blank copy is never answered.
+        """
+        ...
+
+    @required
+    @fallible
+    def watch(self, request: Ref, spawner: Taken[ProcessSpawner], keeper: Taken[AccountKeeper]) -> AccountWatch:
+        """Starts watching the account `request.account` names for a credential its program renewed or
+        lost behind the host's back: the files in its `state_dir`, read through `spawner`. The
+        watch tells `keeper` of each change, from threads of its own, and ends when the returned
+        object is stopped or destroyed.
+
+        A changed credential is `renewed` with the new credentials and the `revision` of the
+        grant it replaces; a blank or deleted one is `lost`, with a reason that holds no
+        credential. Each change is told once, with a `sequence` that grows with every event of the
+        account (renewals and losses together) and that every live watch of the same account in the
+        same provider instance hears, so a host deduplicates by (account, sequence) and may hand a
+        keeper that keeps nothing. A watch reports what it finds when it begins, so a login that is
+        already gone is told at once.
+
+        Refuses `GUATIAO_ERR_UNSUPPORTED`, with the reason, a kind whose entry does not say both
+        `rotates` and `state_dir`, or a spawner without files; `GUATIAO_ERR_BAD_VALUE` for a kind
+        it does not list, an id that is not 1 to 128 bytes without a control character, or a
+        credential that is missing. `spawner` and `keeper` are handed over to the watch: it
+        destroys both when it is stopped, and at once when it refuses.
+        """
+        ...
+
+    @required
+    @fallible
+    def usage(self, query: Ref, spawner: Taken[ProcessSpawner], keeper: Taken[AccountKeeper]) -> ValueAnswer:
+        """What the plan behind `query.account` has used and has left, with no session and no model
+        turn: the account's windows, how much of each is used, when each resets and which models it
+        covers. Cheap, so a host may poll it as often as it likes. A kind the provider lists in
+        `offers().usage` answers `supported`; any other kind it lists answers "not offered",
+        [`AccountUsage::unsupported`], which is a true answer. A kind it does not
+        list is `GUATIAO_ERR_BAD_VALUE`, as is an id that is not 1 to 128 bytes without a control
+        character.
+
+        **Plan usage only.** The tokens a session or a run spent are not an account's: ACP reports
+        them with the session, and no field of the answer holds one. Never carries a value of the
+        environment or the credentials. A provider that runs a program to ask runs it through
+        `spawner`, on the account's directory, and destroys it; `keeper` is handed over as
+        `watch`'s is, for a login the call sees renewed or lost, and is destroyed before the call
+        answers.
+        """
+        ...
+
+
+__all__ = ["SpawnedProcess", "ProcessSpawner", "ChannelSink", "AccountKeeper", "Channel", "LoginPrompter", "AcpHarness", "AccountWatch", "AccountProvider"]

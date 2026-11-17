@@ -9,10 +9,24 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use agent_client_protocol::schema::v1::{
-    ListSessionsResponse, SessionConfigKind, SessionConfigOption, SessionConfigSelectOptions,
+    ListSessionsResponse, Meta, SessionConfigKind, SessionConfigOption, SessionConfigSelectOptions,
     SessionInfo, SessionModeState,
 };
 use serde_json::Value;
+
+/// The `_meta` key of an option value its agent lists only because it is in use, which `false` marks as one that cannot be
+/// chosen: the one entry of a value's `_meta` kept, since a client acts on it.
+const SELECTABLE_META_KEY: &str = "dev.boriken.coqui.acp/selectable";
+
+/// What of a value's `_meta` is kept: the mark that it cannot be chosen, when it says so.
+fn selectable_only(meta: Option<Meta>) -> Option<Meta> {
+    let mark = meta?
+        .remove(SELECTABLE_META_KEY)
+        .filter(|mark| *mark == Value::Bool(false))?;
+    let mut kept = Meta::new();
+    kept.insert(SELECTABLE_META_KEY.to_string(), mark);
+    Some(kept)
+}
 
 /// The `agentCapabilities._meta` key with which an agent says it answers [`SESSION_OPTIONS_METHOD`].
 pub const SESSION_OPTIONS_CAPABILITY: &str = "dev.boriken.coqui.acp/session_options";
@@ -205,7 +219,7 @@ fn option(mut option: SessionConfigOption, limits: &DescribeLimits) -> Option<Se
                 for value in values {
                     cut_in_place(&mut value.name, max);
                     cut_optional(&mut value.description, max);
-                    value.meta = None;
+                    value.meta = selectable_only(value.meta.take());
                 }
             }
             SessionConfigSelectOptions::Grouped(groups) => {
@@ -219,7 +233,7 @@ fn option(mut option: SessionConfigOption, limits: &DescribeLimits) -> Option<Se
                     for value in &mut group.options {
                         cut_in_place(&mut value.name, max);
                         cut_optional(&mut value.description, max);
-                        value.meta = None;
+                        value.meta = selectable_only(value.meta.take());
                     }
                 }
             }
@@ -302,4 +316,30 @@ pub(crate) fn sessions_page(
         next: listed.next_cursor.filter(|cursor| !cursor.is_empty()),
         cut: readable.next().is_some(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_value_marked_as_not_choosable_keeps_that_mark_and_no_other_meta() {
+        let raw = json!({
+            "id": "mode", "name": "Mode", "type": "select", "currentValue": "bypass",
+            "options": [
+                {"value": "manual", "name": "Manual", "_meta": {"other": 1}},
+                {"value": "bypass", "name": "Bypass",
+                 "_meta": {"dev.boriken.coqui.acp/selectable": false, "other": 1}},
+            ],
+        });
+        let parsed: SessionConfigOption = serde_json::from_value(raw).unwrap();
+        let kept = option(parsed, &DescribeLimits::default()).unwrap();
+        let wire = serde_json::to_value(kept).unwrap();
+        assert!(wire["options"][0].get("_meta").is_none());
+        assert_eq!(
+            wire["options"][1]["_meta"],
+            json!({"dev.boriken.coqui.acp/selectable": false})
+        );
+    }
 }

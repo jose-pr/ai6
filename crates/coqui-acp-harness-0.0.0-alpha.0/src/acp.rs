@@ -154,6 +154,10 @@ pub use coqui_acp_api::LIMIT_META_KEY;
 /// each only when known. A client that does not know the key shows the update as the parent's.
 pub const CHILD_META_KEY: &str = "dev.boriken.coqui.acp/child";
 
+/// The `_meta` key of an option value that is listed only because it is in use: `false` says a client may show the value but
+/// cannot choose it, and a client that does not know the key shows it as any other.
+pub const SELECTABLE_META_KEY: &str = "dev.boriken.coqui.acp/selectable";
+
 /// The id of the plan of a session in version 2, where plans have ids; a harness has one plan per session.
 pub const PLAN_ID: &str = "plan";
 
@@ -459,6 +463,9 @@ pub struct OptionValue {
     pub name: String,
     /// What it means.
     pub description: Option<String>,
+    /// Whether it can be chosen: false for a value listed only because it is the one in use, which
+    /// `session/set_config_option` refuses. It is told as `_meta[SELECTABLE_META_KEY] = false`.
+    pub selectable: bool,
 }
 
 impl OptionValue {
@@ -473,7 +480,15 @@ impl OptionValue {
             id: id.into(),
             name: name.into(),
             description,
+            selectable: true,
         }
+    }
+
+    /// Marks it as listed only because it is in use, which a client cannot choose.
+    #[must_use]
+    pub fn in_use_only(mut self) -> Self {
+        self.selectable = false;
+        self
     }
 }
 

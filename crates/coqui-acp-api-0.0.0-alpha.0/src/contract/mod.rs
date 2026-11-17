@@ -29,6 +29,7 @@
 //! The `acp-harness-check` program runs the same suite on a library file or a source file, for a
 //! provider written in any language Guatiao loads.
 
+mod account_provider;
 mod accounts;
 mod checks;
 mod host;
@@ -42,6 +43,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
+pub use account_provider::AccountContract;
 pub use programs::HOME_VARIABLE;
 pub use spawner::spawner_files;
 

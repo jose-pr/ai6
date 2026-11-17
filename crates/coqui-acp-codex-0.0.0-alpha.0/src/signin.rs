@@ -9,6 +9,7 @@ use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use core::time::Duration;
 use std::ffi::OsString;
+use std::sync::mpsc::{Receiver, TryRecvError};
 
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Status, Wipe};
@@ -21,13 +22,14 @@ use coqui_acp_harness::account::{Accounts, Files, SecretText};
 use coqui_acp_harness::cli::{Next, address_in, plain, run};
 use coqui_acp_harness::login::{Job, asked, reason, supervise};
 use coqui_acp_harness::process::Launch;
-use coqui_acp_harness::provider::{credential, schema, to_json};
+use coqui_acp_harness::provider::{credential, schema, to_json, track};
 use serde_json::{Value, json};
 
 use crate::accounts::{
     self, ACCESS_TOKEN, ACCESS_TOKEN_METHOD, API_KEY, API_KEY_METHOD, AUTH_FILE, CHATGPT,
     CHATGPT_METHOD, CONFIG_FILE, CONFIG_TEXT, DEVICE_METHOD, FILE_KEY, StdinLogin, VARIABLES,
 };
+use crate::callback::Expected;
 use crate::{CodexLaunch, CodexSession, CodexSettings};
 
 /// The most output of a command that is kept, in bytes.
@@ -188,14 +190,14 @@ pub(crate) fn login(
 fn work(
     plan: &Plan,
     spawner: &Arc<Object<dyn ProcessSpawner>>,
-    prompter: &Object<dyn LoginPrompter>,
+    prompter: &Arc<Object<dyn LoginPrompter>>,
     job: &Job,
 ) -> Result<LoginOutcome, ProviderError> {
     let files = Files::new(Arc::clone(spawner));
     let spawn = ThroughSpawner::shared(Arc::clone(spawner));
     configure(&files)?;
     match plan.method.as_str() {
-        CHATGPT_METHOD | DEVICE_METHOD => web(plan, &files, &spawn, prompter, job),
+        CHATGPT_METHOD | DEVICE_METHOD => web(plan, &files, &spawn, spawner, prompter, job),
         API_KEY_METHOD => typed(
             plan,
             &spawn,
@@ -230,11 +232,81 @@ fn device_code(shown: &str) -> Option<String> {
     shown.ends_with('\n').then(|| code.to_string())
 }
 
+/// How many times the person is asked for the address before the sign-in gives up on it.
+const ADDRESS_TRIES: u8 = 3;
+
+/// What the form that takes the callback address says.
+fn address_title(port: u16, refused: Option<&str>) -> String {
+    let ask = format!(
+        "After signing in, paste the address your browser ends on (it starts http://127.0.0.1:{port}/auth/callback)"
+    );
+    match refused {
+        Some(why) => format!("That address was not taken: {why}. {ask}"),
+        None => ask,
+    }
+}
+
+/// Asks for the address on a thread of its own, so the sign-in goes on when the browser reaches this machine itself
+/// and Codex ends without it. What comes back is the text the person pasted.
+fn ask_address(
+    prompter: &Arc<Object<dyn LoginPrompter>>,
+    title: &str,
+) -> Receiver<Result<SecretText, ProviderError>> {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let prompter = Arc::clone(prompter);
+    let form = LoginForm::new(
+        title,
+        schema(&json!({
+            "type": "object",
+            "properties": {"address": credential()},
+            "required": ["address"],
+        })),
+    );
+    let spawned = std::thread::Builder::new()
+        .name("coqui-acp-login-address".into())
+        .spawn(move || {
+            let answer = prompter.ask(form).map(|answer| {
+                SecretText::new(
+                    answer
+                        .secrets
+                        .expose()
+                        .get("address")
+                        .unwrap_or_default()
+                        .trim()
+                        .to_string(),
+                )
+            });
+            let _ = sender.send(answer);
+        });
+    if let Ok(thread) = spawned {
+        track(thread);
+    }
+    receiver
+}
+
+/// The address the person gave, checked and requested on this machine's loopback for the waiting Codex.
+fn deliver(callback: &Expected, address: &SecretText) -> Result<(), ProviderError> {
+    let target = callback.accept(address).map_err(|why| {
+        failure(
+            Status::GUATIAO_ERR_BAD_VALUE,
+            &format!("login refused: {why}"),
+        )
+    })?;
+    callback
+        .relay(&target)
+        .map_err(|why| internal(&format!("the callback was not delivered: {why}")))
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "one sign-in's steps, in the order they come"
+)]
 fn web(
     plan: &Plan,
     files: &Files,
     spawn: &ThroughSpawner,
-    prompter: &Object<dyn LoginPrompter>,
+    spawner: &Arc<Object<dyn ProcessSpawner>>,
+    prompter: &Arc<Object<dyn LoginPrompter>>,
     job: &Job,
 ) -> Result<LoginOutcome, ProviderError> {
     let device = plan.method == DEVICE_METHOD;
@@ -245,7 +317,7 @@ fn web(
     };
     let cli = job.start(spawn, &command(&plan.executable, args, &plan.dir))?;
     let mut seen: Vec<u8> = Vec::new();
-    let (url, code) = loop {
+    let (page, code) = loop {
         match cli.next(Duration::from_millis(100)) {
             Next::Piece(piece) => {
                 seen.extend_from_slice(&piece.bytes);
@@ -266,15 +338,57 @@ fn web(
         }
     };
     job.check()?;
-    let mut open = OpenUrl::new(url);
+    let mut open = OpenUrl::new(page.clone());
     if device {
         open.user_code = code;
         open.expires_ms = Some(DEVICE_CODE_MS);
     }
     asked(prompter.open_url(open))?;
+    // The browser comes back to a port of this machine's loopback. When the person's browser is elsewhere they paste the
+    // address it ended on, and it is requested here; when it is here, Codex ends by itself and the form is let go.
+    let callback = Expected::from_page(&page)
+        .filter(|_| !device && spawner.describe().is_ok_and(|info| info.local));
+    let mut tries = 1;
+    let mut asking = callback
+        .as_ref()
+        .map(|callback| ask_address(prompter, &address_title(callback.port(), None)));
     // The person signs in on the page; Codex ends when it has the login.
     let mut printed = String::new();
     loop {
+        if let (Some(receiver), Some(callback)) = (&asking, &callback) {
+            match receiver.try_recv() {
+                Ok(answer) => {
+                    asking = None;
+                    match asked(answer) {
+                        Ok(address) => match deliver(callback, &address) {
+                            Ok(()) => {}
+                            Err(error)
+                                if error.status == Status::GUATIAO_ERR_BAD_VALUE
+                                    && tries < ADDRESS_TRIES =>
+                            {
+                                tries += 1;
+                                let why = error
+                                    .message()
+                                    .trim_start_matches("login refused: ")
+                                    .to_string();
+                                asking = Some(ask_address(
+                                    prompter,
+                                    &address_title(callback.port(), Some(&why)),
+                                ));
+                            }
+                            Err(error) => return Err(error),
+                        },
+                        // A cancelled sign-in ends; a front that cannot ask leaves the browser to reach Codex itself.
+                        Err(error) if error.status == Status::GUATIAO_ERR_GONE => {
+                            return Err(error);
+                        }
+                        Err(_) => {}
+                    }
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => asking = None,
+            }
+        }
         match cli.next(Duration::from_millis(100)) {
             Next::Piece(piece) => {
                 printed.push_str(&String::from_utf8_lossy(&piece.bytes));
@@ -378,7 +492,7 @@ pub(crate) fn renew(
     request: &RenewRequest,
     spawner: Object<dyn ProcessSpawner>,
 ) -> Result<RenewReport, ProviderError> {
-    let grant = &request.account;
+    let grant = &accounts::resolved(&request.account)?;
     let applied = accounts::plan(grant)?;
     let Some(applied) = applied.filter(|_| grant.kind == CHATGPT) else {
         return Err(failure(

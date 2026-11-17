@@ -9,8 +9,8 @@ use alloc::vec::Vec;
 use coqui_acp_api::guatiao::library::ProviderError;
 use coqui_acp_api::guatiao::{Secret, Status};
 use coqui_acp_api::{
-    AccountCatalog, AccountGrant, AccountKindInfo, AccountRef, EndpointSlot, Environment,
-    HARNESS_LOGIN, LoginMethodInfo,
+    Accepted, AcceptedSlot, AccountCatalog, AccountGrant, AccountKindInfo, AccountRef,
+    EndpointSlot, Environment, HARNESS_LOGIN, LoginMethodInfo,
 };
 use serde_json::{Map, Value, json};
 
@@ -55,9 +55,58 @@ pub struct Endpoint {
     pub default: Option<&'static str>,
 }
 
+/// How one credential key of a standard reaches a harness, as [`AcceptedSlot`].
+#[derive(Debug)]
+pub struct SlotDef {
+    /// The credential key of the standard.
+    pub credential: &'static str,
+    /// The harness's own kind that applies it.
+    pub kind: &'static str,
+    /// The variable the credential is set in.
+    pub variable: Option<&'static str>,
+    /// The file in the directory its text is written to.
+    pub file: Option<&'static str>,
+    /// The setting of the kind that holds the account's `base_url`.
+    pub base_url_setting: Option<&'static str>,
+    /// The variable the base URL ends up in.
+    pub base_url_variable: Option<&'static str>,
+    /// The variable that names the private directory.
+    pub dir_variable: Option<&'static str>,
+    /// Settings of the kind the standard fixes.
+    pub settings: &'static [(&'static str, &'static str)],
+}
+
+/// A standard a harness starts on, as [`Accepted`].
+#[derive(Debug)]
+pub struct AcceptDef {
+    /// The standard.
+    pub standard: &'static str,
+    /// How each credential key of it is applied.
+    pub slots: &'static [SlotDef],
+}
+
+impl SlotDef {
+    fn info(&self) -> AcceptedSlot {
+        let mut slot = AcceptedSlot::new(self.credential, self.kind);
+        slot.variable = self.variable.map(ToString::to_string);
+        slot.file = self.file.map(ToString::to_string);
+        slot.base_url_setting = self.base_url_setting.map(ToString::to_string);
+        slot.base_url_variable = self.base_url_variable.map(ToString::to_string);
+        slot.dir_variable = self.dir_variable.map(ToString::to_string);
+        slot.settings = self
+            .settings
+            .iter()
+            .map(|(name, value)| ((*name).to_string(), (*value).to_string()))
+            .collect();
+        slot
+    }
+}
+
 /// One kind of account a harness takes.
 #[derive(Debug)]
 pub struct KindDef {
+    /// The standards an account of it provides.
+    pub provides: &'static [&'static str],
     /// The kind's id.
     pub id: &'static str,
     /// Its name for people.
@@ -105,6 +154,10 @@ pub struct HarnessDef {
     pub args: &'static [&'static str],
     /// Its kinds, [`HARNESS_LOGIN`] aside.
     pub kinds: &'static [KindDef],
+    /// The standards it starts on, most preferred first, and how each is applied.
+    pub accepts: &'static [AcceptDef],
+    /// The standard its own login provides ([`HARNESS_LOGIN`]), when it names one.
+    pub own_standard: Option<&'static str>,
     /// Every variable any kind reads.
     pub variables: &'static [&'static str],
     /// What follows the program to renew a login with no model turn.
@@ -179,6 +232,7 @@ impl KindDef {
         info.state_dir = self.state_dir;
         info.renews = self.renews;
         info.notices = self.notices.iter().map(|n| (*n).to_string()).collect();
+        info.provides = self.provides.iter().map(|s| (*s).to_string()).collect();
         info
     }
 }
@@ -187,7 +241,24 @@ impl KindDef {
 #[must_use]
 pub fn catalog(def: &HarnessDef, logins: Vec<LoginMethodInfo>) -> AccountCatalog {
     let mut catalog = AccountCatalog::new();
+    if let Some(own) = def.own_standard
+        && let Some(login) = catalog
+            .kinds
+            .iter_mut()
+            .find(|kind| kind.id == HARNESS_LOGIN)
+    {
+        login.provides = alloc::vec![own.to_string()];
+    }
     catalog.kinds.extend(def.kinds.iter().map(KindDef::info));
+    catalog.accepts = def
+        .accepts
+        .iter()
+        .map(|accept| {
+            let mut accepted = Accepted::new(accept.standard);
+            accepted.slots = accept.slots.iter().map(SlotDef::info).collect();
+            accepted
+        })
+        .collect();
     catalog.logins = logins;
     catalog.credential_variables = def.variables.iter().map(|v| (*v).to_string()).collect();
     catalog
@@ -218,9 +289,28 @@ pub fn known<'a>(
     if account.kind == HARNESS_LOGIN {
         return Ok(None);
     }
-    def.kind(&account.kind)
-        .map(Some)
-        .ok_or_else(|| bad("this harness takes no account of that kind"))
+    if let Some(kind) = def.kind(&account.kind) {
+        return Ok(Some(kind));
+    }
+    // An account of an accepted standard has no kind of this harness's until `apply` reads its credential.
+    catalog(def, Vec::new()).accepts_reference(account)?;
+    Ok(None)
+}
+
+/// The grant of one of `def`'s own kinds that applies `grant`: itself for an own kind, else the slot of the first
+/// standard it provides that `def` accepts.
+///
+/// # Errors
+///
+/// As [`resolve`](crate::provider::resolve).
+pub fn resolve_grant(
+    def: &HarnessDef,
+    grant: &AccountGrant,
+) -> Result<AccountGrant, ProviderError> {
+    if grant.kind == HARNESS_LOGIN {
+        return Ok(grant.clone());
+    }
+    crate::provider::resolve(&catalog(def, Vec::new()), grant)
 }
 
 /// A credential file to look at while the account is in use.
@@ -270,6 +360,7 @@ fn settings_of(grant: &AccountGrant) -> Result<Map<String, Value>, ProviderError
 /// `GUATIAO_ERR_BAD_VALUE` for a kind not listed, a setting the schema refuses, a credential missing or unknown, or no
 /// directory for a kind that needs one. No message shows a value.
 pub fn apply(def: &HarnessDef, grant: &AccountGrant) -> Result<Option<Applied>, ProviderError> {
+    let grant = &resolve_grant(def, grant)?;
     let Some(kind) = known(def, &grant.reference())? else {
         return Ok(None);
     };
@@ -451,5 +542,119 @@ mod tests {
         let shown = alloc::format!("{applied:?}");
         assert!(shown.contains("XAI_API_KEY"), "{shown}");
         assert!(!shown.contains("secret-value-1f3a"), "{shown}");
+    }
+}
+
+#[cfg(test)]
+mod standards_tests {
+    use super::*;
+    use coqui_acp_api::Credentials;
+    use coqui_acp_api::standard;
+
+    const CANARY: &str = "sk-canary-3b7c";
+
+    fn foreign(standards: &[&str], key: &str) -> AccountGrant {
+        AccountGrant::new("a", "someone-elses-kind")
+            .provides(standards.iter().copied())
+            .credentials(Credentials::from_iter([(key, CANARY)]))
+            .state_dir("/some/dir")
+    }
+
+    fn names(applied: &Applied) -> Vec<String> {
+        applied
+            .environment
+            .expose()
+            .names()
+            .map(ToString::to_string)
+            .collect()
+    }
+
+    #[test]
+    fn grok_lists_what_it_provides_and_accepts() {
+        let catalog = catalog(&grok::DEF, Vec::new());
+        assert_eq!(
+            catalog.kind(grok::LOGIN).expect("login").provides,
+            [standard::GROK]
+        );
+        assert_eq!(
+            catalog.kind(grok::API_KEY).expect("key").provides,
+            [standard::XAI_API]
+        );
+        assert_eq!(
+            catalog.kind(HARNESS_LOGIN).expect("own").provides,
+            [standard::GROK]
+        );
+        let accepted: Vec<&str> = catalog
+            .accepts
+            .iter()
+            .map(|a| a.standard.as_str())
+            .collect();
+        assert_eq!(accepted, [standard::GROK, standard::XAI_API]);
+    }
+
+    #[test]
+    fn an_xai_api_key_from_elsewhere_is_applied_with_its_endpoint_in_a_directory_of_groks() {
+        let grant = foreign(&[standard::XAI_API], "api_key").settings(crate::provider::schema(
+            &json!({"base_url": "https://gateway.example/v1"}),
+        ));
+        let applied = apply(&grok::DEF, &grant)
+            .expect("accepted")
+            .expect("a kind");
+        let seen = names(&applied);
+        for variable in ["XAI_API_KEY", "GROK_XAI_API_BASE_URL", "GROK_HOME"] {
+            assert!(
+                seen.contains(&variable.to_string()),
+                "{variable} in {seen:?}"
+            );
+        }
+        assert!(!alloc::format!("{applied:?}").contains(CANARY));
+    }
+
+    #[test]
+    fn a_grok_login_from_elsewhere_is_the_file_it_watches() {
+        let applied = apply(&grok::DEF, &foreign(&[standard::GROK], "auth_json"))
+            .expect("accepted")
+            .expect("a kind");
+        assert_eq!(applied.watched.expect("watched").path, "auth.json");
+    }
+
+    #[test]
+    fn what_a_harness_does_not_accept_is_refused_with_both_lists() {
+        for (def, standards, accepts) in [
+            (&grok::DEF, &[standard::ANTHROPIC_API][..], "grok, xai-api"),
+            (&grok::DEF, &[][..], "grok, xai-api"),
+            (&antigravity::DEF, &[standard::XAI_API][..], "none"),
+        ] {
+            let grant = foreign(standards, "api_key");
+            let Err(error) = apply(def, &grant) else {
+                panic!("{standards:?} was taken");
+            };
+            let said = error.message();
+            assert!(said.contains(accepts), "{said}");
+            assert!(!said.contains(CANARY), "{said}");
+            assert!(known(def, &grant.reference()).is_err());
+        }
+        // The right standard with a credential or an endpoint the slot does not take.
+        assert!(apply(&grok::DEF, &foreign(&[standard::XAI_API], "token")).is_err());
+        assert!(
+            apply(
+                &grok::DEF,
+                &foreign(&[standard::GROK], "auth_json").settings(crate::provider::schema(
+                    &json!({"base_url": "https://x.example"})
+                ))
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn antigravitys_own_login_provides_its_standard_and_nothing_else_is_taken() {
+        let catalog = catalog(&antigravity::DEF, Vec::new());
+        assert_eq!(catalog.kinds.len(), 1);
+        assert_eq!(
+            catalog.kind(HARNESS_LOGIN).expect("own").provides,
+            [standard::ANTIGRAVITY]
+        );
+        assert!(catalog.accepts.is_empty());
     }
 }

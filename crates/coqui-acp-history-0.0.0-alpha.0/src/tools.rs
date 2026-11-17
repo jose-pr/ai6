@@ -113,7 +113,7 @@ impl Tool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Native {
-    /// The harness: `claude`, `codex` or `agy`.
+    /// The harness: `claude`, `codex`, `pi` or `agy`.
     pub harness: &'static str,
     /// The tool's name there.
     pub name: &'static str,
@@ -140,19 +140,25 @@ const fn native(
 }
 
 /// The table. Claude's names and keys are those of Claude Code's tool schemas; Codex's are those
-/// of its `shell` and `apply_patch` tools. agy's are names only: its input keys are taken to be
-/// the normalised ones until recorded fixtures say otherwise.
+/// of its `shell` and `apply_patch` tools; Pi's are those of its built-in tools (an `edit` of one
+/// replacement and a `bash` timeout in seconds are reshaped by [`normalise`] and [`denormalise`]).
+/// agy's are names only: its input keys are taken to be the normalised ones until recorded fixtures
+/// say otherwise.
 const TABLE: &[Row] = &[
     Row {
         tool: Tool::Read,
         natives: &[
             native("claude", "Read", &[("path", "file_path")]),
+            native("pi", "read", &[]),
             native("agy", "read_file", &[]),
         ],
     },
     Row {
         tool: Tool::Write,
-        natives: &[native("claude", "Write", &[("path", "file_path")])],
+        natives: &[
+            native("claude", "Write", &[("path", "file_path")]),
+            native("pi", "write", &[]),
+        ],
     },
     Row {
         tool: Tool::Edit,
@@ -166,6 +172,7 @@ const TABLE: &[Row] = &[
                     ("new", "new_string"),
                 ],
             ),
+            native("pi", "edit", &[]),
             native("agy", "edit_file", &[]),
         ],
     },
@@ -179,16 +186,20 @@ const TABLE: &[Row] = &[
             native("claude", "Bash", &[("timeout_ms", "timeout")]),
             native("codex", "shell", &[("cwd", "workdir")]),
             native("codex", "shell_command", &[("cwd", "workdir")]),
+            native("pi", "bash", &[]),
             native("agy", "run_command", &[]),
         ],
     },
     Row {
         tool: Tool::Grep,
-        natives: &[native("claude", "Grep", &[])],
+        natives: &[
+            native("claude", "Grep", &[]),
+            native("pi", "grep", &[("-i", "ignoreCase")]),
+        ],
     },
     Row {
         tool: Tool::Glob,
-        natives: &[native("claude", "Glob", &[])],
+        natives: &[native("claude", "Glob", &[]), native("pi", "find", &[])],
     },
     Row {
         tool: Tool::Fetch,
@@ -207,7 +218,7 @@ pub fn normalise(harness: &str, name: &str, input: &Value) -> Option<(Tool, Valu
         .iter()
         .find(|n| n.harness == harness && n.name == name)?;
     let renamed = rename(input, native.keys, false)?;
-    Some((tool, renamed))
+    Some((tool, pi_shape(harness, tool, renamed, false)?))
 }
 
 /// Renames the keys of a normalised `input` to `harness`'s, and gives the native name to call.
@@ -216,8 +227,75 @@ pub fn normalise(harness: &str, name: &str, input: &Value) -> Option<(Tool, Valu
 #[must_use]
 pub fn denormalise(tool: Tool, harness: &str, input: &Value) -> Option<(&'static str, Value)> {
     let native = tool.native(harness)?;
-    let renamed = rename(input, native.keys, true)?;
+    let renamed = pi_shape(harness, tool, rename(input, native.keys, true)?, true)?;
     Some((native.name, renamed))
+}
+
+/// The two changes of shape Pi's tools need, which a rename of keys cannot make: `edit` takes a list of
+/// replacements where the normalised form has one `old` and `new`, and `bash` takes its timeout in seconds
+/// where the normalised form has `timeout_ms`. `None` for an `edit` of several replacements (or a normalised
+/// one that replaces every match), which has no one-call equivalent.
+fn pi_shape(harness: &str, tool: Tool, input: Value, to_native: bool) -> Option<Value> {
+    if harness != "pi" {
+        return Some(input);
+    }
+    let Value::Object(mut map) = input else {
+        return None;
+    };
+    match (tool, to_native) {
+        (Tool::Edit, false) => {
+            let edits = map.remove("edits")?;
+            let [edit] = edits.as_array()?.as_slice() else {
+                return None;
+            };
+            let (old, new) = (edit.get("oldText")?.clone(), edit.get("newText")?.clone());
+            if map.insert("old".to_owned(), old).is_some()
+                || map.insert("new".to_owned(), new).is_some()
+            {
+                return None;
+            }
+        }
+        (Tool::Edit, true) => {
+            if map
+                .remove("replace_all")
+                .is_some_and(|all| all != Value::Bool(false))
+            {
+                return None;
+            }
+            let (old, new) = (map.remove("old")?, map.remove("new")?);
+            let edit = serde_json::json!({"oldText": old, "newText": new});
+            if map
+                .insert("edits".to_owned(), Value::Array(vec![edit]))
+                .is_some()
+            {
+                return None;
+            }
+        }
+        (Tool::Shell, false) => {
+            if let Some(seconds) = map.remove("timeout") {
+                let millis = match seconds.as_u64() {
+                    Some(whole) => Value::from(whole.checked_mul(1000)?),
+                    None => Value::from(seconds.as_f64()? * 1000.0),
+                };
+                if map.insert("timeout_ms".to_owned(), millis).is_some() {
+                    return None;
+                }
+            }
+        }
+        (Tool::Shell, true) => {
+            if let Some(millis) = map.remove("timeout_ms") {
+                let seconds = match millis.as_u64() {
+                    Some(whole) => Value::from(whole.div_ceil(1000)),
+                    None => Value::from(millis.as_f64()? / 1000.0),
+                };
+                if map.insert("timeout".to_owned(), seconds).is_some() {
+                    return None;
+                }
+            }
+        }
+        _ => {}
+    }
+    Some(Value::Object(map))
 }
 
 /// Renames the keys of `input` by `keys`, `(normalised, native)` pairs, in the direction given.

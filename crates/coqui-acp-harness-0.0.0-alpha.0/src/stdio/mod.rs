@@ -397,9 +397,14 @@ impl AcpHarness for StdioProvider {
             accounts::known(self.def(), &grant.reference())?;
         }
         if self.settings.replay_max_bytes == 0 {
-            return Err(unsupported(
-                "this provider does not seed a session in an agent it does not keep the sessions of; set replay_max_bytes to replay the history as context in the first prompt",
-            ));
+            return Err(unsupported(match self.settings.harness {
+                StdioHarness::Antigravity => {
+                    "Antigravity keeps a conversation as a database of its own protobuf steps, which it does not document, so it cannot be seeded with a history it did not make; set replay_max_bytes to replay the history as context in the first prompt"
+                }
+                StdioHarness::Grok => {
+                    "this provider does not seed a session in an agent it does not keep the sessions of; set replay_max_bytes to replay the history as context in the first prompt"
+                }
+            }));
         }
         let bad = |why: &str| ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, why);
         if uuid::Uuid::parse_str(&session.session_id).is_err() {
@@ -481,9 +486,14 @@ impl AcpHarness for StdioProvider {
         if let Some(grant) = &export.account {
             accounts::known(self.def(), &grant.reference())?;
         }
-        Err(unsupported(
-            "this provider does not read a session out of an agent it does not keep the sessions of",
-        ))
+        Err(unsupported(match self.settings.harness {
+            StdioHarness::Antigravity => {
+                "Antigravity keeps each conversation as a SQLite database of protobuf steps in its own program's folder (conversations/<id>.db), a schema it does not publish and changes between releases, so this provider does not read one; a host that records the sessions it serves exports them from its own record"
+            }
+            StdioHarness::Grok => {
+                "this provider does not read a session out of an agent it does not keep the sessions of"
+            }
+        }))
     }
 
     fn models(
@@ -530,7 +540,7 @@ impl AcpHarness for StdioProvider {
         spawner: Object<dyn ProcessSpawner>,
     ) -> Result<RenewReport, ProviderError> {
         let def = self.def();
-        let grant = request.account;
+        let grant = accounts::resolve_grant(def, &request.account)?;
         let Some(applied) = Self::applied(&grant, def)? else {
             return Err(unsupported(
                 "the harness's own login is the harness's to renew",

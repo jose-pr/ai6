@@ -83,6 +83,14 @@
             "maximum": 18446744073709551615,
             "description": "Counts the host's stored copies of the credentials, so a renewal says which it renews.",
             "default": 0
+          },
+          "provides": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The standards the account provides, from the catalog of whoever made it. A harness reads it only for a `kind` its own catalog does not list: it then applies the account as the first of its `accepts` that this names.",
+            "default": []
           }
         },
         "additionalProperties": false,
@@ -96,11 +104,13 @@
         "type": "string",
         "enum": [
           "default",
+          "off",
           "short",
           "long"
         ],
         "x-enum-labels": {
           "default": "The harness's own default.",
+          "off": "No prompt cache at all, for a harness that can switch it off (see [`HarnessInfo::cache_choices`]); one that cannot ignores it like any other hint.",
           "short": "The short cache (about five minutes): for one-shot and background runs and loops that wake more often than that.",
           "long": "The long cache (about an hour): for an interactive session while someone is active."
         },
@@ -224,6 +234,14 @@
             "maximum": 18446744073709551615,
             "description": "Counts the host's stored copies of the credentials, so a renewal says which it renews.",
             "default": 0
+          },
+          "provides": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The standards the account provides, from the catalog of whoever made it. A harness reads it only for a `kind` its own catalog does not list: it then applies the account as the first of its `accepts` that this names.",
+            "default": []
           }
         },
         "additionalProperties": false,
@@ -303,6 +321,14 @@
             "maximum": 18446744073709551615,
             "description": "Counts the host's stored copies of the credentials, so a renewal says which it renews.",
             "default": 0
+          },
+          "provides": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The standards the account provides, from the catalog of whoever made it. A harness reads it only for a `kind` its own catalog does not list: it then applies the account as the first of its `accepts` that this names.",
+            "default": []
           }
         },
         "additionalProperties": false,
@@ -605,6 +631,41 @@
           "null"
         ],
         "description": "What the harness does with [`StartRequest::cache_lifetime`], in a sentence for people (the variables it sets, say); absent when it has no such control and ignores the hint."
+      },
+      "cache_choices": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "lifetime": {
+              "type": "string",
+              "enum": [
+                "default",
+                "off",
+                "short",
+                "long"
+              ],
+              "x-enum-labels": {
+                "default": "The harness's own default.",
+                "off": "No prompt cache at all, for a harness that can switch it off (see [`HarnessInfo::cache_choices`]); one that cannot ignores it like any other hint.",
+                "short": "The short cache (about five minutes): for one-shot and background runs and loops that wake more often than that.",
+                "long": "The long cache (about an hour): for an interactive session while someone is active."
+              },
+              "description": "The lifetime."
+            },
+            "label": {
+              "type": "string",
+              "description": "Its name for people, in the harness's own terms."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "lifetime",
+            "label"
+          ]
+        },
+        "description": "The lifetimes beyond [`CacheLifetime::Default`] the harness honours, each with the name it gives it; empty when the hint is ignored. A host offers these and no others.",
+        "default": []
       }
     },
     "additionalProperties": false,
@@ -680,6 +741,30 @@
         ],
         "description": "Why it could not, when `known` is false."
       },
+      "unknown_kind": {
+        "anyOf": [
+          {
+            "type": "string",
+            "enum": [
+              "not_installed",
+              "failed"
+            ],
+            "x-enum-labels": {
+              "not_installed": "The program the harness runs is not on the machine.",
+              "failed": "The program is there and could not be asked; the text says what."
+            }
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "What kind of reason that is, when the harness could not be started; absent when it simply lists its models only once a session has started."
+      },
+      "signed_out": {
+        "type": "boolean",
+        "description": "Whether the harness, though it listed its models, says nobody is signed in, so a session on the machine's own login would be refused its first prompt. Says nothing of an account a host applies.",
+        "default": false
+      },
       "models": {
         "type": "array",
         "items": {
@@ -751,6 +836,19 @@
     "required": [
       "known"
     ]
+  },
+  "UnknownKind": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "string",
+    "enum": [
+      "not_installed",
+      "failed"
+    ],
+    "x-enum-labels": {
+      "not_installed": "The program the harness runs is not on the machine.",
+      "failed": "The program is there and could not be asked; the text says what."
+    },
+    "properties": {}
   },
   "ModelInfo": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1199,6 +1297,14 @@
             "maximum": 18446744073709551615,
             "description": "Counts the host's stored copies of the credentials, so a renewal says which it renews.",
             "default": 0
+          },
+          "provides": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The standards the account provides, from the catalog of whoever made it. A harness reads it only for a `kind` its own catalog does not list: it then applies the account as the first of its `accepts` that this names.",
+            "default": []
           }
         },
         "additionalProperties": false,
@@ -2363,15 +2469,48 @@
     "type": "string",
     "enum": [
       "default",
+      "off",
       "short",
       "long"
     ],
     "x-enum-labels": {
       "default": "The harness's own default.",
+      "off": "No prompt cache at all, for a harness that can switch it off (see [`HarnessInfo::cache_choices`]); one that cannot ignores it like any other hint.",
       "short": "The short cache (about five minutes): for one-shot and background runs and loops that wake more often than that.",
       "long": "The long cache (about an hour): for an interactive session while someone is active."
     },
     "properties": {}
+  },
+  "CacheChoice": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "lifetime": {
+        "type": "string",
+        "enum": [
+          "default",
+          "off",
+          "short",
+          "long"
+        ],
+        "x-enum-labels": {
+          "default": "The harness's own default.",
+          "off": "No prompt cache at all, for a harness that can switch it off (see [`HarnessInfo::cache_choices`]); one that cannot ignores it like any other hint.",
+          "short": "The short cache (about five minutes): for one-shot and background runs and loops that wake more often than that.",
+          "long": "The long cache (about an hour): for an interactive session while someone is active."
+        },
+        "description": "The lifetime."
+      },
+      "label": {
+        "type": "string",
+        "description": "Its name for people, in the harness's own terms."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "lifetime",
+      "label"
+    ]
   },
   "FileInfo": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2443,6 +2582,14 @@
         "maximum": 18446744073709551615,
         "description": "Counts the host's stored copies of the credentials, so a renewal says which it renews.",
         "default": 0
+      },
+      "provides": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The standards the account provides, from the catalog of whoever made it. A harness reads it only for a `kind` its own catalog does not list: it then applies the account as the first of its `accepts` that this names.",
+        "default": []
       }
     },
     "additionalProperties": false,
@@ -2480,6 +2627,14 @@
         "maximum": 18446744073709551615,
         "description": "As [`AccountGrant::revision`].",
         "default": 0
+      },
+      "provides": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "As [`AccountGrant::provides`].",
+        "default": []
       }
     },
     "additionalProperties": false,
@@ -2553,7 +2708,7 @@
             },
             "history_portable": {
               "type": "boolean",
-              "description": "A session started on one account of this kind resumes on another account of the same provider directly.",
+              "description": "The harness keeps its sessions where every account of this kind shares them, so a session started on one account resumes on another directly, with nothing moved. `false` does not say the conversation cannot follow the person: where each account has its own directory ([`state_dir`](Self::state_dir)) a host exports it from the first account's with [`export_session`](crate::AcpHarness::export_session) and imports it into the second's with [`import_session`](crate::AcpHarness::import_session), then resumes it there.",
               "default": false
             },
             "state_dir": {
@@ -2572,6 +2727,14 @@
                 "type": "string"
               },
               "description": "What using it weakens, shown when the account is added and logged at start.",
+              "default": []
+            },
+            "provides": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The standards an account of this kind provides, each an id of [`crate::standard`]: what it can be used as. Empty: only this harness takes it.",
               "default": []
             }
           },
@@ -2641,9 +2804,235 @@
         },
         "description": "Every variable any of its kinds reads: applying an account clears all of them, then sets the chosen kind's.",
         "default": []
+      },
+      "accepts": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "standard": {
+              "type": "string",
+              "description": "The standard, an id of [`crate::standard`] or the provider's own."
+            },
+            "slots": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "credential": {
+                    "type": "string",
+                    "description": "The credential key of the standard ([`crate::standard::StandardInfo::credentials`])."
+                  },
+                  "kind": {
+                    "type": "string",
+                    "description": "The harness's own kind that applies it: a grant of the standard is run as a grant of this kind, with the same credential."
+                  },
+                  "variable": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "The environment variable the credential is set in, when it is."
+                  },
+                  "file": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "The file in the harness's directory the credential's text is written to, when it is a login file."
+                  },
+                  "base_url_setting": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "The setting of [`kind`](Self::kind) that holds the account's `base_url`, when the harness's endpoint can move; an account that names a `base_url` for a harness with none is refused."
+                  },
+                  "base_url_variable": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "The environment variable the base URL ends up in, when it is one."
+                  },
+                  "dir_variable": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "The environment variable naming the harness's private directory (the grant's `state_dir`), when the credential is kept in one."
+                  },
+                  "settings": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Settings of [`kind`](Self::kind) the standard fixes, as a map of name to text.",
+                    "default": {}
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "credential",
+                  "kind"
+                ]
+              },
+              "description": "How each credential key of it is applied.",
+              "default": []
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "standard"
+          ]
+        },
+        "description": "The standards the harness starts on, most preferred first, and how each is applied. An account whose `kind` this catalog does not list is applied as the first of these that it provides ([`accepted_by`](Self::accepted_by)).",
+        "default": []
       }
     },
     "additionalProperties": false
+  },
+  "Accepted": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "standard": {
+        "type": "string",
+        "description": "The standard, an id of [`crate::standard`] or the provider's own."
+      },
+      "slots": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "credential": {
+              "type": "string",
+              "description": "The credential key of the standard ([`crate::standard::StandardInfo::credentials`])."
+            },
+            "kind": {
+              "type": "string",
+              "description": "The harness's own kind that applies it: a grant of the standard is run as a grant of this kind, with the same credential."
+            },
+            "variable": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The environment variable the credential is set in, when it is."
+            },
+            "file": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The file in the harness's directory the credential's text is written to, when it is a login file."
+            },
+            "base_url_setting": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The setting of [`kind`](Self::kind) that holds the account's `base_url`, when the harness's endpoint can move; an account that names a `base_url` for a harness with none is refused."
+            },
+            "base_url_variable": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The environment variable the base URL ends up in, when it is one."
+            },
+            "dir_variable": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The environment variable naming the harness's private directory (the grant's `state_dir`), when the credential is kept in one."
+            },
+            "settings": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Settings of [`kind`](Self::kind) the standard fixes, as a map of name to text.",
+              "default": {}
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "credential",
+            "kind"
+          ]
+        },
+        "description": "How each credential key of it is applied.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "standard"
+    ]
+  },
+  "AcceptedSlot": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "credential": {
+        "type": "string",
+        "description": "The credential key of the standard ([`crate::standard::StandardInfo::credentials`])."
+      },
+      "kind": {
+        "type": "string",
+        "description": "The harness's own kind that applies it: a grant of the standard is run as a grant of this kind, with the same credential."
+      },
+      "variable": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The environment variable the credential is set in, when it is."
+      },
+      "file": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The file in the harness's directory the credential's text is written to, when it is a login file."
+      },
+      "base_url_setting": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The setting of [`kind`](Self::kind) that holds the account's `base_url`, when the harness's endpoint can move; an account that names a `base_url` for a harness with none is refused."
+      },
+      "base_url_variable": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The environment variable the base URL ends up in, when it is one."
+      },
+      "dir_variable": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The environment variable naming the harness's private directory (the grant's `state_dir`), when the credential is kept in one."
+      },
+      "settings": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "description": "Settings of [`kind`](Self::kind) the standard fixes, as a map of name to text.",
+        "default": {}
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "credential",
+      "kind"
+    ]
   },
   "AccountKindInfo": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2705,7 +3094,7 @@
       },
       "history_portable": {
         "type": "boolean",
-        "description": "A session started on one account of this kind resumes on another account of the same provider directly.",
+        "description": "The harness keeps its sessions where every account of this kind shares them, so a session started on one account resumes on another directly, with nothing moved. `false` does not say the conversation cannot follow the person: where each account has its own directory ([`state_dir`](Self::state_dir)) a host exports it from the first account's with [`export_session`](crate::AcpHarness::export_session) and imports it into the second's with [`import_session`](crate::AcpHarness::import_session), then resumes it there.",
         "default": false
       },
       "state_dir": {
@@ -2724,6 +3113,14 @@
           "type": "string"
         },
         "description": "What using it weakens, shown when the account is added and logged at start.",
+        "default": []
+      },
+      "provides": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The standards an account of this kind provides, each an id of [`crate::standard`]: what it can be used as. Empty: only this harness takes it.",
         "default": []
       }
     },
@@ -2926,6 +3323,14 @@
             "maximum": 18446744073709551615,
             "description": "Counts the host's stored copies of the credentials, so a renewal says which it renews.",
             "default": 0
+          },
+          "provides": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The standards the account provides, from the catalog of whoever made it. A harness reads it only for a `kind` its own catalog does not list: it then applies the account as the first of its `accepts` that this names.",
+            "default": []
           }
         },
         "additionalProperties": false,
@@ -3029,6 +3434,14 @@
             "maximum": 18446744073709551615,
             "description": "Counts the host's stored copies of the credentials, so a renewal says which it renews.",
             "default": 0
+          },
+          "provides": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The standards the account provides, from the catalog of whoever made it. A harness reads it only for a `kind` its own catalog does not list: it then applies the account as the first of its `accepts` that this names.",
+            "default": []
           }
         },
         "additionalProperties": false,
@@ -3180,5 +3593,697 @@
       }
     },
     "additionalProperties": false
+  },
+  "AccountProviderInfo": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string",
+        "description": "Its name for people, such as `Claude accounts`."
+      },
+      "description": {
+        "type": "string",
+        "description": "What it is and what it keeps, in a sentence or two for people.",
+        "default": ""
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "title"
+    ]
+  },
+  "AccountOffer": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "kinds": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Its id, such as `claude-login`."
+            },
+            "title": {
+              "type": "string",
+              "description": "Its name for people."
+            },
+            "description": {
+              "type": "string",
+              "description": "What it is, for people.",
+              "default": ""
+            },
+            "settings": {
+              "description": "A guatiao schema (JSON Schema, `type: object`) for the kind's settings. A credential is a property marked `writeOnly` and `x-sensitive`, and its key is the key in [`Credentials`]. A host renders its form from this.",
+              "default": {}
+            },
+            "endpoints": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "The kind's text setting holding an absolute URL; absent when the harness fixes it."
+                  },
+                  "purpose": {
+                    "type": "string",
+                    "description": "What it is for: [`MODEL_API`], [`AUTH`] or [`PROXY`]."
+                  },
+                  "default": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "The URL used when the setting is absent."
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "purpose"
+                ]
+              },
+              "description": "The URLs the kind talks to, for the host's egress policy.",
+              "default": []
+            },
+            "rotates": {
+              "type": "boolean",
+              "description": "A renewal replaces a credential so that an older copy stops working. The host holds such an account exclusively. A kind whose rotation is unmeasured says `true`.",
+              "default": false
+            },
+            "history_portable": {
+              "type": "boolean",
+              "description": "The harness keeps its sessions where every account of this kind shares them, so a session started on one account resumes on another directly, with nothing moved. `false` does not say the conversation cannot follow the person: where each account has its own directory ([`state_dir`](Self::state_dir)) a host exports it from the first account's with [`export_session`](crate::AcpHarness::export_session) and imports it into the second's with [`import_session`](crate::AcpHarness::import_session), then resumes it there.",
+              "default": false
+            },
+            "state_dir": {
+              "type": "boolean",
+              "description": "The kind needs a private directory where the harness runs ([`AccountGrant::state_dir`]).",
+              "default": false
+            },
+            "renews": {
+              "type": "boolean",
+              "description": "[`renew`](crate::AcpHarness::renew) can renew it with no model turn.",
+              "default": false
+            },
+            "notices": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "What using it weakens, shown when the account is added and logged at start.",
+              "default": []
+            },
+            "provides": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The standards an account of this kind provides, each an id of [`crate::standard`]: what it can be used as. Empty: only this harness takes it.",
+              "default": []
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "title"
+          ]
+        },
+        "description": "The kinds of account it makes and keeps. Each says which standards an account of it provides, whether it rotates its login, keeps files, and renews with no model turn.",
+        "default": []
+      },
+      "logins": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Its id, such as `subscription`."
+            },
+            "title": {
+              "type": "string",
+              "description": "Its name for people."
+            },
+            "description": {
+              "type": "string",
+              "description": "What it does, for people.",
+              "default": ""
+            },
+            "produces": {
+              "type": "string",
+              "description": "The kind of account it makes: one of the catalog's kinds."
+            },
+            "inputs": {
+              "description": "A schema of what is asked before it runs (an email, an issuer); an empty object asks nothing.",
+              "default": {}
+            },
+            "steps": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The steps it relays, in the order they can come: [`OPEN_URL`], [`USER_CODE`], [`ASK`], [`PASTE_CODE`].",
+              "default": []
+            },
+            "remote": {
+              "type": "boolean",
+              "description": "Whether it works through a spawner that is not local. A loopback callback needs the person's browser on the machine where the CLI runs, so it is `false` unless the CLI offers a code to paste or a device code.",
+              "default": false
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "title",
+            "produces"
+          ]
+        },
+        "description": "The ways to sign in. Each names the kind it produces, which is listed in `kinds`.",
+        "default": []
+      },
+      "usage": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The kinds whose accounts report their plan's usage through [`AccountProvider::usage`]: ids listed in `kinds`. A kind not here answers `usage` with \"not offered\".",
+        "default": []
+      }
+    },
+    "additionalProperties": false
+  },
+  "WatchRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "account": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The host's id for the account: text the host assigns, 1 to [`ACCOUNT_ID_MAX`] bytes with no control character, opaque to the provider, echoed (into usage reports) and never interpreted."
+          },
+          "kind": {
+            "type": "string",
+            "description": "One of the catalog's kinds."
+          },
+          "settings": {
+            "description": "The kind's non-secret settings, an object its catalog schema accepts.",
+            "default": {}
+          },
+          "credentials": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "writeOnly": true,
+            "x-sensitive": true,
+            "description": "The kind's secrets, by the key path of the sensitive setting each fills.",
+            "default": {}
+          },
+          "state_dir": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A private directory where the harness runs, made by the host, for a kind whose catalog entry says `state_dir`. The provider writes the account there and starts the harness on it."
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "Counts the host's stored copies of the credentials, so a renewal says which it renews.",
+            "default": 0
+          },
+          "provides": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The standards the account provides, from the catalog of whoever made it. A harness reads it only for a `kind` its own catalog does not list: it then applies the account as the first of its `accepts` that this names.",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind"
+        ],
+        "description": "The account to watch: its `state_dir` holds the files the provider reads, its `revision` is the version of the credentials the host holds."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "account"
+    ]
+  },
+  "AccountUsageQuery": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "account": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The host's id for the account: text the host assigns, 1 to [`ACCOUNT_ID_MAX`] bytes with no control character, opaque to the provider, echoed (into usage reports) and never interpreted."
+          },
+          "kind": {
+            "type": "string",
+            "description": "One of the catalog's kinds."
+          },
+          "settings": {
+            "description": "The kind's non-secret settings, an object its catalog schema accepts.",
+            "default": {}
+          },
+          "credentials": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "writeOnly": true,
+            "x-sensitive": true,
+            "description": "The kind's secrets, by the key path of the sensitive setting each fills.",
+            "default": {}
+          },
+          "state_dir": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A private directory where the harness runs, made by the host, for a kind whose catalog entry says `state_dir`. The provider writes the account there and starts the harness on it."
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "Counts the host's stored copies of the credentials, so a renewal says which it renews.",
+            "default": 0
+          },
+          "provides": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The standards the account provides, from the catalog of whoever made it. A harness reads it only for a `kind` its own catalog does not list: it then applies the account as the first of its `accepts` that this names.",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind"
+        ],
+        "description": "The account to report for; its `id` is echoed into the report and never interpreted."
+      },
+      "environment": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "writeOnly": true,
+        "x-sensitive": true,
+        "description": "Variables for what the provider runs or reaches to ask (a proxy, say), over its configuration's. A provider shows none of them in an answer, a refusal, an error or a log.",
+        "default": {}
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "account"
+    ]
+  },
+  "AccountUsage": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "supported": {
+        "type": "boolean",
+        "description": "Whether the account's provider reports usage for it at all."
+      },
+      "unsupported_because": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Why not, when `supported` is false."
+      },
+      "sources": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "examples": [
+            "reported",
+            "inferred"
+          ],
+          "x-enum-labels": {
+            "reported": "The harness's own structured figure.",
+            "inferred": "Read from an error's words, a 429 or a refusal, by the provider or the host. The bucket's `evidence` holds the words, for logs; nothing parses it."
+          }
+        },
+        "description": "Which kinds of figure it can give at all.",
+        "default": []
+      },
+      "account": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The host's id for the account, echoed and never interpreted."
+      },
+      "revision": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "Grows by one with each change the provider instance sees of the account, so a reader that polls keeps the newest and an unchanged account costs nothing."
+      },
+      "observed_at": {
+        "type": "integer",
+        "minimum": -9223372036854775808,
+        "maximum": 9223372036854775807,
+        "description": "The newest bucket's `observed_at`, in Unix seconds; `0` with no bucket."
+      },
+      "buckets": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Stable per harness and account: `five_hour`, `seven_day`, `seven_day_opus`, `codex:primary`."
+            },
+            "label": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "What a person sees, when the harness has a name apart from the id."
+            },
+            "models": {
+              "type": "object",
+              "x-variant-tag": "kind",
+              "oneOf": [
+                {
+                  "description": "Every model of the account.",
+                  "properties": {
+                    "kind": {
+                      "const": "all"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "kind"
+                  ]
+                },
+                {
+                  "description": "The harness did not say. A reader counts it as covering every model, so an exhausted bucket of unknown coverage stops the account for each of them.",
+                  "properties": {
+                    "kind": {
+                      "const": "unknown"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "kind"
+                  ]
+                },
+                {
+                  "description": "These models only, by the ids or aliases `models()` lists.",
+                  "properties": {
+                    "kind": {
+                      "const": "only"
+                    },
+                    "models": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "The ids."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "models"
+                  ]
+                },
+                {
+                  "description": "A coverage a newer writer named; a reader treats it as unknown.",
+                  "properties": {
+                    "kind": {
+                      "const": "other"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "kind"
+                  ]
+                }
+              ],
+              "description": "The models it covers."
+            },
+            "unit": {
+              "type": "string",
+              "examples": [
+                "tokens",
+                "requests",
+                "micro_usd",
+                "permille"
+              ],
+              "x-enum-labels": {
+                "tokens": "Tokens.",
+                "requests": "Requests.",
+                "micro_usd": "Millionths of a US dollar.",
+                "permille": "A percentage only, when the provider gives no absolute number: `limit` is 1000 and `used` thousandths, so the arithmetic is the same for every unit."
+              },
+              "description": "What it counts."
+            },
+            "used": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "description": "How much is used, when the harness said."
+            },
+            "limit": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "description": "How much the bucket holds, when the harness said."
+            },
+            "remaining": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "description": "How much is left, when the harness said."
+            },
+            "refill": {
+              "type": "object",
+              "x-variant-tag": "kind",
+              "oneOf": [
+                {
+                  "description": "All at once when the window ends, such as a five-hour or weekly allowance.",
+                  "properties": {
+                    "kind": {
+                      "const": "fixed_window"
+                    },
+                    "length": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "prefixItems": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 18446744073709551615
+                        },
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 999999999
+                        }
+                      ],
+                      "items": false,
+                      "minItems": 2,
+                      "maxItems": 2,
+                      "description": "How long the window is, when the harness says."
+                    },
+                    "resets_at": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": -9223372036854775808,
+                      "maximum": 9223372036854775807,
+                      "description": "When it ends, in Unix seconds, when the harness says."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "kind"
+                  ]
+                },
+                {
+                  "description": "Continuously: `amount` units each `per`, up to `max`.",
+                  "properties": {
+                    "kind": {
+                      "const": "token_bucket"
+                    },
+                    "amount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 18446744073709551615,
+                      "description": "The units added each `per`."
+                    },
+                    "per": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 18446744073709551615
+                        },
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 999999999
+                        }
+                      ],
+                      "items": false,
+                      "minItems": 2,
+                      "maxItems": 2,
+                      "description": "The period."
+                    },
+                    "max": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 18446744073709551615,
+                      "description": "The most it holds."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "amount",
+                    "per",
+                    "max"
+                  ]
+                },
+                {
+                  "description": "A balance that never refills.",
+                  "properties": {
+                    "kind": {
+                      "const": "none"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "kind"
+                  ]
+                },
+                {
+                  "description": "The harness did not say.",
+                  "properties": {
+                    "kind": {
+                      "const": "unknown"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "kind"
+                  ]
+                },
+                {
+                  "description": "A refill a newer writer named; a reader treats it as unknown.",
+                  "properties": {
+                    "kind": {
+                      "const": "other"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "kind"
+                  ]
+                }
+              ],
+              "description": "How it refills."
+            },
+            "status": {
+              "type": "string",
+              "examples": [
+                "ok",
+                "warning",
+                "exhausted",
+                "unknown"
+              ],
+              "x-enum-labels": {
+                "ok": "Room is left.",
+                "warning": "The harness said it is nearly used. Only when the harness said so: a host applies its own thresholds to the bucket's fraction.",
+                "exhausted": "Nothing is left until the bucket refills.",
+                "unknown": "The harness did not say."
+              },
+              "description": "What the harness says of it."
+            },
+            "observed_at": {
+              "type": "integer",
+              "minimum": -9223372036854775808,
+              "maximum": 9223372036854775807,
+              "description": "When these figures were read, in Unix seconds."
+            },
+            "source": {
+              "type": "string",
+              "examples": [
+                "reported",
+                "inferred"
+              ],
+              "x-enum-labels": {
+                "reported": "The harness's own structured figure.",
+                "inferred": "Read from an error's words, a 429 or a refusal, by the provider or the host. The bucket's `evidence` holds the words, for logs; nothing parses it."
+              },
+              "description": "Where the figures came from."
+            },
+            "evidence": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The words an inferred bucket was read from, for logs; nothing parses them."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "models",
+            "unit",
+            "refill",
+            "status",
+            "observed_at",
+            "source"
+          ]
+        },
+        "description": "The allowances, each by its id: its window (`refill`, with `resets_at`), what is used or left, the models it covers (`models`: all, or only these) and its status.",
+        "default": []
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "supported",
+      "revision",
+      "observed_at"
+    ]
   }
 }

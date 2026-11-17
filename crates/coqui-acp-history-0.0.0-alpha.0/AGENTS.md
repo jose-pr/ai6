@@ -6,7 +6,7 @@ Cargo feature `cli` (off by default) builds the `coqui-acp-history` command and 
 
 Imports: everything is at the crate root except the tool table, `coqui_acp_history::tools`, and the modules `conversation`, `paging`, `patch`, `record` and `replay`. `StopReason` is ACP's (`agent_client_protocol::schema::v1`), re-exported.
 
-No `unsafe` code (`#![forbid(unsafe_code)]`). No process-wide state. Text only: the crate reads and writes UTF-8 JSON Lines; it parses no harness's own files (the Claude and Codex codecs live in `coqui-acp-claude` and `coqui-acp-codex`, behind their `history` feature, and are built on `conversation` below).
+No `unsafe` code (`#![forbid(unsafe_code)]`). No process-wide state. Text only: the crate reads and writes UTF-8 JSON Lines; it parses no harness's own files (the Claude, Codex and Pi codecs live in `coqui-acp-claude`, `coqui-acp-codex` and `coqui-acp-pi`, behind their `history` feature, and are built on `conversation` below).
 
 Dialect: strict UTF-8 and strict JSON; one leading byte-order mark ignored on line 1 and none elsewhere; a repeated object key, a carriage return, an empty line, a missing final line feed, `NaN`/`Infinity`, a lone surrogate escape and a number no double holds (`1e400`) are refused; an integer outside `i64`/`u64` is read as the nearest `f64`; nesting stops at `PARSER_DEPTH` (127) levels whatever `max_depth` is. Written numbers follow the format document's canonical rule (`100.0`, `1e16`, `-0.0`), not `serde_json`'s.
 
@@ -198,7 +198,7 @@ pub fn tools::normalise(harness: &str, name: &str, input: &Value) -> Option<(Too
 pub fn tools::denormalise(tool: Tool, harness: &str, input: &Value) -> Option<(&'static str, Value)>;
 ```
 
-Harness names are `claude`, `codex`, `agy`. The functions rename input keys only; a change of shape is the codec's. When two keys of the input would become the same key (Claude `Read` with both `file_path` and `path`) the result is `None`: neither value may win. agy's input keys are unverified.
+Harness names are `claude`, `codex`, `pi`, `agy`. The functions rename input keys only; a change of shape is the codec's, but for two of Pi's: its `edit` takes `edits` (a list of replacements) where the normalised form has `old` and `new` (`normalise` reads a list of one and is `None` for more; `denormalise` writes a list of one and is `None` for a `replace_all` that is true), and its `bash` takes `timeout` in seconds where the normalised form has `timeout_ms`. Pi's `grep` renames `-i` to `ignoreCase`; its `find` is `glob`. When two keys of the input would become the same key (Claude `Read` with both `file_path` and `path`) the result is `None`: neither value may win. agy's input keys are unverified.
 
 ## Settings (Guatiao values)
 

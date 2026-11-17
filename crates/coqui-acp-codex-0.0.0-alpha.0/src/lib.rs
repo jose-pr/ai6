@@ -4,8 +4,10 @@
 
 extern crate alloc;
 
+pub mod account_usage;
 pub mod accounts;
 mod agent;
+mod callback;
 mod children;
 #[cfg(feature = "history")]
 #[cfg_attr(docsrs, doc(cfg(feature = "history")))]
@@ -33,7 +35,7 @@ pub use launch::{
 pub use parse::{Parser, ParserLimits};
 pub use provider::{CodexProvider, ProviderSettings};
 pub use session::{
-    AnswerCheck, CodexSession, CodexSettings, Model, models_of, user_input, version_of,
+    AnswerCheck, CodexSession, CodexSettings, Model, ModelRead, models_of, user_input, version_of,
 };
 
 /// The Codex versions this crate was tested with. Another one runs, with a warning.

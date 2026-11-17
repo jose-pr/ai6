@@ -75,7 +75,7 @@ pub fn close(&self)
 
 `next_event` answers `None` when none came in time or the session has ended. `send` is never retried: after a lost connection its outcome is unknown. `close` waits no longer than the close grace, then runs `on_close`. A session ended without `close` (dropped, or after `Event::Failed`) sends `session/cancel` and then one `_coqui/flush` request, waiting up to `abort_wait` (default 5 s, whatever the close grace) for its answer (an error is fine), before `on_close` runs, so the cancel reaches the agent ahead of any kill. When `abort_wait` passes, `on_close` runs anyway: a drop never blocks longer than it.
 
-Only this session's traffic counts: a `session/update` whose `sessionId` is not this session's is dropped, and a `session/request_permission` naming another session is answered cancelled without asking the decider. Before the session is known nothing is this session's, except that `resume` and `load` know it from the start. That is what an agent kept by a bridge (`coqui-acp-bridge serve --linger`) sends of an earlier connection's session. Request ids are the SDK's UUIDs, so they do not repeat across connections.
+Only this session's traffic counts: a `session/update` whose `sessionId` is not this session's is dropped, and a `session/request_permission` naming another session is answered cancelled without asking the decider. Before the session is known nothing is this session's, except that `resume` and `load` know it from the start. That is what an agent kept by a bridge (the bridge's `serve --linger`) sends of an earlier connection's session. Request ids are the SDK's UUIDs, so they do not repeat across connections.
 
 ## `Event` (crate root)
 

@@ -107,9 +107,11 @@ impl Pipe {
     }
 }
 
-/// The process, until it has been collected: after that its id, and its group's, may be another process's.
+/// The process, and its id from the start: its group is that id, and stays one while any member lives.
 struct Inner {
     child: Child,
+    #[cfg(unix)]
+    group: u32,
     collected: Option<std::process::ExitStatus>,
 }
 
@@ -152,11 +154,10 @@ impl Shared {
         );
         let mut inner = self.lock();
         #[cfg(unix)]
-        if inner.collected.is_none()
-            && let Some(group) = i32::try_from(inner.child.id())
-                .ok()
-                .filter(|pid| *pid > 1)
-                .and_then(rustix::process::Pid::from_raw)
+        if let Some(group) = i32::try_from(inner.group)
+            .ok()
+            .filter(|pid| *pid > 1)
+            .and_then(rustix::process::Pid::from_raw)
         {
             let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
         }
@@ -273,6 +274,8 @@ impl Program {
         let input = child.stdin.take();
         let shared = Arc::new(Shared {
             inner: Mutex::new(Inner {
+                #[cfg(unix)]
+                group: child.id(),
                 child,
                 collected: None,
             }),
@@ -374,4 +377,45 @@ fn signal_of(status: &std::process::ExitStatus) -> Option<i64> {
 #[cfg(not(unix))]
 fn signal_of(_status: &std::process::ExitStatus) -> Option<i64> {
     None
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    /// Whether `pid` runs: a zombie, which only its parent's collecting ends, does not.
+    fn alive(pid: i32) -> bool {
+        std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|text| {
+            text.rsplit(')')
+                .next()
+                .is_some_and(|rest| !rest.trim_start().starts_with('Z'))
+        })
+    }
+
+    #[test]
+    fn a_descendant_that_outlives_its_collected_parent_ends_with_the_tree() {
+        let spec = SpawnSpec::new("sh").arg("-c").arg("sleep 300 & echo $!");
+        let program = Program::start(
+            &spec,
+            Arc::new(AtomicBool::new(false)),
+            &std::env::temp_dir(),
+        )
+        .expect("starts");
+        let mut line = [0_u8; 32];
+        let n = program.read(&mut line, 5000).expect("reads");
+        let text = String::from_utf8_lossy(&line[..usize::try_from(n).expect("bytes")]);
+        let grandchild: i32 = text.trim().parse().expect("the grandchild's id");
+        // The shell exits at once and is collected while its child sleeps on.
+        assert!(!program.wait(5000).expect("waits").running);
+        assert!(
+            alive(grandchild),
+            "the grandchild runs before the tree ends"
+        );
+        program.kill().expect("kills");
+        let ended = (0..100).any(|_| {
+            std::thread::sleep(Duration::from_millis(50));
+            !alive(grandchild)
+        });
+        assert!(ended, "the grandchild outlived its program");
+    }
 }

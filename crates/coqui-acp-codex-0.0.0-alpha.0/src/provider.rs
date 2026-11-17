@@ -17,7 +17,7 @@ use coqui_acp_api::{
     AccountCatalog, AccountGrant, AccountKeeper, AccountRef, AcpHarness, Channel, ChannelSink,
     Environment, ExportPage, HarnessInfo, ImportReport, LoginOutcome, LoginPrompter, LoginRequest,
     ModelInfo, ModelListing, ModelsRequest, Narrowing, ProcessSpawner, RenewReport, RenewRequest,
-    Requirement, SessionExport, SessionImport, StartRequest, UsageQuery, UsageReport,
+    Requirement, SessionExport, SessionImport, StartRequest, UnknownKind, UsageQuery, UsageReport,
 };
 use coqui_acp_harness::Mode;
 use coqui_acp_harness::account::{Accounts, Files, Hold, fingerprint, same_name};
@@ -25,7 +25,7 @@ use coqui_acp_harness::acp::Harness;
 use coqui_acp_harness::provider::{Reports, Serving, shared, takes_of};
 use coqui_acp_harness::{Settings, ThroughSpawner};
 
-use crate::{CodexAgent, CodexLaunch, CodexSession, CodexSettings};
+use crate::{CodexAgent, CodexLaunch, CodexSession, CodexSettings, ModelRead};
 use crate::{accounts, signin};
 
 /// How the Codex provider is configured.
@@ -462,22 +462,40 @@ impl AcpHarness for CodexProvider {
         let applying = self.apply(request.account.as_ref(), &spawner, keeper, &mut launch)?;
         let spawn = ThroughSpawner::shared(spawner);
         let listing = match CodexSession::read_models(&launch, &spawn, CodexSettings::new()) {
-            Ok(Some(models)) => ModelListing::of(
-                models
-                    .into_iter()
-                    .map(|model| {
-                        let mut info = ModelInfo::new(model.id);
-                        info.name = Some(model.name);
-                        info.description = model.description;
-                        info.efforts = model.efforts;
-                        info.default_effort = model.default_effort;
-                        info.is_default = model.is_default;
-                        info
-                    })
-                    .collect(),
+            Ok(ModelRead {
+                models: Some(models),
+                signed_out,
+            }) => {
+                let listing = ModelListing::of(
+                    models
+                        .into_iter()
+                        .map(|model| {
+                            let mut info = ModelInfo::new(model.id);
+                            info.name = Some(model.name);
+                            info.description = model.description;
+                            info.efforts = model.efforts;
+                            info.default_effort = model.default_effort;
+                            info.is_default = model.is_default;
+                            info
+                        })
+                        .collect(),
+                );
+                if signed_out {
+                    listing.signed_out()
+                } else {
+                    listing
+                }
+            }
+            Ok(_) => ModelListing::unknown("Codex listed no model"),
+            Err(error) => ModelListing::unavailable(
+                match &error {
+                    crate::Error::Spawn(why) if why.kind() == std::io::ErrorKind::NotFound => {
+                        UnknownKind::NotInstalled
+                    }
+                    _ => UnknownKind::Failed,
+                },
+                format!("Codex could not be asked: {error}"),
             ),
-            Ok(None) => ModelListing::unknown("Codex listed no model"),
-            Err(error) => ModelListing::unknown(format!("Codex could not be asked: {error}")),
         };
         // The last look: a refresh Codex made while it was asked is told before the call returns.
         if let Some(hold) = applying.hold {

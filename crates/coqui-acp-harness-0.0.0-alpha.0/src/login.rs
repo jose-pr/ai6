@@ -136,7 +136,7 @@ pub fn asked<T>(result: Result<T, ProviderError>) -> Result<T, ProviderError> {
 pub type Work = Box<
     dyn FnOnce(
             &Arc<Object<dyn ProcessSpawner>>,
-            &Object<dyn LoginPrompter>,
+            &Arc<Object<dyn LoginPrompter>>,
             &Job,
         ) -> Result<LoginOutcome, ProviderError>
         + Send,

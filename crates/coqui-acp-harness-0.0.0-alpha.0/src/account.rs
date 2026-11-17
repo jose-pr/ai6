@@ -370,15 +370,20 @@ pub fn rfc3339_ms(ms: i64) -> String {
     )
 }
 
-/// When a JWT stops working (its `exp` claim), as an RFC 3339 time. The token is not verified, only read.
+/// The claims of a JWT. The token is not verified, only read.
 #[must_use]
-pub fn jwt_expiry(token: &str) -> Option<String> {
+pub fn jwt_claims(token: &str) -> Option<serde_json::Value> {
     let payload = token.split('.').nth(1)?;
     let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(payload.trim_end_matches('='))
         .ok()?;
-    let claims: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
-    let exp = claims.get("exp")?.as_i64()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+/// When a JWT stops working (its `exp` claim), as an RFC 3339 time. The token is not verified, only read.
+#[must_use]
+pub fn jwt_expiry(token: &str) -> Option<String> {
+    let exp = jwt_claims(token)?.get("exp")?.as_i64()?;
     exp.checked_mul(1000).map(rfc3339_ms)
 }
 

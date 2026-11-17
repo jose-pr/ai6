@@ -589,12 +589,12 @@ pub fn account_refusal(
     catalog: &coqui_acp_api::AccountCatalog,
     account: &coqui_acp_api::AccountRef,
 ) -> Result<Option<String>, ProviderError> {
-    account.check_id()?;
+    catalog.accepts_reference(account)?;
     let Some(kind) = catalog.kind(&account.kind) else {
-        return Err(ProviderError::new(
-            Status::GUATIAO_ERR_BAD_VALUE,
-            "this harness takes no account of that kind",
-        ));
+        return Ok(Some(alloc::format!(
+            "this provider does not apply an account of a standard yet: only `{}` is taken",
+            coqui_acp_api::HARNESS_LOGIN
+        )));
     };
     Ok((kind.id != coqui_acp_api::HARNESS_LOGIN).then(|| {
         alloc::format!(
@@ -609,4 +609,62 @@ pub fn account_refusal(
 #[must_use]
 pub fn to_json(value: &coqui_acp_api::guatiao::Value) -> Value {
     serde_json::to_value(guatiao_serde::Serializable::from(value)).unwrap_or(Value::Null)
+}
+
+/// The grant to apply for `grant`: itself when its kind is one the catalog lists; else, when it provides a standard the
+/// catalog accepts, a grant of the own kind that applies that standard's slot for the credential it carries, with
+/// its `base_url` moved to that kind's setting and the standard's fixed settings added.
+///
+/// # Errors
+///
+/// `GUATIAO_ERR_BAD_VALUE` for an id that is not an account id, a kind not listed that provides no accepted standard
+/// (the message names both lists of ids), a credential the standard has no slot for in this harness, or a setting
+/// other than `base_url`. No message shows a value.
+pub fn resolve(
+    catalog: &coqui_acp_api::AccountCatalog,
+    grant: &coqui_acp_api::AccountGrant,
+) -> Result<coqui_acp_api::AccountGrant, ProviderError> {
+    let bad = |why: String| ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, &why);
+    grant.check_id()?;
+    if catalog.kind(&grant.kind).is_some() {
+        return Ok(grant.clone());
+    }
+    let accepted = catalog.accepted_by(&grant.provides)?;
+    let credentials = grant.credentials.expose();
+    let Some(slot) = accepted.slots.iter().find(|slot| {
+        !credentials.is_empty() && credentials.keys().all(|key| *key == slot.credential)
+    }) else {
+        return Err(bad(alloc::format!(
+            "the credential is not one this harness takes for {}",
+            accepted.standard
+        )));
+    };
+    let mut settings = serde_json::Map::new();
+    match to_json(&grant.settings) {
+        Value::Object(given) => {
+            for (name, value) in given {
+                if name != "base_url" {
+                    return Err(bad(alloc::format!(
+                        "`{name}` is no setting of an account of {}",
+                        accepted.standard
+                    )));
+                }
+                let Some(setting) = &slot.base_url_setting else {
+                    return Err(bad(alloc::format!(
+                        "this harness cannot move the endpoint of {}",
+                        accepted.standard
+                    )));
+                };
+                settings.insert(setting.clone(), value);
+            }
+        }
+        _ => return Err(bad("the account's settings are not an object".to_string())),
+    }
+    for (name, value) in &slot.settings {
+        settings.insert(name.clone(), Value::String(value.clone()));
+    }
+    let mut applied = grant.clone();
+    applied.kind.clone_from(&slot.kind);
+    applied.settings = schema(&Value::Object(settings));
+    Ok(applied)
 }

@@ -13,6 +13,8 @@ pub static DEF: HarnessDef = HarnessDef {
     program: "agy",
     args: &["acp"],
     kinds: &[],
+    accepts: &[],
+    own_standard: Some(coqui_acp_api::standard::ANTIGRAVITY),
     variables: &[],
     renew_args: None,
     login_unsupported: "agy signs in with `agy acp --login`, whose prompts were not run: it may write the Windows Credential Manager, which a throwaway profile does not isolate, and where it keeps the login and whether two logins can exist at once are unmeasured",

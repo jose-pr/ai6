@@ -15,6 +15,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use guatiao::Secret;
+use guatiao::library::{Object, ProviderError};
 use serde_json::{Value, json};
 
 use super::Contract;
@@ -25,24 +26,25 @@ use super::host::{self, GRACE, PATIENCE, Script, status};
 use super::json::{from_json, to_json};
 use crate::{
     ACCOUNT_ID_MAX, AccountCatalog, AccountGrant, AccountKindInfo, AccountRef, AcpHarness,
-    Credentials, HARNESS_LOGIN, LoginMethodInfo, LoginRequest, ModelsRequest, RenewRequest,
-    Requirement, SessionExport, SessionImport, StartRequest, UsageQuery, is_account_id,
+    Credentials, HARNESS_LOGIN, LoginMethodInfo, LoginOutcome, LoginPrompter, LoginRequest,
+    ModelsRequest, ProcessSpawner, RenewRequest, Requirement, SessionExport, SessionImport,
+    StartRequest, UsageQuery, is_account_id,
 };
 
-const OK: u32 = 0;
-const BAD_VALUE: u32 = 7;
-const GONE: u32 = 12;
-const UNSUPPORTED: u32 = 13;
+pub(super) const OK: u32 = 0;
+pub(super) const BAD_VALUE: u32 = 7;
+pub(super) const GONE: u32 = 12;
+pub(super) const UNSUPPORTED: u32 = 13;
 
 /// What a rotated copy of a credential reads as.
-const ROTATED: &str = "coqui-acp-contract-rotated-9e2a";
+pub(super) const ROTATED: &str = "coqui-acp-contract-rotated-9e2a";
 
 /// What a second rotation of it reads as.
-const SECOND: &str = "coqui-acp-contract-second-4c1d";
+pub(super) const SECOND: &str = "coqui-acp-contract-second-4c1d";
 
 /// How long past its deadline a cancelled or timed out login may take to answer: a margin for a busy machine, not a promise
 /// of promptness; a login that never answered would still be caught.
-const PROMPTLY: Duration = Duration::from_secs(20);
+pub(super) const PROMPTLY: Duration = Duration::from_secs(20);
 
 macro_rules! ensure {
     ($cond:expr, $($arg:tt)+) => {
@@ -82,7 +84,7 @@ pub(super) fn all(
     ]
 }
 
-fn why(error: &crate::guatiao::library::ProviderError) -> String {
+pub(super) fn why(error: &crate::guatiao::library::ProviderError) -> String {
     format!("{} ({})", error.message(), status(error))
 }
 
@@ -103,7 +105,7 @@ fn kinds(contract: &Contract, catalog: &AccountCatalog) -> Result<Vec<AccountKin
     }
 }
 
-fn properties(schema: &Value) -> serde_json::Map<String, Value> {
+pub(super) fn properties(schema: &Value) -> serde_json::Map<String, Value> {
     schema
         .get("properties")
         .and_then(Value::as_object)
@@ -111,7 +113,7 @@ fn properties(schema: &Value) -> serde_json::Map<String, Value> {
         .unwrap_or_default()
 }
 
-fn required(schema: &Value) -> Vec<String> {
+pub(super) fn required(schema: &Value) -> Vec<String> {
     schema
         .get("required")
         .and_then(Value::as_array)
@@ -134,7 +136,7 @@ fn x_sensitive(property: &Value) -> bool {
 }
 
 /// The keys of a schema's credentials: its properties marked sensitive.
-fn credential_keys(schema: &Value) -> Vec<String> {
+pub(super) fn credential_keys(schema: &Value) -> Vec<String> {
     properties(schema)
         .into_iter()
         .filter(|(_, property)| write_only(property) && x_sensitive(property))
@@ -200,7 +202,7 @@ fn settings_for(info: &AccountKindInfo) -> Result<crate::guatiao::Value, String>
 
 /// A grant of `info`, with a canary for each credential, and `dir` as its directory when the kind
 /// needs one.
-fn grant_of(
+pub(super) fn grant_of(
     info: &AccountKindInfo,
     dir: Option<&Path>,
     revision: u64,
@@ -221,24 +223,16 @@ fn grant_of(
     Ok(grant)
 }
 
-fn is_url(text: &str) -> bool {
+pub(super) fn is_url(text: &str) -> bool {
     (text.starts_with("https://") || text.starts_with("http://"))
         && text.len() > 8
         && !text.chars().any(|c| c.is_whitespace() || c.is_control())
 }
 
-fn catalog(contract: &Contract, harness: &dyn AcpHarness) -> Outcome {
-    let catalog = catalog_of(harness)?;
-    ensure!(
-        catalog == catalog_of(harness)?,
-        "accounts() answered differently on a second call"
-    );
-    ensure!(
-        catalog.kind(HARNESS_LOGIN).is_some(),
-        "the catalog does not list {HARNESS_LOGIN}"
-    );
+/// What every kind an account provider or a harness lists is held to.
+pub(super) fn kind_rules(kinds: &[AccountKindInfo]) -> Outcome {
     let mut seen = Vec::new();
-    for info in &catalog.kinds {
+    for info in kinds {
         ensure!(
             !info.id.is_empty() && !info.title.is_empty(),
             "a kind has no id or title"
@@ -300,19 +294,22 @@ fn catalog(contract: &Contract, harness: &dyn AcpHarness) -> Outcome {
             }
         }
     }
-    let mut variables = Vec::new();
-    for name in &catalog.credential_variables {
-        ensure!(
-            !name.is_empty()
-                && !name.contains(['=', '\0'])
-                && !name.chars().any(char::is_whitespace),
-            "credential_variables names {name:?}, which cannot be a variable"
-        );
-        ensure!(!variables.contains(&name), "{name} is listed twice");
-        variables.push(name);
+    for info in kinds {
+        for standard in &info.provides {
+            ensure!(
+                crate::standard::is_standard(standard),
+                "{} provides {standard:?}, which is not a standard id",
+                info.id
+            );
+        }
     }
+    Ok(())
+}
+
+/// What every login method is held to.
+pub(super) fn login_rules(kinds: &[AccountKindInfo], logins: &[LoginMethodInfo]) -> Outcome {
     let mut methods = Vec::new();
-    for login in &catalog.logins {
+    for login in logins {
         ensure!(!login.id.is_empty(), "a login method has no id");
         ensure!(
             !methods.contains(&&login.id),
@@ -321,8 +318,8 @@ fn catalog(contract: &Contract, harness: &dyn AcpHarness) -> Outcome {
         );
         methods.push(&login.id);
         ensure!(
-            catalog.kind(&login.produces).is_some(),
-            "{} produces {}, which the catalog does not list",
+            kinds.iter().any(|kind| kind.id == login.produces),
+            "{} produces {}, which no listed kind is",
             login.id,
             login.produces
         );
@@ -343,6 +340,76 @@ fn catalog(contract: &Contract, harness: &dyn AcpHarness) -> Outcome {
             login.id
         );
     }
+    Ok(())
+}
+
+fn catalog(contract: &Contract, harness: &dyn AcpHarness) -> Outcome {
+    let catalog = catalog_of(harness)?;
+    ensure!(
+        catalog == catalog_of(harness)?,
+        "accounts() answered differently on a second call"
+    );
+    ensure!(
+        catalog.kind(HARNESS_LOGIN).is_some(),
+        "the catalog does not list {HARNESS_LOGIN}"
+    );
+    kind_rules(&catalog.kinds)?;
+    let mut variables = Vec::new();
+    for name in &catalog.credential_variables {
+        ensure!(
+            !name.is_empty()
+                && !name.contains(['=', '\0'])
+                && !name.chars().any(char::is_whitespace),
+            "credential_variables names {name:?}, which cannot be a variable"
+        );
+        ensure!(!variables.contains(&name), "{name} is listed twice");
+        variables.push(name);
+    }
+    let mut standards = Vec::new();
+    for accepted in &catalog.accepts {
+        ensure!(
+            crate::standard::is_standard(&accepted.standard),
+            "accepts {:?}, which is not a standard id",
+            accepted.standard
+        );
+        ensure!(
+            !standards.contains(&&accepted.standard),
+            "{} is accepted twice",
+            accepted.standard
+        );
+        standards.push(&accepted.standard);
+        ensure!(
+            !accepted.slots.is_empty(),
+            "{} is accepted with no way to apply it",
+            accepted.standard
+        );
+        for slot in &accepted.slots {
+            let Some(kind) = catalog.kind(&slot.kind) else {
+                return Err(format!(
+                    "{} is applied by {}, which the catalog does not list",
+                    accepted.standard, slot.kind
+                ));
+            };
+            ensure!(
+                kind.provides.is_empty() || kind.provides.contains(&accepted.standard),
+                "{} applies {} but does not provide it",
+                slot.kind,
+                accepted.standard
+            );
+            for variable in [&slot.variable, &slot.base_url_variable]
+                .into_iter()
+                .flatten()
+            {
+                ensure!(
+                    catalog.credential_variables.contains(variable),
+                    "{} is set for {} but is not in credential_variables, so a start would not clear it",
+                    variable,
+                    accepted.standard
+                );
+            }
+        }
+    }
+    login_rules(&catalog.kinds, &catalog.logins)?;
     if contract.logins {
         ensure!(
             !catalog.logins.is_empty(),
@@ -740,7 +807,7 @@ fn refuses(contract: &Contract, harness: &dyn AcpHarness, place: &Place) -> Outc
 }
 
 /// The relative path of the file a provider wrote with a canary in it, and the file's directory.
-fn credential_file(writes: &[(String, Vec<u8>)]) -> Option<String> {
+pub(super) fn credential_file(writes: &[(String, Vec<u8>)]) -> Option<String> {
     writes
         .iter()
         .find(|(_, bytes)| String::from_utf8_lossy(bytes).contains(CANARY))
@@ -761,7 +828,10 @@ struct Events {
     lost: Vec<crate::AccountLoss>,
 }
 
-fn distinct<T: Clone>(items: impl Iterator<Item = T>, key: impl Fn(&T) -> (String, u64)) -> Vec<T> {
+pub(super) fn distinct<T: Clone>(
+    items: impl Iterator<Item = T>,
+    key: impl Fn(&T) -> (String, u64),
+) -> Vec<T> {
     let mut seen = Vec::new();
     let mut kept = Vec::new();
     for item in items {
@@ -1125,7 +1195,7 @@ fn renews(contract: &Contract, harness: &dyn AcpHarness, place: &Place) -> Outco
 }
 
 /// Inputs a method's schema accepts.
-fn inputs_for(method: &LoginMethodInfo) -> Result<crate::guatiao::Value, String> {
+pub(super) fn inputs_for(method: &LoginMethodInfo) -> Result<crate::guatiao::Value, String> {
     let schema = to_json(&method.inputs);
     let properties = properties(&schema);
     let mut inputs = serde_json::Map::new();
@@ -1148,77 +1218,34 @@ fn inputs_for(method: &LoginMethodInfo) -> Result<crate::guatiao::Value, String>
     from_json(&Value::Object(inputs))
 }
 
+/// A call of `login`.
+pub(super) type LoginCall<'a> = dyn Fn(
+        LoginRequest,
+        Object<dyn ProcessSpawner>,
+        Object<dyn LoginPrompter>,
+    ) -> Result<LoginOutcome, ProviderError>
+    + 'a;
+
+/// What a provider's sign-in is held to, whoever owns it: the harness's `login` or the account
+/// provider's.
+pub(super) struct SignIn<'a> {
+    /// Whether the provider offers any login method; when not, `login` must refuse.
+    pub offers: bool,
+    /// The methods it lists.
+    pub methods: &'a [LoginMethodInfo],
+    /// Checks the methods that produce this kind alone.
+    pub only: Option<&'a str>,
+    /// Calls `login`.
+    pub login: &'a LoginCall<'a>,
+    /// Holds what a sign-in that completed made to the provider's own further rules.
+    pub made: &'a dyn Fn(&LoginMethodInfo, &LoginOutcome, &host::Watch) -> Outcome,
+}
+
 fn signs_in(contract: &Contract, harness: &dyn AcpHarness, place: &Place) -> Outcome {
     let catalog = catalog_of(harness)?;
-    let dir = place.scratch()?;
-    if !contract.logins {
-        let (watch, spawner, prompter) = host::login_in(&dir, Script::default());
-        let error = harness
-            .login(LoginRequest::new("any", text(&dir)), spawner, prompter)
-            .err()
-            .ok_or("login answered where the provider offers no method")?;
-        ensure!(
-            watch.spawner_destroyed() && watch.prompter_destroyed(),
-            "login answered with an object it was handed alive"
-        );
-        ensure!(
-            status(&error) == UNSUPPORTED && !error.message().is_empty(),
-            "a provider with no login method refused with {}, not {UNSUPPORTED} and a reason",
-            why(&error)
-        );
-        return Ok(());
-    }
-    {
-        let (watch, spawner, prompter) = host::login_in(&dir, Script::default());
-        let error = harness
-            .login(
-                LoginRequest::new("no-such-method", text(&dir)),
-                spawner,
-                prompter,
-            )
-            .err()
-            .ok_or("login took a method the catalog does not list")?;
-        ensure!(
-            watch.spawner_destroyed() && watch.prompter_destroyed(),
-            "login refused an unknown method with an object it was handed alive"
-        );
-        ensure!(
-            status(&error) == BAD_VALUE,
-            "an unknown login method was refused with {}, not {BAD_VALUE}",
-            why(&error)
-        );
-    }
-    let mut waits_on_a_person = false;
-    let mut cancelled_while_waiting = false;
-    for method in &catalog.logins {
-        if contract
-            .account
-            .as_ref()
-            .is_some_and(|kind| *kind != method.produces)
-        {
-            continue;
-        }
+    let login = |request, spawner, prompter| harness.login(request, spawner, prompter);
+    let made = |method: &LoginMethodInfo, outcome: &LoginOutcome, watch: &host::Watch| -> Outcome {
         let label = method.id.as_str();
-        let request = |dir: &Path, timeout_ms: u64| -> Result<LoginRequest, String> {
-            Ok(LoginRequest::new(label, text(dir))
-                .inputs(inputs_for(method)?)
-                .timeout_ms(timeout_ms))
-        };
-
-        // It completes, and what it made starts.
-        let dir = place.scratch()?;
-        let (watch, spawner, prompter) = host::login_in(&dir, Script::default());
-        let outcome = harness
-            .login(request(&dir, 300_000)?, spawner, prompter)
-            .map_err(|e| format!("{label}: login: {}", why(&e)))?;
-        ensure!(
-            watch.spawner_destroyed() && watch.prompter_destroyed(),
-            "{label}: login answered with an object it was handed alive"
-        );
-        ensure!(
-            !watch.said().contains(CANARY),
-            "{label}: a secret the person typed was shown back to them"
-        );
         clears_all(&watch.specs(), &catalog)
             .map_err(|e| format!("{label}: the sign-in's program: {e}"))?;
         let made = catalog
@@ -1254,6 +1281,84 @@ fn signs_in(contract: &Contract, harness: &dyn AcpHarness, place: &Place) -> Out
         let (conn, _) = running(contract, harness, place, account, &kept)
             .map_err(|e| format!("{label}: what it made does not start: {e}"))?;
         conn.close_with(OK)?;
+        Ok(())
+    };
+    sign_in(
+        place,
+        &SignIn {
+            offers: contract.logins,
+            methods: &catalog.logins,
+            only: contract.account.as_deref(),
+            login: &login,
+            made: &made,
+        },
+    )
+}
+
+pub(super) fn sign_in(place: &Place, held: &SignIn<'_>) -> Outcome {
+    let dir = place.scratch()?;
+    if !held.offers {
+        let (watch, spawner, prompter) = host::login_in(&dir, Script::default());
+        let error = (held.login)(LoginRequest::new("any", text(&dir)), spawner, prompter)
+            .err()
+            .ok_or("login answered where the provider offers no method")?;
+        ensure!(
+            watch.spawner_destroyed() && watch.prompter_destroyed(),
+            "login answered with an object it was handed alive"
+        );
+        ensure!(
+            status(&error) == UNSUPPORTED && !error.message().is_empty(),
+            "a provider with no login method refused with {}, not {UNSUPPORTED} and a reason",
+            why(&error)
+        );
+        return Ok(());
+    }
+    {
+        let (watch, spawner, prompter) = host::login_in(&dir, Script::default());
+        let error = (held.login)(
+            LoginRequest::new("no-such-method", text(&dir)),
+            spawner,
+            prompter,
+        )
+        .err()
+        .ok_or("login took a method the catalog does not list")?;
+        ensure!(
+            watch.spawner_destroyed() && watch.prompter_destroyed(),
+            "login refused an unknown method with an object it was handed alive"
+        );
+        ensure!(
+            status(&error) == BAD_VALUE,
+            "an unknown login method was refused with {}, not {BAD_VALUE}",
+            why(&error)
+        );
+    }
+    let mut waits_on_a_person = false;
+    let mut cancelled_while_waiting = false;
+    for method in held.methods {
+        if held.only.is_some_and(|kind| kind != method.produces) {
+            continue;
+        }
+        let label = method.id.as_str();
+        let request = |dir: &Path, timeout_ms: u64| -> Result<LoginRequest, String> {
+            Ok(LoginRequest::new(label, text(dir))
+                .inputs(inputs_for(method)?)
+                .timeout_ms(timeout_ms))
+        };
+
+        // It completes, and what it made is held to the provider's own rules.
+        let dir = place.scratch()?;
+        let (watch, spawner, prompter) = host::login_in(&dir, Script::default());
+        let outcome = (held.login)(request(&dir, 300_000)?, spawner, prompter)
+            .map_err(|e| format!("{label}: login: {}", why(&e)))?;
+        ensure!(
+            watch.spawner_destroyed() && watch.prompter_destroyed(),
+            "{label}: login answered with an object it was handed alive"
+        );
+        ensure!(
+            !watch.said().contains(CANARY),
+            "{label}: a secret the person typed was shown back to them"
+        );
+        (held.made)(method, &outcome, &watch)?;
 
         // The person cancels at the first thing shown.
         let dir = place.scratch()?;
@@ -1265,7 +1370,7 @@ fn signs_in(contract: &Contract, harness: &dyn AcpHarness, place: &Place) -> Out
             },
         );
         let begun = Instant::now();
-        let answer = harness.login(request(&dir, 300_000)?, spawner, prompter);
+        let answer = (held.login)(request(&dir, 300_000)?, spawner, prompter);
         let took = begun.elapsed();
         ensure!(
             watch.spawner_destroyed() && watch.prompter_destroyed(),
@@ -1308,7 +1413,7 @@ fn signs_in(contract: &Contract, harness: &dyn AcpHarness, place: &Place) -> Out
             },
         );
         let begun = Instant::now();
-        let answer = harness.login(request(&dir, 300_000)?, spawner, prompter);
+        let answer = (held.login)(request(&dir, 300_000)?, spawner, prompter);
         let took = begun.elapsed();
         if let Err(error) = answer {
             cancelled_while_waiting = true;
@@ -1338,7 +1443,7 @@ fn signs_in(contract: &Contract, harness: &dyn AcpHarness, place: &Place) -> Out
             },
         );
         let begun = Instant::now();
-        let answer = harness.login(request(&dir, 300)?, spawner, prompter);
+        let answer = (held.login)(request(&dir, 300)?, spawner, prompter);
         let took = begun.elapsed();
         match answer {
             Ok(_) => {

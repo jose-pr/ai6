@@ -127,7 +127,7 @@ pub(super) struct Place {
 }
 
 impl Place {
-    fn make() -> Result<Self, String> {
+    pub(super) fn make() -> Result<Self, String> {
         let temp = std::fs::canonicalize(std::env::temp_dir())
             .map_err(|e| format!("no temporary directory: {e}"))?;
         let base = temp.join(format!("acp-harness-contract-{}", fresh_uuid()));
@@ -155,7 +155,7 @@ impl Place {
         Ok(dir)
     }
 
-    fn remove(self) {
+    pub(super) fn remove(self) {
         if let Some(link) = &self.link {
             let _ = std::fs::remove_dir(link).or_else(|_| std::fs::remove_file(link));
         }

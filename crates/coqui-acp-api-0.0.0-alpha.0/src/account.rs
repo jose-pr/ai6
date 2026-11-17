@@ -174,6 +174,11 @@ pub struct AccountGrant {
     /// Counts the host's stored copies of the credentials, so a renewal says which it renews.
     #[map(default)]
     pub revision: u64,
+    /// The standards the account provides, from the catalog of whoever made it. A harness reads
+    /// it only for a `kind` its own catalog does not list: it then applies the account as the
+    /// first of its `accepts` that this names.
+    #[map(default)]
+    pub provides: Vec<String>,
 }
 
 impl AccountGrant {
@@ -188,7 +193,15 @@ impl AccountGrant {
             credentials: Secret::default(),
             state_dir: None,
             revision: 0,
+            provides: Vec::new(),
         }
+    }
+
+    /// The same grant, providing these standards.
+    #[must_use]
+    pub fn provides<S: Into<String>>(mut self, standards: impl IntoIterator<Item = S>) -> Self {
+        self.provides = standards.into_iter().map(Into::into).collect();
+        self
     }
 
     /// The same grant, with these settings.
@@ -228,6 +241,7 @@ impl AccountGrant {
             settings: self.settings.clone(),
             state_dir: self.state_dir.clone(),
             revision: self.revision,
+            provides: self.provides.clone(),
         }
     }
 
@@ -258,6 +272,9 @@ pub struct AccountRef {
     /// As [`AccountGrant::revision`].
     #[map(default)]
     pub revision: u64,
+    /// As [`AccountGrant::provides`].
+    #[map(default)]
+    pub provides: Vec<String>,
 }
 
 impl AccountRef {
@@ -270,7 +287,15 @@ impl AccountRef {
             settings: empty_settings(),
             state_dir: None,
             revision: 0,
+            provides: Vec::new(),
         }
+    }
+
+    /// The same reference, providing these standards.
+    #[must_use]
+    pub fn provides<S: Into<String>>(mut self, standards: impl IntoIterator<Item = S>) -> Self {
+        self.provides = standards.into_iter().map(Into::into).collect();
+        self
     }
 
     /// Refuses `GUATIAO_ERR_BAD_VALUE` an id that is not [`is_account_id`].
@@ -310,6 +335,11 @@ pub struct AccountCatalog {
     /// chosen kind's.
     #[map(default)]
     pub credential_variables: Vec<String>,
+    /// The standards the harness starts on, most preferred first, and how each is applied. An
+    /// account whose `kind` this catalog does not list is applied as the first of these that it
+    /// provides ([`accepted_by`](Self::accepted_by)).
+    #[map(default)]
+    pub accepts: Vec<Accepted>,
 }
 
 impl AccountCatalog {
@@ -320,6 +350,7 @@ impl AccountCatalog {
             kinds: alloc::vec![AccountKindInfo::harness_login()],
             logins: Vec::new(),
             credential_variables: Vec::new(),
+            accepts: Vec::new(),
         }
     }
 
@@ -354,8 +385,12 @@ pub struct AccountKindInfo {
     /// account exclusively. A kind whose rotation is unmeasured says `true`.
     #[map(default)]
     pub rotates: bool,
-    /// A session started on one account of this kind resumes on another account of the same
-    /// provider directly.
+    /// The harness keeps its sessions where every account of this kind shares them, so a session
+    /// started on one account resumes on another directly, with nothing moved. `false` does not say
+    /// the conversation cannot follow the person: where each account has its own directory
+    /// ([`state_dir`](Self::state_dir)) a host exports it from the first account's with
+    /// [`export_session`](crate::AcpHarness::export_session) and imports it into the second's with
+    /// [`import_session`](crate::AcpHarness::import_session), then resumes it there.
     #[map(default)]
     pub history_portable: bool,
     /// The kind needs a private directory where the harness runs ([`AccountGrant::state_dir`]).
@@ -367,6 +402,10 @@ pub struct AccountKindInfo {
     /// What using it weakens, shown when the account is added and logged at start.
     #[map(default)]
     pub notices: Vec<String>,
+    /// The standards an account of this kind provides, each an id of [`crate::standard`]: what it
+    /// can be used as. Empty: only this harness takes it.
+    #[map(default)]
+    pub provides: Vec<String>,
 }
 
 impl AccountKindInfo {
@@ -385,7 +424,15 @@ impl AccountKindInfo {
             state_dir: false,
             renews: false,
             notices: Vec::new(),
+            provides: Vec::new(),
         }
+    }
+
+    /// The same kind, providing these standards.
+    #[must_use]
+    pub fn provides<S: Into<String>>(mut self, standards: impl IntoIterator<Item = S>) -> Self {
+        self.provides = standards.into_iter().map(Into::into).collect();
+        self
     }
 
     /// The kind every provider lists: the harness's own login, where it runs. It rotates, since
@@ -400,6 +447,176 @@ impl AccountKindInfo {
         );
         kind.rotates = true;
         kind
+    }
+}
+
+/// A standard a harness starts on, and how each credential of it is applied to the program.
+///
+/// `slots` are the ways an account of the standard reaches the harness: one for each credential key
+/// the standard carries that this harness takes. Each names the harness's own kind that applies it
+/// ([`AcceptedSlot::kind`]), so an account made elsewhere starts the same way as one the harness
+/// made.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq)]
+#[map(crate = ::guatiao)]
+#[non_exhaustive]
+pub struct Accepted {
+    /// The standard, an id of [`crate::standard`] or the provider's own.
+    pub standard: String,
+    /// How each credential key of it is applied.
+    #[map(default)]
+    pub slots: Vec<AcceptedSlot>,
+}
+
+impl Accepted {
+    /// A standard with no slot yet.
+    #[must_use]
+    pub fn new(standard: impl Into<String>) -> Self {
+        Self {
+            standard: standard.into(),
+            slots: Vec::new(),
+        }
+    }
+
+    /// The same, with this slot.
+    #[must_use]
+    pub fn slot(mut self, slot: AcceptedSlot) -> Self {
+        self.slots.push(slot);
+        self
+    }
+}
+
+/// How the credential `credential` of a standard reaches a harness.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq)]
+#[map(crate = ::guatiao)]
+#[non_exhaustive]
+pub struct AcceptedSlot {
+    /// The credential key of the standard ([`crate::standard::StandardInfo::credentials`]).
+    pub credential: String,
+    /// The harness's own kind that applies it: a grant of the standard is run as a grant of this
+    /// kind, with the same credential.
+    pub kind: String,
+    /// The environment variable the credential is set in, when it is.
+    pub variable: Option<String>,
+    /// The file in the harness's directory the credential's text is written to, when it is a login
+    /// file.
+    pub file: Option<String>,
+    /// The setting of [`kind`](Self::kind) that holds the account's `base_url`, when the harness's
+    /// endpoint can move; an account that names a `base_url` for a harness with none is refused.
+    pub base_url_setting: Option<String>,
+    /// The environment variable the base URL ends up in, when it is one.
+    pub base_url_variable: Option<String>,
+    /// The environment variable naming the harness's private directory (the grant's `state_dir`),
+    /// when the credential is kept in one.
+    pub dir_variable: Option<String>,
+    /// Settings of [`kind`](Self::kind) the standard fixes, as a map of name to text.
+    #[map(default)]
+    pub settings: BTreeMap<String, String>,
+}
+
+impl AcceptedSlot {
+    /// A slot for `credential`, applied by the harness's kind `kind`, with nothing else said.
+    #[must_use]
+    pub fn new(credential: impl Into<String>, kind: impl Into<String>) -> Self {
+        Self {
+            credential: credential.into(),
+            kind: kind.into(),
+            variable: None,
+            file: None,
+            base_url_setting: None,
+            base_url_variable: None,
+            dir_variable: None,
+            settings: BTreeMap::new(),
+        }
+    }
+
+    /// The same, set in the environment variable `variable`.
+    #[must_use]
+    pub fn variable(mut self, variable: impl Into<String>) -> Self {
+        self.variable = Some(variable.into());
+        self
+    }
+
+    /// The same, written to `file` in the harness's directory.
+    #[must_use]
+    pub fn file(mut self, file: impl Into<String>) -> Self {
+        self.file = Some(file.into());
+        self
+    }
+
+    /// The same, with the base URL in the setting `setting`, which reaches `variable`.
+    #[must_use]
+    pub fn base_url(mut self, setting: impl Into<String>, variable: Option<&str>) -> Self {
+        self.base_url_setting = Some(setting.into());
+        self.base_url_variable = variable.map(String::from);
+        self
+    }
+
+    /// The same, with the directory named by `variable`.
+    #[must_use]
+    pub fn dir_variable(mut self, variable: impl Into<String>) -> Self {
+        self.dir_variable = Some(variable.into());
+        self
+    }
+
+    /// The same, with the setting `name` fixed to `value`.
+    #[must_use]
+    pub fn fixed(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.settings.insert(name.into(), value.into());
+        self
+    }
+}
+
+fn refuse(why: impl Into<String>) -> ProviderError {
+    ProviderError::new(guatiao::Status::GUATIAO_ERR_BAD_VALUE, &why.into())
+}
+
+impl AccountCatalog {
+    /// Why an account is not one this harness takes: `Ok` when its kind is listed, or when it
+    /// provides a standard the harness accepts. A grant's credentials are read when it is
+    /// applied.
+    ///
+    /// # Errors
+    ///
+    /// `GUATIAO_ERR_BAD_VALUE`, saying which standards the harness accepts and which the account
+    /// provides (ids, never values).
+    pub fn accepts_reference(&self, account: &AccountRef) -> Result<(), ProviderError> {
+        account.check_id()?;
+        if self.kind(&account.kind).is_some() {
+            return Ok(());
+        }
+        self.accepted_by(&account.provides).map(|_| ())
+    }
+
+    /// The first standard of `provides` this catalog accepts, in the catalog's own order of
+    /// preference, with how it is applied.
+    ///
+    /// # Errors
+    ///
+    /// `GUATIAO_ERR_BAD_VALUE`: a name that is not a standard id, or none accepted (the message
+    /// lists both sets of ids and no value).
+    pub fn accepted_by(&self, provides: &[String]) -> Result<&Accepted, ProviderError> {
+        if provides.iter().any(|p| !crate::standard::is_standard(p)) {
+            return Err(refuse("the account names a standard that is not an id"));
+        }
+        if let Some(accepted) = self
+            .accepts
+            .iter()
+            .find(|accepted| provides.contains(&accepted.standard))
+        {
+            return Ok(accepted);
+        }
+        let list = |ids: Vec<&str>| {
+            if ids.is_empty() {
+                String::from("none")
+            } else {
+                ids.join(", ")
+            }
+        };
+        Err(refuse(alloc::format!(
+            "this harness takes no account of that kind: it accepts {}, and the account provides {}",
+            list(self.accepts.iter().map(|a| a.standard.as_str()).collect()),
+            list(provides.iter().map(String::as_str).collect()),
+        )))
     }
 }
 
@@ -740,6 +957,9 @@ impl AccountLoss {
 /// (every `renew_poll_ms`, 30000 by default) and after each import, export, models call and close,
 /// and reports a changed file here. A file deleted or blanked is [`lost`](Self::lost), never
 /// [`renewed`](Self::renewed).
+///
+/// An [`AccountProvider`](crate::AccountProvider) is handed one by `watch` and by `usage`, and tells
+/// it the same events of the accounts it keeps.
 #[guatiao::kind(object, name = "account_keeper")]
 pub trait AccountKeeper: Send + Sync {
     /// The harness renewed the credentials. The host stores them only when they are newer.

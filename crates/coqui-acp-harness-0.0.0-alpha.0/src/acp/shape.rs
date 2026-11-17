@@ -9,7 +9,7 @@ use base64::Engine as _;
 use coqui_acp_api::LimitHit;
 use serde_json::{Map, Value, json};
 
-use super::{CHILD_META_KEY, ConfigOption, LIMIT_META_KEY, PLAN_ID};
+use super::{CHILD_META_KEY, ConfigOption, LIMIT_META_KEY, PLAN_ID, SELECTABLE_META_KEY};
 use crate::event::{
     Child, Command, Content, Diff, Event, FileChange, PlanEntry, Terminal, ToolCall, ToolContent,
     ToolStatus, Usage,
@@ -496,6 +496,9 @@ pub(crate) fn config_options(options: &[ConfigOption], version: u8) -> Value {
                         if let Some(description) = &choice.description {
                             entry["description"] = json!(description);
                         }
+                        if !choice.selectable {
+                            entry["_meta"] = json!({ SELECTABLE_META_KEY: false });
+                        }
                         entry
                     })
                     .collect();
@@ -508,6 +511,16 @@ pub(crate) fn config_options(options: &[ConfigOption], version: u8) -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_value_listed_only_because_it_is_in_use_says_so_in_its_meta() {
+        let option = crate::mode::option(crate::mode::Mode::Bypass, &[crate::mode::Mode::Manual]);
+        let wire = super::config_options(&[option], 2);
+        let values = wire[0]["options"].as_array().unwrap();
+        assert!(values[0].get("_meta").is_none());
+        assert_eq!(values[1]["value"], "bypass");
+        assert_eq!(values[1]["_meta"][super::SELECTABLE_META_KEY], false);
+    }
+
     #[test]
     fn a_child_report_and_a_childs_own_update_carry_the_child_meta() {
         use crate::event::{Child, ChildState, ChildUsage, Event, ToolCall};

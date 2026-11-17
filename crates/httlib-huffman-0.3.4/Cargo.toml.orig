@@ -1,0 +1,16 @@
+[package]
+name = "httlib-huffman"
+description = "Canonical Huffman algorithm for handling HPACK format in HTTP/2."
+license = "MIT"
+version = "0.3.4"
+authors = ["Kristijan Sedlak <xpepermint@gmail.com>"]
+edition = "2018"
+documentation = "https://docs.rs/httlib-huffman"
+homepage = "https://github.com/xpepermint/httlib-rs/tree/main/huffman"
+repository = "https://github.com/xpepermint/httlib-rs"
+keywords = ["huffman", "canonical", "hpack", "http"]
+categories = ["algorithms", "encoding"]
+readme = "README.md"
+
+# [badges]
+# travis-ci = { repository = "https://github.com/xpepermint/httlib-rs", branch = "master" }
