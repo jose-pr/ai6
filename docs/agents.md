@@ -116,7 +116,7 @@ See the [SIS intelligence officer role descriptions](https://www.sis.gov.uk/inte
 | `technical-officer` | Diagnose handler and tool issues, propose bounded changes, and request explicit authorization before changing credentials, policy or deployment. |
 | `chief-of-staff` | Review a brief before M places it, for what the vetting rules cannot judge (see [Chief of Staff](#chief-of-staff)). |
 
-`examples/config/agents.toml` defines these roles with `007`, its backup `008` and a
+`examples/config/agents.toml` is a directory provider that defines these roles with `007`, its backup `008` and a
 `desk`-clearance `Tanner` for reports and reviews. Authorized operators may override a role's purpose
 and policy per Operation in Outer Office. An Operation's local `.ai6/agents.toml` may refine
 Agent entries but cannot change role policy or grant permissions.
@@ -730,8 +730,8 @@ never_prefer = ["claude-fable-5-1"] # models M never proposes putting an Agent o
 ## Credentials
 
 Q issues each Run the credentials its Agent's loadout names, as leases, and nothing
-else of its own: harness keys or tokens, git and forge tokens. A Station reads loadouts from
-`loadouts.toml` in its configuration directory:
+else of its own: harness keys or tokens, git and forge tokens. The loadouts are `loadout` records of
+the configuration provider (Outer Office's Roster page, `ai6ctl`, `/v1/user/roster/loadouts`); in the import form:
 
 ```toml
 [loadout.007]
@@ -869,7 +869,7 @@ env = { PATH = "/opt/tools/bin:/usr/bin:/bin", TZ = "UTC" }
 
 Several provider accounts can be shared by every Station, each Run drawing one, so
 work spreads over the quota that is left and a limit on one account does not stop the
-others. Pools are declared beside the loadouts, in `loadouts.toml`:
+others. Pools are `pool` records beside the loadouts (edited the same ways); in the import form:
 
 ```toml
 [pool.claude-team]
@@ -1158,7 +1158,7 @@ a model at all; an Agent that needs another model's behaviour is another Agent.
   limit, its Runs count and the board shows it as `harness-login`.
 - **Its `env`** is values anyone who reads the roster can read: a credential's variable or AI6's own
   is refused at load. Exposure does not take them away, and a review keeps them.
-- **Its `secrets`** are `[secret.<name>]` definitions in `loadouts.toml`, leased per Run and
+- **Its `secrets`** are `[secret.<name>]` records of the configuration provider, leased per Run and
   handed to the harness as any loadout secret, and issued whatever the Run has read, since the
   harness reaches its model with them. A file of `[secret.<name>]` tables and no loadout or pool is
   acceptable. A secret that is not configured, or a green ink one, rules the route out. A variable
@@ -1244,7 +1244,7 @@ A Station fetches each overlay to a store keyed by its digest, verifies it at ev
 and gives the Run a read-only copy outside its working directory, so no commit can hold it.
 
 ```toml
-# loadouts.toml
+# a document for `ai6ctl apply` (the loadout families)
 [overlay.engineering]
 source = "https://github.com/example/agents.git@4b825dc642cb6eb9a060e54bf8d69288fbee4904#overlays/engineering"
 pin = "sha256:5d0c..."                     # what `ai6 overlay pin DIR` prints
@@ -1257,7 +1257,7 @@ pin = "sha256:9a41..."
 [loadout.007]
 overlays = ["engineering"]
 
-# operations.toml
+# a document for `ai6ctl apply` (the operation family)
 [operation.G]
 overlays = ["rust"]
 ```

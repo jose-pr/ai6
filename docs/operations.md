@@ -3,8 +3,8 @@
 An Operation is a registered project or workspace and its policy. Operations are global:
 no Station owns one, and any Station whose labels match the Operation's `station_labels` (and
 that has its checkout) can run its Missions. The configuration owns the checkout, Agent
-roster, clearance ceiling, concurrency budget, workspace and placement. AI6 reads Operations from `operations.toml` in its configuration directory
-unless the Station is given another source ([Where configuration comes from](#where-configuration-comes-from)).
+roster, clearance ceiling, concurrency budget, workspace and placement. Each Operation is an `operation` record of the configuration provider, edited in Outer Office, with `ai6ctl` or through the gateway,
+read from the provider the bootstrap names ([Where configuration comes from](#where-configuration-comes-from)).
 Only registered Operations may contribute a local `.ai6/agents.toml` override.
 
 ```toml
@@ -455,29 +455,28 @@ it, and Outer Office marks each inherited key "from P".
 ## Where configuration comes from
 
 A Station's configuration (Operations, Agents, roles, covers, Moneypenny's settings and its
-Theaters) comes from a configuration provider. A program that embeds the Station can keep it
+Theaters) is a set of records of a configuration provider: the shared database in a deployment.
+It is edited in Outer Office's Roster page, with `ai6ctl` (`ai6ctl edit operation G`, `ai6ctl
+apply -f`) or through the gateway's `/v1/user/roster/{kind}` routes, never by changing a file
+on a host; TOML, JSON and YAML are the form `ai6ctl apply` and `ai6ctl get` read and write. A
+program that embeds the Station can keep the records
 anywhere else (a database, an HTTP API, its own code): it builds the roster from typed records
 with `Roster::builder()` (or `Roster::from_parts`), where `Operation::new`, `Agent::new`,
-`AgentRole::new` and `Cover::new` start from the same defaults a file gives, and passes a
+`AgentRole::new` and `Cover::new` start from the same defaults a document gives, and passes a
 `ConfigProvider` (such as `MemoryProvider`) to `ServeConfig::with_config_provider`. Records
-built this way get the same checks as the files; an invalid configuration stops the Station
+built this way get the same checks as the stored ones; an invalid configuration stops the Station
 rather than half-loading.
 
-`ai6.cfg`'s `[provider] location` (or `ai6 serve --provider LOCATION`) names the provider:
+`ai6.cfg`'s `[provider] location` (or `ai6 serve --provider LOCATION`) is the one thing the
+bootstrap says about them: where the provider is.
 
-- **A directory** (by default the one holding `ai6.cfg`), read-only: one file per family,
-  `operations`, `agents` (Agents, roles and `[assistant]`), `covers` and `theaters`, each
-  with the extension `.toml`, `.json`, `.yaml`, `.yml` or `.cfg` (TOML). Two files for one
-  family (`agents.toml` beside `agents.yaml`) are refused. A Station's own records go in
-  `stations/<id>/` beside them, for the families that take them (Theaters); a Station reads
-  its own over the global ones, key by key.
 - **`sqlite:PATH` or a `postgres://` URL**, for Stations that share one configuration
   without a shared filesystem. Each family is a table, `ai6_config_<family>`
   (`ai6_config_operation`, `ai6_config_agent`, `ai6_config_role`, `ai6_config_assistant`,
   `ai6_config_cover`, `ai6_config_theater`), each row a record's scope (`''` for every
-  Station, `station:<id>` for one), key and a JSON object with the keys its table has in the
-  files, so `[operation.G]` with `roster = ["007"]` is the row `('', 'G', '{"roster":
-  ["007"]}')`. The rows get the files' checks, `extends` included; an Operation's own
+  Station, `station:<id>` for one), key and a JSON object with the keys its table has in a
+  document, so `[operation.G]` with `roster = ["007"]` is the row `('', 'G', '{"roster":
+  ["007"]}')`. The rows get the documents' checks, `extends` included; an Operation's own
   `.ai6/agents.toml` still applies. Moneypenny's `[assistant]` settings are the one row of
   `ai6_config_assistant`, keyed `settings` ([her
   workspace](assistant.md#her-workspace)); without it the roster has the defaults.
@@ -485,32 +484,38 @@ rather than half-loading.
   configuration invalid. Each change moves the configuration to its next revision (the
   `config` row of `ai6_clock`); a tool that edits the tables directly advances that row in
   the same transaction.
+- **A directory**, read-only, for a single host or a checkout under version control: one file
+  per family, `operations`, `agents` (Agents, roles and `[assistant]`), `covers` and `theaters`,
+  each with the extension `.toml`, `.json`, `.yaml`, `.yml` or `.cfg` (TOML). Two files for one
+  family (`agents.toml` beside `agents.yaml`) are refused. A Station's own records go in
+  `stations/<id>/` beside them, for the families that take them (Theaters); a Station reads
+  its own over the global ones, key by key. Its records are changed by editing the files, not
+  through Outer Office.
 
-Each Station reads its loadouts and Cable settings from the configuration directory (the
-bootstrap file's own directory when the provider is a database).
+Each Station reads its loadouts and Cable settings from the same provider, as the `loadout`
+families and `cables` record ([Configuration](configuration.md#configuration-providers)).
 
 ### Changing the configuration of running Stations
 
 A Station asks its configuration provider for its revision every 5 seconds (`ai6.cfg`'s
 `[provider] poll`, `0` to stop) and applies a new one without a restart: new requests, the scheduler and new
 Runs use it, while a Run already running keeps the roster it started with. Every
-Station sharing a SQL roster therefore takes up an edit within one poll. A new revision is
-checked as the files are checked, every Agent resolved; one that fails is refused once:
+Station sharing a SQL provider therefore takes up an edit within one poll. A new revision is
+checked as a document is checked, every Agent resolved; one that fails is refused once:
 the Station logs why, records a `config.refused` audit event under its own `station:<id>`,
 reports the reason at check-in (Outer Office shows it beside the roster), and keeps running
 the last good roster. A source it cannot reach is logged, not audited, and changes
 nothing.
 
-`loadouts.toml` is read again when its contents change, with the same refusal rule (unless
+The loadout families are read again when they change, with the same refusal rule (unless
 the loadouts were set in code); the Station then declares its pool accounts again and
 withdraws the ones it no longer has. A secret's value is read from its source each time it
 is leased, so it never needs a reload.
 
-Everything else applies only at start, and a change waits for a restart: Theaters (a
-Station that sees a `theater` record change logs it and lists `theater` as needing a restart
-at check-in), `cables.toml` (listed the same way), the bootstrap file `ai6.cfg` (listen address, Registry and provider
-locations, Station ID, plugin paths, the Headquarters lease), and the command-line settings:
-roles, labels, terminal, capacity and watchdog defaults.
+Almost every family applies live. What waits for a restart, and why, is listed in
+[Configuration](configuration.md#what-stays-restart-only); the bootstrap file `ai6.cfg` (listen
+address, Registry and provider locations, Station ID, plugin paths, the Headquarters lease) is
+read at start only.
 
 Universal Exports edits the roster for operators when it is started with the same
 location (`ai6.cfg`'s `[provider] location`, or `--provider`): `roster.read` and `roster.manage` on the

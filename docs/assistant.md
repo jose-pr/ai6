@@ -72,7 +72,7 @@ env = { ANTHROPIC_BASE_URL = "https://llm.example", ANTHROPIC_SMALL_FAST_MODEL =
 ```
 
 ```toml
-# loadouts.toml
+# a document for `ai6ctl apply` (the loadout families)
 [pool.grok-free]
 handler = "acp"
 named_only = true               # no other acp Agent draws its budget
@@ -311,8 +311,8 @@ keep [green ink](missions.md#green-ink): she cannot sign it, only point you to t
 
 When the roster gives people personal repositories, Moneypenny keeps her work in that person's
 own repository, so it outlives the conversation and the Station. Her
-[memory](#her-memory) needs none of this. In the global `agents.toml` of a configuration
-directory:
+[memory](#her-memory) needs none of this. In the `assistant` record (the global `agents.toml` of a directory provider), as
+an `ai6ctl apply` document:
 
 ```toml
 [assistant]
@@ -783,12 +783,12 @@ token expires with the token of her own tools, and the Station starts her again 
 before the next message after that; a turn already running keeps it until it ends or you stop it.
 Recipients see the Cable as from her **for you** (`moneypenny for <your person
 ID>`), and only Agents of the Operation it is sent in can get it. Your permissions are not
-enough on their own: the Station's `cables.toml` must also let her Agent send and receive,
+enough on their own: the Station's `cables` record must also let her Agent send and receive,
 and its quotas and fan-out limits apply to her as to any Agent, except that the sender quota
 is counted for each person she acts for:
 
 ```toml
-# cables.toml
+# a document for `ai6ctl apply` (the cables record)
 [[grants]]
 agent = "moneypenny"
 action = "send"
@@ -898,8 +898,8 @@ set of cases): by Operation; by a Mission's state, that of the Run updated last 
 reported none is working); then by the Station or Agent of any of its Runs and by text in the
 Operation, Mission, Run IDs or brief, in any case.
 
-The bounds are settings, `[assistant.views]` in the global `agents.toml` (the `views` table of
-the `assistant` record), each at least 1; Universal Exports reads them when it starts:
+The bounds are settings, `[assistant.views]` in the `assistant` record (the `views` table of
+the `assistant` record), each at least 1; Universal Exports applies a change at the next poll:
 
 <!-- schema:record.assistant.views:begin -->
 | Key | Default | Meaning |
@@ -1327,7 +1327,7 @@ person's or everyone's for someone who holds both actions.
 | Assistant Runs on one Station | 4 running or starting; closed after 10 idle minutes | `[assistant.desk]` `live`, `idle` |
 | A clone of one of her repositories | 120 seconds and 512 MiB, then given up and removed | `[assistant.desk]` `clone_timeout`, `clone_bytes` |
 | What one save of her work commits | 16 MiB; past it nothing is saved and she is told | `[assistant.desk] save_bytes` |
-| Personal repositories | none: no workspace | `[assistant] personal_repo` in the global `agents.toml`, or the `assistant` record of a SQL roster |
+| Personal repositories | none: no workspace | `[assistant] personal_repo` in the `assistant` record |
 | Shared repositories | none | `[assistant.shared.<group>]`, `[assistant.org]` (`write = false`) |
 | Run on an elevated Station | no | `[assistant] allow_elevated` |
 | Run beside Missions on the Station's own host | no | `[assistant] allow_beside_local_missions` |

@@ -7,7 +7,7 @@ Who may do what is three questions, each a Guatiao provider kind from the shared
 | --- | --- | --- |
 | Are these credentials good? | Authenticator | `coqui_access_password` (passwords), `coqui_access_key` (bearer keys), `coqui_access_ldap`, `coqui_access_proxy` (a trusted reverse proxy), `coqui_access_mtls` (client certificates: Station certificates, or a CA's) |
 | Who is this? | Directory | `coqui_access_password`, `coqui_access_key`, `coqui_access_ldap`, `coqui_access_mtls` |
-| May they do this here? | Authorizer | `coqui_roles`, or the `access.toml` policy Universal Exports reads itself |
+| May they do this here? | Authorizer | `coqui_roles`, or the `access` record Universal Exports reads itself |
 
 `password`, `key` and `mtls` can also manage their own accounts (the `Accounts` kind). The
 providers are libraries: point `--plugin-path` at the directory that holds them.
@@ -136,7 +136,7 @@ that table bound the people kept, a record and a name.
 
 ## The access policy
 
-`access.toml` binds people to roles at a scope. A scope is `*` or `station:<id>`,
+The `access` record of the configuration provider binds people to roles at a scope (Outer Office's Access page edits it; `access.toml` is its import and export form). A scope is `*` or `station:<id>`,
 `operation:<id>`, `theater:<id>`, `config:roster` (the roster every Station reads),
 `config:assistant` (Moneypenny's repositories), `config:memory` (the global
 [memory](reports.md#knowledge)), `config:access` (the global policy) or
@@ -168,7 +168,7 @@ may weaken one. `charge.converse` attaches a person to a [charge's live Run](cha
 outcome, which counts on its Agent's scorecard and settles a held Mission; it does not come with
 `mission.control`. `cable.send` and `cable.read` on
 `operation:<id>` are what [Moneypenny](assistant.md#cables) may do with Cables there for
-the person: send and reply, and read what is sent to her. The Station's `cables.toml` still
+the person: send and reply, and read what is sent to her. The Station's `cables` record still
 has to let her Agent do it. A person reads and changes [Moneypenny's memory of
 them](assistant.md#your-memory-in-the-app) with no action at all, and nobody else's;
 `plugin.manage` on `config:plugin` approves a provider library a Station found and did not load

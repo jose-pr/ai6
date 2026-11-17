@@ -4,8 +4,8 @@
 
 Build AI6 and its providers, then start a Station on the sample configuration in
 `examples/config`: `ai6.cfg` (the one bootstrap file every program reads, naming that directory
-as the configuration provider, with Universal Exports' and Outer Office's sections) and the
-family files `agents.toml`, `operations.toml`, `theaters.yaml` and `station.json` in three
+as the configuration provider, with Universal Exports' and Outer Office's sections) and, as a
+read-only directory provider, the family files `agents.toml`, `operations.toml`, `theaters.yaml` and `station.json` in three
 formats ([Configuration](configuration.md)):
 
 ```console
@@ -16,7 +16,7 @@ cargo run -p ai6 --features cli -- serve --config ./examples/config/ai6.cfg
 ### Tune a Station
 
 The Station record takes tables that bound and pace its work, and `[providers.<id>]` tables
-that configure the providers it builds. A `station.toml` beside the files above, in place of
+that configure the providers it builds. A deployment keeps it as the `station` record (`ai6ctl edit station`); in a directory provider a `station.toml` beside the files above, in place of
 `station.json`, could say:
 
 ```toml

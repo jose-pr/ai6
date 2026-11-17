@@ -415,7 +415,7 @@ rating_bands = [90, 75, 50, 25]                                    # percent con
 A Report filed or remarked with a value outside these lists is refused. One already stored with a
 classification since removed from the list is shown to nobody but by its ID and markings.
 
-Sizes, counts and rates are Registry limits, in `[registry.limits.reports]` of `ai6.cfg`, read by
-the Stations and the gateway alike when they start ([Configuration](configuration.md)):
+Sizes, counts and rates are Registry limits, `[registry.limits.reports]` of the `registry` record of the configuration provider, applied by
+the Stations and the gateway alike at the next poll, with no restart ([Configuration](configuration.md#limits-the-registry-record)):
 `record_bytes`, `reports`, `text_bytes`, `name_bytes`, `links`, `page`, `per_run`,
 `per_operation`, `window` and `keep_closed`.

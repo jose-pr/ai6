@@ -12,9 +12,9 @@ are providers that declare what they can do. A Theater is whatever its transport
 ## Declaring Theaters
 
 A Station's Theaters are `theater` records in its configuration provider
-([Operations](operations.md#where-configuration-comes-from)): in a directory, `theaters.toml`
+([Operations](operations.md#where-configuration-comes-from)), edited in Outer Office's Roster page (Theaters), with `ai6ctl` or through `/v1/user/roster/theaters`. In a directory provider, `theaters.toml`
 (or `.json`, `.yaml`) for every Station and `stations/<id>/theaters.toml` for one Station's
-own, which it reads over the global ones. A change applies at the Station's next start.
+own, which it reads over the global ones. A change applies at the Station's next poll.
 
 ```toml
 [theater.build-box]
