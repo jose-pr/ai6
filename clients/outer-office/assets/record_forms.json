@@ -8164,6 +8164,14 @@
               "title": "A sign-in may replace a second factor for",
               "description": "Seconds a sign-in stays fresh enough to replace its person's second factor without a code from the one they have.",
               "default": 300.0
+            },
+            "max_pins": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "title": "Pins one account may hold",
+              "description": "The most certificate pins, and the most certificate-field entries, one account may hold.",
+              "default": 4
             }
           },
           "additionalProperties": false,
@@ -8176,7 +8184,8 @@
             "name_window": 600.0,
             "pending_seconds": 300.0,
             "pending_tries": 5,
-            "enrol_fresh_seconds": 300.0
+            "enrol_fresh_seconds": 300.0,
+            "max_pins": 4
           }
         },
         "text": {

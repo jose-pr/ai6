@@ -6,6 +6,8 @@
 //! kinds, the action names the gateway checks, the access policy (built-in roles, the chief,
 //! Operation roles) and the guards on changing it.
 
+#[cfg(feature = "daemon")]
+mod certificate;
 mod effective;
 mod guard;
 mod keys;
@@ -21,11 +23,13 @@ mod operation_access_tests;
 use core::fmt;
 use std::path::Path;
 
+#[cfg(feature = "daemon")]
+pub use certificate::{CertificateDirectory, RegistryPins};
 pub use coqui_access::{
     AccountInfo, AccountPut, Accounts, Attempt, Authenticator, AuthorizationDecision,
-    AuthorizationRequest, Authorizer, Description, Directory, Factor, KIND_PREFIX, Lookup, Offer,
-    Person, PutOutcome, SignInContext, SignInDecision, SignInPolicy, Subject, Verdict, Waiting,
-    clients, methods, purposes, takes,
+    AuthorizationRequest, Authorizer, Claims, Description, Directory, Factor, KIND_PREFIX, Lookup,
+    Offer, Person, PutOutcome, SignInContext, SignInDecision, SignInPolicy, Subject, Verdict,
+    Waiting, clients, methods, purposes, takes,
 };
 pub use coqui_roles::{
     Role, RoleAuthorizer, RoleAuthorizerBuilder, RolePolicy, RolePolicyError, Rule,

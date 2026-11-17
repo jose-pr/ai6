@@ -27,6 +27,7 @@ pub mod limits;
 pub mod logbook;
 pub mod mission_ids;
 pub mod mission_issues;
+pub mod pins;
 pub mod principals;
 pub mod products;
 pub mod quarantine;

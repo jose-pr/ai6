@@ -29,9 +29,9 @@ pub use coqui_acp_provider::{AgentEvent, AgentMessage, AgentSession, DENIED_EVEN
 pub use directorates::m::access::{
     ACTIONS, AccessPolicy, AccessPolicyError, AccessSet, AccountInfo, AccountPut, Accounts,
     Attempt, Authenticator, AuthorizationDecision, AuthorizationRequest, Authorizer, CHIEF_ROLE,
-    CONFIG_ACCESS, CONFIG_ACCOUNTS, Description, Directory, Editor, EffectiveAccess, Explanation,
-    KIND_PREFIX, LimitsDef, Lineage, Lookup, NOT_DELEGABLE, OPERATION_ACTIONS, OperationAccess,
-    Orphan, Person, PutOutcome, RESERVED_ROLES, Refusal, Role, RoleAuthorizer,
+    CONFIG_ACCESS, CONFIG_ACCOUNTS, Claims, Description, Directory, Editor, EffectiveAccess,
+    Explanation, KIND_PREFIX, LimitsDef, Lineage, Lookup, NOT_DELEGABLE, OPERATION_ACTIONS,
+    OperationAccess, Orphan, Person, PutOutcome, RESERVED_ROLES, Refusal, Role, RoleAuthorizer,
     RoleAuthorizerBuilder, RoleDef, RolePolicy, RolePolicyError, Rule, RuleDef, SCOPE_KINDS,
     STATION_ACTIONS, Subject, TierKind, Verdict, Waiting, access_from_toml, check_change,
     check_operation_change, compile, compile_with_operations, default_delegable, load_access,
@@ -224,6 +224,7 @@ pub use directorates::registry::logbook::{
 pub use directorates::registry::mission_ids::{
     MissionEntry, MissionHandle, is_uid, new_uid, run_handle, valid_handle,
 };
+pub use directorates::registry::pins::{AccountPins, PinChange, PinMatch, PinStore};
 pub use directorates::registry::principals::{PrincipalRecord, PrincipalStore};
 pub use directorates::registry::quarantine::Quarantine;
 pub use directorates::registry::runs::{

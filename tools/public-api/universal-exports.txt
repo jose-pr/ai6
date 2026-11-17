@@ -478,6 +478,7 @@ pub universal_exports::LoginLimits::address_header: core::option::Option<http::h
 pub universal_exports::LoginLimits::address_window: core::time::Duration
 pub universal_exports::LoginLimits::enrol_fresh_seconds: core::time::Duration
 pub universal_exports::LoginLimits::forget_every: u32
+pub universal_exports::LoginLimits::max_pins: usize
 pub universal_exports::LoginLimits::name_bytes: usize
 pub universal_exports::LoginLimits::name_window: core::time::Duration
 pub universal_exports::LoginLimits::pending_seconds: core::time::Duration

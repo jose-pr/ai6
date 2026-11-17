@@ -1330,7 +1330,12 @@ pub struct UnexRecord { authenticators: Vec<SignInProvider> /* ordered; each ans
     provider_config_depth: Limit /* 64 */,
     gateway: UnexGatewayLimits, controls: ControlLimits, timeline: UnexTimelineLimits,
     search: UnexSearchLimits /* page 25, max_page 200, scan 20000, filter_bytes 256 */,
-    login: LoginTable, text: TextLimits }          // [gateway] [controls] [timeline] [search] [login] [text]
+    login: LoginTable /* ... enrol_fresh_seconds 300, max_pins 4: pins and map entries an account holds, no floor */,
+    text: TextLimits }          // [gateway] [controls] [timeline] [search] [login] [text]
+// feature `daemon`: ai6::directorates::m::access::{CertificateDirectory, RegistryPins}. CertificateDirectory::new(inner: Arc<dyn Directory>,
+//   registry: Arc<dyn RegistryBackend>) answers a `by: "claims"` lookup from the Registry (explicit map first, then rules on san.upn,
+//   san.email, subject.cn that also need the account to hold a pin of the certificate; two accounts naming it refuse it) and every
+//   other lookup from `inner`. RegistryPins is the coqui-access-kit PinSource over the same pins. Nothing is cached.
 impl UnexRecord { pub fn weakenings(&self) -> Vec<String>;   // inline credentials, and each looser limit
     pub fn limits(&self) -> UnexLimits; }                   // the five tables together
 pub struct UnexLimits { pub gateway, pub controls, pub timeline, pub login, pub text }
@@ -1992,6 +1997,11 @@ pub trait AccessTokenStore;  // Universal Exports access tokens (store.rs)
 pub trait FactorStore;       // sign-in factor documents by family and key: factor_documents(family), factor_update(family,
                              //   key, edit) (one atomic change from what is held: Keep, Put(text), Remove), factor_retain(family,
                              //   keep) (factors.rs; SQL: ai6_factors). Pending sign-ins and one-time code accounts
+pub trait PinStore: FactorStore; // certificate pins and explicit map entries per account (pins.rs), kept as `pins` factor
+                             //   documents keyed by account name: account_pins(account), all_pins(), change_pins(account, &PinChange
+                             //   {add, remove, match_add, match_remove}, max) (one atomic change, removals first; QuotaExceeded past
+                             //   `max` pins or `max` entries, nothing changed). Pins are `sha256:<hex>` or `spki-sha256:<hex>`, lowercase
+pub struct AccountPins { pins: Vec<String>, matches: Vec<PinMatch> }   // PinMatch { field, value }: lowercase, case-blind value
 pub trait CableStore;        // Cables, their delivery state and send quotas (store.rs)
 pub trait AuditStore;        // audit records (store.rs)
 pub trait AgentRoleStore;    // the per-Operation Agent-role overlay (store.rs)

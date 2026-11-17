@@ -405,6 +405,10 @@ pub struct LoginTable {
     #[schema(title = "A sign-in may replace a second factor for")]
     #[map(default = LoginTable::default().enrol_fresh_seconds)]
     pub enrol_fresh_seconds: Seconds,
+    /// The most certificate pins, and the most certificate-field entries, one account may hold.
+    #[schema(title = "Pins one account may hold")]
+    #[map(default = LoginTable::default().max_pins)]
+    pub max_pins: u64,
 }
 
 impl Default for LoginTable {
@@ -417,6 +421,7 @@ impl Default for LoginTable {
             pending_seconds: Seconds::new(300),
             pending_tries: 5,
             enrol_fresh_seconds: Seconds::new(300),
+            max_pins: 4,
         }
     }
 }

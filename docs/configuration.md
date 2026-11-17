@@ -1181,6 +1181,7 @@ pending_per_station = 8
 | `pending_seconds` | 300 | **A sign-in waits for its next step.** Seconds a sign-in that has passed its first step waits for the next one. |
 | `pending_tries` | 5 | **Tries at a waiting sign-in's next step.** Tries at the next step one waiting sign-in allows before it ends; every try is also counted against the account. |
 | `enrol_fresh_seconds` | 300 | **A sign-in may replace a second factor for.** Seconds a sign-in stays fresh enough to replace its person's second factor without a code from the one they have. |
+| `max_pins` | 4 | **Pins one account may hold.** The most certificate pins, and the most certificate-field entries, one account may hold. |
 <!-- schema:record.unex.login:end -->
 
 `[text]`

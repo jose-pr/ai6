@@ -12,6 +12,7 @@ pub use ai6::AuthorizationRequest
 pub use ai6::Authorizer
 pub use ai6::Bucket
 pub use ai6::BucketStatus
+pub use ai6::Claims
 pub use ai6::Coverage
 pub use ai6::DEFAULT_LIMIT_PHRASES
 pub use ai6::DENIED_EVENT
@@ -394,6 +395,7 @@ pub use ai6::directorates::m::access::Authenticator
 pub use ai6::directorates::m::access::AuthorizationDecision
 pub use ai6::directorates::m::access::AuthorizationRequest
 pub use ai6::directorates::m::access::Authorizer
+pub use ai6::directorates::m::access::Claims
 pub use ai6::directorates::m::access::Description
 pub use ai6::directorates::m::access::Directory
 pub use ai6::directorates::m::access::Factor
@@ -441,6 +443,11 @@ pub struct ai6::directorates::m::access::AccessSet<'a>
 pub ai6::directorates::m::access::AccessSet::global: &'a ai6::AccessPolicy
 pub ai6::directorates::m::access::AccessSet::lineage: &'a ai6::Lineage
 pub ai6::directorates::m::access::AccessSet::operations: &'a alloc::collections::btree::map::BTreeMap<alloc::string::String, ai6::OperationAccess>
+pub struct ai6::directorates::m::access::CertificateDirectory
+impl ai6::directorates::m::access::CertificateDirectory
+pub fn ai6::directorates::m::access::CertificateDirectory::new(alloc::sync::Arc<dyn coqui_access::kind::Directory>, alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>) -> Self
+impl coqui_access::kind::Directory for ai6::directorates::m::access::CertificateDirectory
+pub fn ai6::directorates::m::access::CertificateDirectory::lookup(&self, coqui_access::model::Lookup) -> core::result::Result<core::option::Option<coqui_access::model::Person>, guatiao::library::kind::ProviderError>
 #[non_exhaustive] pub struct ai6::directorates::m::access::Editor
 pub ai6::directorates::m::access::Editor::chief: bool
 pub ai6::directorates::m::access::Editor::person: coqui_access::model::Person
@@ -507,6 +514,11 @@ pub ai6::directorates::m::access::Refusal::reason: alloc::string::String
 impl core::error::Error for ai6::Refusal
 impl core::fmt::Display for ai6::Refusal
 pub fn ai6::Refusal::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::m::access::RegistryPins
+impl ai6::directorates::m::access::RegistryPins
+pub fn ai6::directorates::m::access::RegistryPins::new(alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>) -> Self
+impl coqui_access_kit::pins::PinSource for ai6::directorates::m::access::RegistryPins
+pub fn ai6::directorates::m::access::RegistryPins::check(&self, &coqui_access::model::Person, &coqui_access_kit::pins::PinSet) -> core::result::Result<coqui_access_kit::pins::PinCheck, guatiao::library::kind::ProviderError>
 pub struct ai6::directorates::m::access::RoleDef
 pub ai6::directorates::m::access::RoleDef::actions: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::access::RoleDef::description: core::option::Option<alloc::string::String>
@@ -2699,6 +2711,7 @@ pub fn ai6::directorates::m::unex_limits::ControlLimits::default() -> Self
 pub ai6::directorates::m::unex_limits::LoginTable::address_window: ai6::bounds::Seconds
 pub ai6::directorates::m::unex_limits::LoginTable::enrol_fresh_seconds: ai6::bounds::Seconds
 pub ai6::directorates::m::unex_limits::LoginTable::forget_every: u64
+pub ai6::directorates::m::unex_limits::LoginTable::max_pins: u64
 pub ai6::directorates::m::unex_limits::LoginTable::name_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::unex_limits::LoginTable::name_window: ai6::bounds::Seconds
 pub ai6::directorates::m::unex_limits::LoginTable::pending_seconds: ai6::bounds::Seconds
@@ -6905,6 +6918,28 @@ pub fn ai6::directorates::registry::store::FileRegistry::settle_outbox(&self, &s
 pub fn ai6::directorates::registry::store::FileRegistry::store_issue_reply(&self, &ai6::directorates::registry::mission_issues::IssueReply) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::store::FileRegistry::unlink_issue(&self, &str, &str, &str) -> core::io::error::Result<bool>
 pub fn ai6::directorates::registry::mission_issues::outbox_counts(&[ai6::directorates::registry::mission_issues::OutboxEntry]) -> alloc::collections::btree::map::BTreeMap<alloc::string::String, usize>
+pub mod ai6::directorates::registry::pins
+pub struct ai6::directorates::registry::pins::AccountPins
+pub ai6::directorates::registry::pins::AccountPins::matches: alloc::vec::Vec<ai6::directorates::registry::pins::PinMatch>
+pub ai6::directorates::registry::pins::AccountPins::pins: alloc::vec::Vec<alloc::string::String>
+pub struct ai6::directorates::registry::pins::PinChange
+pub ai6::directorates::registry::pins::PinChange::add: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::registry::pins::PinChange::match_add: alloc::vec::Vec<ai6::directorates::registry::pins::PinMatch>
+pub ai6::directorates::registry::pins::PinChange::match_remove: alloc::vec::Vec<ai6::directorates::registry::pins::PinMatch>
+pub ai6::directorates::registry::pins::PinChange::remove: alloc::vec::Vec<alloc::string::String>
+pub struct ai6::directorates::registry::pins::PinMatch
+pub ai6::directorates::registry::pins::PinMatch::field: alloc::string::String
+pub ai6::directorates::registry::pins::PinMatch::value: alloc::string::String
+impl ai6::directorates::registry::pins::PinMatch
+pub fn ai6::directorates::registry::pins::PinMatch::normal(&self) -> Self
+pub trait ai6::directorates::registry::pins::PinStore: ai6::directorates::registry::factors::FactorStore
+pub fn ai6::directorates::registry::pins::PinStore::account_pins(&self, &str) -> core::io::error::Result<ai6::directorates::registry::pins::AccountPins>
+pub fn ai6::directorates::registry::pins::PinStore::all_pins(&self) -> core::io::error::Result<alloc::vec::Vec<(alloc::string::String, ai6::directorates::registry::pins::AccountPins)>>
+pub fn ai6::directorates::registry::pins::PinStore::change_pins(&self, &str, &ai6::directorates::registry::pins::PinChange, usize) -> core::io::error::Result<ai6::directorates::registry::pins::AccountPins>
+impl<T: ai6::directorates::registry::factors::FactorStore + ?core::marker::Sized> ai6::directorates::registry::pins::PinStore for T
+pub fn T::account_pins(&self, &str) -> core::io::error::Result<ai6::directorates::registry::pins::AccountPins>
+pub fn T::all_pins(&self) -> core::io::error::Result<alloc::vec::Vec<(alloc::string::String, ai6::directorates::registry::pins::AccountPins)>>
+pub fn T::change_pins(&self, &str, &ai6::directorates::registry::pins::PinChange, usize) -> core::io::error::Result<ai6::directorates::registry::pins::AccountPins>
 pub mod ai6::directorates::registry::principals
 #[non_exhaustive] pub struct ai6::directorates::registry::principals::PrincipalRecord
 pub ai6::directorates::registry::principals::PrincipalRecord::display_name: core::option::Option<alloc::string::String>
@@ -10743,6 +10778,9 @@ pub ai6::AccountLimits::sealed_bytes: ai6::bounds::Limit
 pub ai6::AccountLimits::windows: ai6::bounds::Limit
 impl core::default::Default for ai6::directorates::registry::limits::AccountLimits
 pub fn ai6::directorates::registry::limits::AccountLimits::default() -> Self
+pub struct ai6::AccountPins
+pub ai6::AccountPins::matches: alloc::vec::Vec<ai6::directorates::registry::pins::PinMatch>
+pub ai6::AccountPins::pins: alloc::vec::Vec<alloc::string::String>
 pub struct ai6::AccountPool
 impl ai6::AccountPool
 pub fn ai6::AccountPool::account(self, ai6::Account) -> Self
@@ -12660,6 +12698,7 @@ pub fn ai6::directorates::registry::accounts::LoginState::usable_by(&self, &str)
 pub ai6::LoginTable::address_window: ai6::bounds::Seconds
 pub ai6::LoginTable::enrol_fresh_seconds: ai6::bounds::Seconds
 pub ai6::LoginTable::forget_every: u64
+pub ai6::LoginTable::max_pins: u64
 pub ai6::LoginTable::name_bytes: ai6::bounds::Limit
 pub ai6::LoginTable::name_window: ai6::bounds::Seconds
 pub ai6::LoginTable::pending_seconds: ai6::bounds::Seconds
@@ -12920,6 +12959,16 @@ pub fn ai6::directorates::m::review::PanelSeat::label(&self) -> alloc::string::S
 pub fn ai6::directorates::m::review::PanelSeat::role(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::review::PanelSeat::weighing(self, u32) -> Self
 pub fn ai6::directorates::m::review::PanelSeat::with_veto(self) -> Self
+pub struct ai6::PinChange
+pub ai6::PinChange::add: alloc::vec::Vec<alloc::string::String>
+pub ai6::PinChange::match_add: alloc::vec::Vec<ai6::directorates::registry::pins::PinMatch>
+pub ai6::PinChange::match_remove: alloc::vec::Vec<ai6::directorates::registry::pins::PinMatch>
+pub ai6::PinChange::remove: alloc::vec::Vec<alloc::string::String>
+pub struct ai6::PinMatch
+pub ai6::PinMatch::field: alloc::string::String
+pub ai6::PinMatch::value: alloc::string::String
+impl ai6::directorates::registry::pins::PinMatch
+pub fn ai6::directorates::registry::pins::PinMatch::normal(&self) -> Self
 #[non_exhaustive] pub struct ai6::PinSet
 pub ai6::PinSet::libraries: alloc::vec::Vec<ai6::directorates::registry::bona_fides::LibraryPin>
 impl ai6::directorates::registry::bona_fides::PinSet
@@ -15444,6 +15493,14 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::logbook(&self, &str) -> co
 impl ai6::directorates::registry::logbook::LogbookStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::file_station_report(&self, &ai6::directorates::registry::logbook::StationReport) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::logbook(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::logbook::StationReport>>
+pub trait ai6::PinStore: ai6::directorates::registry::factors::FactorStore
+pub fn ai6::PinStore::account_pins(&self, &str) -> core::io::error::Result<ai6::directorates::registry::pins::AccountPins>
+pub fn ai6::PinStore::all_pins(&self) -> core::io::error::Result<alloc::vec::Vec<(alloc::string::String, ai6::directorates::registry::pins::AccountPins)>>
+pub fn ai6::PinStore::change_pins(&self, &str, &ai6::directorates::registry::pins::PinChange, usize) -> core::io::error::Result<ai6::directorates::registry::pins::AccountPins>
+impl<T: ai6::directorates::registry::factors::FactorStore + ?core::marker::Sized> ai6::directorates::registry::pins::PinStore for T
+pub fn T::account_pins(&self, &str) -> core::io::error::Result<ai6::directorates::registry::pins::AccountPins>
+pub fn T::all_pins(&self) -> core::io::error::Result<alloc::vec::Vec<(alloc::string::String, ai6::directorates::registry::pins::AccountPins)>>
+pub fn T::change_pins(&self, &str, &ai6::directorates::registry::pins::PinChange, usize) -> core::io::error::Result<ai6::directorates::registry::pins::AccountPins>
 pub trait ai6::PrincipalStore
 pub fn ai6::PrincipalStore::note_principal(&self, &ai6::directorates::registry::principals::PrincipalRecord) -> core::io::error::Result<bool>
 pub fn ai6::PrincipalStore::principal(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::principals::PrincipalRecord>>
