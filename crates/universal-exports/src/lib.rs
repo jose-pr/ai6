@@ -2541,6 +2541,7 @@ async fn stations(
             // The report covers every Operation on the Station: it is the Station's to read.
             if !reads_station {
                 board.head_of_station = None;
+                board.degraded.clear();
             }
             stations.push(board);
         }
@@ -2652,6 +2653,10 @@ fn board_station(
         head_of_station: info
             .get("head_of_station")
             .and_then(|value| serde_json::from_value(value.clone()).ok()),
+        degraded: info
+            .get("degraded")
+            .and_then(|value| serde_json::from_value(value.clone()).ok())
+            .unwrap_or_default(),
         queue: info
             .get("queue")
             .and_then(serde_json::Value::as_array)
@@ -6147,6 +6152,11 @@ pub struct BoardStation {
     pub head_of_station: Option<ai6::StationReport>,
     /// Each Operation's issue settings looser than the default, one line each.
     pub issues_weakened: Vec<String>,
+    /// What keeps the Station from being whole while it runs: a refused library, a Source it
+    /// cannot poll or write to, Runs making no progress. Empty when it is whole; only a person
+    /// who reads the Station sees it.
+    #[serde(default)]
+    pub degraded: Vec<ai6::Degradation>,
     /// The Missions waiting in the Station's own queue, to start or to be resumed, of the
     /// Operations this user may read.
     pub queue: Vec<BoardQueueEntry>,

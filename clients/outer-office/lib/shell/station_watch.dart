@@ -184,7 +184,11 @@ class StationCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 6),
                 Text(
-                  station.healthy ? 'Online' : 'Dark',
+                  !station.healthy
+                      ? 'Dark'
+                      : station.degraded.isEmpty
+                      ? 'Online'
+                      : 'Degraded',
                   style: text.labelLarge,
                 ),
                 if (_silent case final seconds?) ...[
@@ -196,6 +200,14 @@ class StationCard extends StatelessWidget {
                 ],
               ],
             ),
+            for (final degradation in station.degraded)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  degradation.description,
+                  style: text.bodySmall?.copyWith(color: tokens.warning),
+                ),
+              ),
             const SizedBox(height: 4),
             OoTime(
               station.seen > 0 ? station.seen : null,

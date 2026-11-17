@@ -4424,7 +4424,11 @@ class StationSummary {
     this.config,
     this.headOfStation,
     this.issuesWeakened = const [],
+    this.degraded = const [],
   });
+
+  /// What keeps the Station from being whole while it runs; empty when it is whole.
+  final List<StationDegradation> degraded;
 
   /// The Agent handlers it has loaded.
   final List<String> handlers;
@@ -4479,7 +4483,46 @@ class StationSummary {
           ),
     issuesWeakened: ((json['issues_weakened'] as List<dynamic>?) ?? const [])
         .cast<String>(),
+    degraded: ((json['degraded'] as List<dynamic>?) ?? const [])
+        .map(
+          (item) => StationDegradation.fromJson(item as Map<String, dynamic>),
+        )
+        .toList(growable: false),
   );
+}
+
+/// One thing that keeps a Station from being whole: a refused library, a Source it cannot poll
+/// or write to, Runs making no progress.
+class StationDegradation {
+  const StationDegradation({
+    required this.kind,
+    required this.subject,
+    required this.reason,
+    this.depends = const [],
+  });
+
+  /// `library`, `source-poll`, `source-write` or `sessions`.
+  final String kind;
+
+  /// The library file, the Source or the Station's Runs.
+  final String subject;
+  final String reason;
+
+  /// What cannot work while it lasts.
+  final List<String> depends;
+
+  String get description =>
+      '$kind $subject: $reason'
+      '${depends.isEmpty ? '' : ' (needed by ${depends.join('; ')})'}';
+
+  factory StationDegradation.fromJson(Map<String, dynamic> json) =>
+      StationDegradation(
+        kind: json['kind'] as String,
+        subject: json['subject'] as String,
+        reason: json['reason'] as String,
+        depends: ((json['depends'] as List<dynamic>?) ?? const [])
+            .cast<String>(),
+      );
 }
 
 /// One thing a Head of Station round found on its Station.

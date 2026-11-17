@@ -75,7 +75,7 @@ pub use directorates::m::identity::{
 pub use directorates::m::issues::{SourcePage, source_pages};
 pub use directorates::m::placement::{
     AgentFacts, DEFAULT_MAX_CPU_PERCENT, DEFAULT_MIN_FREE_MEMORY_MB, ExecutionMode,
-    OperationPolicy, Placement, PlacementChoice, PlacementRejection, PlacementRequest,
+    Degradation, OperationPolicy, Placement, PlacementChoice, PlacementRejection, PlacementRequest,
     PlacementStrategy, ResourceLimits, Resources, StationFacts, execution_mode, fitness,
     harness_verdict, place,
 };

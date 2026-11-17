@@ -74,6 +74,8 @@ pub struct StationLimits {
     pub probes: ProbeLimits,
     /// `[attach]`: people attached to a live Run.
     pub attach: AttachLimits,
+    /// `[denials]`: the calls a harness refused.
+    pub denials: DenialLimits,
     /// `[providers.<id>]`: the Guatiao configuration a Station hands provider `<id>` when it
     /// builds it with none of its own (handlers, terminals and safe houses).
     pub providers: BTreeMap<String, serde_json::Value>,
@@ -1287,6 +1289,31 @@ impl Default for OversightLimits {
             max_page: Limit::at(200),
             scan: Limit::at(20_000),
             text_bytes: Limit::at(16 * KIB),
+        }
+    }
+}
+
+/// `[denials]`.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(deny_unknown_fields)]
+pub struct DenialLimits {
+    /// Refused calls a Mission keeps of its last turn; past it the rest are counted and left out.
+    #[schema(title = "Refused calls kept")]
+    #[map(default = DenialLimits::default().kept)]
+    pub kept: Limit,
+    /// Bytes of what a refused call reached (a path, a command, an address) that are kept; the
+    /// rest is cut, and a credential in it is replaced first.
+    #[schema(title = "Longest target of a refused call", format = "bytes")]
+    #[map(default = DenialLimits::default().target_bytes)]
+    pub target_bytes: Limit,
+}
+
+impl Default for DenialLimits {
+    fn default() -> Self {
+        Self {
+            kept: Limit::at(20),
+            target_bytes: Limit::at(200),
         }
     }
 }

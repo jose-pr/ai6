@@ -91,6 +91,30 @@ impl ParkedOn {
     }
 }
 
+/// One call a harness refused by its permission rules.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Denial {
+    /// The tool the harness named.
+    pub tool: String,
+    /// What the call reached (a path, a command, an address), cut and screened by the Station;
+    /// `None` when the harness did not say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    /// The policy that refused it.
+    pub policy: String,
+}
+
+impl Denial {
+    /// A denial of `tool`.
+    pub fn named(tool: &str, target: Option<String>, policy: &str) -> Self {
+        Self {
+            tool: tool.to_owned(),
+            target,
+            policy: policy.to_owned(),
+        }
+    }
+}
+
 /// A Mission as stored and returned by the daemon.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Mission {
@@ -171,11 +195,11 @@ pub struct Mission {
     /// it is reassigned or changes state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waiting: Option<String>,
-    /// The tools the harness refused by its permission rules in its last turn, each once. A turn
-    /// that ends this way can still be `done`, having done nothing that needed them. Cleared when
-    /// the Mission works again.
+    /// The calls the harness refused by its permission rules in its last turn. A turn that ends
+    /// this way can still be `done`, having done nothing that needed them. Cleared when the
+    /// Mission works again.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub denied_tools: Vec<String>,
+    pub denials: Vec<Denial>,
     /// The review policy its brief names, and who the naming speaks for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_naming: Option<BriefNaming>,
@@ -348,7 +372,7 @@ impl MissionStore {
             runs_past_brief: false,
             review_naming: None,
             plan: None,
-            denied_tools: Vec::new(),
+            denials: Vec::new(),
             exposure: Vec::new(),
             provenance: None,
             waiting: None,
@@ -450,7 +474,7 @@ impl MissionStore {
         mission.reported_failure = None;
         mission.waiting = None;
         if state == MissionState::Working {
-            mission.denied_tools.clear();
+            mission.denials.clear();
             mission.runs_past_brief = false;
         }
         mission.revision += 1;
@@ -459,15 +483,15 @@ impl MissionStore {
         Ok(updated)
     }
 
-    /// Records the tools a turn of the Mission's harness refused.
-    pub fn note_denied_tools(
+    /// Records the calls a turn of the Mission's harness refused.
+    pub fn note_denials(
         &mut self,
         mission_id: &str,
-        tools: Vec<String>,
+        denials: Vec<Denial>,
     ) -> Result<Mission, MissionError> {
         let mut next = self.missions.clone();
         let mission = next.get_mut(mission_id).ok_or(MissionError::NotFound)?;
-        mission.denied_tools = tools;
+        mission.denials = denials;
         mission.revision += 1;
         let updated = mission.clone();
         self.commit(next)?;
@@ -946,7 +970,7 @@ impl MissionStore {
         mission.resume_refused = None;
         mission.runs_past_brief = false;
         mission.waiting = None;
-        mission.denied_tools.clear();
+        mission.denials.clear();
         mission.revision += 1;
         let updated = mission.clone();
         let mut operations = self.operations.clone();
@@ -989,7 +1013,7 @@ impl MissionStore {
         mission.reported_failure = None;
         mission.resume_refused = None;
         mission.waiting = None;
-        mission.denied_tools.clear();
+        mission.denials.clear();
         mission.revision += 1;
         let updated = mission.clone();
         let mut operations = self.operations.clone();
@@ -1213,7 +1237,7 @@ mod tests {
     }
 
     #[test]
-    fn denied_tools_last_until_the_mission_works_again() {
+    fn denials_last_until_the_mission_works_again() {
         let mut missions = MissionStore::default();
         let id = MissionId::try_new("mission-denied").unwrap();
         missions
@@ -1222,25 +1246,28 @@ mod tests {
         missions
             .transition(id.as_str(), MissionState::Working)
             .unwrap();
-        let tools = vec!["Write".to_owned(), "Bash".to_owned()];
+        let tools = vec![
+            Denial::named("Write", Some("/w/a".to_owned()), "permission rules"),
+            Denial::named("Bash", None, "permission rules"),
+        ];
         missions
-            .note_denied_tools(id.as_str(), tools.clone())
+            .note_denials(id.as_str(), tools.clone())
             .unwrap();
         let blocked = missions
             .transition(id.as_str(), MissionState::Blocked)
             .unwrap();
-        assert_eq!(blocked.denied_tools, tools, "a wait keeps them");
+        assert_eq!(blocked.denials, tools, "a wait keeps them");
         let working = missions
             .transition(id.as_str(), MissionState::Working)
             .unwrap();
-        assert!(working.denied_tools.is_empty());
+        assert!(working.denials.is_empty());
         missions
-            .note_denied_tools(id.as_str(), tools.clone())
+            .note_denials(id.as_str(), tools.clone())
             .unwrap();
         let done = missions
             .transition(id.as_str(), MissionState::Done)
             .unwrap();
-        assert_eq!(done.denied_tools, tools, "the end keeps them");
+        assert_eq!(done.denials, tools, "the end keeps them");
     }
 
     #[test]

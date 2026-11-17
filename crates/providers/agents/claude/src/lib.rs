@@ -2063,21 +2063,32 @@ fn decode_event(value: &Value, line: Vec<u8>) -> Option<AgentEvent> {
 }
 
 /// The event for the calls a `result` lists under `permission_denials`, a turn that otherwise
-/// reads as a success: its text names each tool once, in the order first refused. A call's input
-/// stays out, since it may hold anything the model wrote.
+/// reads as a success: its text names each tool once, in the order first refused, and its data
+/// lists every call as `{"tool", "target"}`, the target being the one field of the call's input
+/// that says what it reached (a path, a command, an address or a pattern). The rest of the input
+/// stays out, since it may hold anything the model wrote; the reader cuts and screens the target.
 fn decode_denials(value: &Value) -> Option<AgentEvent> {
     if value.get("type").and_then(Value::as_str) != Some("result") {
         return None;
     }
     let mut tools: Vec<&str> = Vec::new();
+    let mut calls: Vec<Value> = Vec::new();
     for denial in value.get("permission_denials")?.as_array()? {
-        if let Some(tool) = denial.get("tool_name").and_then(Value::as_str)
-            && !tools.contains(&tool)
-        {
-            tools.push(tool);
+        if let Some(tool) = denial.get("tool_name").and_then(Value::as_str) {
+            if !tools.contains(&tool) {
+                tools.push(tool);
+            }
+            let target = denial.get("tool_input").and_then(|input| {
+                ["file_path", "notebook_path", "path", "command", "url", "pattern"]
+                    .iter()
+                    .find_map(|field| input.get(*field).and_then(Value::as_str))
+            });
+            calls.push(json!({"tool": tool, "target": target}));
         }
     }
-    (!tools.is_empty()).then(|| event(DENIED_EVENT, Some(tools.join(", "))))
+    let mut denied = (!tools.is_empty()).then(|| event(DENIED_EVENT, Some(tools.join(", "))))?;
+    denied.data = serde_json::to_vec(&calls).ok();
+    Some(denied)
 }
 
 /// Whether a `result` reports that the turn did not do its work: `is_error`, which Claude Code
@@ -4199,15 +4210,15 @@ denied_tools = [\"Bash(rm *)\"]
 
     /// The shape Claude Code 2.1.316 writes after a turn whose calls were refused: a success.
     #[test]
-    fn a_denied_call_is_reported_before_the_turn_ends_and_its_input_stays_out() {
+    fn a_denied_call_is_reported_before_the_turn_ends_and_names_only_its_target() {
         let run = result_run(json!({
             "type": "result",
             "subtype": "success",
             "is_error": false,
             "result": "finished",
             "permission_denials": [
-                {"tool_name": "Write", "tool_use_id": "t1", "tool_input": {"content": "secret"}},
-                {"tool_name": "Bash", "tool_use_id": "t2", "tool_input": {"command": "secret"}},
+                {"tool_name": "Write", "tool_use_id": "t1", "tool_input": {"content": "secret", "file_path": "/w/a.txt"}},
+                {"tool_name": "Bash", "tool_use_id": "t2", "tool_input": {"command": "ls", "description": "secret"}},
                 {"tool_name": "Write", "tool_use_id": "t3", "tool_input": {"content": "secret"}},
             ],
         }));
@@ -4224,7 +4235,16 @@ denied_tools = [\"Bash(rm *)\"]
             ]
         );
         assert!(events[0].tools.is_empty(), "a refused call did not run");
-        assert_eq!(events[0].data, None, "the raw line holds the calls' input");
+        let calls: Value = serde_json::from_slice(events[0].data.as_deref().unwrap()).unwrap();
+        assert_eq!(
+            calls,
+            json!([
+                {"tool": "Write", "target": "/w/a.txt"},
+                {"tool": "Bash", "target": "ls"},
+                {"tool": "Write", "target": "/w/a.txt"},
+            ]),
+            "only the target of each call, never the rest of its input"
+        );
     }
 
     #[test]

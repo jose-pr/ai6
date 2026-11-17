@@ -1065,16 +1065,30 @@ pub(crate) fn compose_report(disclosure: Disclosure, finished: &FinishedSourceBr
     if let Some(branch) = &branch {
         lines.push(format!("Branch: `{branch}`"));
     }
-    let denied_tools: Vec<&str> = finished
+    let denials: Vec<String> = finished
         .outcome
-        .get("denied_tools")
+        .get("denials")
         .and_then(serde_json::Value::as_array)
-        .map(|tools| tools.iter().filter_map(serde_json::Value::as_str).collect())
+        .map(|calls| {
+            calls
+                .iter()
+                .filter_map(|call| {
+                    let tool = call.get("tool")?.as_str()?;
+                    Some(match call.get("target").and_then(serde_json::Value::as_str) {
+                        Some(target) => format!("{tool} `{target}`"),
+                        None => tool.to_owned(),
+                    })
+                })
+                .collect()
+        })
         .unwrap_or_default();
-    if disclosure != Disclosure::Hidden && !denied_tools.is_empty() {
+    if disclosure != Disclosure::Hidden && !denials.is_empty() {
+        let count = denials.len();
         lines.push(format!(
-            "Refused by its permission rules: {}",
-            denied_tools.join(", ")
+            "{count} tool call{} denied by its permission rules{}: {}",
+            if count == 1 { "" } else { "s" },
+            if finished.ok { "" } else { " (permission denied)" },
+            denials.join(", ")
         ));
     }
     if disclosure == Disclosure::Full {
@@ -3008,17 +3022,26 @@ title = \"Update dependencies\"
     #[test]
     fn a_report_says_what_the_harness_refused_unless_the_cover_is_hidden() {
         let mut entry = finished(true);
-        entry.outcome["denied_tools"] = serde_json::json!(["Write", "Bash"]);
-        let line = "Refused by its permission rules: Write, Bash";
+        entry.outcome["denials"] = serde_json::json!([
+            {"tool": "Write", "target": "/w/a.txt", "policy": "rules"},
+            {"tool": "Bash", "policy": "rules"},
+        ]);
+        let line = "2 tool calls denied by its permission rules: Write `/w/a.txt`, Bash";
         for disclosure in [Disclosure::Assisted, Disclosure::Full] {
             let body = compose_report(disclosure, &entry).body;
             assert!(body.contains(line), "{body}");
         }
         let hidden = compose_report(Disclosure::Hidden, &entry).body;
         assert!(!hidden.contains("Write"), "{hidden}");
-        entry.outcome["denied_tools"] = serde_json::json!([]);
+        let mut failed = finished(false);
+        failed.outcome["denials"] = serde_json::json!([{"tool": "Bash", "policy": "rules"}]);
+        let body = compose_report(Disclosure::Full, &failed).body;
+        assert!(body.contains("1 tool call denied"), "{body}");
+        assert!(body.contains("(permission denied)"), "{body}");
+        assert!(!compose_report(Disclosure::Full, &entry).body.contains("(permission denied)"));
+        entry.outcome["denials"] = serde_json::json!([]);
         let none = compose_report(Disclosure::Full, &entry).body;
-        assert!(!none.contains("Refused"), "{none}");
+        assert!(!none.contains("denied"), "{none}");
     }
 
     #[test]

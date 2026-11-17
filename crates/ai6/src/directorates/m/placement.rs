@@ -192,6 +192,39 @@ impl OperationPolicy {
     }
 }
 
+/// One thing that keeps a Station from being whole while it still runs, as it reports it at
+/// check-in (key `degraded`). A Station with any is `degraded`.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Degradation {
+    /// What kind of thing it is: `library`, `source-poll`, `source-write` or `sessions`.
+    pub kind: String,
+    /// What it names: a library's file, a Source's tracker or the Station's Runs.
+    pub subject: String,
+    /// Why, in a sentence.
+    pub reason: String,
+    /// What cannot work while it lasts, one line each.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub depends: Vec<String>,
+}
+
+impl Degradation {
+    /// A degradation of `kind` naming `subject`.
+    pub fn new(
+        kind: &str,
+        subject: impl Into<String>,
+        reason: impl Into<String>,
+        depends: Vec<String>,
+    ) -> Self {
+        Self {
+            kind: kind.to_owned(),
+            subject: subject.into(),
+            reason: reason.into(),
+            depends,
+        }
+    }
+}
+
 /// CPU and memory of a Station's host or a Theater, as last sampled. A value the host did
 /// not report is `None`, never a guess.
 #[non_exhaustive]

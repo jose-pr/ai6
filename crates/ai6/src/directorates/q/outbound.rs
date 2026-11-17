@@ -223,6 +223,25 @@ pub fn check(
     Ok(MENTIONS.replace_all(&checked, "$1`@$2`").into_owned())
 }
 
+/// What a call a harness refused reached, made fit to show: anything shaped like a credential
+/// replaced, characters a reader cannot see dropped, and the rest cut to `max_bytes` on a
+/// character boundary, ending in `…` when it was cut.
+pub fn screen_target(text: &str, max_bytes: Limit) -> String {
+    let mut shown: String = text.chars().filter(|c| !invisible(*c)).collect();
+    for pattern in CREDENTIALS.iter() {
+        shown = pattern.replace_all(&shown, REDACTED).into_owned();
+    }
+    if !max_bytes.allows(shown.len()) {
+        let mut end = max_bytes.or_max().min(shown.len());
+        while !shown.is_char_boundary(end) {
+            end -= 1;
+        }
+        shown.truncate(end);
+        shown.push('…');
+    }
+    shown
+}
+
 /// The check a person's own text passes: refused when empty, too long, holding characters a
 /// reader cannot see or something shaped like a credential. Links and mentions are the person's.
 pub fn check_person(text: &str, max_bytes: Limit) -> Result<String, Refusal> {
@@ -244,6 +263,15 @@ pub fn check_person(text: &str, max_bytes: Limit) -> Result<String, Refusal> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_refused_call_s_target_is_screened_and_cut() {
+        let token = ["gh", "p_", "0123456789abcdefghij0123456789abcdef"].concat();
+        let shown = screen_target(&format!("curl -H {token} é"), Limit::UNBOUNDED);
+        assert_eq!(shown, "curl -H [redacted] é");
+        assert_eq!(screen_target("aéb", Limit::at(2)), "a…", "never inside a character");
+        assert_eq!(screen_target("a\u{202e}b", Limit::at(10)), "ab");
+    }
 
     #[test]
     fn a_persons_text_keeps_its_links_and_mentions_and_not_its_tokens() {

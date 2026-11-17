@@ -89,13 +89,14 @@ use crate::directorates::m::limits::{
     DEFAULT_LIMIT_FALLBACK_SECS, OnLimit, lifts_at, parked_until,
 };
 use crate::directorates::m::mission::{
-    LaunchManifest, Mission, MissionError, MissionState, MissionStore, RunHold,
+    Denial, LaunchManifest, Mission, MissionError, MissionState, MissionStore, RunHold,
 };
 use crate::directorates::m::placement::{
     self, ExecutionMode, OperationPolicy, PlacementChoice, PlacementRequest, ResourceLimits,
     StationFacts,
 };
 use crate::directorates::m::roster;
+use crate::directorates::q::outbound;
 use crate::directorates::m::roster::AgentRole;
 use crate::directorates::m::roster::Roster;
 use crate::directorates::m::theaters::{LOCAL_THEATER, Theater, TheaterAccess, Theaters};
@@ -2289,7 +2290,7 @@ fn sync_run_record(state: &DaemonState, mission_id: &str) {
     update = update.result(
         RunResult::new(mission.state.as_str())
             .with_reason(mission.blocked_reason.clone())
-            .with_denied_tools(mission.denied_tools.len()),
+            .with_denied_tools(mission.denials.len()),
     );
     update = match mission.state {
         MissionState::Queued => return,
@@ -2705,6 +2706,10 @@ fn publish_station_check_in(state: &DaemonState) {
     );
     info.insert("providers".to_owned(), provider_catalog(state));
     info.insert("found_libraries".to_owned(), found_libraries(state));
+    let degraded = degradations(state);
+    if !degraded.is_empty() {
+        info.insert("degraded".to_owned(), serde_json::json!(degraded));
+    }
     let mut theaters = state
         .transports
         .summaries(station_terminal(state, HarnessStdio::Terminal).is_ok());
@@ -3798,6 +3803,20 @@ fn found_libraries(state: &DaemonState) -> serde_json::Value {
     serde_json::json!(found.iter().take(limit.or_max()).collect::<Vec<_>>())
 }
 
+/// Everything that keeps this Station from being whole, as the check-in reports it.
+fn degradations(state: &DaemonState) -> Vec<crate::directorates::m::placement::Degradation> {
+    let agents: Vec<_> = state
+        .roster
+        .agent_ids()
+        .filter_map(|id| state.roster.agent(None, id).ok())
+        .collect();
+    super::degraded::refused_libraries(
+        &state.plugins.scan_summary().found,
+        &agents,
+        &available_handlers(state),
+    )
+}
+
 fn available_handlers(state: &DaemonState) -> Vec<String> {
     state
         .plugins
@@ -4053,7 +4072,7 @@ fn terminal_outcome(state: &DaemonState, mission_id: &str, mission: &Mission) ->
         "run_ids": mission.run_ids,
         "agent": mission.agent_id,
         "branch": mission.safe_house.as_ref().map(|safe_house| safe_house.branch.clone()),
-        "denied_tools": mission.denied_tools,
+        "denials": mission.denials,
     });
     match (&mission.failure, &mission.reported_failure) {
         (Some(reason), _) => outcome["reason"] = serde_json::json!(reason),
@@ -8000,18 +8019,63 @@ fn queue_issue_status(state: &DaemonState, mission_id: &str, mission_state: Miss
     );
 }
 
-/// Records on the Mission the tools its harness refused in a turn, and logs them.
+/// What a harness says of a refused call besides the tool's name.
+#[derive(serde::Deserialize)]
+struct RefusedCall {
+    tool: String,
+    #[serde(default)]
+    target: Option<String>,
+}
+
+/// The policy a refused call is said to have met when its harness does not name one.
+const DENIAL_POLICY: &str = "the harness's permission rules";
+
+/// The calls a `denied` event reports: each with its target when the harness sent them as data,
+/// otherwise each tool its text names. The target is screened and cut, and no more than
+/// `[denials] kept` are returned.
+fn denials_of(event: &AgentEvent, limits: &crate::station::limits::DenialLimits) -> Vec<Denial> {
+    let calls: Vec<RefusedCall> = event
+        .data
+        .as_deref()
+        .and_then(|data| serde_json::from_slice(data).ok())
+        .unwrap_or_else(|| {
+            event
+                .text
+                .as_deref()
+                .unwrap_or_default()
+                .split(", ")
+                .filter(|tool| !tool.is_empty())
+                .map(|tool| RefusedCall {
+                    tool: tool.to_owned(),
+                    target: None,
+                })
+                .collect()
+        });
+    calls
+        .into_iter()
+        .take(limits.kept.or_max())
+        .map(|call| Denial {
+            tool: call.tool,
+            target: call
+                .target
+                .map(|target| outbound::screen_target(&target, limits.target_bytes)),
+            policy: DENIAL_POLICY.to_owned(),
+        })
+        .collect()
+}
+
+/// Records on the Mission the calls its harness refused in a turn, and logs them.
 fn note_denied_tools(state: &DaemonState, mission_id: &str, event: &AgentEvent) {
     let text = event.text.as_deref().unwrap_or_default();
     eprintln!("ai6: Mission {mission_id:?}: its harness refused calls of {text}");
-    let tools = text.split(", ").map(str::to_owned).collect();
+    let denials = denials_of(event, &state.station.limits().denials);
     let noted = state
         .missions
         .lock()
         .map_err(|_| "the Mission book's lock was poisoned".to_owned())
         .and_then(|mut missions| {
             missions
-                .note_denied_tools(mission_id, tools)
+                .note_denials(mission_id, denials)
                 .map_err(|error| format!("{error:?}"))
         });
     if let Err(error) = noted {
@@ -8041,12 +8105,14 @@ fn publish_lifecycle(state: &DaemonState, mission_id: &str, mission_state: Missi
     let _ = (state, mission_id, mission_state);
 }
 
-/// The reason a Mission's end is published with when its harness refused calls in its last turn.
+/// The reason a Mission's end is published with when it failed after its harness refused calls
+/// in its last turn; a Mission that finished having had calls refused says nothing of them.
 #[cfg(feature = "publisher")]
 fn denied_reason(state: &DaemonState, mission_id: &str) -> Option<&'static str> {
     let missions = state.missions.lock().ok()?;
-    let denied = !missions.get(mission_id)?.denied_tools.is_empty();
-    denied.then_some(DENIED_REASON)
+    let mission = missions.get(mission_id)?;
+    (mission.state == MissionState::Failed && !mission.denials.is_empty())
+        .then_some(DENIED_REASON)
 }
 
 /// The reason an ended run of a Sleeper's order is published with, so the board says it is an
@@ -8481,7 +8547,7 @@ fn publish_finished_event(
     #[cfg(feature = "publisher")]
     if let Some(telemetry) = finished.telemetry {
         let (name, reason) = match settled.kind.as_str() {
-            "completed" => (Some("done"), denied_reason(state, mission_id)),
+            "completed" => (Some("done"), None),
             "failed" | "blown" => (
                 Some("failed"),
                 denied_reason(state, mission_id).or_else(|| order_reason(state, mission_id)),
@@ -9508,7 +9574,13 @@ queue = 1
                 run_id: RunId::try_new("provider-id-denied")
                     .map_err(|error| test_provider_error(&error.to_string()))?,
                 events: Mutex::new(VecDeque::from([
-                    event(DENIED_EVENT, "Write, Bash"),
+                    AgentEvent {
+                        data: Some(
+                            br#"[{"tool":"Write","target":"/work/a.txt"},{"tool":"Bash"}]"#
+                                .to_vec(),
+                        ),
+                        ..event(DENIED_EVENT, "Write, Bash")
+                    },
                     event("completed", "finished"),
                 ])),
             }
@@ -9670,8 +9742,12 @@ queue = 1
         start_mission_by_id(&state, "mission-1").await;
         wait_for_done(&state, "mission-1").await;
         assert_eq!(
-            mission_state(&state, "mission-1").denied_tools,
-            ["Write", "Bash"]
+            mission_state(&state, "mission-1")
+                .denials
+                .iter()
+                .map(|denial| (denial.tool.as_str(), denial.target.as_deref()))
+                .collect::<Vec<_>>(),
+            [("Write", Some("/work/a.txt")), ("Bash", None)]
         );
         // The state changes just before its event is queued.
         let deadline = std::time::Instant::now() + Duration::from_secs(120);
@@ -9697,7 +9773,10 @@ queue = 1
                 path.contains("/lifecycle/") && body["state"] == "done"
             })
             .expect("the end is published");
-            assert_eq!(done["reason"], "permission-denied");
+            assert!(
+                done.get("reason").is_none_or(|reason| reason.is_null()),
+                "a Mission that finished does not say it was denied: {done}"
+            );
         }
     }
 
@@ -11198,7 +11277,10 @@ queue = 1
                 .transition(mission_id, MissionState::Working)
                 .unwrap();
             missions
-                .note_denied_tools(mission_id, vec!["Write".to_owned()])
+                .note_denials(
+                    mission_id,
+                    vec![Denial::named("Write", Some("/w/a.txt".to_owned()), "rules")],
+                )
                 .unwrap();
             missions.transition(mission_id, MissionState::Done).unwrap();
         }
@@ -11211,7 +11293,10 @@ queue = 1
         assert_eq!(outcome["state"], "done");
         assert_eq!(outcome["mission_id"], mission_id);
         assert_eq!(outcome["agent"], "007");
-        assert_eq!(outcome["denied_tools"], serde_json::json!(["Write"]));
+        assert_eq!(
+            outcome["denials"],
+            serde_json::json!([{"tool": "Write", "target": "/w/a.txt", "policy": "rules"}])
+        );
         assert!(!claimed.exists());
 
         state.stopping.store(true, Ordering::Release);

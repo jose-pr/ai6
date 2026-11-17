@@ -763,6 +763,10 @@ pub struct StationRuntime {
     #[schema(title = "Attaching to a Run")]
     #[map(default)]
     pub attach: limits::AttachLimits,
+    /// `[denials]`: the calls a harness refused, as a Run's outcome keeps them.
+    #[schema(title = "Refused calls")]
+    #[map(default)]
+    pub denials: limits::DenialLimits,
     /// Bytes of a terminal line the watchdog holds before it counts as a line. Default: 4096.
     #[schema(title = "Longest partial terminal line", format = "bytes")]
     pub partial_line_bytes: Option<Limit>,
@@ -848,6 +852,7 @@ impl StationRuntime {
             oversight: self.oversight.clone(),
             probes: self.probes.clone(),
             attach: self.attach.clone(),
+            denials: self.denials.clone(),
             providers: self.providers.clone(),
         }
     }

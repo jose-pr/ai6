@@ -1365,6 +1365,18 @@ struct BoardStation {
     resources: Option<StationResources>,
     #[serde(default)]
     queue: Vec<QueueRow>,
+    #[serde(default)]
+    degraded: Vec<Degraded>,
+}
+
+/// One thing that keeps a Station from being whole.
+#[derive(Debug, Deserialize)]
+struct Degraded {
+    kind: String,
+    subject: String,
+    reason: String,
+    #[serde(default)]
+    depends: Vec<String>,
 }
 
 /// One entry of a Station's own queue.
@@ -4509,6 +4521,19 @@ fn print_stations(board: &StationBoard) {
             "{}",
             station_row(station, board.headquarters_station.as_deref())
         );
+        for degraded in &station.degraded {
+            println!(
+                "  degraded: {} {}: {}{}",
+                plain(&degraded.kind),
+                plain(&degraded.subject),
+                plain(&degraded.reason),
+                if degraded.depends.is_empty() {
+                    String::new()
+                } else {
+                    format!(" (needed by: {})", plain(&degraded.depends.join("; ")))
+                }
+            );
+        }
     }
 }
 
@@ -4521,10 +4546,12 @@ fn station_row(station: &BoardStation, headquarters_station: Option<&str>) -> St
     format!(
         "{}\t{}\t{}\t{}/{}\t{}\t{}\t{:.0}\t{}\t{}\t{}\t{}\t{}\t{}",
         plain(&station.station_id),
-        if station.healthy {
+        if !station.healthy {
+            "offline"
+        } else if station.degraded.is_empty() {
             "healthy"
         } else {
-            "offline"
+            "degraded"
         },
         if station.headquarters || headquarters_station == Some(station.station_id.as_str()) {
             "yes"
