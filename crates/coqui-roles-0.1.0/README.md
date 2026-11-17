@@ -36,6 +36,7 @@ let authorizer = RoleAuthorizer::builder()
     .scope_kinds(["site"])
     .role("viewer", ["document.read"])
     .rule(Rule::new("group:staff", "site:north", "viewer"))
+    .rule(Rule::new("any:signed-in", "site:north", "viewer"))
     .build()
     .unwrap();
 ```

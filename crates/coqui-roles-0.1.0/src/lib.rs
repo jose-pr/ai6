@@ -1,7 +1,8 @@
 //! A first-match role authorizer, built in code.
 //!
 //! A policy is named roles that list actions, and ordered rules that bind one
-//! `account:<name>`, `person:<id>` or `group:<name>` to a role at one scope. A scope is `*`
+//! `account:<name>`, `person:<id>` or `group:<name>`, or every signed-in subject
+//! (`any:signed-in`), to a role at one scope. A scope is `*`
 //! (everything) or `<kind>:<id>`, where the kinds a deployment uses are configured, for
 //! example `site` or `project`; the library has no scope vocabulary of its own. A rule's
 //! scope matches a request when it is `*`, when it equals the request's `resource` as an
@@ -39,7 +40,7 @@ use guatiao_builder::Described;
 use coqui_access::guatiao::Provider;
 use coqui_access::guatiao::library::ProviderError;
 use coqui_access::{
-    AuthorizationDecision, AuthorizationRequest, Authorizer, Limit, Subject, error,
+    AuthorizationDecision, AuthorizationRequest, Authorizer, Limit, Person, Subject, error,
 };
 
 /// Bounds on a policy, each a [`Limit`] the caller can change or lift ([`Limit::UNBOUNDED`]).
@@ -167,7 +168,9 @@ impl Role {
 #[map(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct Rule {
-    /// `account:<name>`, `person:<id>` or `group:<name>`.
+    /// `account:<name>`, `person:<id>`, `group:<name>` or `any:signed-in`, the last matching
+    /// every subject a sign-in or key resolved (never one with no identity). No other
+    /// `any:` name exists.
     pub subject: String,
     /// `*`, or `<kind>:<id>` with the kind among the policy's scope kinds.
     pub scope: String,
@@ -307,11 +310,32 @@ impl Default for RoleAuthorizer {
 
 #[derive(Clone)]
 struct CompiledRule {
-    subject: Subject,
+    subject: Who,
     scope: String,
     role: String,
     propagate: bool,
 }
+
+/// Whom a rule names.
+#[derive(Clone)]
+enum Who {
+    Subject(Subject),
+    /// Any subject that carries an identity: a resolved person has a directory id, and an
+    /// anonymous caller has none.
+    AnySignedIn,
+}
+
+impl Who {
+    fn matches(&self, person: &Person) -> bool {
+        match self {
+            Self::Subject(subject) => subject.matches(person),
+            Self::AnySignedIn => !person.id.is_empty(),
+        }
+    }
+}
+
+/// The reserved subject that names every signed-in subject.
+const ANY_SIGNED_IN: &str = "any:signed-in";
 
 /// An invalid role policy.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -415,13 +439,19 @@ impl RoleAuthorizer {
 
         let mut rules = Vec::with_capacity(policy.rules.len());
         for rule in policy.rules {
-            let subject: Subject = rule
-                .subject
-                .parse()
-                .map_err(|_| fail("rule subject must be account, person or group:<value>"))?;
-            if !name(subject.value()) {
-                return Err(fail("rule subject value is invalid"));
-            }
+            let subject = if rule.subject == ANY_SIGNED_IN {
+                Who::AnySignedIn
+            } else if rule.subject.starts_with("any:") {
+                return Err(fail("the only any: subject is any:signed-in"));
+            } else {
+                let subject: Subject = rule.subject.parse().map_err(|_| {
+                    fail("rule subject must be account, person or group:<value>, or any:signed-in")
+                })?;
+                if !name(subject.value()) {
+                    return Err(fail("rule subject value is invalid"));
+                }
+                Who::Subject(subject)
+            };
             if rule.scope != "*" {
                 let allowed = rule.scope.split_once(':').is_some_and(|(kind, id)| {
                     name(id)
@@ -505,8 +535,6 @@ fn name(value: &str, most: Limit) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use coqui_access::Person;
-
     use super::*;
 
     fn person(id: &str, name: &str, groups: &[&str]) -> Person {
@@ -637,6 +665,98 @@ mod tests {
             "document.read",
             "*"
         ));
+    }
+
+    #[test]
+    fn any_signed_in_matches_a_resolved_subject_and_never_an_anonymous_one() {
+        let policy = RoleAuthorizer::builder()
+            .role("viewer", ["document.read"])
+            .role("none", ["x.nothing"])
+            .rule(Rule::new("group:blocked", "*", "none"))
+            .rule(Rule::new("any:signed-in", "*", "viewer"))
+            .build()
+            .unwrap();
+        let directory_person = person("cn=a,dc=x", "alice", &["staff"]);
+        let key_account = person("key-1", "ci-key", &[]);
+        assert!(allowed(&policy, &directory_person, "document.read", "x"));
+        assert!(allowed(&policy, &key_account, "document.read", "x"));
+        assert!(!allowed(&policy, &directory_person, "document.write", "x"));
+        assert!(
+            !allowed(&policy, &Person::default(), "document.read", "x"),
+            "no identity, no match"
+        );
+        assert!(
+            !allowed(
+                &policy,
+                &person("", "named-only", &["g"]),
+                "document.read",
+                "x"
+            ),
+            "a name with no id is not a resolved subject"
+        );
+        assert!(
+            !allowed(
+                &policy,
+                &person("i", "n", &["blocked"]),
+                "document.read",
+                "x"
+            ),
+            "first match order is unchanged"
+        );
+        let scoped = RoleAuthorizer::builder()
+            .scope_kinds(["site"])
+            .role("viewer", ["document.read"])
+            .rule(Rule::new("any:signed-in", "site:north", "viewer"))
+            .build()
+            .unwrap();
+        assert!(allowed(
+            &scoped,
+            &key_account,
+            "document.read",
+            "site:north"
+        ));
+        assert!(!allowed(
+            &scoped,
+            &key_account,
+            "document.read",
+            "site:south"
+        ));
+        assert!(
+            !allowed(
+                &RoleAuthorizer::builder().build().unwrap(),
+                &key_account,
+                "document.read",
+                "x"
+            ),
+            "it grants nothing by itself"
+        );
+    }
+
+    #[test]
+    fn an_unknown_any_subject_is_refused() {
+        for subject in [
+            "any:other",
+            "any:person",
+            "any:",
+            "any:signed-in:x",
+            "ANY:signed-in",
+            "any:Signed-in",
+        ] {
+            let built = RoleAuthorizer::builder()
+                .role("r", ["a"])
+                .rule(Rule::new(subject, "*", "r"))
+                .build();
+            assert!(built.is_err(), "{subject}");
+        }
+        // An ordinary name `any` is unambiguous: the kind comes first.
+        assert!(
+            RoleAuthorizer::builder()
+                .role("r", ["a"])
+                .rule(Rule::new("account:any", "*", "r"))
+                .rule(Rule::new("group:any:signed-in", "*", "r"))
+                .build()
+                .is_ok()
+        );
     }
 
     #[test]

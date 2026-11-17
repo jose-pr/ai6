@@ -15,7 +15,8 @@ user-supplied values. No connection is made until a request is checked.
 - **Search, then bind** — finds the account with a service account, refuses disabled ones,
   then binds as the account with the supplied password.
 - **Groups** — from `memberOf`, from a group search, or nested with Active Directory's
-  matching rule.
+  matching rule; an Active Directory account's primary group (`primaryGroupID`, normally
+  Domain Users), which `memberOf` leaves out, is added.
 - **Private CA** — an optional PEM file as the only trusted roots.
 
 ## Installation

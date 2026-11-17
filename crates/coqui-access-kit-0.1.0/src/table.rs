@@ -114,6 +114,10 @@ impl<T> Snapshot<T> {
 /// put, if any.
 pub type Update<'a, T> = dyn FnMut(&[T]) -> Result<Option<T>, SourceError> + 'a;
 
+/// What [`Table::update_one`] is given to decide a change to one record: that record as the
+/// table holds it (`None` when there is none), and the record to put, if any.
+pub type UpdateOne<'a, T> = dyn FnMut(Option<&T>) -> Result<Option<T>, SourceError> + 'a;
+
 /// Where a provider's records of type `T` come from, and optionally go to.
 ///
 /// Implementations are free to keep records anywhere. They must be cheap to ask for changes:
@@ -176,6 +180,44 @@ pub trait Table<T>: Send + Sync {
             Some(record) => self.put(record),
             None => Ok(()),
         }
+    }
+
+    /// The record with this key, or `None`.
+    ///
+    /// The default loads every record and picks one, so a table that can find a record by
+    /// its key (a database, an API, a record per file) overrides it: then a record that
+    /// cannot be read is an error for its own key only, and a caller that serves one
+    /// person at a time pays for one record.
+    ///
+    /// # Errors
+    ///
+    /// When the table, or this record, cannot be read.
+    fn get(&self, key: &str) -> Result<Option<T>, SourceError>
+    where
+        T: Keyed,
+    {
+        let snapshot = self.load()?;
+        Ok(snapshot
+            .records
+            .into_iter()
+            .find(|record| record.key() == key))
+    }
+
+    /// Like [`update`](Table::update), for the one record with this key: `make` is given
+    /// that record (or `None`) as the table holds it under its lock, and what it returns is
+    /// put.
+    ///
+    /// The default is [`update`](Table::update) with the other records left out of
+    /// `make`'s view; override it with [`get`](Table::get) to read one record.
+    ///
+    /// # Errors
+    ///
+    /// When the table or this record cannot be read, `make` refuses, or the put fails.
+    fn update_one(&self, key: &str, make: &mut UpdateOne<'_, T>) -> Result<(), SourceError>
+    where
+        T: Keyed,
+    {
+        self.update(&mut |records| make(records.iter().find(|record| record.key() == key)))
     }
 }
 
@@ -256,6 +298,27 @@ impl<T: Keyed + Clone + Send> Table<T> for MemoryTable<T> {
         // decide from the same records.
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(record) = make(&state.1)? {
+            upsert(&mut state.1, record);
+            state.0 += 1;
+        }
+        Ok(())
+    }
+
+    fn get(&self, key: &str) -> Result<Option<T>, SourceError>
+    where
+        T: Keyed,
+    {
+        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        Ok(state.1.iter().find(|record| record.key() == key).cloned())
+    }
+
+    fn update_one(&self, key: &str, make: &mut UpdateOne<'_, T>) -> Result<(), SourceError>
+    where
+        T: Keyed,
+    {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let current = state.1.iter().find(|record| record.key() == key);
+        if let Some(record) = make(current)? {
             upsert(&mut state.1, record);
             state.0 += 1;
         }
@@ -354,6 +417,59 @@ impl<T: Keyed + Clone> Reloading<T> {
             Ok(Some(record))
         })?;
         self.refresh(&mut latest)?;
+        made.ok_or_else(|| SourceError::invalid("the table did not update"))
+    }
+
+    /// The record with `key`, read from the table itself and checked alone: neither the
+    /// cache nor the other records are touched, so a record that cannot be read or fails
+    /// `validate` is an error for its own key only.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the table or the record cannot be read, or the record is
+    /// invalid.
+    pub fn get(&self, key: &str) -> Result<Option<T>, SourceError> {
+        let found = self.table.get(key)?;
+        if let Some(record) = &found {
+            (self.validate)(std::slice::from_ref(record))?;
+        }
+        Ok(found)
+    }
+
+    /// Like [`put_with`](Reloading::put_with), for the one record with `key`: `make` is
+    /// given it (or `None`) as the table reads it under its lock, and returns the record to
+    /// put (`None` puts nothing) and a result. Only that record is read and checked, so
+    /// one that cannot be read is an error for its own key only, and the cost does not
+    /// grow with the table.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the table or the record cannot be read, `make` refuses, the
+    /// record or the result is invalid or has another key, or the table refuses the put.
+    pub fn update_one<R>(
+        &self,
+        key: &str,
+        make: impl FnOnce(Option<&T>) -> Result<(Option<T>, R), SourceError>,
+    ) -> Result<R, SourceError> {
+        let mut make = Some(make);
+        let mut made = None;
+        self.table.update_one(key, &mut |current| {
+            if let Some(current) = current {
+                (self.validate)(std::slice::from_ref(current))?;
+            }
+            let Some(make) = make.take() else {
+                return Err(SourceError::invalid("the table asked twice"));
+            };
+            let (record, result) = make(current)?;
+            if let Some(record) = &record {
+                if record.key() != key {
+                    return Err(SourceError::invalid("the record is not the one asked for"));
+                }
+                (self.validate)(std::slice::from_ref(record))?;
+            }
+            made = Some(result);
+            Ok(record)
+        })?;
         made.ok_or_else(|| SourceError::invalid("the table did not update"))
     }
 
@@ -563,5 +679,73 @@ mod tests {
     fn a_table_invalid_at_the_start_is_not_opened() {
         let table = Arc::new(MemoryTable::from_records([name("a"), name("b"), name("c")]));
         assert!(Reloading::new(table, few).is_err());
+    }
+
+    #[test]
+    fn one_record_is_read_and_updated_by_its_key() {
+        let table = MemoryTable::from_records([name("a"), name("b")]);
+        assert_eq!(table.get("b").unwrap(), Some(name("b")));
+        assert_eq!(table.get("z").unwrap(), None);
+        let mut seen = Vec::new();
+        table
+            .update_one("a", &mut |current| {
+                seen.push(current.cloned());
+                Ok(Some(name("a")))
+            })
+            .unwrap();
+        assert_eq!(seen, [Some(name("a"))]);
+        assert_eq!(table.load().unwrap().revision, Revision::new(1));
+    }
+
+    #[test]
+    fn the_defaults_find_one_record_through_load_and_update() {
+        struct Plain(MemoryTable<Name>);
+        impl Table<Name> for Plain {
+            fn load(&self) -> Result<Snapshot<Name>, SourceError> {
+                self.0.load()
+            }
+            fn put(&self, record: Name) -> Result<(), SourceError> {
+                self.0.put(record)
+            }
+        }
+        let table = Plain(MemoryTable::from_records([name("a"), name("b")]));
+        assert_eq!(table.get("a").unwrap(), Some(name("a")));
+        let mut seen = None;
+        table
+            .update_one("b", &mut |current| {
+                seen = Some(current.cloned());
+                Ok(Some(name("b")))
+            })
+            .unwrap();
+        assert_eq!(seen, Some(Some(name("b"))));
+    }
+
+    #[test]
+    fn reloading_checks_only_the_one_record_it_reads() {
+        let table = Arc::new(MemoryTable::from_records([name("a"), name("b")]));
+        let reloading = Reloading::new(table.clone(), |records| {
+            if records.iter().any(|record| record.0 == "bad") {
+                Err(SourceError::invalid("a record is invalid"))
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap();
+        table.put(name("bad")).unwrap();
+        assert!(reloading.read(|_| ()).is_err());
+        assert_eq!(reloading.get("a").unwrap(), Some(name("a")));
+        assert!(reloading.get("bad").is_err());
+        let put = reloading
+            .update_one("b", |current| {
+                assert_eq!(current, Some(&name("b")));
+                Ok((Some(name("b")), 7))
+            })
+            .unwrap();
+        assert_eq!(put, 7);
+        assert!(
+            reloading
+                .update_one("b", |_| Ok((Some(name("other")), ())))
+                .is_err()
+        );
     }
 }

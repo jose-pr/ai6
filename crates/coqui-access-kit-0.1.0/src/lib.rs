@@ -44,6 +44,6 @@ pub use hash::{
 };
 pub use record::RecordLimits;
 pub use table::{
-    Keyed, MemoryTable, Reloading, Revision, Snapshot, SourceError, Table, Update, check_field,
-    check_keys, unix_now,
+    Keyed, MemoryTable, Reloading, Revision, Snapshot, SourceError, Table, Update, UpdateOne,
+    check_field, check_keys, unix_now,
 };

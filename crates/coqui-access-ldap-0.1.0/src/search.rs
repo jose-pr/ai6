@@ -66,6 +66,70 @@ pub fn disabled(flags: Option<&str>) -> bool {
         .is_some_and(|flags| flags & 0x2 != 0)
 }
 
+/// A distinguished name as its components, each lower-cased with the blanks around `=` and
+/// the component dropped; a `,` after a backslash belongs to its component.
+fn components(dn: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut escaped = false;
+    for character in dn.chars() {
+        match character {
+            _ if escaped => {
+                current.push(character);
+                escaped = false;
+            }
+            '\\' => {
+                current.push(character);
+                escaped = true;
+            }
+            ',' | ';' => parts.push(std::mem::take(&mut current)),
+            _ => current.push(character),
+        }
+    }
+    parts.push(current);
+    parts
+        .into_iter()
+        .map(|part| {
+            let part = part.trim();
+            match part.split_once('=') {
+                Some((kind, value)) => format!("{}={}", kind.trim(), value.trim()).to_lowercase(),
+                None => part.to_lowercase(),
+            }
+        })
+        .collect()
+}
+
+/// Whether `dn` names an entry strictly below `base` (the base itself is not below it).
+/// Components compare case-insensitively with blanks around `=` and `,` ignored.
+pub fn below(dn: &str, base: &str) -> bool {
+    let (dn, base) = (components(dn), components(base));
+    !base.iter().any(String::is_empty)
+        && !dn.iter().any(String::is_empty)
+        && dn.len() > base.len()
+        && dn[dn.len() - base.len()..] == base[..]
+}
+
+/// A person's name in natural order: `display` when it says anything, else the given name,
+/// initials and surname that are present, joined by single spaces; `None` when nothing is.
+pub fn display_name(
+    display: Option<&str>,
+    given: Option<&str>,
+    initials: Option<&str>,
+    surname: Option<&str>,
+) -> Option<String> {
+    fn present(value: Option<&str>) -> Option<&str> {
+        value.map(str::trim).filter(|value| !value.is_empty())
+    }
+    if let Some(display) = present(display) {
+        return Some(display.to_owned());
+    }
+    let parts: Vec<&str> = [given, initials, surname]
+        .into_iter()
+        .filter_map(present)
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(" "))
+}
+
 /// Whether connecting to `url` without StartTLS would expose a password.
 pub fn in_the_clear(url: &str, start_tls: bool) -> bool {
     let Some(rest) = url.strip_prefix("ldap://") else {
@@ -138,5 +202,41 @@ mod tests {
         assert!(!in_the_clear("ldap://directory.example.org", true));
         assert!(!in_the_clear("ldaps://directory.example.org", false));
         assert!(!in_the_clear("ldap://[::1]:389", false));
+    }
+
+    #[test]
+    fn a_name_is_below_a_base_by_its_components() {
+        let base = "DC=example,DC=org";
+        assert!(below("CN=Ana,OU=People,DC=example,DC=org", base));
+        assert!(below("cn=Ana , ou = People,dc=EXAMPLE,dc=Org", base));
+        assert!(below("CN=Smith\\, Ana,DC=example,DC=org", base));
+        assert!(!below(base, base));
+        assert!(!below("DC=org", base));
+        assert!(!below("CN=Ana,DC=example,DC=org,DC=evil", base));
+        assert!(!below("CN=Ana,DC=notexample,DC=org", base));
+        assert!(!below("CN=Ana,,DC=example,DC=org", base));
+        assert!(!below("", base));
+        assert!(!below("CN=Ana,DC=example,DC=org", ""));
+    }
+
+    #[test]
+    fn a_display_name_is_the_directorys_or_the_parts_in_natural_order() {
+        assert_eq!(
+            display_name(Some("Ana Rivera"), Some("A"), None, Some("R")).as_deref(),
+            Some("Ana Rivera")
+        );
+        assert_eq!(
+            display_name(Some("  "), Some("Ana"), Some("Q"), Some("Rivera")).as_deref(),
+            Some("Ana Q Rivera")
+        );
+        assert_eq!(
+            display_name(None, Some("Ana"), None, Some("Rivera")).as_deref(),
+            Some("Ana Rivera")
+        );
+        assert_eq!(
+            display_name(None, None, None, Some("Rivera")).as_deref(),
+            Some("Rivera")
+        );
+        assert_eq!(display_name(None, Some(" "), None, None), None);
     }
 }

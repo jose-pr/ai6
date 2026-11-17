@@ -79,7 +79,7 @@ fields. Unknown keys are skipped when reading.
 | `AuthorizationDecision` | `allowed`, `limits: BTreeMap<String, Value>` |
 | `Description` | `name?`, `takes?` (one of `takes::PASSWORD`, `KEY`, `REQUEST`, `OTP`) |
 | `AccountInfo` | `id`, `name`, `groups`, `disabled?`, `made_unix?`, `expires_unix?` |
-| `AccountPut` | `name`, `secret?`, `groups?`, `disabled?`, `expires_unix?`, `display_name?` (the label an enrolment shows; providers keeping none ignore it) |
+| `AccountPut` | `name`, `secret?`, `groups?`, `disabled?`, `expires_unix?`, `display_name?` (the label an enrolment shows; providers keeping none ignore it), `proved_current` (bool, default false, not written when false: the caller checked the account's current secret in this request; the one-time code provider refuses a rotation without it, the others ignore it) |
 | `PutOutcome` | `secret?`, `codes?: Vec<String>` (one-time recovery codes, said once) |
 | `Waiting` | `shown`, `peer?`, `seen_unix?` |
 | `Factor` | `method`, `provider?` (the id that accepted the step), `person?` (the `Person::id` it named; `Debug` hides it) |

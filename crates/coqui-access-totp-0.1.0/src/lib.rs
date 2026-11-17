@@ -563,11 +563,12 @@ impl TotpAccounts {
         held
     }
 
-    /// Presents a code to the account `name`, written down before the answer.
+    /// Presents a code to `record`, written down before the answer.
     ///
     /// The judgement is made against the record read under the table's lock, so two requests
     /// with one code (here or in another process) cannot both succeed, and a wrong code is
-    /// counted. A write that fails is an error, never a success that could be replayed.
+    /// counted. Only this account's record is read and written. A write that fails is an
+    /// error, never a success that could be replayed.
     fn present(
         &self,
         record: &TotpRecord,
@@ -579,25 +580,32 @@ impl TotpAccounts {
         if self.judge(record, presented, recovery, now).next.is_none() {
             return Ok(Verdict::Invalid);
         }
-        let name = record.name.clone();
-        let mut gone = false;
-        let result = self.records.put_with(|records| {
-            let Some(current) = records.iter().find(|own| own.name == name) else {
-                gone = true;
-                return Err(SourceError::invalid("the account is gone"));
-            };
-            let judged = self.judge(current, presented, recovery, now);
-            let taken = judged.taken;
-            Ok((judged.next.unwrap_or_else(|| current.clone()), taken))
-        });
-        match result {
-            Ok(taken) => Ok(verdict(taken, &record.name)),
-            Err(_) if gone => Ok(Verdict::Unknown),
-            Err(reason) => Err(reason.writing("one-time code table")),
-        }
+        self.records
+            .update_one(&record.name, |current| {
+                let Some(current) = current else {
+                    return Ok((None, Verdict::Unknown));
+                };
+                let judged = self.judge(current, presented, recovery, now);
+                let verdict = verdict(judged.taken, &current.name);
+                Ok((judged.next, verdict))
+            })
+            .map_err(|reason| reason.writing("one-time code table"))
     }
 
     fn begin(&self, account: &AccountPut) -> Result<PutOutcome, ProviderError> {
+        // Confirming replaces the factor the person holds, so beginning that replacement is
+        // for a caller that has checked the current one.
+        if !account.proved_current {
+            let enrolled = self
+                .records
+                .read(|records| records.iter().any(|record| record.name == account.name))
+                .map_err(|reason| reason.reading("one-time code table"))?;
+            if enrolled {
+                return Err(error::bad_value(
+                    "replacing the one-time code secret needs the caller to prove the current one first",
+                ));
+            }
+        }
         let mut key = [0u8; 20];
         getrandom::fill(&mut key)
             .map_err(|_| error::internal("system random source is unavailable"))?;
@@ -770,9 +778,11 @@ impl Authenticator for TotpAccounts {
             Some(methods::RECOVERY_CODE) => true,
             Some(_) => return Ok(Verdict::Unknown),
         };
+        // Only this account's record is read: another's, unreadable or not, is nothing to this
+        // sign-in, and one that cannot be read fails its own account alone.
         let Some(record) = self
             .records
-            .read(|records| records.iter().find(|record| record.name == name).cloned())
+            .get(&name)
             .map_err(|reason| reason.reading("one-time code table"))?
         else {
             return Ok(Verdict::Unknown);
@@ -811,7 +821,10 @@ impl Accounts for TotpAccounts {
     ///
     /// - With no `secret` and no `disabled`: begins an enrolment, replacing one waiting for
     ///   the account. The answer's `secret` is the `otpauth://` link (its label the
-    ///   `display_name`, else the name) and `codes` the recovery codes, both said once.
+    ///   `display_name`, else the name) and `codes` the recovery codes, both said once. For
+    ///   an account that is already enrolled (a rotation) it needs `proved_current`, the
+    ///   caller's statement that it checked the current secret, and is refused with
+    ///   `GUATIAO_ERR_BAD_VALUE` without it.
     /// - With a `secret` that is a code from the app: confirms the enrolment waiting for the
     ///   account, within `enrol_seconds`. The new secret replaces any the account had, which
     ///   keeps working until then. A wrong code is `GUATIAO_ERR_BAD_VALUE`; no enrolment

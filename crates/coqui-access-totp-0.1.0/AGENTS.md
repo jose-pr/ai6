@@ -69,6 +69,11 @@ impl Accounts for TotpAccounts { /* accounts, put, remove, waiting */ }
   right code resets it; `put` with `disabled` (either value) resets it. `Lockout::OFF` (`after` 0)
   keeps no count and writes nothing on a wrong code. The delay lets anyone who can name an account keep
   its owner out for up to `longest_seconds` at a time: the consumer's per-address throttle limits that.
+- A check reads and writes only the signing-in account's record (`Table::get`, `Table::update_one`), so its
+  cost does not grow with the number of accounts when the table reads by key. A record the table cannot read, or
+  that is not valid, answers an error for its own account (`GUATIAO_ERR_INTERNAL`, `one-time code table: <reason>`,
+  never the name) and leaves every other account's sign-in alone. A `FileTable` reads its whole file; a file with
+  one undecodable record cannot be read at all.
 - Every step in range is compared in constant time, and every recovery code is compared, none
   stopping the others.
 - A recovery code is `XXXXX-XXXXX` (letters and digits, no `I`, `O`, `0`, `1`), compared without the
@@ -84,6 +89,12 @@ impl Accounts for TotpAccounts { /* accounts, put, remove, waiting */ }
   codes }` once. Nothing is a factor yet. The link is
   `otpauth://totp/[ISSUER:]LABEL?secret=BASE32[&issuer=ISSUER]&algorithm=SHA1&digits=6&period=30`, the
   label `AccountPut::display_name` else `name`, percent-encoded.
+- **Rotation.** For an account that is already enrolled, the no-`secret` call begins a rotation only
+  when `AccountPut::proved_current` is true (the caller checked the current code, or a sign-in that
+  just used it, in this request); otherwise it is `GUATIAO_ERR_BAD_VALUE` ("replacing the one-time
+  code secret needs the caller to prove the current one first"), nothing is written and an
+  enrolment already waiting stays. The provider takes the statement on trust: it cannot re-check
+  a code the caller's own check already spent. An account with no secret needs no statement.
 - `secret` a code from the app: confirms the enrolment waiting, within `enrol_seconds`. The pending
   entry becomes the account, replacing any the account had (rotation: the old secret works until
   this moment). The confirming code is spent. A wrong code is `GUATIAO_ERR_BAD_VALUE` and leaves the

@@ -56,7 +56,14 @@ impl From<RolePolicyError> for ProviderError;   // GUATIAO_ERR_BAD_VALUE
 ```
 
 - `subject` is `account:<name>` | `person:<id>` | `group:<name>`, read as `coqui_access::Subject`
-  (the value also has no whitespace and is at most 256 bytes); `scope` is `*` or
+  (the value also has no whitespace and is at most 256 bytes), or the reserved `any:signed-in`:
+  it matches every subject a sign-in or key resolved (a directory person or a key or other
+  provider's account) and never one with an empty `Person::id`, which is how an anonymous
+  caller reaches an authorizer. It grants nothing by itself: the rule's role does, and rules
+  stay first-match. Any other `any:` name (`any:person`, `any:other`) is refused when the
+  policy builds; a person or group may still be named `any` (`account:any`), since the
+  kind comes first. There is no `any:person`: a `Person` does not say whether it came from
+  a directory or a service account; `scope` is `*` or
   `<kind>:<id>`; `role` must name a defined role.
 - `scope_kinds` lists the kinds a rule scope may use; an empty list allows any kind. `*` is
   always allowed.

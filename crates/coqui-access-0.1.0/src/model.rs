@@ -267,6 +267,15 @@ pub struct AccountPut {
     /// The label an enrolment shows the person (an authenticator app's account line); the
     /// account's name when absent. Providers that keep no such label ignore it.
     pub display_name: Option<String>,
+    /// The caller has checked the account's current secret in this request (a code from it, or
+    /// a sign-in that just used it). A provider that lets a put replace a secret the person
+    /// holds refuses the replacement without it; one that does not ignores it. Absent is false.
+    #[map(default, skip_serializing_if = is_false)]
+    pub proved_current: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl fmt::Debug for AccountPut {
@@ -279,6 +288,7 @@ impl fmt::Debug for AccountPut {
             .field("disabled", &self.disabled)
             .field("expires_unix", &self.expires_unix)
             .field("display_name", &self.display_name.as_ref().map(|_| "…"))
+            .field("proved_current", &self.proved_current)
             .finish()
     }
 }

@@ -1,4 +1,4 @@
-# coqui-access/crates/coqui-access at 97eed019f3df8783bb7e688f2c0889c39dc8c4f8, with what it inherits written out.
+# coqui-access/crates/coqui-access at c2a7cd9b5c17cce7fc8fc6369ef1e1d82f186bef, with what it inherits written out.
 [package]
 name = "coqui-access"
 description = "Authentication, directory, authorization and account-management kinds, and the models that cross them"

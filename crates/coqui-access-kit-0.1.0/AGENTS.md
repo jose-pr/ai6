@@ -287,8 +287,11 @@ pub trait Table<T>: Send + Sync {
     fn put(&self, record: T) -> Result<(), SourceError>;        // default Err(ReadOnly); same key replaces
     fn remove(&self, key: &str) -> Result<bool, SourceError>;   // default Err(ReadOnly); true when it was there
     fn update(&self, make: &mut Update<'_, T>) -> Result<(), SourceError>;   // default: load, make, put
+    fn get(&self, key: &str) -> Result<Option<T>, SourceError> where T: Keyed;   // default: load, find; override to read one record
+    fn update_one(&self, key: &str, make: &mut UpdateOne<'_, T>) -> Result<(), SourceError> where T: Keyed;   // default: update, find
 }
 pub type Update<'a, T> = dyn FnMut(&[T]) -> Result<Option<T>, SourceError> + 'a;   // records read -> the record to put, or None
+pub type UpdateOne<'a, T> = dyn FnMut(Option<&T>) -> Result<Option<T>, SourceError> + 'a;   // the one record read -> the record to put, or None
 pub struct MemoryTable<T>;              // Table<T> for T: Keyed + Clone + Send
 impl<T> MemoryTable<T> { pub fn new() -> Self; pub fn from_records(impl IntoIterator<Item = T>) -> Self; }
 pub struct Reloading<T>;                // Debug
@@ -297,6 +300,10 @@ impl<T: Keyed + Clone> Reloading<T> {
     pub fn read<R>(&self, read: impl FnOnce(&[T]) -> R) -> Result<R, SourceError>;
     pub fn put_with<R>(&self, make: impl FnOnce(&[T]) -> Result<(T, R), SourceError>) -> Result<R, SourceError>;
         // `make` runs against the records the table read for this update (through `Table::update`)
+    pub fn get(&self, key: &str) -> Result<Option<T>, SourceError>;
+        // straight from the table, only that record validated: a bad record is an error for its key alone
+    pub fn update_one<R>(&self, key: &str, make: impl FnOnce(Option<&T>) -> Result<(Option<T>, R), SourceError>) -> Result<R, SourceError>;
+        // as put_with for one record; the result must keep `key`
     pub fn remove(&self, key: &str) -> Result<bool, SourceError>;
 }
 pub fn check_keys<T: Keyed>(records: &[T], max: usize) -> Result<(), SourceError>;

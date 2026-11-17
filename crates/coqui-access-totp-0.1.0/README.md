@@ -22,7 +22,8 @@ one-time recovery codes are made at enrolment and presented as the separate meth
   doubling to an hour; a caller lifts it with `Lockout::OFF`.
 - **Skew** - one step either side by default; every step in range is compared in constant time.
 - **Enrolment you prove** - a secret is not a factor until a code from the app confirms it;
-  rotation keeps the old secret working until then.
+  rotation keeps the old secret working until then, and begins only when the caller says it proved the
+  current one (`AccountPut::proved_current`).
 - **Recovery codes** - ten, kept as digests, each good once, a method the policy must name.
 - **Any source** - an `Arc<dyn Table<TotpRecord>>` and an `Arc<dyn Table<PendingTotp>>`.
 
