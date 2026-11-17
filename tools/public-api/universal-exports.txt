@@ -357,6 +357,7 @@ pub fn universal_exports::Gateway::with_access(universal_exports::GatewayConfig,
 pub fn universal_exports::Gateway::with_access_admin(self, alloc::sync::Arc<universal_exports::LiveAccess>) -> Self
 pub fn universal_exports::Gateway::with_accounts(self, alloc::sync::Arc<dyn coqui_access::kind::Accounts>) -> Self
 pub fn universal_exports::Gateway::with_assistant(self, universal_exports::AssistantConfig) -> Self
+pub fn universal_exports::Gateway::with_degraded(self, alloc::vec::Vec<ai6::directorates::m::placement::Degradation>) -> Self
 pub fn universal_exports::Gateway::with_job_poll_max_wait(self, core::time::Duration) -> Self
 pub fn universal_exports::Gateway::with_liaison(self, universal_exports::liaison::LiaisonConfig) -> Self
 pub fn universal_exports::Gateway::with_own_providers(self, alloc::vec::Vec<ai6::providers::ProviderEntry>) -> Self
@@ -551,6 +552,7 @@ pub universal_exports::RosterRecords::records: alloc::vec::Vec<universal_exports
 pub universal_exports::RosterRecords::revision: alloc::string::String
 pub universal_exports::RosterRecords::writable: bool
 #[non_exhaustive] pub struct universal_exports::StationBoard
+pub universal_exports::StationBoard::gateway_degraded: alloc::vec::Vec<ai6::directorates::m::placement::Degradation>
 pub universal_exports::StationBoard::headquarters_station: core::option::Option<alloc::string::String>
 pub universal_exports::StationBoard::operations: alloc::vec::Vec<universal_exports::BoardOperation>
 pub universal_exports::StationBoard::stations: alloc::vec::Vec<universal_exports::BoardStation>
