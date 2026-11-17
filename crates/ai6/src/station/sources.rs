@@ -1074,10 +1074,12 @@ pub(crate) fn compose_report(disclosure: Disclosure, finished: &FinishedSourceBr
                 .iter()
                 .filter_map(|call| {
                     let tool = call.get("tool")?.as_str()?;
-                    Some(match call.get("target").and_then(serde_json::Value::as_str) {
-                        Some(target) => format!("{tool} `{target}`"),
-                        None => tool.to_owned(),
-                    })
+                    Some(
+                        match call.get("target").and_then(serde_json::Value::as_str) {
+                            Some(target) => format!("{tool} `{target}`"),
+                            None => tool.to_owned(),
+                        },
+                    )
                 })
                 .collect()
         })
@@ -1087,7 +1089,11 @@ pub(crate) fn compose_report(disclosure: Disclosure, finished: &FinishedSourceBr
         lines.push(format!(
             "{count} tool call{} denied by its permission rules{}: {}",
             if count == 1 { "" } else { "s" },
-            if finished.ok { "" } else { " (permission denied)" },
+            if finished.ok {
+                ""
+            } else {
+                " (permission denied)"
+            },
             denials.join(", ")
         ));
     }
@@ -3038,7 +3044,11 @@ title = \"Update dependencies\"
         let body = compose_report(Disclosure::Full, &failed).body;
         assert!(body.contains("1 tool call denied"), "{body}");
         assert!(body.contains("(permission denied)"), "{body}");
-        assert!(!compose_report(Disclosure::Full, &entry).body.contains("(permission denied)"));
+        assert!(
+            !compose_report(Disclosure::Full, &entry)
+                .body
+                .contains("(permission denied)")
+        );
         entry.outcome["denials"] = serde_json::json!([]);
         let none = compose_report(Disclosure::Full, &entry).body;
         assert!(!none.contains("denied"), "{none}");

@@ -18,13 +18,20 @@ pub(crate) fn refused_libraries(
         .filter(|library| library.verdict.starts_with("refused"))
         .map(|library| {
             let kinds = library.kinds.join(", ");
-            let depends = if library.kinds.iter().any(|kind| kind.contains("agent_handler")) {
+            let depends = if library
+                .kinds
+                .iter()
+                .any(|kind| kind.contains("agent_handler"))
+            {
                 let stranded: Vec<&str> = agents
                     .iter()
                     .filter(|agent| !agent.runs_on(loaded_handlers))
                     .map(|agent| agent.id.as_str())
                     .collect();
-                vec![format!("Agents without a loaded handler: {}", stranded.join(", "))]
+                vec![format!(
+                    "Agents without a loaded handler: {}",
+                    stranded.join(", ")
+                )]
             } else {
                 vec![format!("providers of kind {kinds}")]
             };
@@ -59,13 +66,24 @@ mod tests {
         let mut agent = Agent::new("007");
         agent.handler = Some("claude".to_owned());
         let found = [
-            library("claude.dll", "refused: digest differs from its pin", "ai6_agent_handler"),
+            library(
+                "claude.dll",
+                "refused: digest differs from its pin",
+                "ai6_agent_handler",
+            ),
             library("spare.dll", "unpinned", "ai6_terminal"),
         ];
         let degraded = refused_libraries(&found, &[agent], &["codex".to_owned()]);
-        assert_eq!(degraded.len(), 1, "an unpinned library awaits approval; it is not refused");
+        assert_eq!(
+            degraded.len(),
+            1,
+            "an unpinned library awaits approval; it is not refused"
+        );
         assert_eq!(degraded[0].subject, "claude.dll");
-        assert!(degraded[0].reason.contains("ai6_agent_handler"), "{degraded:?}");
+        assert!(
+            degraded[0].reason.contains("ai6_agent_handler"),
+            "{degraded:?}"
+        );
         assert!(degraded[0].depends[0].contains("007"), "{degraded:?}");
     }
 }

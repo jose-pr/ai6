@@ -2079,9 +2079,16 @@ fn decode_denials(value: &Value) -> Option<AgentEvent> {
                 tools.push(tool);
             }
             let target = denial.get("tool_input").and_then(|input| {
-                ["file_path", "notebook_path", "path", "command", "url", "pattern"]
-                    .iter()
-                    .find_map(|field| input.get(*field).and_then(Value::as_str))
+                [
+                    "file_path",
+                    "notebook_path",
+                    "path",
+                    "command",
+                    "url",
+                    "pattern",
+                ]
+                .iter()
+                .find_map(|field| input.get(*field).and_then(Value::as_str))
             });
             calls.push(json!({"tool": tool, "target": target}));
         }

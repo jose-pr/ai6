@@ -1250,9 +1250,7 @@ mod tests {
             Denial::named("Write", Some("/w/a".to_owned()), "permission rules"),
             Denial::named("Bash", None, "permission rules"),
         ];
-        missions
-            .note_denials(id.as_str(), tools.clone())
-            .unwrap();
+        missions.note_denials(id.as_str(), tools.clone()).unwrap();
         let blocked = missions
             .transition(id.as_str(), MissionState::Blocked)
             .unwrap();
@@ -1261,9 +1259,7 @@ mod tests {
             .transition(id.as_str(), MissionState::Working)
             .unwrap();
         assert!(working.denials.is_empty());
-        missions
-            .note_denials(id.as_str(), tools.clone())
-            .unwrap();
+        missions.note_denials(id.as_str(), tools.clone()).unwrap();
         let done = missions
             .transition(id.as_str(), MissionState::Done)
             .unwrap();
