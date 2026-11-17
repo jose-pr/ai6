@@ -666,7 +666,7 @@ async fn serve(args: ServeArgs) -> ExitCode {
         plugin_paths,
         plugin_profile,
     } = args;
-    let mut located = match load_bootstrap(&bootstrap) {
+    let mut located = match Bootstrap::find_degraded(bootstrap.config.as_deref()) {
         Ok(located) => located,
         Err(error) => {
             eprintln!("ai6: {error}");
@@ -740,7 +740,7 @@ async fn serve(args: ServeArgs) -> ExitCode {
 
 /// The bootstrap file `--config` names, else the one the search finds, else the defaults.
 fn load_bootstrap(bootstrap: &BootstrapArg) -> Result<Located<Bootstrap>, String> {
-    Bootstrap::find_degraded(bootstrap.config.as_deref()).map_err(|error| error.to_string())
+    Bootstrap::find(bootstrap.config.as_deref()).map_err(|error| error.to_string())
 }
 
 /// What a degraded read of the bootstrap file left out, as the Station reports it.

@@ -578,6 +578,40 @@ fn starts(dir: &Path, config: &Path, env: &[(&str, &str)]) -> String {
     said
 }
 
+/// What a program that goes on serving said on standard error up to the first line holding
+/// `until`; it is killed once it has said it, or at the deadline.
+fn serving_until(command: &mut Command, until: &str) -> String {
+    use std::io::{BufRead, BufReader};
+    let mut child = command
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let (lines, heard) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            if lines.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    let mut said = String::new();
+    while let Ok(line) =
+        heard.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+    {
+        said.push_str(&line);
+        said.push('\n');
+        if line.contains(until) {
+            break;
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    said
+}
+
 /// What a program said as it stopped: its exit code and standard error. A program that goes on
 /// serving past the deadline is killed, and has no exit code to report.
 fn stopped(command: &mut Command) -> (Option<i32>, String) {
@@ -597,7 +631,7 @@ fn stopped(command: &mut Command) -> (Option<i32>, String) {
 }
 
 #[test]
-fn a_station_refuses_a_key_nobody_knows_and_does_not_repeat_its_value() {
+fn a_station_starts_degraded_naming_a_key_nobody_knows_and_does_not_repeat_its_value() {
     let dir = tempfile::tempdir().unwrap();
     let config = one_file(dir.path(), "http://127.0.0.1:9", free_port(), free_port());
     let text = std::fs::read_to_string(&config).unwrap();
@@ -619,9 +653,13 @@ fn a_station_refuses_a_key_nobody_knows_and_does_not_repeat_its_value() {
         ),
     ] {
         std::fs::write(&config, document).unwrap();
-        let (code, said) = stopped(ai6().args(["serve", "--config"]).arg(&config));
-        assert_eq!(code, Some(1), "{said}");
+        let said = serving_until(
+            ai6().args(["serve", "--config"]).arg(&config),
+            "starting degraded",
+        );
+        assert!(said.contains("starting degraded"), "{said}");
         assert!(said.contains(key), "names {key}: {said}");
+        assert!(said.contains("ai6.cfg"), "names the file: {said}");
         assert!(!said.contains(PLANTED), "{said}");
     }
 }

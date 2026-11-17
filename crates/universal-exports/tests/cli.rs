@@ -200,6 +200,40 @@ fn stopped(command: &mut Command) -> (Option<i32>, String) {
     (code, String::from_utf8_lossy(&output.stderr).into_owned())
 }
 
+/// What a program that goes on serving said on standard error up to the first line holding
+/// `until`; it is killed once it has said it, or at the deadline.
+fn serving_until(command: &mut Command, until: &str) -> String {
+    use std::io::{BufRead, BufReader};
+    let mut child = command
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let (lines, heard) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            if lines.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    let mut said = String::new();
+    while let Ok(line) =
+        heard.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+    {
+        said.push_str(&line);
+        said.push('\n');
+        if line.contains(until) {
+            break;
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    said
+}
+
 #[test]
 fn the_gateway_starts_from_the_one_file_every_program_shares() {
     let dir = tempfile::tempdir().unwrap();
@@ -235,7 +269,7 @@ fn the_gateway_starts_from_the_one_file_every_program_shares() {
 }
 
 #[test]
-fn the_gateway_refuses_a_key_nobody_knows_and_does_not_repeat_its_value() {
+fn the_gateway_starts_degraded_naming_a_key_nobody_knows_and_does_not_repeat_its_value() {
     let dir = tempfile::tempdir().unwrap();
     let config = one_file(dir.path(), free_port());
     let text = std::fs::read_to_string(&config).unwrap();
@@ -254,9 +288,10 @@ fn the_gateway_refuses_a_key_nobody_knows_and_does_not_repeat_its_value() {
         ),
     ] {
         std::fs::write(&config, document).unwrap();
-        let (code, said) = stopped(gateway().arg("--config").arg(&config));
-        assert_eq!(code, Some(1), "{said}");
+        let said = serving_until(gateway().arg("--config").arg(&config), "starting degraded");
+        assert!(said.contains("starting degraded"), "{said}");
         assert!(said.contains(key), "names {key}: {said}");
+        assert!(said.contains("ai6.cfg"), "names the file: {said}");
         assert!(!said.contains("pl4nted"), "{said}");
     }
 }
