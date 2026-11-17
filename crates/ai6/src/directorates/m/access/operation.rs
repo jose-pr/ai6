@@ -174,8 +174,10 @@ fn rule_outcome(
     set: &AccessSet<'_>,
     delegable: &BTreeSet<String>,
 ) -> Result<Vec<String>, String> {
-    if rule.subject.parse::<Subject>().is_err() {
-        return Err("a subject is account:<name>, person:<id> or group:<name>".into());
+    if rule.subject != "any:signed-in" && rule.subject.parse::<Subject>().is_err() {
+        return Err(
+            "a subject is account:<name>, person:<id>, group:<name> or any:signed-in".into(),
+        );
     }
     let inside = rule.scope.strip_prefix("operation:").is_some_and(|scope| {
         set.lineage.contains(scope) && set.lineage.in_subtree(scope, operation)

@@ -75,9 +75,26 @@ pub(super) struct TierRule {
     pub index: usize,
 }
 
+/// What a rule names: one subject, or every signed-in person (`any:signed-in`).
+#[derive(Clone)]
+enum Who {
+    AnySignedIn,
+    Subject(Subject),
+}
+
+impl Who {
+    /// A person a sign-in resolved has an ID; a caller with none has an empty one.
+    fn matches(&self, person: &Person) -> bool {
+        match self {
+            Self::AnySignedIn => !person.id.is_empty(),
+            Self::Subject(subject) => subject.matches(person),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct WalkRule {
-    subject: Subject,
+    subject: Who,
     scope: String,
     role: String,
     shown: String,
@@ -111,9 +128,16 @@ impl Tier {
         }
         let mut walk = Vec::with_capacity(rules.len());
         for rule in rules {
-            let subject: Subject = rule.subject.parse().map_err(|_| {
-                AccessPolicyError("rule subject must be account, person or group:<value>".into())
-            })?;
+            let subject = if rule.subject == "any:signed-in" {
+                Who::AnySignedIn
+            } else {
+                Who::Subject(rule.subject.parse().map_err(|_| {
+                    AccessPolicyError(
+                        "rule subject must be account, person or group:<value>, or any:signed-in"
+                            .into(),
+                    )
+                })?)
+            };
             builder = builder.rule(
                 Rule::new(rule.subject, rule.scope.clone(), rule.role.clone())
                     .propagate(rule.propagate),

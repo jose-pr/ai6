@@ -285,6 +285,36 @@ mod tests {
     }
 
     #[test]
+    fn any_signed_in_gives_the_viewer_role_to_a_person_in_no_group_and_not_to_an_anonymous_caller()
+    {
+        let policy = access_from_toml(
+            r#"
+                [role.viewer]
+                actions = ["mission.read"]
+
+                [[rule]]
+                subject = "any:signed-in"
+                scope = "*"
+                role = "viewer"
+            "#,
+            Limit::UNBOUNDED,
+        )
+        .unwrap();
+        let allowed = |person: Person| {
+            policy
+                .authorize(request(person, "mission.read", "operation:G"))
+                .unwrap()
+                .allowed
+        };
+        assert!(allowed(person("person-lone", "lone", &[])));
+        assert!(!allowed(Person::default()), "an empty id is not signed in");
+        assert!(!allowed(Person {
+            name: "anonymous".to_owned(),
+            ..Person::default()
+        }));
+    }
+
+    #[test]
     fn a_rule_on_a_parent_operation_reaches_its_children_unless_it_does_not_propagate() {
         let policy = access_from_toml(
             r#"

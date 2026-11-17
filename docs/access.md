@@ -212,6 +212,29 @@ scope = "config:assistant"
 role = "memory-admin"
 ```
 
+### Everyone who is signed in
+
+The subject `any:signed-in` matches every person a sign-in, a key or a certificate resolved, whatever
+groups they are in, and nobody else: a caller with no sign-in reaches the policy with an empty
+person ID, which it never matches (a route that needs a sign-in answers such a caller `401` before it asks the
+policy anything). Nothing binds it by default; a deployment that wants every signed-in person to
+read a scope names it:
+
+```toml
+[[rule]]
+subject = "any:signed-in"
+scope = "operation:G"
+role = "viewer"
+```
+
+An Active Directory sign-in token carries Everyone and Authenticated Users as SIDs, not as groups,
+so no `group:` rule can name them; `any:signed-in` covers them for every way in. The directory
+provider (`coqui_access_ldap`) does list a person's primary group, read from `primaryGroupID`
+and found by SID under `group_base`: `group:Domain Users` matches an AD person without a
+`memberOf` entry for it. A primary group that cannot be found adds nothing, and the person keeps
+the groups they have. The first match still decides, so place a rule for `any:signed-in` after
+narrower ones it should not override.
+
 ## The sign-in policy
 
 Which methods a sign-in may use, from where it is made, and what it still needs, is decided by a
