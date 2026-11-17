@@ -566,6 +566,7 @@ mod tests {
             deliverables: Vec::new(),
             evidence: Vec::new(),
             probe_requested: None,
+            comments_through: None,
             recommendation: None,
             starts: Vec::new(),
         }

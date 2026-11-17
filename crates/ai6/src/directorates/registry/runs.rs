@@ -325,6 +325,11 @@ pub struct RunRecord {
     /// has.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub probe_requested: Option<f64>,
+    /// How far into its source issue's comments the brief of a standing window reached, as
+    /// `created`, a tab and the comment's ID. The next window briefs what is past the latest
+    /// such mark of a run that ended done.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comments_through: Option<String>,
     /// What a charge held at `desk` clearance advises for a verifying run; it settles
     /// nothing, and a person's decision confirms it or overrides it. The latest stands.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -633,6 +638,7 @@ pub struct NewRun {
     launch: Option<RunLaunch>,
     account: Option<AccountRef>,
     window: Option<String>,
+    comments_through: Option<String>,
     start: Option<RunStart>,
 }
 
@@ -657,8 +663,15 @@ impl NewRun {
             launch: None,
             account: None,
             window: None,
+            comments_through: None,
             start: None,
         }
+    }
+
+    /// Records how far into its source issue's comments the Run's brief reached.
+    pub fn with_comments_through(mut self, cursor: Option<String>) -> Self {
+        self.comments_through = cursor;
+        self
     }
 
     /// Records the first start of the Run.
@@ -1065,6 +1078,7 @@ pub(super) fn opened(new: NewRun, ttl: Duration, now: f64, term: u64) -> RunReco
         deliverables: Vec::new(),
         evidence: Vec::new(),
         probe_requested: None,
+        comments_through: new.comments_through,
         recommendation: None,
         starts: new.start.into_iter().collect(),
     }
@@ -2647,4 +2661,15 @@ mod tests {
         }
         assert!(registry.run("../escape").is_err());
     }
+}
+
+/// A fresh record of run `number` of `mission`, for tests of what reads Run records.
+#[cfg(test)]
+pub(crate) fn opened_for_test(mission: &str, number: u32) -> RunRecord {
+    opened(
+        NewRun::new(format!("{mission}.{number}"), mission, "s-1").with_number(number, None),
+        Duration::from_secs(60),
+        0.0,
+        1,
+    )
 }

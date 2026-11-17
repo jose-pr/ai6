@@ -64,6 +64,7 @@ mod usage_watch;
 mod verdicts;
 mod verification;
 mod vetting;
+mod window_delta;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
@@ -96,7 +97,6 @@ use crate::directorates::m::placement::{
     StationFacts,
 };
 use crate::directorates::m::roster;
-use crate::directorates::q::outbound;
 use crate::directorates::m::roster::AgentRole;
 use crate::directorates::m::roster::Roster;
 use crate::directorates::m::theaters::{LOCAL_THEATER, Theater, TheaterAccess, Theaters};
@@ -105,6 +105,7 @@ use crate::directorates::medical::exposure::ExposureGate;
 use crate::directorates::medical::quarantine::IncidentKind;
 use crate::directorates::medical::usage::UsageTracker;
 use crate::directorates::medical::watchdog::{Watchdog, WatchdogConfig};
+use crate::directorates::q::outbound;
 use crate::directorates::q::safehouse::{SafeHouseCheckpoint, SafeHouseReport, SafeHouseSpec};
 use crate::directorates::q::terminal::{DEFAULT_TERMINAL, HarnessStdio, Terminal, TerminalBridge};
 use crate::directorates::q::transport::TransportClient;
@@ -5684,6 +5685,17 @@ async fn start_mission(
             initial_context.push(text);
         }
     }
+    // What its source issue gained since the last window that ended done.
+    let comments_through = match window_run
+        .as_ref()
+        .and_then(|_| window_delta::of(&state, mission_id.as_str()))
+    {
+        Some(delta) => {
+            initial_context.extend(delta.text);
+            delta.through
+        }
+        None => None,
+    };
     let task = mission.task();
     let prompt_record = PromptRecord::new(
         &task,
@@ -5920,7 +5932,9 @@ async fn start_mission(
         .with_number(attempt, predecessor)
         .with_exposure(exposure.exposures());
     if let Some(run) = &window_run {
-        new_run = new_run.with_window(run.window.as_str());
+        new_run = new_run
+            .with_window(run.window.as_str())
+            .with_comments_through(comments_through);
     }
     if let Some(account) = accounts::held(&state, &mission_id) {
         new_run = new_run.with_account(account);
@@ -8111,8 +8125,7 @@ fn publish_lifecycle(state: &DaemonState, mission_id: &str, mission_state: Missi
 fn denied_reason(state: &DaemonState, mission_id: &str) -> Option<&'static str> {
     let missions = state.missions.lock().ok()?;
     let mission = missions.get(mission_id)?;
-    (mission.state == MissionState::Failed && !mission.denials.is_empty())
-        .then_some(DENIED_REASON)
+    (mission.state == MissionState::Failed && !mission.denials.is_empty()).then_some(DENIED_REASON)
 }
 
 /// The reason an ended run of a Sleeper's order is published with, so the board says it is an
