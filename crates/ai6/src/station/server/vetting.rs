@@ -503,8 +503,9 @@ impl<'a> Round<'a> {
         Some(())
     }
 
-    /// Returns to the queue, to be vetted again, the briefs held only for the rate longer than
-    /// their Operation's `rate_hold_hours`. Looks at most once a minute.
+    /// Returns to the queue, to be vetted again, the briefs held only for the rate once the
+    /// rate window has rolled since they were held (or sooner, by their Operation's
+    /// `rate_hold_hours`). Looks at most once a minute.
     pub(super) fn requeue_expired(&mut self) {
         let state = self.state;
         let due = state.vetting.swept_at.lock().is_ok_and(|mut swept_at| {
@@ -519,13 +520,15 @@ impl<'a> Round<'a> {
             return;
         }
         for operation in state.roster.operations() {
-            let Some(secs) = operation
-                .vetting
-                .rate_hold_secs
-                .filter(|_| operation.vetting.enabled)
-            else {
+            if !operation.vetting.enabled {
+                continue;
+            }
+            // 0 hours keeps a held brief for a person; any other hold ends when the window rolls.
+            let Some(hold) = operation.vetting.rate_hold_secs else {
                 continue;
             };
+            let window = state.station.limits().vetting.rate_window.0.as_secs();
+            let secs = hold.min(window);
             let held = match state
                 .intake
                 .held_briefs(&operation.id, held_results(&state.intake.limits()))
@@ -1861,6 +1864,35 @@ mod tests {
         assert!(state.intake.lease(&first).unwrap().is_some());
         assert!(state.intake.lease(&second).unwrap().is_some());
         assert!(intake_actions(&state).is_empty());
+    }
+
+    #[test]
+    fn a_brief_held_for_the_rate_is_released_when_the_rate_window_rolls() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = headquarters(dir.path(), "vetting = { max_per_source_per_hour = 1 }\n");
+        ingest(
+            &state,
+            "github",
+            &item("org/repo#1", "One", "a", "https://x/1"),
+        );
+        let second = ingest(
+            &state,
+            "github",
+            &item("org/repo#2", "Two", "b", "https://x/2"),
+        );
+        assert!(schedule_intake_once(&state));
+        assert_eq!(state.intake.held_briefs("G", 10).unwrap().len(), 1);
+        assert!(
+            intake_actions(&state).contains(&"held".to_owned()),
+            "the timeline says it was held"
+        );
+
+        later(&mut state, 2 * 3_600);
+        assert!(schedule_intake_once(&state));
+        assert!(state.intake.held_briefs("G", 10).unwrap().is_empty());
+        assert!(intake_actions(&state).contains(&"requeued".to_owned()));
+        assert!(schedule_intake_once(&state));
+        assert!(state.intake.lease(&second).unwrap().is_some());
     }
 
     #[test]
