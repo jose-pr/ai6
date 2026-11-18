@@ -56,6 +56,8 @@ Future<MissionBoard> _board(
   List<http.Request> writes, {
   List<String> actions = const ['mission.read', 'pool.read'],
   int writeStatus = 202,
+  String writeBody = 'secret body',
+  List<Map<String, Object?>>? accounts,
 }) async {
   final board = MissionBoard(
     apiOrigin: Uri.parse('https://oo.example'),
@@ -67,13 +69,13 @@ Future<MissionBoard> _board(
       }
       if (request.method != 'GET') {
         writes.add(request);
-        return http.Response('secret body', writeStatus);
+        return http.Response(writeBody, writeStatus);
       }
       if (path.endsWith('/pools')) {
         return http.Response(
           jsonEncode({
             'operation_id': 'G',
-            'accounts': [_healthy(), _needsPerson()],
+            'accounts': accounts ?? [_healthy(), _needsPerson()],
           }),
           200,
         );
@@ -232,6 +234,86 @@ void main() {
     );
     expect(writes.last.url.queryParameters, {'sign_out': 'true'});
     expect(writes, hasLength(4));
+  });
+
+  testWidgets('Read usage now asks the gateway and says how it went', (
+    tester,
+  ) async {
+    final writes = <http.Request>[];
+    final board = await _board(
+      writes,
+      writeStatus: 200,
+      writeBody: jsonEncode({
+        ...account('alpha'),
+        'usage_read': {
+          'requested_at': _now,
+          'answered_at': _now + 1,
+          'result': 'reading from 5s ago',
+        },
+      }),
+      accounts: [
+        {
+          ...account('alpha'),
+          'usage_read': {
+            'requested_at': _now - 600,
+            'answered_at': _now - 599,
+            'result':
+                'not read: this handler learns its usage only during a turn',
+          },
+        },
+      ],
+    );
+    addTearDown(board.dispose);
+    await openAt(tester, board, '/pools', size: const Size(1280, 1200));
+    expect(
+      find.textContaining(
+        'not read: this handler learns its usage only during a turn',
+      ),
+      findsOneWidget,
+      reason: 'the last ask shows with the account',
+    );
+    expect(find.text('Read usage now'), findsOneWidget);
+    await tester.tap(find.text('Read usage now'));
+    await tester.pumpAndSettle();
+    expect(writes.single.method, 'POST');
+    expect(
+      writes.single.url.path,
+      '/v1/user/operations/G/pools/team/alpha/usage',
+    );
+    expect(find.text('Usage: reading from 5s ago.'), findsOneWidget);
+  });
+
+  testWidgets('a usage read that no Station has answered says so', (
+    tester,
+  ) async {
+    final waiting = await _board(
+      [],
+      writeStatus: 202,
+      writeBody: jsonEncode({
+        ...account('alpha'),
+        'usage_read': {'requested_at': _now},
+      }),
+    );
+    addTearDown(waiting.dispose);
+    await openAt(tester, waiting, '/pools', size: const Size(1280, 1200));
+    await tester.tap(find.text('Read usage now').first);
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Asked a Station holding the account'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('a refused usage read shows its status and never its body', (
+    tester,
+  ) async {
+    final refused = await _board([], writeStatus: 403);
+    addTearDown(refused.dispose);
+    await openAt(tester, refused, '/pools', size: const Size(1280, 1200));
+    await tester.tap(find.text('Read usage now').first);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('HTTP 403'), findsOneWidget);
+    expect(find.textContaining('secret body'), findsNothing);
   });
 
   testWidgets('a refusal shows its status, never its body', (tester) async {

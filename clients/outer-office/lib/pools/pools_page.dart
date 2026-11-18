@@ -225,6 +225,36 @@ class PoolLoginForget extends PoolLoginChange {
   final bool signOut;
 }
 
+/// The last request that an account's usage be read now, and how a Station answered.
+@immutable
+class PoolUsageRead {
+  const PoolUsageRead({
+    required this.requestedAt,
+    this.answeredAt,
+    this.result,
+  });
+
+  /// Unix seconds.
+  final double requestedAt;
+
+  /// Unix seconds, once a Station answered.
+  final double? answeredAt;
+
+  /// `read`, `reading from 5s ago` or `not read: why`; never a credential.
+  final String? result;
+
+  factory PoolUsageRead.fromJson(Map<String, dynamic> json) => PoolUsageRead(
+    requestedAt: (json['requested_at'] as num).toDouble(),
+    answeredAt: (json['answered_at'] as num?)?.toDouble(),
+    result: json['result'] as String?,
+  );
+
+  /// As a person reads it.
+  String get label => answeredAt == null
+      ? 'Usage requested ${ooRelativeTime(requestedAt)}, no Station has answered yet'
+      : 'Usage request ${ooRelativeTime(answeredAt!)}: ${result ?? 'answered'}';
+}
+
 /// One pool account as the board shows it: never a credential.
 @immutable
 class PoolAccountSummary {
@@ -240,6 +270,7 @@ class PoolAccountSummary {
     this.limitedUntil,
     this.tokensToday = 0,
     this.login,
+    this.usageRead,
   });
 
   final String pool;
@@ -262,6 +293,9 @@ class PoolAccountSummary {
   /// The sealed login it keeps, or null for an account that keeps none.
   final PoolLogin? login;
 
+  /// The last time a person asked for its usage to be read now.
+  final PoolUsageRead? usageRead;
+
   factory PoolAccountSummary.fromJson(Map<String, dynamic> json) =>
       PoolAccountSummary(
         pool: json['pool'] as String,
@@ -282,6 +316,10 @@ class PoolAccountSummary {
         tokensToday: json['tokens_today'] as int,
         login: switch (json['login']) {
           final Map<String, dynamic> login => PoolLogin.fromJson(login),
+          _ => null,
+        },
+        usageRead: switch (json['usage_read']) {
+          final Map<String, dynamic> read => PoolUsageRead.fromJson(read),
           _ => null,
         },
       );
@@ -561,6 +599,33 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
     if (mounted) unawaited(_load());
   }
 
+  /// The Operation in which the person may read [row]'s usage: any that shows the account.
+  String? _readIn(OoGrouped<PoolAccountSummary> row) {
+    final may = widget.board.poolOperations;
+    for (final operation in row.operations) {
+      if (may.contains(operation)) return operation;
+    }
+    return null;
+  }
+
+  Future<void> _readUsage(String operation, PoolAccountSummary account) async {
+    final messenger = ScaffoldMessenger.of(context);
+    String outcome;
+    try {
+      outcome = await widget.board.readPoolUsage(
+        operation,
+        account.pool,
+        account.account,
+      );
+    } on Object catch (error) {
+      outcome = error is StateError
+          ? error.message
+          : 'The usage could not be read.';
+    }
+    messenger.showSnackBar(SnackBar(content: Text(outcome)));
+    if (mounted) unawaited(_load());
+  }
+
   Future<void> _addStation(String operation, PoolAccountSummary account) async {
     final station = await showDialog<String>(
       context: context,
@@ -756,6 +821,12 @@ class _AccountPoolsPageState extends State<AccountPoolsPage> {
               ].join(' · '),
             ),
             if (account.readLabel case final read?) Text(read),
+            if (account.usageRead case final asked?) Text(asked.label),
+            if (_readIn(row) case final operation?)
+              TextButton(
+                onPressed: () => unawaited(_readUsage(operation, account)),
+                child: const Text('Read usage now'),
+              ),
             if (account.login case final login?)
               _loginBlock(context, row, login),
             for (final (operation, read) in row.reads)

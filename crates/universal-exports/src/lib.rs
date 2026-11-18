@@ -120,7 +120,9 @@ pub use keys::KeyProvider;
 use login_limit::LoginGuard;
 pub use login_limit::LoginLimits;
 pub use moneypenny::{AssistantConfig, PagesConfig, ViewLimits};
-pub use pools::{BoardAccount, BoardClaim, BoardLogin, BoardLoginRequest, BoardWindow, PoolBoard};
+pub use pools::{
+    BoardAccount, BoardClaim, BoardLogin, BoardLoginRequest, BoardUsageRead, BoardWindow, PoolBoard,
+};
 pub use roster::{EffectiveOperation, RosterChange, RosterRecord, RosterRecords};
 pub use second_factor::{TOTP as TOTP_PROVIDER, totp_builder, totp_provider};
 pub use sign_in::{LiveSignIn, SignInLoader, nothing_offered};
@@ -2191,6 +2193,10 @@ impl Gateway {
             .route(
                 "/v1/user/operations/{operation_id}/pools/{pool}/{account}/clear-limit",
                 post(pools::clear_limit),
+            )
+            .route(
+                "/v1/user/operations/{operation_id}/pools/{pool}/{account}/usage",
+                post(pools::read_usage),
             )
             .route(
                 "/v1/user/operations/{operation_id}/pools/{pool}/{account}/login",

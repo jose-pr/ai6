@@ -2276,6 +2276,48 @@ class MissionBoard extends ChangeNotifier
     };
   }
 
+  /// Asks the gateway to read an account's usage from its provider now, and says what came of it.
+  /// A reading made a moment ago is reused. Only the status of a refusal is reported, never a body.
+  Future<String> readPoolUsage(
+    String operationId,
+    String pool,
+    String account,
+  ) async {
+    if (demo) return 'Preview: no usage was read.';
+    final token = accessToken;
+    if (token == null) throw StateError('Sign in before reading usage.');
+    final response = await _client.post(
+      apiOrigin.resolve(
+        '/v1/user/operations/${Uri.encodeComponent(operationId)}/pools/'
+        '${Uri.encodeComponent(pool)}/${Uri.encodeComponent(account)}/usage',
+      ),
+      headers: {'authorization': 'Bearer $token'},
+    );
+    return switch (response.statusCode) {
+      200 || 202 => _usageOutcome(response),
+      403 => 'This account may not read that usage (HTTP 403).',
+      404 => 'No such account (HTTP 404).',
+      final status => 'The gateway refused the request (HTTP $status).',
+    };
+  }
+
+  /// What a Station answered to a request for usage, from the board entry the gateway returned.
+  String _usageOutcome(http.Response response) {
+    try {
+      final read =
+          (jsonDecode(response.body) as Map<String, dynamic>)['usage_read'];
+      if (read is Map<String, dynamic>) {
+        final result = read['result'];
+        if (read['answered_at'] != null && result is String) {
+          return 'Usage: $result.';
+        }
+      }
+    } on Object {
+      // The board shows the request either way.
+    }
+    return 'Asked a Station holding the account to read its usage; the board shows it when one answers.';
+  }
+
   /// Whether the person may see any charge: M's (`config.read` on charges), an Operation's
   /// (`mission.read`) or a Station's (`station.read`), or may converse with one.
   bool get canOpenCharges =>

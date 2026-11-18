@@ -37,6 +37,18 @@ pub struct BoardWindow {
     pub observed_at: f64,
 }
 
+/// The last time a person asked for an account's usage to be read now, and how it went.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct BoardUsageRead {
+    /// When it was asked, as Unix seconds.
+    pub requested_at: f64,
+    /// When a Station answered, as Unix seconds; absent while it waits.
+    pub answered_at: Option<f64>,
+    /// How it went: `read`, `reading from <age> ago` or `not read: <why>`; never a credential.
+    pub result: Option<String>,
+}
+
 /// One Run using an account.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -184,6 +196,8 @@ pub struct BoardAccount {
     pub tokens_today: u64,
     /// Its login, when one is kept sealed in the Registry.
     pub login: Option<BoardLogin>,
+    /// The last request that its usage be read now, when a person made one.
+    pub usage_read: Option<BoardUsageRead>,
 }
 
 /// The board for one Operation.
@@ -214,6 +228,11 @@ fn board_account(state: AccountState, operation: &str, now: f64) -> Option<Board
     );
     Some(BoardAccount {
         login,
+        usage_read: state.usage_request.as_ref().map(|ask| BoardUsageRead {
+            requested_at: ask.at,
+            answered_at: ask.done_at,
+            result: ask.result.clone(),
+        }),
         tokens_today: state.tokens_on_day(now as i64),
         active: own
             .into_iter()
@@ -271,6 +290,83 @@ pub(crate) async fn operation_pools(
             .collect(),
         operation_id: operation,
     }))
+}
+
+/// How long a request to read an account's usage waits for a Station's answer before the gateway
+/// replies that it is still waiting.
+const USAGE_WAIT: std::time::Duration =
+    std::time::Duration::from_millis(if cfg!(test) { 1_500 } else { 20_000 });
+/// How often the gateway looks at the Registry while it waits.
+const USAGE_POLL: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// `POST /v1/user/operations/{operation_id}/pools/{pool}/{account}/usage`: asks a Station that
+/// holds the account to read its usage from its provider now, and answers the account's board
+/// entry once one has answered: `200` with the new reading, or `202` with the request still
+/// waiting after a while. A reading made a moment ago is reused, so asking often reaches the
+/// provider once. Needs `pool.read` on the Operation, as the board does; `404` for an account not
+/// declared for the Operation.
+pub(crate) async fn read_usage(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path((operation_id, pool, account)): Path<(String, String, String)>,
+) -> Result<(StatusCode, Json<BoardAccount>), ApiError> {
+    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    let operation = OperationId::new(operation_id).map_err(|_| ApiError::bad_request())?;
+    let account = AccountRef::new(pool, account);
+    authorize_operation_action(&gateway, person.clone(), &operation, "pool.read").await?;
+    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+    let (name, by, now) = (
+        operation.to_string(),
+        crate::actor_of(&person),
+        unix_timestamp()?,
+    );
+    let target = account.clone();
+    let asking = registry.clone();
+    let asked = tokio::task::spawn_blocking(move || {
+        let declared = asking
+            .accounts()
+            .map_err(|_| ApiError::internal())?
+            .into_iter()
+            .find(|state| state.account == target)
+            .and_then(|state| state.profile())
+            .is_some_and(|profile| profile.operations.contains(&name));
+        if !declared {
+            return Err(ApiError::from(GatewayError::NotFound));
+        }
+        ai6::directorates::q::usage_standing::request(asking.as_ref(), &target, &by, now)
+            .map_err(|_| ApiError::internal())
+    })
+    .await
+    .map_err(|_| ApiError::internal())??;
+    let deadline = std::time::Instant::now() + USAGE_WAIT;
+    loop {
+        let (looking, target) = (registry.clone(), account.clone());
+        let states = tokio::task::spawn_blocking(move || looking.accounts())
+            .await
+            .map_err(|_| ApiError::internal())?
+            .map_err(|_| ApiError::internal())?;
+        let state = states
+            .into_iter()
+            .find(|state| state.account == target)
+            .ok_or_else(|| ApiError::from(GatewayError::NotFound))?;
+        // The request this call made, or a later one: either way a Station has answered. Times match
+        // to the millisecond, since the Registry keeps them as JSON numbers.
+        let answered = state
+            .usage_request
+            .as_ref()
+            .is_some_and(|ask| ask.at >= asked.at - 0.001 && !ask.waits());
+        if answered || std::time::Instant::now() >= deadline {
+            let status = if answered {
+                StatusCode::OK
+            } else {
+                StatusCode::ACCEPTED
+            };
+            let entry = board_account(state, &operation.to_string(), unix_timestamp()?)
+                .ok_or_else(|| ApiError::from(GatewayError::NotFound))?;
+            return Ok((status, Json(entry)));
+        }
+        tokio::time::sleep(USAGE_POLL).await;
+    }
 }
 
 /// `POST /v1/user/operations/{operation_id}/pools/{pool}/{account}/clear-limit`: lifts an
@@ -770,10 +866,117 @@ mod tests {
                 "pool",
                 "priority",
                 "tokens_today",
+                "usage_read",
                 "windows",
             ],
             "no field carries a secret name or a login directory"
         );
+    }
+
+    /// What `POST .../usage` answers for `account`: the status and the board entry.
+    async fn ask_usage(
+        served: &Served,
+        token: &str,
+        account: &str,
+    ) -> (StatusCode, serde_json::Value) {
+        let response = reqwest::Client::new()
+            .post(format!(
+                "{}/v1/user/operations/G/pools/team/{account}/usage",
+                served.base
+            ))
+            .bearer_auth(token)
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        (status, response.json().await.unwrap_or_default())
+    }
+
+    #[tokio::test]
+    async fn asking_for_usage_needs_pool_read_and_a_station_answers_it_through_the_registry() {
+        let served = served_with(ROLES).await;
+        declare(&served);
+        let alpha = AccountRef::new("team", "alpha");
+        assert_eq!(
+            ask_usage(&served, "not-a-token", "alpha").await.0,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            ask_usage(&served, &served.viewer, "beta").await.0,
+            StatusCode::NOT_FOUND,
+            "beta is not declared for G"
+        );
+        // No Station answers: the ask stays on record and the gateway says so.
+        let (status, waiting) = ask_usage(&served, &served.viewer, "alpha").await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{waiting}");
+        assert!(
+            waiting["usage_read"]["requested_at"].is_number(),
+            "{waiting}"
+        );
+        assert!(waiting["usage_read"]["answered_at"].is_null(), "{waiting}");
+        let held = served
+            .registry
+            .accounts()
+            .unwrap()
+            .into_iter()
+            .find(|state| state.account == alpha)
+            .unwrap();
+        assert!(held.usage_request.unwrap().waits());
+        // A Station holding the account answers on its beat, after reading it.
+        let station = ai6::FileRegistry::open(served.registry.root());
+        let answering = alpha.clone();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stopping = stop.clone();
+        let answered = std::thread::spawn(move || {
+            let mut answers = 0;
+            while !stopping.load(std::sync::atomic::Ordering::SeqCst) {
+                let asked = station
+                    .accounts()
+                    .unwrap()
+                    .into_iter()
+                    .find(|state| state.account == answering)
+                    .and_then(|state| state.usage_request)
+                    .filter(|ask| ask.waits());
+                if let Some(ask) = asked {
+                    station
+                        .report_quota(
+                            &answering,
+                            &[QuotaWindow::new("five_hour", ask.at + 1.0).used_permille(420)],
+                        )
+                        .unwrap();
+                    ai6::directorates::q::usage_standing::answer(
+                        &station,
+                        &answering,
+                        ask.at,
+                        ask.at + 1.0,
+                        "read",
+                    )
+                    .unwrap();
+                    answers += 1;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            answers
+        });
+        let (status, entry) = ask_usage(&served, &served.viewer, "alpha").await;
+        stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(answered.join().unwrap() >= 1, "the Station saw the ask");
+        assert_eq!(status, StatusCode::OK, "{entry}");
+        assert_eq!(entry["usage_read"]["result"], "read");
+        assert!(entry["usage_read"]["answered_at"].is_number());
+        assert_eq!(entry["windows"][0]["used_permille"], 420);
+        let text = entry.to_string();
+        assert!(
+            !text.contains("SECRET-NAME") && !text.contains("SECRET-DIR"),
+            "{text}"
+        );
+        // The board carries it too.
+        let board: serde_json::Value = board(&served, &served.viewer, "G")
+            .await
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(board["accounts"][0]["usage_read"]["result"], "read");
     }
 
     #[tokio::test]

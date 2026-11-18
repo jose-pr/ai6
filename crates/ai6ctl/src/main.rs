@@ -398,6 +398,16 @@ enum AgentCommand {
 /// Changes to a pool account.
 #[derive(Debug, Subcommand)]
 enum PoolCommand {
+    /// Read an account's usage from its provider now, and print the account as the board shows
+    /// it (needs pool.read on the Operation). A reading made a moment ago is reused, so asking
+    /// often reaches the provider once; a provider that reports usage only during a turn is
+    /// not asked, and the answer says so.
+    Usage {
+        /// The pool ID.
+        pool: String,
+        /// The account's name in the pool.
+        account: String,
+    },
     /// Lift an account's provider limit so Runs may use it again now (needs pool.manage
     /// on the Operation; audited).
     ClearLimit {
@@ -2559,6 +2569,17 @@ async fn run() -> Result<(), String> {
                     let board: PoolBoard = send(request, "pool.read", "pool board").await?;
                     print_pools(&board, unix_now());
                 }
+                Some(PoolCommand::Usage { pool, account }) => {
+                    let request = operation_request(
+                        &client,
+                        &server,
+                        &token,
+                        Method::POST,
+                        &[&operation, "pools", &pool, &account, "usage"],
+                    )?;
+                    let read: PoolAccount = send(request, "pool.read", "pool account").await?;
+                    print_usage_read(read, unix_now());
+                }
                 Some(PoolCommand::ClearLimit { pool, account }) => {
                     let request = operation_request(
                         &client,
@@ -3764,6 +3785,17 @@ struct PoolAccount {
     tokens_today: u64,
     #[serde(default)]
     login: Option<PoolLogin>,
+    /// The last request that its usage be read now.
+    #[serde(default)]
+    usage_read: Option<PoolUsageRead>,
+}
+
+/// How the last request to read an account's usage went.
+#[derive(Debug, Deserialize)]
+struct PoolUsageRead {
+    requested_at: f64,
+    answered_at: Option<f64>,
+    result: Option<String>,
 }
 
 /// What the board says of a login kept in the Registry: never the login.
@@ -4182,6 +4214,31 @@ async fn pool_change(request: reqwest::RequestBuilder, done: &str) -> Result<(),
             .to_owned()),
         status => Err(format!("Universal Exports returned HTTP {status}")),
     }
+}
+
+/// An account after a request to read its usage: the board's row, and how the request went.
+fn print_usage_read(account: PoolAccount, now: f64) {
+    let outcome = match &account.usage_read {
+        Some(read) if read.answered_at.is_some() => {
+            format!(
+                "usage: {}",
+                plain(read.result.as_deref().unwrap_or("answered"))
+            )
+        }
+        Some(read) => format!(
+            "usage: asked {:.0}s ago and no Station has answered yet; the board shows it when one does",
+            (now - read.requested_at).max(0.0)
+        ),
+        None => "usage: not asked".to_owned(),
+    };
+    print_pools(
+        &PoolBoard {
+            accounts: vec![account],
+        },
+        now,
+    );
+    println!();
+    println!("{outcome}");
 }
 
 fn print_pools(board: &PoolBoard, now: f64) {

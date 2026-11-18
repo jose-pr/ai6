@@ -681,6 +681,102 @@ async fn pools_lists_an_operations_accounts_and_their_quota() {
 }
 
 #[tokio::test]
+async fn pools_usage_asks_a_station_and_prints_the_account_and_how_it_went() {
+    use ai6::directorates::registry::backend::*;
+
+    let (server, shutdown, token, directory) = start_gateway().await;
+    let registry = FileRegistry::open(directory.path());
+    let pool = ai6::AccountPool::new("team", "claude")
+        .account(ai6::Account::new("alpha", ai6::AccountKind::ClaudeOauthToken).max_concurrent(2));
+    let alpha = ai6::AccountRef::new("team", "alpha");
+    registry
+        .declare_account(
+            &alpha,
+            "station-01",
+            &ai6::AccountProfile::of(&pool, "alpha", vec!["operation-01".to_owned()]).unwrap(),
+        )
+        .unwrap();
+    // A Station holding the account answers the ask on its beat, after reading it.
+    let station = FileRegistry::open(directory.path());
+    let answering = alpha.clone();
+    let answered = std::thread::spawn(move || {
+        for _ in 0..500 {
+            let asked = station
+                .accounts()
+                .unwrap()
+                .into_iter()
+                .find(|state| state.account == answering)
+                .and_then(|state| state.usage_request)
+                .filter(|ask| ask.waits());
+            if let Some(ask) = asked {
+                station
+                    .report_quota(
+                        &answering,
+                        &[ai6::QuotaWindow::new("five_hour", ask.at + 1.0).used_permille(420)],
+                    )
+                    .unwrap();
+                ai6::directorates::q::usage_standing::answer(
+                    &station,
+                    &answering,
+                    ask.at,
+                    ask.at + 1.0,
+                    "read",
+                )
+                .unwrap();
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        false
+    });
+    let output = ai6ctl(
+        server.clone(),
+        Some(token.clone()),
+        &[
+            "pools",
+            "usage",
+            "team",
+            "alpha",
+            "--operation",
+            "operation-01",
+        ],
+    )
+    .await;
+    assert!(answered.join().unwrap(), "the Station saw the ask");
+    assert!(output.status.success());
+    let printed = lines(&output);
+    assert_eq!(
+        printed[0],
+        "POOL\tACCOUNT\tKIND\tRUNS\tWINDOWS\tREAD_UNIX\tLIMITED_UNTIL_UNIX\tTOKENS_TODAY"
+    );
+    assert!(
+        printed[1].starts_with("team\talpha\tclaude-oauth-token\t0/2\tfive_hour=42.0%\t"),
+        "{printed:?}"
+    );
+    assert_eq!(printed.last().unwrap(), "usage: read");
+    let missing = ai6ctl(
+        server.clone(),
+        Some(token.clone()),
+        &[
+            "pools",
+            "usage",
+            "team",
+            "nobody",
+            "--operation",
+            "operation-01",
+        ],
+    )
+    .await;
+    assert!(!missing.status.success());
+    assert!(
+        String::from_utf8(missing.stderr)
+            .unwrap()
+            .contains("HTTP 404")
+    );
+    let _ = shutdown.send(());
+}
+
+#[tokio::test]
 async fn agents_lists_each_agents_record_in_the_operation() {
     let (server, shutdown, token, directory) = start_gateway().await;
     let registry = FileRegistry::open(directory.path());
