@@ -8,6 +8,8 @@ import 'package:material_ui/material_ui.dart';
 import 'package:outer_office/assistant/assistant_controller.dart';
 import 'package:outer_office/assistant/assistant_panel.dart';
 import 'package:outer_office/main.dart';
+import 'package:outer_office/forms/form_host.dart'
+    show flutterMaterialLocalizations;
 
 /// A socket whose failure the test decides: nothing happens until it says.
 class SilentChannel implements AssistantChannel {
@@ -224,6 +226,7 @@ void main() {
       );
       await tester.pumpWidget(
         MaterialApp(
+          localizationsDelegates: const [flutterMaterialLocalizations],
           home: Scaffold(body: AssistantPanel(controller: controller)),
         ),
       );

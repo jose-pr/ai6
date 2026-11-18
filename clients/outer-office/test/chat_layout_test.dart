@@ -1,6 +1,8 @@
 import 'dart:convert';
 
 import 'package:flutter/services.dart';
+// ignore: deprecated_member_use
+import 'package:flutter/material.dart' as flutter show TextField;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:outer_office/assistant/assistant_controller.dart';
@@ -16,6 +18,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'polish_test.dart' show FakeChannel, atSize, signedIn;
 import 'shell_navigation.dart';
+
+import 'package:outer_office/forms/form_host.dart'
+    show flutterMaterialLocalizations;
 
 /// A window that only records being closed.
 class FakeWindow implements AppWindow {
@@ -389,7 +394,7 @@ void main() {
     final chat = await signIn(tester, board, channel);
     await chord(tester, LogicalKeyboardKey.keyI);
     await connect(tester, channel);
-    await tester.enterText(find.byType(TextField).last, 'Status?');
+    await tester.enterText(find.byType(flutter.TextField).last, 'Status?');
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
@@ -590,6 +595,7 @@ void main() {
     addTearDown(chat.dispose);
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: const [flutterMaterialLocalizations],
         home: MissionBoardPage(
           board: board,
           desktopWindows: true,

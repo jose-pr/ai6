@@ -15,6 +15,9 @@ import 'session_renewal_test.dart'
     show FakeChannel, FakeGateway, close, settle, signedIn;
 import 'shell_navigation.dart';
 
+import 'package:outer_office/forms/form_host.dart'
+    show flutterMaterialLocalizations;
+
 /// The gateway's idle limit, and what the tests count the token's life by.
 const _idle = Duration(minutes: 30);
 
@@ -170,6 +173,7 @@ void main() {
       late BuildContext context;
       await tester.pumpWidget(
         MaterialApp(
+          localizationsDelegates: const [flutterMaterialLocalizations],
           home: Builder(
             builder: (c) {
               context = c;

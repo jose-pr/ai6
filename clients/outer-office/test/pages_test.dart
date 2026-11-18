@@ -12,6 +12,8 @@ import 'package:outer_office/shell/oo_freshness.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:url_launcher_platform_interface/link.dart';
 import 'package:url_launcher_platform_interface/url_launcher_platform_interface.dart';
+import 'package:outer_office/forms/form_host.dart'
+    show flutterMaterialLocalizations;
 
 /// A launcher that records what it was asked and opens nothing.
 class FakeLauncher extends UrlLauncherPlatform with MockPlatformInterfaceMixin {
@@ -116,6 +118,7 @@ Future<(FakeLauncher, FakeActions)> show(
   addTearDown(tester.view.resetDevicePixelRatio);
   await tester.pumpWidget(
     MaterialApp(
+      localizationsDelegates: const [flutterMaterialLocalizations],
       home: Scaffold(
         body: PageCard(
           data: data,
@@ -329,7 +332,12 @@ void sharingTests() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    await tester.pumpWidget(MaterialApp(home: HerPagesPage(actions: actions)));
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: const [flutterMaterialLocalizations],
+        home: HerPagesPage(actions: actions),
+      ),
+    );
     await tester.pumpAndSettle();
     final yours = tester.getTopLeft(find.text('Your pages')).dy;
     final mine = tester.getTopLeft(find.text('Station load')).dy;
@@ -416,6 +424,7 @@ void privacyTests() {
       addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(
         MaterialApp(
+          localizationsDelegates: const [flutterMaterialLocalizations],
           home: HerPagesPage(actions: actions, focus: 'page-1'),
         ),
       );
@@ -431,6 +440,7 @@ void privacyTests() {
 
       await tester.pumpWidget(
         MaterialApp(
+          localizationsDelegates: const [flutterMaterialLocalizations],
           home: HerPagesPage(actions: actions, focus: 'page-x'),
         ),
       );
@@ -531,6 +541,7 @@ void menuTests() {
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: const [flutterMaterialLocalizations],
         home: Scaffold(
           body: AssistantPanel(controller: controller, pageActions: actions),
         ),

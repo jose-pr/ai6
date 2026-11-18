@@ -15,6 +15,9 @@ import 'chat_layout_test.dart' show chord, connect, signIn;
 import 'polish_test.dart' show FakeChannel, atSize, signedIn;
 import 'shell_navigation.dart';
 
+import 'package:outer_office/forms/form_host.dart'
+    show flutterMaterialLocalizations;
+
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
@@ -52,6 +55,7 @@ void main() {
     }) async {
       await tester.pumpWidget(
         MaterialApp(
+          localizationsDelegates: const [flutterMaterialLocalizations],
           home: Scaffold(
             body: EmptyBoard(
               operations: const ['G', 'L', 'Q'],
@@ -121,7 +125,10 @@ void main() {
       expect(find.text('New Mission'), findsNothing);
 
       await tester.pumpWidget(
-        const MaterialApp(home: Scaffold(body: EmptyBoard())),
+        const MaterialApp(
+          localizationsDelegates: [flutterMaterialLocalizations],
+          home: Scaffold(body: EmptyBoard()),
+        ),
       );
       expect(find.textContaining('a controller grants'), findsOneWidget);
       expect(find.text('New Mission'), findsNothing);
@@ -139,6 +146,7 @@ void main() {
       );
       Future<void> header(List<String> selected) => tester.pumpWidget(
         MaterialApp(
+          localizationsDelegates: const [flutterMaterialLocalizations],
           home: Material(
             child: BoardHeader(
               missions: groupMissions([run]),

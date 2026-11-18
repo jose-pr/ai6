@@ -7,6 +7,8 @@ import 'package:outer_office/assistant/entry_kind.dart';
 import 'package:outer_office/assistant/navigation_card.dart';
 import 'package:outer_office/routes/oo_route.dart';
 import 'package:outer_office/shell/oo_shell.dart' show OoPage;
+import 'package:outer_office/forms/form_host.dart'
+    show flutterMaterialLocalizations;
 
 Map<String, Object?> proposal({
   String status = 'pending',
@@ -52,6 +54,7 @@ Future<void> show(
   addTearDown(tester.view.resetDevicePixelRatio);
   await tester.pumpWidget(
     MaterialApp(
+      localizationsDelegates: const [flutterMaterialLocalizations],
       home: Scaffold(
         body: SingleChildScrollView(
           child: ProposalCard(
@@ -209,6 +212,7 @@ void main() {
     // Told later that it applied, the card says so.
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: const [flutterMaterialLocalizations],
         home: Scaffold(
           body: ProposalCard(
             proposal: proposal(status: 'done'),
@@ -233,6 +237,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: const [flutterMaterialLocalizations],
         home: Scaffold(
           body: SingleChildScrollView(
             child: Column(

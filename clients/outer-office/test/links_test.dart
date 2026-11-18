@@ -13,6 +13,9 @@ import 'package:outer_office/shell/overview_page.dart';
 import 'moneypenny_off_test.dart' show gateway;
 import 'routes_test.dart' show locations;
 
+import 'package:outer_office/forms/form_host.dart'
+    show flutterMaterialLocalizations;
+
 const wide = Size(1600, 1400);
 
 /// The demo at [location]; what the app reports as its address goes into the returned list.
@@ -239,6 +242,7 @@ void main() {
       required List<OoPage> pages,
       required ValueChanged<OoRoute> onRoute,
     }) => MaterialApp(
+      localizationsDelegates: const [flutterMaterialLocalizations],
       home: Scaffold(
         body: OoLinks(
           pages: pages,

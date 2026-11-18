@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart'
+    show ChatTranscript, Composer;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:outer_office/assistant/assistant_controller.dart';
@@ -9,6 +11,9 @@ import 'package:outer_office/assistant/chat_region.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'polish_test.dart' show FakeChannel;
+
+import 'package:outer_office/forms/form_host.dart'
+    show flutterMaterialLocalizations;
 
 class FakeHandle implements PopupHandle {
   @override
@@ -107,6 +112,7 @@ Future<void> popOut(WidgetTester tester, MoneypennyChat chat) async {
   late BuildContext context;
   await tester.pumpWidget(
     MaterialApp(
+      localizationsDelegates: const [flutterMaterialLocalizations],
       home: Builder(
         builder: (c) {
           context = c;
@@ -209,6 +215,7 @@ void main() {
     await popOut(tester, chat);
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: const [flutterMaterialLocalizations],
         home: Scaffold(
           body: ChatPanel(chat: chat, placement: ChatPlacement.side),
         ),
@@ -258,6 +265,42 @@ void main() {
     expect(state['draft'], 'half a thought');
     expect(state['theme'], 'night-ops');
   });
+
+  testWidgets(
+    'the window draws the same widgets as the page: the shared transcript and composer',
+    (tester) async {
+      final chat = chatWith(FakePopups());
+      chat.message.text = 'half a thought';
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: const [flutterMaterialLocalizations],
+          home: Scaffold(
+            body: ChatPanel(
+              chat: chat,
+              placement: ChatPlacement.away,
+              inWindow: true,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.byType(ChatTranscript), findsOneWidget);
+      expect(find.byType(Composer), findsOneWidget);
+      expect(
+        find.text('half a thought'),
+        findsOneWidget,
+        reason: 'the draft of the page',
+      );
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is Tooltip &&
+              (widget.message ?? '').startsWith('Bring back'),
+        ),
+        findsOneWidget,
+      );
+    },
+  );
 
   testWidgets('the draft follows in both directions without echoing', (
     tester,

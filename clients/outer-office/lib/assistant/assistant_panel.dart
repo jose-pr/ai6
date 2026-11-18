@@ -1,25 +1,41 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:coqui_acp_chat/coqui_acp_chat.dart' show AgentCommandInfo;
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart'
+    show
+        ChatEntryData,
+        ChatLookOf,
+        ChatRenderers,
+        ChatTranscript,
+        ChatTranscriptState,
+        Composer,
+        DiffView,
+        MessageBox,
+        patchLines;
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../held/held_briefs_page.dart' show revealInvisible;
 import '../routes/oo_route.dart';
+import '../shell/oo_markdown.dart';
 import '../settings/oo_config.dart' show ControlSettings;
 import '../shell/oo_shell.dart' show OoPage;
 import '../theme/oo_theme.dart';
 import 'assistant_controller.dart';
 import 'chat_commands.dart';
 import 'assistant_view.dart';
+import 'chat_entries.dart';
+import 'chat_look.dart';
+import 'chat_parts.dart';
 import 'entry_kind.dart';
 import 'images.dart';
 import 'export.dart' as exporting;
 import 'mission_draft.dart';
 import 'pages.dart';
 import 'transcripts.dart';
-import 'chat_transcript.dart';
 import 'navigation_card.dart';
+import 'turns.dart' show SourcesChecked;
 
 /// The chat with Moneypenny: her answers, the tools she used, her views and the changes she
 /// proposes, with Confirm and Cancel, and Stop while she answers. Each message carries
@@ -153,12 +169,11 @@ class _AssistantPanelState extends State<AssistantPanel> {
   /// The commands last read, and whether a read is under way.
   List<ChatCommand>? _commands;
   bool _loadingCommands = false;
-  int _highlight = 0;
-  String? _shownQuery;
 
-  /// Escape closed the menu for this word; typing another opens it again.
-  bool _menuClosed = false;
-  bool _menuReported = false;
+  /// Whether the composer's `/` list is showing: Enter, Tab and Escape are its then.
+  bool _menuOpen = false;
+
+  final _transcript = GlobalKey<ChatTranscriptState>();
 
   @override
   void initState() {
@@ -176,44 +191,10 @@ class _AssistantPanelState extends State<AssistantPanel> {
   late FocusNode _composer;
   FocusNode? _ownComposer;
 
-  /// The word typed after a leading `/`, while the menu has something to show for it.
-  String? get _query {
-    final value = _message.value;
-    return commandQuery(
-      value.text,
-      value.selection.isValid ? value.selection.end : value.text.length,
-    );
-  }
-
-  List<ChatCommand> get _matches =>
-      matchingCommands(_commands ?? const [], _query ?? '');
-
-  bool get _menuOpen =>
-      widget.commands != null &&
-      _query != null &&
-      !_menuClosed &&
-      _matches.isNotEmpty;
-
   void _edited() {
-    final query = _query;
-    if (query == null) {
-      _menuClosed = false;
-    } else if (query != _shownQuery) {
-      _menuClosed = false;
-      _highlight = 0;
-      if (_shownQuery == null) unawaited(_loadCommands());
-    }
-    // Pasted, or typed past the menu: still told whether the name is hers when it is sent.
+    // Pasted, or typed: told whether the name is hers when it is sent.
     if (_commands == null && _message.text.startsWith('/')) {
       unawaited(_loadCommands());
-    }
-    _shownQuery = query;
-    if (!mounted) return;
-    setState(() {});
-    final open = _menuOpen;
-    if (open != _menuReported) {
-      _menuReported = open;
-      widget.onCommandMenu?.call(open);
     }
   }
 
@@ -225,10 +206,7 @@ class _AssistantPanelState extends State<AssistantPanel> {
       final loaded = await source.load(
         conversation: widget.controller.conversationId,
       );
-      if (mounted) {
-        setState(() => _commands = loaded);
-        _edited();
-      }
+      if (mounted) setState(() => _commands = loaded);
     } on Object {
       // No list: the composer sends what is typed, as it always did.
     } finally {
@@ -236,13 +214,9 @@ class _AssistantPanelState extends State<AssistantPanel> {
     }
   }
 
-  void _pickCommand(ChatCommand command) {
-    final inserted = insertCommand(_message.text, command.name);
-    _message.value = TextEditingValue(
-      text: inserted.text,
-      selection: TextSelection.collapsed(offset: inserted.cursor),
-    );
-    _composer.requestFocus();
+  void _menuShown(bool open) {
+    _menuOpen = open;
+    widget.onCommandMenu?.call(open);
   }
 
   @override
@@ -250,7 +224,6 @@ class _AssistantPanelState extends State<AssistantPanel> {
     _message.removeListener(_edited);
     _composer.onKeyEvent = null;
     _ownComposer?.dispose();
-    if (_menuReported) widget.onCommandMenu?.call(false);
     widget.controller.removeListener(_showReveal);
     unawaited(_pasting?.cancel());
     _ownMessage?.dispose();
@@ -359,36 +332,14 @@ class _AssistantPanelState extends State<AssistantPanel> {
     );
     _message.clear();
     setState(() => _images = const []);
+    _transcript.currentState?.jumpToLatest();
   }
 
-  /// Enter sends; with Shift it is left to the field, which starts a new line.
+  /// Enter sends; with Shift it is left to the field, which starts a new line. While the `/`
+  /// list shows, Enter is its.
   KeyEventResult _composerKey(FocusNode _, KeyEvent event) {
-    if (event is KeyDownEvent && _menuOpen) {
-      final matches = _matches;
-      final key = event.logicalKey;
-      if (key == LogicalKeyboardKey.arrowDown) {
-        setState(() => _highlight = (_highlight + 1) % matches.length);
-        return KeyEventResult.handled;
-      }
-      if (key == LogicalKeyboardKey.arrowUp) {
-        setState(
-          () => _highlight = (_highlight - 1 + matches.length) % matches.length,
-        );
-        return KeyEventResult.handled;
-      }
-      if (key == LogicalKeyboardKey.enter ||
-          key == LogicalKeyboardKey.numpadEnter ||
-          key == LogicalKeyboardKey.tab) {
-        _pickCommand(matches[_highlight.clamp(0, matches.length - 1)]);
-        return KeyEventResult.handled;
-      }
-      if (key == LogicalKeyboardKey.escape) {
-        setState(() => _menuClosed = true);
-        _edited();
-        return KeyEventResult.handled;
-      }
-    }
-    if (event is! KeyDownEvent ||
+    if (_menuOpen ||
+        event is! KeyDownEvent ||
         (event.logicalKey != LogicalKeyboardKey.enter &&
             event.logicalKey != LogicalKeyboardKey.numpadEnter) ||
         HardwareKeyboard.instance.isShiftPressed) {
@@ -400,6 +351,126 @@ class _AssistantPanelState extends State<AssistantPanel> {
 
   /// [child] kept to [AssistantPanel.textWidth], centred, where one is set.
   Widget _column(Widget child) => chatColumn(widget.textWidth, child);
+
+  /// Outer Office's own kinds of entry, drawn for the shared transcript; null leaves an entry to
+  /// the package (the person's words, a plain notice).
+  Widget? _draw(BuildContext context, ChatEntryData data) {
+    if (data is OoSources) return SourcesChecked(item: data.item);
+    if (data is! OoEntry) return null;
+    final entry = data.entry;
+    final controller = widget.controller;
+    final look = context.chatLook;
+    return switch (entry.role) {
+      'person' => switch (_imagesOf(entry)) {
+        final images when images.isEmpty => null,
+        final images => MessageBox(
+          color: look.user,
+          copy: data.text,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            spacing: 8,
+            children: [
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final (index, sha256) in images.indexed)
+                    switch (widget.imageLoader) {
+                      final loader? => StoredImage(
+                        sha256: sha256,
+                        loader: loader,
+                        label: 'Your image ${index + 1}',
+                      ),
+                      null => Chip(
+                        avatar: const Icon(Icons.image_outlined, size: 16),
+                        label: Text('Image ${index + 1}'),
+                      ),
+                    },
+                ],
+              ),
+              Text(data.text),
+            ],
+          ),
+        ),
+      },
+      'moneypenny' => Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        spacing: 8,
+        children: [
+          const MoneypennyAvatar(),
+          Expanded(
+            child: MessageBox(
+              color: look.agent,
+              copy: entry.text,
+              child: OoMarkdown(
+                entry.text,
+                onOpen: widget.onOpen,
+                webLinks: false,
+                selectable: false,
+              ),
+            ),
+          ),
+        ],
+      ),
+      'proposal'
+          when widget.missions != null &&
+              entry.data?['tool'] == 'propose_mission' =>
+        MissionDraftCard(
+          proposal: entry.data ?? const {},
+          reads: widget.missions!,
+          onConfirm: controller.confirm,
+          onCancel: controller.cancel,
+          onRevise: (id, text) {
+            controller.cancel(id);
+            controller.say(text);
+          },
+          onOpen: widget.onOpen,
+        ),
+      'proposal' => ProposalCard(
+        proposal: entry.data ?? const {},
+        onConfirm: controller.confirm,
+        onCancel: controller.cancel,
+        onOpen: widget.onOpen,
+        confirmingAfter: widget.proposalWait,
+      ),
+      'navigation' => NavigationCard(data: entry.data, onOpen: widget.onOpen),
+      'page' when widget.pageActions != null => PageCard(
+        data: entry.data,
+        actions: widget.pageActions!,
+      ),
+      'page' => Text(data.text),
+      'view' => AssistantViewCard(
+        json: entry.data?['view'],
+        limits: controller.viewLimits,
+        onOpen: widget.onOpen,
+        onSubmit: entry.id == null
+            ? null
+            : (values) => controller.submit(entry.id!, values),
+      ),
+      'notice' => switch (entry.data?['diff']) {
+        final String diff when diff.isNotEmpty => Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          spacing: 6,
+          children: [
+            MessageBox(
+              color: look.notice,
+              child: Text(
+                data.text,
+                style: TextStyle(
+                  color: look.muted,
+                  fontSize: look.bodySize - 2,
+                ),
+              ),
+            ),
+            DiffView(lines: patchLines(revealInvisible(diff))),
+          ],
+        ),
+        _ => null,
+      },
+      _ => Text(data.text, style: TextStyle(color: look.danger)),
+    };
+  }
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -595,156 +666,163 @@ class _AssistantPanelState extends State<AssistantPanel> {
                     excluding: widget.attached != null,
                     child: TickerMode(
                       enabled: widget.attached == null,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Expanded(
-                            child: ChatTranscript(
-                              entries: controller.entries,
-                              busy: controller.busy,
-                              earlier: controller.earlier,
-                              textWidth: widget.textWidth,
-                              // Views are tables and charts: they take the whole width.
-                              wide: (entry) => entry.role == 'view',
-                              entryBuilder: (context, entry) => _EntryView(
-                                entry: entry,
-                                controller: controller,
-                                onOpen: widget.onOpen,
-                                proposalWait: widget.proposalWait,
-                                pageActions: widget.pageActions,
-                                missions: widget.missions,
-                                imageLoader: widget.imageLoader,
-                              ),
-                            ),
-                          ),
-                          if (controller.connected &&
-                              !controller.busy &&
-                              controller.entries.isEmpty)
-                            _column(
-                              Padding(
-                                padding: const EdgeInsets.fromLTRB(
-                                  12,
-                                  4,
-                                  12,
-                                  0,
+                      child: OoChatTheme(
+                        look: ooChatLook(
+                          OoTokens.of(context),
+                          width: widget.textWidth,
+                          centred: widget.textWidth != null,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Expanded(
+                              child: ChatTranscript(
+                                key: _transcript,
+                                entries: ooChatEntries(
+                                  controller.entries,
+                                  busy: controller.busy,
+                                  earlier: controller.earlier,
                                 ),
-                                child: Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  children: [
-                                    for (final prompt in moneypennyPrompts)
-                                      ActionChip(
-                                        label: Text(prompt),
-                                        onPressed: () => widget.controller.say(
-                                          prompt,
-                                          route: widget.route,
-                                        ),
-                                      ),
-                                  ],
+                                working: controller.busy,
+                                agentName: 'Moneypenny',
+                                narrow: true,
+                                renderers: ChatRenderers(
+                                  entry: [_draw],
+                                  wide: isWideEntry,
                                 ),
                               ),
                             ),
-                          if (controller.busy) const LinearProgressIndicator(),
-                          if (controller.costLabel.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                              ),
-                              child: Text(
-                                controller.costLabel,
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            ),
-                          if (controller.problem case final problem?)
-                            ChatProblemLine(
-                              text: problem,
-                              actions: [
-                                if (!controller.connected &&
-                                    !controller.connecting)
-                                  TextButton(
-                                    onPressed: controller.retry,
-                                    child: const Text('Try again'),
-                                  ),
-                                if (controller.reconnecting)
-                                  TextButton(
-                                    onPressed: controller.stopRetrying,
-                                    child: const Text('Stop trying'),
-                                  ),
-                              ],
-                            ),
-                          if (_images.isNotEmpty)
-                            _column(
-                              Padding(
-                                padding: const EdgeInsets.fromLTRB(
-                                  12,
-                                  8,
-                                  12,
-                                  0,
-                                ),
-                                child: Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  children: [
-                                    for (final (index, image)
-                                        in _images.indexed)
-                                      ImageThumbnail(
-                                        key: ValueKey('composer-image-$index'),
-                                        image: MemoryImage(image.bytes),
-                                        label: 'Image ${index + 1}',
-                                        size: 64,
-                                        onRemove: () => setState(
-                                          () =>
-                                              _images = [..._images]
-                                                ..removeAt(index),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          if (_menuOpen)
-                            _column(
-                              Padding(
-                                padding: const EdgeInsets.fromLTRB(
-                                  12,
-                                  8,
-                                  12,
-                                  0,
-                                ),
-                                child: CommandMenu(
-                                  commands: _matches,
-                                  highlighted: _highlight.clamp(
+                            if (controller.connected &&
+                                !controller.busy &&
+                                controller.entries.isEmpty)
+                              _column(
+                                Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    12,
+                                    4,
+                                    12,
                                     0,
-                                    _matches.length - 1,
                                   ),
-                                  onPick: _pickCommand,
+                                  child: Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: [
+                                      for (final prompt in moneypennyPrompts)
+                                        ActionChip(
+                                          label: Text(prompt),
+                                          onPressed: () => widget.controller
+                                              .say(prompt, route: widget.route),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            if (controller.costLabel.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                ),
+                                child: Text(
+                                  controller.costLabel,
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
+                              ),
+                            if (controller.problem case final problem?)
+                              ChatProblemLine(
+                                text: problem,
+                                actions: [
+                                  if (!controller.connected &&
+                                      !controller.connecting)
+                                    TextButton(
+                                      onPressed: controller.retry,
+                                      child: const Text('Try again'),
+                                    ),
+                                  if (controller.reconnecting)
+                                    TextButton(
+                                      onPressed: controller.stopRetrying,
+                                      child: const Text('Stop trying'),
+                                    ),
+                                ],
+                              ),
+                            if (_images.isNotEmpty)
+                              _column(
+                                Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    12,
+                                    8,
+                                    12,
+                                    0,
+                                  ),
+                                  child: Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: [
+                                      for (final (index, image)
+                                          in _images.indexed)
+                                        ImageThumbnail(
+                                          key: ValueKey(
+                                            'composer-image-$index',
+                                          ),
+                                          image: MemoryImage(image.bytes),
+                                          label: 'Image ${index + 1}',
+                                          size: 64,
+                                          onRemove: () => setState(
+                                            () =>
+                                                _images = [..._images]
+                                                  ..removeAt(index),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            if (widget.scopeBar case final bar?) _column(bar),
+                            _column(
+                              Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Composer(
+                                  controller: _message,
+                                  focusNode: _composer,
+                                  enabled: controller.connected,
+                                  working: controller.busy,
+                                  // She answers one message at a time: none waits its turn.
+                                  canQueue: false,
+                                  onStop: controller.stopping
+                                      ? null
+                                      : controller.interrupt,
+                                  onSend: _send,
+                                  hint: 'Ask Moneypenny…',
+                                  suggestionLimit: 50,
+                                  onSuggestions: _menuShown,
+                                  commands: [
+                                    for (final command
+                                        in widget.commands == null
+                                            ? const <ChatCommand>[]
+                                            : _commands ??
+                                                  const <ChatCommand>[])
+                                      AgentCommandInfo(
+                                        command.name,
+                                        command.description,
+                                        hint: command.argumentHint,
+                                      ),
+                                  ],
+                                  before: [
+                                    if (widget.imageInput?.canPick ?? false)
+                                      IconButton(
+                                        tooltip: 'Add an image',
+                                        onPressed: controller.connected
+                                            ? _pick
+                                            : null,
+                                        icon: const Icon(
+                                          Icons.add_photo_alternate_outlined,
+                                        ),
+                                      ),
+                                  ],
                                 ),
                               ),
                             ),
-                          if (widget.scopeBar case final bar?) _column(bar),
-                          ChatComposerBar(
-                            message: _message,
-                            focusNode: _composer,
-                            enabled: controller.connected,
-                            busy: controller.busy,
-                            stopping: controller.stopping,
-                            hint: 'Ask Moneypenny…',
-                            onSend: _send,
-                            onStop: controller.interrupt,
-                            textWidth: widget.textWidth,
-                            leading: widget.imageInput?.canPick ?? false
-                                ? IconButton(
-                                    tooltip: 'Add an image',
-                                    onPressed: controller.connected
-                                        ? _pick
-                                        : null,
-                                    icon: const Icon(
-                                      Icons.add_photo_alternate_outlined,
-                                    ),
-                                  )
-                                : null,
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -757,100 +835,6 @@ class _AssistantPanelState extends State<AssistantPanel> {
       );
     },
   );
-}
-
-class _EntryView extends StatelessWidget {
-  const _EntryView({
-    required this.entry,
-    required this.controller,
-    required this.proposalWait,
-    this.pageActions,
-    this.missions,
-    this.onOpen,
-    this.imageLoader,
-  });
-
-  final PageActions? pageActions;
-  final MissionDraftReads? missions;
-  final Duration proposalWait;
-  final AssistantEntry entry;
-  final AssistantController controller;
-  final void Function(String link)? onOpen;
-  final ImageLoader? imageLoader;
-
-  @override
-  Widget build(BuildContext context) {
-    return switch (entry.role) {
-      'person' => ChatPersonBubble(
-        text: entry.text,
-        attachments: switch (_imagesOf(entry)) {
-          final images when images.isEmpty => null,
-          final images => Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final (index, sha256) in images.indexed)
-                switch (imageLoader) {
-                  final loader? => StoredImage(
-                    sha256: sha256,
-                    loader: loader,
-                    label: 'Your image ${index + 1}',
-                  ),
-                  null => Chip(
-                    avatar: const Icon(Icons.image_outlined, size: 16),
-                    label: Text('Image ${index + 1}'),
-                  ),
-                },
-            ],
-          ),
-        },
-      ),
-      'moneypenny' => ChatAgentBubble(
-        avatar: const MoneypennyAvatar(),
-        text: entry.text,
-        onOpen: onOpen,
-      ),
-      'proposal'
-          when missions != null && entry.data?['tool'] == 'propose_mission' =>
-        MissionDraftCard(
-          proposal: entry.data ?? const {},
-          reads: missions!,
-          onConfirm: controller.confirm,
-          onCancel: controller.cancel,
-          onRevise: (id, text) {
-            controller.cancel(id);
-            controller.say(text);
-          },
-          onOpen: onOpen,
-        ),
-      'proposal' => ProposalCard(
-        proposal: entry.data ?? const {},
-        onConfirm: controller.confirm,
-        onCancel: controller.cancel,
-        onOpen: onOpen,
-        confirmingAfter: proposalWait,
-      ),
-      'navigation' => NavigationCard(data: entry.data, onOpen: onOpen),
-      'page' when pageActions != null => PageCard(
-        data: entry.data,
-        actions: pageActions!,
-      ),
-      'page' => Text(revealInvisible(entry.text)),
-      'view' => AssistantViewCard(
-        json: entry.data?['view'],
-        limits: controller.viewLimits,
-        onOpen: onOpen,
-        onSubmit: entry.id == null
-            ? null
-            : (values) => controller.submit(entry.id!, values),
-      ),
-      'notice' => ChatNotice(
-        text: entry.text,
-        diff: entry.data?['diff'] as String?,
-      ),
-      _ => ChatErrorLine(entry.text),
-    };
-  }
 }
 
 /// The quick questions offered under her greeting on Overview and in an empty chat.

@@ -1,8 +1,23 @@
+import 'package:coqui_acp/coqui_acp.dart' show AcpPermissionOption;
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart'
+    show
+        ChatEntryData,
+        ChatLookOf,
+        ChatRenderers,
+        ChatTranscript,
+        Composer,
+        MessageBox,
+        PermissionCard;
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
-import '../assistant/assistant_controller.dart';
-import '../assistant/chat_transcript.dart';
+import '../assistant/assistant_controller.dart' show AssistantEntry;
+import '../assistant/chat_entries.dart';
+import '../assistant/chat_look.dart';
+import '../assistant/chat_parts.dart';
+import '../held/held_briefs_page.dart' show revealInvisible;
+import '../assistant/turns.dart' show SourcesChecked;
+import '../shell/oo_markdown.dart';
 import '../theme/oo_tokens.dart';
 import 'attach_entries.dart';
 import 'attachment.dart';
@@ -102,88 +117,198 @@ class _AttachViewState extends State<AttachView> {
       final problem =
           attachment.refusal ??
           (dropped ? 'The connection to this Run was lost.' : null);
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            child: Text(
-              _status(attachment),
-              key: const ValueKey('attach-status'),
-              style: Theme.of(context).textTheme.bodySmall
-                  ?.copyWith(color: tokens.muted),
+      return OoChatTheme(
+        look: ooChatLook(
+          tokens,
+          width: widget.textWidth,
+          centred: widget.textWidth != null,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              child: Text(
+                _status(attachment),
+                key: const ValueKey('attach-status'),
+                style: Theme.of(context).textTheme.bodySmall
+                    ?.copyWith(color: tokens.muted),
+              ),
             ),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: ChatTranscript(
-              entries: attachEntries(attachment, me: widget.me),
-              busy: attachment.busy,
-              textWidth: widget.textWidth,
-              entryBuilder: (context, entry) =>
-                  _entry(label, attachment, entry),
+            const Divider(height: 1),
+            Expanded(
+              child: ChatTranscript(
+                entries: ooChatEntries(
+                  attachEntries(attachment, me: widget.me),
+                  busy: attachment.busy,
+                ),
+                working: attachment.busy,
+                agentName: label,
+                narrow: true,
+                renderers: ChatRenderers(
+                  entry: [
+                    (context, entry) =>
+                        _entry(context, label, attachment, entry),
+                  ],
+                ),
+              ),
             ),
-          ),
-          if (attachment.busy) const LinearProgressIndicator(),
-          if (problem != null)
-            ChatProblemLine(
-              text: problem,
-              actions: [
-                if (dropped)
-                  TextButton(
-                    key: const ValueKey('attach-reconnect'),
-                    onPressed: attachment.reconnect,
-                    child: const Text('Reconnect'),
-                  ),
-              ],
+            if (problem != null)
+              ChatProblemLine(
+                text: problem,
+                actions: [
+                  if (dropped)
+                    TextButton(
+                      key: const ValueKey('attach-reconnect'),
+                      onPressed: attachment.reconnect,
+                      child: const Text('Reconnect'),
+                    ),
+                ],
+              ),
+            chatColumn(
+              widget.textWidth,
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Composer(
+                  controller: _message,
+                  focusNode: _composer,
+                  enabled: attachment.attached,
+                  // Interrupt is the only thing to do while a turn runs, where the person holds
+                  // it; without it the box stays a box.
+                  working: attachment.busy && widget.canInterrupt,
+                  canQueue: false,
+                  onStop: widget.canInterrupt ? attachment.interrupt : null,
+                  onSend: _send,
+                  hint: 'Say something to this Run',
+                ),
+              ),
             ),
-          ChatComposerBar(
-            message: _message,
-            focusNode: _composer,
-            enabled: attachment.attached,
-            busy: attachment.busy,
-            hint: 'Say something to this Run',
-            onSend: _send,
-            onStop: widget.canInterrupt ? attachment.interrupt : null,
-            stopTooltip: 'Interrupt',
-            textWidth: widget.textWidth,
-          ),
-        ],
+          ],
+        ),
       );
     },
   );
 
-  Widget _entry(String agent, Attachment attachment, AssistantEntry entry) =>
-      switch (entry.role) {
-        'person' => ChatPersonBubble(
-          text: entry.text,
-          sender: entry.data?['mine'] == true
-              ? 'You'
-              : '${entry.data?['from'] ?? ''}',
-        ),
-        'agent' => ChatAgentBubble(
-          avatar: ChatAvatar(label: agent),
-          text: entry.text,
-        ),
-        'permission' => ChatPermissionCard(
-          request: '${entry.data?['request']}',
-          title: 'Asks permission: ${entry.text}',
-          detail: entry.data?['detail'] as String?,
-          options: [
-            for (final option
-                in entry.data?['options'] as List<PermissionOption>? ??
-                    const <PermissionOption>[])
-              (id: option.id, label: option.label),
+  /// The Run's own kinds of entry; null leaves the person's own words and a plain notice to the
+  /// package.
+  Widget? _entry(
+    BuildContext context,
+    String agent,
+    Attachment attachment,
+    ChatEntryData data,
+  ) {
+    if (data is OoSources) return SourcesChecked(item: data.item);
+    if (data is! OoEntry) return null;
+    final entry = data.entry;
+    final look = context.chatLook;
+    return switch (entry.role) {
+      'person' => MessageBox(
+        color: look.user,
+        copy: data.text,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          mainAxisSize: MainAxisSize.min,
+          spacing: 8,
+          children: [
+            Text(
+              entry.data?['mine'] == true
+                  ? 'You'
+                  : revealInvisible('${entry.data?['from'] ?? ''}'),
+              style: TextStyle(color: look.muted, fontSize: look.bodySize - 3),
+            ),
+            Text(data.text),
           ],
-          answeredBy: entry.data?['answered'] as String?,
-          onAnswer: attachment.attached
-              ? (option) =>
-                    attachment.answer('${entry.data?['request']}', option)
-              : null,
         ),
-        'notice' => ChatNotice(text: entry.text),
-        _ => ChatErrorLine(entry.text),
-      };
+      ),
+      'agent' => Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        spacing: 8,
+        children: [
+          ChatAvatar(label: agent),
+          Expanded(
+            child: MessageBox(
+              color: look.agent,
+              copy: entry.text,
+              child: OoMarkdown(entry.text, webLinks: false, selectable: false),
+            ),
+          ),
+        ],
+      ),
+      'permission' => _permission(context, agent, attachment, entry, data),
+      'notice' => null,
+      _ => Text(data.text, style: TextStyle(color: look.danger)),
+    };
+  }
+
+  /// A request to be answered: its card while it waits and the Run can be answered, the answer
+  /// once there is one.
+  Widget _permission(
+    BuildContext context,
+    String agent,
+    Attachment attachment,
+    AssistantEntry entry,
+    OoEntry data,
+  ) {
+    final look = context.chatLook;
+    final request = '${entry.data?['request']}';
+    final options =
+        entry.data?['options'] as List<PermissionOption>? ??
+        const <PermissionOption>[];
+    final answered = entry.data?['answered'] as String?;
+    final detail = entry.data?['detail'] as String?;
+    if (answered == null && attachment.attached) {
+      return KeyedSubtree(
+        key: ValueKey('permission-$request'),
+        child: PermissionCard(
+          agent: agent,
+          title: data.text,
+          detail: detail == null ? null : revealInvisible(detail),
+          options: [
+            for (final option in options)
+              AcpPermissionOption(
+                optionId: option.id,
+                name: option.label,
+                kind: _kindOf(option),
+              ),
+          ],
+          onChoose: (option) => attachment.answer(request, option.optionId),
+          host: 'Outer Office',
+        ),
+      );
+    }
+    return MessageBox(
+      color: look.notice,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        spacing: 4,
+        children: [
+          Text('Asks permission: ${data.text}'),
+          if (detail != null && detail.isNotEmpty)
+            Text(
+              revealInvisible(detail),
+              style: TextStyle(color: look.muted, fontSize: look.bodySize - 2),
+            ),
+          if (answered != null)
+            Text(
+              answered,
+              key: ValueKey('permission-$request-answered'),
+              style: TextStyle(color: look.muted, fontSize: look.bodySize - 2),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// The kind ACP gives an answer, from what the Run called it.
+  static String _kindOf(PermissionOption option) {
+    final words = '${option.id} ${option.label}'.toLowerCase();
+    if (words.contains('reject') ||
+        words.contains('deny') ||
+        words.contains('refuse')) {
+      return words.contains('always') ? 'reject_always' : 'reject_once';
+    }
+    return words.contains('always') ? 'allow_always' : 'allow_once';
+  }
 
   String _status(Attachment attachment) => switch (attachment.phase) {
     AttachPhase.connecting => 'Connecting to ${widget.target.label}',

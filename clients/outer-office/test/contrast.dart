@@ -76,6 +76,9 @@ List<Pair> actualUsePairs(OoTokens t) {
       4.5,
     ),
     ('snack bar text', t.bg, t.text, 4.5),
+    // The chat's diff lines: what an added or a removed line of a notice is drawn on.
+    ('text on an added diff line', t.text, over(t.success, 0.25, t.bg), 4.5),
+    ('text on a removed diff line', t.text, over(t.danger, 0.25, t.bg), 4.5),
     ('outlined button edge (muted) on surface', t.muted, t.surface, 3),
   ];
 }

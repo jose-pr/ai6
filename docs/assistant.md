@@ -1121,7 +1121,17 @@ beside the page in a wide window, over it in a narrower one, full screen on a ph
 be expanded into the centre (Ctrl+Alt+Shift+I) and popped out into its own window
 (Ctrl+Alt+O), a native one on desktop and a browser window on the web
 ([below](#her-own-window-on-the-web)); every layout shows the same conversation, and the app
-remembers the layout per person on each device (the app's README has the details). The app's demo build
+remembers the layout per person on each device (the app's README has the details).
+
+The chat is drawn with the shared chat widgets of `coqui_acp_chat_ui` (the transcript, the composer
+and its `/` list, the cards), the package the other Coqui chat apps use. Outer Office keeps its own
+conversation and its socket, adapts each entry to the package's, and passes what is its own through
+the package's renderers: her views, proposals, page and navigation cards, the folded "Sources
+checked" row and her Markdown with its references. The chat's look is a preset over the package's
+`ChatLook`, made from each theme's tokens, so the six themes colour it as they colour the rest of the
+app. Where the chat takes the page, messages keep to a centred column and a view takes the whole
+width. She answers one message at a time, so while she does the composer offers Stop and no Send or
+Queue. The app's demo build
 (`OO_DEMO=true`) shows a scripted sample conversation instead, labelled as one; it reaches no
 network and its proposals change nothing.
 
@@ -1200,8 +1210,9 @@ The chat panel has a **Talking to** picker under its header: Moneypenny first, t
 person holds `charge.converse` on (listed as the Charges page names them) and each Mission with a live
 Run under `mission.control` (as the Missions board names them). It lists nothing the person lacks the
 action for, and is absent when there is nothing to choose. Choosing a Run attaches to it in the panel,
-drawn as her chat is (the same bubbles, the tool calls of a turn folded into one row, quiet notices, the
-same box with Interrupt where the chat has Stop; a permission request is a card answered in place); the
+drawn as her chat is (the same transcript and bubbles, the tool calls of a turn folded into one row,
+quiet notices, the same box with Stop, which interrupts the turn for a person who holds the action;
+a permission request is the shared card, answered in place, and says who answered once someone did); the
 header names the Run and its Agent's codename stands in for her portrait. Her conversation stays under
 it, so choosing Moneypenny again detaches from the Run, which goes on, and returns to her conversation
 with the draft, the scroll and the scope as they were. A refusal from the gateway shows under the

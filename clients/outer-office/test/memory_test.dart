@@ -9,6 +9,8 @@ import 'package:outer_office/assistant/assistant_controller.dart';
 import 'package:outer_office/assistant/assistant_panel.dart';
 import 'package:outer_office/assistant/memory_page.dart';
 import 'package:outer_office/main.dart';
+import 'package:outer_office/forms/form_host.dart'
+    show flutterMaterialLocalizations;
 
 const _json = {'content-type': 'application/json'};
 
@@ -179,6 +181,7 @@ Future<void> openMemory(
   addTearDown(board.dispose);
   await tester.pumpWidget(
     MaterialApp(
+      localizationsDelegates: const [flutterMaterialLocalizations],
       home: MemoryPage(key: ObjectKey(board), board: board, shelf: shelf),
     ),
   );
@@ -420,6 +423,7 @@ void main() {
     var opened = 0;
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: const [flutterMaterialLocalizations],
         home: Scaffold(
           body: AssistantPanel(
             controller: controller,
@@ -436,6 +440,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: const [flutterMaterialLocalizations],
         home: Scaffold(body: AssistantPanel(controller: controller)),
       ),
     );

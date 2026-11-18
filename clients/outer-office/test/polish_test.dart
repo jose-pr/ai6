@@ -18,6 +18,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'shell_test.dart' show demoAt;
 
+import 'package:outer_office/forms/form_host.dart'
+    show flutterMaterialLocalizations;
+
 /// A Moneypenny socket that keeps what the app sends and answers what the test says.
 class FakeChannel implements AssistantChannel {
   final sent = <Map<String, Object?>>[];
@@ -243,6 +246,7 @@ void main() {
       addTearDown(board.dispose);
       await tester.pumpWidget(
         MaterialApp(
+          localizationsDelegates: const [flutterMaterialLocalizations],
           home: MissionBoardPage(
             board: board,
             desktopWindows: false,
@@ -309,6 +313,7 @@ void main() {
     for (final theme in OoThemeId.values) {
       await tester.pumpWidget(
         MaterialApp(
+          localizationsDelegates: const [flutterMaterialLocalizations],
           theme: ooTheme(theme),
           home: const Scaffold(
             body: Row(

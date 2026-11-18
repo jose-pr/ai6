@@ -8,6 +8,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'polish_test.dart' show FakeChannel;
 
+import 'package:outer_office/forms/form_host.dart'
+    show flutterMaterialLocalizations;
+
 /// What a draft card reads of the board, as the test sets it.
 class FakeReads extends ChangeNotifier implements MissionDraftReads {
   DraftPlacement? where = const DraftPlacement(
@@ -74,6 +77,7 @@ Future<Harness> show(
   final harness = Harness();
   await tester.pumpWidget(
     MaterialApp(
+      localizationsDelegates: const [flutterMaterialLocalizations],
       home: Scaffold(
         body: SingleChildScrollView(
           child: MissionDraftCard(
@@ -308,6 +312,7 @@ void main() {
       final opened = <String>[];
       await tester.pumpWidget(
         MaterialApp(
+          localizationsDelegates: const [flutterMaterialLocalizations],
           home: Scaffold(
             body: AssistantPanel(
               controller: controller,
@@ -377,6 +382,7 @@ void main() {
       addTearDown(reads.dispose);
       await tester.pumpWidget(
         MaterialApp(
+          localizationsDelegates: const [flutterMaterialLocalizations],
           home: Scaffold(
             body: AssistantPanel(controller: controller, missions: reads),
           ),
@@ -413,6 +419,7 @@ void main() {
       addTearDown(reads.dispose);
       await tester.pumpWidget(
         MaterialApp(
+          localizationsDelegates: const [flutterMaterialLocalizations],
           home: Scaffold(
             body: AssistantPanel(controller: controller, missions: reads),
           ),

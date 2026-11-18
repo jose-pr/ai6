@@ -14,6 +14,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'routes_test.dart' show locations;
 import 'work_views_test.dart' show openAt;
 
+import 'package:outer_office/forms/form_host.dart'
+    show flutterMaterialLocalizations;
+
 /// A board whose person holds [actions] in Operation G (called Guatiao); every POST of a
 /// Mission is kept in [posts].
 MissionBoard boardWith(
@@ -208,6 +211,7 @@ void main() {
       final drafted = <String>[];
       await tester.pumpWidget(
         MaterialApp(
+          localizationsDelegates: const [flutterMaterialLocalizations],
           home: Scaffold(
             body: NewMissionPage(
               board: board,

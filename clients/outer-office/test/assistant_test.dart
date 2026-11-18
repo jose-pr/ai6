@@ -5,6 +5,9 @@ import 'dart:io';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/services.dart' show SystemChannels;
 import 'package:flutter_svg/flutter_svg.dart';
+// ignore: deprecated_member_use
+import 'package:flutter/material.dart' as flutter show IconButton, TextField;
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show WorkingRow;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:outer_office/assistant/assistant_controller.dart';
@@ -15,6 +18,8 @@ import 'package:outer_office/routes/oo_route.dart';
 import 'package:outer_office/settings/oo_config.dart' show ChatSettings;
 import 'package:outer_office/shell/oo_shell.dart';
 import 'package:outer_office/terminal/run_connection.dart' show runSocketUri;
+import 'package:outer_office/forms/form_host.dart'
+    show flutterMaterialLocalizations;
 
 /// One view of every kind and the views Universal Exports refuses, shared with its tests.
 final Map<String, Object?> fixture = (jsonDecode(
@@ -36,6 +41,7 @@ Future<void> showView(
   addTearDown(tester.view.resetDevicePixelRatio);
   await tester.pumpWidget(
     MaterialApp(
+      localizationsDelegates: const [flutterMaterialLocalizations],
       home: Scaffold(
         body: SingleChildScrollView(
           child: AssistantViewCard(
@@ -89,6 +95,7 @@ void main() {
       addTearDown(controller.dispose);
       await tester.pumpWidget(
         MaterialApp(
+          localizationsDelegates: const [flutterMaterialLocalizations],
           home: Scaffold(body: AssistantPanel(controller: controller)),
         ),
       );
@@ -398,6 +405,7 @@ void main() {
     addTearDown(controller.dispose);
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: const [flutterMaterialLocalizations],
         home: Scaffold(body: AssistantPanel(controller: controller)),
       ),
     );
@@ -431,6 +439,7 @@ void main() {
     addTearDown(controller.dispose);
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: const [flutterMaterialLocalizations],
         home: Scaffold(body: AssistantPanel(controller: controller)),
       ),
     );
@@ -450,9 +459,9 @@ void main() {
     });
     await tester.pumpAndSettle();
     expect(find.textContaining('keeps in her memory'), findsOneWidget);
-    expect(find.text('+++ after'), findsOneWidget);
+    expect(find.text('  +++ after'), findsOneWidget);
     expect(
-      find.text('+Prefers<U+200B> tables.'),
+      find.text('+ Prefers<U+200B> tables.'),
       findsOneWidget,
       reason: 'a character that renders as nothing shows here as anywhere',
     );
@@ -469,6 +478,7 @@ void main() {
     final saved = <(String, String)>[];
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: const [flutterMaterialLocalizations],
         home: Scaffold(
           body: AssistantPanel(
             controller: controller,
@@ -535,6 +545,7 @@ void main() {
     addTearDown(controller.dispose);
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: const [flutterMaterialLocalizations],
         home: Scaffold(body: AssistantPanel(controller: controller)),
       ),
     );
@@ -571,6 +582,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: const [flutterMaterialLocalizations],
         home: Scaffold(
           body: AssistantPanel(
             controller: controller,
@@ -602,7 +614,10 @@ void main() {
       reason: 'only her messages carry her avatar',
     );
 
-    await tester.enterText(find.byType(TextField), 'Which Stations are busy?');
+    await tester.enterText(
+      find.byType(flutter.TextField),
+      'Which Stations are busy?',
+    );
     await tester.tap(find.byTooltip('Send'));
     await tester.pump();
     expect(channel.sent.last, {
@@ -627,7 +642,7 @@ void main() {
       });
     await tester.pump();
     await tester.pump();
-    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+    expect(find.byType(WorkingRow), findsOneWidget);
     // The call is one folded row, not a row of its own.
     expect(find.text('board'), findsNothing);
     expect(find.text('Checking sources… (1)'), findsOneWidget);
@@ -651,7 +666,7 @@ void main() {
         null,
       ),
     );
-    await tester.tap(find.byTooltip('Copy'));
+    await tester.tap(find.byTooltip('Copy message').last);
     await tester.pump();
     expect(copied, ['**worker** is busy: 4 of 4.'], reason: 'her Markdown');
     expect(inConversation, findsOneWidget);
@@ -744,6 +759,7 @@ void main() {
       addTearDown(controller.dispose);
       await tester.pumpWidget(
         MaterialApp(
+          localizationsDelegates: const [flutterMaterialLocalizations],
           home: Scaffold(body: AssistantPanel(controller: controller)),
         ),
       );
@@ -767,7 +783,12 @@ void main() {
       expect(find.text('Stopping…'), findsOneWidget);
       expect(
         tester
-            .widget<IconButton>(find.widgetWithIcon(IconButton, Icons.stop))
+            .widget<flutter.IconButton>(
+              find.widgetWithIcon(
+                flutter.IconButton,
+                Icons.stop_circle_outlined,
+              ),
+            )
             .onPressed,
         isNull,
         reason: 'one interrupt is enough',
@@ -786,7 +807,6 @@ void main() {
         ..answer({'type': 'busy', 'busy': false});
       await tester.pumpAndSettle();
       expect(find.text("You stopped Moneypenny's answer."), findsOneWidget);
-      expect(find.byIcon(Icons.stop_circle_outlined), findsOneWidget);
       expect(find.byTooltip('Stop'), findsNothing);
       expect(find.byTooltip('Send'), findsOneWidget);
       expect(
@@ -801,6 +821,7 @@ void main() {
   ) async {
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: const [flutterMaterialLocalizations],
         home: Scaffold(
           body: ProposalCard(
             proposal: {
@@ -847,6 +868,7 @@ void main() {
     addTearDown(controller.dispose);
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: const [flutterMaterialLocalizations],
         home: Scaffold(body: AssistantPanel(controller: controller)),
       ),
     );
@@ -909,6 +931,7 @@ void main() {
       addTearDown(controller.dispose);
       await tester.pumpWidget(
         MaterialApp(
+          localizationsDelegates: const [flutterMaterialLocalizations],
           home: Scaffold(body: AssistantPanel(controller: controller)),
         ),
       );

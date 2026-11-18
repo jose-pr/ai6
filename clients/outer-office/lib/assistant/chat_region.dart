@@ -15,7 +15,7 @@ import 'assistant_panel.dart';
 import 'chat_layout.dart';
 import 'chat_scope.dart';
 import 'chat_talk.dart';
-import 'chat_transcript.dart' show ChatAvatar;
+import 'chat_parts.dart' show ChatAvatar;
 import 'navigation_card.dart';
 
 /// How long [chat] takes to move, unless the platform asks for no animations.

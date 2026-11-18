@@ -1,3 +1,5 @@
+// ignore: deprecated_member_use
+import 'package:flutter/material.dart' as flutter show ListTile, TextField;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
@@ -6,6 +8,9 @@ import 'package:outer_office/assistant/assistant_panel.dart';
 import 'package:outer_office/assistant/chat_commands.dart';
 
 import 'polish_test.dart' show FakeChannel;
+
+import 'package:outer_office/forms/form_host.dart'
+    show flutterMaterialLocalizations;
 
 class FakeCommands implements ChatCommands {
   FakeCommands(this.commands);
@@ -42,6 +47,7 @@ panel(WidgetTester tester) async {
   addTearDown(text.dispose);
   await tester.pumpWidget(
     MaterialApp(
+      localizationsDelegates: const [flutterMaterialLocalizations],
       home: Scaffold(
         body: AssistantPanel(
           controller: controller,
@@ -56,8 +62,8 @@ panel(WidgetTester tester) async {
   return (channel: channel, commands: commands, text: text);
 }
 
-Finder get _field => find.byType(TextField);
-Finder _row(String name) => find.byKey(ValueKey('command-$name'));
+Finder get _field => find.byType(flutter.TextField);
+Finder _row(String name) => find.byKey(ValueKey('command $name'));
 
 void main() {
   testWidgets('typing / opens the menu of her skills and harness commands', (
@@ -193,40 +199,35 @@ void main() {
     expect(find.textContaining('is not one of her commands'), findsNothing);
   });
 
-  test('which word is a command, which are arguments', () {
-    expect(commandQuery('/', 1), '');
-    expect(commandQuery('/ch', 3), 'ch');
-    expect(commandQuery('/ch', 0), isNull, reason: 'cursor before the slash');
-    expect(commandQuery('/ch arg', 3), 'ch');
-    expect(
-      commandQuery('/ch arg', 6),
-      isNull,
-      reason: 'cursor in the arguments',
-    );
-    expect(commandQuery('hi /ch', 6), isNull);
+  test('which word is the name typed', () {
     expect(typedCommand('  /charts x'), 'charts');
     expect(typedCommand('/'), isNull);
     expect(typedCommand('no'), isNull);
   });
 
-  test('names that start with the query come before those that contain it', () {
-    expect(matchingCommands(_skills, 'c').map((c) => c.name), [
-      'charts',
-      'compact',
-    ]);
-    expect(matchingCommands(_skills, 'WRITES').map((c) => c.name), [
-      'report-writer',
-    ], reason: 'the description, any case');
-    expect(matchingCommands(_skills, ''), _skills);
-    expect(matchingCommands(_skills, 'zzz'), isEmpty);
-  });
-
-  test('inserting keeps what follows the first word', () {
-    final inserted = insertCommand('/re last week', 'report-writer');
-    expect(inserted.text, '/report-writer last week');
-    expect(inserted.cursor, '/report-writer '.length);
-    expect(insertCommand('/', 'charts').text, '/charts ');
-  });
+  testWidgets(
+    'names that start with the word come before those that only hold it',
+    (tester) async {
+      await panel(tester);
+      await tester.enterText(_field, '/c');
+      await tester.pumpAndSettle();
+      final order = [
+        for (final tile in tester.widgetList<flutter.ListTile>(
+          find.byType(flutter.ListTile),
+        ))
+          (tile.key! as ValueKey<String>).value,
+      ];
+      expect(order, ['command charts', 'command compact']);
+      await tester.enterText(_field, '/WRITES');
+      await tester.pumpAndSettle();
+      expect(
+        _row('report-writer'),
+        findsOneWidget,
+        reason: 'the description, any case',
+      );
+      expect(_row('charts'), findsNothing);
+    },
+  );
 
   test('a command is read from the gateway\'s JSON', () {
     final command = ChatCommand.fromJson({

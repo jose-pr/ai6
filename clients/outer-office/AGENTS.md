@@ -44,6 +44,23 @@ native windows build their app with `boardThemedApp`.
   title, default, choice or bound is written in Dart: the app shows what the route sends. A record
   type's change regenerates `assets/record_forms.json` (see `README.md`).
 
+## The shared chat
+
+Moneypenny's chat (`lib/assistant/assistant_panel.dart`, and so every placement and the web pop-out)
+and the Run attach view (`lib/charges/attach_view.dart`) draw through `coqui_acp_chat_ui`'s
+`ChatTranscript` and `Composer`, pinned by one coqui-acp commit for `coqui_acp`, `coqui_acp_chat` and
+`coqui_acp_chat_ui`. Outer Office keeps its own conversation and socket: `lib/assistant/chat_entries.dart`
+adapts an `AssistantEntry` to the package's `ChatEntryData` (`OoEntry`, `OoSources`, `OoNote`), and the
+kinds that are Outer Office's own (views, proposals, cards, her avatar and Markdown) are one `entry`
+renderer in each of the two files. `chat_look.dart` makes the `ChatLook` of each theme from `OoTokens`.
+A widget the package provides is not kept here; a gap is a change in coqui-acp.
+
+The app's `Theme` and `Material` are `material_ui`'s, the package's are Flutter's own: `OoChatTheme`
+(`chat_look.dart`) wraps the chat in Flutter's theme made from the app's tokens, as `OoFormView` does
+for forms. The app must carry `flutterMaterialLocalizations` (a test that pumps the chat does too), and the
+composer's field is Flutter's `TextField`, not `material_ui`'s: tests find it as `flutter.TextField`.
+The package's Copied note is a Flutter snack bar, which this app has no scaffold for, so none shows.
+
 ## Flutter windowing
 
 - Stable Flutter lacks the first-party Desktop Windowing API; use the Flutter `main` commit `tools/sdk/sdk.lock` names, installed as `README.md` describes.

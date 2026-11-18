@@ -4,6 +4,8 @@ import 'attention_fake.dart';
 
 import 'dart:convert';
 
+// ignore: deprecated_member_use
+import 'package:flutter/material.dart' as flutter show TextField;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -481,7 +483,9 @@ void main() {
   ) async {
     final board = await signedIn(Gateway());
     await openAt(tester, board, '/');
-    final field = find.byType(TextField);
+    final field = find.byWidgetPredicate(
+      (widget) => widget is TextField || widget is flutter.TextField,
+    );
     expect(field, findsNothing, reason: 'Overview has no field of its own');
     await tester.tap(find.byTooltip('Ask Moneypenny (Ctrl+Alt+I)'));
     await tester.pumpAndSettle();
@@ -511,7 +515,9 @@ void main() {
     await openAt(tester, board, '/');
     await tester.tap(find.byTooltip('Ask Moneypenny (Ctrl+Alt+I)'));
     await tester.pumpAndSettle();
-    final field = find.byType(TextField);
+    final field = find.byWidgetPredicate(
+      (widget) => widget is TextField || widget is flutter.TextField,
+    );
     await tester.tap(field);
     await tester.pump();
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);

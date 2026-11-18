@@ -8,7 +8,11 @@ import 'package:material_ui/material_ui.dart';
 import 'package:outer_office/assistant/chat_layout.dart';
 import 'package:outer_office/assistant/chat_region.dart';
 import 'package:outer_office/assistant/chat_talk.dart';
-import 'package:outer_office/assistant/chat_transcript.dart';
+import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart'
+    show ChatTranscript, Composer, MessageBox, PermissionCard, WorkingRow;
+// ignore: deprecated_member_use
+import 'package:flutter/material.dart' as flutter show IconButton, TextField;
+import 'package:outer_office/assistant/chat_parts.dart';
 import 'package:outer_office/assistant/turns.dart';
 import 'package:outer_office/charges/attach_view.dart';
 import 'package:outer_office/charges/attachment.dart';
@@ -23,6 +27,9 @@ import 'package:outer_office/shell/oo_shell.dart' show OoPage;
 import 'package:outer_office/theme/oo_theme.dart';
 
 import 'polish_test.dart' show FakeChannel;
+
+import 'package:outer_office/forms/form_host.dart'
+    show flutterMaterialLocalizations;
 
 /// A stand-in for the attach socket: what the app sent, and frames the test makes arrive.
 class FakeAttach implements AttachChannel {
@@ -195,6 +202,7 @@ Future<void> _show(
   addTearDown(tester.view.reset);
   await tester.pumpWidget(
     MaterialApp(
+      localizationsDelegates: const [flutterMaterialLocalizations],
       theme: ooTheme(OoThemeId.values.first),
       home: Scaffold(body: child),
     ),
@@ -240,8 +248,8 @@ Future<FakeAttach> _attach(
 
 /// The box of the shared composer.
 Finder get _field => find.descendant(
-  of: find.byType(ChatComposerBar),
-  matching: find.byType(TextField),
+  of: find.byType(Composer),
+  matching: find.byType(flutter.TextField),
 );
 
 Future<void> _say(WidgetTester tester, String words) async {
@@ -305,7 +313,7 @@ void main() {
           'charge': 'operation:G',
         });
         expect(find.byType(AttachView), findsOneWidget);
-        expect(find.byType(ChatComposerBar), findsOneWidget);
+        expect(find.byType(Composer), findsOneWidget);
 
         socket.attached();
         socket.frame(1, 'prompt', {'from': 'ana', 'text': 'status?'});
@@ -313,21 +321,33 @@ void main() {
         socket.frame(3, 'ready', {'busy': false, 'attached': 1, 'last': 3});
         await _flush(tester);
         // A person's message and the Run's, in the bubbles Moneypenny's chat uses.
-        expect(find.byType(ChatPersonBubble), findsOneWidget);
+        expect(
+          find.ancestor(
+            of: find.text('status?'),
+            matching: find.byType(MessageBox),
+          ),
+          findsOneWidget,
+        );
         expect(find.text('ana'), findsOneWidget);
         expect(find.text('status?'), findsOneWidget);
-        expect(find.byType(ChatAgentBubble), findsOneWidget);
         expect(
           find.descendant(
-            of: find.byType(ChatAgentBubble),
+            of: find.byType(ChatTranscript),
             matching: find.byType(ChatAvatar),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.ancestor(
+            of: find.textContaining('quiet', findRichText: true),
+            matching: find.byType(MessageBox),
           ),
           findsOneWidget,
         );
         expect(find.text('007'), findsWidgets);
         expect(find.textContaining('quiet'), findsOneWidget);
         expect(find.text('Idle'), findsOneWidget);
-        expect(find.byType(LinearProgressIndicator), findsNothing);
+        expect(find.byType(WorkingRow), findsNothing);
 
         // A turn: the tools it calls fold into one row, as in the chat.
         socket.frame(4, 'turn', {'state': 'begun', 'by': 'ana'});
@@ -343,14 +363,13 @@ void main() {
         expect(find.byType(SourcesChecked), findsOneWidget);
         expect(find.text('Checking sources… (3)'), findsOneWidget);
         // The turn is the chat's typing state.
-        expect(find.byType(LinearProgressIndicator), findsOneWidget);
+        expect(find.byType(WorkingRow), findsOneWidget);
         expect(find.text('Answering…'), findsOneWidget);
-        expect(find.byTooltip('Interrupt'), findsOneWidget);
+        expect(find.byTooltip('Stop'), findsOneWidget);
         expect(find.byTooltip('Send'), findsNothing);
         expect(find.text('bo attached'), findsOneWidget);
         expect(find.text('bo detached'), findsOneWidget);
         expect(find.text('Interrupted by ana'), findsOneWidget);
-        expect(find.byType(ChatNotice), findsNWidgets(3));
         // No attach-only row: a notice is not a frame row.
         expect(find.textContaining('Turn begun'), findsNothing);
         expect(find.textContaining('Replay complete'), findsNothing);
@@ -366,7 +385,12 @@ void main() {
         await tester.enterText(_field, 'hi');
         expect(
           tester
-              .widget<IconButton>(find.widgetWithIcon(IconButton, Icons.send))
+              .widget<flutter.IconButton>(
+                find.widgetWithIcon(
+                  flutter.IconButton,
+                  Icons.arrow_upward_rounded,
+                ),
+              )
               .onPressed,
           isNull,
         );
@@ -404,7 +428,7 @@ void main() {
   });
 
   testWidgets(
-    'the first answer to a permission wins and disables the buttons',
+    'a permission is a card to answer, and the first answer wins: the card then says who answered',
     (tester) async {
       final socket = await _attach(tester, size: const Size(390, 844));
       socket.attached();
@@ -419,16 +443,10 @@ void main() {
       });
       socket.frame(2, 'ready', {'busy': true});
       await _flush(tester);
-      expect(find.byType(ChatPermissionCard), findsOneWidget);
-      expect(find.text('Asks permission: Run a command'), findsOneWidget);
+      expect(find.byType(PermissionCard), findsOneWidget);
       expect(find.text('git push'), findsOneWidget);
 
-      Finder button(String id) => find.byKey(ValueKey('permission-7-$id'));
-      expect(
-        tester.widget<OutlinedButton>(button('allow')).onPressed,
-        isNotNull,
-      );
-      await tester.tap(button('allow'));
+      await tester.tap(find.byKey(const ValueKey('permission-primary')));
       await _flush(tester);
       expect(socket.ofType('answer').single, {
         'type': 'answer',
@@ -436,20 +454,17 @@ void main() {
         'option': 'allow',
       });
 
-      // Another attached person answered first: theirs counts, and both buttons are off,
-      // in the same card.
+      // Another attached person answered first: theirs counts, and the card is gone with its
+      // buttons, in its place who answered and with what.
       socket.frame(3, 'answered', {'request': 7, 'by': 'bo', 'option': 'deny'});
       await _flush(tester);
-      expect(find.byType(ChatPermissionCard), findsOneWidget);
-      expect(tester.widget<OutlinedButton>(button('allow')).onPressed, isNull);
-      expect(tester.widget<OutlinedButton>(button('deny')).onPressed, isNull);
+      expect(find.byType(PermissionCard), findsNothing);
+      expect(find.text('Asks permission: Run a command'), findsOneWidget);
       expect(
         find.byKey(const ValueKey('permission-7-answered')),
         findsOneWidget,
       );
       expect(find.text('Answered by bo: deny'), findsOneWidget);
-      // A later answer is never sent.
-      await tester.tap(button('deny'), warnIfMissed: false);
       expect(socket.ofType('answer'), hasLength(1));
     },
   );
@@ -461,7 +476,7 @@ void main() {
     without.attached();
     without.frame(1, 'ready', {'busy': true});
     await _flush(tester);
-    expect(find.byTooltip('Interrupt'), findsNothing);
+    expect(find.byTooltip('Stop'), findsNothing);
     expect(find.byTooltip('Send'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
 
@@ -469,7 +484,7 @@ void main() {
     withRight.attached();
     withRight.frame(1, 'ready', {'busy': true});
     await _flush(tester);
-    await tester.tap(find.byTooltip('Interrupt'));
+    await tester.tap(find.byTooltip('Stop'));
     await _flush(tester);
     expect(withRight.ofType('interrupt'), hasLength(1));
   });
@@ -480,7 +495,7 @@ void main() {
     final socket = await _attach(tester, converse: false);
     expect(socket.sent, isEmpty, reason: 'nothing is attached to');
     expect(find.byType(AttachView), findsNothing);
-    expect(find.byTooltip('Interrupt'), findsNothing);
+    expect(find.byTooltip('Stop'), findsNothing);
     expect(find.byKey(const ValueKey('charge-open-chat')), findsNothing);
     expect(find.textContaining('needs charge.converse'), findsOneWidget);
   });
@@ -559,12 +574,11 @@ void main() {
     });
     await _flush(tester);
     expect(find.text('Refused: the prompt is too long'), findsOneWidget);
-    expect(find.byType(ChatErrorLine), findsOneWidget);
     expect(
       find.text('Too many requests wait for the Station.'),
       findsOneWidget,
     );
-    expect(find.byType(ChatComposerBar), findsOneWidget);
+    expect(find.byType(Composer), findsOneWidget);
   });
 
   testWidgets('leaving the view detaches', (tester) async {
@@ -677,8 +691,15 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('009'), findsWidgets);
-      expect(find.byType(ChatAgentBubble), findsOneWidget);
-      expect(find.byTooltip('Interrupt'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(ChatTranscript),
+          matching: find.byType(ChatAvatar),
+        ),
+        findsOneWidget,
+      );
+      expect(find.byType(MessageBox), findsOneWidget);
+      expect(find.byTooltip('Stop'), findsOneWidget);
     });
 
     testWidgets('is not offered without mission.control', (tester) async {
@@ -810,7 +831,10 @@ void main() {
         expect(find.byType(AttachView), findsOneWidget);
         expect(find.text('Hello from G.'), findsOneWidget);
         // Her conversation is under it, out of view, and her draft is not in the Run's box.
-        expect(find.widgetWithText(TextField, 'half a thought'), findsNothing);
+        expect(
+          find.widgetWithText(flutter.TextField, 'half a thought'),
+          findsNothing,
+        );
         expect(find.byTooltip('New conversation'), findsNothing);
 
         await choose(tester, 'moneypenny');
@@ -818,7 +842,7 @@ void main() {
         expect(sockets.single.closed, isTrue);
         expect(find.byType(AttachView), findsNothing);
         expect(
-          find.widgetWithText(TextField, 'half a thought'),
+          find.widgetWithText(flutter.TextField, 'half a thought'),
           findsOneWidget,
         );
         expect(chat.message.text, 'half a thought');
@@ -882,7 +906,7 @@ void main() {
 }
 
 String _textOf(WidgetTester tester, Finder field) =>
-    tester.widget<TextField>(field).controller!.text;
+    tester.widget<flutter.TextField>(field).controller!.text;
 
 /// Lets what the fake socket sent arrive and the page settle: a Run taking a turn shows
 /// a progress bar that never stops, so `pumpAndSettle` would not return.

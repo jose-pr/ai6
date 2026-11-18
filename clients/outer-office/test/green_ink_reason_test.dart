@@ -4,6 +4,8 @@ import 'package:material_ui/material_ui.dart';
 import 'package:outer_office/green_ink/green_ink_reason.dart';
 import 'package:outer_office/shell/oo_markdown.dart';
 import 'package:outer_office/theme/oo_theme.dart';
+import 'package:outer_office/forms/form_host.dart'
+    show flutterMaterialLocalizations;
 
 const _pages = [
   SourcePageSummary(
@@ -46,6 +48,7 @@ Future<List<Uri>> _shown(
   final opened = <Uri>[];
   await tester.pumpWidget(
     MaterialApp(
+      localizationsDelegates: const [flutterMaterialLocalizations],
       theme: ooTheme(OoThemeId.values.first),
       home: Scaffold(
         body: SingleChildScrollView(
