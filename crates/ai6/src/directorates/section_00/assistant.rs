@@ -1037,6 +1037,9 @@ pub struct AssistantRun {
     /// Tokens the harness reported for these events.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tokens: Option<u64>,
+    /// Millionths of a dollar the harness reported for these events, retries included.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_micro_usd: Option<u64>,
 }
 
 impl AssistantReport {

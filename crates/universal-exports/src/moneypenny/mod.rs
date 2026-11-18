@@ -668,6 +668,22 @@ impl Assistant {
                 "Sign in again to talk to Moneypenny.".to_owned(),
             )
         })?;
+        let spent = self
+            .desk()
+            .store
+            .owned(conversation_id, person_id)
+            .map_or(0, |conversation| conversation.spent_micro_usd);
+        let budget = self.config().limits.conversation_cost_micro_usd;
+        if budget.get().is_some_and(|bound| spent >= bound) {
+            return Err((
+                "budget",
+                format!(
+                    "This conversation has used its budget (${} of ${}). Start a new conversation to continue.",
+                    ai6::directorates::medical::usage::usd_text(spent),
+                    ai6::directorates::medical::usage::usd_text(budget.get().unwrap_or(0)),
+                ),
+            ));
+        }
         let kept = self.keep_images(gateway, person_id, images)?;
         let message = match route.and_then(|route| page_line(route, self.config().route_limits())) {
             Some(line) => format!("{line}\n\n{text}"),
@@ -2187,6 +2203,10 @@ fn ready(
         "entries": shown,
         "earlier": conversation.entries.len() - shown.len(),
         "busy": conversation.busy,
+        "usage": {
+            "tokens": conversation.spent_tokens,
+            "cost_micro_usd": conversation.spent_micro_usd,
+        },
         "view_limits": limits,
     })
 }

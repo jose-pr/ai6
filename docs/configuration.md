@@ -1657,6 +1657,8 @@ Universal Exports when it starts.
 | `page_bytes` | 16 MiB | **All the files read for a page.** Bytes over all the files of one page the Station reads. |
 | `images` | 4 | **Images in one message.** Images one message carries. |
 | `image_bytes` | 5 MiB | **Largest image in a message.** Bytes of one image a message carries. |
+| `turn_cost_micro_usd` | 5,000,000 | **Spend in one turn (millionths of a dollar).** Millionths of a dollar one turn of hers may spend, retries included; past it the turn is stopped and she says so. `none` sets no bound. |
+| `conversation_cost_micro_usd` | 50,000,000 | **Spend in one conversation (millionths of a dollar).** Millionths of a dollar one conversation may spend in all; past it a message is refused with the reason. `none` sets no bound. |
 <!-- schema:record.assistant.limits:end -->
 
 `[assistant.desk]`: how each Station's desk runs her harnesses. Read for each job and harness

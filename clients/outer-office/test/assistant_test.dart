@@ -114,6 +114,28 @@ void main() {
     },
   );
 
+  testWidgets('a conversation shows what it has used', (tester) async {
+    final channel = FakeChannel();
+    final controller = AssistantController(
+      token: 'user-token',
+      connect: () => channel,
+    );
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: AssistantPanel(controller: controller)),
+      ),
+    );
+    channel.answer({
+      'type': 'ready',
+      'conversation': 'c-1',
+      'entries': [],
+      'usage': {'tokens': 4000000, 'cost_micro_usd': 1250000},
+    });
+    await tester.pumpAndSettle();
+    expect(find.text('Used \$1.25 in this conversation'), findsOneWidget);
+  });
+
   testWidgets('every kind of view renders natively from the fixture', (
     tester,
   ) async {

@@ -126,7 +126,10 @@ pub(crate) struct Conversation {
     pub(crate) model: Option<String>,
     /// While a Station's report is applied: that Station, and the tokens it reported, which
     /// the first entry it adds carries.
-    pub(crate) reporting: Option<(String, Option<u64>)>,
+    pub(crate) reporting: Option<(String, Option<u64>, Option<u64>)>,
+    /// Tokens and millionths of a dollar the conversation's harnesses have reported in all.
+    pub(crate) spent_tokens: u64,
+    pub(crate) spent_micro_usd: u64,
     /// The commands the harness last announced.
     pub(crate) commands: Vec<ai6::AssistantCommand>,
 }
@@ -213,6 +216,8 @@ impl Conversation {
             account: None,
             model: None,
             reporting: None,
+            spent_tokens: 0,
+            spent_micro_usd: 0,
             commands: Vec::new(),
         }
     }
@@ -228,18 +233,19 @@ impl Conversation {
                 self.model.clone_from(&run.model);
             }
         }
-        self.reporting = Some((
-            report.station_id.clone(),
-            report.run.as_ref().and_then(|run| run.tokens),
-        ));
+        let tokens = report.run.as_ref().and_then(|run| run.tokens);
+        let cost = report.run.as_ref().and_then(|run| run.cost_micro_usd);
+        self.spent_tokens = self.spent_tokens.saturating_add(tokens.unwrap_or(0));
+        self.spent_micro_usd = self.spent_micro_usd.saturating_add(cost.unwrap_or(0));
+        self.reporting = Some((report.station_id.clone(), tokens, cost));
     }
 
     /// The turn the harness is on, as far as the gateway knows: the Station reporting now or
     /// the one running it, its Run, route, account and model.
     fn turn(&mut self) -> AssistantTurn {
-        let (station, tokens) = match &mut self.reporting {
-            Some((station, tokens)) => (Some(station.clone()), tokens.take()),
-            None => (self.station.clone(), None),
+        let (station, tokens, cost) = match &mut self.reporting {
+            Some((station, tokens, cost)) => (Some(station.clone()), tokens.take(), cost.take()),
+            None => (self.station.clone(), None, None),
         };
         let mut turn = AssistantTurn::default();
         turn.station = station;
@@ -249,6 +255,7 @@ impl Conversation {
         turn.account.clone_from(&self.account);
         turn.model.clone_from(&self.model);
         turn.tokens = tokens;
+        turn.cost_micro_usd = cost;
         turn
     }
 

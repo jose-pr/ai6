@@ -333,6 +333,15 @@ impl Budget {
     }
 }
 
+/// Micro-dollars as dollars and cents for a person to read: `1.25`.
+pub fn usd_text(micro_usd: u64) -> String {
+    format!(
+        "{}.{:02}",
+        micro_usd / 1_000_000,
+        micro_usd % 1_000_000 / 10_000
+    )
+}
+
 /// Dollars as micro-dollars, rounded; negative or non-finite values become zero.
 pub fn micro_usd(dollars: f64) -> u64 {
     if dollars.is_finite() && dollars > 0.0 {

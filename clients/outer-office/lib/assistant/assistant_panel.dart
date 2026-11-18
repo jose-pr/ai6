@@ -645,6 +645,16 @@ class _AssistantPanelState extends State<AssistantPanel> {
                               ),
                             ),
                           if (controller.busy) const LinearProgressIndicator(),
+                          if (controller.costLabel.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                              ),
+                              child: Text(
+                                controller.costLabel,
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ),
                           if (controller.problem case final problem?)
                             ChatProblemLine(
                               text: problem,

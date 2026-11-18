@@ -134,6 +134,14 @@ class AssistantController extends ChangeNotifier {
   ViewLimits viewLimits = const ViewLimits();
   bool busy = false;
 
+  /// What the conversation has used so far, in millionths of a dollar, retries included.
+  int costMicroUsd = 0;
+
+  /// The cost as dollars and cents, empty before anything was used.
+  String get costLabel => costMicroUsd <= 0
+      ? ''
+      : 'Used \$${(costMicroUsd / 1000000).toStringAsFixed(2)} in this conversation';
+
   /// A password Universal Exports made for an account the person confirmed resetting, until the
   /// panel has shown it: it is never an entry of the conversation and never reaches Moneypenny.
   String? _reveal;
@@ -297,6 +305,9 @@ class AssistantController extends ChangeNotifier {
         conversationId = message['conversation'] as String?;
         if (conversationId case final id?) onConversation?.call(id);
         busy = message['busy'] == true;
+        costMicroUsd =
+            ((message['usage'] as Map?)?['cost_micro_usd'] as num?)?.toInt() ??
+            0;
         stopping = false;
         earlier = (message['earlier'] as num?)?.toInt() ?? 0;
         viewLimits = ViewLimits.fromJson(message['view_limits']);

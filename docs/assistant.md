@@ -1259,6 +1259,21 @@ shared conversation (one socket per window on one conversation) is by the gatewa
 was not watched in a browser. Clipboard and input-method composition in the pop-out were not
 tried by hand.
 
+## Her budget
+
+She has a budget per turn and per conversation, both in `[assistant.limits]`, in millionths of a
+dollar, and `none` takes either away. A turn past `turn_cost_micro_usd` (default 5000000, five
+dollars) is interrupted and she says what it spent. A conversation past `conversation_cost_micro_usd`
+(default 50000000) refuses its next message with the same reason, and the person starts another. The
+defaults sit well above a turn that reads a board and answers, which costs cents, and well below the
+turn that read every board and cost tens of dollars. The harness is also given the conversation's
+budget as its own cost cap, so it cannot spend past it on its own.
+
+The cost counts what the harness reports, which includes its retries. Each report of a turn carries
+the tokens and cost since the last, the conversation log keeps them with the turn, and the app's
+`ready` message shows the conversation's total as `usage`. A gateway that restarts counts again from
+zero.
+
 ## Her conversation log
 
 With a Registry, Universal Exports keeps every entry of every conversation for good, as it

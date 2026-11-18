@@ -2089,6 +2089,17 @@
                 "description": "Among routes with room, the highest goes first where `balance` compares priority.",
                 "x-advanced": true,
                 "default": 0
+              },
+              "token_cap": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 18446744073709551615,
+                "title": "Token cap",
+                "description": "Tokens one request to this route may hold, when its gateway refuses more; empty when it states none. Long-lived conversations compact before it, and the models listing shows it.",
+                "x-advanced": true
               }
             },
             "additionalProperties": false,
@@ -3628,6 +3639,46 @@
               "title": "Largest image in a message",
               "description": "Bytes of one image a message carries.",
               "default": 5242880
+            },
+            "turn_cost_micro_usd": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Spend in one turn (millionths of a dollar)",
+              "description": "Millionths of a dollar one turn of hers may spend, retries included; past it the turn is stopped and she says so. `none` sets no bound.",
+              "default": 5000000
+            },
+            "conversation_cost_micro_usd": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Spend in one conversation (millionths of a dollar)",
+              "description": "Millionths of a dollar one conversation may spend in all; past it a message is refused with the reason. `none` sets no bound.",
+              "default": 50000000
             }
           },
           "additionalProperties": false,
@@ -3651,7 +3702,9 @@
             "page_files": 200,
             "page_bytes": 16777216,
             "images": 4,
-            "image_bytes": 5242880
+            "image_bytes": 5242880,
+            "turn_cost_micro_usd": 5000000,
+            "conversation_cost_micro_usd": 50000000
           }
         },
         "desk": {

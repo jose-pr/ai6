@@ -87,6 +87,16 @@ pub struct AssistantLimits {
     #[schema(title = "Largest image in a message", format = "bytes")]
     #[map(default = AssistantLimits::default().image_bytes)]
     pub image_bytes: Limit,
+    /// Millionths of a dollar one turn of hers may spend, retries included; past it the turn is
+    /// stopped and she says so. `none` sets no bound.
+    #[schema(title = "Spend in one turn (millionths of a dollar)")]
+    #[map(default = AssistantLimits::default().turn_cost_micro_usd)]
+    pub turn_cost_micro_usd: Limit,
+    /// Millionths of a dollar one conversation may spend in all; past it a message is refused
+    /// with the reason. `none` sets no bound.
+    #[schema(title = "Spend in one conversation (millionths of a dollar)")]
+    #[map(default = AssistantLimits::default().conversation_cost_micro_usd)]
+    pub conversation_cost_micro_usd: Limit,
 }
 
 impl Default for AssistantLimits {
@@ -108,6 +118,10 @@ impl Default for AssistantLimits {
             page_bytes: Limit::at(16 * MIB),
             images: Limit::at(4),
             image_bytes: Limit::at(5 * MIB),
+            // A turn that reads a board and answers costs cents; the 4M-token summary that
+            // prompted these cost tens of dollars. Five dollars stops that and clears the work.
+            turn_cost_micro_usd: Limit::at(5_000_000),
+            conversation_cost_micro_usd: Limit::at(50_000_000),
         }
     }
 }

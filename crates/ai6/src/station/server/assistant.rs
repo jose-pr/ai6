@@ -199,6 +199,11 @@ impl Outbox {
         (self.tables)().1
     }
 
+    /// `[assistant.limits]` as it is now.
+    fn limits(&self) -> AssistantLimits {
+        (self.tables)().0
+    }
+
     /// Hands `report` to the link, its texts cut to `[assistant.limits] event_bytes`.
     fn emit(&self, mut report: AssistantReport, answered: Option<Answered>) {
         report.cut_texts(&(self.tables)().0);
@@ -1283,6 +1288,9 @@ impl Desk {
         // A resumed harness has the conversation; only one started afresh is given its recap.
         let mut fresh_context = initial_context.clone();
         fresh_context.extend(job.recap.iter().cloned());
+        // A harness cannot spend more than its conversation may in all, so that is the cap it is
+        // given; the turn's own budget is held by the pump.
+        let conversation_budget = self.outbox.limits().conversation_cost_micro_usd.get();
         let start = AgentStart {
             mission_id: mission_id.clone(),
             agent_id: agent.id.clone(),
@@ -1293,7 +1301,7 @@ impl Desk {
             environment: environment.clone(),
             model: agent.model.clone(),
             effort: agent.effort.clone(),
-            max_cost_micro_usd: None,
+            max_cost_micro_usd: conversation_budget,
             project_settings: false,
             project_mcp: false,
             answer_only: false,
@@ -1311,7 +1319,7 @@ impl Desk {
                 environment,
                 model: agent.model.clone(),
                 effort: agent.effort.clone(),
-                max_cost_micro_usd: None,
+                max_cost_micro_usd: conversation_budget,
                 project_settings: false,
                 project_mcp: false,
                 answer_only: false,
@@ -1391,6 +1399,9 @@ impl Desk {
             route: on.map(|on| on.route.reference()),
             usage: UsageTracker::default(),
             unreported_tokens: std::cell::Cell::new(0),
+            unreported_cost: std::cell::Cell::new(0),
+            turn_cost: 0,
+            over_budget: false,
             model: agent.model.clone(),
             conversation_id: job.conversation_id.clone(),
             station_id: state.station_id.clone(),
@@ -1963,6 +1974,12 @@ struct Pump {
     usage: UsageTracker,
     /// Tokens reported since the last report to Universal Exports.
     unreported_tokens: std::cell::Cell<u64>,
+    /// Millionths of a dollar reported since the last report to Universal Exports.
+    unreported_cost: std::cell::Cell<u64>,
+    /// Millionths of a dollar the turn under way has spent, retries included.
+    turn_cost: u64,
+    /// The turn under way was stopped at its budget.
+    over_budget: bool,
     /// The model the harness runs, as its route or Agent names it.
     model: Option<String>,
     conversation_id: String,
@@ -2116,6 +2133,8 @@ impl Pump {
                         ));
                     }
                     if event.kind == "completed" || cancelled {
+                        self.turn_cost = 0;
+                        self.over_budget = false;
                         // The work is saved before the turn is reported over, so the next
                         // message's turn starts from it.
                         events.extend(self.end_turn(false));
@@ -2288,10 +2307,17 @@ impl Pump {
             let delta = self.usage.observe(reported);
             self.unreported_tokens
                 .set(self.unreported_tokens.get().saturating_add(delta.tokens()));
+            self.unreported_cost.set(
+                self.unreported_cost
+                    .get()
+                    .saturating_add(delta.cost_micro_usd),
+            );
+            self.turn_cost = self.turn_cost.saturating_add(delta.cost_micro_usd);
             accounts::record_usage(&self.state, &self.run_name, delta.tokens());
         }
+        let over = self.stop_over_budget();
         if event.kind != LIMIT_EVENT {
-            return None;
+            return over;
         }
         let holder = Holder {
             id: &self.run_name,
@@ -2312,6 +2338,27 @@ impl Pump {
         Some(format!(
             "Moneypenny's route {route} is out of quota: your next message takes another route if \
              one has room."
+        ))
+    }
+
+    /// Stops the turn under way once it has spent more than `[assistant.limits]
+    /// turn_cost_micro_usd`, and says so to the person.
+    fn stop_over_budget(&mut self) -> Option<String> {
+        let bound = self.outbox.limits().turn_cost_micro_usd.get()?;
+        if self.over_budget || self.turn_cost <= bound || !self.flags.busy.load(Ordering::Acquire) {
+            return None;
+        }
+        self.over_budget = true;
+        self.flags.interrupting.store(true, Ordering::Release);
+        if let Ok(run) = self.run.read() {
+            let _ = run.interrupt();
+        }
+        let usd = crate::directorates::medical::usage::usd_text;
+        Some(format!(
+            "This answer used its budget (${} of ${}) and was stopped. Ask for less at a time, or \
+             ask an administrator to raise the turn budget.",
+            usd(self.turn_cost),
+            usd(bound)
         ))
     }
 
@@ -2468,6 +2515,7 @@ impl Pump {
             account: accounts::held(&self.state, &self.run_name),
             model: self.model.clone(),
             tokens: Some(self.unreported_tokens.take()).filter(|tokens| *tokens > 0),
+            cost_micro_usd: Some(self.unreported_cost.take()).filter(|cost| *cost > 0),
         };
         self.outbox.send(AssistantReport {
             route: run_id.and(self.route.clone()),
@@ -3220,6 +3268,9 @@ mod tests {
         /// Starts answering and completes only when interrupted, as Claude Code and Codex end
         /// an interrupted turn.
         Works,
+        /// Starts answering, reports a spend past any turn budget, and completes only when
+        /// interrupted.
+        Costly,
         /// Writes a note and a memory in `personal/`, then answers and completes.
         Writes,
         /// Calls a file tool (see [`ScriptedRun::answer`]), writes a memory, then answers
@@ -3392,6 +3443,17 @@ mod tests {
                     events.push_back(event("failed", Some(DIED)));
                 }
                 Script::Hangs => {}
+                Script::Costly => {
+                    events.push_back(event(EVENT_TEXT, Some("Reading every board.")));
+                    let mut spent = event("system", None);
+                    let mut report = coqui_acp_api::UsageReport::new();
+                    let mut spend = coqui_acp_api::Spend::new("provider-costly");
+                    spend.input = 4_000_000;
+                    spend.cost_micro_usd = Some(6_000_000);
+                    report.spend = Some(spend);
+                    spent.report = Some(report);
+                    events.push_back(spent);
+                }
                 Script::Works => {
                     events.push_back(event(EVENT_TEXT, Some(&format!("working on: {message}"))));
                 }
@@ -3490,7 +3552,7 @@ mod tests {
 
         fn interrupt(&self) -> Result<(), ProviderError> {
             self.asked.lock().unwrap().interrupts += 1;
-            if self.script == Script::Works {
+            if matches!(self.script, Script::Works | Script::Costly) {
                 self.events
                     .lock()
                     .unwrap()
@@ -5747,6 +5809,30 @@ event_bytes = 7
         let reason = text_of(&fixture, "c-hung", EVENT_FAILED).unwrap();
         assert!(reason.contains("wrote nothing"), "{reason}");
         assert!(fixture.desk.live.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_turn_past_its_budget_is_stopped_and_the_person_told_what_it_spent() {
+        let fixture = scripted(true, IDLE, Script::Costly, Script::Costly);
+        fixture
+            .desk
+            .handle(job("c-cost", "Summarize every board."))
+            .await;
+        until(|| kinds(&fixture, "c-cost").contains(&EVENT_INTERRUPTED.to_owned())).await;
+        let notice = text_of(&fixture, "c-cost", EVENT_NOTICE).unwrap();
+        assert!(notice.contains("$6.00 of $5.00"), "{notice}");
+        assert_eq!(fixture.asked.lock().unwrap().interrupts, 1);
+        let reported: u64 = fixture
+            .reports
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|report| report.run.as_ref()?.cost_micro_usd)
+            .sum();
+        assert_eq!(
+            reported, 6_000_000,
+            "its cost reaches the usage a person sees"
+        );
     }
 
     #[tokio::test]

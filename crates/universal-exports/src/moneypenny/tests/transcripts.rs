@@ -123,6 +123,7 @@ async fn a_pooled_turn_is_logged_with_its_pool_and_account_and_no_token_reaches_
             account: Some(AccountRef::new("team", "alice")),
             model: Some("sonnet".to_owned()),
             tokens: Some(321),
+            cost_micro_usd: Some(1_250_000),
         }),
         station_id: "hq".to_owned(),
         conversation_id: conversation.clone(),
@@ -169,6 +170,7 @@ async fn a_pooled_turn_is_logged_with_its_pool_and_account_and_no_token_reaches_
         (turn.model.as_deref(), turn.tokens),
         (Some("sonnet"), Some(321))
     );
+    assert_eq!(turn.cost_micro_usd, Some(1_250_000));
     assert!(rows[0].turn.is_none(), "the person's words ran on no turn");
     assert_eq!(rows[1].text, "board");
     assert!(rows[2].data.as_ref().unwrap()["bytes"].as_u64().is_some());
@@ -411,4 +413,58 @@ async fn a_person_reads_their_own_log_and_another_s_only_with_both_actions_on_th
     assert_eq!(read[0].target, format!("operator-007 {conversation}"));
     assert_eq!(audits(&served, "assistant.context.read").len(), 1);
     assert_eq!(audits(&served, "assistant.log.list").len(), 1);
+}
+
+#[tokio::test]
+async fn a_conversation_past_its_budget_refuses_the_next_message_with_the_reason() {
+    let mut limits = AssistantLimits::default();
+    limits.conversation_cost_micro_usd = Limit::at(1_000_000);
+    let served = served(AssistantConfig::default().with_limits(limits).unwrap()).await;
+    let (mut app, _) = open(&served, &served.operator).await;
+    say(&mut app, "Summarize the board.", None).await;
+    let job = take(&served, "hq").await;
+    report(
+        &served,
+        "hq",
+        &job,
+        Some(&job.job_id),
+        vec![AssistantEvent::new(EVENT_ACCEPTED, None)],
+    )
+    .await;
+    let spent = AssistantReport {
+        route: None,
+        run: Some(AssistantRun {
+            account: None,
+            model: None,
+            tokens: Some(4_000_000),
+            cost_micro_usd: Some(1_250_000),
+        }),
+        station_id: "hq".to_owned(),
+        conversation_id: job.conversation_id.clone(),
+        job_id: None,
+        run_id: Some("provider-spent".to_owned()),
+        events: vec![
+            AssistantEvent::new(EVENT_TEXT, Some("Done.".to_owned())),
+            AssistantEvent::new(EVENT_COMPLETED, None),
+        ],
+    };
+    let posted = reqwest::Client::new()
+        .post(format!("{}/v1/station/assistant/reports", served.base))
+        .bearer_auth(STATION_TOKEN)
+        .json(&spent)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(posted.status(), StatusCode::NO_CONTENT);
+    receive_until(&mut app, |frame| {
+        frame["type"] == "busy" && frame["busy"] == false
+    })
+    .await;
+    say(&mut app, "And again.", None).await;
+    let frames = receive_until(&mut app, |frame| frame["type"] == "error").await;
+    let refused = frames.last().unwrap();
+    assert_eq!(refused["code"], "budget", "{refused}");
+    let words = refused["message"].as_str().unwrap();
+    assert!(words.contains("$1.25 of $1.00"), "{words}");
+    assert!(nothing_for(&served, "hq").await, "no job was queued");
 }

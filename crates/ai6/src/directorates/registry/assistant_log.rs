@@ -47,6 +47,9 @@ pub struct AssistantTurn {
     /// Tokens the harness reported for the events of this report.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tokens: Option<u64>,
+    /// Millionths of a dollar the harness reported for them, retries included.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_micro_usd: Option<u64>,
 }
 
 /// One entry of a conversation's log.
@@ -473,6 +476,7 @@ mod tests {
             account: Some(AccountRef::new("team", "alice")),
             model: Some("sonnet".into()),
             tokens: Some(1_200),
+            cost_micro_usd: Some(30_000),
         }
     }
 
