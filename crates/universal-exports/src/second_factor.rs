@@ -33,7 +33,8 @@ use crate::access_admin::{AdminError, audit};
 use crate::factor_seal::FactorSealer;
 use crate::{
     AccessProviders, ApiError, Gateway, LoginRequest, Signer, access_token_digest, bearer,
-    complete_login, new_secret, require_origin, resolve_user, sign_in, unix_timestamp,
+    complete_login, new_secret, require_login_origin, require_origin, resolve_user, sign_in,
+    unix_timestamp,
 };
 
 /// The ID the one-time code provider is listed under in `authenticators` and in a policy.
@@ -340,7 +341,7 @@ pub(crate) async fn continue_login(
 ) -> Result<Response, ApiError> {
     let from_browser = headers.contains_key(ORIGIN);
     if from_browser {
-        require_origin(gateway, headers)?;
+        require_login_origin(gateway, headers)?;
     }
     let providers = gateway.access.clone().ok_or_else(ApiError::unavailable)?;
     let method = request.method.clone().ok_or_else(ApiError::bad_request)?;

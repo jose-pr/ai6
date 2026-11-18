@@ -3960,7 +3960,7 @@ async fn login(
     // does, so that is what tells a web sign-in from a desktop app's or an API client's.
     let from_browser = headers.contains_key(ORIGIN);
     if from_browser {
-        require_origin(&gateway, &headers)?;
+        require_login_origin(&gateway, &headers)?;
     }
     let ttl = sign_in_ttl(
         &gateway.config.unex().gateway,
@@ -4132,7 +4132,7 @@ async fn proxy_person(
     let Some(value) = headers.get(&proxy.header) else {
         return Ok(None);
     };
-    require_origin(gateway, headers)?;
+    require_login_origin(gateway, headers)?;
     let sent = headers
         .get(PROXY_SECRET_HEADER)
         .map(|value| value.as_bytes())
@@ -4142,12 +4142,17 @@ async fn proxy_person(
         .as_ref()
         .is_some_and(|secret| constant_time_eq(secret.as_bytes(), sent));
     if !proven {
+        journal_login_refusal(LoginCheck::ProxySecret);
         return Err(ApiError::unauthorized());
     }
-    let value = value.to_str().map_err(|_| ApiError::unauthorized())?;
+    let unusable = || {
+        journal_login_refusal(LoginCheck::ProxyIdentity);
+        ApiError::unauthorized()
+    };
+    let value = value.to_str().map_err(|_| unusable())?;
     let value = value.trim();
     if value.is_empty() || value.len() > 512 || value.contains(',') {
-        return Err(ApiError::unauthorized());
+        return Err(unusable());
     }
     let directory = providers.directory.clone();
     let lookup = Lookup {
@@ -4159,7 +4164,10 @@ async fn proxy_person(
         .await
         .map_err(|_| ApiError::internal())?
         .map_err(|_| ApiError::internal())?
-        .ok_or_else(ApiError::unauthorized)
+        .ok_or_else(|| {
+            journal_login_refusal(LoginCheck::DirectoryMiss);
+            ApiError::unauthorized()
+        })
         .map(Some)
 }
 
@@ -4172,7 +4180,7 @@ async fn resume(
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
     // Unlike a bearer, a cookie goes along by itself, so the origin is not optional here.
-    require_origin(&gateway, &headers)?;
+    require_login_origin(&gateway, &headers)?;
     let value = session_cookie(&headers).ok_or_else(ApiError::unauthorized)?;
     let address = connection.map(|Extension(ConnectInfo(address))| address);
     if let Some((issued, sign_in)) = resumed_token(&gateway, &headers, address, value).await? {
@@ -6658,17 +6666,75 @@ fn close_policy() -> Message {
 }
 
 fn require_origin(gateway: &Gateway, headers: &HeaderMap) -> Result<(), ApiError> {
+    origin_check(gateway, headers).map_err(|_| ApiError::forbidden())
+}
+
+/// Which check a refused login failed. The caller is told only that the request is not
+/// authorized; the journal gets the name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LoginCheck {
+    /// The request names no `Origin`.
+    OriginMissing,
+    /// The `Origin` is not the public origin.
+    OriginMismatch,
+    /// `X-Forwarded-Proto` is not `https`.
+    ForwardedProto,
+    /// The proxy secret header is absent or differs from the configured secret.
+    ProxySecret,
+    /// The proxy's identity header is empty, too long, lists several names or is not text.
+    ProxyIdentity,
+    /// The directory holds nobody the proxy's identity names.
+    DirectoryMiss,
+}
+
+impl LoginCheck {
+    fn name(self) -> &'static str {
+        match self {
+            Self::OriginMissing => "origin header missing",
+            Self::OriginMismatch => "origin is not the public origin",
+            Self::ForwardedProto => "forwarded protocol is not https",
+            Self::ProxySecret => "proxy secret does not match",
+            Self::ProxyIdentity => "proxy identity header is unusable",
+            Self::DirectoryMiss => "directory has no such person",
+        }
+    }
+}
+
+fn origin_check(gateway: &Gateway, headers: &HeaderMap) -> Result<(), LoginCheck> {
     let origin = headers
         .get(ORIGIN)
         .and_then(|value| value.to_str().ok())
-        .ok_or_else(ApiError::forbidden)?;
+        .ok_or(LoginCheck::OriginMissing)?;
+    if origin != gateway.public_origin() {
+        return Err(LoginCheck::OriginMismatch);
+    }
     let forwarded_proto = headers
         .get("x-forwarded-proto")
         .and_then(|value| value.to_str().ok());
-    if origin != gateway.public_origin() || forwarded_proto != Some("https") {
-        return Err(ApiError::forbidden());
+    if forwarded_proto != Some("https") {
+        return Err(LoginCheck::ForwardedProto);
     }
     Ok(())
+}
+
+/// Writes one journal line for a refused login, naming the check and nothing the request sent.
+fn journal_login_refusal(check: LoginCheck) {
+    let line = format!("universal-exports: login refused: {}", check.name());
+    #[cfg(test)]
+    JOURNALED.lock().unwrap().push(line.clone());
+    eprintln!("{line}");
+}
+
+/// What the tests read back of the journal.
+#[cfg(test)]
+static JOURNALED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// [`require_origin`] for a login route: a refusal is journaled with the failing check.
+fn require_login_origin(gateway: &Gateway, headers: &HeaderMap) -> Result<(), ApiError> {
+    origin_check(gateway, headers).map_err(|check| {
+        journal_login_refusal(check);
+        ApiError::forbidden()
+    })
 }
 
 fn bearer(headers: &HeaderMap) -> Result<&str, ApiError> {
@@ -9597,6 +9663,32 @@ mod tests {
             proxy_identity_without_origin.status(),
             StatusCode::FORBIDDEN
         );
+        let wrong_proto = client
+            .post(format!("{base}/v1/auth/login"))
+            .header("origin", "https://localhost")
+            .header("x-forwarded-proto", "http")
+            .header("x-forwarded-user", "viewer")
+            .json(&serde_json::json!({}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(wrong_proto.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            wrong_proto.text().await.unwrap(),
+            "request is not authorized"
+        );
+        let journaled = JOURNALED.lock().unwrap().join("\n");
+        for check in [
+            "proxy secret does not match",
+            "directory has no such person",
+            "origin header missing",
+            "forwarded protocol is not https",
+        ] {
+            assert!(journaled.contains(check), "{check}: {journaled}");
+        }
+        assert!(!journaled.contains(PROXY_TEST_SECRET), "{journaled}");
+        assert!(!journaled.contains(&PROXY_TEST_SECRET[1..]), "{journaled}");
+        assert!(!journaled.contains("wrong"), "{journaled}");
 
         let viewer_login = login("viewer").send().await.unwrap();
         assert_eq!(viewer_login.status(), StatusCode::CREATED);

@@ -292,6 +292,10 @@ What is decided, and where:
   decided again with the person it named. A complete sign-in is issued; one the policy offers more
   steps to waits for them (`202`, [a second step](#a-second-step)); anything else is answered as a
   wrong password is.
+  A login refused by a check of the request itself is journaled, one line naming the check (the origin
+  is missing or is not the public origin, the forwarded protocol is not `https`, the proxy secret does not
+  match, the proxy identity header is unusable, the directory has no such person), and never the secret
+  or any header's value; the caller is told only `request is not authorized` or `authentication is required`.
 - A sign-in keeps the steps it passed. `POST /v1/auth/resume` and `POST /v1/auth/renew` decide again,
   with the person as the directory has them now, the policy now in force and the address of this
   request, and a sign-in the policy no longer completes ends: `401`. A token a Station issued for a
