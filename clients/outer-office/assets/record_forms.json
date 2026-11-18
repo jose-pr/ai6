@@ -6062,6 +6062,46 @@
           "description": "For M's charge: seconds another charge may stand with its lease lapsed, or its last turn failed, before M is told it is stuck; `none` never flags one.",
           "default": 600.0
         },
+        "max_reports_per_turn": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "none"
+              ],
+              "x-enum-labels": {
+                "none": "No limit"
+              }
+            }
+          ],
+          "title": "Reports assessed a turn",
+          "description": "Open Reports a charge is given to assess in one turn, oldest first; it decides each with `assess_report`, and `no_action` closes a routine one. `none` gives it every open Report.",
+          "default": 10
+        },
+        "failing_after": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "enum": [
+                "none"
+              ],
+              "x-enum-labels": {
+                "none": "No limit"
+              }
+            }
+          ],
+          "title": "Failed turns before degraded",
+          "description": "Turns in a row that end failed, or take no harness, before the Station reports itself degraded naming the charge; an operator's acknowledgement or a turn that ends well starts the count again. `0` flags the first, `none` never flags one.",
+          "default": 3
+        },
         "max_text_chars": {
           "anyOf": [
             {

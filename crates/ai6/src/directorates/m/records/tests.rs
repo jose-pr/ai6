@@ -306,6 +306,8 @@ fn full_example(record: ConfigRecord) -> Value {
             "stuck_queued_after": 0,
             "stuck_blocked_after": 1800,
             "stuck_charge_after": 120,
+            "max_reports_per_turn": 5,
+            "failing_after": 2,
             "max_text_chars": 200
         }),
         ConfigRecord::Compartment => json!({

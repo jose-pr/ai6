@@ -78,6 +78,8 @@ allow `00` as well, or the Agent cannot serve it.
 | `stuck_queued_after` | 900 | **Queued stuck after.** Seconds a Mission may wait in the queue before the charge is told it is stuck; `none` never flags one. |
 | `stuck_blocked_after` | 3,600 | **Blocked or held stuck after.** Seconds a Mission may stand `blocked` or `held`, counted from when the Station first saw it (a held Mission, from when its Run ended), before the charge is told it is stuck; `none` never flags one. |
 | `stuck_charge_after` | 600 | **Charge stuck after.** For M's charge: seconds another charge may stand with its lease lapsed, or its last turn failed, before M is told it is stuck; `none` never flags one. |
+| `max_reports_per_turn` | 10 | **Reports assessed a turn.** Open Reports a charge is given to assess in one turn, oldest first; it decides each with `assess_report`, and `no_action` closes a routine one. `none` gives it every open Report. |
+| `failing_after` | 3 | **Failed turns before degraded.** Turns in a row that end failed, or take no harness, before the Station reports itself degraded naming the charge; an operator's acknowledgement or a turn that ends well starts the count again. `0` flags the first, `none` never flags one. |
 | `max_text_chars` | 500 | **Text one act records.** Characters of text one of the charge's acts records in the audit log and on the timeline (a target, a reason); the rest is cut. `none` records it whole. |
 <!-- schema:record.charge:end -->
 
