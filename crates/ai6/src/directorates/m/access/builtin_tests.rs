@@ -545,3 +545,34 @@ fn a_chief_entry_naming_any_signed_in_is_refused_with_its_field() {
     )
     .expect("named chiefs still work");
 }
+
+#[test]
+fn a_role_bound_to_group_domain_users_grants_a_person_whose_group_is_lowercase() {
+    let stored = policy(
+        r#"
+        [role.reader]
+        actions = ["mission.read"]
+        [[rule]]
+        subject = "group:Domain Users"
+        scope = "operation:G"
+        role = "reader"
+        "#,
+    );
+    let access = compile(&stored, &[]).unwrap();
+    let sssd = person("ann", &["domain users"]);
+    assert!(allowed(&access, &sssd, "mission.read", "operation:G"));
+    let other = person("bob", &["domain  users"]);
+    assert!(!allowed(&access, &other, "mission.read", "operation:G"));
+    let account = person("ann", &["staff"]);
+    assert!(!allowed(&access, &account, "mission.read", "operation:G"));
+}
+
+#[test]
+fn a_global_rule_subject_with_a_leading_space_is_refused_naming_the_rule() {
+    let error = compile(&seeded_with(&[("group: staff", "*", "auditor")], &[]), &[])
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("rule 0"), "{error}");
+    assert!(error.contains("subject"), "{error}");
+    assert!(error.contains("group: staff"), "{error}");
+}

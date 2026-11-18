@@ -111,11 +111,11 @@ impl Tier {
         }
         let mut walk = Vec::with_capacity(rules.len());
         for rule in rules {
-            let subject: Subject = rule.subject.parse().map_err(|_| {
-                AccessPolicyError(
-                    "rule subject must be account, person or group:<value>, or any:signed-in"
-                        .into(),
-                )
+            let subject: Subject = rule.subject.parse().map_err(|error| {
+                AccessPolicyError(format!(
+                    "rule {}: subject {:?} is refused ({error}); it must be account:<name>, person:<id>, group:<name> or any:signed-in",
+                    rule.index, rule.subject
+                ))
             })?;
             builder = builder.rule(
                 Rule::new(rule.subject, rule.scope.clone(), rule.role.clone())

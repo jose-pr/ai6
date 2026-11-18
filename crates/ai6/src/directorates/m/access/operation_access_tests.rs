@@ -594,3 +594,48 @@ fn each_accepted_delegate_edit_only_allows_what_its_editor_held() {
         "the generator exercised {accepted} accepted edits"
     );
 }
+
+#[test]
+fn an_operation_rule_bound_to_group_domain_users_matches_a_lowercase_group() {
+    let (lineage, policy) = (tree(), global());
+    let records: Records = [(
+        "P".to_owned(),
+        record(
+            &[("viewer", &["mission.read"])],
+            &[("group:Domain Users", "operation:P", "viewer")],
+        ),
+    )]
+    .into();
+    let access = compile_with_operations(&policy, &[], &records, &lineage).unwrap();
+    assert!(access.orphaned().is_empty());
+    let sssd = person("ann", &["domain users"]);
+    assert!(is_allowed(&access, &sssd, "mission.read", "P", &lineage));
+    let other = person("bob", &["domain user"]);
+    assert!(!is_allowed(&access, &other, "mission.read", "P", &lineage));
+}
+
+#[test]
+fn an_operation_rule_subject_with_a_leading_space_is_refused_naming_the_field() {
+    let (lineage, policy) = (tree(), global());
+    let records: Records = [(
+        "P".to_owned(),
+        record(
+            &[("viewer", &["mission.read"])],
+            &[("group: staff", "operation:P", "viewer")],
+        ),
+    )]
+    .into();
+    let access = compile_with_operations(&policy, &[], &records, &lineage).unwrap();
+    let orphan = &access.orphaned()["P"][0];
+    assert_eq!(orphan.item, "rule 0");
+    assert!(orphan.reason.contains("subject"), "{}", orphan.reason);
+    assert!(orphan.reason.contains("group: staff"), "{}", orphan.reason);
+    let new = record(&[], &[("group: staff", "operation:P", "viewer")]);
+    let set = AccessSet {
+        global: &policy,
+        operations: &records,
+        lineage: &lineage,
+    };
+    let refusal = validate_operation_access("P", &new, &set).unwrap_err();
+    assert!(refusal.to_string().contains("subject"), "{refusal}");
+}
