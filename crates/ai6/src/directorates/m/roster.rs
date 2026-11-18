@@ -873,43 +873,31 @@ pub struct RosterSettings {
     #[schema(title = "Reports")]
     #[map(default)]
     pub reports: ReportSettings,
-    /// `[roster.usage]`: how limited pool accounts are read again.
+    /// `[roster.usage]`: how long a reading of a pool account's usage stands.
     #[schema(title = "Account usage")]
     #[map(default)]
     pub usage: UsageSettings,
 }
 
-/// How often a Station reads a limited pool account's usage again, and how it backs off while
-/// the account stays used up: the `usage` table of the `roster` record. The reset time a
-/// provider states, or a 429's `retry-after`, only schedules the first read.
+/// How long a reading of a pool account's usage stands: the `usage` table of the `roster` record.
+/// A Station reads an account only when something asks (a person, an Agent, or an event such as a
+/// route about to choose an account), and never on a timer.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, ToValue, FromValue, Schema, Form)]
 #[map(deny_unknown_fields)]
 pub struct UsageSettings {
-    /// Seconds between this Station's re-reads of a limited account's usage, for a harness that
-    /// can be read with no turn; a re-read that finds room frees the account and resumes the
-    /// Missions parked on it. 0 never re-reads, and a limited account waits for its reset.
-    #[schema(title = "Re-read a limited account's usage every")]
-    #[map(default = UsageSettings::default().refresh_every)]
-    pub refresh_every: Seconds,
-    /// What each re-read that finds the account still used up multiplies the wait to the next
-    /// by; 0 and 1 keep it at `refresh_every`.
-    #[schema(title = "Back off re-reads of a used-up account by")]
-    #[map(default = UsageSettings::default().backoff_factor)]
-    pub backoff_factor: u32,
-    /// The longest wait between two re-reads of a used-up account, in seconds, however far the
-    /// backoff has grown.
-    #[schema(title = "Longest wait between re-reads")]
-    #[map(default = UsageSettings::default().backoff_max)]
-    pub backoff_max: Seconds,
+    /// Seconds a reading of an account's usage stands: a request for the same account within it
+    /// is answered from the reading, so a burst of asks reaches the provider once. 0 reads at
+    /// every ask.
+    #[schema(title = "Keep a reading of an account's usage for")]
+    #[map(default = UsageSettings::default().keep)]
+    pub keep: Seconds,
 }
 
 impl Default for UsageSettings {
     fn default() -> Self {
         Self {
-            refresh_every: Seconds::new(300),
-            backoff_factor: 2,
-            backoff_max: Seconds::new(3_600),
+            keep: Seconds::new(60),
         }
     }
 }

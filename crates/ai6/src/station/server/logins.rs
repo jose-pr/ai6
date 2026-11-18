@@ -378,7 +378,7 @@ pub(super) fn stale_note(state: &DaemonState, mission_id: &str) -> Option<String
 
 /// Says what a round did: the log always; a person is told through the audit log and the timeline
 /// of each Operation that may draw the account, and the board shows the account's state.
-fn tell(state: &DaemonState, notice: &LoginNotice) {
+pub(super) fn tell(state: &DaemonState, notice: &LoginNotice) {
     eprintln!("ai6: {}", notice.text);
     let action = match notice.kind {
         NoticeKind::Renewed => "pool.login.renewed",
@@ -390,6 +390,9 @@ fn tell(state: &DaemonState, notice: &LoginNotice) {
         | NoticeKind::Changed => return,
     };
     audit(state, action, &notice.account);
+    if matches!(notice.kind, NoticeKind::Renewed) {
+        super::usage_reads::after_renewal(state, &notice.account);
+    }
     if !matches!(notice.kind, NoticeKind::NeedsPerson | NoticeKind::MayLapse) {
         return;
     }

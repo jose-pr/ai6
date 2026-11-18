@@ -62,7 +62,7 @@ mod stewardship;
 mod stream_tests;
 #[cfg(feature = "cables-mcp")]
 mod theater_mcp;
-mod usage_watch;
+mod usage_reads;
 mod verdicts;
 mod verification;
 mod vetting;
@@ -1092,7 +1092,7 @@ where
         clock: Clock::system(),
         vetting: Default::default(),
         models: Default::default(),
-        usage_watch: Default::default(),
+        usage_reads: Default::default(),
         charges: Default::default(),
         #[cfg(feature = "publisher")]
         publisher,
@@ -1723,8 +1723,8 @@ struct DaemonState {
     vetting: Arc<vetting::VettingDesk>,
     /// The models each account and route may use, as their handlers last said.
     models: Arc<models::ModelBoard>,
-    /// What the Station knows of the limited accounts it re-reads and the Missions parked on them.
-    usage_watch: Arc<usage_watch::UsageWatch>,
+    /// The readings of pool accounts' usage this Station keeps, and the one it is making of each.
+    usage_reads: Arc<usage_reads::UsageReads>,
     /// The charges this Station runs.
     charges: Arc<charges::ChargeDesk>,
     /// The people attached to this Station's live Runs.
@@ -1890,13 +1890,14 @@ async fn scheduler_loop(base: DaemonState) {
                 logins::end_renewals(&renewing);
             });
         }
-        // A re-read of limited accounts asks harnesses, which may take a while: it never holds up
-        // the beat either.
-        if usage_watch::begin(&state) {
+        // What a person asked of an account's usage is answered here, and a limit another Station
+        // lifted resumes its Missions. A reading asks a harness, which may take a while: it never
+        // holds up the beat. Nothing here reads on a timer.
+        if usage_reads::begin(&state) {
             let reading = state.clone();
             tokio::task::spawn_blocking(move || {
-                usage_watch::run(&reading);
-                usage_watch::end(&reading);
+                usage_reads::tend(&reading);
+                usage_reads::end(&reading);
             });
         }
         // A look asks harnesses, which may take minutes: it never holds up the beat.
@@ -5231,6 +5232,13 @@ async fn start_mission(
     let remote_field = plan.mode == ExecutionMode::Field && !plan.own_host;
     let wrapped = remote_field && runner.is_none();
     let on_route = if agent.is_routed() {
+        // The choice weighs each route's quota: read what the providers say now.
+        let (reading, operation, routed) =
+            (state.clone(), mission.operation_id.clone(), agent.clone());
+        let _ = tokio::task::spawn_blocking(move || {
+            routes::read_usage(&reading, operation.as_deref(), &routed);
+        })
+        .await;
         let hosted_by_runner = runner.is_some();
         let available = available_handlers(&state);
         let clearance = if review {
@@ -5548,6 +5556,7 @@ async fn start_mission(
             endpoint.open_plan_tools(review::PlanDesk::new(state.clone(), mission_id.clone()));
         }
         endpoint.open_compartment_tools(compartments::CompartmentDesk::new(state.clone()));
+        endpoint.open_quota_tools(cables_mcp::QuotaDesk::new(state.clone()));
         endpoint.open_report_tools(
             reports::ReportDesk::new(state.clone()).with_knowledge(issued_knowledge),
         );
@@ -6641,6 +6650,7 @@ async fn resume_mission(
             endpoint.open_plan_tools(review::PlanDesk::new(state.clone(), mission_id.clone()));
         }
         endpoint.open_compartment_tools(compartments::CompartmentDesk::new(state.clone()));
+        endpoint.open_quota_tools(cables_mcp::QuotaDesk::new(state.clone()));
         endpoint.open_report_tools(
             reports::ReportDesk::new(state.clone()).with_knowledge(resumed_knowledge),
         );
@@ -9338,7 +9348,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
-            usage_watch: Default::default(),
+            usage_reads: Default::default(),
             charges: Default::default(),
             hub: Default::default(),
         };
@@ -9507,7 +9517,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
-            usage_watch: Default::default(),
+            usage_reads: Default::default(),
             charges: Default::default(),
             hub: Default::default(),
         };
@@ -10544,7 +10554,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
-            usage_watch: Default::default(),
+            usage_reads: Default::default(),
             charges: Default::default(),
             hub: Default::default(),
         }
@@ -11110,7 +11120,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
-            usage_watch: Default::default(),
+            usage_reads: Default::default(),
             charges: Default::default(),
             hub: Default::default(),
         };
@@ -11243,7 +11253,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
-            usage_watch: Default::default(),
+            usage_reads: Default::default(),
             charges: Default::default(),
             hub: Default::default(),
         };
@@ -11476,7 +11486,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
-            usage_watch: Default::default(),
+            usage_reads: Default::default(),
             charges: Default::default(),
             hub: Default::default(),
         };
@@ -11620,7 +11630,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
-            usage_watch: Default::default(),
+            usage_reads: Default::default(),
             charges: Default::default(),
             hub: Default::default(),
         };
@@ -11680,7 +11690,7 @@ queue = 1
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
-            usage_watch: Default::default(),
+            usage_reads: Default::default(),
             charges: Default::default(),
             hub: Default::default(),
         }
@@ -11969,7 +11979,7 @@ theater = \"other-box\"
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
-            usage_watch: Default::default(),
+            usage_reads: Default::default(),
             charges: Default::default(),
             hub: Default::default(),
         };
@@ -12090,7 +12100,7 @@ theater = \"other-box\"
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
-            usage_watch: Default::default(),
+            usage_reads: Default::default(),
             charges: Default::default(),
             hub: Default::default(),
         };
@@ -12319,7 +12329,7 @@ theater = \"other-box\"
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
-            usage_watch: Default::default(),
+            usage_reads: Default::default(),
             charges: Default::default(),
             hub: Default::default(),
         };
@@ -12427,7 +12437,7 @@ theater = \"other-box\"
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
-            usage_watch: Default::default(),
+            usage_reads: Default::default(),
             charges: Default::default(),
             hub: Default::default(),
         };
@@ -12619,7 +12629,7 @@ theater = \"other-box\"
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
-            usage_watch: Default::default(),
+            usage_reads: Default::default(),
             charges: Default::default(),
             hub: Default::default(),
         };
@@ -13004,7 +13014,7 @@ theater = \"other-box\"
             clock: Clock::system(),
             vetting: Default::default(),
             models: Default::default(),
-            usage_watch: Default::default(),
+            usage_reads: Default::default(),
             charges: Default::default(),
             hub: Default::default(),
         };

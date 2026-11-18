@@ -246,6 +246,24 @@ fn pick(state: &DaemonState, agent: &Agent, survey: &Survey) -> Option<OnRoute> 
     Some(survey.open[chosen].0.clone())
 }
 
+/// Reads the usage of every account the routes of `agent` draw on, before a route is chosen: the
+/// choice weighs what each account's quota says. An account read lately is not read again. Blocks.
+pub(super) fn read_usage(state: &DaemonState, operation: Option<&str>, agent: &Agent) {
+    let Some(catalog) = state.station.credentials.catalog() else {
+        return;
+    };
+    let mut ids = std::collections::BTreeSet::new();
+    for route in agent.route_list() {
+        if let accounts::Source::Pools(found) =
+            accounts::source_of(state, operation, &agent.on_route(&route))
+        {
+            ids.extend(found);
+        }
+    }
+    let pools: Vec<&AccountPool> = ids.iter().filter_map(|id| catalog.pool(id)).collect();
+    super::usage_reads::before_claim(state, &pools);
+}
+
 /// The route a new Run of the routed `agent` takes at `place`.
 ///
 /// # Errors

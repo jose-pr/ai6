@@ -2023,9 +2023,9 @@ mod tests {
         .await;
         assert_eq!(form.status(), StatusCode::OK);
         let form: serde_json::Value = form.json().await.unwrap();
-        let usage = &form["schema"]["properties"]["usage"]["properties"]["refresh_every"];
+        let usage = &form["schema"]["properties"]["usage"]["properties"]["keep"];
         assert_eq!(
-            usage["title"], "Re-read a limited account's usage every",
+            usage["title"], "Keep a reading of an account's usage for",
             "{form}"
         );
 
@@ -2034,19 +2034,18 @@ mod tests {
             &served.operator,
             reqwest::Method::PUT,
             "roster/roster/settings",
-            Some(json!({"usage": {"refresh_every": 45, "backoff_factor": 3}})),
+            Some(json!({"usage": {"keep": 45}})),
         )
         .await;
         assert_eq!(set.status(), StatusCode::OK);
         let usage = station.load("").unwrap().roster.settings().usage.clone();
-        assert_eq!(usage.refresh_every.0.as_secs(), 45);
-        assert_eq!(usage.backoff_factor, 3);
+        assert_eq!(usage.keep.0.as_secs(), 45);
         let refused = call(
             &served,
             &served.operator,
             reqwest::Method::PUT,
             "roster/roster/settings",
-            Some(json!({"usage": {"refresh_every": -1}})),
+            Some(json!({"usage": {"keep": -1}})),
         )
         .await;
         assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);

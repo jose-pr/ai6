@@ -16,9 +16,9 @@ use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use codex::ApplyOptions;
-use coqui_acp_api::{AccountCatalog, AccountGrant, Credentials, ProcessSpawner};
-use coqui_acp_claude::{ClaudeLaunch, accounts as claude};
-use coqui_acp_codex::{CodexLaunch, accounts as codex};
+use coqui_acp_api::{AccountCatalog, AccountGrant, Credentials, ProcessSpawner, UsageReport};
+use coqui_acp_claude::{ClaudeLaunch, account_usage as claude_usage, accounts as claude};
+use coqui_acp_codex::{CodexLaunch, account_usage as codex_usage, accounts as codex};
 use coqui_acp_harness::LocalSpawner;
 use coqui_acp_harness::account::Files;
 
@@ -305,6 +305,88 @@ pub(crate) fn apply_secret(
         &ApplyOptions::default(),
         environment,
     )
+}
+
+/// The plan limits of the account `account` of `pool`, read by its harness's account provider with the credential
+/// the account hands a Run, which `environment` holds as `hand_over` left it: a request to the provider's own
+/// endpoint (Claude's OAuth API, the ChatGPT backend), no program started and no model turn. `endpoint` replaces
+/// that address, for a test's stand-in.
+///
+/// `None` for an account the provider cannot be asked from here (its kind has no provider, or a Codex key or token
+/// saved to a home the harness keeps, which the harness itself reads): the caller asks the handler. An account with
+/// no plan limits is a report that says so, not an error; the message of an error names no credential.
+pub(crate) fn read_limits(
+    handler: &str,
+    pool: &str,
+    account: &str,
+    kind: AccountKind,
+    environment: &BTreeMap<String, String>,
+    endpoint: Option<&str>,
+) -> Option<Result<UsageReport, String>> {
+    if !reads_limits(handler, kind) {
+        return None;
+    }
+    let harness = Harness::named(handler)?;
+    let from = |name: &str| {
+        environment
+            .iter()
+            .find(|(variable, _)| same_name(variable, name))
+            .map(|(_, value)| value.as_str())
+    };
+    let id = id_of(pool, account);
+    let grant = match slot_of(kind) {
+        Some((_, slot)) if slot.variable.is_some() => {
+            let secret = from(slot.variable.as_deref()?)?;
+            let credentials: Credentials =
+                [(slot.credential.as_str(), secret)].into_iter().collect();
+            AccountGrant::new(id, provider_id(kind)?).credentials(credentials)
+        }
+        // A key or token the harness logs in to a home of its own.
+        Some(_) => return None,
+        None => {
+            let dir = Path::new(from(&directory_variable(AccountKind::ConfigDir, handler)?)?);
+            let (file, key) = match harness {
+                Harness::Claude => (claude::CREDENTIALS_FILE, claude::FILE_KEY),
+                Harness::Codex => (codex::AUTH_FILE, codex::FILE_KEY),
+            };
+            let Ok(text) = std::fs::read_to_string(dir.join(file)) else {
+                return Some(Err(format!(
+                    "the account's directory holds no readable {file}"
+                )));
+            };
+            let credentials: Credentials = [(key, text.as_str())].into_iter().collect();
+            AccountGrant::new(id, harness.login_kind())
+                .credentials(credentials)
+                .state_dir(dir.to_string_lossy())
+        }
+    };
+    let read = match harness {
+        Harness::Claude => {
+            let mut options = claude_usage::ReadOptions::new();
+            if let Some(endpoint) = endpoint {
+                options = options.endpoint(endpoint);
+            }
+            claude_usage::read_limits(&grant, &options)
+        }
+        Harness::Codex => {
+            let mut options = codex_usage::ReadOptions::new();
+            if let Some(endpoint) = endpoint {
+                options = options.endpoint(endpoint);
+            }
+            codex_usage::read_limits(&grant, &options)
+        }
+    };
+    Some(read.map_err(|error| error.message().to_owned()))
+}
+
+/// Whether the account provider of `handler`'s harness may read an account of `kind`: the pool is served by Claude
+/// Code or Codex and the kind is one of that harness's, so [`read_limits`] can answer.
+pub(crate) fn reads_limits(handler: &str, kind: AccountKind) -> bool {
+    let named = Harness::named(handler);
+    match kind {
+        AccountKind::ConfigDir | AccountKind::HarnessLogin => named.is_some(),
+        other => named.is_some() && owner(other) == named,
+    }
 }
 
 /// Runs the harness of `handler` on the directory `dir`, a login it already holds, as it is: nothing is written there.
@@ -639,5 +721,167 @@ mod tests {
         )
         .expect_err("no program");
         assert!(!error.contains(CANARY), "{error}");
+    }
+
+    /// A server on a loopback port that answers one request with `status` and `body`, and says what it was
+    /// asked: the request's lines.
+    fn answers_once(
+        status: u16,
+        body: &'static str,
+    ) -> (String, std::thread::JoinHandle<Vec<String>>) {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = format!("http://{}", listener.local_addr().unwrap());
+        let served = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut lines = Vec::new();
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let line = line.trim_end().to_owned();
+                if line.is_empty() {
+                    break;
+                }
+                lines.push(line);
+            }
+            let mut stream = stream;
+            write!(
+                stream,
+                "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+            lines
+        });
+        (address, served)
+    }
+
+    #[test]
+    fn a_claude_token_s_plan_limits_are_read_by_its_account_provider_with_its_own_credential() {
+        let (endpoint, served) = answers_once(
+            200,
+            r#"{"five_hour": {"utilization": 42.5, "resets_at": "2026-11-19T12:00:00Z"}}"#,
+        );
+        let env = environment(&[("CLAUDE_CODE_OAUTH_TOKEN", CANARY), ("HOME", "/h")]);
+        let report = read_limits(
+            "claude",
+            "team",
+            "alice",
+            AccountKind::ClaudeOauthToken,
+            &env,
+            Some(&endpoint),
+        )
+        .expect("the provider reads this kind")
+        .expect("and it answered");
+        assert!(report.supported);
+        let window = report
+            .buckets
+            .iter()
+            .find(|bucket| bucket.id == "five_hour")
+            .expect("the window the document names");
+        assert_eq!(UsageReport::fraction_permille(window), Some(425));
+        assert_eq!(report.account.as_deref(), Some("team/alice"));
+        let asked = served.join().unwrap();
+        assert!(asked[0].starts_with("GET /api/oauth/usage"), "{asked:?}");
+        assert!(
+            asked
+                .iter()
+                .any(|line| line.eq_ignore_ascii_case(&format!("authorization: Bearer {CANARY}"))),
+            "the credential goes to the provider's own endpoint: {asked:?}"
+        );
+        assert!(
+            !format!("{report:?}").contains(CANARY),
+            "no credential in the report"
+        );
+    }
+
+    #[test]
+    fn a_refused_token_is_an_error_that_names_no_credential() {
+        let (endpoint, served) = answers_once(401, "{}");
+        let env = environment(&[("CLAUDE_CODE_OAUTH_TOKEN", CANARY)]);
+        let error = read_limits(
+            "claude",
+            "team",
+            "alice",
+            AccountKind::ClaudeOauthToken,
+            &env,
+            Some(&endpoint),
+        )
+        .unwrap()
+        .expect_err("a 401 is a refusal");
+        served.join().unwrap();
+        assert!(error.contains("renew"), "{error}");
+        assert!(!error.contains(CANARY), "{error}");
+    }
+
+    #[test]
+    fn a_login_in_a_directory_is_read_from_its_file_and_one_without_the_profile_scope_has_no_limits()
+     {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".credentials.json"),
+            r#"{"claudeAiOauth": {"accessToken": "login-canary-77", "scopes": ["user:inference"], "expiresAt": 99999999999999}}"#,
+        )
+        .unwrap();
+        let env = environment(&[("CLAUDE_CONFIG_DIR", dir.path().to_str().unwrap())]);
+        let report = read_limits("claude", "team", "bob", AccountKind::ConfigDir, &env, None)
+            .expect("a login in a directory")
+            .expect("the provider answered with no request");
+        assert!(!report.supported, "no network was needed to say so");
+        assert!(
+            report
+                .unsupported_because
+                .as_deref()
+                .is_some_and(|why| why.contains("profile scope")),
+            "{report:?}"
+        );
+        assert!(!format!("{report:?}").contains("login-canary-77"));
+        let empty = tempfile::tempdir().unwrap();
+        let env = environment(&[("CLAUDE_CONFIG_DIR", empty.path().to_str().unwrap())]);
+        let error = read_limits("claude", "team", "bob", AccountKind::ConfigDir, &env, None)
+            .unwrap()
+            .expect_err("no file");
+        assert!(error.contains(".credentials.json"), "{error}");
+    }
+
+    #[test]
+    fn only_what_the_account_providers_can_read_is_asked_of_them() {
+        let env = environment(&[("CODEX_HOME", "/somewhere")]);
+        assert!(reads_limits("claude", AccountKind::ClaudeOauthToken));
+        assert!(reads_limits("claude", AccountKind::ConfigDir));
+        assert!(reads_limits("codex", AccountKind::CodexApiKey));
+        assert!(!reads_limits("acp", AccountKind::ConfigDir));
+        assert!(
+            !reads_limits("mock-pooled", AccountKind::ClaudeOauthToken),
+            "a key is read only for the harness it belongs to, whatever the pool is called"
+        );
+        assert!(!reads_limits("codex", AccountKind::ClaudeOauthToken));
+        assert!(!reads_limits("antigravity", AccountKind::HarnessLogin));
+        // A Codex key saved to a home the harness keeps is read by the harness.
+        assert!(
+            read_limits(
+                "codex",
+                "team",
+                "carol",
+                AccountKind::CodexApiKey,
+                &env,
+                None
+            )
+            .is_none()
+        );
+        assert!(read_limits("acp", "team", "dan", AccountKind::ConfigDir, &env, None).is_none());
+        // A credential the environment does not hold is no read either.
+        assert!(
+            read_limits(
+                "claude",
+                "team",
+                "eve",
+                AccountKind::AnthropicApiKey,
+                &environment(&[]),
+                None
+            )
+            .is_none()
+        );
     }
 }

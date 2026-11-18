@@ -636,19 +636,14 @@ void main() {
         ),
       );
       expect(
-        find.text('Re-read a limited account\'s usage every'),
+        find.text('Keep a reading of an account\'s usage for'),
         findsOneWidget,
       );
-      expect(
-        find.text('Back off re-reads of a used-up account by'),
-        findsOneWidget,
-      );
-      expect(find.text('Longest wait between re-reads'), findsOneWidget);
-      await tester.ensureVisible(_field('usage.refresh_every'));
-      await tester.enterText(_box('usage.refresh_every'), '120');
+      await tester.ensureVisible(_field('usage.keep'));
+      await tester.enterText(_box('usage.keep'), '120');
       await tester.pumpAndSettle();
       expect(model.value(), {
-        'usage': {'refresh_every': 120},
+        'usage': {'keep': 120},
       });
     });
 

@@ -30,9 +30,11 @@ mod compartment_tools;
 mod decision_tools;
 mod issue_tools;
 mod oversight_tools;
+mod quota_tools;
 mod report_tools;
 mod resource_tools;
 
+pub(super) use self::quota_tools::QuotaDesk;
 use super::charges::decide::DecisionDesk;
 use super::charges::keep::AreaDesk;
 use super::compartments::CompartmentDesk;
@@ -83,6 +85,7 @@ pub(super) struct Endpoint {
     plan: Arc<OnceLock<review::PlanDesk>>,
     decision_desk: Arc<OnceLock<DecisionDesk>>,
     resource_desk: Arc<OnceLock<ResourceDesk>>,
+    quota_desk: Arc<OnceLock<QuotaDesk>>,
     area_desk: Arc<OnceLock<AreaDesk>>,
 }
 
@@ -121,6 +124,7 @@ impl Endpoint {
         let plan = Arc::new(OnceLock::new());
         let decision_desk = Arc::new(OnceLock::new());
         let resource_desk = Arc::new(OnceLock::new());
+        let quota_desk = Arc::new(OnceLock::new());
         let area_desk = Arc::new(OnceLock::new());
         let token = Uuid::new_v4().to_string();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -140,6 +144,7 @@ impl Endpoint {
                 let plan = plan.clone();
                 let decision_desk = decision_desk.clone();
                 let resource_desk = resource_desk.clone();
+                let quota_desk = quota_desk.clone();
                 let area_desk = area_desk.clone();
                 let identity = identity.clone();
                 move || {
@@ -159,6 +164,7 @@ impl Endpoint {
                         plan.clone(),
                         decision_desk.clone(),
                         resource_desk.clone(),
+                        quota_desk.clone(),
                         area_desk.clone(),
                     ))
                 }
@@ -190,6 +196,7 @@ impl Endpoint {
             plan,
             decision_desk,
             resource_desk,
+            quota_desk,
             area_desk,
         })
     }
@@ -199,6 +206,12 @@ impl Endpoint {
     /// harness connects.
     pub(super) fn open_area_tools(&self, desk: AreaDesk) {
         let _ = self.area_desk.set(desk);
+    }
+
+    /// Lets the Run read its own account's quota; without it `check_quota` does not exist for
+    /// the Run. Open it before the harness connects.
+    pub(super) fn open_quota_tools(&self, desk: QuotaDesk) {
+        let _ = self.quota_desk.set(desk);
     }
 
     /// Gives an Operation's charge the tool to ask a Station for resources, and M's charge the
@@ -1763,6 +1776,7 @@ struct CableTools {
     plan: Arc<OnceLock<review::PlanDesk>>,
     decision_desk: Arc<OnceLock<DecisionDesk>>,
     resource_desk: Arc<OnceLock<ResourceDesk>>,
+    quota_desk: Arc<OnceLock<QuotaDesk>>,
     area_desk: Arc<OnceLock<AreaDesk>>,
     tool_router: ToolRouter<Self>,
 }
@@ -1785,6 +1799,7 @@ impl CableTools {
         plan: Arc<OnceLock<review::PlanDesk>>,
         decision_desk: Arc<OnceLock<DecisionDesk>>,
         resource_desk: Arc<OnceLock<ResourceDesk>>,
+        quota_desk: Arc<OnceLock<QuotaDesk>>,
         area_desk: Arc<OnceLock<AreaDesk>>,
     ) -> Self {
         // The Station's own tools exist only for the Station's charge, and the issue tools
@@ -1807,6 +1822,7 @@ impl CableTools {
                 plan,
                 decision_desk,
                 resource_desk,
+                quota_desk,
                 area_desk,
                 tool_router: Self::plan_router(),
             };
@@ -1840,6 +1856,9 @@ impl CableTools {
                 tool_router += Self::station_detail_router();
             }
         }
+        if quota_desk.get().is_some() {
+            tool_router += Self::quota_router();
+        }
         if let Some(desk) = resource_desk.get() {
             tool_router += if desk.is_m() {
                 Self::flag_router()
@@ -1863,6 +1882,7 @@ impl CableTools {
             plan,
             decision_desk,
             resource_desk,
+            quota_desk,
             area_desk,
             tool_router,
         }

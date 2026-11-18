@@ -425,6 +425,8 @@ pub(super) fn issue(
     {
         environment.remove(&variable);
     }
+    // The claim picks on what each account's quota says: read the ones that may be picked.
+    super::usage_reads::before_claim(state, &pools);
     let mission_id = holder.id;
     let desk = &state.station.credentials.accounts;
     // A check-in during a slow hand-over (a Codex login) renews this claim too.
@@ -1094,6 +1096,8 @@ pub(super) fn on_limit(
     else {
         return (Rotation::Unpooled, None);
     };
+    // What the provider says of the account's buckets decides where the Run goes next.
+    super::usage_reads::after_limit(state, &account);
     let now = state.clock.now();
     let operation = mission.operation_id.as_deref();
     let agent = state
@@ -1348,6 +1352,21 @@ pub(super) mod testing {
 
     /// The reset time the pooled mock reports with its limit.
     pub(in crate::station::server) const POOLED_RESET: i64 = 1_790_003_600;
+
+    /// Makes `mission_id`'s Run hold `account`, as a claim does.
+    pub(in crate::station::server) fn hold(
+        state: &super::DaemonState,
+        mission_id: &str,
+        account: crate::directorates::registry::accounts::AccountRef,
+    ) {
+        super::lock(&state.station.credentials.accounts.held).insert(
+            mission_id.to_owned(),
+            super::Held {
+                account,
+                kind: super::AccountKind::ClaudeOauthToken,
+            },
+        );
+    }
 
     /// One call: the Mission, `start` or `resume`, the environment and initial context.
     pub(in crate::station::server) type PooledCall =

@@ -273,7 +273,7 @@ fn full_example(record: ConfigRecord) -> Value {
                 "rating_confirms": ["mission_done"],
                 "rating_bands": [80, 60, 40, 20]
             },
-            "usage": {"refresh_every": 60, "backoff_factor": 3, "backoff_max": 900}
+            "usage": {"keep": 90}
         }),
         ConfigRecord::Review => json!({
             "panel": [
