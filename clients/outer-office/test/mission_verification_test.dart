@@ -39,6 +39,7 @@ Future<MissionBoard> _board(
   (int, String)? refuse,
   List<Map<String, Object?>> evidence = const [],
   double? probeRequested,
+  int? conversation,
 }) async {
   final board = MissionBoard(
     apiOrigin: Uri.parse('https://oo.example'),
@@ -70,6 +71,17 @@ Future<MissionBoard> _board(
             'state': 'verifying',
             'sequence': 5,
           },
+        ]),
+        '/v1/missions' => json([
+          if (conversation != null)
+            {
+              'operation_id': 'G',
+              'mission_id': 'm1',
+              'handle': 'G-1',
+              'runs': const <Object>[],
+              'history': const <Object>[],
+              'conversation_tokens': conversation,
+            },
         ]),
         '/v1/stations' => json({'headquarters_station': null, 'stations': []}),
         '/v1/user/profile' => json({
@@ -145,6 +157,15 @@ final _latest = [
 ];
 
 void main() {
+  testWidgets('a Mission shows the size of its conversation', (tester) async {
+    final board = await _board(const ['mission.read'], conversation: 123456);
+    expect(board.conversationTokens('G', 'm1'), 123456);
+    await _detail(tester, board);
+    expect(find.text('Conversation: 123456 tokens'), findsOneWidget);
+    final bare = await _board(const ['mission.read']);
+    expect(bare.conversationTokens('G', 'm1'), isNull);
+  });
+
   testWidgets('the board counts verifying Missions as waiting for a decision', (
     tester,
   ) async {

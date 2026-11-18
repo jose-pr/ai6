@@ -72,6 +72,7 @@ fn pending_mission(
             brief: None,
             usage: None,
             history: Vec::new(),
+            conversation_tokens: None,
             pending: Some(pending),
         },
     )

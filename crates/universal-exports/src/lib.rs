@@ -1449,6 +1449,8 @@ impl Gateway {
                         .ok()
                         .flatten();
                     mission.history = attempts.remove(&mission.mission_id).unwrap_or_default();
+                    mission.conversation_tokens =
+                        conversation_tokens(&mission.history, mission.usage.as_ref());
                     if let Ok(Some(found)) = registry.resolve_mission(&mission.mission_id)
                         && found.mission_id == mission.mission_id
                     {
@@ -2879,8 +2881,35 @@ async fn mission_detail(
         .map_err(|_| ApiError::internal())?;
         mission.usage = usage;
         mission.history = attempts.remove(&mission.mission_id).unwrap_or_default();
+        mission.conversation_tokens = conversation_tokens(&mission.history, mission.usage.as_ref());
     }
     Ok(Json(mission))
+}
+
+/// What the conversation of the latest run's provider session holds: the tokens each run of the
+/// session added, summed back along the runs that resumed it. None before a Run has a provider ID.
+fn conversation_tokens(history: &[MissionRun], usage: Option<&MissionUsage>) -> Option<u64> {
+    let mut current = history.iter().max_by_key(|run| run.number)?;
+    current.provider_id.as_ref()?;
+    let mut total = 0_u64;
+    let mut seen = std::collections::BTreeSet::new();
+    while seen.insert(current.run_id.as_str()) {
+        total = total.saturating_add(
+            usage
+                .and_then(|usage| usage.runs.get(&current.run_id))
+                .map_or(0, ai6::UsageTotals::tokens),
+        );
+        let Some(previous) = current
+            .predecessor
+            .as_deref()
+            .and_then(|id| history.iter().find(|run| run.run_id == id))
+            .filter(|previous| previous.provider_id == current.provider_id)
+        else {
+            break;
+        };
+        current = previous;
+    }
+    Some(total)
 }
 
 /// Whether a title and instructions are written, and within `[text]`.
@@ -3594,6 +3623,7 @@ fn group_missions(runs: Vec<BoardRun>) -> Vec<BoardMission> {
             brief: None,
             usage: None,
             history: Vec::new(),
+            conversation_tokens: None,
             pending: None,
         })
         .collect()
@@ -6014,6 +6044,11 @@ pub struct BoardMission {
     /// Every run at the Mission, first first, from the shared Run records; empty
     /// when no Run was recorded.
     pub history: Vec<MissionRun>,
+    /// Tokens the Mission's conversation holds, an estimate: what the Runs that resumed one
+    /// provider session took in (input, output, cache writes). The Station starts a fresh
+    /// session with a summary once it reaches its compaction setting.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conversation_tokens: Option<u64>,
     /// Where a Mission with no Run stands: queued, waiting, retrying a start or failed
     /// before one; absent once it has a Run.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -10439,6 +10474,20 @@ mod tests {
                 1_790_000_000,
             )
             .unwrap();
+        FileRegistry::open(directory.path())
+            .record_usage(
+                Some("G"),
+                "mission-g",
+                "attempt-2",
+                &ai6::UsageTotals {
+                    output: 10,
+                    cache_write: 40,
+                    cache_read: 9_000,
+                    ..ai6::UsageTotals::default()
+                },
+                1_790_000_000,
+            )
+            .unwrap();
         // The first run was lost with its Station; the second runs elsewhere.
         let registry = FileRegistry::open(directory.path());
         registry
@@ -10497,6 +10546,10 @@ mod tests {
         assert_eq!(mission_detail["usage"]["total"]["input"], 120);
         assert_eq!(mission_detail["usage"]["total"]["cost_micro_usd"], 4_500);
         assert_eq!(mission_detail["usage"]["runs"]["run-g"]["output"], 30);
+        assert_eq!(
+            mission_detail["conversation_tokens"], 50,
+            "the latest run's own tokens: the run before it had no provider session to share"
+        );
         assert_eq!(
             mission_detail["brief"]["prompt"],
             "Review the requested change"

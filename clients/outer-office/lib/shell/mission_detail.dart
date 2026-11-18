@@ -149,6 +149,12 @@ class MissionDetail extends StatelessWidget {
               ].join(' · '),
               style: text.bodySmall?.copyWith(color: tokens.muted),
             ),
+          if (board.conversationTokens(operationId, mission.missionId)
+              case final size?)
+            Text(
+              'Conversation: $size tokens',
+              style: text.bodySmall?.copyWith(color: tokens.muted),
+            ),
           if (control != null) ...[
             const SizedBox(height: 6),
             Text(control.describe(), style: text.labelMedium),

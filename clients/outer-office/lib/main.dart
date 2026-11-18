@@ -478,6 +478,9 @@ class MissionBoard extends ChangeNotifier
   /// What each Mission is called now, by (Operation, Mission UID).
   Map<(String, String), String> missionHandles = const {};
 
+  /// Tokens each Mission's conversation holds, an estimate, for the Missions that report one.
+  Map<(String, String), int> missionConversation = const {};
+
   /// Where each Mission with no Run stands, by (Operation, Mission UID): queued, waiting,
   /// retrying a start, or failed before one.
   Map<(String, String), PendingMission> missionPending = const {};
@@ -3641,6 +3644,12 @@ class MissionBoard extends ChangeNotifier
                   MissionRunSummary.fromJson(attempt as Map<String, dynamic>),
               ],
           };
+          missionConversation = {
+            for (final item in missions.cast<Map<String, dynamic>>())
+              if (item['conversation_tokens'] case final num tokens)
+                (item['operation_id'] as String, item['mission_id'] as String):
+                    tokens.toInt(),
+          };
           missionHandles = {
             for (final item in missions.cast<Map<String, dynamic>>())
               if (item['handle'] case final String handle)
@@ -3769,6 +3778,7 @@ class MissionBoard extends ChangeNotifier
     missionBriefs = const [];
     missionRuns = const {};
     missionHandles = const {};
+    missionConversation = const {};
     missionPending = const {};
     auditEntries = const [];
     heldBriefs = const [];
@@ -3792,6 +3802,10 @@ class MissionBoard extends ChangeNotifier
       _freshness[source] = OoFreshness.loading;
     }
   }
+
+  /// Tokens the Mission's conversation holds, or null when none is reported.
+  int? conversationTokens(String operationId, String missionId) =>
+      missionConversation[(operationId, missionId)];
 
   List<MissionRunSummary> history(String operationId, String missionId) =>
       missionRuns[(operationId, missionId)] ?? const [];
