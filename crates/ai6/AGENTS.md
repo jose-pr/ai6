@@ -3783,7 +3783,9 @@ reads the issue into the link's `snapshot`, and unlinks it when it cannot be rea
 `ai6::settings_from_table::<T>(toml::Table)` builds a provider's settings through a Guatiao value, so
 its one declaration gives its parsing, defaults and schema. `source_setups` strips `provider`,
 `intake`, `interval_secs` and the keys of `InstanceKeys` (`status_labels`, `status_transitions`,
-`agent_labels`, `agent_transitions`, `priority_map`, `reopen`, `decisions`) before a provider sees the table.
+`agent_labels`, `agent_transitions`, `priority_map`, `reopen`, `decisions`, `comments`) before a provider sees the table.
+`comments = off | claim-only | settle-only | both` chooses which status comments the instance gets; unset, the
+Operation's `updates` decides. A report names no Run ID.
 
 `decisions = { approvers = [ACCOUNT_ID...], approval_secs? }` (off with no approvers) lets
 `station::tracker_decisions` read a comment on a Mission's linked item that is exactly `/approve`, or

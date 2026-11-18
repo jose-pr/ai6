@@ -98,10 +98,65 @@ pub(crate) struct InstanceKeys {
     #[schema(title = "Decisions by comment")]
     #[map(default)]
     pub decisions: Decisions,
+    /// Which comments AI6 writes on this instance's issues; unset, the Operation's `updates`
+    /// decides.
+    #[schema(title = "Status comments")]
+    pub comments: Option<StatusComments>,
+}
+
+/// Which of its own comments AI6 writes on one instance's issues. A claim comment is the
+/// progress status (working, waiting, paused); a settle comment is the report when the Mission
+/// ends, and the final status on a linked issue other than the source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ToValue, FromValue, Schema)]
+#[map(rename_all = "kebab-case")]
+pub(crate) enum StatusComments {
+    /// Neither: nothing is written on the issue by itself.
+    #[schema(label = "None")]
+    Off,
+    /// The progress status only.
+    #[schema(label = "When work starts, and while it waits or pauses")]
+    ClaimOnly,
+    /// The closing comment only.
+    #[schema(label = "When the Mission ends")]
+    SettleOnly,
+    /// Both.
+    #[schema(label = "Both")]
+    Both,
+}
+
+impl StatusComments {
+    /// Whether the progress status is written.
+    pub(crate) fn claims(self) -> bool {
+        matches!(self, Self::ClaimOnly | Self::Both)
+    }
+
+    /// Whether the closing comment is written.
+    pub(crate) fn settles(self) -> bool {
+        matches!(self, Self::SettleOnly | Self::Both)
+    }
+}
+
+/// The choice an Operation's `sources.NAME` makes of its status comments; `None` when it makes
+/// none, and the Operation's `updates` stands. A value that is not a choice is refused when
+/// the Station reads the instance, so here it reads as none.
+pub(crate) fn instance_comments(operation: &Operation, name: &str) -> Option<StatusComments> {
+    let named = operation
+        .sources
+        .get(name)?
+        .as_table()?
+        .get("comments")?
+        .as_str()?;
+    Some(match named {
+        "off" => StatusComments::Off,
+        "claim-only" => StatusComments::ClaimOnly,
+        "settle-only" => StatusComments::SettleOnly,
+        "both" => StatusComments::Both,
+        _ => return None,
+    })
 }
 
 impl InstanceKeys {
-    const NAMES: [&str; 7] = [
+    const NAMES: [&str; 8] = [
         "status_labels",
         "status_transitions",
         "agent_labels",
@@ -109,6 +164,7 @@ impl InstanceKeys {
         "priority_map",
         "reopen",
         "decisions",
+        "comments",
     ];
 }
 
@@ -218,6 +274,8 @@ pub(crate) struct SourceSetup {
     pub reopen: Reopen,
     /// Who may decide green ink from a comment on a linked item.
     pub decisions: Decisions,
+    /// Which status comments are written here; `None` leaves it to the Operation's `updates`.
+    pub comments: Option<StatusComments>,
 }
 
 impl SourceSetup {
@@ -237,6 +295,7 @@ impl SourceSetup {
             priority_map: BTreeMap::new(),
             reopen: Reopen::default(),
             decisions: Decisions::default(),
+            comments: None,
         }
     }
 
@@ -357,6 +416,7 @@ pub(crate) fn source_setups(
                 priority_map: keys.priority_map,
                 reopen: keys.reopen,
                 decisions: keys.decisions,
+                comments: keys.comments,
             })
         })
         .collect()
@@ -1097,19 +1157,10 @@ pub(crate) fn compose_report(disclosure: Disclosure, finished: &FinishedSourceBr
             denials.join(", ")
         ));
     }
-    if disclosure == Disclosure::Full {
-        if let Some(agent) = outcome_text("agent") {
-            lines.push(format!("Agent: {agent}"));
-        }
-        let run_ids: Vec<&str> = finished
-            .outcome
-            .get("run_ids")
-            .and_then(serde_json::Value::as_array)
-            .map(|ids| ids.iter().filter_map(serde_json::Value::as_str).collect())
-            .unwrap_or_default();
-        if !run_ids.is_empty() {
-            lines.push(format!("Runs: {}", run_ids.join(", ")));
-        }
+    if disclosure == Disclosure::Full
+        && let Some(agent) = outcome_text("agent")
+    {
+        lines.push(format!("Agent: {agent}"));
     }
     CxReport {
         item_id,
@@ -1170,7 +1221,7 @@ fn queue_one(
         .ok_or("the brief names no Operation")?;
     let operation = roster.operation(operation_key).map_err(|e| e.to_string())?;
     let cover = roster.cover(&operation.cover).map_err(|e| e.to_string())?;
-    source_setups(operation, limits)
+    let setup = source_setups(operation, limits)
         .into_iter()
         .filter_map(Result::ok)
         .find(|setup| setup.name == instance)
@@ -1180,6 +1231,9 @@ fn queue_one(
                 operation.id
             )
         })?;
+    if setup.comments.is_some_and(|comments| !comments.settles()) {
+        return Ok(());
+    }
     if !reportable(&entry.brief, instance) {
         return Err(format!(
             "the brief has no provenance from source {instance}, so nothing is posted for it"
@@ -3268,6 +3322,94 @@ Branch: `agent/br-1`"
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn a_source_chooses_its_status_comments_and_the_default_is_what_updates_implies() {
+        let state = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(state.path());
+        // (the instance's choice, a working status is written, a settled report is written)
+        for (choice, claims, settles) in [
+            ("", true, true),
+            (", comments = \"both\"", true, true),
+            (", comments = \"off\"", false, false),
+            (", comments = \"claim-only\"", true, false),
+            (", comments = \"settle-only\"", false, true),
+        ] {
+            let mission = format!("m-{}", choice.len());
+            let sources = format!("{{ fake = {{ ids = [\"cs-1\"]{choice} }} }}");
+            let (_dir, roster) = roster_with("overt", &sources);
+            registry
+                .link_issue(&source_link("G", &mission, "fake", "cs-1", None, 1.0))
+                .unwrap();
+            let status = crate::station::issues::queue_status(
+                &registry, &roster, &mission, "working", None, 1.0,
+            );
+            assert_eq!(status == 1, claims, "{choice}: status");
+            let operation = roster.operation("G").unwrap();
+            let setup = source_setups(operation, &SourceLimits::default())
+                .remove(0)
+                .unwrap();
+            assert_eq!(setup.name, "fake");
+            assert_eq!(
+                setup.comments.is_none_or(StatusComments::settles),
+                settles,
+                "{choice}: report"
+            );
+        }
+        // A value that is no choice is refused with the instance.
+        let (_dir, roster) = roster_with(
+            "overt",
+            "{ fake = { ids = [\"cs-1\"], comments = \"sometimes\" } }",
+        );
+        let operation = roster.operation("G").unwrap();
+        assert!(source_setups(operation, &SourceLimits::default())[0].is_err());
+    }
+
+    #[test]
+    fn a_settle_only_source_posts_one_report_with_no_run_or_session_id() {
+        let plugins = plugins();
+        for (choice, reports) in [("settle-only", 1), ("claim-only", 0), ("off", 0)] {
+            let sources =
+                format!("{{ fake = {{ ids = [\"so-{choice}\"], comments = \"{choice}\" }} }}");
+            let (_dir, roster) = roster_with("overt", &sources);
+            let state = tempfile::tempdir().unwrap();
+            let registry = FileRegistry::open(state.path());
+            let desk = SourceDesk::new("station-a", SourceLimits::default());
+            desk.run(&plugins, &roster, &registry);
+            finish_all(
+                &registry,
+                true,
+                serde_json::json!({
+                    "state": "done",
+                    "mission_id": format!("G-fake-so-{choice}"),
+                    "agent": "technical-officer",
+                    "run_ids": ["provider-session-0042"],
+                }),
+            );
+            *desk.next_report.lock().unwrap() = Instant::now();
+            report_finished(&registry, &roster, &SourceLimits::default(), 5.0);
+            let queued: Vec<_> = registry
+                .outbox_entries(None)
+                .unwrap()
+                .into_iter()
+                .filter(|entry| entry.kind == OutboxKind::Report)
+                .collect();
+            assert_eq!(queued.len(), reports, "{choice}");
+            for entry in queued {
+                assert!(
+                    !entry.body.contains("provider-session-0042"),
+                    "{}",
+                    entry.body
+                );
+                assert!(!entry.body.contains("Runs:"), "{}", entry.body);
+                assert!(
+                    entry.body.contains("Agent: technical-officer"),
+                    "{}",
+                    entry.body
+                );
+            }
+        }
     }
 
     #[test]

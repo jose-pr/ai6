@@ -25,7 +25,7 @@ use crate::directorates::registry::tracker::{
     IssueSpec, Tracker, TrackerLink, TrackerPost, TrackerUpdate,
 };
 use crate::station::limits::SourceLimits;
-use crate::station::sources::{Reopen, SourceSetup, StatusWords, source_setups};
+use crate::station::sources::{Reopen, SourceSetup, StatusWords, instance_comments, source_setups};
 use crate::station::tracker_decisions;
 use guatiao::{Status, library::ProviderError};
 
@@ -82,11 +82,26 @@ pub(crate) fn queue_status(
         let Ok(operation) = roster.operation(&link.operation) else {
             continue;
         };
-        let wanted = match operation.issues.updates {
-            IssueUpdates::Outcome => false,
-            IssueUpdates::Milestones => link.relation == LinkRelation::Source && !ended,
-            IssueUpdates::All => !(ended && link.relation == LinkRelation::Source),
+        // An instance that names its comments chooses which kinds are written; `updates` then
+        // says only which links, and `outcome` is read as `milestones`.
+        let chosen = instance_comments(operation, &link.tracker);
+        let updates = match (chosen, operation.issues.updates) {
+            (Some(_), IssueUpdates::Outcome) => IssueUpdates::Milestones,
+            (_, updates) => updates,
         };
+        let kind_written = chosen.is_none_or(|comments| {
+            if ended {
+                comments.settles()
+            } else {
+                comments.claims()
+            }
+        });
+        let wanted = kind_written
+            && match updates {
+                IssueUpdates::Outcome => false,
+                IssueUpdates::Milestones => link.relation == LinkRelation::Source && !ended,
+                IssueUpdates::All => !(ended && link.relation == LinkRelation::Source),
+            };
         if !wanted {
             continue;
         }

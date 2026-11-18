@@ -217,10 +217,19 @@ lists its own (`reply_authors` and `labels` on all three, `reply_min_access` on 
 | `agent_transitions` | none | **Transitions Agents may make.** The workflow transitions an Agent may make without green ink. |
 | `priority_map` | none | **Priority map.** The priority a mirrored issue takes here, by the priority it has where it comes from. |
 | `reopen` | `label` | **Reopen a settled item on.** What queues an item whose Mission settled again, as the Mission's next run. |
+| `comments` | none | **Status comments.** Which comments AI6 writes on this instance's issues; unset, the Operation's `updates` decides. |
 <!-- schema:record.source:end -->
 
 `status_labels` and `status_transitions` name a label or a workflow transition for `working`,
 `waiting`, `paused`, `done` and `failed`.
+
+`comments` chooses which of its own comments AI6 writes on the instance's issues: `off`, `claim-only`
+(the progress status: working, waiting, paused), `settle-only` (the report when the Mission ends, and
+the final status on a linked issue other than the source) or `both`. Left out, the Operation's
+`updates` decides, as it always has. When it is set, `updates` only says which links get the status
+comments (the source alone, or every linked issue), and `outcome` reads as `milestones`. No Run ID or
+provider session ID is ever written in a comment on a tracker; a report under full disclosure names
+the Mission, its branch and its Agent.
 
 `decisions = { approvers = ["ACCOUNT-ID"] }` lets those accounts decide a Mission's green ink with
 a `/approve` or `/reject REASON` comment on its linked item; it is off without approvers
