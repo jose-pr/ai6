@@ -65,7 +65,9 @@ Mission → Run board, Mission briefs, live Run terminals, administration and au
   added on top every ten seconds; it needs `audit.read`.
 - Account pools: the pool accounts each Operation may draw from, with the Runs using
   each against its limit (other Operations' counted, not named), quota used per window, tokens today and until when a limited
-  account waits, refreshed every fifteen seconds; it needs `pool.read`.
+  account waits, refreshed every fifteen seconds; it needs `pool.read`. **Read usage now** asks a Station holding the
+  account to read its usage from its provider (the refresh reads only the Registry's board, never a provider), and the
+  account shows how the last ask went.
 - Agents (`agent.read`): each Agent of an Operation with its record there
   (Missions done, failed, stalled and the incidents charged to it), the model occupying the
   codename, the clearance it works at, a coming retirement and a promotion waiting for green

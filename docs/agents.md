@@ -536,7 +536,8 @@ of its Runs that was already open.
 Across Operations, a Cable needs a [compartment](compartments.md#cables) as well as these grants,
 and a Run holding one also has `compartments`, `missions_in`, `mission_brief` and
 `mission_products`. Every Run also has `reports`, `read_report`, `file_report` and `forget_report`, for what its
-Operation and everyone know ([Reports](reports.md#what-an-agent-does-with-them)).
+Operation and everyone know ([Reports](reports.md#what-an-agent-does-with-them)), and a Run that draws on a pool
+account has `check_quota`, which reads that account's quota now ([Reading usage again](#reading-usage-again)).
 
 ## Reports
 
@@ -1250,21 +1251,49 @@ models it covers, how much is used and when it refills, as `coqui-acp`'s usage m
 
 | Handler | Reports | Read |
 | --- | --- | --- |
-| `claude` | the running spend of a process and each window of a `rate_limit_event` | only from a turn's events (`needs_turn`) |
-| `codex` | each request's tokens and the account's rate-limit windows | `account/rateLimits/read` through an app server started for the read; no thread, no turn |
+| `claude` | the running spend of a process and each window of a `rate_limit_event` | from a turn's events (`needs_turn`); the plan windows also through the account provider, below |
+| `codex` | each request's tokens and the account's rate-limit windows | `account/rateLimits/read` through an app server started for the read; no thread, no turn; also through the account provider, below |
 | `antigravity` | each model call's tokens, and the quota agy serves on a loopback port | from the agy of a running Run of the same home, else through a private `agy acp` with an empty run, ended after the read (`usage_wait_ms`) |
 | `acp` | a refusal read as a limit (`limit_phrases`, default the shared words) | only from a turn (`needs_turn`) |
 
-A Station reads each pool account it declared that the Registry holds limited, on the `usage` table of the
-`roster` record (`[roster.usage]`, edited like the rest of it through Universal Exports, `ai6ctl` and Outer
-Office's Roster settings, applied at the next pass): every `refresh_every` seconds (300; 0 never reads), each
-read that finds the account still used up multiplying the wait by `backoff_factor` (2) up to `backoff_max`
-(3600). A read that finds no bucket covering the waiting Missions' models used up frees the account; one that
-shows the reset later keeps the account out and re-parks them to the new time. The Missions waiting on an account are the parked ones whose record names it (`parked_on`: the account and the
-model they need, none for a routed Agent), so a restarted Station, or one that finds the limit lifted by another
-Station's read, resumes them. A handler that learns its usage
-only during a turn is never read: its account waits for the time the limit stated. The board shows each window
-with the models it covers and when it was read (`ai6ctl pools`, column `READ_UNIX`, and the Account Pools page).
+For a Claude Code or Codex account the Station asks the harness's **account provider** first
+(`account_usage::read_limits` of `coqui-acp-claude` and `coqui-acp-codex`): one request, with the account's own
+credential, to the provider's own endpoint (Claude's OAuth API, the ChatGPT backend), with no program started and no
+model turn. That gives a Claude account its plan windows (`five_hour`, `seven_day`, a window per model) although
+Claude Code reports them only inside a turn. The credential leaves the Station only in that request, to that
+endpoint; an answer or an error names none. An account the provider has no limits for (a Console login, an API key
+with no rate-limit headers) is not read; one it cannot be asked about from here (a Codex key saved in a home the
+harness keeps) is read by the handler as the table says. Another handler, `antigravity` and `acp`, is read by the
+handler alone.
+
+A Station reads an account only when something asks, never on a timer:
+
+- **A person**: `ai6ctl pools usage POOL ACCOUNT --operation <id>`, the **Read usage now** button of Outer
+  Office's Account Pools page, or `POST /v1/user/operations/{id}/pools/{pool}/{account}/usage` (`pool.read`).
+  The gateway reaches no Station, so the ask is a record in the Registry that a Station holding the account
+  answers at its next beat; the call returns the account's board entry once one has (`200`), or `202` when
+  none has within 20 seconds. The board shows the last ask, `usage_read`: when, and `read`, `reading from 5s
+  ago` or `not read: why`.
+- **An Agent**: every Run that draws on a pool account has `check_quota` on its AI6 MCP server, which reads its
+  own account and answers its pool, its windows (how much is used, when each resets, the models it covers) and
+  how the reading went. It names no account and carries no credential, and it starts no work.
+- **An event**: a Run about to be given an account of a pool, and a Mission about to choose a route, read the
+  accounts the choice may fall on first, so it is made on what the providers say now; a Run that ends at a
+  provider limit reads its account, which keeps a reset the provider moved later and lifts nothing; and a
+  renewed login reads its account.
+
+A reading is kept for `keep` seconds on the `usage` table of the `roster` record (`[roster.usage]`, edited
+like the rest of it through Universal Exports, `ai6ctl` and Outer Office's Roster settings, applied at the next
+ask; 60, 0 reads at every ask), and one reading is made at a time per account, so a burst of asks, from
+whatever started them, reaches the provider once. What is read goes to the account's quota in the Registry as
+the quota a Run reports does, which the route chooser and the claim read. For an account the Registry holds
+limited, a reading that finds no bucket covering the waiting Missions' models used up frees the account and
+resumes them (not after a limit a Run just hit); one that shows the reset later keeps the account out and re-parks them to the new time. The Missions
+waiting on an account are the parked ones whose record names it (`parked_on`: the account and the model they
+need, none for a routed Agent), so a restarted Station, or one that finds the limit lifted by another
+Station's read, resumes them. A handler that learns its usage only during a turn, for an account its harness's provider cannot read, is never read: its account
+waits for the time the limit stated. The board shows each window with the models it covers and when it was
+read (`ai6ctl pools`, column `READ_UNIX`, and the Account Pools page).
 
 ### Models an account may use
 

@@ -840,6 +840,7 @@ pub struct RosterSettings {
     pub max_operation_depth: Limit,   // levels, a root the first; default 64; 0 refused
     pub max_compartment_rules: Limit, // read-in and cover pairs per compartment; default 10 000
     pub reports: ReportSettings,      // [roster.reports]: the Report lists (Reports, below)
+    pub usage: UsageSettings,         // [roster.usage]: `keep` (60 s), how long a reading of an account's usage stands; 0 reads at every ask
 }
 impl RosterSettings {   // Default: the defaults above
     pub fn new() -> Self;
@@ -3033,6 +3034,9 @@ with `memory.write`, or the Operation's charge) and by whoever filed it. Every c
 (nobody is exempt, no chief). `memory.*` audit actions are `memory.write`, `.forget`, `.read`, `.compartments`,
 `.mark_cleared` and `.proposed`; a verdict is `report.assess`.
 
+A Run that draws on a pool account (feature `cables-mcp`) has `check_quota`, which reads its own account's usage now unless a
+reading from a moment ago stands, and answers `{pool, read, read_at, limited_until, windows}`: never the account's name or a credential.
+
 Every Run (feature `cables-mcp`) has `file_report` (against its Mission's Operation, linked to
 its Mission; the Station charge's goes to the logbook, check-in and channel and is also a
 `station` Report of its Station), `reports` and `read_report`, answering inside `<ai6-data>`, and
@@ -3195,7 +3199,11 @@ impl AccountProfile { pub fn of(pool: &AccountPool, account: &str, operations: V
 #[non_exhaustive] pub struct AccountState { pub account: AccountRef,
     pub profiles: BTreeMap<String /* Station */, AccountProfile>,
     pub active: Vec<AccountClaim>, pub windows: Vec<QuotaWindow>, pub limited_until: Option<f64>,
-    pub last_used: Option<f64>, pub daily_tokens: BTreeMap<String /* YYYY-MM-DD UTC */, u64> }
+    pub last_used: Option<f64>, pub daily_tokens: BTreeMap<String /* YYYY-MM-DD UTC */, u64>,
+    pub login: Option<LoginState>, pub usage_request: Option<UsageRequest> }
+#[non_exhaustive] pub struct UsageRequest { pub by: String, pub at: f64, pub done_at: Option<f64>,
+    pub result: Option<String> /* `read`, `reading from 5s ago`, `not read: why`; no credential */ }
+impl UsageRequest { pub fn new(by, at: f64) -> Self; pub fn waits(&self) -> bool }   // nobody has answered
 impl AccountState { pub fn new(AccountRef) -> Self;
     pub fn profile(&self) -> Option<AccountProfile>;   // first Station's settings, operations of every Station
     pub fn live_claims(&self, now) -> impl Iterator<Item = &AccountClaim>;
@@ -3220,7 +3228,14 @@ pub trait AccountStore {
     fn clear_account_limit(&self, account: &AccountRef) -> io::Result<bool>;                   // whether it had one
     fn record_account_usage(&self, account: &AccountRef, tokens: u64, now: i64) -> io::Result<()>;  // 8 days kept
     fn accounts(&self) -> io::Result<Vec<AccountState>>;                                        // by pool, account
+    fn change_usage_request(&self, account: &AccountRef,
+        change: &mut dyn FnMut(&mut Option<UsageRequest>)) -> io::Result<Option<UsageRequest>>;   // one write, as change_login
 }
+// ai6::directorates::q::usage_standing: a person's ask that a Station read an account's usage now.
+pub fn request(registry: &dyn RegistryBackend, account: &AccountRef, by: &str, now: f64) -> io::Result<UsageRequest>;
+    // a request no Station answered is kept as it is, so a burst of asks is one
+pub fn answer(registry: &dyn RegistryBackend, account: &AccountRef, asked_at: f64, done_at: f64, result: &str) -> io::Result<()>;
+    // only the request made at `asked_at`; control characters dropped, 300 characters kept
 ```
 
 `claim_account` reads the candidates, drops lapsed claims and any earlier claim of the same
@@ -3241,6 +3256,12 @@ The Station claims with a TTL of `[accounts] claim_ttl` (60 s), renews at each c
 and those whose account is being handed over), releases with the Run's leases, records
 quota from `AgentEvent::quota` and adds each usage delta's tokens. A limit is recorded until
 the reset, at most the Station's horizon (`[accounts] limit_horizon`, 8 days).
+A Station reads an account's usage only when asked, never on a timer, through the harness's account provider for a
+Claude Code or Codex account (`coqui_acp_claude::account_usage::read_limits`, `coqui_acp_codex::account_usage::read_limits`: the
+account's own credential in one request to the provider's own endpoint, no program, no turn) and else `AgentHandler::usage`: a person's request
+(`usage_standing`, answered at its next beat), the Run's own `check_quota` tool, a Run about to be given an account or a
+Mission about to choose a route, a Run ended at a limit, and a renewed login. A reading stands `[roster.usage] keep` seconds,
+one is made at a time per account, and it lands in the account's windows like a Run's own report.
 A re-attached Run's recorded account is claimed again `in_use`. Each Station declares its
 configured accounts at start with the Operations of its roster that may draw from each pool;
 there is no reload, so a changed roster or loadout is declared at the next start.

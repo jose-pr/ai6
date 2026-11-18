@@ -926,7 +926,8 @@ that cannot run. The reason ("no account with headroom in pools …", with the f
 when every account is limited) is recorded once on the Operation's timeline (`account` /
 `waiting`), and the brief is placed on the first pass after an account frees up.
 Outer Office's **Account pools** view and `ai6ctl pools --operation <id>` show each account's
-Runs, quota used, limit and tokens today (`pool.read`).
+Runs, quota used, limit and tokens today (`pool.read`); an account's usage is read from its provider only when
+something asks ([Reading usage again](agents.md#reading-usage-again)).
 
 ### Budgets, exposure and quarantine
 

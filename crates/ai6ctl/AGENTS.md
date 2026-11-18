@@ -83,6 +83,10 @@ origin leaves the public roots alone.
   `name=42.5%` per window (`name=?` without a figure) or `-`, `LIMITED_UNTIL_UNIX` `-`
   unless in the future; `RUNS` counts other Operations' Runs too. A refusal names
   `pool.read`.
+- `ai6ctl pools usage <POOL> <ACCOUNT> --operation <OPERATION_ID>` posts `.../pools/{pool}/{account}/usage`, which asks a
+  Station holding the account to read its usage from its provider now (a reading made a moment ago is reused), and prints the
+  account's row and a `usage:` line (`read`, `reading from Ns ago`, `not read: why`, or that no Station has answered yet);
+  403 names `pool.read`, 404 an account not declared for the Operation.
 - `ai6ctl pools clear-limit <POOL> <ACCOUNT> --operation <OPERATION_ID>` posts
   `.../pools/{pool}/{account}/clear-limit` and prints `pool/account: limit cleared`; 403 names
   `pool.manage`, 404 an account not declared for the Operation.

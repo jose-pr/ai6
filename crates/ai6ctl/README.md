@@ -68,6 +68,7 @@ ai6ctl held-briefs release source_jira--OPS-12 --operation G
 | `stations`, `station <STATION_ID>` | Station health, HQS status, capacity, roles, authorized Operations, and the host's CPU, load and memory with their sample time (`unknown` when not reported) |
 | `agent-roles --operation <ID>` | Role purpose and policy visible with `agent.read` |
 | `pools --operation <ID>` | Pool accounts the Operation may draw from: Runs, quota used, limited until and tokens today (`pool.read`) |
+| `pools usage <POOL> <ACCOUNT> --operation <ID>` | Reads an account's usage from its provider now (`pool.read`; a reading made a moment ago is reused) |
 | `pools clear-limit <POOL> <ACCOUNT> --operation <ID>` | Lifts an account's provider limit (`pool.manage`, audited) |
 | `pools add-station <POOL> <ACCOUNT> <STATION> --operation <ID>` | Lets one more Station hold the account's sealed login; a Station holding it makes the change at its next check-in (`pool.manage`, audited) |
 | `pools remove-station <POOL> <ACCOUNT> <STATION> --operation <ID>` | Stops sealing the login to a Station, dropping its copy (`pool.manage`, audited) |

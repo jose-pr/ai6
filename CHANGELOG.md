@@ -212,12 +212,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   default) and a recorded last use, is shown once, and is in no log or audit record. Service accounts
   stay available under `account.manage`.
 
-- Limited pool accounts are read again. Handlers report their usage (`AgentHandler::usage_support` and `usage`,
+- Pool accounts' usage is read when something asks, never on a timer. Handlers report their usage (`AgentHandler::usage_support` and `usage`,
   with the buckets of `coqui-acp`'s usage model): Codex through `account/rateLimits/read`, Antigravity through
   agy's loopback quota (a running Session's, else a private `agy acp` with an empty session), Claude Code and
-  the `acp` handler from turns only. A Station reads each limited account every `[roster.usage] refresh_every`
-  seconds with no model turn, backing off while it stays used up, and frees the account and resumes the Missions
-  parked on it when the buckets covering their models have room, or re-parks them when the reset moved later.
+  the `acp` handler from turns only, and a Claude Code or Codex account also through its harness's account provider
+  (`account_usage::read_limits`: one request with the account's own credential to the provider's own endpoint, no
+  program started), which gives a Claude account its plan windows with no turn. A person asks with `ai6ctl pools usage`,
+  Outer Office's **Read usage now** or
+  `POST /v1/user/operations/{id}/pools/{pool}/{account}/usage` (`pool.read`; the ask waits in the Registry as
+  `AccountState::usage_request` for a Station holding the account, and the board's `usage_read` shows how it went);
+  an Agent asks with `check_quota`, which answers its own account's windows; and a Run about to be given an account,
+  a Mission about to choose a route, a Run that ends at a limit and a renewed login each read the account. A reading
+  is kept for `[roster.usage] keep` seconds (60), and one is made at a time per account, so a burst of asks reaches
+  the provider once; what is read goes to the account's quota like a Run's report. For a limited account, room in the
+  buckets covering a parked Mission's models frees the account and resumes it, and a reset moved later re-parks it.
   A refusal's stated `retry-after` parks a Mission ahead of the Operation's fallback. The Account Pools page and
   `ai6ctl pools` show the models a window covers and when it was read.
 
