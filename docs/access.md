@@ -212,6 +212,16 @@ scope = "config:assistant"
 role = "memory-admin"
 ```
 
+### Subject names
+
+A group name matches without regard to case, and may hold inner spaces: `group:Domain Users` matches
+the group a directory lists as `Domain Users` and the one an operating-system account service
+such as SSSD reports as `domain users`. A group that differs in anything but case does not match.
+`account:` and `person:` names match exactly. A subject with leading or trailing whitespace
+(`group: staff`) is refused, not trimmed: a rule in an Operation's record is skipped and listed
+as an orphan naming the `subject` and its rule, and a rule in the global policy or a chief entry
+(`chief`, `[unex.access] chief`) fails to load naming the field and the entry.
+
 ### Everyone who is signed in
 
 The subject `any:signed-in` matches every person a sign-in, a key or a certificate resolved, whatever
@@ -230,8 +240,9 @@ role = "viewer"
 An Active Directory sign-in token carries Everyone and Authenticated Users as SIDs, not as groups,
 so no `group:` rule can name them; `any:signed-in` covers them for every way in. The directory
 provider (`coqui_access_ldap`) does list a person's primary group, read from `primaryGroupID`
-and found by SID under `group_base`: `group:Domain Users` matches an AD person without a
-`memberOf` entry for it. A primary group that cannot be found adds nothing, and the person keeps
+and found by SID under `group_base`, so `group:Domain Users` matches an AD person without a
+`memberOf` entry for it. The system provider (`coqui_access_system`) lists the groups the host
+reports, which SSSD gives in lowercase; the same rule matches those too. A primary group that cannot be found adds nothing, and the person keeps
 the groups they have. The first match still decides, so place a rule for `any:signed-in` after
 narrower ones it should not override.
 
