@@ -810,6 +810,9 @@ dir = "/etc/ai6/secrets"
 - A Run the Operation's [exposure](medical.md) policy restricts with `secrets` gets no
   new leases but its harness's model credential: a secret whose `env` is a provider credential
   variable (below). A Mission from a Source is exposed from its start, so this is how it runs.
+  The Run is told which secrets it lost, by name and never by value, in a context line at each
+  start and resume, and the line tells it to report a step that needed one (a push, a tracker
+  or forge write) as failed, never as landed.
 - Each lease is on the Mission's timeline (`credential` / `leased`), naming the secrets and
   the approval, never a value.
 

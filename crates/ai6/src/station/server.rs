@@ -5613,8 +5613,8 @@ async fn start_mission(
         on_station: remote_hands || plan.own_host,
     };
     // A review authenticates to its model with what its Agent's own environment carries.
-    if !review
-        && let Err(error) = credentials::issue(
+    if !review {
+        match credentials::issue(
             &state,
             &mission,
             &agent,
@@ -5622,9 +5622,16 @@ async fn start_mission(
             &exposure,
             site,
             &mut environment,
-        )
-    {
-        return Err(start_failure(&state, &mission_id, error, area.safe_house.clone()).await);
+        ) {
+            // The Run is told what the exposure policy took from it, so a push or a write that
+            // needs it is reported as failed, never as done.
+            Ok(withheld) => initial_context.extend(credentials::withheld_notice(&withheld)),
+            Err(error) => {
+                return Err(
+                    start_failure(&state, &mission_id, error, area.safe_house.clone()).await,
+                );
+            }
+        }
     }
     // A Mission started again (a later run) keeps the lease of the run it replaces
     // until the new Run is recorded.
@@ -6666,6 +6673,7 @@ async fn resume_mission(
     let relayed = runner
         .as_ref()
         .and_then(|_| runner_cables(&state, cables_mcp.as_ref(), &mut environment));
+    let mut withheld_notice = None;
     // A harness a runner still supervises keeps the environment it started with, and the
     // account its Run record names.
     if reattach.is_some() {
@@ -6679,7 +6687,7 @@ async fn resume_mission(
             resuming: true,
             on_station: resume_mode == ExecutionMode::RemoteHands || resume_own_host,
         };
-        credentials::issue(
+        withheld_notice = credentials::issue(
             &state,
             &mission,
             &resume_agent,
@@ -6688,6 +6696,7 @@ async fn resume_mission(
             site,
             &mut environment,
         )
+        .map(|withheld| credentials::withheld_notice(&withheld))
         .map_err(configuration_error)?;
     }
     // A harness that is started again does nothing until it reads a message; one still running
@@ -6750,6 +6759,7 @@ async fn resume_mission(
                 context.push(review::PLAN_CONTEXT.to_owned());
             }
             context.extend(resumed_context);
+            context.extend(withheld_notice);
             context
         },
         overlays: resumed_overlays,
@@ -13205,6 +13215,24 @@ theater = \"other-box\"
             !started.contains_key("FORGE_TOKEN"),
             "exposed: no secret but the model's"
         );
+        // It is told which secret it lost, by name, so it cannot claim a push it could not make.
+        let told = |context: Vec<String>| {
+            context
+                .into_iter()
+                .find(|line| line.contains("withheld these secrets"))
+                .expect("a line naming what exposure took")
+        };
+        let notice = told(
+            RECORDED_STARTS
+                .lock()
+                .unwrap()
+                .iter()
+                .rfind(|request| request.mission_id.as_str() == mission_id)
+                .map(|request| request.initial_context.clone())
+                .expect("the handler was started"),
+        );
+        assert!(notice.contains("forge-token"), "{notice}");
+        assert!(notice.contains("report the step as failed"), "{notice}");
 
         let _ = resume_mission(
             State(state.clone()),
@@ -13228,6 +13256,16 @@ theater = \"other-box\"
         );
         assert_eq!(resumed["PATH"], "/opt/tools/bin");
         assert!(!resumed.contains_key("FORGE_TOKEN"));
+        let notice = told(
+            RECORDED_RESUMES
+                .lock()
+                .unwrap()
+                .iter()
+                .rfind(|request| request.mission_id.as_str() == mission_id)
+                .map(|request| request.initial_context.clone())
+                .expect("the handler was resumed"),
+        );
+        assert!(notice.contains("forge-token"), "{notice}");
 
         // A Station with no live Run of it, after a restart, starts from the records again.
         RECORDED_RESUMES

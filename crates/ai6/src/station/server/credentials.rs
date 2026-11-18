@@ -501,6 +501,8 @@ pub(super) fn run_environment(
 ///
 /// `agent` is as its Run works, on `on` when it has routes: the route's own secrets are what
 /// its harness reaches its model with, so they are issued whatever the Run has read.
+///
+/// Answers the loadout secrets the exposure policy withheld, by name, for the Run to be told.
 pub(super) fn issue(
     state: &DaemonState,
     mission: &Mission,
@@ -509,7 +511,7 @@ pub(super) fn issue(
     exposure: &ExposureGate,
     site: super::accounts::Site,
     environment: &mut BTreeMap<String, String>,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
     issue_for(
         state,
         mission.into(),
@@ -533,7 +535,7 @@ pub(super) fn issue_for_assistant(
     site: super::accounts::Site,
     environment: &mut BTreeMap<String, String>,
 ) -> Result<(), String> {
-    issue_for(state, holder, agent, on, None, site, environment)
+    issue_for(state, holder, agent, on, None, site, environment).map(drop)
 }
 
 /// What a charge's Run of `agent` reaches its model with, under the name `holder` gives it: its
@@ -547,7 +549,7 @@ pub(super) fn issue_for_charge(
     site: super::accounts::Site,
     environment: &mut BTreeMap<String, String>,
 ) -> Result<(), String> {
-    issue_for(state, holder, agent, on, None, site, environment)
+    issue_for(state, holder, agent, on, None, site, environment).map(drop)
 }
 
 fn issue_for(
@@ -558,7 +560,7 @@ fn issue_for(
     loadout_of: Option<(&Mission, &ExposureGate)>,
     site: super::accounts::Site,
     environment: &mut BTreeMap<String, String>,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
     let desk = &state.station.credentials;
     let mission_id = holder.id;
     release(state, mission_id);
@@ -566,7 +568,7 @@ fn issue_for(
         super::accounts::claim_implicit(state, pool, holder)?;
     }
     let Some(catalog) = &desk.catalog else {
-        return Ok(());
+        return Ok(Vec::new());
     };
     let broker = desk.broker(
         &state.plugins,
@@ -576,8 +578,9 @@ fn issue_for(
     // A pooled Agent's loadout may not set a provider credential variable.
     let reserved = super::accounts::credential_variables(state, catalog, holder.operation, agent);
     let mut leases = Leases::default();
+    let mut withheld = Vec::new();
     if let Some((mission, exposure)) = loadout_of {
-        issue_loadout(
+        withheld = issue_loadout(
             state,
             (catalog, &broker),
             mission,
@@ -609,7 +612,8 @@ fn issue_for(
             approval: None,
         });
     }
-    keep(state, mission_id, leases)
+    keep(state, mission_id, leases)?;
+    Ok(withheld)
 }
 
 /// The catalog and a broker over it, for a look at the models accounts and routes may use.
@@ -720,20 +724,34 @@ fn issue_loadout(
     reserved: Option<&BTreeSet<String>>,
     environment: &mut BTreeMap<String, String>,
     leases: &mut Leases,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
     let mission_id = mission.mission_id.to_string();
     let loadout = catalog
         .for_agent(agent)
         .ok()
         .filter(|loadout| !loadout.secret_names().is_empty());
     let Some(loadout) = loadout else {
-        return Ok(());
+        return Ok(Vec::new());
     };
     // What an earlier Run of the Mission held goes, so only this issue's leases remain.
     for name in loadout.secret_names() {
         environment.remove(catalog.secret(name).env());
     }
     let restricted = exposure.restricts(Restriction::Secrets);
+    // What the policy takes from the Run, so it can be told: every loadout secret but the model's own.
+    let withheld: Vec<String> = if restricted {
+        loadout
+            .secret_names()
+            .iter()
+            .map(|name| catalog.secret(name))
+            .filter(|definition| {
+                definition.green_ink() || !CREDENTIAL_VARIABLES.contains(&definition.env())
+            })
+            .map(|definition| definition.name().to_owned())
+            .collect()
+    } else {
+        Vec::new()
+    };
     if restricted {
         eprintln!(
             "ai6: Mission {mission_id:?} read untrusted input and its Operation restricts \
@@ -850,7 +868,22 @@ fn issue_loadout(
     if !leased.is_empty() {
         record(state, mission, agent, &leased, &approvals);
     }
-    Ok(())
+    Ok(withheld)
+}
+
+/// The line that tells a Run which secrets its Operation's exposure policy withheld, by name and
+/// never by value; none when it withheld nothing.
+pub(super) fn withheld_notice(names: &[String]) -> Option<String> {
+    (!names.is_empty()).then(|| {
+        format!(
+            "This Run read input an outsider could have written, so its Operation's exposure \
+             policy withheld these secrets from its environment: {}. Whatever needs them (a git \
+             push, a tracker or forge write) will fail without them. If a step fails for that \
+             reason, report the step as failed and name the secret; never report work as landed \
+             that was not pushed or posted.",
+            names.join(", ")
+        )
+    })
 }
 
 /// Keeps `leases` for `mission_id` until its Run stops here.
