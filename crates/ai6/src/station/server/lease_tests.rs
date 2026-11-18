@@ -197,3 +197,57 @@ fn a_station_whose_check_in_is_over_a_minute_old_is_still_healthy_for_placement(
     let gone = StationFacts::from_record(&record, record.seen() + 400.0, window, 0);
     assert!(!gone.healthy);
 }
+
+/// A Mission whose harness started and stays quiet, its brief claimed here and its Run live.
+async fn started_quiet(state: &DaemonState, id: &str) -> String {
+    let mut brief = pinned_brief(id, &[]);
+    brief.agent = Some("007".to_owned());
+    state.intake.submit_brief(&brief).unwrap();
+    schedule_intake_once(state);
+    schedule_queued_once(state).await;
+    let mission_id = brief.key();
+    wait_for_state(state, &mission_id, MissionState::Blocked).await;
+    state
+        .missions
+        .lock()
+        .unwrap()
+        .transition(&mission_id, MissionState::Working)
+        .unwrap();
+    mission_id
+}
+
+#[tokio::test]
+async fn a_run_that_sends_nothing_after_it_starts_is_a_failed_start_and_its_brief_is_queued_again()
+{
+    let root = tempfile::tempdir().unwrap();
+    let mut state = empty_book(root.path(), "[agent.007]\nhandler = \"mock-agent\"\n");
+    let silent = started_quiet(&state, "start-silent").await;
+    let speaking = started_quiet(&state, "start-speaking").await;
+    state.runs.lock().unwrap()[&speaking]
+        .watchdog
+        .record_activity();
+    std::sync::Arc::make_mut(&mut state.station.limits)
+        .scheduler
+        .start_deadline = crate::bounds::TimeLimit::at(Duration::from_millis(1));
+    std::thread::sleep(Duration::from_millis(20));
+
+    assert_eq!(health::surrender_stuck(&state), vec![silent.clone()]);
+    assert!(!state.runs.lock().unwrap().contains_key(&silent));
+    assert!(state.runs.lock().unwrap().contains_key(&speaking));
+    assert!(
+        state
+            .intake
+            .list_new()
+            .unwrap()
+            .iter()
+            .any(|brief| brief.key() == silent),
+        "queued again for placement"
+    );
+    assert!(
+        health::declined_here(&state, unix_now()).is_empty(),
+        "a failed start does not leave this Station out of the retry"
+    );
+    state
+        .stopping
+        .store(true, std::sync::atomic::Ordering::Release);
+}

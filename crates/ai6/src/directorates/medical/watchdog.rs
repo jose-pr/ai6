@@ -232,6 +232,8 @@ pub struct Watchdog {
 struct ActivityState {
     started: Instant,
     last_activity: Instant,
+    /// Whether the Run has shown any sign of life since it started: output or an event with content.
+    progressed: bool,
     last_novel: Instant,
     lines_since_novel: usize,
     partial_line: Vec<u8>,
@@ -266,6 +268,7 @@ impl Watchdog {
             state: Arc::new(Mutex::new(ActivityState {
                 started: now,
                 last_activity: now,
+                progressed: false,
                 last_novel: now,
                 lines_since_novel: 0,
                 partial_line: Vec::new(),
@@ -322,7 +325,9 @@ impl Watchdog {
 
     /// Records provider output or operator input as Run activity.
     pub fn record_activity(&self) {
-        self.lock_state().last_activity = Instant::now();
+        let mut state = self.lock_state();
+        state.last_activity = Instant::now();
+        state.progressed = true;
     }
 
     /// Records a provider event as Run activity only when it carries something: text, data, a
@@ -369,6 +374,7 @@ impl Watchdog {
         let mut state = self.lock_state();
         state.last_activity = now;
         state.output_revision = state.output_revision.wrapping_add(1);
+        state.progressed = true;
         for byte in bytes {
             if *byte == b'\r' || *byte == b'\n' {
                 observe_line(&mut state, now, &self.config);
@@ -427,6 +433,17 @@ impl Watchdog {
             .paused_since
             .is_none()
             .then(|| state.last_activity.elapsed())
+    }
+
+    /// How long the Run has been going without any output or event with content; `None` once it
+    /// has shown either, or while it is paused.
+    #[cfg_attr(
+        not(feature = "daemon"),
+        allow(dead_code, reason = "used only by the daemon")
+    )]
+    pub(crate) fn silent_since_start(&self) -> Option<Duration> {
+        let state = self.lock_state();
+        (!state.progressed && state.paused_since.is_none()).then(|| state.started.elapsed())
     }
 
     /// Makes the Run look as if it last made progress `by` earlier.

@@ -223,20 +223,36 @@ fn lock_runs(
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Gives back each brief whose Run made no progress for `[scheduler] claim_progress`, and leaves
-/// this Station out of its placement for `[scheduler] claim_exclusion`.
+/// Gives back each brief whose Run sent nothing within `[scheduler] start_deadline` of starting
+/// (a failed start, tried again at once), or made no progress for `[scheduler] claim_progress`
+/// (this Station is left out of its placement for `[scheduler] claim_exclusion`).
 pub(super) fn surrender_stuck(state: &DaemonState) -> Vec<String> {
     let scheduler = &state.station.limits().scheduler;
-    let Some(after) = scheduler.claim_progress.get() else {
-        return Vec::new();
-    };
     let stuck: Vec<_> = lock_runs(state)
         .iter()
-        .filter(|(_, run)| run.watchdog.quiet_for().is_some_and(|quiet| quiet >= after))
-        .map(|(mission, run)| (mission.clone(), run.run.clone()))
+        .filter_map(|(mission, run)| {
+            let silent = run.watchdog.silent_since_start();
+            if let (Some(silent), Some(deadline)) = (silent, scheduler.start_deadline.get())
+                && silent >= deadline
+            {
+                return Some((
+                    mission.clone(),
+                    run.run.clone(),
+                    Surrender::NeverStarted(deadline),
+                ));
+            }
+            let (quiet, after) = (run.watchdog.quiet_for()?, scheduler.claim_progress.get()?);
+            (quiet >= after).then(|| {
+                (
+                    mission.clone(),
+                    run.run.clone(),
+                    Surrender::NoProgress(after),
+                )
+            })
+        })
         .collect();
     let mut given_back = Vec::new();
-    for (mission_id, run) in stuck {
+    for (mission_id, run, why) in stuck {
         let working = state
             .missions
             .lock()
@@ -246,32 +262,49 @@ pub(super) fn surrender_stuck(state: &DaemonState) -> Vec<String> {
         if !working {
             continue;
         }
-        let Some(key) = state.intake.leases().ok().and_then(|leases| {
-            leases.into_iter().find_map(|lease| {
-                (lease.station() == state.station_id
-                    && lease.meta().get("mission_id").and_then(|id| id.as_str())
-                        == Some(mission_id.as_str()))
-                .then(|| lease.key().to_owned())
-            })
-        }) else {
-            continue;
-        };
-        lock(&DECLINED).insert(
-            (state.station_id.clone(), key),
-            unix_now() + scheduler.claim_exclusion.0.as_secs_f64(),
-        );
-        recovery::give_up(
-            state,
-            &mission_id,
-            Some(&run),
-            &format!(
-                "its Run made no progress for {:.0} seconds, so this Station gave the brief back",
-                after.as_secs_f64()
-            ),
-        );
+        if let Surrender::NoProgress(_) = why {
+            let Some(key) = state.intake.leases().ok().and_then(|leases| {
+                leases.into_iter().find_map(|lease| {
+                    (lease.station() == state.station_id
+                        && lease.meta().get("mission_id").and_then(|id| id.as_str())
+                            == Some(mission_id.as_str()))
+                    .then(|| lease.key().to_owned())
+                })
+            }) else {
+                continue;
+            };
+            lock(&DECLINED).insert(
+                (state.station_id.clone(), key),
+                unix_now() + scheduler.claim_exclusion.0.as_secs_f64(),
+            );
+        }
+        recovery::give_up(state, &mission_id, Some(&run), &why.reason());
         given_back.push(mission_id);
     }
     given_back
+}
+
+/// Why a Run's brief is given back.
+enum Surrender {
+    /// The Run sent no output and no event with content within the start deadline.
+    NeverStarted(std::time::Duration),
+    /// The Run made no progress for the claim progress limit.
+    NoProgress(std::time::Duration),
+}
+
+impl Surrender {
+    fn reason(&self) -> String {
+        match self {
+            Self::NeverStarted(after) => format!(
+                "its Run sent nothing within {:.0} seconds of starting, so this Station gave the brief back to start again",
+                after.as_secs_f64()
+            ),
+            Self::NoProgress(after) => format!(
+                "its Run made no progress for {:.0} seconds, so this Station gave the brief back",
+                after.as_secs_f64()
+            ),
+        }
+    }
 }
 
 /// Each Source's last finished poll, for the check-in.

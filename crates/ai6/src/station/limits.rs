@@ -216,6 +216,12 @@ pub struct SchedulerLimits {
     #[schema(title = "Retry a failed brief claim after")]
     #[map(default = SchedulerLimits::default().claim_backoff)]
     pub claim_backoff: Seconds,
+    /// Seconds a Run this Station started may send no output and no event with content before it
+    /// counts as a failed start: the Station gives its brief back to be placed again, this
+    /// Station included. `none` never does.
+    #[schema(title = "A started Run may stay silent for")]
+    #[map(default = SchedulerLimits::default().start_deadline)]
+    pub start_deadline: TimeLimit,
     /// Seconds an operator control may take to apply, and the longest the control loop may go
     /// without coming round, before the control is rejected back to the operator and the Station
     /// reports itself degraded; `none` never does.
@@ -244,6 +250,7 @@ impl Default for SchedulerLimits {
             claim_progress: TimeLimit::secs(30 * 60),
             claim_exclusion: Seconds::new(15 * 60),
             claim_backoff: Seconds::new(5),
+            start_deadline: TimeLimit::secs(10 * 60),
             control_timeout: TimeLimit::secs(120),
             shutdown_wait: Seconds::new(2),
         }
