@@ -56,7 +56,9 @@ impl From<RolePolicyError> for ProviderError;   // GUATIAO_ERR_BAD_VALUE
 ```
 
 - `subject` is `account:<name>` | `person:<id>` | `group:<name>` | `any:signed-in`, read as
-  `coqui_access::Subject` (a name's value also has no whitespace and is at most 256 bytes).
+  `coqui_access::Subject` (a subject value may hold inner spaces, `group:Domain Users`, but not start or end with whitespace or hold a
+  control character, and is at most `name_bytes` bytes; the policy is data, so nothing needs quoting). A
+  `group:` subject matches a person's groups without regard to case (`group:Staff` matches `staff`).
   `any:signed-in` matches every subject a sign-in or key resolved (a directory person or a key or other
   provider's account) and never one with an empty `Person::id`, which is how an anonymous
   caller reaches an authorizer. It grants nothing by itself: the rule's role does, and rules
@@ -79,7 +81,7 @@ impl From<RolePolicyError> for ProviderError;   // GUATIAO_ERR_BAD_VALUE
   `limits.ancestors` (64 by default): an error, never a denial.
 - `build`/`new` refuse: a policy past its `limits`, a role with no actions, a repeated role or
   action, a malformed subject or scope, a scope kind not allowed, an unknown role in a rule.
-  Names are 1 to `name_bytes` bytes without whitespace or control characters.
+  Role, action and scope names are 1 to `name_bytes` bytes without whitespace or control characters.
 - The limits bound work and memory (the rule scan per request, the tables built once), not
   trust: a caller lifts any of them with `Limit::UNBOUNDED`, and nothing reports that.
 - Reading a `Role`, `Rule` or `RolePolicy` refuses a key it does not declare.

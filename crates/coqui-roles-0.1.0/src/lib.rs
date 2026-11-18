@@ -422,11 +422,15 @@ impl RoleAuthorizer {
                 if rule.subject.starts_with("any:") {
                     fail("the only any: subject is any:signed-in")
                 } else {
-                    fail("rule subject must be account, person or group:<value>, or any:signed-in")
+                    fail(
+                        "rule subject must be account, person or group:<value> (not empty, no control character, no leading or trailing whitespace), or any:signed-in",
+                    )
                 }
             })?;
-            if subject != Subject::AnySignedIn && !name(subject.value()) {
-                return Err(fail("rule subject value is invalid"));
+            // `Subject` already refuses an empty value, a control character and whitespace at
+            // either end; inner spaces stay, since directory group names hold them.
+            if subject != Subject::AnySignedIn && !limits.name_bytes.allows(subject.value().len()) {
+                return Err(fail("rule subject value is longer than the name limit"));
             }
             if rule.scope != "*" {
                 let allowed = rule.scope.split_once(':').is_some_and(|(kind, id)| {
@@ -542,6 +546,62 @@ mod tests {
                 ancestors: ancestors.iter().map(|scope| (*scope).to_owned()).collect(),
             })
             .map(|decision| decision.allowed)
+    }
+
+    #[test]
+    fn a_group_rule_applies_to_a_person_whose_group_differs_only_in_case() {
+        let policy = RoleAuthorizer::builder()
+            .scope_kinds(["site"])
+            .role("viewer", ["document.read"])
+            .rule(Rule::new("group:Domain-Users", "site:north", "viewer"))
+            .build()
+            .unwrap();
+        let lowercase = person("a", "alice", &["domain-users"]);
+        let other = person("b", "bob", &["domain-admins"]);
+        assert!(allowed(&policy, &lowercase, "document.read", "site:north"));
+        assert!(!allowed(&policy, &other, "document.read", "site:north"));
+    }
+
+    #[test]
+    fn a_rule_subject_may_hold_inner_spaces_and_matches_a_group_in_either_case() {
+        let policy = RoleAuthorizer::builder()
+            .scope_kinds(["site"])
+            .role("viewer", ["document.read"])
+            .rule(Rule::new("group:Domain Users", "site:north", "viewer"))
+            .rule(Rule::new("account:Ana María", "site:south", "viewer"))
+            .build()
+            .unwrap();
+        let lowercase = person("a", "alice", &["domain users"]);
+        let other = person("b", "bob", &["domain  users", "domain admins"]);
+        assert!(allowed(&policy, &lowercase, "document.read", "site:north"));
+        assert!(!allowed(&policy, &other, "document.read", "site:north"));
+        let ana = person("c", "Ana María", &[]);
+        assert!(allowed(&policy, &ana, "document.read", "site:south"));
+    }
+
+    #[test]
+    fn a_rule_subject_with_edge_whitespace_or_a_control_character_is_refused() {
+        for subject in [
+            "group: Domain Users",
+            "group:Domain Users ",
+            "group:Domain Users\u{a0}",
+            "group: ",
+            "group:Domain\nUsers",
+            "group:Domain\tUsers",
+            "account:a\u{0}b",
+        ] {
+            let built = RoleAuthorizer::builder()
+                .role("r", ["a"])
+                .rule(Rule::new(subject, "*", "r"))
+                .build();
+            assert!(built.is_err(), "{subject:?}");
+        }
+        let long = format!("group:{}", "a b".repeat(100));
+        let built = RoleAuthorizer::builder()
+            .role("r", ["a"])
+            .rule(Rule::new(long, "*", "r"))
+            .build();
+        assert!(built.is_err(), "the name_bytes limit still holds");
     }
 
     #[test]

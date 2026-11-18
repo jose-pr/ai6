@@ -1,4 +1,4 @@
-# coqui-access/crates/coqui-roles/plugin at 8f4a7ba478e338ad17b3b54cf61145d0dc3feb3d, with what it inherits written out.
+# coqui-access/crates/coqui-roles/plugin at ac96b16ff93fdf63a0d13c2ccdff635d29a437e6, with what it inherits written out.
 [package]
 name = "coqui-roles-plugin"
 description = "coqui-roles as a library a host loads"
