@@ -438,6 +438,12 @@ the recommendation is audited (`mission.recommend`) and shown as `recommendation
 by `ai6ctl missions probe`, settles nothing, and a person confirms it by deciding the same way. A charge never
 replaces a decision a person has given.
 
+The decision turn reads the deliverables back: a charge's `done` first has any declared deliverable
+it has not seen found read now, and one that is missing (a branch never pushed, an `approval` for a
+step nobody asked green ink for) or whose look failed holds the Mission. The decision is refused as
+"held, not passed" naming each, the Mission stays `verifying`, and the charge can redispatch or fail
+it, or leave it to a person. A kind this Station cannot look at does not hold it.
+
 A person who gives a verdict on a `verifying` Mission with `ai6ctl missions verdict` settles it the same
 way as `confirmed` or `failed-verification`; only `verify` redispatches. A standing order whose run is
 `verifying` waits for the decision like one that is held: its next window does not fire over it.

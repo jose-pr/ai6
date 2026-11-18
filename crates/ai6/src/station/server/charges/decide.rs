@@ -22,7 +22,7 @@ use crate::directorates::registry::decisions::{self, VerifyingDecision};
 use crate::directorates::registry::reports::{
     Report, ReportFiler, ReportFilter, ReportScope, ReportState,
 };
-use crate::directorates::registry::runs::{OutcomeVerdict, RunRecord};
+use crate::directorates::registry::runs::{OutcomeVerdict, ProbeResult, RunRecord};
 use crate::directorates::registry::source_items::{self, ITEM_KIND};
 use crate::directorates::registry::store::AuditRecord;
 
@@ -244,6 +244,80 @@ impl DecisionDesk {
         ))
     }
 
+    /// Refuses `done` for a Mission whose declared deliverables the probes do not find: each is
+    /// read back now (a Mission another Station holds is asked to), and one that is missing, or
+    /// whose look failed, holds the Mission for a person or a redispatch. A kind this Station
+    /// cannot look at does not hold it.
+    fn hold_unless_delivered(&self, record: &RunRecord, operation: &str) -> Result<(), String> {
+        if record.deliverables.is_empty() {
+            return Ok(());
+        }
+        let here = self.state.missions.lock().ok().and_then(|missions| {
+            missions
+                .get(&record.mission_id)
+                .map(|mission| mission.state)
+        }) == Some(MissionState::Verifying);
+        let latest = |evidence: &[crate::directorates::registry::runs::Evidence], wanted: &_| {
+            evidence
+                .iter()
+                .rev()
+                .find(|found| &found.deliverable == wanted)
+                .map(|found| found.result)
+        };
+        let mut evidence = record.evidence.clone();
+        // What the charge already read back and found stands; anything else is read now.
+        if here
+            && record.deliverables.iter().any(|wanted| {
+                !matches!(
+                    latest(&evidence, wanted),
+                    Some(ProbeResult::Found | ProbeResult::Unprobed)
+                )
+            })
+        {
+            verification::probe_and_record(&self.state, &record.mission_id)?;
+            evidence = self.latest(&record.mission_id)?.evidence;
+        }
+        let mut open = Vec::new();
+        for wanted in &record.deliverables {
+            match evidence
+                .iter()
+                .rev()
+                .find(|found| &found.deliverable == wanted)
+            {
+                None => open.push(format!("{wanted}: not read back yet")),
+                Some(found)
+                    if matches!(found.result, ProbeResult::Missing | ProbeResult::Failed) =>
+                {
+                    open.push(format!(
+                        "{wanted}: {} ({})",
+                        found.result.as_str(),
+                        found.detail
+                    ));
+                }
+                Some(_) => {}
+            }
+        }
+        if open.is_empty() {
+            return Ok(());
+        }
+        if !here {
+            self.state
+                .intake
+                .request_probe(operation, &record.mission_id, unix_seconds())
+                .map_err(|error| error.to_string())?;
+        }
+        eprintln!(
+            "ai6: Mission {:?} is held, not passed: {}",
+            record.mission_id,
+            open.join("; ")
+        );
+        Err(format!(
+            "held, not passed: what the Mission was to deliver is not all there: {}. Redispatch \
+             or fail it, or leave it to a person",
+            open.join("; ")
+        ))
+    }
+
     /// Decides the verifying Mission `done` or `failed`, or redispatches it with `amendment`.
     /// Held at `desk` clearance, the charge records a recommendation a person confirms instead.
     pub(in crate::station::server) fn decide(
@@ -271,6 +345,9 @@ impl DecisionDesk {
             return Err(format!("{by} has already decided this Mission"));
         }
         let operation = self.operation_of(&record)?;
+        if verdict == OutcomeVerdict::Confirmed {
+            self.hold_unless_delivered(&record, &operation)?;
+        }
         let clearance = agents::effective(
             &self.state,
             (!self.any).then_some(self.operation.as_str()),

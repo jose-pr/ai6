@@ -420,6 +420,53 @@ async fn a_mission_whose_branch_is_missing_is_redispatched_with_the_reason_and_i
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_charge_cannot_pass_a_mission_whose_declared_branch_was_never_pushed() {
+    let root = tempfile::tempdir().unwrap();
+    let tag = "d9";
+    let state = station_for(root.path(), tag);
+    let mission = verifying_mission(&state, tag, "phantom").await;
+    remote(root.path(), false);
+    // The charge decides at once, without reading anything back.
+    judging(tag, |tools, detail| {
+        let mission = detail["mission"].as_str().unwrap();
+        tools.call(
+            "verify_mission",
+            json!({ "mission": mission, "decision": "done", "reason": "the branch is pushed" }),
+        );
+    });
+
+    tend_and_settle(&state, "the charge tried to decide", || {
+        SAID.lock()
+            .unwrap()
+            .get(&key(tag))
+            .is_some_and(|said| !said.is_empty())
+    })
+    .await;
+    let said = said_after(tag, 1).await;
+    assert!(
+        said[0].contains("held, not passed") && said[0].contains("branch:feature-x: missing"),
+        "{said:?}"
+    );
+    for _ in 0..3 {
+        charges::tend(&state, false, true).await;
+        super::super::verdicts::settle_held(&state);
+    }
+    assert_eq!(state_of(&state, &mission), MissionState::Verifying);
+    let record = attempt(&state, &mission, 1);
+    assert!(record.verdict.is_none(), "nothing was decided");
+    assert!(
+        record
+            .evidence
+            .iter()
+            .any(|found| found.result == crate::directorates::registry::runs::ProbeResult::Missing),
+        "the decision turn read the branch back: {:?}",
+        record.evidence
+    );
+    charges::close_all(&state).await;
+    state.stopping.store(true, Ordering::Release);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_verified_mission_settles_done() {
     let root = tempfile::tempdir().unwrap();
     let tag = "d2";
