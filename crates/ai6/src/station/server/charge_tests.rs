@@ -908,8 +908,10 @@ async fn a_charge_whose_conversation_reached_its_setting_starts_a_fresh_run_with
     let started = first.provider_id.clone().unwrap();
 
     // Below the setting the same Run takes the next wake.
-    let mut update = ChargeUpdate::default();
-    update.context_tokens = Some(999);
+    let update = ChargeUpdate {
+        context_tokens: Some(999),
+        ..Default::default()
+    };
     state
         .intake
         .update_charge(&scope(tag), "test", first.fence, None, update)
@@ -928,8 +930,10 @@ async fn a_charge_whose_conversation_reached_its_setting_starts_a_fresh_run_with
     );
 
     // At it, the next wake starts a fresh Run that is given the logbook.
-    let mut update = ChargeUpdate::default();
-    update.context_tokens = Some(1_000);
+    let update = ChargeUpdate {
+        context_tokens: Some(1_000),
+        ..Default::default()
+    };
     state
         .intake
         .update_charge(&scope(tag), "test", first.fence, None, update)

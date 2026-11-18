@@ -84,20 +84,26 @@ mod tests {
     use super::*;
     use crate::bounds::Limit;
 
+    fn limits(tokens: Limit, percent: Limit) -> HarnessLimits {
+        HarnessLimits {
+            compact_at_tokens: tokens,
+            compact_at_cap_percent: percent,
+            ..HarnessLimits::default()
+        }
+    }
+
     #[test]
     fn the_smaller_of_the_size_and_the_share_of_the_cap_decides() {
-        let mut limits = HarnessLimits::default();
-        limits.compact_at_tokens = Limit::UNBOUNDED;
-        limits.compact_at_cap_percent = Limit::at(50);
-        assert_eq!(threshold(&limits, Some(300_000)), Some(150_000));
-        assert_eq!(threshold(&limits, None), None, "no cap, no size: no bound");
-        limits.compact_at_tokens = Limit::at(100_000);
-        assert_eq!(threshold(&limits, Some(300_000)), Some(100_000));
-        assert_eq!(threshold(&limits, None), Some(100_000));
-        limits.compact_at_cap_percent = Limit::UNBOUNDED;
-        assert_eq!(threshold(&limits, Some(10)), Some(100_000));
-        limits.compact_at_tokens = Limit::UNBOUNDED;
-        assert_eq!(threshold(&limits, Some(10)), None);
+        let share = limits(Limit::UNBOUNDED, Limit::at(50));
+        assert_eq!(threshold(&share, Some(300_000)), Some(150_000));
+        assert_eq!(threshold(&share, None), None, "no cap, no size: no bound");
+        let both = limits(Limit::at(100_000), Limit::at(50));
+        assert_eq!(threshold(&both, Some(300_000)), Some(100_000));
+        assert_eq!(threshold(&both, None), Some(100_000));
+        let size = limits(Limit::at(100_000), Limit::UNBOUNDED);
+        assert_eq!(threshold(&size, Some(10)), Some(100_000));
+        let neither = limits(Limit::UNBOUNDED, Limit::UNBOUNDED);
+        assert_eq!(threshold(&neither, Some(10)), None);
     }
 
     #[test]
