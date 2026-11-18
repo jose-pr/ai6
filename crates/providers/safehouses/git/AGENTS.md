@@ -28,7 +28,12 @@ them in `[providers.git]`.
   `<state_root>/safe-houses/<operation>/<mission>` (names reduced to safe characters plus a
   hash) on a new branch from `spec.branch`, where `{id}`, `{slug}` (lowercased title, at
   most 40 characters) and `{operation}` are filled in and characters Git rejects become `-`.
-  `state_root` must lie outside `source`, and the Mission path must not already exist.
+  `state_root` must lie outside `source`. Worktrees whose directory is gone are pruned first. The
+  Mission path already holding a worktree registered with `source` on a branch is adopted, work
+  and all; any other directory there is renamed beside it (`.stale-<nanoseconds>`), not deleted.
+  A branch of that name left by an earlier run is checked out again rather than refused; one
+  another worktree has checked out, or one a template with no `{id}` expands alike for every
+  Mission, gets `-<mission>` appended so each Mission has its own.
 - **Re-attach** (`reopen = Some(report)` with `isolate = true`): the report must be `kept`,
   name an existing worktree registered with `source`, whose checked-out branch equals
   `report.branch`, and whose `report.base` is a commit that is an ancestor of `HEAD`.

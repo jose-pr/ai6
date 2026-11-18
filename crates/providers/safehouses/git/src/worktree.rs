@@ -112,24 +112,34 @@ impl Worktree {
             .join("safe-houses")
             .join(path_segment(&spec.operation_id))
             .join(path_segment(&spec.mission_id));
+        // Forget worktrees whose directory is gone, so their branches can be used again.
+        git(run, &repository, &["worktree", "prune"])?;
         if path.exists() {
-            return Err(format!("safe-house path {} already exists", path.display()));
+            if let Some(house) = Self::adopt(run, &repository, &path, &commit)? {
+                return Ok(house);
+            }
+            set_aside(&path)?;
         }
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|error| fail(parent, error))?;
         }
-        git(
-            run,
-            &repository,
-            &[
-                "worktree",
-                "add",
-                "-b",
-                &branch,
-                path.to_string_lossy().as_ref(),
-                &commit,
-            ],
-        )?;
+        let branch = free_branch(run, &repository, branch, (&spec.branch, &spec.mission_id))?;
+        let exists = branch_exists(run, &repository, &branch);
+        let target = path.to_string_lossy();
+        // A branch an earlier run of this Mission left behind carries on from where it was.
+        let args: Vec<&str> = if exists {
+            vec!["worktree", "add", target.as_ref(), &branch]
+        } else {
+            vec!["worktree", "add", "-b", &branch, target.as_ref(), &commit]
+        };
+        git(run, &repository, &args)?;
+        let base = if exists {
+            git(run, &path, &["merge-base", "HEAD", &commit])
+                .map(|base| base.trim().to_owned())
+                .unwrap_or(base)
+        } else {
+            base
+        };
         Ok(Self {
             repository,
             path,
@@ -140,6 +150,36 @@ impl Worktree {
             git_dir: None,
             run: *run,
         })
+    }
+
+    /// Takes over the worktree an earlier run of this Mission left at `path` when Git still
+    /// has it registered on a branch; `None` when it is anything else.
+    fn adopt(
+        run: &Runner,
+        repository: &Path,
+        path: &Path,
+        commit: &str,
+    ) -> Result<Option<Self>, Failure> {
+        let path = git_path(path.canonicalize().map_err(|error| fail(path, error))?);
+        if !registered(run, repository, &path)? {
+            return Ok(None);
+        }
+        let Ok(branch) = git(run, &path, &["symbolic-ref", "--short", "HEAD"]) else {
+            return Ok(None);
+        };
+        let base = git(run, &path, &["merge-base", "HEAD", commit])
+            .map(|base| base.trim().to_owned())
+            .unwrap_or_else(|_| commit.to_owned());
+        Ok(Some(Self {
+            repository: repository.to_owned(),
+            path,
+            branch: Some(branch.trim().to_owned()),
+            base,
+            isolated: true,
+            cloned: false,
+            git_dir: None,
+            run: *run,
+        }))
     }
 
     /// Saves the work so far as one commit on top of `HEAD`, holding the uncommitted changes
@@ -572,6 +612,66 @@ fn resume_point(
         })
         .map_or_else(|| commit.clone(), str::to_owned);
     Ok((checkpoint.branch.clone(), commit, base))
+}
+
+/// Whether Git lists `path` as a worktree of `repository`.
+fn registered(run: &Runner, repository: &Path, path: &Path) -> Result<bool, Failure> {
+    let worktrees = git(run, repository, &["worktree", "list", "--porcelain"])?;
+    Ok(worktrees.lines().any(|line| {
+        line.strip_prefix("worktree ")
+            .and_then(|value| Path::new(value).canonicalize().ok())
+            .is_some_and(|value| git_path(value) == path)
+    }))
+}
+
+/// Whether the local branch `branch` exists in `repository`.
+fn branch_exists(run: &Runner, repository: &Path, branch: &str) -> bool {
+    git(
+        run,
+        repository,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch}"),
+        ],
+    )
+    .is_ok()
+}
+
+/// Whether a worktree of `repository` has `branch` checked out.
+fn branch_in_use(run: &Runner, repository: &Path, branch: &str) -> Result<bool, Failure> {
+    let wanted = format!("branch refs/heads/{branch}");
+    let worktrees = git(run, repository, &["worktree", "list", "--porcelain"])?;
+    Ok(worktrees.lines().any(|line| line.trim_end() == wanted))
+}
+
+/// `branch`, or when it would be shared (another worktree has it checked out, or the template has
+/// no `{id}`, so every Mission expands it alike and a branch that exists is another's), the name
+/// made the Mission's own.
+fn free_branch(
+    run: &Runner,
+    repository: &Path,
+    branch: String,
+    (template, mission_id): (&str, &str),
+) -> Result<String, Failure> {
+    let shared = !template.contains("{id}") && branch_exists(run, repository, &branch);
+    if !shared && !branch_in_use(run, repository, &branch)? {
+        return Ok(branch);
+    }
+    let own = format!("{branch}-{}", path_segment(mission_id));
+    git(run, repository, &["check-ref-format", "--branch", &own])?;
+    Ok(own)
+}
+
+/// Moves a directory that is not a worktree out of the way, keeping whatever it holds.
+fn set_aside(path: &Path) -> Result<(), Failure> {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    let mut aside = path.as_os_str().to_owned();
+    aside.push(format!(".stale-{stamp}"));
+    fs::rename(path, &aside).map_err(|error| fail(path, error))
 }
 
 /// A temporary index file, removed when dropped.
@@ -1320,5 +1420,86 @@ mod tests {
         let plain = temp.0.join("plain");
         fs::create_dir_all(&plain).unwrap();
         assert!(open(&temp.spec(&plain, "mission-7", "{id}")).is_err());
+    }
+
+    #[test]
+    fn a_registered_worktree_an_earlier_window_left_is_adopted_with_its_work() {
+        let temp = Temp::new();
+        let repo = temp.repo();
+        let spec = temp.spec(&repo, "standing-1", "{id}-{slug}");
+        let first = open(&spec).unwrap();
+        fs::write(first.path.join("work.txt"), "work\n").unwrap();
+        temp.git(&first.path, &["add", "work.txt"]);
+        temp.git(&first.path, &["commit", "--quiet", "-m", "add work"]);
+
+        let again = open(&spec).expect("the Mission's own worktree is adopted, not refused");
+        assert_eq!(again.path, first.path);
+        assert_eq!(again.branch, first.branch);
+        assert_eq!(
+            again.changes().unwrap().len(),
+            1,
+            "its commits are still there"
+        );
+    }
+
+    #[test]
+    fn a_worktree_whose_directory_vanished_is_recreated_on_its_branch() {
+        let temp = Temp::new();
+        let repo = temp.repo();
+        let spec = temp.spec(&repo, "standing-2", "{id}-{slug}");
+        let first = open(&spec).unwrap();
+        fs::write(first.path.join("work.txt"), "work\n").unwrap();
+        temp.git(&first.path, &["add", "work.txt"]);
+        temp.git(&first.path, &["commit", "--quiet", "-m", "add work"]);
+        fs::remove_dir_all(&first.path).unwrap();
+
+        let again = open(&spec).expect("a stale registration and branch do not wedge it");
+        assert_eq!(again.path, first.path);
+        assert_eq!(again.branch, first.branch);
+        assert!(
+            again.path.join("work.txt").exists(),
+            "it continues the branch"
+        );
+        assert_eq!(again.changes().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_directory_in_the_way_that_is_no_worktree_is_set_aside_not_deleted() {
+        let temp = Temp::new();
+        let repo = temp.repo();
+        let spec = temp.spec(&repo, "standing-3", "{id}-{slug}");
+        let first = open(&spec).unwrap();
+        temp.git(
+            &repo,
+            &[
+                "worktree",
+                "remove",
+                "--force",
+                first.path.to_str().unwrap(),
+            ],
+        );
+        fs::create_dir_all(&first.path).unwrap();
+        fs::write(first.path.join("keep.txt"), "kept\n").unwrap();
+
+        let again = open(&spec).unwrap();
+        assert!(again.path.join("seed.txt").exists());
+        let beside: Vec<_> = fs::read_dir(first.path.parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.to_string_lossy().contains(".stale-"))
+            .collect();
+        assert_eq!(beside.len(), 1);
+        assert!(beside[0].join("keep.txt").exists());
+    }
+
+    #[test]
+    fn missions_whose_branch_template_has_no_id_still_get_a_worktree_each() {
+        let temp = Temp::new();
+        let repo = temp.repo();
+        let first = open(&temp.spec(&repo, "mission-a", "work")).unwrap();
+        let second = open(&temp.spec(&repo, "mission-b", "work")).unwrap();
+        assert_ne!(first.path, second.path);
+        assert_ne!(first.branch, second.branch);
+        assert!(first.path.join("seed.txt").exists() && second.path.join("seed.txt").exists());
     }
 }
