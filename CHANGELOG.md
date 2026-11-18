@@ -233,6 +233,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The gateway serves a brief, a green ink request, a held brief, a Mission's reviews, a charge's report and a
 ### Changed
 
+- The Claude Code handler starts and runs Claude Code through `coqui-acp-claude` (its stream-json
+  session, control requests, interrupt and exit) on the Station's terminal, instead of its own stream
+  code. A Run now asks Claude Code to `initialize` before its first message, which Claude Code answers
+  with no model turn; a Claude Code that ends before it answers still starts a Run, which ends with the
+  `failed` event naming how it ended.
+
 - The Codex handler starts and runs the app server through `coqui-acp-codex` (its session, requests,
   approvals, interrupt, steer and exit) on the Station's terminal, instead of its own JSON-RPC code. A turn
   now waits for the app server to accept it, so a refused turn fails `send_message`; `interrupt` names the

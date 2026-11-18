@@ -5,7 +5,8 @@ signature, contract and gotchas, so a consuming agent skips the source. It ships
 the package and is self-contained. Development documentation lives with the source at
 <https://github.com/jose-pr/ai6>.
 
-No features. MSRV: Rust 1.89. The crate depends on `ai6`, `serde`, `serde_json` and `toml`.
+No features. MSRV: Rust 1.89. The crate depends on `ai6`, `coqui-acp-claude` (Claude Code's session: its process, stream-json
+parsing, control requests and exit), `serde`, `serde_json` and `toml`.
 It exposes `ClaudeHandler` and `ClaudeConfig` from the root. The crate contains no
 `unsafe` code.
 
@@ -63,17 +64,25 @@ carries such blocks is not documented; the block types are the Messages API's. A
 `claude-opus-5-5`), and neither `--restricted`, `--tools=` nor a deny rule removes it. That
 variable is the only documented switch (code.claude.com/docs/en/advisor and
 `/docs/en/env-vars`); no setting, flag or permission rule turns server-side tools off as a
-class. `--resume <id>` finds a Run only from the directory that recorded
+class. `--resume=<id>` finds a Run only from the directory that recorded
 it (Claude Code 2.1.310: from another one it answers "No conversation found with run
-ID"), so resume must be given that working directory. With `--input-format stream-json`
-Claude Code writes nothing, not even its stream's initialization, until it has read a
-message, so resume sends its optional follow-up message right after starting the process and
-returns without waiting for output. `run_id()` is `None` until Claude reports the
+ID"), so resume must be given that working directory. A Run is a `coqui_acp_claude::ClaudeSession` started through the Station's terminal
+(`terminal.rs` adapts it as the driver's `Spawn`, keeping the terminal's output read through
+`JsonLines` and dropping the echo of what was written). The driver starts Claude Code with the flags
+it always passes (`-p --input-format=stream-json --output-format=stream-json --verbose
+--replay-user-messages`, `--resume=ID` to resume) and this crate's flags after them, with
+`--include-partial-messages` and `--permission-prompts` off, writes an `initialize` control
+request, and waits up to 30 s for its answer, which Claude Code gives with no message written
+(its stream's own initialization still comes only after a message), before the first message goes
+out. A Claude Code that ends, or refuses `initialize`, before it answers still starts a Run, which
+ends with one `failed` event naming how it ended. Every line Claude writes reaches this crate first,
+through the driver's line hook, where the restricted Run's check and the Run's events are made from
+it (`AgentEvent::data` is the line as the terminal wrote it). `run_id()` is `None` until Claude reports the
 Run; a reported ID other than the one resumed makes `next_event` fail ("Claude resumed a
 different Run than requested"), and a Run Claude cannot find ends with a `failed`
 event quoting its message. The end of Claude's output is the terminal's
-end-of-file, or Claude's exit while the terminal keeps the output open (a read that times
-out asks the terminal's `exit_status`). After every line written before it, that emits one
+end-of-file, or Claude's exit while the terminal keeps the output open (the driver asks the
+terminal's `exit_status` every 100 ms). After every line written before it, that emits one
 `failed` event whose text names the exit (`exited with code N`, `was ended by signal N`, or
 `closed its terminal` when the terminal cannot tell) and quotes the last eight lines Claude
 wrote that were not JSON (512 bytes each); a read timeout otherwise returns `None`. `close`
@@ -87,15 +96,16 @@ Claude Code 2.1.310 exits at once when its standard input is a terminal ("Input 
 provided either through stdin or as a prompt argument when using --print").
 
 `interrupt` writes one stream-json control request,
-`{"type":"control_request","request_id":"ai6-interrupt-N","request":{"subtype":"interrupt"}}`
-(`N` counts from 1 per Run), the shape the Agent SDK sends; no `^C` byte is written,
+`{"type":"control_request","request_id":"ID","request":{"subtype":"interrupt"}}`
+(`ID` is the driver's own, numbered per Run), the shape the Agent SDK sends; no `^C` byte is written,
 since without a terminal it would reach Claude as data. Claude answers with a
 `control_response` line, which `next_event` reads and drops, never an event; one whose
 `response.subtype` is `error` is logged to standard error with its `error`. Claude Code
 2.1.310 answers an interrupt with `success` and `{"still_queued":[]}` even when no turn is
 running, and stays running (checked against that version over pipes, with no message sent).
-Each message and request is written in a single write, so an interrupt sent while a message
-is being written cannot land inside it.
+Each message and request is one line the driver queues for a writer thread, so an interrupt sent
+while a message is being written cannot land inside it, and a Claude Code that has stopped reading
+holds up no caller.
 
 The terminal is opened at `STREAM_COLS` (32767) columns and read with
 `ai6::directorates::q::terminal::JsonLines`, so the controls ConPTY writes on Windows and a
