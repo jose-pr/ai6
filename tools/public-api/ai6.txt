@@ -3292,6 +3292,7 @@ pub ai6::directorates::q::logins::Synced::Rewritten(u64)
 pub ai6::directorates::q::logins::Synced::Unchanged
 pub struct ai6::directorates::q::logins::CommandRenewer
 impl ai6::directorates::q::logins::LoginRenewer for ai6::directorates::q::logins::CommandRenewer
+pub fn ai6::directorates::q::logins::CommandRenewer::can_renew(&self, &ai6::Account) -> bool
 pub fn ai6::directorates::q::logins::CommandRenewer::renew(&self, &ai6::Account, &std::path::Path, core::time::Duration) -> ai6::directorates::q::logins::RenewEnd
 pub fn ai6::directorates::q::logins::CommandRenewer::sign_out(&self, &ai6::Account, &std::path::Path, core::time::Duration) -> ai6::directorates::q::logins::RenewEnd
 pub struct ai6::directorates::q::logins::LoginFiles(_)
@@ -3321,13 +3322,19 @@ pub fn ai6::directorates::q::logins::RunLogin::recall(&std::path::Path) -> core:
 pub fn ai6::directorates::q::logins::RunLogin::remove(&self) -> core::io::error::Result<()>
 pub fn ai6::directorates::q::logins::RunLogin::sync(&mut self, &ai6::directorates::q::sealing::Vault, core::option::Option<u64>, f64) -> core::result::Result<ai6::directorates::q::logins::Synced, ai6::directorates::q::logins::LoginError>
 pub trait ai6::directorates::q::logins::LoginRenewer: core::marker::Send + core::marker::Sync
+pub fn ai6::directorates::q::logins::LoginRenewer::can_renew(&self, &ai6::Account) -> bool
 pub fn ai6::directorates::q::logins::LoginRenewer::renew(&self, &ai6::Account, &std::path::Path, core::time::Duration) -> ai6::directorates::q::logins::RenewEnd
 pub fn ai6::directorates::q::logins::LoginRenewer::sign_out(&self, &ai6::Account, &std::path::Path, core::time::Duration) -> ai6::directorates::q::logins::RenewEnd
 impl ai6::directorates::q::logins::LoginRenewer for ai6::directorates::q::logins::CommandRenewer
+pub fn ai6::directorates::q::logins::CommandRenewer::can_renew(&self, &ai6::Account) -> bool
 pub fn ai6::directorates::q::logins::CommandRenewer::renew(&self, &ai6::Account, &std::path::Path, core::time::Duration) -> ai6::directorates::q::logins::RenewEnd
 pub fn ai6::directorates::q::logins::CommandRenewer::sign_out(&self, &ai6::Account, &std::path::Path, core::time::Duration) -> ai6::directorates::q::logins::RenewEnd
+impl ai6::directorates::q::logins::LoginRenewer for ai6::station::renewer::ProviderRenewer
+pub fn ai6::station::renewer::ProviderRenewer::can_renew(&self, &ai6::Account) -> bool
+pub fn ai6::station::renewer::ProviderRenewer::renew(&self, &ai6::Account, &std::path::Path, core::time::Duration) -> ai6::directorates::q::logins::RenewEnd
+pub fn ai6::station::renewer::ProviderRenewer::sign_out(&self, &ai6::Account, &std::path::Path, core::time::Duration) -> ai6::directorates::q::logins::RenewEnd
 pub fn ai6::directorates::q::logins::add_login(&ai6::directorates::q::sealing::Vault, &ai6::directorates::registry::accounts::AccountRef, &std::path::Path, &[alloc::string::String], &[ai6::directorates::q::sealing::Recipient], f64) -> core::result::Result<u64, ai6::directorates::q::logins::LoginError>
-pub fn ai6::directorates::q::logins::assign_renewals(&dyn ai6::directorates::registry::backend::RegistryBackend, &[(ai6::directorates::registry::accounts::AccountRef, &ai6::Account)], &str, &[alloc::string::String], &ai6::station::limits::AccountLimits, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::q::logins::LoginNotice>>
+pub fn ai6::directorates::q::logins::assign_renewals(&dyn ai6::directorates::registry::backend::RegistryBackend, &[(ai6::directorates::registry::accounts::AccountRef, &ai6::Account)], &dyn ai6::directorates::q::logins::LoginRenewer, &str, &[alloc::string::String], &ai6::station::limits::AccountLimits, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::q::logins::LoginNotice>>
 pub fn ai6::directorates::q::logins::login_accounts<'a>(impl core::iter::traits::collect::IntoIterator<Item = &'a ai6::AccountPool>) -> alloc::vec::Vec<(ai6::directorates::registry::accounts::AccountRef, &'a ai6::Account)>
 pub fn ai6::directorates::q::logins::renewal_due(&ai6::directorates::registry::accounts::LoginState, &ai6::station::limits::AccountLimits, f64) -> bool
 pub fn ai6::directorates::q::logins::run_leases(&ai6::directorates::q::sealing::Vault, &[(ai6::directorates::registry::accounts::AccountRef, &ai6::Account)], &dyn ai6::directorates::q::logins::LoginRenewer, &std::path::Path, &ai6::station::limits::AccountLimits, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::q::logins::LoginNotice>>
@@ -4108,14 +4115,12 @@ pub ai6::directorates::q::AccountKind::AnthropicApiKey
 pub ai6::directorates::q::AccountKind::AnthropicAuthToken
 pub ai6::directorates::q::AccountKind::ClaudeOauthToken
 pub ai6::directorates::q::AccountKind::CodexAccessToken
+pub ai6::directorates::q::AccountKind::CodexApiKey
 pub ai6::directorates::q::AccountKind::ConfigDir
 pub ai6::directorates::q::AccountKind::HarnessLogin
-pub ai6::directorates::q::AccountKind::OpenaiApiKey
 impl ai6::AccountKind
 pub fn ai6::AccountKind::as_str(self) -> &'static str
 pub fn ai6::AccountKind::carries_run(self) -> bool
-pub fn ai6::AccountKind::env(self) -> core::option::Option<&'static str>
-pub fn ai6::AccountKind::login_flag(self) -> core::option::Option<&'static str>
 pub fn ai6::AccountKind::parse(&str) -> core::option::Option<Self>
 pub fn ai6::AccountKind::reads_secret(self) -> bool
 impl core::fmt::Display for ai6::AccountKind
@@ -4182,9 +4187,11 @@ pub fn ai6::Account::renew_command(self, impl core::iter::traits::collect::IntoI
 pub fn ai6::Account::renew_env(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::Account::renewal(&self) -> &[alloc::string::String]
 pub fn ai6::Account::renewal_env(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub fn ai6::Account::renews_through_provider(&self) -> bool
 pub fn ai6::Account::secret(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::Account::secret_name(&self) -> core::option::Option<&str>
 pub fn ai6::Account::variable(&self, &str) -> core::option::Option<alloc::string::String>
+pub fn ai6::Account::variable_override(&self) -> core::option::Option<&str>
 pub fn ai6::Account::weakening(&self, &str) -> core::option::Option<alloc::string::String>
 pub struct ai6::directorates::q::AccountPool
 impl ai6::AccountPool
@@ -4366,7 +4373,9 @@ impl core::fmt::Debug for ai6::SecretValue
 pub fn ai6::SecretValue::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::ops::drop::Drop for ai6::SecretValue
 pub fn ai6::SecretValue::drop(&mut self)
-pub const ai6::directorates::q::CREDENTIAL_VARIABLES: &[&str]
+pub const ai6::directorates::q::CLAUDE_LOGIN_FILE: &str
+pub const ai6::directorates::q::CODEX_LOGIN_FILE: &str
+pub static ai6::directorates::q::CREDENTIAL_VARIABLES: std::sync::lazy_lock::LazyLock<alloc::vec::Vec<alloc::string::String>>
 pub trait ai6::directorates::q::AccountLogin: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::q::AccountLogin::login(&self, &ai6::AccountPool, &ai6::Account, &std::path::Path, &str) -> core::result::Result<(), alloc::string::String>
 impl ai6::AccountLogin for ai6::CommandLogin
@@ -10081,6 +10090,16 @@ pub fn ai6::station::publisher::Config::try_new(&str, impl core::convert::Into<a
 pub fn ai6::station::publisher::Config::with_ca_certificates(self, &[alloc::vec::Vec<u8>]) -> Self
 impl core::fmt::Debug for ai6::station::publisher::Config
 pub fn ai6::station::publisher::Config::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub mod ai6::station::renewer
+pub struct ai6::station::renewer::ProviderRenewer
+impl ai6::station::renewer::ProviderRenewer
+pub const ai6::station::renewer::ProviderRenewer::DEFAULT: Self
+pub fn ai6::station::renewer::ProviderRenewer::claude_program(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::station::renewer::ProviderRenewer::codex_program(self, impl core::convert::Into<alloc::string::String>) -> Self
+impl ai6::directorates::q::logins::LoginRenewer for ai6::station::renewer::ProviderRenewer
+pub fn ai6::station::renewer::ProviderRenewer::can_renew(&self, &ai6::Account) -> bool
+pub fn ai6::station::renewer::ProviderRenewer::renew(&self, &ai6::Account, &std::path::Path, core::time::Duration) -> ai6::directorates::q::logins::RenewEnd
+pub fn ai6::station::renewer::ProviderRenewer::sign_out(&self, &ai6::Account, &std::path::Path, core::time::Duration) -> ai6::directorates::q::logins::RenewEnd
 pub mod ai6::station::runner
 #[non_exhaustive] pub struct ai6::station::runner::RunnerConfig
 impl ai6::station::runner::RunnerConfig
@@ -10206,14 +10225,12 @@ pub ai6::AccountKind::AnthropicApiKey
 pub ai6::AccountKind::AnthropicAuthToken
 pub ai6::AccountKind::ClaudeOauthToken
 pub ai6::AccountKind::CodexAccessToken
+pub ai6::AccountKind::CodexApiKey
 pub ai6::AccountKind::ConfigDir
 pub ai6::AccountKind::HarnessLogin
-pub ai6::AccountKind::OpenaiApiKey
 impl ai6::AccountKind
 pub fn ai6::AccountKind::as_str(self) -> &'static str
 pub fn ai6::AccountKind::carries_run(self) -> bool
-pub fn ai6::AccountKind::env(self) -> core::option::Option<&'static str>
-pub fn ai6::AccountKind::login_flag(self) -> core::option::Option<&'static str>
 pub fn ai6::AccountKind::parse(&str) -> core::option::Option<Self>
 pub fn ai6::AccountKind::reads_secret(self) -> bool
 impl core::fmt::Display for ai6::AccountKind
@@ -10904,9 +10921,11 @@ pub fn ai6::Account::renew_command(self, impl core::iter::traits::collect::IntoI
 pub fn ai6::Account::renew_env(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::Account::renewal(&self) -> &[alloc::string::String]
 pub fn ai6::Account::renewal_env(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub fn ai6::Account::renews_through_provider(&self) -> bool
 pub fn ai6::Account::secret(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::Account::secret_name(&self) -> core::option::Option<&str>
 pub fn ai6::Account::variable(&self, &str) -> core::option::Option<alloc::string::String>
+pub fn ai6::Account::variable_override(&self) -> core::option::Option<&str>
 pub fn ai6::Account::weakening(&self, &str) -> core::option::Option<alloc::string::String>
 pub struct ai6::AccountCandidate
 pub ai6::AccountCandidate::account: alloc::string::String
@@ -15160,11 +15179,12 @@ pub const ai6::BRIEF_SOURCE: &str
 pub const ai6::BUILTIN_KINDS: [&str; 9]
 pub const ai6::CHIEF_OF_STAFF_ROLE: &str
 pub const ai6::CHIEF_ROLE: &str
+pub const ai6::CLAUDE_LOGIN_FILE: &str
 pub const ai6::CLEARANCE_KIND: &str
+pub const ai6::CODEX_LOGIN_FILE: &str
 pub const ai6::CONFIG_ACCESS: &str
 pub const ai6::CONFIG_ACCOUNTS: &str
 pub const ai6::CONTEXT_EVENTS_FORMAT: &str
-pub const ai6::CREDENTIAL_VARIABLES: &[&str]
 pub const ai6::DEFAULT_00_MAX_FAILURE_RATE: f64
 pub const ai6::DEFAULT_00_MISSIONS: u64
 pub const ai6::DEFAULT_00_QUIET_DAYS: u64
@@ -15246,6 +15266,7 @@ pub const ai6::SCRIPT_ENVIRONMENT: [&str; 14]
 pub const ai6::SLEEPER_BRIEF_SOURCE: &str
 pub const ai6::SOURCE_BRIEF_PREFIX: &str
 pub const ai6::STATION_ACTIONS: &[&str]
+pub static ai6::CREDENTIAL_VARIABLES: std::sync::lazy_lock::LazyLock<alloc::vec::Vec<alloc::string::String>>
 pub trait ai6::AccessTokenStore
 pub fn ai6::AccessTokenStore::extend_access_token(&self, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
 pub fn ai6::AccessTokenStore::find_access_token(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::m::identity::AccessTokenRecord>>
