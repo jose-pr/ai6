@@ -272,6 +272,7 @@ control's status route every `--poll-interval` (0.5 s) until the Station reports
   prints `SLEEPER STATE`. Needs `mission.control`.
 - `ai6ctl mission resume <MISSION_ID> [--message <TEXT>]` resumes a parked, blocked or
   stalled Mission now, sending `--message` to the Agent.
+- `ai6ctl charge acknowledge <SCOPE>` posts to `/v1/user/charges/{scope}/acknowledge` and prints `CHARGE	ACKNOWLEDGED` and the scope; exit 1 on a refusal.
 - `ai6ctl charge attach <SCOPE> [OPTIONS]` and `ai6ctl mission attach <MISSION_ID> [--operation <ID>] [OPTIONS]`
   (`OPTIONS`: `--after <SEQ>`, `--connect-timeout <SECONDS>`, `--hello-timeout <SECONDS>`, `--leave-wait <SECONDS>`) attach to a live Run through the gateway's `GET /v1/socket/attach` WebSocket: a charge's
   standing Run (`SCOPE` is `m`, `operation:CODENAME` or `station:ID`; needs `charge.converse` on it) or a

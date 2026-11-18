@@ -13,7 +13,7 @@ mod sources;
 #[cfg(feature = "cables-mcp")]
 mod station;
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::Path;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
@@ -55,6 +55,24 @@ fn act(key: &str, text: &str, environment: &BTreeMap<String, String>) {
     let turn = TURNS.lock().unwrap().get(key).cloned();
     if let Some(turn) = turn {
         turn(text, environment);
+    }
+}
+
+/// The charges, by Run name, whose turns the stand-in ends `failed` while they are listed.
+static FAILING: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+
+/// What a turn of the stand-in `key` says before it ends: a line and `completed`, or `failed`.
+fn answer(key: &str, run: &str) -> [AgentEvent; 2] {
+    if FAILING.lock().unwrap().contains(key) {
+        [
+            event("text", Some(format!("noted on {run}"))),
+            event("failed", Some("the model refused".to_owned())),
+        ]
+    } else {
+        [
+            event("text", Some(format!("noted on {run}"))),
+            event("completed", None),
+        ]
     }
 }
 static NEXT_RUN: AtomicUsize = AtomicUsize::new(1);
@@ -181,12 +199,9 @@ impl ChargeRun {
         terminal: Object<dyn AgentTerminal>,
     ) -> Self {
         Self {
-            key,
             environment,
-            events: Mutex::new(VecDeque::from([
-                event("text", Some(format!("noted on {run}"))),
-                event("completed", None),
-            ])),
+            events: Mutex::new(VecDeque::from(answer(&key, &run))),
+            key,
             run,
             holding: Default::default(),
             _terminal: terminal,
@@ -212,9 +227,10 @@ impl AgentSession for ChargeRun {
             self.holding.store(true, Ordering::Release);
             return Ok(());
         }
-        let mut events = self.events.lock().unwrap();
-        events.push_back(event("text", Some(format!("noted on {}", self.run))));
-        events.push_back(event("completed", None));
+        self.events
+            .lock()
+            .unwrap()
+            .extend(answer(&self.key, &self.run));
         Ok(())
     }
 
@@ -757,5 +773,65 @@ async fn quotas_stop_a_storm() {
         "what was not told waits on the record"
     );
     assert_no_mission(&state, tag);
+    charges::close_all(&state).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_failed_turn_on_an_idle_charge_is_retried_once_and_an_acknowledgement_ends_the_count() {
+    let root = tempfile::tempdir().unwrap();
+    let tag = "f1";
+    FAILING.lock().unwrap().insert(key(tag));
+    let state = station(root.path(), tag, "test", "", "");
+    charges::tend(&state, false, true).await;
+    control(&state, tag, "look at the board");
+    tend_until(&state, "the failed turn", || turns(&state, tag) == 1).await;
+    assert_eq!(record(&state, tag).failed_turns, 1);
+
+    // Nothing else is due, and the charge is idle: the Station wakes it once more by itself.
+    tend_until(&state, "the retry", || turns(&state, tag) == 2).await;
+    let all = calls(&key(tag));
+    assert!(
+        all.last().unwrap().text.contains("\"retry\""),
+        "{}",
+        all.last().unwrap().text
+    );
+    assert_eq!(record(&state, tag).failed_turns, 2);
+
+    // The retry failed too: it is not tried again until something wakes the charge.
+    tend_for(&state, 350).await;
+    assert_eq!(turns(&state, tag), 2, "one retry, not a loop");
+
+    let acknowledged = state
+        .intake
+        .acknowledge_charge(&scope(tag), "person-1")
+        .unwrap();
+    assert_eq!(acknowledged.failed_turns, 0);
+    FAILING.lock().unwrap().remove(&key(tag));
+    tend_for(&state, 25).await;
+    assert_eq!(
+        turns(&state, tag),
+        2,
+        "an acknowledged failure is not retried"
+    );
+    control(&state, tag, "again");
+    tend_until(&state, "a turn that ends well", || turns(&state, tag) == 3).await;
+    assert_eq!(record(&state, tag).failed_turns, 0);
+    charges::close_all(&state).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_retry_that_ends_well_clears_the_failure_and_is_not_followed_by_another() {
+    let root = tempfile::tempdir().unwrap();
+    let tag = "f2";
+    FAILING.lock().unwrap().insert(key(tag));
+    let state = station(root.path(), tag, "test", "", "");
+    charges::tend(&state, false, true).await;
+    control(&state, tag, "look");
+    tend_until(&state, "the failed turn", || turns(&state, tag) == 1).await;
+    FAILING.lock().unwrap().remove(&key(tag));
+    tend_until(&state, "the retry", || turns(&state, tag) == 2).await;
+    assert_eq!(record(&state, tag).failed_turns, 0);
+    tend_for(&state, 350).await;
+    assert_eq!(turns(&state, tag), 2);
     charges::close_all(&state).await;
 }

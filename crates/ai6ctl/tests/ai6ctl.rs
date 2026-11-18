@@ -2110,3 +2110,53 @@ async fn pools_changes_who_holds_a_login_forgets_it_and_shows_what_a_person_must
     assert_eq!(audited.len(), 4, "{audited:?}");
     let _ = shutdown.send(());
 }
+
+#[tokio::test]
+async fn a_charge_whose_turns_failed_is_acknowledged_from_the_command_line() {
+    let (server, shutdown, access_token, registry_dir) = start_gateway().await;
+    let registry = FileRegistry::open(registry_dir.path());
+    let record = registry
+        .claim_charge(
+            "operation:station-01",
+            "007",
+            "station-01",
+            Duration::from_secs(60),
+        )
+        .unwrap();
+    registry
+        .update_charge(
+            "operation:station-01",
+            "station-01",
+            record.fence,
+            None,
+            ai6::directorates::registry::charges::ChargeUpdate::default().turn_ended(true),
+        )
+        .unwrap();
+    let acknowledged = ai6ctl(
+        server.clone(),
+        Some(access_token.clone()),
+        &["charge", "acknowledge", "operation:station-01"],
+    )
+    .await;
+    assert!(
+        acknowledged.status.success(),
+        "{}",
+        String::from_utf8_lossy(&acknowledged.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(acknowledged.stdout).unwrap(),
+        "CHARGE\tACKNOWLEDGED\noperation:station-01\tyes\n"
+    );
+    let kept = registry.charge("operation:station-01").unwrap().unwrap();
+    assert_eq!(kept.failed_turns, 0);
+    assert_eq!(kept.logbook.last().unwrap().kind, "acknowledged");
+
+    let missing = ai6ctl(
+        server.clone(),
+        Some(access_token.clone()),
+        &["charge", "acknowledge", "operation:nowhere"],
+    )
+    .await;
+    assert_eq!(missing.status.code(), Some(1));
+    let _ = shutdown.send(());
+}

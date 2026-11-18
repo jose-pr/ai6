@@ -968,6 +968,13 @@ enum ChargeCommand {
         #[command(flatten)]
         options: AttachOptions,
     },
+    /// Record that you saw a charge fail its last turns (needs charge.converse and the control
+    /// that interrupts its turn on its scope): its "failed its last turn" attention item ends and
+    /// the Station stops counting the failures, until its next turn fails.
+    Acknowledge {
+        /// The charge's scope: `m`, `operation:CODENAME` or `station:ID`.
+        scope: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -2332,6 +2339,17 @@ async fn run() -> Result<(), String> {
             .await;
         }
         Command::Charge {
+            command: ChargeCommand::Acknowledge { scope },
+        } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            let acknowledged = acknowledge_charge(&client, &server, &token, &scope).await?;
+            println!("CHARGE\tACKNOWLEDGED");
+            println!(
+                "{}\tyes",
+                plain(acknowledged["scope"].as_str().unwrap_or(&scope))
+            );
+        }
+        Command::Charge {
             command: ChargeCommand::Attach { scope, options },
         } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
@@ -3658,6 +3676,39 @@ async fn send<T: DeserializeOwned>(
         .json()
         .await
         .map_err(|_| format!("Universal Exports returned an invalid {what}"))
+}
+
+/// Asks Universal Exports to record that the person saw the charge `scope` fail, and reads the
+/// charge as it stands, naming what each refusal means.
+async fn acknowledge_charge(
+    client: &Client,
+    server: &Url,
+    access_token: &str,
+    scope: &str,
+) -> Result<serde_json::Value, String> {
+    let mut url = server.clone();
+    url.path_segments_mut()
+        .map_err(|_| "Universal Exports URL cannot contain path segments".to_owned())?
+        .extend(["v1", "user", "charges", scope, "acknowledge"]);
+    let response = client
+        .post(url)
+        .bearer_auth(access_token)
+        .send()
+        .await
+        .map_err(|_| "could not contact Universal Exports".to_owned())?;
+    let status = response.status();
+    if !status.is_success() {
+        let detail = match status {
+            StatusCode::FORBIDDEN => " (charge.converse and the scope's control are required)",
+            StatusCode::NOT_FOUND => " (no such charge, or it is not yours to see)",
+            _ => "",
+        };
+        return Err(format!("Universal Exports returned HTTP {status}{detail}"));
+    }
+    response
+        .json()
+        .await
+        .map_err(|_| "Universal Exports returned an invalid charge".to_owned())
 }
 
 /// A Mission withdrawn before any Station took it.

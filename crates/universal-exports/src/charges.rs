@@ -68,6 +68,9 @@ pub(crate) struct ChargeView {
     can_converse: bool,
     /// Whether the person may interrupt its turn.
     can_interrupt: bool,
+    /// Whether a person has acknowledged the failure of its last turn.
+    #[serde(skip)]
+    acknowledged: bool,
 }
 
 /// A charge's view with its logbook, oldest first.
@@ -137,6 +140,16 @@ fn route_of(agent: &Value) -> RouteView {
     }
 }
 
+/// Whether the newest word on how its turns went is a person's acknowledgement.
+fn acknowledged(record: &ChargeRecord) -> bool {
+    record
+        .logbook
+        .iter()
+        .rev()
+        .find(|entry| entry.kind == "turn" || entry.kind == "acknowledged")
+        .is_some_and(|entry| entry.kind == "acknowledged")
+}
+
 fn last_turn(record: &ChargeRecord) -> Option<String> {
     record
         .logbook
@@ -195,7 +208,7 @@ impl ChargeView {
         if let Some(ended) = self
             .last_ended
             .as_deref()
-            .filter(|e| e.starts_with("failed"))
+            .filter(|e| e.starts_with("failed") && !self.acknowledged)
         {
             found.push(Trouble {
                 kind: "charge_failed",
@@ -308,6 +321,7 @@ async fn view(
         }),
         can_converse,
         can_interrupt,
+        acknowledged: record.as_ref().is_some_and(acknowledged),
     };
     Some((view, record))
 }
@@ -354,6 +368,61 @@ pub(crate) async fn show(
         charge: view,
         logbook: record.map(|record| record.logbook).unwrap_or_default(),
     }))
+}
+
+/// `POST /v1/user/charges/{scope}/acknowledge`: records that the person saw the charge fail its
+/// last turns, which ends its 'failed its last turn' attention item and the Station's count of
+/// failures. Needs `charge.converse` and the control that interrupts its turn; audited before it
+/// is recorded.
+pub(crate) async fn acknowledge(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path(scope): Path<String>,
+) -> Result<Json<ChargeView>, ApiError> {
+    let person = resolve_user(&gateway, bearer(&headers)?).await?;
+    let current = sources(&gateway).await?;
+    let Some((own, _)) = view(&gateway, &person, &current, &scope).await else {
+        return Err(ApiError::not_found());
+    };
+    if !own.can_interrupt {
+        return Err(ApiError::forbidden());
+    }
+    let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
+    let (rights_resource, operation) = match scope.parse::<ChargeScope>() {
+        Ok(ChargeScope::Operation(operation)) => {
+            (crate::tree::operation_resource(&operation), operation)
+        }
+        Ok(ChargeScope::Station(station)) => (format!("station:{station}"), String::new()),
+        _ => ("config:charge".to_owned(), String::new()),
+    };
+    let record = ai6::AuditRecord {
+        id: uuid::Uuid::new_v4().to_string(),
+        actor: crate::actor_of(&person),
+        action: "charge.acknowledge".to_owned(),
+        operation,
+        resource: Some(rights_resource),
+        target: scope.clone(),
+        at: unix_timestamp()?,
+    };
+    let (audited, acknowledging, by, target) = (
+        registry.clone(),
+        registry,
+        crate::actor_of(&person),
+        scope.clone(),
+    );
+    tokio::task::spawn_blocking(move || audited.record_audit(&record))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(|_| ApiError::internal())?;
+    tokio::task::spawn_blocking(move || acknowledging.acknowledge_charge(&target, &by))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(|_| ApiError::not_found())?;
+    let current = sources(&gateway).await?;
+    let (shown, _) = view(&gateway, &person, &current, &scope)
+        .await
+        .ok_or_else(ApiError::not_found)?;
+    Ok(Json(shown))
 }
 
 /// Unix seconds as an RFC 3339 time, or the number itself when it is out of range.
@@ -562,5 +631,71 @@ mod tests {
             .unwrap();
         assert_eq!(lapsed[0]["held"], false);
         assert!(lapsed[0].get("station").is_none());
+    }
+    async fn post_acknowledge(served: &Served, token: &str, scope: &str) -> reqwest::Response {
+        reqwest::Client::new()
+            .post(format!(
+                "{}/v1/user/charges/{scope}/acknowledge",
+                served.base
+            ))
+            .bearer_auth(token)
+            .send()
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_person_who_may_control_a_charge_acknowledges_its_failed_turns_and_it_is_audited() {
+        let served = served_charges().await;
+        let mut failed = ChargeUpdate::default().turn_ended(true);
+        failed.log = vec![ChargeLogEntry::new(
+            "turn",
+            "woke for a timer; the turn ended failed: the model refused",
+            2_000.0,
+        )];
+        served
+            .registry
+            .update_charge("operation:G", "worker", 1, None, failed)
+            .unwrap();
+
+        // Reading shows no control; a charge that is not theirs is not there to acknowledge.
+        assert_eq!(
+            post_acknowledge(&served, &served.viewer, "operation:G")
+                .await
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            post_acknowledge(&served, &served.operator, "operation:L")
+                .await
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            served
+                .registry
+                .charge("operation:G")
+                .unwrap()
+                .unwrap()
+                .failed_turns,
+            1
+        );
+
+        let answer = post_acknowledge(&served, &served.operator, "operation:G").await;
+        assert_eq!(answer.status(), StatusCode::OK);
+        let answer: Value = answer.json().await.unwrap();
+        assert_eq!(answer["scope"], "operation:G");
+        let record = served.registry.charge("operation:G").unwrap().unwrap();
+        assert_eq!(record.failed_turns, 0);
+        assert_eq!(record.logbook.last().unwrap().kind, "acknowledged");
+        let audited: Vec<_> = served
+            .registry
+            .list_audit(100)
+            .unwrap()
+            .into_iter()
+            .filter(|audit| audit.action == "charge.acknowledge")
+            .collect();
+        assert_eq!(audited.len(), 1);
+        assert_eq!(audited[0].target, "operation:G");
     }
 }

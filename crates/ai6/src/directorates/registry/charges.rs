@@ -155,6 +155,14 @@ pub struct ChargeRecord {
     /// Controls waiting for its Station, oldest first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub controls: Vec<ChargeControl>,
+    /// Turns in a row that ended failed or took no harness; a turn that ends well, or an
+    /// operator's acknowledgement, makes it `0`.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub failed_turns: u32,
+}
+
+fn is_zero(count: &u32) -> bool {
+    *count == 0
 }
 
 impl ChargeRecord {
@@ -180,6 +188,8 @@ pub struct ChargeUpdate {
     pub seen: Option<Vec<String>>,
     /// The controls its Station took, by ID.
     pub taken_controls: Vec<String>,
+    /// Whether the turn that ended failed (or took no harness): counted, or with `false` reset.
+    pub turn_failed: Option<bool>,
 }
 
 impl ChargeUpdate {
@@ -218,6 +228,13 @@ impl ChargeUpdate {
     #[must_use]
     pub fn seen(mut self, seen: Vec<String>) -> Self {
         self.seen = Some(seen);
+        self
+    }
+
+    /// Records that a turn ended, `failed` or not, for the run of failures it counts.
+    #[must_use]
+    pub fn turn_ended(mut self, failed: bool) -> Self {
+        self.turn_failed = Some(failed);
         self
     }
 
@@ -319,6 +336,16 @@ pub trait ChargeStore {
         note: &str,
     ) -> Result<ChargeControl, ChargeError>;
 
+    /// Records that `by` saw the charge of `scope` fail its last turns: the failed-turn count
+    /// starts again and the logbook says who. It needs no lease: a person's word, not a holder's
+    /// write.
+    ///
+    /// # Errors
+    ///
+    /// `NotFound` when the charge has never been claimed; `Io` for an empty or invalid `by` or a
+    /// Registry failure.
+    fn acknowledge_charge(&self, scope: &str, by: &str) -> Result<ChargeRecord, ChargeError>;
+
     /// The record of the charge of `scope`.
     ///
     /// # Errors
@@ -412,6 +439,7 @@ pub(super) fn claim(
             logbook: Vec::new(),
             seen: Vec::new(),
             controls: Vec::new(),
+            failed_turns: 0,
         });
     };
     let mut log = Vec::new();
@@ -482,6 +510,13 @@ pub(super) fn apply(
         record.turns.push(at);
     }
     record.turns.retain(|at| *at > now - TURN_WINDOW_SECS);
+    if let Some(failed) = update.turn_failed {
+        record.failed_turns = if failed {
+            record.failed_turns.saturating_add(1)
+        } else {
+            0
+        };
+    }
     append_log(record, update.log, limits);
     if let Some(mut seen) = update.seen {
         keep_newest(&mut seen, limits.seen);
@@ -493,6 +528,29 @@ pub(super) fn apply(
     if let Some(ttl) = renew {
         record.lease_expires = now + ttl.as_secs_f64();
     }
+    Ok(())
+}
+
+/// `record` with its failed turns acknowledged by `by` at `now`.
+pub(super) fn acknowledge(
+    record: &mut ChargeRecord,
+    by: &str,
+    now: f64,
+    limits: &ChargeLimits,
+) -> Result<(), ChargeError> {
+    if by.trim().is_empty() || by.len() > 256 || by.chars().any(char::is_control) {
+        return Err(invalid_input("who acknowledged a charge must be 1-256 bytes").into());
+    }
+    let failed = std::mem::take(&mut record.failed_turns);
+    append_log(
+        record,
+        vec![ChargeLogEntry::new(
+            "acknowledged",
+            format!("{by} acknowledged its failed turns ({failed} in a row)"),
+            now,
+        )],
+        limits,
+    );
     Ok(())
 }
 
@@ -635,6 +693,12 @@ impl ChargeStore for FileRegistry {
         .map(|(control, _)| control)
     }
 
+    fn acknowledge_charge(&self, scope: &str, by: &str) -> Result<ChargeRecord, ChargeError> {
+        let limits = self.current_limits().charges.clone();
+        self.change_charge(scope, |record, now| acknowledge(record, by, now, &limits))
+            .map(|((), record)| record)
+    }
+
     fn charge(&self, scope: &str) -> io::Result<Option<ChargeRecord>> {
         validate_scope(scope)?;
         self.read_charge(scope)
@@ -671,6 +735,7 @@ mod tests {
         a_charge_is_claimed_renewed_and_taken_over_only_once_its_lease_lapses,
         only_the_holder_writes_and_the_logbook_keeps_the_newest,
         a_control_waits_until_the_holder_takes_it,
+        failed_turns_are_counted_and_an_acknowledgement_or_a_good_turn_clears_them,
     );
 
     const LONG: Duration = Duration::from_secs(600);
@@ -820,5 +885,42 @@ mod tests {
             )
             .unwrap();
         assert!(taken.controls.is_empty());
+    }
+
+    fn failed_turns_are_counted_and_an_acknowledgement_or_a_good_turn_clears_them(
+        store: &dyn Store,
+    ) {
+        let registry = store.handle();
+        assert!(matches!(
+            registry.acknowledge_charge("station:a", "person-1"),
+            Err(ChargeError::NotFound)
+        ));
+        let record = registry
+            .claim_charge("station:a", "chief", "a", LONG)
+            .unwrap();
+        let fail = |failed: bool| {
+            registry
+                .update_charge(
+                    "station:a",
+                    "a",
+                    record.fence,
+                    None,
+                    ChargeUpdate::default().turn_ended(failed),
+                )
+                .unwrap()
+        };
+        assert_eq!(fail(true).failed_turns, 1);
+        assert_eq!(fail(true).failed_turns, 2);
+        assert_eq!(fail(false).failed_turns, 0, "a turn that ended well");
+        assert_eq!(fail(true).failed_turns, 1);
+        assert!(registry.acknowledge_charge("station:a", " ").is_err());
+        let acknowledged = registry
+            .acknowledge_charge("station:a", "person-1")
+            .unwrap();
+        assert_eq!(acknowledged.failed_turns, 0);
+        let last = acknowledged.logbook.last().unwrap();
+        assert_eq!(last.kind, "acknowledged");
+        assert!(last.text.contains("person-1"), "{last:?}");
+        assert_eq!(registry.charge("station:a").unwrap().unwrap(), acknowledged);
     }
 }

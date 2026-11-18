@@ -32,7 +32,7 @@ pub(super) mod oversight;
 mod turn;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
@@ -96,8 +96,8 @@ impl ChargeDesk {
 #[derive(Debug, Clone, Serialize)]
 struct ChargeEvent {
     /// `verifying`, `cable`, `health`, `stuck`, `control`, `request` (an Operation's ask of a
-    /// Station), `resources` (a Station's answer), `reports` (the open Reports to assess) or
-    /// `timer`.
+    /// Station), `resources` (a Station's answer), `reports` (the open Reports to assess), `retry`
+    /// (its last turn failed) or `timer`.
     kind: &'static str,
     /// When the Station saw it, as Unix seconds.
     at: f64,
@@ -155,6 +155,12 @@ pub(super) struct Live {
     closing: AtomicBool,
     /// Before this time (Unix seconds) no turn starts: its harness last failed to start.
     retry_at: Mutex<f64>,
+    /// Turns in a row that failed or took no harness, as the record has them.
+    failed_turns: AtomicU32,
+    /// The wake that retries a failed turn has been given since the last turn that ended well.
+    retried: AtomicBool,
+    /// How the last failed turn ended.
+    last_failure: Mutex<String>,
     waiting: Mutex<VecDeque<ChargeEvent>>,
     /// Keys of events handed to a turn that the record may not show as seen yet, so a scan of an
     /// older record does not wake the charge for them again.
@@ -384,6 +390,14 @@ async fn post(state: &DaemonState, charge: Charge) {
     if let Ok(mut told) = live.told.lock() {
         told.retain(|key| !record.seen.contains(key));
     }
+    // A turn under way will write its own end; the record read before it is not the news.
+    if !live.busy.load(Ordering::Acquire) {
+        live.failed_turns
+            .store(record.failed_turns, Ordering::Release);
+        if record.failed_turns == 0 {
+            live.retried.store(false, Ordering::Release);
+        }
+    }
     let (looking, live_for_scan) = (state.clone(), live.clone());
     let events = tokio::task::spawn_blocking(move || scan(&looking, &live_for_scan, &record))
         .await
@@ -436,6 +450,9 @@ async fn open(state: &DaemonState, charge: &Charge, record: &ChargeRecord) -> Ar
             first_seen: Mutex::new(BTreeMap::new()),
             closing: AtomicBool::new(false),
             retry_at: Mutex::new(0.0),
+            failed_turns: AtomicU32::new(record.failed_turns),
+            retried: AtomicBool::new(false),
+            last_failure: Mutex::default(),
             waiting: Mutex::new(VecDeque::new()),
             told: Mutex::default(),
             dropped: AtomicU64::new(0),
@@ -904,18 +921,40 @@ async fn wake(state: &DaemonState, live: &Arc<Live>) {
         } else {
             charge.settings.wake_every_idle
         };
-        if every
+        // A turn that failed is tried once more at the next wake even when nothing else is due,
+        // so an idle charge does not stay failed until a person comes.
+        let failed = live.failed_turns.load(Ordering::Acquire);
+        let retrying = failed > 0 && !live.retried.load(Ordering::Acquire);
+        let timed = every
             .get()
-            .is_some_and(|every| now - since >= every.as_secs_f64())
-        {
+            .is_some_and(|every| now - since >= every.as_secs_f64());
+        if timed {
             let area = live.summary.lock().ok().and_then(|summary| summary.clone());
             live.push(ChargeEvent::new(
                 "timer",
                 false,
                 serde_json::json!({ "since": since, "open_work": open, "area": area }),
             ));
+        } else if retrying {
+            let ended = live
+                .last_failure
+                .lock()
+                .map(|last| last.clone())
+                .unwrap_or_default();
+            live.push(ChargeEvent::new(
+                "retry",
+                true,
+                serde_json::json!({
+                    "why": "its last turn failed",
+                    "failed_turns": failed,
+                    "ended": ended,
+                }),
+            ));
         } else {
             return;
+        }
+        if retrying {
+            live.retried.store(true, Ordering::Release);
         }
     }
     if !room {
@@ -1110,10 +1149,14 @@ async fn run_turn(state: &DaemonState, live: &Arc<Live>, events: Vec<ChargeEvent
         }
         if let Ok(mut waiting) = live.waiting.lock() {
             for event in events.into_iter().rev() {
-                waiting.push_front(event);
+                // The Reports duty is worked out afresh for the turn that does run.
+                if event.kind != "reports" {
+                    waiting.push_front(event);
+                }
             }
         }
-        let _ = write(state, live, update).await;
+        note_turn(live, true, &outcome.ended);
+        let _ = write(state, live, update.turn_ended(true)).await;
         return;
     }
     update = update.log(ChargeLogEntry::new(
@@ -1131,6 +1174,7 @@ async fn run_turn(state: &DaemonState, live: &Arc<Live>, events: Vec<ChargeEvent
         ),
         now,
     ));
+    let failed = outcome.failed();
     if let Some((handler, run)) = outcome.run {
         update = update.run(handler, run);
     }
@@ -1142,7 +1186,31 @@ async fn run_turn(state: &DaemonState, live: &Arc<Live>, events: Vec<ChargeEvent
             .filter_map(|event| event.control.clone())
             .collect(),
     );
-    let _ = write(state, live, update).await;
+    note_turn(live, failed, &outcome.ended);
+    if failed && let Ok(mut retry) = live.retry_at.lock() {
+        *retry = now
+            + state
+                .station
+                .limits()
+                .scheduler
+                .retry_backoff
+                .0
+                .as_secs_f64();
+    }
+    let _ = write(state, live, update.turn_ended(failed)).await;
+}
+
+/// Counts a turn that ended `ended` in the charge's run of failures.
+fn note_turn(live: &Live, failed: bool, ended: &str) {
+    if !failed {
+        live.failed_turns.store(0, Ordering::Release);
+        live.retried.store(false, Ordering::Release);
+        return;
+    }
+    live.failed_turns.fetch_add(1, Ordering::AcqRel);
+    if let Ok(mut last) = live.last_failure.lock() {
+        *last = ended.to_owned();
+    }
 }
 
 /// What a person typed into the charge's Run, waiting for it to be free.

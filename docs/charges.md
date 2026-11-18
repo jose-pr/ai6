@@ -114,6 +114,7 @@ The Station wakes a charge with what its area holds that the charge has not been
 | `resources`: a Station answered a request of the Operation | `operation:` | always: it carries the Station's reason |
 | `control`: a person asked the charge to wake, with an optional note | all | when it carries a note |
 | `reports`: the open Reports to assess, oldest first, at most `max_reports_per_turn`; given with every turn of M's and an Operation's charge while any are open | `m`, `operation:` | always: it names each Report's kind |
+| `retry`: the charge's last turn failed (it ended `failed`, or no harness took it) and nothing else is due | all | always: it quotes how the turn ended |
 | `timer`: `wake_every` (while the area has open work) or `wake_every_idle` (while it has none) passed with no other wake; it carries a short health summary of the area | all | no |
 
 Open Reports are a duty rather than a one-time event: M's charge is given the open global Reports and an Operation's its Operation's, every turn, as a `reports` event naming the oldest `max_reports_per_turn` of them (id, kind, severity, when filed). Reports left open are given again, so a backlog drains turn by turn; a shorter `wake_every` drains it faster. The charge reads each with `read_report` and decides it with `assess_report`, `no_action` for a routine entry. A Station's charge has no Report tools and is given none.
@@ -153,6 +154,10 @@ yet assessed or a request waiting. `wake_every_idle` applies while it has none, 
 `none`: an idle charge takes no timer turn and events still wake it. The timer's event carries a
 short health summary of the area (Missions by state, the oldest one open, Reports waiting), so a
 quiet turn has something to check.
+
+### A failed turn
+
+A turn that ends `failed`, or that no harness takes, is counted on the charge's record (`failed_turns`). With nothing else due, the Station wakes the charge **once** more by itself, after the Registry's retry backoff (`[scheduler] retry_backoff`), with a `retry` event, even when the area is idle and `wake_every_idle` is `none`; a retry that fails is not followed by another until something wakes the charge, and a turn that ends well clears the count. A failed last turn is an attention item (`charge_failed`). A person with `charge.converse` and the control of the scope (`mission.control` on an Operation, `station.configure` on a Station or M) acknowledges it with `ai6ctl charge acknowledge SCOPE` or `POST /v1/user/charges/{scope}/acknowledge`: the item ends and the count starts again, and the audit log and the charge's logbook say who, until a later turn fails.
 
 ### Quotas
 

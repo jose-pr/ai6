@@ -3963,11 +3963,13 @@ pub const TURN_WINDOW_SECS: f64 = 3_600.0;
 #[non_exhaustive] pub struct ChargeControl { pub id: String, pub by: String, pub note: String, pub at: f64 }
 #[non_exhaustive] pub struct ChargeRecord { pub scope, pub agent, pub station, pub fence: u64, pub lease_expires: f64,
     pub opened_at: f64, pub provider_id: Option<String>, pub handler: Option<String>, pub last_wake: Option<f64>,
-    pub turns: Vec<f64>, pub logbook: Vec<ChargeLogEntry>, pub seen: Vec<String>, pub controls: Vec<ChargeControl> }
+    pub turns: Vec<f64>, pub logbook: Vec<ChargeLogEntry>, pub seen: Vec<String>, pub controls: Vec<ChargeControl>,
+    pub failed_turns: u32 }   // turns in a row that failed or took no harness; a good turn or an acknowledgement makes it 0
 impl ChargeRecord { pub fn turns_since(&self, since: f64) -> usize; }
 #[non_exhaustive] #[derive(Default)] pub struct ChargeUpdate { pub run: Option<Option<(String, String)>>,
-    pub last_wake, pub turn_at, pub log: Vec<ChargeLogEntry>, pub seen: Option<Vec<String>>, pub taken_controls: Vec<String> }
-impl ChargeUpdate { run(handler, id), forget_run(), woke(at, turn: bool), log(entry), seen(keys), took_controls(ids) }
+    pub last_wake, pub turn_at, pub log: Vec<ChargeLogEntry>, pub seen: Option<Vec<String>>, pub taken_controls: Vec<String>,
+    pub turn_failed: Option<bool> }
+impl ChargeUpdate { run(handler, id), forget_run(), woke(at, turn: bool), log(entry), seen(keys), took_controls(ids), turn_ended(failed: bool) }
 #[non_exhaustive] pub enum ChargeError { NotFound, HeldBy(String), Stale, Io(io::Error) }
 pub trait ChargeStore {
     fn claim_charge(&self, scope, agent, station, ttl: Duration) -> Result<ChargeRecord, ChargeError>;
@@ -3975,6 +3977,7 @@ pub trait ChargeStore {
         // another Agent forgets the Run; HeldBy while another's lease is live
     fn update_charge(&self, scope, station, fence: u64, renew: Option<Duration>, update: ChargeUpdate) -> Result<ChargeRecord, ChargeError>;  // Stale unless holder and fence
     fn request_charge_wake(&self, scope, by, note) -> Result<ChargeControl, ChargeError>;   // no lease; NotFound before a first claim
+    fn acknowledge_charge(&self, scope, by) -> Result<ChargeRecord, ChargeError>;   // no lease: failed_turns = 0 and a logbook line naming `by`; NotFound before a first claim
     fn charge(&self, scope: &str) -> io::Result<Option<ChargeRecord>>;
     fn charges(&self) -> io::Result<Vec<ChargeRecord>>;   // by scope
 }

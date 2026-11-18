@@ -46,6 +46,12 @@ pub(super) struct Outcome {
 }
 
 impl Outcome {
+    /// Whether the turn did not come to an end that counts: no harness took it, or it ended
+    /// `failed`.
+    pub(super) fn failed(&self) -> bool {
+        !self.ran || self.ended.starts_with("failed")
+    }
+
     /// No harness took the wake, for `reason`.
     pub(super) fn refused(reason: String) -> Self {
         Self {
@@ -91,7 +97,9 @@ fn keeping(scope: &ChargeScope) -> String {
          `stuck` event (its condition is run-lost, verifying, queued, blocked, held, \
          charge-lapsed or charge-failing, with the Mission, since when and why) and every \
          `health` event, and the area summary a `timer` event carries: oldest open work, counts \
-         by state. `board` shows the Missions by state and what is stuck. `settle_mission` files \
+         by state. A `retry` event means your last turn failed and the Station is trying once \
+         more: do what that turn was for. `board` shows the Missions by state and what is \
+         stuck. `settle_mission` files \
          a Mission nothing holds as failed or stalled with your reason; `retry_mission`, \
          `resume_mission` and `cancel_mission` act on a Mission; `wake_charge` asks another \
          charge to look; `notify_person` tells a person what you found, what you did and what \

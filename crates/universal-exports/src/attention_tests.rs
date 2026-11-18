@@ -784,3 +784,38 @@ async fn a_harness_login_that_needs_a_person_is_one_item_saying_what_to_run() {
     assert_eq!(coverage(&summary, "pools")["status"], "not_permitted");
     assert!(items(&summary, "login_needs_person").is_empty());
 }
+
+#[tokio::test]
+async fn an_acknowledged_failed_turn_is_no_longer_an_item_until_the_next_one_fails() {
+    let fixture = fixture().await;
+    fixture.report(json!({"revision": "79"}));
+    fixture.charge(
+        "operation:G",
+        Duration::from_secs(600),
+        "woke for a timer; the turn ended failed: the model refused",
+    );
+    let summary = fixture.summary(&fixture.served.operator).await;
+    assert_eq!(items(&summary, "charge_failed").len(), 1, "{summary}");
+
+    fixture
+        .served
+        .registry
+        .acknowledge_charge("operation:G", "operator-007")
+        .unwrap();
+    let summary = fixture.summary(&fixture.served.operator).await;
+    assert!(items(&summary, "charge_failed").is_empty(), "{summary}");
+
+    let mut next = ChargeUpdate::default();
+    next.log = vec![ChargeLogEntry::new(
+        "turn",
+        "woke for a timer; the turn ended failed: the model refused again",
+        2_000.0,
+    )];
+    fixture
+        .served
+        .registry
+        .update_charge("operation:G", "worker", 1, None, next)
+        .unwrap();
+    let summary = fixture.summary(&fixture.served.operator).await;
+    assert_eq!(items(&summary, "charge_failed").len(), 1, "{summary}");
+}
