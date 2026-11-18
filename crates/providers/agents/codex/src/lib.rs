@@ -6,21 +6,20 @@
 ai6::guatiao::providers!(CodexHandler);
 
 mod sandbox;
+mod terminal;
 mod tools;
 
 pub use tools::{KEPT_FEATURES, TOOL_CHECK_ENV};
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
+use std::ffi::OsString;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::time::{Duration, Instant};
 
 use ai6::directorates::m::identity::RunId;
-use ai6::directorates::q::terminal::{
-    AgentTerminal, ExitInfo, JsonLines, READ_TIMED_OUT, STREAM_COLS, Spec, StreamLine, TerminalRun,
-    exit_code_text,
-};
+use ai6::directorates::q::terminal::{AgentTerminal, exit_code_text};
 use ai6::directorates::section_00::agent::{
     AgentHandler, AgentResume, AgentStart, AssistantMode, ModelInfo, ModelListing, RunRecordFile,
     RunRecordQuery, clearance_reads_only, clearance_runs_commands,
@@ -35,8 +34,14 @@ use ai6::{
     Spend, UsageReport, UsageSource, UsageSupport, infer_limit,
 };
 use coqui_acp_codex::harness::PlainSpawn;
-use coqui_acp_codex::{CodexLaunch, CodexSession as AppServer, CodexSettings};
+use coqui_acp_codex::harness::event::{Content, Event as CodexEvent, Outcome, PermissionRequest};
+use coqui_acp_codex::{
+    ClientInfo, CodexLaunch, CodexSession as AppServer, CodexSettings, Error as CodexError,
+    ThreadStart,
+};
 use serde_json::{Value, json};
+
+use terminal::{Link, TerminalSpawn};
 
 /// The models in the app server's answer to `model/list`; unknown when it has none. A model the
 /// catalog hides (`hidden`) is left out: Codex does not offer it.
@@ -320,12 +325,14 @@ impl AgentHandler for CodexHandler {
             request.answer_only,
             request.assistant.as_ref(),
         );
-        let (process, weakening) = spawn(
+        let gate = station_gate(&request.environment)
+            .filter(|_| !(request.answer_only || request.assistant.is_some()));
+        let run = open(Opening {
+            config: &self.config,
             terminal,
-            &self.config.executable,
-            &request.working_directory,
-            &request.environment,
-            Mode {
+            cwd: &request.working_directory,
+            environment: &request.environment,
+            mode: Mode {
                 config: &self.config,
                 project_settings: request.project_settings,
                 answer_only: request.answer_only || request.assistant.is_some(),
@@ -334,88 +341,19 @@ impl AgentHandler for CodexHandler {
                 model: request.model.as_deref(),
                 profile: profile.as_ref(),
             },
-        )?;
-        let gate = station_gate(&request.environment)
-            .filter(|_| !(request.answer_only || request.assistant.is_some()));
-        let scripts = Scripts::of(request.assistant.as_ref());
-        let mut run = CodexRun::new(process, request.effort)
-            .working_in(&request.working_directory)
-            .limited_by(&self.config)
-            .with_gate(gate)
-            .with_weakening(weakening)
-            .restricted_to(restriction(
+            thread: ThreadStart::Resume(request.run_id.as_str().to_owned()),
+            model: request.model.clone(),
+            effort: request.effort,
+            instructions: None,
+            gate,
+            restriction: restriction(
                 request.answer_only,
                 request.assistant.as_ref(),
                 desk.then_some(&request.environment),
                 clearance_reads_only(&request.clearance),
-            ))
-            .reporting_commands(scripts != Scripts::None);
-        run.request(
-            "initialize",
-            json!({
-                "clientInfo": { "name": "ai6", "version": env!("CARGO_PKG_VERSION") },
-                "capabilities": {}
-            }),
-            self.config.millis(self.config.start_timeout_ms),
-        )?;
-        run.notify("initialized", json!({}))?;
-        if let Some(profile) = &profile {
-            close_unless(
-                &run,
-                check_sandbox_config(
-                    &run,
-                    profile,
-                    &request.working_directory,
-                    self.config.millis(self.config.request_timeout_ms),
-                ),
-            )?;
-        }
-        let mut params = json!({ "threadId": request.run_id.as_str(), "excludeTurns": true });
-        if let Some(model) = request.model {
-            params["model"] = json!(model);
-        }
-        params["cwd"] = json!(request.working_directory);
-        set_approval_policy(
-            &mut params,
-            &request.environment,
-            request.answer_only || request.assistant.is_some(),
-            scripts,
-            desk,
-        );
-        let response = match run.request(
-            "thread/resume",
-            params,
-            self.config.millis(self.config.request_timeout_ms),
-        ) {
-            Ok(response) => response,
-            Err(error) => {
-                let _ = run.close();
-                return Err(error);
-            }
-        };
-        let Some(resumed_thread_id) = response.pointer("/thread/id").and_then(Value::as_str) else {
-            let _ = run.close();
-            return Err(refuse(
-                Status::GUATIAO_ERR_BAD_VALUE,
-                "Codex omitted resumed thread ID",
-            ));
-        };
-        if resumed_thread_id != request.run_id.as_str() {
-            let _ = run.close();
-            return Err(refuse(
-                Status::GUATIAO_ERR_BAD_VALUE,
-                "Codex resumed a different thread than requested",
-            ));
-        }
-        if let Some(profile) = &profile {
-            close_unless(
-                &run,
-                profile
-                    .check_thread(&response)
-                    .map_err(|found| refuse(Status::GUATIAO_ERR_UNSUPPORTED, found)),
-            )?;
-        }
-        run.thread_id = Some(request.run_id);
+            ),
+            profile: profile.as_ref(),
+        })?;
         if let Some(message) = request.message
             && let Err(error) = run.send_message(AgentMessage { text: message })
         {
@@ -458,12 +396,13 @@ impl CodexHandler {
             request.answer_only,
             request.assistant.as_ref(),
         );
-        let (process, weakening) = spawn(
+        let gate = gate.filter(|_| !(request.answer_only || request.assistant.is_some()));
+        let run = open(Opening {
+            config: &self.config,
             terminal,
-            &self.config.executable,
-            &request.working_directory,
-            &request.environment,
-            Mode {
+            cwd: &request.working_directory,
+            environment: &request.environment,
+            mode: Mode {
                 config: &self.config,
                 project_settings: request.project_settings,
                 answer_only: request.answer_only || request.assistant.is_some(),
@@ -472,76 +411,19 @@ impl CodexHandler {
                 model: request.model.as_deref(),
                 profile: profile.as_ref(),
             },
-        )?;
-        let gate = gate.filter(|_| !(request.answer_only || request.assistant.is_some()));
-        let mut run = CodexRun::new(process, request.effort)
-            .working_in(&request.working_directory)
-            .limited_by(&self.config)
-            .with_gate(gate)
-            .with_weakening(weakening)
-            .restricted_to(restriction(
+            thread: ThreadStart::New,
+            model: request.model.clone(),
+            effort: request.effort,
+            instructions: (!instructions.is_empty()).then(|| instructions.join("\n\n")),
+            gate,
+            restriction: restriction(
                 request.answer_only,
                 request.assistant.as_ref(),
                 desk.then_some(&request.environment),
                 clearance_reads_only(&request.clearance),
-            ))
-            .reporting_commands(scripts != Scripts::None);
-        run.request(
-            "initialize",
-            json!({
-                "clientInfo": { "name": "ai6", "version": env!("CARGO_PKG_VERSION") },
-                "capabilities": {}
-            }),
-            self.config.millis(self.config.start_timeout_ms),
-        )?;
-        run.notify("initialized", json!({}))?;
-        if let Some(profile) = &profile {
-            close_unless(
-                &run,
-                check_sandbox_config(
-                    &run,
-                    profile,
-                    &request.working_directory,
-                    self.config.millis(self.config.request_timeout_ms),
-                ),
-            )?;
-        }
-        let mut params = json!({ "cwd": request.working_directory });
-        set_approval_policy(
-            &mut params,
-            &request.environment,
-            request.answer_only || request.assistant.is_some(),
-            scripts,
-            desk,
-        );
-        if let Some(model) = request.model {
-            params["model"] = json!(model);
-        }
-        if !instructions.is_empty() {
-            params["developerInstructions"] = json!(instructions.join("\n\n"));
-        }
-        let response = run.request(
-            "thread/start",
-            params,
-            self.config.millis(self.config.request_timeout_ms),
-        )?;
-        if let Some(profile) = &profile {
-            close_unless(
-                &run,
-                profile
-                    .check_thread(&response)
-                    .map_err(|found| refuse(Status::GUATIAO_ERR_UNSUPPORTED, found)),
-            )?;
-        }
-        let thread_id = response
-            .pointer("/thread/id")
-            .and_then(Value::as_str)
-            .ok_or_else(|| refuse(Status::GUATIAO_ERR_BAD_VALUE, "Codex omitted thread ID"))?
-            .to_string();
-        run.thread_id = Some(
-            RunId::try_from(thread_id)
-                .map_err(|error| refuse(Status::GUATIAO_ERR_BAD_VALUE, error))?,
-        );
+            ),
+            profile: profile.as_ref(),
+        })?;
         run.send_message(AgentMessage {
             text: request.prompt,
         })?;
@@ -748,14 +630,170 @@ fn set_approval_policy(
     }
 }
 
-struct CodexRun {
-    terminal: Object<dyn TerminalRun>,
-    gate: Option<Gate>,
-    output: Mutex<JsonLines>,
-    events: Mutex<VecDeque<AgentEvent>>,
-    thread_id: Option<RunId>,
-    request_id: AtomicU64,
+/// Everything `open` needs to start a thread.
+struct Opening<'a> {
+    config: &'a CodexConfig,
+    terminal: Object<dyn AgentTerminal>,
+    cwd: &'a str,
+    environment: &'a std::collections::BTreeMap<String, String>,
+    mode: Mode<'a>,
+    thread: ThreadStart,
+    model: Option<String>,
     effort: Option<String>,
+    /// The developer instructions of a new thread.
+    instructions: Option<String>,
+    gate: Option<Gate>,
+    /// For a restricted (answer-only, assistant or `desk`) thread, what it may use.
+    restriction: Option<Restriction>,
+    profile: Option<&'a sandbox::Profile>,
+}
+
+/// Starts the app server on the Station's terminal and opens the thread, through
+/// `coqui-acp-codex`.
+fn open(opening: Opening<'_>) -> Result<CodexRun, ProviderError> {
+    let Opening {
+        config,
+        terminal,
+        cwd,
+        environment,
+        mode,
+        thread,
+        model,
+        effort,
+        instructions,
+        gate,
+        restriction,
+        profile,
+    } = opening;
+    let scripts = Scripts::of(mode.assistant);
+    let (argv, weakening) = prepare(&terminal, &config.executable, cwd, environment, mode)?;
+    let mut policy = json!({});
+    set_approval_policy(
+        &mut policy,
+        environment,
+        mode.answer_only,
+        scripts,
+        mode.desk,
+    );
+    let mut launch = CodexLaunch::new(cwd);
+    launch.executable = config.executable.clone().into();
+    launch.thread = thread;
+    launch.model = model;
+    launch.effort = effort;
+    launch.developer_instructions = instructions;
+    launch.approval_policy = policy["approvalPolicy"].as_str().map(str::to_owned);
+    launch.sandbox = policy["sandbox"].as_str().map(str::to_owned);
+    if let Some(settings) = policy["config"].as_object() {
+        launch.thread_config = settings.clone();
+    }
+    launch.extra_args = argv.iter().skip(2).map(OsString::from).collect();
+    launch.client_info = ClientInfo::new("ai6", env!("CARGO_PKG_VERSION"));
+
+    let link = Arc::new(Link::default());
+    let shared = Arc::new(Shared::new(
+        gate,
+        restriction,
+        scripts != Scripts::None,
+        Path::new(cwd).to_path_buf(),
+        Arc::clone(&link),
+    ));
+    shared.weakened(weakening);
+
+    let mut settings = CodexSettings::new();
+    settings.max_line = config.json_line_bytes;
+    settings.tail_lines = usize::try_from(config.tail_lines).unwrap_or(usize::MAX);
+    settings.tail_line_bytes = usize::try_from(config.tail_line_bytes).unwrap_or(usize::MAX);
+    settings.initialize_timeout = config.millis(config.start_timeout_ms);
+    settings.request_timeout = config.millis(config.request_timeout_ms);
+    settings.exit_wait = config.millis(config.exit_wait_ms);
+    settings.close_wait = config.millis(config.close_wait_ms);
+    settings.list_models = false;
+    settings.version_wait = Duration::ZERO;
+    {
+        let shared = Arc::clone(&shared);
+        settings.on_line = Some(Arc::new(move |message| shared.line(message)));
+    }
+    if let Some(profile) = profile {
+        let (config_check, thread_check) = (profile.clone(), profile.clone());
+        settings.check_config = Some(Arc::new(move |result| {
+            config_check
+                .check_config(result)
+                .map_err(|found| found.to_string())
+        }));
+        settings.check_thread = Some(Arc::new(move |result| {
+            thread_check
+                .check_thread(result)
+                .map_err(|found| found.to_string())
+        }));
+    }
+    let mut limits = ai6::station::limits::TerminalOutputLimits::default();
+    limits.json_line_bytes = ai6::Limit::at(config.json_line_bytes);
+    limits.csi_bytes = ai6::Limit::at(config.csi_bytes);
+    let spawner = TerminalSpawn {
+        terminal,
+        environment: environment.clone(),
+        limits,
+        link,
+    };
+    let sink = Arc::clone(&shared);
+    let session = AppServer::start(&launch, &spawner, settings, move |event| sink.tell(event))
+        .map_err(started_with)?;
+    // The thread was opened with the model; a turn names none of its own.
+    session.set_model(None);
+    let thread_id = RunId::try_from(session.thread().to_owned())
+        .map_err(|error| refuse(Status::GUATIAO_ERR_BAD_VALUE, error))?;
+    let session = Arc::new(session);
+    *lock(&shared.session)? = Arc::downgrade(&session);
+    Ok(CodexRun {
+        session,
+        shared,
+        thread_id,
+    })
+}
+
+/// What a failed start was, in AI6's terms.
+fn started_with(error: CodexError) -> ProviderError {
+    match error {
+        CodexError::Refused(why) => refuse(Status::GUATIAO_ERR_UNSUPPORTED, why),
+        CodexError::Timeout { .. } => {
+            refuse(Status::GUATIAO_ERR_INTERNAL, "Codex app-server timed out")
+        }
+        CodexError::Harness(why) if why.ends_with("not the one requested") => refuse(
+            Status::GUATIAO_ERR_BAD_VALUE,
+            "Codex resumed a different thread than requested",
+        ),
+        other => refuse(Status::GUATIAO_ERR_INTERNAL, polished(&other.to_string())),
+    }
+}
+
+/// An exit reason in the words of a Run: how the driver words it, with a negative exit code also
+/// as Windows names it.
+fn polished(reason: &str) -> String {
+    let mut text = reason
+        .replace("before completing the session", "before completing the Run")
+        .replace("closed its output", "closed its terminal");
+    const CODE: &str = "exited with code ";
+    if let Some(at) = text.find(CODE) {
+        let start = at + CODE.len();
+        let digits = text[start..]
+            .char_indices()
+            .find(|(index, c)| !(c.is_ascii_digit() || (*index == 0 && *c == '-')))
+            .map_or(text.len(), |(index, _)| start + index);
+        if let Ok(code) = text[start..digits].parse::<i64>() {
+            text.replace_range(start..digits, &exit_code_text(code));
+        }
+    }
+    text
+}
+
+/// What a Run's reader thread and its caller share.
+struct Shared {
+    gate: Option<Gate>,
+    events: Mutex<VecDeque<AgentEvent>>,
+    arrived: Condvar,
+    /// The events of approval requests, told once the request is answered, after the events the
+    /// answer itself gave.
+    held: Mutex<Vec<AgentEvent>>,
     /// The latest quota window the account reported as used up.
     exhausted: Mutex<Option<LimitHit>>,
     /// What the thread's requests have used since this process started: Codex reports each
@@ -770,369 +808,381 @@ struct CodexRun {
     /// Set once a restricted thread used a tool it may not, and was ended.
     tripped: AtomicBool,
     /// The command of each command execution item the thread started, by item id.
-    started: Mutex<std::collections::HashMap<String, String>>,
+    started: Mutex<HashMap<String, String>>,
     /// The paths of each file change item the thread started, by item id.
-    started_changes: Mutex<std::collections::HashMap<String, Vec<String>>>,
+    started_changes: Mutex<HashMap<String, Vec<String>>>,
     /// Where a file change is the Mission's own work.
-    working_directory: Option<std::path::PathBuf>,
-    /// Set once the app server's output has ended.
-    ended: AtomicBool,
-    /// Set once that end was reported as a `failed` event.
+    working_directory: std::path::PathBuf,
+    /// Set once the end of the app server was reported as a `failed` event.
     ended_reported: AtomicBool,
-    ended_reason: Mutex<Option<String>>,
-    /// The last lines the app server wrote that were not JSON: its own diagnostics, which say
-    /// why it exited when it exits.
-    tail: Mutex<VecDeque<String>>,
-    /// How many of the last non-JSON lines a `failed` event quotes, and how long each may be.
-    tail_lines: usize,
-    tail_line_bytes: usize,
-    /// How long `close` waits for the app server to have exited, for a terminal whose `kill`
-    /// does not.
-    close_wait_ms: i64,
-    /// How long the end of the output waits for the app server's exit status.
-    exit_wait_ms: i64,
+    link: Arc<Link>,
+    session: Mutex<Weak<AppServer>>,
 }
 
-impl CodexRun {
-    fn new(terminal: Object<dyn TerminalRun>, effort: Option<String>) -> Self {
+fn failed(reason: String) -> AgentEvent {
+    AgentEvent {
+        kind: "failed".to_owned(),
+        text: Some(reason),
+        data: None,
+        limit: None,
+        tools: Vec::new(),
+        report: None,
+    }
+}
+
+impl Shared {
+    fn new(
+        gate: Option<Gate>,
+        restricted: Option<Restriction>,
+        reports_commands: bool,
+        working_directory: std::path::PathBuf,
+        link: Arc<Link>,
+    ) -> Self {
         Self {
-            terminal,
-            gate: None,
-            output: Mutex::new(JsonLines::new(&Default::default())),
+            gate,
             events: Mutex::new(VecDeque::new()),
-            thread_id: None,
-            request_id: AtomicU64::new(0),
-            effort,
+            arrived: Condvar::new(),
+            held: Mutex::new(Vec::new()),
             exhausted: Mutex::new(None),
             spent: Mutex::new(Spend::new("")),
-            restricted: None,
-            reports_commands: false,
+            restricted,
+            reports_commands,
             tripped: AtomicBool::new(false),
             started: Mutex::default(),
             started_changes: Mutex::default(),
-            working_directory: None,
-            ended: AtomicBool::new(false),
+            working_directory,
             ended_reported: AtomicBool::new(false),
-            ended_reason: Mutex::new(None),
-            tail: Mutex::new(VecDeque::new()),
-            tail_lines: 8,
-            tail_line_bytes: 512,
-            close_wait_ms: 2_000,
-            exit_wait_ms: 1_000,
+            link,
+            session: Mutex::new(Weak::new()),
         }
     }
 
-    /// Takes the bounds and waits from the handler's configuration.
-    fn limited_by(mut self, config: &CodexConfig) -> Self {
-        let mut limits = ai6::station::limits::TerminalOutputLimits::default();
-        limits.json_line_bytes = ai6::Limit::at(config.json_line_bytes);
-        limits.csi_bytes = ai6::Limit::at(config.csi_bytes);
-        self.output = Mutex::new(JsonLines::new(&limits));
-        self.tail_lines = usize::try_from(config.tail_lines).unwrap_or(usize::MAX);
-        self.tail_line_bytes = usize::try_from(config.tail_line_bytes).unwrap_or(usize::MAX);
-        self.close_wait_ms = i64::try_from(config.close_wait_ms).unwrap_or(i64::MAX);
-        self.exit_wait_ms = i64::try_from(config.exit_wait_ms).unwrap_or(i64::MAX);
-        self
-    }
-
-    /// How the app server ended, once its terminal says it has; `None` while it runs or when
-    /// the terminal cannot tell.
-    fn exited(&self, timeout_ms: i64) -> Option<ExitInfo> {
-        let status = self.terminal.exit_status(timeout_ms).ok()?;
-        ExitInfo::from_value(&status)
-            .ok()
-            .filter(|exit| !exit.running)
-    }
-
-    /// Why the app server's output ended: its exit status and the last lines it wrote outside
-    /// the protocol. Worked out once.
-    fn exit_reason(&self) -> String {
-        if let Ok(mut reason) = self.ended_reason.lock() {
-            return reason.get_or_insert_with(|| self.describe_exit()).clone();
-        }
-        self.describe_exit()
-    }
-
-    fn describe_exit(&self) -> String {
-        let how = match self.exited(self.exit_wait_ms) {
-            Some(ExitInfo {
-                code: Some(code), ..
-            }) => format!("exited with code {}", exit_code_text(code)),
-            Some(ExitInfo {
-                signal: Some(signal),
-                ..
-            }) => format!("was ended by signal {signal}"),
-            Some(_) => "exited".to_owned(),
-            None => "closed its terminal".to_owned(),
-        };
-        let mut reason = format!("Codex app-server {how} before completing the Run");
-        if let Ok(tail) = self.tail.lock()
-            && !tail.is_empty()
-        {
-            reason.push_str("; its last output:\n");
-            reason.push_str(&tail.iter().cloned().collect::<Vec<_>>().join("\n"));
-        }
-        reason
-    }
-
-    fn remember_output(&self, line: &str) {
-        if let Ok(mut tail) = self.tail.lock() {
-            if tail.len() >= self.tail_lines {
-                tail.pop_front();
-            }
-            let mut end = line.len().min(self.tail_line_bytes);
-            while !line.is_char_boundary(end) {
-                end -= 1;
-            }
-            tail.push_back(line[..end].to_owned());
+    fn push(&self, event: AgentEvent) {
+        if let Ok(mut events) = self.events.lock() {
+            events.push_back(event);
+            self.arrived.notify_all();
         }
     }
 
-    /// Restricts the thread to the tools of `servers`: any other tool it uses ends it.
-    fn restricted_to(mut self, restriction: Option<Restriction>) -> Self {
-        self.restricted = restriction;
-        self
+    fn flush_held(&self) {
+        let held = self
+            .held
+            .lock()
+            .map(|mut held| std::mem::take(&mut *held))
+            .unwrap_or_default();
+        for event in held {
+            self.push(event);
+        }
     }
 
-    fn reporting_commands(mut self, reports: bool) -> Self {
-        self.reports_commands = reports;
-        self
+    /// Reports what a `warn` tool check found, on the Station's log and as the Run's
+    /// first event (kind `weakened`).
+    fn weakened(&self, weakening: Option<String>) {
+        if let Some(text) = weakening {
+            eprintln!("ai6: weakening: {text}");
+            self.push(AgentEvent {
+                kind: "weakened".to_owned(),
+                text: Some(text),
+                data: None,
+                limit: None,
+                tools: Vec::new(),
+                report: None,
+            });
+        }
     }
 
     /// Ends a restricted thread that used `what`: the tool check confirmed before the start
     /// what Codex said it would offer, and this is the backstop for what it offered anyway.
-    fn trip(&self, what: &str) -> Result<(), ProviderError> {
+    fn trip(&self, what: &str) {
         if self.tripped.swap(true, Ordering::AcqRel) {
-            return Ok(());
+            return;
         }
         let reason = format!(
             "the restricted Codex thread used {what}, which it may not use; the Run was ended"
         );
         eprintln!("ai6: {reason}");
-        let _ = self.terminal.kill();
-        lock(&self.events)?.push_back(AgentEvent {
-            kind: "failed".to_owned(),
-            text: Some(reason),
+        self.link.kill();
+        self.ended_reported.store(true, Ordering::Release);
+        self.push(failed(reason));
+    }
+
+    /// Takes one message the app server wrote, before the driver reads it; `false` ends the app
+    /// server.
+    fn line(&self, message: &Value) -> bool {
+        self.flush_held();
+        // An answer to one of the driver's own requests.
+        if message.get("method").is_none() {
+            return true;
+        }
+        if self.tripped.load(Ordering::Acquire) {
+            return false;
+        }
+        if let Some(restriction) = &self.restricted
+            && let Some(what) = forbidden_use(message, restriction)
+        {
+            self.trip(&what);
+            return false;
+        }
+        if message.get("method").and_then(Value::as_str) == Some("item/started")
+            && let Some(item) = message.pointer("/params/item")
+            && let Some(id) = item.get("id").and_then(Value::as_str)
+        {
+            match item.get("type").and_then(Value::as_str) {
+                Some("fileChange") => {
+                    let paths = item
+                        .get("changes")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|change| change.get("path").and_then(Value::as_str))
+                        .map(str::to_owned)
+                        .collect();
+                    if let Ok(mut started) = self.started_changes.lock() {
+                        started.insert(id.to_owned(), paths);
+                    }
+                }
+                Some("commandExecution") => {
+                    if let Some(command) = item.get("command").and_then(Value::as_str)
+                        && let Ok(mut started) = self.started.lock()
+                    {
+                        started.insert(id.to_owned(), command.to_owned());
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(exhausted) = exhausted_window(message)
+            && let Ok(mut hint) = self.exhausted.lock()
+        {
+            *hint = Some(exhausted);
+        }
+        let hint = self.exhausted.lock().ok().and_then(|hint| hint.clone());
+        let Some(mut event) = decode_event(message, hint.as_ref()) else {
+            return true;
+        };
+        if self.reports_commands && started_item(message) == Some("commandExecution") {
+            event.tools.push(COMMAND_TOOL.to_owned());
+        }
+        if let Some(spend) = event
+            .report
+            .as_mut()
+            .and_then(|report| report.spend.as_mut())
+            && let Ok(mut spent) = self.spent.lock()
+        {
+            spent.input = spent.input.saturating_add(spend.input);
+            spent.output = spent.output.saturating_add(spend.output);
+            spent.cache_read = spent.cache_read.saturating_add(spend.cache_read);
+            spent.cache_write = spent.cache_write.saturating_add(spend.cache_write);
+            *spend = spent.clone();
+        }
+        let asks = message.get("id").is_some()
+            && matches!(
+                message.get("method").and_then(Value::as_str),
+                Some(COMMAND_APPROVAL | FILE_APPROVAL)
+            );
+        if asks {
+            if let Ok(mut held) = self.held.lock() {
+                held.push(event);
+            }
+        } else {
+            self.push(event);
+        }
+        true
+    }
+
+    /// Takes what the driver tells of the app server.
+    fn tell(&self, event: CodexEvent) -> bool {
+        match event {
+            CodexEvent::Permission(request) => self.permission(request),
+            CodexEvent::Output(text) => self.push(AgentEvent {
+                kind: "output".to_owned(),
+                text: Some(text),
+                data: None,
+                limit: None,
+                tools: Vec::new(),
+                report: None,
+            }),
+            CodexEvent::Exited(reason) => {
+                self.flush_held();
+                // The app server's exit ends the Run once, with the reason.
+                if !self.ended_reported.swap(true, Ordering::AcqRel) {
+                    let reason = polished(&reason);
+                    eprintln!("ai6: {reason}");
+                    self.push(failed(reason));
+                }
+            }
+            _ => {}
+        }
+        true
+    }
+
+    /// Answers what the app server asks leave for. A question that is not a command or a file
+    /// change is left unanswered, which the driver reports to the app server as nobody having
+    /// chosen.
+    fn permission(&self, request: PermissionRequest) {
+        match request
+            .details
+            .get("method")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .as_deref()
+        {
+            Some(COMMAND_APPROVAL) => self.answer_command_approval(request),
+            Some(FILE_APPROVAL) => self.answer_file_approval(request),
+            _ => {}
+        }
+        self.flush_held();
+    }
+
+    /// A hold the gate did not decide: logged, and queued as a `declined` event.
+    fn declined(&self, reason: &str) -> GateVerdict {
+        eprintln!("ai6: {reason}");
+        self.push(AgentEvent {
+            kind: "declined".to_owned(),
+            text: Some(reason.to_owned()),
             data: None,
             limit: None,
             tools: Vec::new(),
             report: None,
         });
-        Ok(())
+        GateVerdict::Hold(reason.to_owned())
     }
 
-    fn working_in(mut self, directory: &str) -> Self {
-        self.working_directory = Some(std::path::PathBuf::from(directory));
-        self
+    /// Answers a command approval with the green ink gate: `accept` unless the gate holds the
+    /// command, then `decline`, and the reason is steered into the running turn so the Agent
+    /// knows to ask for green ink. With a gate, these are declined without asking it: input to
+    /// a running command and a request that names no command (the gate cannot see what they
+    /// run), a request whose line was rebuilt from a terminal's rendering (`rebuilt`: its
+    /// command may not be what Codex wrote), and one with no command execution item started
+    /// earlier under its item id with the same command. A decline the gate did not decide is
+    /// also logged and queued as an event of kind `declined`. Without a gate (no Cable
+    /// endpoint) everything is accepted.
+    fn answer_command_approval(&self, request: PermissionRequest) {
+        let input = request.tool.input.clone().unwrap_or(Value::Null);
+        let command = input
+            .get("command")
+            .and_then(Value::as_str)
+            .filter(|command| !command.is_empty());
+        let cwd = input.get("cwd").and_then(Value::as_str).map(Path::new);
+        let kind = request.details.get("kind").and_then(Value::as_str);
+        let started = request
+            .details
+            .get("itemId")
+            .and_then(Value::as_str)
+            .and_then(|item| self.started.lock().ok()?.get(item).cloned());
+        let rebuilt = self.link.rebuilt.load(Ordering::Acquire);
+        let unseen = |command: &str| started.as_deref() != Some(command);
+        let verdict = match (&self.gate, kind, command) {
+            (None, _, _) => GateVerdict::Allow,
+            (Some(_), _, _) if rebuilt => self.declined(
+                "Green ink: this approval request reached AI6 rebuilt from a terminal's \
+                 rendering (a line it broke, or a control inside it), so its command may not be \
+                 what was asked; it is declined. Run the command again.",
+            ),
+            (Some(_), kind, Some(command)) if kind != Some("writeStdin") && unseen(command) => self
+                .declined(
+                    "Green ink: this approval request names a command no command execution \
+                     item started with before it; it is declined. Run the command again.",
+                ),
+            (Some(_), Some("writeStdin"), _) => GateVerdict::Hold(
+                "Green ink: input to a running command is declined, because the gate cannot see \
+                 what it runs; run the command with all its arguments instead."
+                    .to_owned(),
+            ),
+            (Some(_), _, None) => GateVerdict::Hold(
+                "Green ink: an approval request that names no command is declined; run the \
+                 command with all its arguments instead."
+                    .to_owned(),
+            ),
+            (Some(gate), _, Some(command)) => gate(command, cwd),
+        };
+        self.answer_approval(request, verdict);
     }
 
-    fn with_gate(mut self, gate: Option<Gate>) -> Self {
-        self.gate = gate;
-        self
-    }
-
-    /// Reports what a `warn` tool check found, on the Station's log and as the Run's
-    /// first event (kind `weakened`).
-    fn with_weakening(self, weakening: Option<String>) -> Self {
-        if let Some(text) = weakening {
-            eprintln!("ai6: weakening: {text}");
-            if let Ok(mut events) = self.events.lock() {
-                events.push_back(AgentEvent {
-                    kind: "weakened".to_owned(),
-                    text: Some(text),
-                    data: None,
-                    limit: None,
-                    tools: Vec::new(),
-                    report: None,
-                });
-            }
-        }
-        self
-    }
-
-    fn request(
-        &self,
-        method: &str,
-        params: Value,
-        timeout: Duration,
-    ) -> Result<Value, ProviderError> {
-        let id = self.request_id.fetch_add(1, Ordering::Relaxed) + 1;
-        self.write_line(&json!({ "id": id, "method": method, "params": params }))?;
-        let deadline = Instant::now() + timeout;
-        loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                return Err(refuse(
-                    Status::GUATIAO_ERR_INTERNAL,
-                    "Codex app-server timed out",
-                ));
-            }
-            // Anything but JSON is the harness's own diagnostics, which a reply never is.
-            let Some(StreamLine::Json {
-                value: message,
-                rebuilt,
-                ..
-            }) = self.read_line(remaining)?
-            else {
-                continue;
-            };
-            let ours = message.get("id").and_then(Value::as_u64) == Some(id);
-            // ConPTY echoes the request itself when the app server reads its input as lines.
-            if ours && message.get("method").and_then(Value::as_str) == Some(method) {
-                continue;
-            }
-            // A server request carries its own id, which may equal ours; it has a method.
-            if ours && message.get("method").is_none() {
-                if let Some(error) = message.get("error") {
-                    return Err(refuse(Status::GUATIAO_ERR_INTERNAL, error));
-                }
-                return Ok(message.get("result").cloned().unwrap_or(Value::Null));
-            }
-            if message.get("method").is_none() {
-                continue;
-            }
-            self.collect_event(message, rebuilt)?;
-        }
-    }
-
-    fn notify(&self, method: &str, params: Value) -> Result<(), ProviderError> {
-        self.write_line(&json!({ "method": method, "params": params }))
-    }
-
-    fn write_line(&self, value: &Value) -> Result<(), ProviderError> {
-        let mut line = serde_json::to_vec(value).map_err(internal)?;
-        line.push(b'\n');
-        self.terminal.write(&line)
-    }
-
-    /// The next line the app server wrote, `None` when `timeout` passes first. Once its output
-    /// has ended (the terminal closed, or the app server exited while the terminal kept it
-    /// open) and every line is read, an error saying how it ended.
-    fn read_line(&self, timeout: Duration) -> Result<Option<StreamLine>, ProviderError> {
-        let line = self.next_line(timeout)?;
-        if let Some(StreamLine::Text(text)) = &line {
-            self.remember_output(text);
-        }
-        Ok(line)
-    }
-
-    fn next_line(&self, timeout: Duration) -> Result<Option<StreamLine>, ProviderError> {
-        let deadline = Instant::now() + timeout;
-        loop {
-            if let Some(line) = lock(&self.output)?.next_line() {
-                return Ok(Some(line));
-            }
-            if self.ended.load(Ordering::Acquire) {
-                if let Some(line) = lock(&self.output)?.finish() {
-                    return Ok(Some(line));
-                }
-                return Err(refuse(Status::GUATIAO_ERR_INTERNAL, self.exit_reason()));
-            }
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                return Ok(None);
-            }
-            let mut bytes = [0_u8; 8192];
-            let count = self.terminal.read(
-                &mut bytes,
-                remaining.as_millis().min(i64::MAX as u128) as i64,
-            )?;
-            if count == READ_TIMED_OUT {
-                // A terminal may keep its output open after the app server exits.
-                if self.exited(0).is_some() {
-                    self.ended.store(true, Ordering::Release);
-                    continue;
-                }
-                return Ok(None);
-            }
-            if count == 0 {
-                self.ended.store(true, Ordering::Release);
-                continue;
-            }
-            if count < 0 {
-                return Err(refuse(
-                    Status::GUATIAO_ERR_INTERNAL,
-                    "Codex terminal returned an invalid read count",
-                ));
-            }
-            lock(&self.output)?.push(&bytes[..count as usize]);
-        }
-    }
-
-    /// Takes one message from the app server; `rebuilt` says its line was not read as written
-    /// ([`StreamLine::Json`]).
-    fn collect_event(&self, message: Value, rebuilt: bool) -> Result<(), ProviderError> {
-        if self.tripped.load(Ordering::Acquire) {
-            return Ok(());
-        }
-        if let Some(restriction) = &self.restricted
-            && let Some(what) = forbidden_use(&message, restriction)
-        {
-            return self.trip(&what);
-        }
-        if let Some(id) = message.get("id")
-            && message.get("method").and_then(Value::as_str) == Some(COMMAND_APPROVAL)
-        {
-            self.answer_command_approval(
-                id,
-                message.get("params").unwrap_or(&Value::Null),
-                rebuilt,
-            )?;
-        }
-        if let Some(id) = message.get("id")
-            && message.get("method").and_then(Value::as_str) == Some(FILE_APPROVAL)
-        {
-            self.answer_file_approval(id, message.get("params").unwrap_or(&Value::Null), rebuilt)?;
-        }
-        if message.get("method").and_then(Value::as_str) == Some("item/started")
-            && let Some(item) = message.pointer("/params/item")
-            && item.get("type").and_then(Value::as_str) == Some("fileChange")
-            && let Some(id) = item.get("id").and_then(Value::as_str)
-        {
-            let paths = item
-                .get("changes")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter_map(|change| change.get("path").and_then(Value::as_str))
-                .map(str::to_owned)
-                .collect();
-            lock(&self.started_changes)?.insert(id.to_owned(), paths);
-        }
-        if message.get("method").and_then(Value::as_str) == Some("item/started")
-            && let Some(item) = message.pointer("/params/item")
-            && item.get("type").and_then(Value::as_str) == Some("commandExecution")
-            && let (Some(id), Some(command)) = (
-                item.get("id").and_then(Value::as_str),
-                item.get("command").and_then(Value::as_str),
-            )
-        {
-            lock(&self.started)?.insert(id.to_owned(), command.to_owned());
-        }
-        if let Some(exhausted) = exhausted_window(&message) {
-            *lock(&self.exhausted)? = Some(exhausted);
-        }
-        let hint = lock(&self.exhausted)?.clone();
-        if let Some(mut event) = decode_event(&message, hint.as_ref()) {
-            if self.reports_commands && started_item(&message) == Some("commandExecution") {
-                event.tools.push(COMMAND_TOOL.to_owned());
-            }
-            if let Some(spend) = event
-                .report
-                .as_mut()
-                .and_then(|report| report.spend.as_mut())
+    /// Answers a file change the way the Claude handler's gate treats an edit: green ink governs
+    /// shell commands, so an edit inside the working directory is the Mission's own work and
+    /// `accept`ed. Codex 0.164.0 applies what is accepted wherever it points, even from a
+    /// read-only thread, so a gated thread is declined a path outside the working directory, a
+    /// `grantRoot`, a request whose line was `rebuilt`, and one with no file change item started
+    /// earlier under its item id, and so is a `desk` thread, gated or not. Otherwise, without a
+    /// gate, everything is accepted.
+    fn answer_file_approval(&self, request: PermissionRequest) {
+        let paths = request
+            .details
+            .get("itemId")
+            .and_then(Value::as_str)
+            .and_then(|item| self.started_changes.lock().ok()?.get(item).cloned());
+        let granted = request
+            .details
+            .get("grantRoot")
+            .is_some_and(|root| !root.is_null());
+        let judged = self.gate.is_some()
+            || self
+                .restricted
+                .as_ref()
+                .is_some_and(|allowed| allowed.asks_file_changes);
+        let rebuilt = self.link.rebuilt.load(Ordering::Acquire);
+        let root = &self.working_directory;
+        let verdict = match (judged, paths) {
+            (false, _) => GateVerdict::Allow,
+            _ if rebuilt => self.declined(
+                "Green ink: this file change request reached AI6 rebuilt from a terminal's \
+                 rendering, so what it changes may not be what was asked; it is declined. Apply \
+                 the change again.",
+            ),
+            _ if granted => self.declined(
+                "Green ink: a file change may not widen where this thread writes; it is \
+                 declined. Keep the change inside the working directory.",
+            ),
+            (true, Some(paths))
+                if !paths.is_empty() && paths.iter().all(|path| inside(root, path)) =>
             {
-                let mut spent = lock(&self.spent)?;
-                spent.input = spent.input.saturating_add(spend.input);
-                spent.output = spent.output.saturating_add(spend.output);
-                spent.cache_read = spent.cache_read.saturating_add(spend.cache_read);
-                spent.cache_write = spent.cache_write.saturating_add(spend.cache_write);
-                *spend = spent.clone();
+                GateVerdict::Allow
             }
-            lock(&self.events)?.push_back(event);
-        }
-        Ok(())
+            (true, Some(_)) => self.declined(
+                "Green ink: this file change reaches outside the working directory; it is \
+                 declined. Keep the change inside the working directory.",
+            ),
+            (true, None) => self.declined(
+                "Green ink: this approval request names a change no file change item started \
+                 with before it; it is declined. Apply the change again.",
+            ),
+        };
+        self.answer_approval(request, verdict);
     }
+
+    /// Writes the decision, and steers a held step's reason into the running turn.
+    fn answer_approval(&self, request: PermissionRequest, verdict: GateVerdict) {
+        let turn = request
+            .details
+            .get("turnId")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let chosen = match verdict {
+            GateVerdict::Allow => coqui_acp_codex::parse::ALLOW_ONCE,
+            GateVerdict::Hold(_) => coqui_acp_codex::parse::REJECT,
+        };
+        let _ = request
+            .responder
+            .answer(Outcome::Selected(chosen.to_owned()));
+        if let GateVerdict::Hold(reason) = verdict
+            && let Some(turn) = turn
+            && let Some(session) = self
+                .session
+                .lock()
+                .ok()
+                .and_then(|session| session.upgrade())
+        {
+            let _ = session.steer(&turn, &[Content::Text(reason)]);
+        }
+    }
+}
+
+/// A started Codex thread, as one of AI6's Runs.
+struct CodexRun {
+    session: Arc<AppServer>,
+    shared: Arc<Shared>,
+    thread_id: RunId,
 }
 
 /// The tool name a scripts thread's command executions are reported under.
@@ -1201,162 +1251,6 @@ fn forbidden_use(message: &Value, restriction: &Restriction) -> Option<String> {
             field("server")
         )),
         kind => Some(format!("a {kind:?} item")),
-    }
-}
-
-impl CodexRun {
-    /// Answers a command approval with the green ink gate: `accept` unless the gate holds the
-    /// command, then `decline`, and the reason is steered into the running turn so the Agent
-    /// knows to ask for green ink. With a gate, these are declined without asking it: input to
-    /// a running command and a request that names no command (the gate cannot see what they
-    /// run), a request whose line was rebuilt from a terminal's rendering (`rebuilt`: its
-    /// command may not be what Codex wrote), and one with no command execution item started
-    /// earlier under its item id with the same command. A decline the gate did not decide is
-    /// also logged and queued as an event of kind `declined`. Without a gate (no Cable
-    /// endpoint) everything is accepted.
-    /// A hold the gate did not decide: logged, and queued as a `declined` event.
-    fn declined(&self, reason: &str) -> Result<GateVerdict, ProviderError> {
-        eprintln!("ai6: {reason}");
-        lock(&self.events)?.push_back(AgentEvent {
-            kind: "declined".to_owned(),
-            text: Some(reason.to_owned()),
-            data: None,
-            limit: None,
-            tools: Vec::new(),
-            report: None,
-        });
-        Ok(GateVerdict::Hold(reason.to_owned()))
-    }
-
-    fn answer_command_approval(
-        &self,
-        id: &Value,
-        params: &Value,
-        rebuilt: bool,
-    ) -> Result<(), ProviderError> {
-        let command = params.get("command").and_then(Value::as_str);
-        let cwd = params.get("cwd").and_then(Value::as_str).map(Path::new);
-        let item = params.get("itemId").and_then(Value::as_str);
-        let started = match item {
-            Some(item) => lock(&self.started)?.get(item).cloned(),
-            None => None,
-        };
-        let unseen = |command: &str| started.as_deref() != Some(command);
-        let verdict = match (
-            &self.gate,
-            params.get("kind").and_then(Value::as_str),
-            command,
-        ) {
-            (None, _, _) => GateVerdict::Allow,
-            (Some(_), _, _) if rebuilt => self.declined(
-                "Green ink: this approval request reached AI6 rebuilt from a terminal's \
-                 rendering (a line it broke, or a control inside it), so its command may not be \
-                 what was asked; it is declined. Run the command again.",
-            )?,
-            (Some(_), kind, Some(command)) if kind != Some("writeStdin") && unseen(command) => self
-                .declined(
-                    "Green ink: this approval request names a command no command execution \
-                     item started with before it; it is declined. Run the command again.",
-                )?,
-            (Some(_), Some("writeStdin"), _) => GateVerdict::Hold(
-                "Green ink: input to a running command is declined, because the gate cannot see \
-                 what it runs; run the command with all its arguments instead."
-                    .to_owned(),
-            ),
-            (Some(_), _, None) => GateVerdict::Hold(
-                "Green ink: an approval request that names no command is declined; run the \
-                 command with all its arguments instead."
-                    .to_owned(),
-            ),
-            (Some(gate), _, Some(command)) => gate(command, cwd),
-        };
-        self.answer_approval(id, params, verdict)
-    }
-
-    /// Answers a file change the way the Claude handler's gate treats an edit: green ink governs
-    /// shell commands, so an edit inside the working directory is the Mission's own work and
-    /// `accept`ed. Codex 0.164.0 applies what is accepted wherever it points, even from a
-    /// read-only thread, so a gated thread is declined a path outside the working directory, a
-    /// `grantRoot`, a request whose line was `rebuilt`, and one with no file change item started
-    /// earlier under its item id, and so is a `desk` thread, gated or not. Otherwise, without a
-    /// gate, everything is accepted.
-    fn answer_file_approval(
-        &self,
-        id: &Value,
-        params: &Value,
-        rebuilt: bool,
-    ) -> Result<(), ProviderError> {
-        let paths = params
-            .get("itemId")
-            .and_then(Value::as_str)
-            .and_then(|item| {
-                lock(&self.started_changes)
-                    .ok()
-                    .and_then(|started| started.get(item).cloned())
-            });
-        let granted = params.get("grantRoot").is_some_and(|root| !root.is_null());
-        let judged = self.gate.is_some()
-            || self
-                .restricted
-                .as_ref()
-                .is_some_and(|allowed| allowed.asks_file_changes);
-        let verdict = match (judged, &self.working_directory, paths) {
-            (false, _, _) => GateVerdict::Allow,
-            _ if rebuilt => self.declined(
-                "Green ink: this file change request reached AI6 rebuilt from a terminal's \
-                 rendering, so what it changes may not be what was asked; it is declined. Apply \
-                 the change again.",
-            )?,
-            _ if granted => self.declined(
-                "Green ink: a file change may not widen where this thread writes; it is \
-                 declined. Keep the change inside the working directory.",
-            )?,
-            (true, Some(root), Some(paths))
-                if !paths.is_empty() && paths.iter().all(|path| inside(root, path)) =>
-            {
-                GateVerdict::Allow
-            }
-            (true, _, Some(_)) => self.declined(
-                "Green ink: this file change reaches outside the working directory; it is \
-                 declined. Keep the change inside the working directory.",
-            )?,
-            (true, _, None) => self.declined(
-                "Green ink: this approval request names a change no file change item started \
-                 with before it; it is declined. Apply the change again.",
-            )?,
-        };
-        self.answer_approval(id, params, verdict)
-    }
-
-    /// Writes the decision, and steers a held step's reason into the running turn.
-    fn answer_approval(
-        &self,
-        id: &Value,
-        params: &Value,
-        verdict: GateVerdict,
-    ) -> Result<(), ProviderError> {
-        let decision = match verdict {
-            GateVerdict::Allow => "accept",
-            GateVerdict::Hold(_) => "decline",
-        };
-        self.write_line(&json!({ "id": id, "result": { "decision": decision } }))?;
-        if let GateVerdict::Hold(reason) = verdict
-            && let (Some(thread), Some(turn)) = (
-                params.get("threadId").and_then(Value::as_str),
-                params.get("turnId").and_then(Value::as_str),
-            )
-        {
-            self.write_line(&json!({
-                "id": self.request_id.fetch_add(1, Ordering::Relaxed) + 1,
-                "method": "turn/steer",
-                "params": {
-                    "threadId": thread,
-                    "expectedTurnId": turn,
-                    "input": [{ "type": "text", "text": reason }]
-                }
-            }))?;
-        }
-        Ok(())
     }
 }
 
@@ -1619,90 +1513,45 @@ fn decode_event(message: &Value, hint: Option<&LimitHit>) -> Option<AgentEvent> 
 
 impl AgentSession for CodexRun {
     fn session_id(&self) -> Result<Option<String>, ProviderError> {
-        Ok(self.thread_id.clone().map(String::from))
+        Ok(Some(self.thread_id.clone().into()))
     }
 
     fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {
-        let thread_id = self
-            .thread_id
-            .as_ref()
-            .ok_or_else(|| refuse(Status::GUATIAO_ERR_INTERNAL, "Codex thread is not started"))?;
-        let mut params = json!({
-            "threadId": thread_id.as_str(),
-            "input": [{ "type": "text", "text": message.text }]
-        });
-        if let Some(effort) = &self.effort {
-            params["effort"] = json!(effort);
-        }
-        self.write_line(&json!({
-            "id": self.request_id.fetch_add(1, Ordering::Relaxed) + 1,
-            "method": "turn/start",
-            "params": params
-        }))
+        self.session
+            .prompt(&[Content::Text(message.text)])
+            .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error))
     }
 
     fn next_event(&self, timeout_ms: i64) -> Result<Option<AgentEvent>, ProviderError> {
-        if let Some(event) = lock(&self.events)?.pop_front() {
-            return Ok(Some(event));
-        }
-        let read = self.read_line(Duration::from_millis(timeout_ms.max(0) as u64));
-        // The app server's exit ends the Run once, with the reason.
-        let read = match read {
-            Err(_) if self.ended.load(Ordering::Acquire) => {
-                if self.ended_reported.swap(true, Ordering::AcqRel) {
-                    return Ok(None);
-                }
-                let reason = self.exit_reason();
-                eprintln!("ai6: {reason}");
-                return Ok(Some(AgentEvent {
-                    kind: "failed".to_owned(),
-                    text: Some(reason),
-                    data: None,
-                    limit: None,
-                    tools: Vec::new(),
-                    report: None,
-                }));
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms.max(0) as u64);
+        let mut events = lock(&self.shared.events)?;
+        loop {
+            if let Some(event) = events.pop_front() {
+                return Ok(Some(event));
             }
-            read => read?,
-        };
-        let (message, rebuilt) = match read {
-            None => return Ok(None),
-            Some(StreamLine::Json { value, rebuilt, .. }) => (value, rebuilt),
-            Some(StreamLine::Text(text)) => {
-                return Ok(Some(AgentEvent {
-                    kind: "output".to_owned(),
-                    text: Some(text),
-                    data: None,
-                    limit: None,
-                    tools: Vec::new(),
-                    report: None,
-                }));
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Ok(None);
             }
-        };
-        if message.get("method").is_none() {
-            return Ok(None);
+            events = self
+                .shared
+                .arrived
+                .wait_timeout(events, remaining)
+                .map_err(|_| refuse(Status::GUATIAO_ERR_INTERNAL, "run lock was poisoned"))?
+                .0;
         }
-        self.collect_event(message, rebuilt)?;
-        Ok(lock(&self.events)?.pop_front())
     }
 
     fn interrupt(&self) -> Result<(), ProviderError> {
-        let thread_id = self
-            .thread_id
-            .as_ref()
-            .ok_or_else(|| refuse(Status::GUATIAO_ERR_INTERNAL, "Codex thread is not started"))?;
-        self.write_line(&json!({
-            "id": self.request_id.fetch_add(1, Ordering::Relaxed) + 1,
-            "method": "turn/interrupt",
-            "params": { "threadId": thread_id.as_str() }
-        }))
+        self.session
+            .interrupt()
+            .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error))
     }
 
+    /// Ends the app server. The caller may remove the working directory next, which the app
+    /// server holds until it has exited, so this waits for that.
     fn close(&self) -> Result<(), ProviderError> {
-        self.terminal.kill()?;
-        // The caller may remove the working directory next, which the app server holds until
-        // it has exited; a terminal that cannot tell is not waited for.
-        let _ = self.terminal.exit_status(self.close_wait_ms);
+        self.session.close();
         Ok(())
     }
 }
@@ -1736,36 +1585,15 @@ fn scripts_profile(
         .map(|mode| sandbox::Profile::new(executable, cwd, environment, mode))
 }
 
-/// Refuses a scripts thread whose app server's effective configuration is not the sandbox
-/// passed to it ([`sandbox::Profile::check_config`]): Codex merges the user's own settings in.
-fn check_sandbox_config(
-    run: &CodexRun,
-    profile: &sandbox::Profile,
-    cwd: &str,
-    timeout: Duration,
-) -> Result<(), ProviderError> {
-    let result = run.request("config/read", json!({ "cwd": cwd }), timeout)?;
-    profile
-        .check_config(&result)
-        .map_err(|found| refuse(Status::GUATIAO_ERR_UNSUPPORTED, found))
-}
-
-/// Closes `run` and returns `error` when `checked` failed.
-fn close_unless<T>(run: &CodexRun, checked: Result<T, ProviderError>) -> Result<T, ProviderError> {
-    checked.inspect_err(|_| {
-        let _ = run.close();
-    })
-}
-
-/// Starts the app server, and returns what a `warn` tool check found. A restricted (answer-only,
+/// The app server's command line, and what a `warn` tool check found. A restricted (answer-only,
 /// assistant or `desk`) app server starts only after its tool check ([`tools`]).
-fn spawn(
-    terminal: Object<dyn AgentTerminal>,
+fn prepare(
+    terminal: &Object<dyn AgentTerminal>,
     executable: &str,
     cwd: &str,
     environment: &std::collections::BTreeMap<String, String>,
     mode: Mode<'_>,
-) -> Result<(Object<dyn TerminalRun>, Option<String>), ProviderError> {
+) -> Result<(Vec<String>, Option<String>), ProviderError> {
     let mut argv = if let Some(assistant) = mode.assistant {
         assistant_argv(executable, environment, assistant, mode.profile)?
     } else if mode.answer_only {
@@ -1796,7 +1624,7 @@ fn spawn(
         };
         let commands = scripts != Scripts::None;
         let checked = tools::Probe {
-            terminal: &terminal,
+            terminal,
             executable,
             overrides: &argv[2..],
             cwd,
@@ -1832,15 +1660,7 @@ fn spawn(
             None => admitted,
         });
     }
-    let spec = Spec {
-        argv,
-        cwd: Some(cwd.to_string()),
-        env: Some(environment.clone()),
-        rows: 24,
-        cols: STREAM_COLS,
-    };
-    let value = spec.to_value().map_err(internal)?;
-    Ok((terminal.spawn(&value)?, weakening))
+    Ok((argv, weakening))
 }
 
 /// The app server of a Mission, with AI6's servers its environment names, their tools approved
@@ -2078,6 +1898,10 @@ fn refuse(status: Status, error: impl std::fmt::Display) -> ProviderError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ai6::directorates::q::terminal::{
+        ExitInfo, READ_TIMED_OUT, STREAM_COLS, Spec, TerminalRun,
+    };
+    use ai6::guatiao::{FromValue, ToValue};
     use std::collections::BTreeMap;
 
     #[test]
@@ -2412,6 +2236,18 @@ mod tests {
         for line in std::io::stdin().lock().lines() {
             let message: Value = serde_json::from_str(&line.unwrap()).unwrap();
             let method = message.get("method").and_then(Value::as_str).unwrap_or("");
+            // Codex answers a turn at once, with the turn's id, before it streams anything.
+            if method == "turn/start"
+                && let Some(id) = message.get("id")
+            {
+                writeln!(
+                    stdout,
+                    "{}",
+                    json!({"id": id, "result": {"turn": {"id": "turn-7"}}})
+                )
+                .unwrap();
+                stdout.flush().unwrap();
+            }
             if pending.is_some() && message.get("id").and_then(Value::as_u64) == pending {
                 pending = None;
                 let decision = message
@@ -2866,31 +2702,15 @@ mod tests {
 
     /// What a gated run answers to `stream`: the decision written back, and the events.
     fn answered(stream: &[u8]) -> (Value, Vec<AgentEvent>) {
-        let writes = Arc::new(Mutex::new(Vec::new()));
-        let run = CodexRun::new(
-            ResumeTerminalRun {
-                input: Mutex::new(stream.to_vec()),
-                writes: writes.clone(),
-                killed: Arc::new(AtomicBool::new(false)),
-            }
-            .into_object(),
+        let (run, writes) = scripted_run(
+            stream,
+            "/work",
+            approvals_gate(Arc::new(Mutex::new(Vec::new()))),
             None,
-        )
-        .with_gate(approvals_gate(Arc::new(Mutex::new(Vec::new()))));
-        let mut events = Vec::new();
-        while let Some(event) = run.next_event(20).unwrap() {
-            events.push(event);
-        }
-        while let Ok(Some(event)) = run.next_event(20) {
-            events.push(event);
-        }
-        let written = String::from_utf8(writes.lock().unwrap().clone()).unwrap();
-        let decision = written
-            .lines()
-            .map(|line| serde_json::from_str::<Value>(line).unwrap())
-            .find(|message| message.pointer("/result/decision").is_some())
-            .expect("the approval was answered");
-        (decision["result"]["decision"].clone(), events)
+        );
+        let events = events_until_quiet(&run);
+        let (decision, _) = written_decision(&writes).expect("the approval was answered");
+        (decision, events)
     }
 
     fn started(command: &str) -> String {
@@ -2985,26 +2805,14 @@ mod tests {
 
     /// What a gated run working in `directory` answers to `stream`, and what it told the turn.
     fn answered_in(directory: &Path, stream: &str) -> (Value, String) {
-        let writes = Arc::new(Mutex::new(Vec::new()));
-        let run = CodexRun::new(
-            ResumeTerminalRun {
-                input: Mutex::new(stream.as_bytes().to_vec()),
-                writes: writes.clone(),
-                killed: Arc::new(AtomicBool::new(false)),
-            }
-            .into_object(),
+        let (run, writes) = scripted_run(
+            stream.as_bytes(),
+            &directory.to_string_lossy(),
+            approvals_gate(Arc::new(Mutex::new(Vec::new()))),
             None,
-        )
-        .working_in(&directory.to_string_lossy())
-        .with_gate(approvals_gate(Arc::new(Mutex::new(Vec::new()))));
-        while let Ok(Some(_)) = run.next_event(20) {}
-        let written = String::from_utf8(writes.lock().unwrap().clone()).unwrap();
-        let decision = written
-            .lines()
-            .map(|line| serde_json::from_str::<Value>(line).unwrap())
-            .find(|message| message.pointer("/result/decision").is_some())
-            .expect("the file change was answered, not left waiting");
-        (decision["result"]["decision"].clone(), written)
+        );
+        let _ = events_until_quiet(&run);
+        written_decision(&writes).expect("the file change was answered, not left waiting")
     }
 
     #[test]
@@ -3057,25 +2865,16 @@ mod tests {
 
     /// What a `desk` run working in `directory`, without a gate, answers to `stream`.
     fn answered_at_desk(directory: &Path, stream: &str) -> Value {
-        let writes = Arc::new(Mutex::new(Vec::new()));
-        let run = CodexRun::new(
-            ResumeTerminalRun {
-                input: Mutex::new(stream.as_bytes().to_vec()),
-                writes: writes.clone(),
-                killed: Arc::new(AtomicBool::new(false)),
-            }
-            .into_object(),
+        let (run, writes) = scripted_run(
+            stream.as_bytes(),
+            &directory.to_string_lossy(),
             None,
-        )
-        .working_in(&directory.to_string_lossy())
-        .restricted_to(restriction(false, None, Some(&BTreeMap::new()), false));
-        while let Ok(Some(_)) = run.next_event(20) {}
-        let written = String::from_utf8(writes.lock().unwrap().clone()).unwrap();
-        written
-            .lines()
-            .map(|line| serde_json::from_str::<Value>(line).unwrap())
-            .find_map(|message| message.pointer("/result/decision").cloned())
+            restriction(false, None, Some(&BTreeMap::new()), false),
+        );
+        let _ = events_until_quiet(&run);
+        written_decision(&writes)
             .expect("the file change was answered, not left waiting")
+            .0
     }
 
     #[test]
@@ -3085,33 +2884,14 @@ mod tests {
         std::fs::create_dir_all(&work).unwrap();
         let inside = file_change(&work.join("p.md").to_string_lossy(), Value::Null);
         let answered = |reads_only: bool| {
-            let writes = Arc::new(Mutex::new(Vec::new()));
-            let run = CodexRun::new(
-                ResumeTerminalRun {
-                    input: Mutex::new(inside.as_bytes().to_vec()),
-                    writes: writes.clone(),
-                    killed: Arc::new(AtomicBool::new(false)),
-                }
-                .into_object(),
+            let (run, writes) = scripted_run(
+                inside.as_bytes(),
+                &work.to_string_lossy(),
                 None,
-            )
-            .working_in(&work.to_string_lossy())
-            .restricted_to(restriction(
-                false,
-                None,
-                Some(&BTreeMap::new()),
-                reads_only,
-            ));
-            let mut events = Vec::new();
-            while let Ok(Some(event)) = run.next_event(20) {
-                events.push(event);
-            }
-            let written = String::from_utf8(writes.lock().unwrap().clone()).unwrap();
-            let decision = written
-                .lines()
-                .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-                .find_map(|message| message.pointer("/result/decision").cloned());
-            (decision, events)
+                restriction(false, None, Some(&BTreeMap::new()), reads_only),
+            );
+            let events = events_until_quiet(&run);
+            (written_decision(&writes).map(|written| written.0), events)
         };
         let (decision, events) = answered(true);
         assert_ne!(decision, Some(json!("accept")), "{events:?}");
@@ -3606,42 +3386,48 @@ mod tests {
         );
     }
 
-    struct EofTerminalRun;
-
-    impl TerminalRun for EofTerminalRun {
-        fn pid(&self) -> i64 {
-            1
-        }
-
-        fn read(&self, _dst: &mut [u8], _timeout_ms: i64) -> Result<i64, ProviderError> {
-            Ok(0)
-        }
-
-        fn write(&self, _data: &[u8]) -> Result<(), ProviderError> {
-            Ok(())
-        }
-
-        fn resize(&self, _rows: i64, _cols: i64) -> Result<(), ProviderError> {
-            Ok(())
-        }
-
-        fn kill(&self) -> Result<(), ProviderError> {
-            Ok(())
-        }
-
-        fn exit_status(&self, _timeout_ms: i64) -> Result<ai6::guatiao::Value, ProviderError> {
-            Err(refuse(Status::GUATIAO_ERR_INTERNAL, "unused in EOF test"))
-        }
+    /// How a scripted app server's output ends once everything scripted was read.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Ending {
+        /// Never: the terminal keeps its output open.
+        Open,
+        /// The terminal closes its output.
+        Eof,
+        /// The program exits with this code and the terminal keeps its output open.
+        Exited(i64),
     }
 
-    struct ResumeTerminal {
+    /// A terminal whose app server answers by script: the n-th request written (a message with an
+    /// id and a method) releases the n-th chunk of output, and the request `handshake` releases
+    /// every chunk left, so a stream is read only once the driver is waiting for it.
+    struct ScriptedTerminal {
         spec: Arc<Mutex<Option<Spec>>>,
-        input: Vec<u8>,
+        chunks: Vec<Vec<u8>>,
+        handshake: usize,
+        ending: Ending,
         writes: Arc<Mutex<Vec<u8>>>,
         killed: Arc<AtomicBool>,
     }
 
-    impl AgentTerminal for ResumeTerminal {
+    impl ScriptedTerminal {
+        fn new(chunks: Vec<Vec<u8>>, handshake: usize) -> Self {
+            Self {
+                spec: Arc::new(Mutex::new(None)),
+                chunks,
+                handshake,
+                ending: Ending::Open,
+                writes: Arc::new(Mutex::new(Vec::new())),
+                killed: Arc::new(AtomicBool::new(false)),
+            }
+        }
+
+        fn ending(mut self, ending: Ending) -> Self {
+            self.ending = ending;
+            self
+        }
+    }
+
+    impl AgentTerminal for ScriptedTerminal {
         fn spawn_private(
             &self,
             value: &ai6::guatiao::Value,
@@ -3654,8 +3440,15 @@ mod tests {
             value: &ai6::guatiao::Value,
         ) -> Result<Object<dyn TerminalRun>, ProviderError> {
             *self.spec.lock().unwrap() = Some(Spec::from_value(value).map_err(internal)?);
-            Ok(ResumeTerminalRun {
-                input: Mutex::new(self.input.clone()),
+            Ok(ScriptedRun {
+                script: Mutex::new(Script {
+                    output: VecDeque::new(),
+                    chunks: self.chunks.iter().cloned().collect(),
+                    requests: 0,
+                }),
+                arrived: Condvar::new(),
+                handshake: self.handshake,
+                ending: self.ending,
                 writes: self.writes.clone(),
                 killed: self.killed.clone(),
             }
@@ -3663,30 +3456,71 @@ mod tests {
         }
     }
 
-    struct ResumeTerminalRun {
-        input: Mutex<Vec<u8>>,
+    struct Script {
+        output: VecDeque<u8>,
+        chunks: VecDeque<Vec<u8>>,
+        requests: usize,
+    }
+
+    struct ScriptedRun {
+        script: Mutex<Script>,
+        arrived: Condvar,
+        handshake: usize,
+        ending: Ending,
         writes: Arc<Mutex<Vec<u8>>>,
         killed: Arc<AtomicBool>,
     }
 
-    impl TerminalRun for ResumeTerminalRun {
+    impl TerminalRun for ScriptedRun {
         fn pid(&self) -> i64 {
             8
         }
 
-        fn read(&self, dst: &mut [u8], _timeout_ms: i64) -> Result<i64, ProviderError> {
-            let mut input = self.input.lock().unwrap();
-            if input.is_empty() {
-                return Ok(READ_TIMED_OUT);
+        fn read(&self, dst: &mut [u8], timeout_ms: i64) -> Result<i64, ProviderError> {
+            let mut script = self.script.lock().unwrap();
+            if script.output.is_empty() {
+                script = self
+                    .arrived
+                    .wait_timeout(script, Duration::from_millis(timeout_ms.max(0) as u64))
+                    .unwrap()
+                    .0;
             }
-            let count = dst.len().min(input.len());
-            dst[..count].copy_from_slice(&input[..count]);
-            input.drain(..count);
+            if script.output.is_empty() {
+                let finished = script.chunks.is_empty() && script.requests > 0;
+                return Ok(if self.ending == Ending::Eof && finished {
+                    0
+                } else {
+                    READ_TIMED_OUT
+                });
+            }
+            let count = dst.len().min(script.output.len());
+            for byte in &mut dst[..count] {
+                *byte = script.output.pop_front().unwrap();
+            }
             Ok(count as i64)
         }
 
         fn write(&self, data: &[u8]) -> Result<(), ProviderError> {
             self.writes.lock().unwrap().extend_from_slice(data);
+            for line in data.split(|byte| *byte == b'\n') {
+                let Ok(message) = serde_json::from_slice::<Value>(line) else {
+                    continue;
+                };
+                if message.get("id").is_none() || message.get("method").is_none() {
+                    continue;
+                }
+                let mut script = self.script.lock().unwrap();
+                script.requests += 1;
+                let released = if script.requests >= self.handshake {
+                    script.chunks.drain(..).collect::<Vec<_>>()
+                } else {
+                    script.chunks.pop_front().into_iter().collect()
+                };
+                for chunk in released {
+                    script.output.extend(chunk);
+                }
+                self.arrived.notify_all();
+            }
             Ok(())
         }
 
@@ -3700,25 +3534,159 @@ mod tests {
         }
 
         fn exit_status(&self, _timeout_ms: i64) -> Result<ai6::guatiao::Value, ProviderError> {
-            Err(refuse(
-                Status::GUATIAO_ERR_INTERNAL,
-                "unused in resume test",
-            ))
+            let script = self.script.lock().unwrap();
+            match self.ending {
+                Ending::Exited(code)
+                    if script.requests > 0
+                        && script.chunks.is_empty()
+                        && script.output.is_empty() =>
+                {
+                    ExitInfo {
+                        running: false,
+                        code: Some(code),
+                        signal: None,
+                    }
+                    .to_value()
+                    .map_err(internal)
+                }
+                Ending::Exited(_) => ExitInfo {
+                    running: true,
+                    code: None,
+                    signal: None,
+                }
+                .to_value()
+                .map_err(internal),
+                _ => Err(refuse(Status::GUATIAO_ERR_INTERNAL, "unused in this test")),
+            }
+        }
+    }
+
+    /// A run on a scripted app server that opens a thread, takes a turn, and then writes `stream`;
+    /// what it wrote back is in the second value.
+    fn scripted_run(
+        stream: &[u8],
+        directory: &str,
+        gate: Option<Gate>,
+        restriction: Option<Restriction>,
+    ) -> (CodexRun, Arc<Mutex<Vec<u8>>>) {
+        let mut turn = b"{\"id\":3,\"result\":{\"turn\":{\"id\":\"u\"}}}\n".to_vec();
+        turn.extend_from_slice(stream);
+        let terminal = ScriptedTerminal::new(
+            vec![
+                b"{\"id\":1,\"result\":{}}\n".to_vec(),
+                b"{\"id\":2,\"result\":{\"thread\":{\"id\":\"t\"}}}\n".to_vec(),
+                turn,
+            ],
+            3,
+        );
+        let writes = terminal.writes.clone();
+        let config = CodexConfig::default();
+        let run = open(Opening {
+            config: &config,
+            terminal: terminal.into_object(),
+            cwd: directory,
+            environment: &BTreeMap::new(),
+            mode: Mode {
+                config: &config,
+                project_settings: true,
+                answer_only: false,
+                desk: false,
+                assistant: None,
+                model: None,
+                profile: None,
+            },
+            thread: ThreadStart::New,
+            model: None,
+            effort: None,
+            instructions: None,
+            gate,
+            restriction,
+            profile: None,
+        })
+        .unwrap();
+        run.send_message(AgentMessage {
+            text: "go".to_owned(),
+        })
+        .unwrap();
+        (run, writes)
+    }
+
+    /// Every event the run tells until it has been quiet for a moment.
+    fn events_until_quiet(run: &CodexRun) -> Vec<AgentEvent> {
+        let mut events = Vec::new();
+        while let Ok(Some(event)) = run.next_event(400) {
+            events.push(event);
+        }
+        events
+    }
+
+    /// Opens a thread on `terminal` with the settings of an ungated Mission's.
+    fn open_on(
+        terminal: ScriptedTerminal,
+        config: &CodexConfig,
+    ) -> Result<CodexRun, ProviderError> {
+        open(Opening {
+            config,
+            terminal: terminal.into_object(),
+            cwd: "/work",
+            environment: &BTreeMap::new(),
+            mode: Mode {
+                config,
+                project_settings: true,
+                answer_only: false,
+                desk: false,
+                assistant: None,
+                model: None,
+                profile: None,
+            },
+            thread: ThreadStart::New,
+            model: None,
+            effort: None,
+            instructions: None,
+            gate: None,
+            restriction: None,
+            profile: None,
+        })
+    }
+
+    /// The decision the app server was sent, once it has been.
+    fn written_decision(writes: &Arc<Mutex<Vec<u8>>>) -> Option<(Value, String)> {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let written = String::from_utf8(writes.lock().unwrap().clone()).unwrap();
+            if let Some(decision) = written
+                .lines()
+                .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                .find_map(|message| message.pointer("/result/decision").cloned())
+            {
+                // What follows a decision (the steer) is written in the same moment.
+                std::thread::sleep(Duration::from_millis(100));
+                let written = String::from_utf8(writes.lock().unwrap().clone()).unwrap();
+                return Some((decision, written));
+            }
+            if Instant::now() > deadline {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(20));
         }
     }
 
     #[test]
     fn resume_reattaches_and_submits_a_turn_to_the_same_provider_thread() {
         let run_id = RunId::try_new("codex-thread-42").unwrap();
-        let spec = Arc::new(Mutex::new(None));
-        let writes = Arc::new(Mutex::new(Vec::new()));
-        let killed = Arc::new(AtomicBool::new(false));
-        let terminal = ResumeTerminal {
-            spec: spec.clone(),
-            input: b"{\"id\":1,\"result\":{}}\n{\"id\":2,\"result\":{\"thread\":{\"id\":\"codex-thread-42\"}}}\n".to_vec(),
-            writes: writes.clone(),
-            killed: killed.clone(),
-        };
+        let terminal = ScriptedTerminal::new(
+            vec![
+                b"{\"id\":1,\"result\":{}}\n".to_vec(),
+                b"{\"id\":2,\"result\":{\"thread\":{\"id\":\"codex-thread-42\"}}}\n".to_vec(),
+                b"{\"id\":3,\"result\":{\"turn\":{\"id\":\"turn-1\"}}}\n".to_vec(),
+            ],
+            3,
+        );
+        let (spec, writes, killed) = (
+            terminal.spec.clone(),
+            terminal.writes.clone(),
+            terminal.killed.clone(),
+        );
         let handler = CodexHandler::try_from(CodexConfig {
             executable: "codex-test".to_owned(),
             ..CodexConfig::default()
@@ -3796,23 +3764,19 @@ mod tests {
             "{{\"method\":\"item/agentMessage/delta\",\"params\":{{\"delta\":\"{delta}\"}}}}"
         );
         let (head, tail) = notification.split_at(2_000);
-        let mut input =
+        let input =
             b"\x1b[?9001h\x1b[?1004h\x1b[m\x1b]0;C:\\bin\\codex.exe\x07\x1b[?25h\r\n".to_vec();
-        input.extend_from_slice(b"{\"id\":1,\"result\":{}}\r\n\x1b[?25l");
-        input.extend_from_slice(
-            b"\x1b[5;1H{\"id\":2,\"result\":{\"thread\":{\"id\":\"codex-thread-42\"}}}\r\n",
-        );
-        input.extend_from_slice(head.as_bytes());
-        input.extend_from_slice(b"\r\n\x1b[23;2000H");
-        input.extend_from_slice(tail.as_bytes());
-        input.extend_from_slice(b"\r\n");
-        let spec = Arc::new(Mutex::new(None));
-        let terminal = ResumeTerminal {
-            spec: spec.clone(),
-            input,
-            writes: Arc::new(Mutex::new(Vec::new())),
-            killed: Arc::new(AtomicBool::new(false)),
-        };
+        let mut first = input;
+        let mut second =
+            b"\x1b[5;1H{\"id\":2,\"result\":{\"thread\":{\"id\":\"codex-thread-42\"}}}\r\n"
+                .to_vec();
+        second.extend_from_slice(head.as_bytes());
+        second.extend_from_slice(b"\r\n\x1b[23;2000H");
+        second.extend_from_slice(tail.as_bytes());
+        second.extend_from_slice(b"\r\n");
+        first.extend_from_slice(b"{\"id\":1,\"result\":{}}\r\n\x1b[?25l");
+        let terminal = ScriptedTerminal::new(vec![first, second], 2);
+        let spec = terminal.spec.clone();
         let handler = CodexHandler::try_from(CodexConfig {
             executable: "codex-test".to_owned(),
             ..CodexConfig::default()
@@ -3850,15 +3814,14 @@ mod tests {
 
     #[test]
     fn resume_rejects_a_different_thread_and_closes_the_provider_process() {
-        let spec = Arc::new(Mutex::new(None));
-        let writes = Arc::new(Mutex::new(Vec::new()));
-        let killed = Arc::new(AtomicBool::new(false));
-        let terminal = ResumeTerminal {
-            spec,
-            input: b"{\"id\":1,\"result\":{}}\n{\"id\":2,\"result\":{\"thread\":{\"id\":\"different-thread\"}}}\n".to_vec(),
-            writes,
-            killed: killed.clone(),
-        };
+        let terminal = ScriptedTerminal::new(
+            vec![
+                b"{\"id\":1,\"result\":{}}\n".to_vec(),
+                b"{\"id\":2,\"result\":{\"thread\":{\"id\":\"different-thread\"}}}\n".to_vec(),
+            ],
+            2,
+        );
+        let killed = terminal.killed.clone();
         let handler = CodexHandler::try_from(CodexConfig {
             executable: "codex-test".to_owned(),
             ..CodexConfig::default()
@@ -4065,81 +4028,49 @@ mod tests {
 
     #[test]
     fn terminal_eof_is_a_provider_failure_not_an_idle_timeout() {
-        let run = CodexRun::new(EofTerminalRun.into_object(), None);
-        let error = run
-            .read_line(Duration::from_millis(10))
-            .unwrap_err()
+        let config = CodexConfig::default();
+        let terminal = ScriptedTerminal::new(Vec::new(), 1).ending(Ending::Eof);
+        let error = open_on(terminal, &config)
+            .err()
+            .expect("an app server with no output is not a thread")
             .to_string();
 
-        assert!(error.contains("closed its terminal"));
-    }
-
-    /// An app server that exited, behind a terminal that keeps its output open (ConPTY).
-    struct ExitedTerminalRun {
-        output: Mutex<Vec<u8>>,
-    }
-
-    impl TerminalRun for ExitedTerminalRun {
-        fn pid(&self) -> i64 {
-            1
-        }
-
-        fn read(&self, dst: &mut [u8], _timeout_ms: i64) -> Result<i64, ProviderError> {
-            let mut output = self.output.lock().unwrap();
-            if output.is_empty() {
-                return Ok(READ_TIMED_OUT);
-            }
-            let count = dst.len().min(output.len());
-            dst[..count].copy_from_slice(&output[..count]);
-            output.drain(..count);
-            Ok(count as i64)
-        }
-
-        fn write(&self, _data: &[u8]) -> Result<(), ProviderError> {
-            Ok(())
-        }
-
-        fn resize(&self, _rows: i64, _cols: i64) -> Result<(), ProviderError> {
-            Ok(())
-        }
-
-        fn kill(&self) -> Result<(), ProviderError> {
-            Ok(())
-        }
-
-        fn exit_status(&self, _timeout_ms: i64) -> Result<ai6::guatiao::Value, ProviderError> {
-            ExitInfo {
-                running: false,
-                code: Some(2),
-                signal: None,
-            }
-            .to_value()
-            .map_err(internal)
-        }
+        assert!(error.contains("closed its terminal"), "{error}");
     }
 
     #[test]
     fn an_app_server_that_exits_fails_the_run_with_its_status_and_last_output() {
-        let run = CodexRun::new(
-            ExitedTerminalRun {
-                output: Mutex::new(b"error: unknown model \"nope\"\r\n".to_vec()),
-            }
-            .into_object(),
-            None,
-        );
-        let output = run.next_event(100).unwrap().unwrap();
+        // Behind a terminal that keeps its output open (ConPTY): it exits after its thread opened.
+        let terminal = ScriptedTerminal::new(
+            vec![
+                b"{\"id\":1,\"result\":{}}\n".to_vec(),
+                b"{\"id\":2,\"result\":{\"thread\":{\"id\":\"t\"}}}\nerror: unknown model \"nope\"\r\n"
+                    .to_vec(),
+            ],
+            2,
+        )
+        .ending(Ending::Exited(2));
+        let config = CodexConfig::default();
+        let run = open_on(terminal, &config).unwrap();
+        let output = run.next_event(2_000).unwrap().unwrap();
         assert_eq!(output.kind, "output");
-        let failed = run.next_event(100).unwrap().unwrap();
+        let failed = run.next_event(2_000).unwrap().unwrap();
         assert_eq!(failed.kind, "failed");
         let reason = failed.text.unwrap();
         assert!(reason.contains("exited with code 2"), "{reason}");
         assert!(reason.contains("unknown model"), "{reason}");
         assert_eq!(run.next_event(100).unwrap(), None, "reported once");
-        let error = run
-            .request("thread/start", json!({}), Duration::from_millis(100))
-            .unwrap_err()
+
+        // And one that exits before its thread opened is why the start failed.
+        let terminal =
+            ScriptedTerminal::new(vec![b"error: unknown model \"nope\"\r\n".to_vec()], 1)
+                .ending(Ending::Exited(2));
+        let error = open_on(terminal, &config)
+            .err()
+            .expect("no thread opened")
             .to_string();
         assert!(error.contains("exited with code 2"), "{error}");
+        assert!(error.contains("unknown model"), "{error}");
     }
 
     #[test]
@@ -4149,12 +4080,14 @@ mod tests {
             tail_line_bytes: 4,
             ..CodexConfig::default()
         };
-        let run = CodexRun::new(EofTerminalRun.into_object(), None).limited_by(&config);
-        for line in ["one one", "two two", "three three"] {
-            run.remember_output(line);
-        }
-
-        let reason = run.exit_reason();
+        let terminal =
+            ScriptedTerminal::new(vec![b"one one\r\ntwo two\r\nthree three\r\n".to_vec()], 1)
+                .ending(Ending::Exited(1));
+        let reason = open_on(terminal, &config)
+            .err()
+            .expect("no thread opened")
+            .to_string();
+        let reason = reason.trim_end_matches(" (GUATIAO_ERR_INTERNAL)");
         assert!(reason.ends_with("its last output:\ntwo \nthre"), "{reason}");
     }
 
