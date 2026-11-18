@@ -1909,6 +1909,8 @@ async fn scheduler_loop(base: DaemonState) {
         #[cfg(feature = "cables-mcp")]
         {
             green_ink::deliver_decisions(&state).await;
+            let sweeping = state.clone();
+            let _ = tokio::task::spawn_blocking(move || green_ink::report_unspent(&sweeping)).await;
             cable_wakes::wake_idle(&state).await;
             issues::deliver_replies(&state).await;
             issues::deliver_proposal_outcomes(&state).await;
@@ -14802,7 +14804,7 @@ theater = \"other-box\"
             let held = run(arguments.clone()).await;
             let error = held["error"].as_str().unwrap_or_default();
             assert!(
-                error.contains("request_approval") && error.contains("origin:refs/heads/main"),
+                error.contains("is filed") && error.contains("origin:refs/heads/main"),
                 "{arguments}: {held}"
             );
         }

@@ -16,13 +16,15 @@ use tokio::time::Instant;
 use super::{
     DaemonState, ResumeMission, publish_lifecycle, queue_event, resume_mission, sync_run_record,
 };
-use crate::directorates::m::approvals::{ActionScope, GREEN_INK_REASON, Requirement};
+use crate::directorates::m::approvals::{ActionScope, GREEN_INK_REASON, Requirement, StepRule};
 use crate::directorates::m::mission::{Mission, MissionState};
 use crate::directorates::m::roster::Roster;
 use crate::directorates::registry::agent_records::AgentOutcome;
 use crate::directorates::registry::approvals::{
     Approval, ApprovalLink, ApprovalRequest, ApprovalStatus, Decision,
 };
+use crate::directorates::registry::logbook::Severity;
+use crate::directorates::registry::reports::ReportFiler;
 use crate::directorates::registry::store::AuditRecord;
 use crate::directorates::registry::timeline::TimelineEvent;
 use crate::{MissionId, RunId};
@@ -54,7 +56,7 @@ pub(super) struct Asked {
 pub(super) struct Answer {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) request_id: Option<String>,
-    /// `approved`, `pending`, `rejected`, `expired` or `not_required`.
+    /// `approved`, `pending`, `rejected`, `expired`, `revoked` or `not_required`.
     pub(super) status: &'static str,
     /// When an approval stops covering the step, or when a pending request expires.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -131,6 +133,17 @@ impl Desk {
             })
             .map_err(|e| e.to_string())?;
         let policy = &operation.green_ink;
+        let parked = match policy.rule(&scope) {
+            Some((StepRule::Deny, entry)) => {
+                return Err(format!(
+                    "the Operation denies {} {} (green_ink deny {entry:?}); the step is not asked for",
+                    scope.kind, scope.target
+                ));
+            }
+            Some((StepRule::Park, _)) => true,
+            _ => false,
+        };
+        let (always, exposed) = (always || parked, asked.exposed || parked);
         match policy.requirement(&clearance, &scope) {
             Requirement::NotRequired if always => {}
             Requirement::NotRequired => {
@@ -175,9 +188,14 @@ impl Desk {
             if matches!(status, ApprovalStatus::Pending(_)) {
                 hold(state, &asked.mission);
             }
-            return Ok(answer(&status));
+            return Ok(answer_at(&status, now));
         }
-        if !asked.exposed
+        if let Some(earlier) =
+            self.earlier(&asked.operation, &asked.mission, &request.scope, now)?
+        {
+            return Ok(earlier);
+        }
+        if !exposed
             && let Some(approval) = registry
                 .approve_by_class(&request, mission.role_id.as_deref(), &clearance, now)
                 .map_err(unavailable)?
@@ -212,12 +230,87 @@ impl Desk {
         hold(state, &asked.mission);
         Ok(answer(&status))
     }
+    /// The answer an earlier request for the same step gives, if one still stands: it waits, it
+    /// is approved and live, or a person rejected it and nobody reopened it. A second request
+    /// for the step is never filed in its place.
+    fn earlier(
+        &self,
+        operation: &str,
+        mission: &str,
+        scope: &ActionScope,
+        now: f64,
+    ) -> Result<Option<Answer>, String> {
+        let state = &self.state;
+        let mut same = state
+            .intake
+            .step_requests(operation, &scope.kind)
+            .map_err(|error| format!("the request was not recorded: {error}"))?
+            .into_iter()
+            .filter(|status| status.request().scope.same_step(scope))
+            .collect::<Vec<_>>();
+        let when = |status: &ApprovalStatus| match status {
+            ApprovalStatus::Pending(request) => request.requested_at,
+            ApprovalStatus::Decided(approval) => approval.at,
+        };
+        same.sort_by(|left, right| when(right).total_cmp(&when(left)));
+        for status in &same {
+            let request = status.request();
+            let found = match status {
+                ApprovalStatus::Pending(request) if request.expires_at > now => {
+                    if request.mission.as_str() == mission {
+                        hold(state, mission);
+                    }
+                    let mut found = answer(status);
+                    found.message = Some(format!(
+                        "this step is already requested ({}); no second request was filed. An \
+                         operator decides; do not take the step before it is approved",
+                        request.id
+                    ));
+                    found
+                }
+                ApprovalStatus::Decided(approval) if approval.is_live(now) => answer(status),
+                ApprovalStatus::Decided(approval) if approval.decision == Decision::Rejected => {
+                    Answer {
+                        request_id: Some(request.id.clone()),
+                        status: "rejected",
+                        expires_at: None,
+                        message: Some(format!(
+                            "{} rejected this step{}. The rejection stands until an operator \
+                             reopens request {}; do not ask again and do not take the step",
+                            approval.signer,
+                            approval
+                                .note
+                                .as_deref()
+                                .map(|note| format!(": {note}"))
+                                .unwrap_or_default(),
+                            request.id
+                        )),
+                    }
+                }
+                _ => continue,
+            };
+            gate_line(
+                state,
+                operation,
+                mission,
+                &scope.kind,
+                &scope.target,
+                &format!("{} by request {}", found.status, request.id),
+            );
+            return Ok(Some(found));
+        }
+        Ok(None)
+    }
 }
 
 /// What a harness gate asks before a command runs: may this Agent take these steps now?
 pub(super) struct Checked {
     pub(super) operation: String,
     pub(super) mission: String,
+    /// The Run that attempts the steps, when the caller knows it.
+    pub(super) run: Option<String>,
+    /// Whether the Run's exposure keeps it from class authorisations.
+    pub(super) exposed: bool,
     pub(super) agent: String,
     pub(super) steps: Vec<(String, String)>,
 }
@@ -253,6 +346,8 @@ pub(super) fn step_check(
         let answers = desk.check(Checked {
             operation,
             mission: mission.clone(),
+            run: None,
+            exposed: true,
             agent: agent.clone(),
             steps: steps
                 .iter()
@@ -267,8 +362,9 @@ pub(super) fn step_check(
 }
 
 impl Desk {
-    /// Answers, for each step, whether the Agent may take it now. Nothing is recorded: the
-    /// gate refuses what is not covered and tells the Agent to ask with `request_approval`.
+    /// Answers, for each step, whether the Agent may take it now. A step no approval covers is
+    /// filed as a request on the Agent's behalf, so a denial always leaves a request to decide;
+    /// when that cannot be filed the step is refused naming why. Every answer is journaled.
     ///
     /// # Errors
     ///
@@ -294,24 +390,118 @@ impl Desk {
                         .map(|()| scope)
                 })
                 .map_err(|e| e.to_string())?;
-            let (status, request_id, message) = match policy.requirement(&clearance, &scope) {
-                Requirement::NotRequired => ("not_required", None, None),
-                Requirement::GreenInk => match state
-                    .intake
-                    .live_approval(&checked.operation, &checked.mission, &scope, now)
-                    .map_err(|error| format!("green ink could not be checked: {error}"))?
-                {
-                    Some(approval) => ("approved", Some(approval.request.id), None),
-                    None => ("needs_approval", None, None),
-                },
-                _ => (
-                    "refused",
-                    None,
-                    Some(format!(
-                        "a {clearance} Agent may not {kind} under this Operation's policy"
-                    )),
+            let rule = policy.rule(&scope);
+            let (mut status, mut request_id, mut message) =
+                match policy.requirement(&clearance, &scope) {
+                    _ if matches!(rule, Some((StepRule::Deny, _))) => (
+                        "refused",
+                        None,
+                        Some(format!(
+                            "this Operation denies {kind} {target} (green_ink deny {:?})",
+                            rule.map_or("", |(_, entry)| entry)
+                        )),
+                    ),
+                    Requirement::NotRequired if rule.is_none() => ("not_required", None, None),
+                    Requirement::NotRequired | Requirement::GreenInk => match state
+                        .intake
+                        .live_approval(&checked.operation, &checked.mission, &scope, now)
+                        .map_err(|error| format!("green ink could not be checked: {error}"))?
+                    {
+                        Some(approval) => {
+                            if let Err(error) = state.intake.mark_approval_used(
+                                &checked.operation,
+                                &approval.request.id,
+                                now,
+                            ) {
+                                eprintln!(
+                                    "ai6: green ink approval {:?} was used but not marked: {error}",
+                                    approval.request.id
+                                );
+                            }
+                            ("approved", Some(approval.request.id), None)
+                        }
+                        None => ("needs_approval", None, None),
+                    },
+                    _ => (
+                        "refused",
+                        None,
+                        Some(format!(
+                            "a {clearance} Agent may not {kind} under this Operation's policy"
+                        )),
+                    ),
+                };
+            if status == "needs_approval" {
+                let run = checked
+                    .run
+                    .clone()
+                    .or_else(|| super::run_hold(state, &checked.mission).map(|hold| hold.id));
+                let filed = match run {
+                    Some(run) => self.request(Asked {
+                        operation: checked.operation.clone(),
+                        mission: checked.mission.clone(),
+                        run,
+                        agent: checked.agent.clone(),
+                        kind: kind.clone(),
+                        target: target.clone(),
+                        reason: format!(
+                            "The Agent attempted to {kind} {target} and the gate stopped it \
+                             until a person approves. Filed by the gate; the Agent gave no \
+                             reason of its own."
+                        ),
+                        links: Vec::new(),
+                        // A fresh key each time: an earlier request for the step that no longer stands
+                        // (revoked, spent, lapsed) must not be answered in place of a new one.
+                        idempotency_key: format!(
+                            "gate:{kind}:{target}:{}",
+                            uuid::Uuid::new_v4().simple()
+                        ),
+                        exposed: checked.exposed,
+                    }),
+                    None => Err("the Mission has no Run to file it under".to_owned()),
+                };
+                match filed {
+                    Ok(answer) if answer.status == "approved" => {
+                        status = "approved";
+                        request_id = answer.request_id;
+                    }
+                    Ok(answer) if answer.status == "pending" => {
+                        message = Some(format!(
+                            "denied until a person approves; request {} is filed. Wait for the \
+                             decision, which arrives as a message",
+                            answer.request_id.as_deref().unwrap_or_default()
+                        ));
+                        request_id = answer.request_id;
+                    }
+                    Ok(answer) => {
+                        status = "refused";
+                        message = answer.message;
+                        request_id = answer.request_id;
+                    }
+                    Err(why) => {
+                        status = "refused";
+                        message =
+                            Some(format!("denied, and the request could not be filed: {why}"));
+                    }
+                }
+            }
+            gate_line(
+                state,
+                &checked.operation,
+                &checked.mission,
+                &kind,
+                &target,
+                &format!(
+                    "{status}{}{}",
+                    request_id
+                        .as_deref()
+                        .map(|id| format!(" (request {id})"))
+                        .unwrap_or_default(),
+                    message
+                        .as_deref()
+                        .map(|why| format!(": {why}"))
+                        .unwrap_or_default()
                 ),
-            };
+            );
             answers.push(StepAnswer {
                 kind,
                 target,
@@ -322,6 +512,41 @@ impl Desk {
         }
         Ok(answers)
     }
+}
+
+/// The Station's journal line for a gate decision: whose step, and what became of it.
+fn gate_line(
+    state: &DaemonState,
+    operation: &str,
+    mission: &str,
+    kind: &str,
+    target: &str,
+    outcome: &str,
+) {
+    eprintln!(
+        "ai6: green ink at {}: Operation {operation:?}, Mission {mission:?}, {kind} {target:?}: {outcome}",
+        state.station_id
+    );
+}
+
+/// As [`answer`], except that an approval a person withdrew, or that has lapsed, is not `approved`.
+fn answer_at(status: &ApprovalStatus, now: f64) -> Answer {
+    let mut found = answer(status);
+    if let ApprovalStatus::Decided(approval) = status
+        && approval.decision == Decision::Approved
+        && !approval.is_live(now)
+    {
+        found.status = if approval.revoked.is_some() {
+            "revoked"
+        } else {
+            "expired"
+        };
+        found.message = Some(
+            "the approval no longer covers the step; ask again with a new idempotency_key"
+                .to_owned(),
+        );
+    }
+    found
 }
 
 fn answer(status: &ApprovalStatus) -> Answer {
@@ -516,6 +741,73 @@ pub(super) async fn deliver_decisions(state: &DaemonState) {
                 resume_with(state, mission_id, &untold, now).await;
             }
             None => {}
+        }
+    }
+}
+
+/// When the last sweep for unspent approvals ran, as `f64` bits of Unix seconds.
+static UNSPENT_SWEPT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Puts in front of a person each approval that lapsed since the last sweep with no step ever
+/// taken under it: the work it was for did not happen. One Report per approval, so a sweep seen
+/// twice, or by two Stations, files it once.
+pub(super) fn report_unspent(state: &DaemonState) {
+    use std::sync::atomic::Ordering;
+    let now = state.clock.now() as f64;
+    let since = f64::from_bits(UNSPENT_SWEPT.swap(now.to_bits(), Ordering::AcqRel));
+    report_unspent_since(state, since, now);
+}
+
+fn report_unspent_since(state: &DaemonState, since: f64, now: f64) {
+    for operation in state.roster.operations() {
+        let lapsed = match state.intake.lapsed_approvals(&operation.id, since, now) {
+            Ok(lapsed) => lapsed,
+            Err(error) => {
+                eprintln!(
+                    "ai6: unspent approvals of Operation {:?} were not read: {error}",
+                    operation.id
+                );
+                continue;
+            }
+        };
+        for approval in lapsed {
+            let request = &approval.request;
+            super::observations::observe(
+                state,
+                super::observations::Observed {
+                    operation: &operation.id,
+                    filer: ReportFiler::Probe {
+                        probe: "green-ink".to_owned(),
+                    },
+                    kind: "green_ink",
+                    severity: Severity::Warning,
+                    about: &request.id,
+                    title: format!(
+                        "Approved {} {} lapsed unspent",
+                        request.scope.kind, request.scope.target
+                    ),
+                    text: format!(
+                        "{} approved request {} to {} {} for Mission {}, and no step was taken \
+                         under it before it lapsed. The work it was for did not happen; ask \
+                         for it again or do it by hand.",
+                        approval.signer,
+                        request.id,
+                        request.scope.kind,
+                        request.scope.target,
+                        request.mission
+                    ),
+                    mission: Some(request.mission.as_str()),
+                    links: Vec::new(),
+                },
+            );
+            gate_line(
+                state,
+                &operation.id,
+                request.mission.as_str(),
+                &request.scope.kind,
+                &request.scope.target,
+                &format!("approval {} lapsed unspent", request.id),
+            );
         }
     }
 }
@@ -1228,7 +1520,7 @@ mod tests {
         assert_eq!(output["permissionDecision"], "deny");
         let reason = output["permissionDecisionReason"].as_str().unwrap();
         assert!(
-            reason.contains("request_approval") && reason.contains("origin:refs/heads/main"),
+            reason.contains("is filed") && reason.contains("origin:refs/heads/main"),
             "{reason}"
         );
         assert!(
@@ -1238,14 +1530,9 @@ mod tests {
             "a Mission branch needs no green ink"
         );
         assert!(hook(&environment, cwd, "cargo test").await.is_none());
-        assert!(
-            state
-                .intake
-                .pending_approvals("G", now(&state))
-                .unwrap()
-                .is_empty(),
-            "the gate asks nobody; the Agent does"
-        );
+        let filed = state.intake.pending_approvals("G", now(&state)).unwrap();
+        assert_eq!(filed.len(), 1, "the gate files the push it denied");
+        assert!(reason.contains(&filed[0].id), "{reason}");
 
         let answer: serde_json::Value = serde_json::from_str(
             &call_tool(
@@ -1262,6 +1549,10 @@ mod tests {
         )
         .unwrap();
         let request_id = answer["request_id"].as_str().unwrap().to_owned();
+        assert_eq!(
+            request_id, filed[0].id,
+            "the Agent's own request is the one filed"
+        );
         assert!(
             hook(&environment, cwd, "git push origin main")
                 .await
@@ -1410,7 +1701,7 @@ mod tests {
             .and_then(|event| event.text.as_deref())
             .expect("the refusal is an event");
         assert!(
-            refusal.contains("refused") && refusal.contains("request_approval"),
+            refusal.contains("refused") && refusal.contains("is filed"),
             "{refusal}"
         );
         // A command that takes no governed step goes ahead.
@@ -1682,6 +1973,285 @@ mod tests {
             weakened[0].contains("\"007\"") && weakened[0].contains("/opt/gate"),
             "{weakened:?}"
         );
+    }
+
+    #[test]
+    fn one_step_named_two_ways_is_one_request_and_a_rejection_stands_until_reopened() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, mission_id) = station(root.path(), "dedupe");
+        let desk = Desk::new(state.clone());
+        let first = desk
+            .request(asked(&mission_id, "007", "release", "tag v1.2.0"))
+            .unwrap();
+        assert_eq!(first.status, "pending");
+        let mut drifted = asked(&mission_id, "007", "release", "origin:refs/tags/v1.2.0");
+        drifted.idempotency_key = "another-window".to_owned();
+        drifted.run = "provider-id-later".to_owned();
+        let again = desk.request(drifted).unwrap();
+        assert_eq!(again.status, "pending");
+        assert_eq!(again.request_id, first.request_id);
+        assert_eq!(
+            state
+                .intake
+                .pending_approvals("G", now(&state))
+                .unwrap()
+                .len(),
+            1,
+            "no second row"
+        );
+        let other = desk
+            .request(asked(&mission_id, "007", "release", "tag v1.2.1"))
+            .unwrap();
+        assert_ne!(
+            other.request_id, first.request_id,
+            "another tag is another step"
+        );
+
+        let id = first.request_id.unwrap();
+        state
+            .intake
+            .decide_approval(
+                "G",
+                &id,
+                &Ruling::reject("operator-m", now(&state), Some("no such tag".to_owned())),
+            )
+            .unwrap();
+        let mut refile = asked(&mission_id, "007", "release", "refs/tags/v1.2.0");
+        refile.idempotency_key = "after-rejection".to_owned();
+        let refused = desk.request(refile).unwrap();
+        assert_eq!(refused.status, "rejected");
+        assert_eq!(refused.request_id.as_deref(), Some(id.as_str()));
+        let said = refused.message.unwrap();
+        assert!(
+            said.contains("no such tag") && said.contains("reopens"),
+            "{said}"
+        );
+        assert_eq!(
+            state
+                .intake
+                .pending_approvals("G", now(&state))
+                .unwrap()
+                .len(),
+            1,
+            "only the other tag waits"
+        );
+
+        let at = now(&state) + 1.0;
+        state
+            .intake
+            .rearm_approval(
+                "G",
+                &id,
+                &crate::directorates::registry::approvals::Rearming::new("operator-m", at, None),
+                at + 600.0,
+            )
+            .unwrap();
+        let reopened = desk
+            .request(asked(&mission_id, "007", "release", "tag v1.2.0"))
+            .unwrap();
+        assert_eq!(reopened.status, "pending");
+        assert_eq!(reopened.request_id.as_deref(), Some(id.as_str()));
+    }
+
+    #[test]
+    fn the_policy_denies_and_parks_the_steps_it_lists() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(
+            root.path(),
+            "[operation.G.green_ink]\ndeny = [\"release refs/tags/v0.*\"]\npark = [\"merge PR 7\"]\n\
+             [operation.G.green_ink.unattended]\nfield = [\"merge\"]\n",
+            AGENTS,
+        );
+        let mission_id = format!("green-ink-rules-{}", std::process::id());
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .create(
+                MissionId::try_new(&mission_id).unwrap(),
+                Some("G".to_owned()),
+                "release the work".to_owned(),
+                Some("007".to_owned()),
+                None,
+            )
+            .unwrap();
+        let desk = Desk::new(state.clone());
+        let denied = desk
+            .request(asked(&mission_id, "007", "release", "tag v0.3.0"))
+            .unwrap_err();
+        assert!(
+            denied.contains("denies") && denied.contains("v0.*"),
+            "{denied}"
+        );
+        let checked = desk
+            .check(Checked {
+                operation: "G".to_owned(),
+                mission: mission_id.clone(),
+                run: Some("provider-id-direct".to_owned()),
+                exposed: false,
+                agent: "007".to_owned(),
+                steps: vec![("release".to_owned(), "refs/tags/v0.3.0".to_owned())],
+            })
+            .unwrap();
+        assert_eq!(checked[0].status, "refused");
+        assert!(
+            state
+                .intake
+                .pending_approvals("G", now(&state))
+                .unwrap()
+                .is_empty(),
+            "a denied step files nothing"
+        );
+
+        assert_eq!(
+            desk.request(asked(&mission_id, "007", "merge", "PR 8"))
+                .unwrap()
+                .status,
+            "not_required",
+            "unattended for field"
+        );
+        assert_eq!(
+            desk.request(asked(&mission_id, "007", "merge", "PR 7"))
+                .unwrap()
+                .status,
+            "pending",
+            "a parked step waits whatever the policy lets through"
+        );
+    }
+
+    #[test]
+    fn a_denied_step_is_filed_or_refused_naming_why_it_was_not() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, mission_id) = station(root.path(), "denied");
+        let desk = Desk::new(state.clone());
+        let check = |run: Option<&str>| {
+            desk.check(Checked {
+                operation: "G".to_owned(),
+                mission: mission_id.clone(),
+                run: run.map(str::to_owned),
+                exposed: false,
+                agent: "007".to_owned(),
+                steps: vec![("push".to_owned(), "origin:refs/heads/main".to_owned())],
+            })
+            .unwrap()
+            .remove(0)
+        };
+        // The Mission has no Run on record, so nothing can be filed under one: loud, not silent.
+        let unfiled = check(None);
+        assert_eq!(unfiled.status, "refused");
+        assert!(
+            unfiled
+                .message
+                .as_deref()
+                .unwrap()
+                .contains("could not be filed"),
+            "{unfiled:?}"
+        );
+        assert!(
+            state
+                .intake
+                .pending_approvals("G", now(&state))
+                .unwrap()
+                .is_empty()
+        );
+
+        let filed = check(Some("provider-id-direct"));
+        assert_eq!(filed.status, "needs_approval");
+        let id = filed
+            .request_id
+            .clone()
+            .expect("the filed request is named");
+        let pending = state.intake.pending_approvals("G", now(&state)).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].id, id);
+        let again = check(Some("provider-id-later"));
+        assert_eq!(
+            again.request_id.as_deref(),
+            Some(id.as_str()),
+            "one request"
+        );
+        assert_eq!(
+            state
+                .intake
+                .pending_approvals("G", now(&state))
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn an_approval_decided_after_its_run_settled_is_spent_by_the_next_window_or_reported() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, mission_id) = station(root.path(), "outlive");
+        let desk = Desk::new(state.clone());
+        let at = now(&state);
+        let mut first = asked(&mission_id, "007", "merge", "PR 11");
+        first.run = "provider-id-window-1".to_owned();
+        let one = desk.request(first).unwrap().request_id.unwrap();
+        let mut second = asked(&mission_id, "007", "merge", "PR 12");
+        second.run = "provider-id-window-1".to_owned();
+        let two = desk.request(second).unwrap().request_id.unwrap();
+
+        // Window 1 is over. Its asks are decided later: one lives, one lapsed meanwhile.
+        state
+            .intake
+            .decide_approval("G", &one, &Ruling::approve("operator-m", at, at + 3600.0))
+            .unwrap();
+        state
+            .intake
+            .decide_approval(
+                "G",
+                &two,
+                &Ruling::approve("operator-m", at - 100.0, at - 10.0),
+            )
+            .unwrap();
+
+        // Window 2 of the same Mission finds the live approval covering its step.
+        let next = |target: &str| {
+            desk.check(Checked {
+                operation: "G".to_owned(),
+                mission: mission_id.clone(),
+                run: Some("provider-id-window-2".to_owned()),
+                exposed: false,
+                agent: "007".to_owned(),
+                steps: vec![("merge".to_owned(), target.to_owned())],
+            })
+            .unwrap()
+            .remove(0)
+        };
+        let spent = next("PR 11");
+        assert_eq!(spent.status, "approved");
+        assert_eq!(spent.request_id.as_deref(), Some(one.as_str()));
+
+        // The one nobody spent before it lapsed reaches a person; the used one does not.
+        report_unspent_since(&state, 0.0, at);
+        let reports = state
+            .intake
+            .reports(
+                &crate::directorates::registry::reports::ReportFilter::all().of_kind("green_ink"),
+            )
+            .unwrap();
+        assert_eq!(reports.len(), 1, "{reports:?}");
+        assert!(reports[0].title.contains("PR 12"), "{}", reports[0].title);
+        report_unspent_since(&state, 0.0, at);
+        assert_eq!(
+            state
+                .intake
+                .reports(
+                    &crate::directorates::registry::reports::ReportFilter::all()
+                        .of_kind("green_ink")
+                )
+                .unwrap()
+                .len(),
+            1,
+            "a sweep seen twice files once"
+        );
+        let used = state.intake.approval("G", &one, at).unwrap().unwrap();
+        let ApprovalStatus::Decided(used) = used else {
+            panic!("decided")
+        };
+        assert!(used.used_at.is_some());
     }
 
     #[test]

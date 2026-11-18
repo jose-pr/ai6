@@ -578,6 +578,9 @@ pub ai6::directorates::m::approvals::GreenInkPreset::Strict
 pub ai6::directorates::m::approvals::Requirement::GreenInk
 pub ai6::directorates::m::approvals::Requirement::NotRequired
 pub ai6::directorates::m::approvals::Requirement::Refused
+#[non_exhaustive] pub enum ai6::directorates::m::approvals::StepRule
+pub ai6::directorates::m::approvals::StepRule::Deny
+pub ai6::directorates::m::approvals::StepRule::Park
 #[non_exhaustive] pub struct ai6::directorates::m::approvals::ActionScope
 pub ai6::directorates::m::approvals::ActionScope::kind: alloc::string::String
 pub ai6::directorates::m::approvals::ActionScope::target: alloc::string::String
@@ -586,6 +589,7 @@ pub fn ai6::directorates::m::approvals::ActionScope::check_size(&self, &ai6::sta
 pub fn ai6::directorates::m::approvals::ActionScope::covers(&self, &ai6::directorates::m::approvals::ActionScope) -> bool
 pub fn ai6::directorates::m::approvals::ActionScope::pushed_ref(&self) -> alloc::string::String
 pub fn ai6::directorates::m::approvals::ActionScope::remote(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::m::approvals::ActionScope::same_step(&self, &Self) -> bool
 pub fn ai6::directorates::m::approvals::ActionScope::try_new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> core::io::error::Result<Self>
 pub fn ai6::directorates::m::approvals::ActionScope::validate(&self) -> core::io::error::Result<()>
 #[non_exhaustive] pub struct ai6::directorates::m::approvals::GitContext
@@ -597,6 +601,7 @@ impl ai6::directorates::m::approvals::GreenInkDefinition
 pub fn ai6::directorates::m::approvals::GreenInkDefinition::resolve(&self) -> core::result::Result<ai6::directorates::m::approvals::GreenInkPolicy, alloc::string::String>
 pub struct ai6::directorates::m::approvals::GreenInkPolicy
 impl ai6::directorates::m::approvals::GreenInkPolicy
+pub fn ai6::directorates::m::approvals::GreenInkPolicy::approval_ttl(&self) -> core::time::Duration
 pub fn ai6::directorates::m::approvals::GreenInkPolicy::is_protected(&self, &str) -> bool
 pub fn ai6::directorates::m::approvals::GreenInkPolicy::kinds(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
 pub fn ai6::directorates::m::approvals::GreenInkPolicy::preset(ai6::directorates::m::approvals::GreenInkPreset) -> Self
@@ -604,6 +609,7 @@ pub fn ai6::directorates::m::approvals::GreenInkPolicy::protected(&self) -> &[al
 pub fn ai6::directorates::m::approvals::GreenInkPolicy::request_ttl(&self) -> core::time::Duration
 pub fn ai6::directorates::m::approvals::GreenInkPolicy::requesters(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
 pub fn ai6::directorates::m::approvals::GreenInkPolicy::requirement(&self, &str, &ai6::directorates::m::approvals::ActionScope) -> ai6::directorates::m::approvals::Requirement
+pub fn ai6::directorates::m::approvals::GreenInkPolicy::rule(&self, &ai6::directorates::m::approvals::ActionScope) -> core::option::Option<(ai6::directorates::m::approvals::StepRule, &str)>
 pub fn ai6::directorates::m::approvals::GreenInkPolicy::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::cmp::PartialEq for ai6::directorates::m::approvals::GreenInkPolicy
 pub fn ai6::directorates::m::approvals::GreenInkPolicy::eq(&self, &Self) -> bool
@@ -1982,30 +1988,30 @@ pub fn ai6::directorates::m::promotion::PromotionDefinition::resolve(&self) -> c
 pub ai6::directorates::m::promotion::PromotionPolicy::double_o: ai6::directorates::m::promotion::PromotionStep
 pub ai6::directorates::m::promotion::PromotionPolicy::field: ai6::directorates::m::promotion::PromotionStep
 impl ai6::directorates::m::promotion::PromotionPolicy
+pub fn ai6::directorates::m::promotion::PromotionPolicy::brief(&self, &ai6::directorates::m::promotion::Promotion, &ai6::directorates::m::promotion::PromotionSubject<'_>, &ai6::directorates::registry::agent_records::AgentTally, &[&ai6::directorates::registry::agent_records::AgentTally], f64) -> alloc::string::String
+impl ai6::directorates::m::promotion::PromotionPolicy
 pub fn ai6::directorates::m::promotion::PromotionPolicy::due(&self, &str, &str, &ai6::directorates::registry::agent_records::AgentTally, &[&ai6::directorates::registry::agent_records::AgentTally], f64) -> core::option::Option<ai6::directorates::m::promotion::Promotion>
 impl core::default::Default for ai6::directorates::m::promotion::PromotionPolicy
 pub fn ai6::directorates::m::promotion::PromotionPolicy::default() -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::promotion::PromotionStep
 pub ai6::directorates::m::promotion::PromotionStep::max_failure_rate: core::option::Option<f64>
 pub ai6::directorates::m::promotion::PromotionStep::missions: u64
-pub fn ai6::directorates::m::promotion::PromotionPolicy::brief(&self, &ai6::directorates::m::promotion::Promotion, &ai6::directorates::m::promotion::PromotionSubject<'_>, &ai6::directorates::registry::agent_records::AgentTally, &[&ai6::directorates::registry::agent_records::AgentTally], f64) -> alloc::string::String
-impl ai6::directorates::m::promotion::PromotionPolicy
 pub ai6::directorates::m::promotion::PromotionStep::quiet_days: u64
 pub ai6::directorates::m::promotion::PromotionStep::quiet_on: alloc::vec::Vec<ai6::directorates::registry::agent_records::AgentOutcome>
 impl ai6::directorates::m::promotion::PromotionStep
 pub fn ai6::directorates::m::promotion::PromotionStep::after(u64) -> Self
 pub fn ai6::directorates::m::promotion::PromotionStep::shortfall(&self, &ai6::directorates::registry::agent_records::AgentTally, &[&ai6::directorates::registry::agent_records::AgentTally], f64) -> core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct ai6::directorates::m::promotion::PromotionSubject<'a>
+pub ai6::directorates::m::promotion::PromotionSubject::agent: &'a str
+pub ai6::directorates::m::promotion::PromotionSubject::ceiling: &'a str
+pub ai6::directorates::m::promotion::PromotionSubject::model: core::option::Option<&'a str>
+pub ai6::directorates::m::promotion::PromotionSubject::operation: &'a str
 pub const ai6::directorates::m::promotion::CLEARANCE_KIND: &str
 pub const ai6::directorates::m::promotion::DEFAULT_00_MAX_FAILURE_RATE: f64
 pub const ai6::directorates::m::promotion::DEFAULT_00_MISSIONS: u64
 pub const ai6::directorates::m::promotion::DEFAULT_00_QUIET_DAYS: u64
 pub const ai6::directorates::m::promotion::DEFAULT_FIELD_MISSIONS: u64
 pub const ai6::directorates::m::promotion::DEFAULT_FIELD_QUIET_DAYS: u64
-#[non_exhaustive] pub struct ai6::directorates::m::promotion::PromotionSubject<'a>
-pub ai6::directorates::m::promotion::PromotionSubject::agent: &'a str
-pub ai6::directorates::m::promotion::PromotionSubject::ceiling: &'a str
-pub ai6::directorates::m::promotion::PromotionSubject::model: core::option::Option<&'a str>
-pub ai6::directorates::m::promotion::PromotionSubject::operation: &'a str
 pub mod ai6::directorates::m::records
 #[non_exhaustive] pub struct ai6::directorates::m::records::RecordForm
 pub ai6::directorates::m::records::RecordForm::form: serde_json::value::Value
@@ -4705,6 +4711,7 @@ pub ai6::directorates::registry::approvals::Approval::request: ai6::directorates
 pub ai6::directorates::registry::approvals::Approval::revoked: core::option::Option<ai6::directorates::registry::approvals::Revocation>
 pub ai6::directorates::registry::approvals::Approval::signer: alloc::string::String
 pub ai6::directorates::registry::approvals::Approval::spent_at: core::option::Option<f64>
+pub ai6::directorates::registry::approvals::Approval::used_at: core::option::Option<f64>
 impl ai6::directorates::registry::approvals::Approval
 pub fn ai6::directorates::registry::approvals::Approval::is_live(&self, f64) -> bool
 #[non_exhaustive] pub struct ai6::directorates::registry::approvals::ApprovalLink
@@ -4786,8 +4793,10 @@ pub fn ai6::directorates::registry::approvals::ApprovalStore::approve_by_class(&
 pub fn ai6::directorates::registry::approvals::ApprovalStore::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
 pub fn ai6::directorates::registry::approvals::ApprovalStore::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::approvals::ApprovalStore::expired_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::directorates::registry::approvals::ApprovalStore::lapsed_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::approvals::ApprovalStore::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::approvals::ApprovalStore::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::approvals::ApprovalStore::mark_approval_used(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::approvals::ApprovalStore::mark_rearming_told(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::approvals::ApprovalStore::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::approvals::ApprovalStore::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
@@ -4797,14 +4806,17 @@ pub fn ai6::directorates::registry::approvals::ApprovalStore::request_approval(&
 pub fn ai6::directorates::registry::approvals::ApprovalStore::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::approvals::ApprovalStore::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::approvals::ApprovalStore::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::approvals::ApprovalStore::step_requests(&self, &str, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 impl ai6::directorates::registry::approvals::ApprovalStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::approval(&self, &str, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::sql::SqlRegistry::expired_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::lapsed_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mark_approval_used(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mark_rearming_told(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
@@ -4814,14 +4826,17 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::request_approval(&self, &a
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::sql::SqlRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::step_requests(&self, &str, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 impl ai6::directorates::registry::approvals::ApprovalStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::approval(&self, &str, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::store::FileRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
 pub fn ai6::directorates::registry::store::FileRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::store::FileRegistry::expired_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::directorates::registry::store::FileRegistry::lapsed_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::mark_approval_used(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_rearming_told(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::store::FileRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
@@ -4831,6 +4846,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::request_approval(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::store::FileRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::step_requests(&self, &str, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub mod ai6::directorates::registry::assessments
 #[non_exhaustive] pub enum ai6::directorates::registry::assessments::Confidence
 pub ai6::directorates::registry::assessments::Confidence::High
@@ -5103,8 +5119,10 @@ pub fn ai6::directorates::registry::backend::ApprovalStore::approve_by_class(&se
 pub fn ai6::directorates::registry::backend::ApprovalStore::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
 pub fn ai6::directorates::registry::backend::ApprovalStore::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::backend::ApprovalStore::expired_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::directorates::registry::backend::ApprovalStore::lapsed_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::backend::ApprovalStore::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::backend::ApprovalStore::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::backend::ApprovalStore::mark_approval_used(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::backend::ApprovalStore::mark_rearming_told(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::backend::ApprovalStore::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::backend::ApprovalStore::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
@@ -5114,14 +5132,17 @@ pub fn ai6::directorates::registry::backend::ApprovalStore::request_approval(&se
 pub fn ai6::directorates::registry::backend::ApprovalStore::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::backend::ApprovalStore::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::backend::ApprovalStore::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::backend::ApprovalStore::step_requests(&self, &str, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 impl ai6::directorates::registry::approvals::ApprovalStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::approval(&self, &str, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::sql::SqlRegistry::expired_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::lapsed_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mark_approval_used(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mark_rearming_told(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
@@ -5131,14 +5152,17 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::request_approval(&self, &a
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::sql::SqlRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::step_requests(&self, &str, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 impl ai6::directorates::registry::approvals::ApprovalStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::approval(&self, &str, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::store::FileRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
 pub fn ai6::directorates::registry::store::FileRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::store::FileRegistry::expired_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::directorates::registry::store::FileRegistry::lapsed_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::mark_approval_used(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_rearming_told(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::store::FileRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
@@ -5148,6 +5172,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::request_approval(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::store::FileRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::step_requests(&self, &str, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub trait ai6::directorates::registry::backend::AssistantLogStore
 pub fn ai6::directorates::registry::backend::AssistantLogStore::assistant_conversations(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantConversation>>
 pub fn ai6::directorates::registry::backend::AssistantLogStore::assistant_log(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantLogEntry>>
@@ -7893,8 +7918,10 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::approve_by_class(&self, &a
 pub fn ai6::directorates::registry::sql::SqlRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::sql::SqlRegistry::expired_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::lapsed_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mark_approval_used(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mark_rearming_told(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
@@ -7904,6 +7931,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::request_approval(&self, &a
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::sql::SqlRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::step_requests(&self, &str, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 impl ai6::directorates::registry::assistant_log::AssistantLogStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::assistant_conversations(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantConversation>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::assistant_log(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantLogEntry>>
@@ -8208,8 +8236,10 @@ pub fn ai6::directorates::registry::store::FileRegistry::approve_by_class(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
 pub fn ai6::directorates::registry::store::FileRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::store::FileRegistry::expired_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::directorates::registry::store::FileRegistry::lapsed_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::mark_approval_used(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_rearming_told(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::store::FileRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
@@ -8219,6 +8249,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::request_approval(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::store::FileRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::step_requests(&self, &str, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 impl ai6::directorates::registry::assistant_log::AssistantLogStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::assistant_conversations(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantConversation>>
 pub fn ai6::directorates::registry::store::FileRegistry::assistant_log(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantLogEntry>>
@@ -10725,6 +10756,9 @@ pub fn ai6::directorates::registry::logbook::StationFindingKind::from_str(&str) 
 #[non_exhaustive] pub enum ai6::StationRole
 pub ai6::StationRole::Control
 pub ai6::StationRole::Execution
+#[non_exhaustive] pub enum ai6::StepRule
+pub ai6::StepRule::Deny
+pub ai6::StepRule::Park
 #[non_exhaustive] pub enum ai6::StepStatus
 pub ai6::StepStatus::Changed
 pub ai6::StepStatus::Failed
@@ -10931,6 +10965,7 @@ pub fn ai6::directorates::m::approvals::ActionScope::check_size(&self, &ai6::sta
 pub fn ai6::directorates::m::approvals::ActionScope::covers(&self, &ai6::directorates::m::approvals::ActionScope) -> bool
 pub fn ai6::directorates::m::approvals::ActionScope::pushed_ref(&self) -> alloc::string::String
 pub fn ai6::directorates::m::approvals::ActionScope::remote(&self) -> core::option::Option<&str>
+pub fn ai6::directorates::m::approvals::ActionScope::same_step(&self, &Self) -> bool
 pub fn ai6::directorates::m::approvals::ActionScope::try_new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> core::io::error::Result<Self>
 pub fn ai6::directorates::m::approvals::ActionScope::validate(&self) -> core::io::error::Result<()>
 #[non_exhaustive] pub struct ai6::Agent
@@ -11146,6 +11181,7 @@ pub ai6::Approval::request: ai6::directorates::registry::approvals::ApprovalRequ
 pub ai6::Approval::revoked: core::option::Option<ai6::directorates::registry::approvals::Revocation>
 pub ai6::Approval::signer: alloc::string::String
 pub ai6::Approval::spent_at: core::option::Option<f64>
+pub ai6::Approval::used_at: core::option::Option<f64>
 impl ai6::directorates::registry::approvals::Approval
 pub fn ai6::directorates::registry::approvals::Approval::is_live(&self, f64) -> bool
 #[non_exhaustive] pub struct ai6::ApprovalLimits
@@ -12316,8 +12352,10 @@ pub fn ai6::directorates::registry::store::FileRegistry::approve_by_class(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
 pub fn ai6::directorates::registry::store::FileRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::store::FileRegistry::expired_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::directorates::registry::store::FileRegistry::lapsed_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::mark_approval_used(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_rearming_told(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::store::FileRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
@@ -12327,6 +12365,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::request_approval(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::store::FileRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::step_requests(&self, &str, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 impl ai6::directorates::registry::assistant_log::AssistantLogStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::assistant_conversations(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantConversation>>
 pub fn ai6::directorates::registry::store::FileRegistry::assistant_log(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantLogEntry>>
@@ -12582,6 +12621,7 @@ impl ai6::directorates::m::approvals::GreenInkDefinition
 pub fn ai6::directorates::m::approvals::GreenInkDefinition::resolve(&self) -> core::result::Result<ai6::directorates::m::approvals::GreenInkPolicy, alloc::string::String>
 pub struct ai6::GreenInkPolicy
 impl ai6::directorates::m::approvals::GreenInkPolicy
+pub fn ai6::directorates::m::approvals::GreenInkPolicy::approval_ttl(&self) -> core::time::Duration
 pub fn ai6::directorates::m::approvals::GreenInkPolicy::is_protected(&self, &str) -> bool
 pub fn ai6::directorates::m::approvals::GreenInkPolicy::kinds(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
 pub fn ai6::directorates::m::approvals::GreenInkPolicy::preset(ai6::directorates::m::approvals::GreenInkPreset) -> Self
@@ -12589,6 +12629,7 @@ pub fn ai6::directorates::m::approvals::GreenInkPolicy::protected(&self) -> &[al
 pub fn ai6::directorates::m::approvals::GreenInkPolicy::request_ttl(&self) -> core::time::Duration
 pub fn ai6::directorates::m::approvals::GreenInkPolicy::requesters(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
 pub fn ai6::directorates::m::approvals::GreenInkPolicy::requirement(&self, &str, &ai6::directorates::m::approvals::ActionScope) -> ai6::directorates::m::approvals::Requirement
+pub fn ai6::directorates::m::approvals::GreenInkPolicy::rule(&self, &ai6::directorates::m::approvals::ActionScope) -> core::option::Option<(ai6::directorates::m::approvals::StepRule, &str)>
 pub fn ai6::directorates::m::approvals::GreenInkPolicy::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::cmp::PartialEq for ai6::directorates::m::approvals::GreenInkPolicy
 pub fn ai6::directorates::m::approvals::GreenInkPolicy::eq(&self, &Self) -> bool
@@ -13184,6 +13225,8 @@ pub fn ai6::directorates::m::promotion::PromotionDefinition::resolve(&self) -> c
 pub ai6::PromotionPolicy::double_o: ai6::directorates::m::promotion::PromotionStep
 pub ai6::PromotionPolicy::field: ai6::directorates::m::promotion::PromotionStep
 impl ai6::directorates::m::promotion::PromotionPolicy
+pub fn ai6::directorates::m::promotion::PromotionPolicy::brief(&self, &ai6::directorates::m::promotion::Promotion, &ai6::directorates::m::promotion::PromotionSubject<'_>, &ai6::directorates::registry::agent_records::AgentTally, &[&ai6::directorates::registry::agent_records::AgentTally], f64) -> alloc::string::String
+impl ai6::directorates::m::promotion::PromotionPolicy
 pub fn ai6::directorates::m::promotion::PromotionPolicy::due(&self, &str, &str, &ai6::directorates::registry::agent_records::AgentTally, &[&ai6::directorates::registry::agent_records::AgentTally], f64) -> core::option::Option<ai6::directorates::m::promotion::Promotion>
 impl core::default::Default for ai6::directorates::m::promotion::PromotionPolicy
 pub fn ai6::directorates::m::promotion::PromotionPolicy::default() -> Self
@@ -13195,6 +13238,11 @@ pub ai6::PromotionStep::quiet_on: alloc::vec::Vec<ai6::directorates::registry::a
 impl ai6::directorates::m::promotion::PromotionStep
 pub fn ai6::directorates::m::promotion::PromotionStep::after(u64) -> Self
 pub fn ai6::directorates::m::promotion::PromotionStep::shortfall(&self, &ai6::directorates::registry::agent_records::AgentTally, &[&ai6::directorates::registry::agent_records::AgentTally], f64) -> core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct ai6::PromotionSubject<'a>
+pub ai6::PromotionSubject::agent: &'a str
+pub ai6::PromotionSubject::ceiling: &'a str
+pub ai6::PromotionSubject::model: core::option::Option<&'a str>
+pub ai6::PromotionSubject::operation: &'a str
 #[non_exhaustive] pub struct ai6::PromptRecord
 pub ai6::PromptRecord::chars: u64
 pub ai6::PromptRecord::excerpt: alloc::string::String
@@ -13225,8 +13273,6 @@ pub ai6::Provenance::received_by: alloc::string::String
 pub ai6::Provenance::reference: core::option::Option<alloc::string::String>
 impl ai6::directorates::registry::bona_fides::Provenance
 pub fn ai6::directorates::registry::bona_fides::Provenance::matches(&self, &ai6::directorates::registry::store::Brief) -> bool
-pub fn ai6::directorates::m::promotion::PromotionPolicy::brief(&self, &ai6::directorates::m::promotion::Promotion, &ai6::directorates::m::promotion::PromotionSubject<'_>, &ai6::directorates::registry::agent_records::AgentTally, &[&ai6::directorates::registry::agent_records::AgentTally], f64) -> alloc::string::String
-impl ai6::directorates::m::promotion::PromotionPolicy
 pub fn ai6::directorates::registry::bona_fides::Provenance::new(ai6::directorates::registry::bona_fides::Origin, &ai6::directorates::registry::store::Brief, impl core::convert::Into<alloc::string::String>, i64) -> Self
 pub fn ai6::directorates::registry::bona_fides::Provenance::registry_drop(&ai6::directorates::registry::store::Brief, impl core::convert::Into<alloc::string::String>, i64) -> Self
 pub fn ai6::directorates::registry::bona_fides::Provenance::with_item_url(self, core::option::Option<alloc::string::String>) -> Self
@@ -13238,11 +13284,6 @@ pub ai6::ProvisionSpec::install_timeout_secs: core::option::Option<u64>
 pub ai6::ProvisionSpec::plugins: alloc::vec::Vec<alloc::string::String>
 pub ai6::ProvisionSpec::runner: core::option::Option<alloc::string::String>
 impl ai6::directorates::q::provision::ProvisionSpec
-#[non_exhaustive] pub struct ai6::PromotionSubject<'a>
-pub ai6::PromotionSubject::agent: &'a str
-pub ai6::PromotionSubject::ceiling: &'a str
-pub ai6::PromotionSubject::model: core::option::Option<&'a str>
-pub ai6::PromotionSubject::operation: &'a str
 pub fn ai6::directorates::q::provision::ProvisionSpec::with_install(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::q::provision::ProvisionSpec::with_plugin(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::q::provision::ProvisionSpec::with_runner(self, impl core::convert::Into<alloc::string::String>) -> Self
@@ -14217,8 +14258,10 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::approve_by_class(&self, &a
 pub fn ai6::directorates::registry::sql::SqlRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::sql::SqlRegistry::expired_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::lapsed_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mark_approval_used(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mark_rearming_told(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
@@ -14228,6 +14271,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::request_approval(&self, &a
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::sql::SqlRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::step_requests(&self, &str, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 impl ai6::directorates::registry::assistant_log::AssistantLogStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::assistant_conversations(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantConversation>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::assistant_log(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantLogEntry>>
@@ -15328,8 +15372,10 @@ pub fn ai6::ApprovalStore::approve_by_class(&self, &ai6::directorates::registry:
 pub fn ai6::ApprovalStore::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
 pub fn ai6::ApprovalStore::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::ApprovalStore::expired_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::ApprovalStore::lapsed_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::ApprovalStore::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::ApprovalStore::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::ApprovalStore::mark_approval_used(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::ApprovalStore::mark_rearming_told(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::ApprovalStore::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::ApprovalStore::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
@@ -15339,14 +15385,17 @@ pub fn ai6::ApprovalStore::request_approval(&self, &ai6::directorates::registry:
 pub fn ai6::ApprovalStore::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::ApprovalStore::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::ApprovalStore::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
+pub fn ai6::ApprovalStore::step_requests(&self, &str, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 impl ai6::directorates::registry::approvals::ApprovalStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::approval(&self, &str, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::sql::SqlRegistry::expired_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::directorates::registry::sql::SqlRegistry::lapsed_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::sql::SqlRegistry::mark_approval_used(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mark_rearming_told(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
@@ -15356,14 +15405,17 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::request_approval(&self, &a
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::sql::SqlRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::sql::SqlRegistry::step_requests(&self, &str, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 impl ai6::directorates::registry::approvals::ApprovalStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::approval(&self, &str, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::store::FileRegistry::approve_by_class(&self, &ai6::directorates::registry::approvals::ApprovalRequest, core::option::Option<&str>, &str, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::class_authorizations(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ClassAuthorization>>
 pub fn ai6::directorates::registry::store::FileRegistry::decide_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Ruling) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::store::FileRegistry::expired_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
+pub fn ai6::directorates::registry::store::FileRegistry::lapsed_approvals(&self, &str, f64, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::live_approval(&self, &str, &str, &ai6::directorates::m::approvals::ActionScope, f64) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_approval_notified(&self, &str, &str, f64) -> core::io::error::Result<()>
+pub fn ai6::directorates::registry::store::FileRegistry::mark_approval_used(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_rearming_told(&self, &str, &str, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::mission_approvals(&self, &str, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub fn ai6::directorates::registry::store::FileRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
@@ -15373,6 +15425,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::request_approval(&self,
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
 pub fn ai6::directorates::registry::store::FileRegistry::spend_approval(&self, &str, &str, f64) -> core::io::error::Result<bool>
+pub fn ai6::directorates::registry::store::FileRegistry::step_requests(&self, &str, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalStatus>>
 pub trait ai6::AssistantLogStore
 pub fn ai6::AssistantLogStore::assistant_conversations(&self, core::option::Option<&str>) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantConversation>>
 pub fn ai6::AssistantLogStore::assistant_log(&self, &str) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::assistant_log::AssistantLogEntry>>

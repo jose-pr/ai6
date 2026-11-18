@@ -467,6 +467,21 @@ the `kind` of step, its `target` (for a push, `REMOTE:REF` such as
 | `pending` | A person decides. The Mission is `blocked` with reason `green-ink` until then. |
 | `rejected`, `expired` | Do not take the step. A request nobody decides within 24 hours (`request_ttl_secs`) expires as refused, and is kept where a person can [re-arm it](#expired-requests). |
 
+**One request per step.** Requests dedupe on the Operation, the kind and the target however it is
+written: `tag v1.2.0`, `refs/tags/v1.2.0` and `origin:refs/tags/v1.2.0` are one release, and a push
+names its remote only if both do. Asking again for a step that already waits, or is approved and
+live, returns that request's `request_id` and files nothing. A **rejection stands** as the decision
+of record for that step: asking again returns `rejected` with the signer's note and the request's
+id, and files nothing, until an operator reopens that request (the re-arm route takes a rejected
+request as well as an expired one). A step the Operation's `deny` list names is refused before
+anything is filed, and one on its `park` list always waits for a person.
+
+**The gate files for the Agent.** A command the harness gate holds because no approval covers its
+step is filed as a request on the Agent's behalf (its reason says the gate filed it), and the hold
+names the request. When it cannot be filed the hold says so and why, so a denied step always leaves
+either a request or a stated failure. The Station journals a line for every gate decision (the
+Operation, Mission, step and what became of it) and for each approval that lapses unused.
+
 While a request is pending the Mission's [Watchdog](watchdog.md) is paused: waiting for a
 person is not a stall, and terminal output or an operator message does not end the wait.
 If the Agent's turn ends meanwhile, the Run closes and the Mission stays blocked.
@@ -477,6 +492,18 @@ and approves one for a chosen time (one hour unless chosen) or rejects it with a
 The signer is always the signed-in person. The Station holding the Mission tells the Agent
 the outcome, the step and the expiry (in a message to its live Run, or by resuming the
 Run with it), and the Mission is `working` again once nothing it asked for is pending.
+
+An approval belongs to the Mission, not to the Run that asked: a later Run or window of the same
+Mission is covered by it while it lasts. How long, when the signer does not choose, is the
+Operation's `approval_ttl_secs` (one hour by default); a standing Mission whose windows are further
+apart needs a longer one. An approval that lapses with no step ever taken under it is filed as a
+Report of the Operation (kind `green_ink`), so it reaches the attention list.
+
+A request an Agent files through the issue tools (`issue_comment`, `issue_request_info`,
+`issue_update`) carries the `reason` it gave; without one it says what the step is (the comment
+text, or what the update closes, reopens, moves or assigns). The `clearance` requests M files to
+promote an Agent are Markdown briefs with frontmatter: who is put up for what, the record against
+each threshold as a table, what the grant is bounded by and what refusing does.
 
 The Green Ink page renders a reason as Markdown and links what it names to the Operation's
 [Sources](operations.md#sources): a Jira key of a configured project, `#12` or `owner/name#12`, a commit

@@ -3337,7 +3337,10 @@ after it, a script a command runs, `gh` aliases, other programs that push.
 protected ref. Keys: `preset`, `kinds` (added to the built-ins), `requesters`
 (clearances that may ask), `unattended = { CLEARANCE = [KIND, ..] }` (replaces the
 preset's list per clearance named), `protected` (ref globs, replacing the default) and
-`request_ttl_secs`. An invalid value fails the roster load naming the key; a Station logs
+`request_ttl_secs`, `approval_ttl_secs` (an approval's length when the signer gives none;
+`GreenInkPolicy::approval_ttl`), `deny` and `park` (lists of `KIND PATTERN`, a glob on the target,
+a pushed or released ref matched by its full name; `GreenInkPolicy::rule` answers `StepRule::Deny`
+or `StepRule::Park`). An invalid value fails the roster load naming the key; a Station logs
 each weakening at start.
 
 Records, under the Registry lock: `approvals/pending/OP/ID.json`,
@@ -3368,7 +3371,8 @@ pub struct Revocation { pub by: String, pub at: f64, pub note: Option<String> } 
 #[non_exhaustive] pub struct Approval { pub request: ApprovalRequest, pub decision: Decision,
     pub signer: String /* person, "class:ID" or "expiry" */, pub at: f64, pub expires_at: Option<f64>,
     pub note: Option<String>, pub revoked: Option<Revocation>, pub notified_at: Option<f64>,
-    pub spent_at: Option<f64> /* a green ink credential was leased against it */ }
+    pub spent_at: Option<f64> /* a green ink credential was leased against it */,
+    pub used_at: Option<f64> /* a gate first found it covering a step; unset at lapse = never used */ }
 impl Approval { pub fn is_live(&self, now: f64) -> bool }   // approved, not revoked, not expired
 #[non_exhaustive] pub struct Ruling { pub decision, pub signer, pub at, pub expires_at, pub note }
 impl Ruling { pub fn approve(signer, at, expires_at) -> Self; pub fn reject(signer, at, note: Option<String>) -> Self;
@@ -3400,7 +3404,13 @@ pub trait ApprovalStore {
     fn expired_approvals(&self, operation, since: f64, now: f64) -> io::Result<Vec<Approval>>;
         // expired undecided at since or later, the newest first, at most expired_listed (200)
     fn rearm_approval(&self, operation, id, rearming: &Rearming, expires_at: f64) -> io::Result<ApprovalRequest>;
-        // only an expired, undecided request; AlreadyExists otherwise
+        // only an expired or rejected request (a rejection stands until this reopens it);
+        // AlreadyExists otherwise
+    fn step_requests(&self, operation, kind: &str) -> io::Result<Vec<ApprovalStatus>>;
+        // every request of the kind, pending or decided, in no order (the dedupe reads this)
+    fn mark_approval_used(&self, operation, id, at: f64) -> io::Result<()>;   // first use only
+    fn lapsed_approvals(&self, operation, since: f64, now: f64) -> io::Result<Vec<Approval>>;
+        // approved, not revoked, never used or spent, expired in (since, now]; oldest first
     fn mark_rearming_told(&self, operation, id, at: f64) -> io::Result<()>;
     fn mark_approval_notified(&self, operation, id, at: f64) -> io::Result<()>;
     fn spend_approval(&self, operation, id, at: f64) -> io::Result<bool>;   // true once; false if spent or not live
@@ -5838,8 +5848,14 @@ on `station:<id>`'s record (this Station's by default; refused when that charge 
 `check_approval {steps: [{kind, target}, ..]}` (at most 64) answers the harness gate without
 recording anything: a JSON array of `{kind, target, status, request_id?, message?}` with
 `status` `not_required`, `approved` (a live approval of the Mission covers the step,
-`ApprovalStore::live_approval`), `needs_approval` or `refused` (the Agent's clearance may not
-ask).
+`ApprovalStore::live_approval`; the first such answer marks it used), `needs_approval` (the
+gate files the request itself and answers its `request_id`; one it cannot file is `refused`
+naming why) or `refused` (the Agent's clearance may not ask, or the Operation's `deny` names
+the step). Every gate decision is a Station journal line. `request_approval` returns the
+existing request for the same step (`ActionScope::same_step`: `tag v1`, `refs/tags/v1` and
+`origin:refs/tags/v1` are one release) instead of filing another, and `rejected` with the
+signer's note for a step a person rejected until the request is reopened (re-armed). The
+Station reports an approval that lapsed unused as a Report of kind `green_ink`.
 Credentials: a Station with a loadout catalog (`loadouts.toml` in the configuration
 directory, or `StationConfig::with_loadouts`) leases the Agent's loadout secrets at every
 Run start and resume, last before the launch (one-hour lease, each secret from the provider

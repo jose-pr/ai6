@@ -418,9 +418,9 @@ of the Agent's own Mission; anything else answers "not linked to this Mission".
 | --- | --- |
 | `issues` | Lists the Mission's links: relation, whether the Agent may write, the title (untrusted), the last status and whether a question is open |
 | `issue_read` | One issue's title and body as last read, and the recent comments from people allowed to answer for it, each fenced as untrusted data; reading exposes the Run |
-| `issue_comment` | Comments. `queued` (the Station sends it), `pending` (green ink first) or `refused` with the rule |
+| `issue_comment` | Comments. `queued` (the Station sends it), `pending` (green ink first) or `refused` with the rule. Takes an optional `reason`, which the person approving reads |
 | `issue_request_info` | Asks a question and blocks the Mission (`blocked`, reason `issue`, the Watchdog paused) until a permitted reply or the timeout; the Agent ends its turn |
-| `issue_update` | Labels within the instance's `agent_labels`, a transition the instance lists in `agent_transitions`, assignees, close or reopen. The last three, and any other transition, need green ink (`issue-assign`, `issue-close`) |
+| `issue_update` | Labels within the instance's `agent_labels`, a transition the instance lists in `agent_transitions`, assignees, close or reopen. The last three, and any other transition, need green ink (`issue-assign`, `issue-close`); an optional `reason` is what the person approving reads |
 | `issue_link` | Proposes a `related` or `parent` link; a person accepts it before the Mission may write there |
 | `issue_create` | Asks for a new issue in one of the Operation's trackers; `proposed` until a person approves, or `queued` |
 | `issue_split` | Asks for up to 10 children of a linked issue, in its tracker |

@@ -102,13 +102,20 @@ pub fn decide(
     for (step, (status, message)) in steps.iter().zip(answers) {
         match status.as_str() {
             "approved" | "not_required" => {}
-            "needs_approval" => held.push(format!(
-                "it would {kind} {target}, which needs green ink: call request_approval with kind \
-                 \"{kind}\" and target \"{target}\", wait until it is approved, then run the \
-                 command again",
-                kind = step.kind,
-                target = step.target
-            )),
+            "needs_approval" => held.push(match message {
+                Some(filed) => format!(
+                    "it would {} {}, which needs green ink: {filed}; run the command again once \
+                     it is approved",
+                    step.kind, step.target
+                ),
+                None => format!(
+                    "it would {kind} {target}, which needs green ink: call request_approval with \
+                     kind \"{kind}\" and target \"{target}\", wait until it is approved, then run \
+                     the command again",
+                    kind = step.kind,
+                    target = step.target
+                ),
+            }),
             _ => held.push(format!(
                 "it would {} {}: {}",
                 step.kind,

@@ -2222,7 +2222,7 @@ impl CableTools {
 impl CableTools {
     /// Whether steps may be taken now, without asking.
     #[tool(
-        description = "Check, without asking anyone, whether steps may be taken now. The harness gate calls this before a shell command that pushes, merges or releases. Each step comes back approved (a live approval covers it), not_required, needs_approval (call request_approval first) or refused."
+        description = "Check whether steps may be taken now. The harness gate calls this before a shell command that pushes, merges or releases. Each step comes back approved (a live approval covers it), not_required, needs_approval (a request is filed for you; its id is in the answer, so wait for the decision) or refused (with why, including when the request could not be filed)."
     )]
     async fn check_approval(&self, Parameters(args): Parameters<CheckApprovalArgs>) -> String {
         let Some(desk) = self.green_ink.get().cloned() else {
@@ -2241,6 +2241,8 @@ impl CableTools {
         let checked = Checked {
             operation: principal.operation().to_owned(),
             mission: mission.to_owned(),
+            run: principal.run_id().map(str::to_owned),
+            exposed: self.exposure.restricts(Restriction::Approvals),
             agent: principal.agent().to_owned(),
             steps: args
                 .steps
