@@ -222,6 +222,45 @@ impl WatchdogConfig {
 }
 
 /// Measures activity, prompt waits and repeated terminal output for an Agent Run.
+/// The bytes a launcher writes into the terminal stream right before it starts the harness, so
+/// whatever came earlier (a wrapper's spawn banner) is not the harness speaking.
+pub(crate) const HARNESS_MARKER: &[u8] = b"\x1b]777;ai6-harness\x07";
+
+/// What the first sign of life of a started Run is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StartGate {
+    /// Any terminal output: the terminal is the harness's own.
+    Output,
+    /// A parsed provider event with content; raw bytes are not the harness's first request.
+    Events,
+    /// Terminal output after the launcher's [`HARNESS_MARKER`].
+    Marker { seen: bool },
+}
+
+/// Notes terminal output as the Run's first sign of life when its gate lets it.
+fn mark_start_output(state: &mut ActivityState, bytes: &[u8]) {
+    match state.start_gate {
+        StartGate::Output => state.progressed = true,
+        StartGate::Events => {}
+        StartGate::Marker { seen: true } => state.progressed = true,
+        StartGate::Marker { seen: false } => {
+            let mut window = std::mem::take(&mut state.marker_tail);
+            window.extend_from_slice(bytes);
+            if let Some(at) = window
+                .windows(HARNESS_MARKER.len())
+                .position(|part| part == HARNESS_MARKER)
+            {
+                state.start_gate = StartGate::Marker { seen: true };
+                state.progressed = window.len() > at + HARNESS_MARKER.len();
+            } else {
+                let keep = HARNESS_MARKER.len() - 1;
+                let from = window.len().saturating_sub(keep);
+                state.marker_tail = window[from..].to_vec();
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Watchdog {
     config: WatchdogConfig,
@@ -234,6 +273,8 @@ struct ActivityState {
     last_activity: Instant,
     /// Whether the Run has shown any sign of life since it started: output or an event with content.
     progressed: bool,
+    start_gate: StartGate,
+    marker_tail: Vec<u8>,
     last_novel: Instant,
     lines_since_novel: usize,
     partial_line: Vec<u8>,
@@ -269,6 +310,8 @@ impl Watchdog {
                 started: now,
                 last_activity: now,
                 progressed: false,
+                start_gate: StartGate::Output,
+                marker_tail: Vec::new(),
                 last_novel: now,
                 lines_since_novel: 0,
                 partial_line: Vec::new(),
@@ -374,7 +417,7 @@ impl Watchdog {
         let mut state = self.lock_state();
         state.last_activity = now;
         state.output_revision = state.output_revision.wrapping_add(1);
-        state.progressed = true;
+        mark_start_output(&mut state, bytes);
         for byte in bytes {
             if *byte == b'\r' || *byte == b'\n' {
                 observe_line(&mut state, now, &self.config);
@@ -433,6 +476,26 @@ impl Watchdog {
             .paused_since
             .is_none()
             .then(|| state.last_activity.elapsed())
+    }
+
+    /// Counts only a provider event with content as the Run's first sign of life, for a harness
+    /// that speaks JSON: its raw bytes are not its first request.
+    #[cfg_attr(
+        not(feature = "daemon"),
+        allow(dead_code, reason = "used only by the daemon")
+    )]
+    pub(crate) fn start_on_events(&self) {
+        self.lock_state().start_gate = StartGate::Events;
+    }
+
+    /// Counts terminal output as the Run's first sign of life only after [`HARNESS_MARKER`], for a
+    /// harness a launcher starts and whose own output may follow a banner.
+    #[cfg_attr(
+        not(feature = "daemon"),
+        allow(dead_code, reason = "used only by the daemon")
+    )]
+    pub(crate) fn start_after_marker(&self) {
+        self.lock_state().start_gate = StartGate::Marker { seen: false };
     }
 
     /// How long the Run has been going without any output or event with content; `None` once it
@@ -788,5 +851,38 @@ mod tests {
         monitor.record_activity();
 
         assert!(monitor.is_max_runtime_exceeded());
+    }
+
+    #[test]
+    fn a_started_run_is_alive_only_by_what_its_launch_says_counts() {
+        let first = |watchdog: &Watchdog| watchdog.silent_since_start().is_none();
+
+        // A JSON harness: raw bytes are not a request; an event with content is.
+        let json = Watchdog::default();
+        json.start_on_events();
+        json.record_terminal_output(b"banner\n");
+        assert!(!first(&json));
+        json.record_event(&crate::AgentEvent {
+            kind: "message".to_owned(),
+            text: Some("hello".to_owned()),
+            data: None,
+            limit: None,
+            report: None,
+            tools: Vec::new(),
+        });
+        assert!(first(&json));
+
+        // A wrapped harness: the marker may arrive split, and only what follows it counts.
+        let wrapped = Watchdog::default();
+        wrapped.start_after_marker();
+        let (head, tail) = HARNESS_MARKER.split_at(5);
+        wrapped.record_terminal_output(&[b"banner\n", head].concat());
+        wrapped.record_terminal_output(tail);
+        assert!(
+            !first(&wrapped),
+            "the marker itself is not the harness speaking"
+        );
+        wrapped.record_terminal_output(b"hello\n");
+        assert!(first(&wrapped));
     }
 }

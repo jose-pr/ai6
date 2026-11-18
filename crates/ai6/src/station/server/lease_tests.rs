@@ -223,9 +223,19 @@ async fn a_run_that_sends_nothing_after_it_starts_is_a_failed_start_and_its_brie
     let mut state = empty_book(root.path(), "[agent.007]\nhandler = \"mock-agent\"\n");
     let silent = started_quiet(&state, "start-silent").await;
     let speaking = started_quiet(&state, "start-speaking").await;
-    state.runs.lock().unwrap()[&speaking]
+    // Both are launched by a wrapper whose spawn banner reaches the same stream; only what follows the
+    // marker is the harness.
+    let banner = b"ai6: spawned harness 007\n";
+    let marker = crate::directorates::medical::watchdog::HARNESS_MARKER;
+    let runs = state.runs.lock().unwrap();
+    for id in [&silent, &speaking] {
+        runs[id].watchdog.start_after_marker();
+        runs[id].watchdog.record_terminal_output(banner);
+    }
+    runs[&speaking]
         .watchdog
-        .record_activity();
+        .record_terminal_output(&[marker, b"Welcome\n"].concat());
+    drop(runs);
     std::sync::Arc::make_mut(&mut state.station.limits)
         .scheduler
         .start_deadline = crate::bounds::TimeLimit::at(Duration::from_millis(1));

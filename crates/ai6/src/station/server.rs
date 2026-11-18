@@ -4994,6 +4994,18 @@ fn resolve_working_area(
     Ok(WorkingArea { path, safe_house })
 }
 
+/// Says what counts as a started Run's first sign of life: a JSON harness speaks in parsed events
+/// (raw bytes are not its first request); a harness a wrapper launches speaks after the wrapper's
+/// marker, so a spawn banner is not the harness.
+fn gate_start(watchdog: &Watchdog, wrapped: bool, json: bool) {
+    if wrapped {
+        watchdog.start_after_marker();
+    }
+    if json {
+        watchdog.start_on_events();
+    }
+}
+
 /// Opens an Operation's safe house through its provider; `None` when it has no provider.
 /// `name`, the Mission's handle when it opens, names its branch and directory. `reopen`
 /// re-attaches to a safe house an earlier run left behind on this Station; `checkpoint` starts
@@ -5900,6 +5912,10 @@ async fn start_mission(
     let raw_input = !in_process
         .as_ref()
         .is_some_and(|(_, handler)| matches!(handler.stdio(), Ok(HarnessStdio::Json)));
+    let json = in_process
+        .as_ref()
+        .is_some_and(|(_, handler)| matches!(handler.stdio(), Ok(HarnessStdio::Json)));
+    gate_start(&watchdog, wrapped, json);
     let started = match (in_process, &runner, &attachment) {
         (Some((terminal, handler)), _, _) => {
             let terminal = terminal.build(
@@ -6879,6 +6895,10 @@ async fn resume_mission(
     let raw_input = !in_process
         .as_ref()
         .is_some_and(|(_, handler)| matches!(handler.stdio(), Ok(HarnessStdio::Json)));
+    let json = in_process
+        .as_ref()
+        .is_some_and(|(_, handler)| matches!(handler.stdio(), Ok(HarnessStdio::Json)));
+    gate_start(&watchdog, resume_wrapped, json);
     let resumed = match (in_process, &runner, &attachment) {
         (Some((terminal, handler)), _, _) => {
             let terminal = terminal.build(

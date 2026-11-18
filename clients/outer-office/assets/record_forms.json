@@ -8940,7 +8940,7 @@
               ],
               "format": "seconds",
               "title": "A started Run may stay silent for",
-              "description": "Seconds a Run this Station started may send no output and no event with content before it counts as a failed start: the Station gives its brief back to be placed again, this Station included. `none` never does.",
+              "description": "Seconds a Run this Station started may send no first event from its harness before it counts as a failed start: the Station gives its brief back to be placed again, this Station included. `none` never does.",
               "default": 600.0
             },
             "control_timeout": {

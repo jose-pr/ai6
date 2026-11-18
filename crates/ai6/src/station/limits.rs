@@ -216,7 +216,7 @@ pub struct SchedulerLimits {
     #[schema(title = "Retry a failed brief claim after")]
     #[map(default = SchedulerLimits::default().claim_backoff)]
     pub claim_backoff: Seconds,
-    /// Seconds a Run this Station started may send no output and no event with content before it
+    /// Seconds a Run this Station started may send no first event from its harness before it
     /// counts as a failed start: the Station gives its brief back to be placed again, this
     /// Station included. `none` never does.
     #[schema(title = "A started Run may stay silent for")]

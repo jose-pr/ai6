@@ -6658,8 +6658,10 @@ blocked Mission held here with no live Run, nothing queued and no re-attach wait
 (`{processed, failed_back, heartbeat}` of the control loop), `orphaned` (the Missions of `orphaned-claim`;
 Universal Exports settles such a claim although the Station answers, and the Station renews neither its
 claim nor its Run lease and hands it back once the claim lapses) and `declined` (briefs this
-Station gave back, with when it may take them again). A Run that sent no output and no event with content within `[scheduler] start_deadline` of starting is a
-failed start: its brief is given back and this Station may take it again at once. A Run quiet for `[scheduler] claim_progress` has
+Station gave back, with when it may take them again). A Run whose harness sent no first event within `[scheduler] start_deadline` of starting is a
+failed start (for a JSON handler a parsed event with content, never raw bytes; for a handler a detached
+wrapper launches, terminal output after the wrapper's `HARNESS_MARKER`, never its spawn banner; otherwise
+any terminal output): its brief is given back and this Station may take it again at once. A Run quiet for `[scheduler] claim_progress` has
 its brief given back; placement leaves that Station out for `[scheduler] claim_exclusion`
 (`PlacementRequest.brief`, `StationFacts.declined`). A provider event with no text, data, tool call or
 end does not reset the stall clock (`Watchdog::record_event`).

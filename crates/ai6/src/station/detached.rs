@@ -58,6 +58,7 @@ ai6_cwd=$1
 shift
 cd "$ai6_cwd" || { echo 127 > "$ai6_dir/exit"; exit 127; }
 exec 3<>"$ai6_dir/in"
+printf '\033]777;ai6-harness\007' >>"$ai6_dir/out"
 "$@" <&3 >>"$ai6_dir/out" 2>&1
 ai6_code=$?
 echo "$ai6_code" > "$ai6_dir/exit.tmp" && mv "$ai6_dir/exit.tmp" "$ai6_dir/exit"
