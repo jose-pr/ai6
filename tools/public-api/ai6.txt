@@ -9898,6 +9898,7 @@ pub ai6::station::limits::SchedulerLimits::check_in: ai6::bounds::Seconds
 pub ai6::station::limits::SchedulerLimits::claim_backoff: ai6::bounds::Seconds
 pub ai6::station::limits::SchedulerLimits::claim_exclusion: ai6::bounds::Seconds
 pub ai6::station::limits::SchedulerLimits::claim_progress: ai6::bounds::TimeLimit
+pub ai6::station::limits::SchedulerLimits::control_timeout: ai6::bounds::TimeLimit
 pub ai6::station::limits::SchedulerLimits::event_queue: ai6::bounds::Limit
 pub ai6::station::limits::SchedulerLimits::found_libraries: ai6::bounds::Limit
 pub ai6::station::limits::SchedulerLimits::intake_runs: u32
@@ -9908,6 +9909,7 @@ pub ai6::station::limits::SchedulerLimits::retry_backoff: ai6::bounds::Seconds
 pub ai6::station::limits::SchedulerLimits::retry_backoff_max: ai6::bounds::Seconds
 pub ai6::station::limits::SchedulerLimits::role_catalog_bytes: ai6::bounds::Limit
 pub ai6::station::limits::SchedulerLimits::shutdown_wait: ai6::bounds::Seconds
+pub ai6::station::limits::SchedulerLimits::start_deadline: ai6::bounds::TimeLimit
 impl core::default::Default for ai6::station::limits::SchedulerLimits
 pub fn ai6::station::limits::SchedulerLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::station::limits::SecretLimits

@@ -4890,6 +4890,7 @@ impl From<AreaError> for ApiErrorResponse {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn resolve_working_area(
     roster: &Roster,
     plugins: &plugins::Plugins,
