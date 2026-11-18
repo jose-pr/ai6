@@ -274,6 +274,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   running turn; a question that is not a command or file approval is reported to the app server as
   unanswered rather than left open, and a request the driver does not take is answered `-32601`.
 
+- Outer Office: Moneypenny's chat, its web pop-out and the view of a Run a person talks to are drawn with
+  the shared chat widgets of `coqui_acp_chat_ui` (the transcript, the composer with its `/` list, the cards),
+  with the colours of each of the six themes as a `ChatLook`. Her views, proposals, page and navigation
+  cards, "Sources checked" row and avatar are renderers passed to the package. Her `/` list is keyboard
+  driven as before and lists names that start with the word before those that hold it; the composer offers
+  Stop and no Send while she answers; a Run's permission request is the shared card, which says who
+  answered once someone did. A document's Markdown is drawn by the shared chat's Markdown, with the
+  references Universal Exports resolved as one of its syntaxes, and its frontmatter is split and read by the
+  Agent Overlay Specification's rule, which refuses YAML tags, anchors, aliases and merge keys, so a document
+  of aliases cannot grow in memory; the app's own Markdown parser is gone.
 - A Sleeper has no `each_station` (one brief per Station per window); the Chief of Station's charge is
   woken instead. Removing it changes every Sleeper's fingerprint, so each stored authorization must be
   given again, and an Operation record that still sets `each_station` is refused. Gone with it:

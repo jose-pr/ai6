@@ -14,17 +14,17 @@ dependencies:
   coqui_acp:
     git:
       url: https://github.com/Boriken-Dev/coqui-acp.git
-      ref: abf7a6ec351fff718566a59790e49d4652301fc8
+      ref: 98fe31e8a26329cc802b3984cb54c11bab2540b5
       path: bindings/dart/coqui_acp
   coqui_acp_chat:
     git:
       url: https://github.com/Boriken-Dev/coqui-acp.git
-      ref: abf7a6ec351fff718566a59790e49d4652301fc8
+      ref: 98fe31e8a26329cc802b3984cb54c11bab2540b5
       path: bindings/dart/coqui_acp_chat
   coqui_acp_chat_ui:
     git:
       url: https://github.com/Boriken-Dev/coqui-acp.git
-      ref: abf7a6ec351fff718566a59790e49d4652301fc8
+      ref: 98fe31e8a26329cc802b3984cb54c11bab2540b5
       path: bindings/dart/coqui_acp_chat_ui
   # Reads the frontmatter of a document by the Agent Overlay Specification's rule, which refuses
   # anchors and aliases.

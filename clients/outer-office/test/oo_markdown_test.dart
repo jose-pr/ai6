@@ -26,10 +26,32 @@ Future<void> _tapWords(WidgetTester tester, String words) async {
   await tester.pumpAndSettle();
 }
 
+/// The text of every rich text, joined by `|`.
+String _plainText(WidgetTester tester) => tester
+    .widgetList<RichText>(find.byType(RichText))
+    .map((rich) => rich.text.toPlainText())
+    .join('|');
+
+/// Every span that holds text, of every rich text.
+List<TextSpan> _spans(WidgetTester tester) {
+  final spans = <TextSpan>[];
+  for (final rich in tester.widgetList<RichText>(find.byType(RichText))) {
+    rich.text.visitChildren((span) {
+      if (span is TextSpan && (span.text ?? '').isNotEmpty) spans.add(span);
+      return true;
+    });
+  }
+  return spans;
+}
+
 void main() {
-  group('blocks', () {
-    test('headings, paragraphs, lists, quotes, code, tables and rules', () {
-      final blocks = parseBlocks('''
+  group('the body, drawn by the shared chat\'s Markdown', () {
+    testWidgets(
+      'headings, paragraphs, lists, task boxes, quotes, code, tables and rules draw',
+      (tester) async {
+        await tester.pumpWidget(
+          _app(
+            const OoMarkdown(r'''
 # Title
 Line one
 line two
@@ -48,80 +70,94 @@ let x = 1;
 
 | Key | Value |
 |:----|------:|
-| a \\| b | 2 |
+| a \| b | 2 |
 
 ---
-''');
-      expect(blocks.map((b) => b.runtimeType.toString()), [
-        'MdHeading',
-        'MdParagraph',
-        'MdList',
-        'MdList',
-        'MdQuote',
-        'MdCode',
-        'MdTable',
-        'MdRule',
-      ]);
-      expect((blocks[1] as MdParagraph).text, 'Line one\nline two');
-      final tasks = blocks[2] as MdList;
-      expect(tasks.items.map((i) => i.checked), [true, false]);
-      expect(
-        (tasks.items[1].children.single as MdList).items.single.text,
-        'nested',
+'''),
+          ),
+        );
+        final text = _plainText(tester);
+        expect(text, contains('Title'));
+        expect(
+          text,
+          contains('Line one\nline two'),
+          reason: 'a line break is kept',
+        );
+        expect(text, contains('done'));
+        expect(text, contains('nested'));
+        expect(text, contains('second'));
+        expect(text, contains('quoted words'));
+        expect(text, contains('let x = 1;'));
+        expect(text, contains('Value'));
+        expect(text, contains('a | b'));
+        expect(find.byIcon(Icons.check_box), findsOneWidget);
+        expect(find.byIcon(Icons.check_box_outline_blank), findsOneWidget);
+      },
+    );
+
+    testWidgets('only a list from 1 ends a paragraph, as CommonMark has it', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _app(const OoMarkdown('Shipped in\n2026. A good year')),
       );
-      final ordered = blocks[3] as MdList;
-      expect(ordered.ordered, isTrue);
-      expect(ordered.items.map((i) => i.text), ['first', 'second']);
-      expect((blocks[5] as MdCode).info, 'rust');
-      final table = blocks[6] as MdTable;
-      expect(table.header, ['Key', 'Value']);
-      expect(table.align, [MdAlign.left, MdAlign.right]);
-      expect(table.rows.single, ['a | b', '2']);
+      expect(_plainText(tester), contains('Shipped in\n2026. A good year'));
+      await tester.pumpWidget(_app(const OoMarkdown('Steps\n1. one')));
+      expect(_plainText(tester).split('|'), containsAll(['Steps']));
+      expect(_plainText(tester), contains('one'));
     });
 
-    test('only a list from 1 ends a paragraph, as CommonMark has it', () {
-      expect(
-        (parseBlocks('Shipped in\n2026. A good year').single as MdParagraph)
-            .text,
-        'Shipped in\n2026. A good year',
-      );
-      expect(parseBlocks('Steps\n1. one'), hasLength(2));
+    testWidgets('an unclosed fence runs to the end', (tester) async {
+      await tester.pumpWidget(_app(const OoMarkdown('```\nopen')));
+      expect(_plainText(tester), contains('open'));
     });
 
-    test('an unclosed fence runs to the end', () {
-      final code = parseBlocks('```\nopen').single as MdCode;
-      expect(code.text, 'open');
-    });
-  });
-
-  group('inline', () {
-    test('marks, code and links', () {
-      final runs = parseInline(
-        'a **b** *c* ~~d~~ `e*f*` [g](https://x.test/p) <https://y.test> https://z.test/q.',
+    testWidgets('marks, code and links', (tester) async {
+      await tester.pumpWidget(
+        _app(
+          const OoMarkdown(
+            'a **b** *c* ~~d~~ `e*f*` [g](https://x.test/p) <https://y.test> https://z.test/q.',
+          ),
+        ),
       );
-      expect(runs.firstWhere((r) => r.text == 'b').bold, isTrue);
-      expect(runs.firstWhere((r) => r.text == 'c').italic, isTrue);
-      expect(runs.firstWhere((r) => r.text == 'd').strike, isTrue);
-      expect(runs.firstWhere((r) => r.text == 'e*f*').code, isTrue);
-      expect(runs.firstWhere((r) => r.text == 'g').link, 'https://x.test/p');
-      expect(runs.where((r) => r.link == 'https://y.test'), hasLength(1));
+      final spans = _spans(tester);
+      TextSpan span(String text) => spans.firstWhere((s) => s.text == text);
+      expect(span('b').style?.fontWeight, FontWeight.bold);
+      expect(span('c').style?.fontStyle, FontStyle.italic);
+      expect(span('d').style?.decoration, TextDecoration.lineThrough);
+      expect(span('e*f*').style?.fontFamily, 'monospace');
+      expect(span('g').recognizer, isNotNull);
+      expect(span('https://y.test').recognizer, isNotNull);
       expect(
-        runs.where((r) => r.link == 'https://z.test/q'),
-        hasLength(1),
+        span('https://z.test/q').recognizer,
+        isNotNull,
         reason: 'the sentence\'s full stop is not part of the address',
       );
     });
 
-    test('snake_case and escaped stars stay as written', () {
-      final runs = parseInline(r'run_the_gate and \*not italic\*');
-      expect(runs.every((r) => !r.italic), isTrue);
-      expect(runs.map((r) => r.text).join(), 'run_the_gate and *not italic*');
+    testWidgets('snake_case and escaped stars stay as written', (tester) async {
+      await tester.pumpWidget(
+        _app(const OoMarkdown(r'run_the_gate and \*not italic\*')),
+      );
+      expect(_plainText(tester), contains('run_the_gate and *not italic*'));
+      expect(
+        _spans(tester).every((s) => s.style?.fontStyle != FontStyle.italic),
+        isTrue,
+      );
     });
 
-    test('with markup off only links are found', () {
-      final runs = parseInline('**x** https://a.test', markup: false);
-      expect(runs.first.text, '**x** ');
-      expect(runs.last.link, 'https://a.test');
+    testWidgets('an image is not fetched and HTML is not drawn', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _app(
+          const OoMarkdown(
+            '![secret](https://evil.test/?d=1) <script>alert(1)</script>',
+          ),
+        ),
+      );
+      expect(find.byType(Image), findsNothing);
+      expect(_plainText(tester), isNot(contains('evil.test')));
     });
   });
 
@@ -149,6 +185,42 @@ let x = 1;
       expect(split.frontmatter, isNull);
       expect(split.body, startsWith('Intro'));
     });
+
+    test('anchors and aliases are refused, so nothing is expanded', () {
+      final split = splitFrontmatter(
+        '---\nlol: &a [x, x, x]\nlol2: &b [*a, *a, *a]\nlol3: &c [*b, *b, *b]\n---\nBody',
+      );
+      expect(split.frontmatter, isNull);
+      expect(split.unreadable, contains('&a'));
+      expect(split.body, 'Body');
+      final merged = splitFrontmatter(
+        '---\nbase: &b {a: 1}\nuse:\n  <<: *b\n---\nBody',
+      );
+      expect(merged.frontmatter, isNull);
+      expect(merged.unreadable, isNotNull);
+    });
+
+    testWidgets(
+      'a reference in a frontmatter value is a link, and a code span is not read for references',
+      (tester) async {
+        await tester.pumpWidget(
+          _app(
+            const OoMarkdown(
+              '---\nmission: M-12\n---\nSee `M-12` and M-12.',
+              references: [DocReference(text: 'M-12', route: 'app:/missions')],
+            ),
+          ),
+        );
+        final linked = [
+          for (final s in _spans(tester))
+            if (s.recognizer != null) s.text,
+        ];
+        expect(linked, [
+          'M-12',
+          'M-12',
+        ], reason: 'the value and the sentence, not the code span');
+      },
+    );
 
     testWidgets('fields show above the body, and a bad block says so', (
       tester,
