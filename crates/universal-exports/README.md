@@ -159,6 +159,7 @@ All `/v1/station/` paths require the Station bearer credential.
 | `POST` | `/v1/user/operations/{operation_id}/green-ink/{request_id}/reject` | Require `approval.decide`; refuse the step, with an optional `reason` the Agent is told. |
 | `POST` | `/v1/user/operations/{operation_id}/green-ink/{request_id}/revoke` | Require `approval.decide`; withdraw an approval before it expires, with an optional `reason` kept on the record. |
 | `GET` | `/v1/user/operations/{operation_id}/green-ink/expired` | Require `approval.decide`; list the requests that expired undecided, the newest first. |
+| `GET` | `/v1/user/operations/{operation_id}/green-ink/rejected` | Require `approval.decide`; list the requests a person rejected, the newest first; the `rearm` route reopens one. |
 | `POST` | `/v1/user/operations/{operation_id}/green-ink/{request_id}/rearm` | Require `approval.decide`; open an expired, undecided request again. |
 | `GET` | `/v1/user/operations/{operation_id}/green-ink/sources` | Require `approval.decide`; where the Operation's Sources are read on the web. |
 | `POST` | `/v1/user/operations/{operation_id}/missions/{mission_id}/verdict` | Require `mission.verify`; say what you found when you checked the Mission's outcome. |

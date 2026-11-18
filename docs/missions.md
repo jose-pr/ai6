@@ -580,7 +580,10 @@ A request nobody decided in time counts as refused and leaves the inbox; it does
 Expired tab of the Green Ink page, `GET .../green-ink/expired?since=UNIX` and `ai6ctl green-ink list
 --expired` list those that expired since `since`, by default within `[text]
 green_ink_expired_window` (30 days), the newest first and at most `[registry.limits.approvals]
-expired_listed` (200). A request a person decided is not on it.
+expired_listed` (200). A request a person approved is not on it. The same tab lists the requests a
+person **rejected** (`GET .../green-ink/rejected?since=UNIX`, same window and bound) with a Reopen
+action: it calls the re-arm route, gated on `approval.decide` like the rest of the page, and the
+request waits for a decision again as the same request.
 
 A person with `approval.decide` can re-arm one: `POST .../green-ink/{request_id}/rearm` with
 `{"note"?, "expires_in_secs"?}`, `ai6ctl green-ink rearm REQUEST_ID --operation G [--note TEXT]

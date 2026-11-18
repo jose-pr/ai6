@@ -612,6 +612,18 @@ afresh. Removing the grant, or revoking its approval, is final. A refused or exp
 again once the record has as many Missions more. A `desk` Agent's record grows only where its
 handler starts it: on `acp` without `unconfined_desk` it has no Missions to count.
 
+The request is a **brief** a person can decide from: Markdown whose frontmatter names the kind
+(`clearance_promotion`), the Agent, its model, the Operation and the clearance it leaves and
+reaches. The body sets the record against each threshold of the step in a table (Missions done,
+failed or blown share, quiet days: what is required, what the record shows, whether it is met),
+then says what approval grants (that clearance in that Operation only, never above the Operation's
+own, for the model that holds the codename now, taken back at once by a quarantine, spent once),
+what refusing does (the Agent stays where it is and keeps working; M asks again only when the
+record reaches the next multiple of the step's Missions) and links the Operation's Missions. Outer
+Office shows it on the Green Ink page with the frontmatter as fields and the table as a table. A
+brief longer than `[registry.limits.approvals] reason_bytes` is filed as the one-line summary
+instead.
+
 ```toml
 [operation.G.promotion.field]      # desk -> field; these are the defaults
 missions = 10                      # Missions done in G; 0 turns the step off

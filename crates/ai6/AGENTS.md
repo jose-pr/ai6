@@ -3406,6 +3406,7 @@ pub trait ApprovalStore {
     fn rearm_approval(&self, operation, id, rearming: &Rearming, expires_at: f64) -> io::Result<ApprovalRequest>;
         // only an expired or rejected request (a rejection stands until this reopens it);
         // AlreadyExists otherwise
+    fn rejected_approvals(&self, operation, since: f64) -> io::Result<Vec<Approval>>;   // rejected at since or later, newest first, at most expired_listed
     fn step_requests(&self, operation, kind: &str) -> io::Result<Vec<ApprovalStatus>>;
         // every request of the kind, pending or decided, in no order (the dedupe reads this)
     fn mark_approval_used(&self, operation, id, at: f64) -> io::Result<()>;   // first use only
