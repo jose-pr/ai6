@@ -4439,14 +4439,15 @@ impl Loadout {
     pub fn for_account(pool: &AccountPool, account: &Account) -> Option<Self>;
 }
 #[non_exhaustive] pub enum AccountKind { ClaudeOauthToken, AnthropicApiKey, AnthropicAuthToken,
-    OpenaiApiKey, CodexAccessToken, ConfigDir, HarnessLogin }   // as_str()/parse(): "claude-oauth-token", …, "config-dir"
+    CodexApiKey, CodexAccessToken, ConfigDir, HarnessLogin }   // as_str()/parse(): the ids Claude Code's and Codex's account providers give the kinds ("claude-oauth-token", "anthropic-api-key", "anthropic-auth-token", "codex-api-key", "codex-access-token"), then "config-dir" and "harness-login"
 impl AccountKind {
-    pub fn env(self) -> Option<&'static str>;          // CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN
-    pub fn login_flag(self) -> Option<&'static str>;   // --with-api-key, --with-access-token
-    pub fn reads_secret(self) -> bool;                 // all but ConfigDir
-    pub fn carries_run(self) -> bool;              // the env kinds: a Run may move accounts
+    pub fn reads_secret(self) -> bool;                 // all but ConfigDir and HarnessLogin
+    pub fn carries_run(self) -> bool;              // the env kinds (the provider names a variable for the credential): a Run may move accounts
 }
-pub const CREDENTIAL_VARIABLES: &[&str];   // every provider credential variable a pooled Run is stripped of
+// What a kind reads, and what applying one does, are the providers' (`coqui_acp_claude::accounts::apply`, `coqui_acp_codex::accounts::apply_with`):
+// the environment kinds set their variable, a `config-dir` of handler `claude` or `codex` runs the harness on its directory as it is, a Codex key or
+// token is saved by `<login_command> login` into a home made for the Mission. An account with its own `env` is set by AI6 alone.
+pub static CREDENTIAL_VARIABLES: LazyLock<Vec<String>>;   // the providers' secret variables and the directories their logins are kept in, which a pooled Run is stripped of; no endpoint or cloud switch
 #[non_exhaustive] pub enum PoolStrategy { Headroom /* default */, RoundRobin, Priority }   // "headroom" | "round_robin" | "priority"
 pub struct Account;   // Account::new(name, kind) .secret(name) .dir(path) .env(var) .priority(i64) .max_concurrent(n) .label(k, v)
                       // HarnessLogin only: .files(paths in a home) .renew_command(argv) .renew_env(k, v)
@@ -4454,6 +4455,8 @@ impl Account { pub fn name(&self) -> &str; pub fn kind(&self) -> AccountKind;
     pub fn login_files(&self) -> &[String]; pub fn keeps_login_files(&self) -> bool;   // sealed in the Registry
     pub fn renewal(&self) -> &[String]; pub fn renewal_env(&self) -> &BTreeMap<String, String>;
     pub fn renews_through_provider(&self) -> bool;   // files hold CLAUDE_LOGIN_FILE or CODEX_LOGIN_FILE: no renew_command or renew_env is taken
+    pub fn variable(&self, handler: &str) -> Option<String>;   // `env`, else the provider's variable for the kind (the directory's for a Codex key or token and a config-dir)
+    pub fn variable_override(&self) -> Option<&str>;   // `env`: set by AI6 alone, no provider applies it
     pub fn secret_name(&self) -> Option<&str>;        // `secret`, else the account's name; None for ConfigDir
     pub fn login_dir(&self) -> Option<&Path>; pub fn priority_value(&self) -> i64;
     pub fn concurrency(&self) -> Option<usize>; pub fn labels(&self) -> &BTreeMap<String, String>;
@@ -4521,8 +4524,8 @@ pub fn login_accounts(pools) -> Vec<(AccountRef, &Account)>;
 pub fn assign_renewals(registry, logins, renewer: &dyn LoginRenewer, headquarters: &str, live: &[String], limits, now) -> io::Result<Vec<LoginNotice>>;   // one lease, one write
 pub fn run_leases(vault, logins, renewer: &dyn LoginRenewer, scratch: &Path, limits, now) -> io::Result<Vec<LoginNotice>>;   // this Station's leases
 pub struct LoginNotice { pub account: AccountRef, pub kind: NoticeKind, pub text: String }   // Leased(station), Renewed, Unchanged, Failed, NeedsPerson, MayLapse
-/// Runs `<login_command> login <flag>` with CODEX_HOME=home and the credential plus a newline
-/// on stdin, output discarded; killed after the timeout (default 60 s).
+/// Saves a Codex key or token with `<login_command> login <flag>`, CODEX_HOME=home and the credential on stdin, through
+/// coqui-acp-codex's `accounts::apply_with` (its refusal never carries the credential); killed after the timeout (default 60 s).
 #[derive(Default)] pub struct CommandLogin;   // .with_timeout(Duration)
 pub struct SandboxProfile;
 impl SandboxProfile {

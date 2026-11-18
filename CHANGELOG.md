@@ -233,6 +233,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The gateway serves a brief, a green ink request, a held brief, a Mission's reviews, a charge's report and a
 ### Changed
 
+- Account kinds are the ids Claude Code's and Codex's account providers give them, and what applying one does is
+  those providers' (`coqui_acp_claude::accounts::apply`, `coqui_acp_codex::accounts::apply_with`). `AccountKind::OpenaiApiKey`
+  (`openai-api-key`) is `CodexApiKey` (`codex-api-key`); a stored `pool` record that still spells it is read as the new
+  one at every load and saved in the new spelling (a `pool` record migration, in the journal as the others). The
+  environment kinds, a `config-dir` of handler `claude` or `codex` (the harness runs on the directory as it is, nothing
+  is written there) and the Codex key or token login (`CommandLogin`, now `accounts::apply_with` run on the home) go through
+  `apply`; an account with its own `env`, a `config-dir` of another handler and a `harness-login` are set by AI6 alone.
+  `CREDENTIAL_VARIABLES` is derived from the providers' catalogs: their secret variables (now also `CODEX_API_KEY`,
+  the Bedrock, Foundry and AWS keys and tokens, and the client key of Claude Code) and the directories their logins are
+  kept in. An endpoint, a cloud-provider switch, a region or a profile is not among them: a loadout's `env` may still
+  set one and a pooled Run keeps the one its Agent's environment sets. `AccountKind::env`, `login_flag` and the
+  `CREDENTIAL_VARIABLES` slice are gone; `CREDENTIAL_VARIABLES` is a `LazyLock<Vec<String>>`. `ai6` depends on
+  `coqui-acp-claude`, `coqui-acp-codex` and `coqui-acp-harness` with no feature on.
+
 - A sealed Claude Code or Codex login (`files` naming `.claude/.credentials.json` or `.codex/auth.json`) is renewed by
   that harness's account provider (`coqui-acp-claude`, `coqui-acp-codex`, at coqui-acp `e4a59a9`) instead of a
   `renew_command`, which those two logins no longer take (the load refuses one, naming the provider). The provider

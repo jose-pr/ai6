@@ -932,7 +932,7 @@ handler = "codex"
 login_command = ["codex"]       # the program that logs Codex accounts in; default codex
 
 [pool.codex-team.account.carol]
-kind = "openai-api-key"
+kind = "codex-api-key"
 ```
 
 | `kind` | The harness reads it as |
@@ -940,11 +940,16 @@ kind = "openai-api-key"
 | `claude-oauth-token` | `CLAUDE_CODE_OAUTH_TOKEN` |
 | `anthropic-api-key` | `ANTHROPIC_API_KEY` |
 | `anthropic-auth-token` | `ANTHROPIC_AUTH_TOKEN` |
-| `openai-api-key`, `codex-access-token` | a `CODEX_HOME` the Station makes for the Mission and logs in with `codex login --with-api-key` or `--with-access-token`, the value on standard input |
+| `codex-api-key`, `codex-access-token` | a `CODEX_HOME` the Station makes for the Mission and logs in with `codex login --with-api-key` or `--with-access-token`, the value on standard input |
 | `config-dir` | `dir` as `CLAUDE_CONFIG_DIR` (handler `claude`) or `CODEX_HOME` (`codex`) |
 | `harness-login` | nothing is handed over: the harness uses the login it has where it runs, and the account only counts its use and its limits, so several routes can share one budget. With `files`, the login is [kept in the Registry](#logins-kept-in-the-registry) and written under a home of the Run's own |
 
-`env = "VAR"` puts the value (or directory) in another variable; a handler other than
+The kind names are the ids Claude Code's and Codex's account providers give them (`codex-api-key` was
+`openai-api-key`: a stored pool still spelling it is read as the new one, and saving it stores the new
+spelling). What each kind reads, the variables a Run is stripped of and the login that saves a Codex key
+are those providers' (`coqui-acp-claude` and `coqui-acp-codex`), not AI6's.
+
+`env = "VAR"` puts the value (or directory) in another variable, which no provider applies; a handler other than
 `claude` or `codex` needs it for `config-dir`. Each account's secret is an ordinary loadout
 secret: it is leased from the same provider, never written to the Registry, the safe house or
 the timeline. A `green_ink` secret cannot back an account: the load fails, since a pool hands
@@ -959,10 +964,14 @@ a person approved.
   that does not name it, so a pool of one source is not drawn by every other Agent of its
   handler.
 - **One account per Run**: the Station removes every provider credential variable from the
-  Run's environment (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`,
-  `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CONFIG_DIR`, `OPENAI_API_KEY`, `CODEX_ACCESS_TOKEN`,
-  `CODEX_HOME` and every account's `env`), then claims an account in the Registry and hands its
-  credential over, after the Agent's loadout secrets so none can stand in for it. A loadout
+  Run's environment (the secret variables Claude Code's and Codex's account providers list, such as
+  `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY`,
+  `CODEX_API_KEY` and `CODEX_ACCESS_TOKEN`, the directories their logins are kept in,
+  `CLAUDE_CONFIG_DIR` and `CODEX_HOME`, and every account's `env`), then claims an account in the
+  Registry and hands its credential over, after the Agent's loadout secrets so none can stand in
+  for it. The provider hands it over: it clears every variable it knows, endpoints included, and the
+  Station puts back the ones that are not secrets that the Agent's environment had (`ANTHROPIC_BASE_URL`,
+  `OPENAI_BASE_URL`, a cloud switch, a region, a profile), as before. A loadout
   secret whose `env` is one of those variables is not issued to a pooled Agent's Run, and
   that is logged as a weakening. The claim is one Registry write, so two Stations never both
   take the last place of an account, and it drops any claim the Mission held on another
