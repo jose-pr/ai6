@@ -745,7 +745,7 @@ fn issue_loadout(
             .iter()
             .map(|name| catalog.secret(name))
             .filter(|definition| {
-                definition.green_ink() || !CREDENTIAL_VARIABLES.contains(&definition.env())
+                definition.green_ink() || !is_credential_variable(definition.env())
             })
             .map(|definition| definition.name().to_owned())
             .collect()
@@ -763,8 +763,7 @@ fn issue_loadout(
         .iter()
         .map(|name| catalog.secret(name))
         .filter(|definition| {
-            !restricted
-                || (!definition.green_ink() && CREDENTIAL_VARIABLES.contains(&definition.env()))
+            !restricted || (!definition.green_ink() && is_credential_variable(definition.env()))
         })
         .filter(|definition| {
             let kept = reserved.is_none_or(|reserved| !reserved.contains(definition.env()));
@@ -1123,3 +1122,8 @@ fn record(
 
 #[cfg(test)]
 mod tests;
+
+/// Whether `name` is one of [`CREDENTIAL_VARIABLES`].
+fn is_credential_variable(name: &str) -> bool {
+    CREDENTIAL_VARIABLES.iter().any(|variable| variable == name)
+}

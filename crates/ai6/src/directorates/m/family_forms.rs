@@ -377,9 +377,9 @@ pub(crate) enum AccountKindForm {
     #[schema(label = "Anthropic bearer token")]
     AnthropicAuthToken,
     /// An OpenAI API key.
-    #[map(rename = "openai-api-key")]
+    #[map(rename = "codex-api-key")]
     #[schema(label = "OpenAI API key")]
-    OpenaiApiKey,
+    CodexApiKey,
     /// A Codex access token.
     #[map(rename = "codex-access-token")]
     #[schema(label = "Codex access token")]

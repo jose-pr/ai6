@@ -1,5 +1,6 @@
 //! Q Branch execution resources: validated loadouts, secret leases and terminals.
 
+pub(crate) mod harness_accounts;
 mod mcp;
 mod pools;
 mod sandbox;
@@ -21,11 +22,11 @@ pub mod secret_kind;
 pub mod terminal;
 pub mod transport;
 
+pub use harness_accounts::CREDENTIAL_VARIABLES;
 pub use mcp::claude_mcp_config;
 pub use pools::{
     Account, AccountKind, AccountLogin, AccountPool, CLAUDE_LOGIN_FILE, CODEX_LOGIN_FILE,
-    CREDENTIAL_VARIABLES, CommandLogin, PoolChoice, PoolStrategy, RouteStanding, choose_pools,
-    choose_route,
+    CommandLogin, PoolChoice, PoolStrategy, RouteStanding, choose_pools, choose_route,
 };
 pub use sandbox::{SandboxError, SandboxRequest};
 pub use secret_kind::{SecretFields, SecretKeeper, SecretProvider, SecretSource};
@@ -198,11 +199,7 @@ impl RunEnv {
     /// provider credential's ([`CREDENTIAL_VARIABLES`]). The catalog's own variables are checked
     /// when a Station has one ([`LoadoutCatalog::check_run_env`]).
     pub(crate) fn check_on_roster(&self) -> Result<(), String> {
-        let taken: Vec<String> = CREDENTIAL_VARIABLES
-            .iter()
-            .map(|variable| (*variable).to_owned())
-            .collect();
-        self.check(&taken, Limit::UNBOUNDED)
+        self.check(&CREDENTIAL_VARIABLES, Limit::UNBOUNDED)
     }
 
     /// Why a name or value cannot be set, ignoring case in `taken` as Windows does.
@@ -557,10 +554,7 @@ impl LoadoutCatalog {
     ///
     /// Why, naming the variable and never its value.
     pub fn check_run_env(&self, env: &RunEnv, chars: Limit) -> Result<(), String> {
-        let mut taken: Vec<String> = CREDENTIAL_VARIABLES
-            .iter()
-            .map(|variable| (*variable).to_owned())
-            .collect();
+        let mut taken: Vec<String> = CREDENTIAL_VARIABLES.clone();
         taken.extend(self.secrets().iter().map(|secret| secret.env().to_owned()));
         for pool in self.pools.values() {
             taken.extend(
@@ -1666,7 +1660,7 @@ handler = "codex"
 login_command = ["/opt/codex/bin/codex"]
 
 [pool.codex-team.account.carol]
-kind = "openai-api-key"
+kind = "codex-api-key"
 "#,
         )
         .unwrap();

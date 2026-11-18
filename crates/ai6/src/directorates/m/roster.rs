@@ -3552,6 +3552,9 @@ effort = "low"
         for (name, expected) in [
             ("ANTHROPIC_AUTH_TOKEN", "a credential's variable"),
             ("anthropic_api_key", "a credential's variable"),
+            ("CODEX_API_KEY", "a credential's variable"),
+            ("AWS_SECRET_ACCESS_KEY", "a credential's variable"),
+            ("CODEX_HOME", "a credential's variable"),
             ("AI6_ANYTHING", "AI6's own"),
             ("not a name", "not a variable name"),
         ] {
@@ -3563,6 +3566,27 @@ effort = "low"
             .to_string();
             assert!(reason.contains(expected), "{reason}");
             assert!(!reason.contains("value-not-shown"), "{reason}");
+        }
+    }
+
+    #[test]
+    fn a_routes_env_may_name_an_endpoint_a_cloud_switch_or_a_region() {
+        for name in [
+            "ANTHROPIC_BASE_URL",
+            "OPENAI_BASE_URL",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "ANTHROPIC_VERTEX_PROJECT_ID",
+            "AWS_PROFILE",
+            "CLOUD_ML_REGION",
+        ] {
+            assert!(
+                routed_roster(&format!(
+                    "[agent.x]\n[[agent.x.route]]\nhandler = \"claude\"\n\
+                     env = {{ \"{name}\" = \"a-value\" }}\n"
+                ))
+                .is_ok(),
+                "{name} is not a credential"
+            );
         }
     }
 

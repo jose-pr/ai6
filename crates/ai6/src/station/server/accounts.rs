@@ -17,6 +17,7 @@ use crate::directorates::m::mission::Mission;
 use crate::directorates::m::mission::ParkedOn;
 use crate::directorates::m::placement;
 use crate::directorates::m::roster::{Agent, AgentRoute};
+use crate::directorates::q::harness_accounts;
 use crate::directorates::q::{
     Account, AccountKind, AccountLogin, AccountPool, CREDENTIAL_VARIABLES, CommandLogin, Loadout,
     LoadoutCatalog, PoolChoice, SecretBroker, SecretLease, SecretLeaseRequest, choose_pools,
@@ -359,10 +360,7 @@ pub(super) fn credential_variables(
     if let PoolChoice::Unpooled = pools_for(state, catalog, operation, agent) {
         return None;
     }
-    let mut variables: BTreeSet<String> = CREDENTIAL_VARIABLES
-        .iter()
-        .map(|variable| (*variable).to_owned())
-        .collect();
+    let mut variables: BTreeSet<String> = CREDENTIAL_VARIABLES.iter().cloned().collect();
     for pool in catalog.pools() {
         for account in pool.accounts() {
             variables.extend(account.variable(pool.handler()));
@@ -583,14 +581,29 @@ pub(super) fn hand_over(
     let variable = account
         .variable(pool.handler())
         .ok_or_else(|| format!("account {name} has no variable for its credential"))?;
+    // An account that names its own variable is set by AI6 alone: its harness's account provider
+    // knows nothing of it.
+    let provided = account.variable_override().is_none();
     if account.kind() == AccountKind::ConfigDir {
         let dir = account
             .login_dir()
             .ok_or_else(|| format!("account {name} has no directory"))?;
-        environment.insert(variable, dir.display().to_string());
+        if provided && harness_accounts::Harness::named(pool.handler()).is_some() {
+            harness_accounts::apply_directory(
+                pool.handler(),
+                pool.id(),
+                account.name(),
+                dir,
+                environment,
+            )
+            .map_err(|error| format!("account {name}: {error}"))?;
+        } else {
+            environment.insert(variable, dir.display().to_string());
+        }
         return Ok(None);
     }
-    if account.kind().login_flag().is_some() && !site.on_station {
+    let logs_in = harness_accounts::logs_in_to_a_home(account.kind());
+    if logs_in && !site.on_station {
         return Err(format!(
             "account {name} is logged in to a CODEX_HOME on the Station, so its harness must \
              run on the Station's own host"
@@ -608,7 +621,7 @@ pub(super) fn hand_over(
     let lease = broker
         .lease(&loadout, request)
         .map_err(|error| format!("account {name}'s credential could not be leased: {error}"))?;
-    let handed = if account.kind().login_flag().is_some() {
+    let handed = if logs_in {
         home_for(state, mission_id, pool, account).and_then(|home| {
             let login = state
                 .station
@@ -619,9 +632,37 @@ pub(super) fn hand_over(
                 .with_secret(&secret, |value| login.login(pool, account, &home, value))
                 .map_err(|error| error.to_string())?
                 .map_err(|error| format!("account {name} was not logged in: {error}"))?;
-            environment.insert(variable, home.display().to_string());
-            Ok(())
+            if provided {
+                // The kind belongs to Codex whatever the pool's handler is called.
+                let owner: &str = harness_accounts::owner(account.kind())
+                    .map(harness_accounts::Harness::handler)
+                    .unwrap_or(pool.handler());
+                harness_accounts::apply_directory(
+                    owner,
+                    pool.id(),
+                    account.name(),
+                    &home,
+                    environment,
+                )
+                .map_err(|error| format!("account {name}: {error}"))
+            } else {
+                environment.insert(variable, home.display().to_string());
+                Ok(())
+            }
         })
+    } else if provided {
+        lease
+            .with_secret(&secret, |value| {
+                harness_accounts::apply_secret(
+                    pool.id(),
+                    account.name(),
+                    account.kind(),
+                    value,
+                    environment,
+                )
+            })
+            .map_err(|error| error.to_string())
+            .and_then(|applied| applied.map_err(|error| format!("account {name}: {error}")))
     } else {
         lease
             .with_secret(&secret, |value| {
@@ -886,7 +927,7 @@ pub(super) fn declare(state: &DaemonState) {
             if let Some(weakening) = account.weakening(pool.id()) {
                 eprintln!("ai6: {weakening}");
             }
-            if cfg!(windows) && account.kind().login_flag().is_some() {
+            if cfg!(windows) && harness_accounts::logs_in_to_a_home(account.kind()) {
                 eprintln!(
                     "ai6: account {}/{}: on Windows its CODEX_HOME keeps the access list it \
                      inherits from the Station's state directory",
@@ -2539,7 +2580,8 @@ secrets = ["second"]
         let (state, _now, _) = pooled_state(
             root.path(),
             "",
-            "[agent.007.env]\nANTHROPIC_API_KEY = \"stray\"\nCLAUDE_CONFIG_DIR = \"/stray\"\n",
+            "[agent.007.env]\nANTHROPIC_API_KEY = \"stray\"\nCLAUDE_CONFIG_DIR = \"/stray\"\n\
+             ANTHROPIC_BASE_URL = \"https://gateway.example\"\nCLAUDE_CODE_USE_BEDROCK = \"1\"\n",
             &format!(
                 "{ENV_POOLS}\n[loadout.007]\nsecrets = [\"leftover\", \"forge\"]\n\
                  [secret.leftover]\nenv = \"ANTHROPIC_API_KEY\"\n\
@@ -2553,17 +2595,22 @@ secrets = ["second"]
         let (_, _, environment, _) = calls("pooled-env").remove(0);
         let carried: Vec<_> = CREDENTIAL_VARIABLES
             .iter()
-            .filter(|variable| environment.contains_key(**variable))
+            .filter(|variable| environment.contains_key(*variable))
             .collect();
         assert_eq!(
             carried,
-            [&"CLAUDE_CODE_OAUTH_TOKEN"],
+            [&"CLAUDE_CODE_OAUTH_TOKEN".to_owned()],
             "one account, and no stray credential"
         );
         assert_eq!(
             environment["CLAUDE_CODE_OAUTH_TOKEN"],
             "fake-env-alpha-0451"
         );
+        assert_eq!(
+            environment["ANTHROPIC_BASE_URL"], "https://gateway.example",
+            "the Agent's own endpoint is not a credential, and the provider's clearing leaves it"
+        );
+        assert_eq!(environment["CLAUDE_CODE_USE_BEDROCK"], "1");
         assert_eq!(
             environment["GH_TOKEN"], "fake-forge-0451",
             "a loadout secret outside the credential variables is still issued"
@@ -2737,7 +2784,7 @@ secret = "rotate-b"
 [pool.codex-team]
 handler = "mock-pooled"
 [pool.codex-team.account.a]
-kind = "openai-api-key"
+kind = "codex-api-key"
 secret = "codex-limited-a"
 [pool.codex-team.account.b]
 kind = "codex-access-token"
@@ -3163,7 +3210,7 @@ secret = "codex-b"
 [pool.solo]
 handler = "mock-pooled"
 [pool.solo.account.only]
-kind = "openai-api-key"
+kind = "codex-api-key"
 secret = "race-only"
 "#;
 

@@ -13,7 +13,7 @@ exclude = [".*", "*.local.*"]
 [features]
 default = []
 # The Station and the field runner (`ai6::station::runner`), which a Station reaches over HTTP.
-daemon = ["gate", "acp", "dep:coqui-acp-claude", "dep:coqui-acp-codex", "dep:coqui-acp-harness", "dep:coqui-access-kit", "dep:axum", "dep:tokio", "dep:subtle", "dep:futures-util", "dep:sysinfo", "dep:ring", "dep:rustix", "dep:base64", "dep:crypto_box", "guatiao/load"]
+daemon = ["gate", "acp", "dep:coqui-access-kit", "dep:axum", "dep:tokio", "dep:subtle", "dep:futures-util", "dep:sysinfo", "dep:ring", "dep:rustix", "dep:base64", "dep:crypto_box", "guatiao/load"]
 # The Agent Client Protocol wire (`ai6::directorates::section_00::acp`): the client a Station
 # and the `acp` handler drive agents with, and the agent side serving any AgentHandler.
 acp = ["dep:agent-client-protocol", "dep:coqui-acp", "dep:futures"]
@@ -79,10 +79,10 @@ coqui-transport = { workspace = true, optional = true }
 coqui-transport-web = { workspace = true, optional = true }
 coqui-peer-webcrypto = { workspace = true, optional = true }
 coqui-acp-api.workspace = true
-# Claude Code's and Codex's account providers renew a sealed login (`station::renewer`).
-coqui-acp-claude = { workspace = true, optional = true }
-coqui-acp-codex = { workspace = true, optional = true }
-coqui-acp-harness = { workspace = true, features = ["kind"], optional = true }
+# Claude Code's and Codex's account providers describe their accounts (`directorates::q`) and renew a sealed login (`station::renewer`).
+coqui-acp-claude.workspace = true
+coqui-acp-codex.workspace = true
+coqui-acp-harness = { workspace = true, features = ["kind"] }
 coqui-acp-provider.workspace = true
 futures = { workspace = true, optional = true }
 axum = { workspace = true, optional = true }

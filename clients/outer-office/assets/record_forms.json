@@ -6940,7 +6940,7 @@
                   "claude-oauth-token",
                   "anthropic-api-key",
                   "anthropic-auth-token",
-                  "openai-api-key",
+                  "codex-api-key",
                   "codex-access-token",
                   "config-dir",
                   "harness-login"
@@ -6949,7 +6949,7 @@
                   "claude-oauth-token": "Claude Code token",
                   "anthropic-api-key": "Anthropic API key",
                   "anthropic-auth-token": "Anthropic bearer token",
-                  "openai-api-key": "OpenAI API key",
+                  "codex-api-key": "OpenAI API key",
                   "codex-access-token": "Codex access token",
                   "config-dir": "Directory of an existing login",
                   "harness-login": "The harness's own login"

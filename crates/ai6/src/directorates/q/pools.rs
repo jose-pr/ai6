@@ -11,6 +11,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use super::harness_accounts;
+
 /// How a harness reads an account's credential.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -23,7 +25,7 @@ pub enum AccountKind {
     AnthropicAuthToken,
     /// An OpenAI API key, logged in with `codex login --with-api-key` into a `CODEX_HOME`
     /// the Station makes for the Mission.
-    OpenaiApiKey,
+    CodexApiKey,
     /// A Codex access token, logged in with `codex login --with-access-token` into a
     /// `CODEX_HOME` the Station makes for the Mission.
     CodexAccessToken,
@@ -43,64 +45,27 @@ const KINDS: [AccountKind; 7] = [
     AccountKind::ClaudeOauthToken,
     AccountKind::AnthropicApiKey,
     AccountKind::AnthropicAuthToken,
-    AccountKind::OpenaiApiKey,
+    AccountKind::CodexApiKey,
     AccountKind::CodexAccessToken,
     AccountKind::ConfigDir,
     AccountKind::HarnessLogin,
 ];
 
-/// The variables that carry a provider credential to a harness. A pooled Run gets
-/// exactly one account's, so every other one is removed from its environment.
-pub const CREDENTIAL_VARIABLES: &[&str] = &[
-    "CLAUDE_CODE_OAUTH_TOKEN",
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "CLAUDE_CONFIG_DIR",
-    "OPENAI_API_KEY",
-    "CODEX_ACCESS_TOKEN",
-    "CODEX_HOME",
-];
-
 impl AccountKind {
-    /// The configuration spelling (`claude-oauth-token`, ...).
+    /// The configuration spelling: the id of the kind in its harness's account provider
+    /// (`claude-oauth-token`, `codex-api-key`, ...), and `config-dir` and `harness-login` for the two no
+    /// provider lists.
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::ClaudeOauthToken => "claude-oauth-token",
-            Self::AnthropicApiKey => "anthropic-api-key",
-            Self::AnthropicAuthToken => "anthropic-auth-token",
-            Self::OpenaiApiKey => "openai-api-key",
-            Self::CodexAccessToken => "codex-access-token",
             Self::ConfigDir => "config-dir",
-            Self::HarnessLogin => "harness-login",
+            Self::HarnessLogin => coqui_acp_api::HARNESS_LOGIN,
+            _ => harness_accounts::provider_id(self).unwrap_or_default(),
         }
     }
 
     /// The kind spelled `name`, or `None`.
     pub fn parse(name: &str) -> Option<Self> {
         KINDS.into_iter().find(|kind| kind.as_str() == name)
-    }
-
-    /// The variable an environment kind's value goes in; `None` for kinds that hand the
-    /// harness a directory.
-    pub fn env(self) -> Option<&'static str> {
-        match self {
-            Self::ClaudeOauthToken => Some("CLAUDE_CODE_OAUTH_TOKEN"),
-            Self::AnthropicApiKey => Some("ANTHROPIC_API_KEY"),
-            Self::AnthropicAuthToken => Some("ANTHROPIC_AUTH_TOKEN"),
-            Self::OpenaiApiKey | Self::CodexAccessToken | Self::ConfigDir | Self::HarnessLogin => {
-                None
-            }
-        }
-    }
-
-    /// The `codex login` flag that reads this kind's value from standard input, for the
-    /// kinds logged in to a Mission's own `CODEX_HOME`.
-    pub fn login_flag(self) -> Option<&'static str> {
-        match self {
-            Self::OpenaiApiKey => Some("--with-api-key"),
-            Self::CodexAccessToken => Some("--with-access-token"),
-            _ => None,
-        }
     }
 
     /// Whether the value is a loadout secret (every kind but `config-dir` and `harness-login`).
@@ -112,18 +77,7 @@ impl AccountKind {
     /// history: only the environment kinds, whose history stays where the harness keeps it
     /// whatever the token.
     pub fn carries_run(self) -> bool {
-        self.env().is_some()
-    }
-
-    /// The handler this kind belongs to, when it belongs to one.
-    fn handler(self) -> Option<&'static str> {
-        match self {
-            Self::ClaudeOauthToken | Self::AnthropicApiKey | Self::AnthropicAuthToken => {
-                Some("claude")
-            }
-            Self::OpenaiApiKey | Self::CodexAccessToken => Some("codex"),
-            Self::ConfigDir | Self::HarnessLogin => None,
-        }
+        harness_accounts::variable(self).is_some()
     }
 }
 
@@ -355,10 +309,18 @@ impl Account {
         &self.logout_command
     }
 
+    /// The variable the account names for its credential or directory (`env`), which its harness's
+    /// account provider knows nothing of: it is set by AI6 alone.
+    pub fn variable_override(&self) -> Option<&str> {
+        self.env.as_deref()
+    }
+
     /// The variable the harness reads the credential or directory from, given the pool's
-    /// handler: the override, else the kind's own, else for `config-dir` `CLAUDE_CONFIG_DIR`
-    /// (handler `claude`) or `CODEX_HOME` (`codex`). `None` when none applies, and for a
-    /// `harness-login` account, which hands over nothing.
+    /// handler: the override, else the one its harness's account provider names for the kind
+    /// (the credential's, or the directory's for a kind logged in to a `CODEX_HOME`), else for
+    /// `config-dir` the provider's directory variable (`CLAUDE_CONFIG_DIR` for handler `claude`,
+    /// `CODEX_HOME` for `codex`). `None` when none applies, and for a `harness-login` account,
+    /// which hands over nothing.
     pub fn variable(&self, handler: &str) -> Option<String> {
         if self.kind == AccountKind::HarnessLogin {
             return None;
@@ -366,16 +328,8 @@ impl Account {
         if let Some(env) = &self.env {
             return Some(env.clone());
         }
-        if let Some(env) = self.kind.env() {
-            return Some(env.to_owned());
-        }
-        let variable = match (self.kind, handler) {
-            (AccountKind::ConfigDir, "claude") => "CLAUDE_CONFIG_DIR",
-            (AccountKind::ConfigDir, "codex")
-            | (AccountKind::OpenaiApiKey | AccountKind::CodexAccessToken, _) => "CODEX_HOME",
-            _ => return None,
-        };
-        Some(variable.to_owned())
+        harness_accounts::variable(self.kind)
+            .or_else(|| harness_accounts::directory_variable(self.kind, handler))
     }
 
     /// Why this account is looser than an environment credential, if it is: a login kept on
@@ -390,7 +344,7 @@ impl Account {
                     .as_deref()
                     .map_or_else(|| "?".to_owned(), |dir| dir.display().to_string())
             )),
-            AccountKind::OpenaiApiKey | AccountKind::CodexAccessToken => Some(format!(
+            AccountKind::CodexApiKey | AccountKind::CodexAccessToken => Some(format!(
                 "account {pool}/{name} is logged in to a CODEX_HOME on the Station's disk for \
                  the Mission's life, since Codex reads its login only from there"
             )),
@@ -564,7 +518,8 @@ impl AccountPool {
             if !valid_name(name) || name != &account.name {
                 return Err(at("the name may use letters, digits, '.', '_' and '-'"));
             }
-            if let Some(owner) = account.kind.handler()
+            if let Some(owner) =
+                harness_accounts::owner(account.kind).map(|harness| harness.handler())
                 && matches!(self.handler.as_str(), "claude" | "codex")
                 && owner != self.handler
             {
@@ -806,7 +761,9 @@ pub trait AccountLogin: Send + Sync {
 
 /// Runs the pool's login command (`codex` by default) as `<command> login <flag>` with
 /// `CODEX_HOME` set to the home and the credential on standard input, as
-/// `printenv OPENAI_API_KEY | codex login --with-api-key` does.
+/// `printenv OPENAI_API_KEY | codex login --with-api-key` does. Codex's account provider applies the
+/// account (`coqui_acp_codex::accounts::apply_with`): it runs the command, keeps the credential out of
+/// every argument and error, and leaves the home keeping its login in `auth.json`.
 #[derive(Debug, Clone, Copy)]
 pub struct CommandLogin {
     timeout: std::time::Duration,
@@ -840,58 +797,15 @@ impl AccountLogin for CommandLogin {
         home: &Path,
         credential: &str,
     ) -> Result<(), String> {
-        use std::io::Write;
-        use std::process::{Command, Stdio};
-
-        let flag = account
-            .kind()
-            .login_flag()
-            .ok_or_else(|| format!("a {} account is not logged in", account.kind()))?;
-        let (program, arguments) = pool
-            .login()
-            .split_first()
-            .ok_or("the pool has no login command")?;
-        let mut child = Command::new(program)
-            .args(arguments)
-            .args(["login", flag])
-            .env("CODEX_HOME", home)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|error| format!("{program} could not be started: {error}"))?;
-        if let Some(mut stdin) = child.stdin.take() {
-            let written = stdin
-                .write_all(credential.as_bytes())
-                .and_then(|()| stdin.write_all(b"\n"));
-            drop(stdin);
-            if let Err(error) = written {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!(
-                    "{program} login did not read its credential: {error}"
-                ));
-            }
-        }
-        let deadline = std::time::Instant::now() + self.timeout;
-        loop {
-            match child.try_wait() {
-                Ok(Some(status)) if status.success() => return Ok(()),
-                Ok(Some(status)) => return Err(format!("{program} login failed: {status}")),
-                Ok(None) if std::time::Instant::now() >= deadline => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(format!(
-                        "{program} login did not finish within {:?}",
-                        self.timeout
-                    ));
-                }
-                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(20)),
-                Err(error) => {
-                    return Err(format!("{program} login could not be waited on: {error}"));
-                }
-            }
-        }
+        harness_accounts::log_in_to_home(
+            pool.login(),
+            pool.id(),
+            account.name(),
+            account.kind(),
+            home,
+            credential,
+            self.timeout,
+        )
     }
 }
 
@@ -943,7 +857,7 @@ mod tests {
                 "ANTHROPIC_AUTH_TOKEN",
                 true,
             ),
-            (AccountKind::OpenaiApiKey, "codex", "CODEX_HOME", false),
+            (AccountKind::CodexApiKey, "codex", "CODEX_HOME", false),
             (AccountKind::CodexAccessToken, "codex", "CODEX_HOME", false),
             (AccountKind::ConfigDir, "claude", "CLAUDE_CONFIG_DIR", false),
             (AccountKind::ConfigDir, "codex", "CODEX_HOME", false),
@@ -956,7 +870,11 @@ mod tests {
             );
             assert_eq!(kind.carries_run(), moves, "{kind}");
             assert_eq!(AccountKind::parse(kind.as_str()), Some(kind));
-            assert!(CREDENTIAL_VARIABLES.contains(&variable));
+            assert!(
+                harness_accounts::CREDENTIAL_VARIABLES
+                    .iter()
+                    .any(|name| name == variable)
+            );
         }
         assert_eq!(AccountKind::parse("password"), None);
         assert_eq!(
@@ -990,7 +908,7 @@ mod tests {
                 .is_some()
         );
         assert!(
-            Account::new("a", AccountKind::OpenaiApiKey)
+            Account::new("a", AccountKind::CodexApiKey)
                 .weakening("p")
                 .is_some()
         );
@@ -1051,7 +969,7 @@ mod tests {
         }
         assert!(
             AccountPool::new("team", "mock")
-                .account(Account::new("a", AccountKind::OpenaiApiKey))
+                .account(Account::new("a", AccountKind::CodexApiKey))
                 .validate()
                 .is_ok(),
             "an unknown handler takes any kind"
@@ -1064,7 +982,7 @@ mod tests {
             pool("claude-team", "claude").operations(["ai6-*"]),
             pool("claude-all", "claude"),
             AccountPool::new("codex-team", "codex")
-                .account(Account::new("c", AccountKind::OpenaiApiKey)),
+                .account(Account::new("c", AccountKind::CodexApiKey)),
         ];
         let ids = |choice: PoolChoice<'_>| -> Vec<String> {
             match choice {
@@ -1284,7 +1202,7 @@ mod tests {
             (login.clone().files(["/etc/passwd"]), "inside a home"),
             (login.clone().files([""]), "inside a home"),
             (
-                Account::new("a", AccountKind::OpenaiApiKey).files(["x"]),
+                Account::new("a", AccountKind::CodexApiKey).files(["x"]),
                 "only a harness-login",
             ),
             (
