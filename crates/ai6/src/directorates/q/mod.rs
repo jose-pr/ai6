@@ -21,6 +21,7 @@ pub mod sealing;
 pub mod secret_kind;
 pub mod terminal;
 pub mod transport;
+pub mod usage_standing;
 
 pub use harness_accounts::CREDENTIAL_VARIABLES;
 pub use mcp::claude_mcp_config;

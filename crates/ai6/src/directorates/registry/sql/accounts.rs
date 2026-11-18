@@ -8,8 +8,8 @@ use super::SqlRegistry;
 use super::db::Tx;
 use crate::directorates::registry::accounts::{
     AccountClaimRequest, AccountProfile, AccountRef, AccountState, AccountStore, LoginState,
-    QuotaWindow, add_tokens, claim_among, parse_state, release_in, renew_in, report_in,
-    state_bytes, validate_ref,
+    QuotaWindow, UsageRequest, add_tokens, claim_among, parse_state, release_in, renew_in,
+    report_in, state_bytes, validate_ref,
 };
 use crate::directorates::registry::limits::AccountLimits;
 use crate::directorates::registry::store::invalid_data;
@@ -185,6 +185,19 @@ impl AccountStore for SqlRegistry {
         self.update_account(account, |state| {
             change(&mut state.login);
             after = state.login.clone();
+        })?;
+        Ok(after)
+    }
+
+    fn change_usage_request(
+        &self,
+        account: &AccountRef,
+        change: &mut dyn FnMut(&mut Option<UsageRequest>),
+    ) -> io::Result<Option<UsageRequest>> {
+        let mut after = None;
+        self.update_account(account, |state| {
+            change(&mut state.usage_request);
+            after = state.usage_request.clone();
         })?;
         Ok(after)
     }

@@ -178,7 +178,8 @@ pub use directorates::q::{
 };
 pub use directorates::registry::accounts::{
     AccountCandidate, AccountClaim, AccountClaimRequest, AccountProfile, AccountRef, AccountState,
-    LoginRequest, LoginRequestAction, LoginState, QuotaWindow, RenewalLease, choose_account,
+    LoginRequest, LoginRequestAction, LoginState, QuotaWindow, RenewalLease, UsageRequest,
+    choose_account,
 };
 pub use directorates::registry::agent_records::{
     AgentOutcome, AgentOutcomeReport, AgentRecord, AgentTally, ModelTenure, NO_OPERATION,

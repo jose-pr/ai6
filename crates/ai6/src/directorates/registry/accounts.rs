@@ -268,6 +268,42 @@ pub struct LoginRequest {
     pub at: f64,
 }
 
+/// A person's request that a Station holding an account read its usage now, and how a Station
+/// answered. A request waits in the Registry because the gateway reaches no Station.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UsageRequest {
+    /// Who asked.
+    pub by: String,
+    /// When, as Unix seconds.
+    pub at: f64,
+    /// When a Station answered, as Unix seconds; `None` while it waits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub done_at: Option<f64>,
+    /// How the answer went: `read`, `reading from <age> ago` or `not read: <why>`; never a
+    /// credential.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
+}
+
+impl UsageRequest {
+    /// A request made at `at` by `by` that no Station has answered.
+    pub fn new(by: impl Into<String>, at: f64) -> Self {
+        Self {
+            by: by.into(),
+            at,
+            done_at: None,
+            result: None,
+        }
+    }
+
+    /// Whether no Station has answered it.
+    pub fn waits(&self) -> bool {
+        self.done_at.is_none()
+    }
+}
+
 impl LoginState {
     /// Whether `station` may use it: it is sealed to that Station and no person is needed.
     pub fn usable_by(&self, station: &str) -> bool {
@@ -307,6 +343,9 @@ pub struct AccountState {
     /// Its login, when one is kept sealed in the Registry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub login: Option<LoginState>,
+    /// The last time a person asked for its usage to be read now.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_request: Option<UsageRequest>,
 }
 
 impl AccountState {
@@ -321,6 +360,7 @@ impl AccountState {
             last_used: None,
             daily_tokens: BTreeMap::new(),
             login: None,
+            usage_request: None,
         }
     }
 
@@ -811,6 +851,18 @@ pub trait AccountStore {
         account: &AccountRef,
         change: &mut dyn FnMut(&mut Option<LoginState>),
     ) -> io::Result<Option<LoginState>>;
+
+    /// Changes the request for an account's usage to be read in one write and returns what it
+    /// holds afterwards.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid name or when the Registry cannot be written.
+    fn change_usage_request(
+        &self,
+        account: &AccountRef,
+        change: &mut dyn FnMut(&mut Option<UsageRequest>),
+    ) -> io::Result<Option<UsageRequest>>;
 }
 
 impl FileRegistry {
@@ -1008,6 +1060,19 @@ impl AccountStore for FileRegistry {
         })?;
         Ok(after)
     }
+
+    fn change_usage_request(
+        &self,
+        account: &AccountRef,
+        change: &mut dyn FnMut(&mut Option<UsageRequest>),
+    ) -> io::Result<Option<UsageRequest>> {
+        let mut after = None;
+        self.update_account(account, |state| {
+            change(&mut state.usage_request);
+            after = state.usage_request.clone();
+        })?;
+        Ok(after)
+    }
 }
 
 #[cfg(test)]
@@ -1069,7 +1134,45 @@ mod tests {
         stations_with_different_rosters_keep_their_own_profiles,
         two_stations_never_both_take_the_last_place_on_a_route,
         a_routes_own_account_is_limited_for_every_station,
+        a_usage_request_waits_until_answered_and_an_answered_one_is_replaced,
     );
+
+    fn a_usage_request_waits_until_answered_and_an_answered_one_is_replaced(store: &dyn Store) {
+        use crate::directorates::q::usage_standing::{answer, request};
+        let registry = store.handle();
+        let account = AccountRef::new("team", "a");
+        let asked = request(registry.as_ref(), &account, "ana", NOW).unwrap();
+        assert!(asked.waits());
+        assert_eq!(
+            request(registry.as_ref(), &account, "bo", NOW + 5.0).unwrap(),
+            asked,
+            "a request nobody answered is kept, so a burst of asks is one"
+        );
+        // An answer to a request that is not the waiting one changes nothing.
+        answer(registry.as_ref(), &account, NOW - 1.0, NOW + 6.0, "read").unwrap();
+        assert!(state(registry.as_ref(), "a").usage_request.unwrap().waits());
+        answer(
+            registry.as_ref(),
+            &account,
+            NOW,
+            NOW + 7.0,
+            "read\nin two lines",
+        )
+        .unwrap();
+        let held = state(registry.as_ref(), "a").usage_request.unwrap();
+        assert!(!held.waits());
+        assert_eq!(held.done_at, Some(NOW + 7.0));
+        assert_eq!(held.result.as_deref(), Some("readin two lines"));
+        // A quota report keeps it; a new ask after an answer is a new request.
+        registry
+            .report_quota(&account, &[QuotaWindow::new("five_hour", NOW + 8.0)])
+            .unwrap();
+        assert!(!state(registry.as_ref(), "a").usage_request.unwrap().waits());
+        let next = request(registry.as_ref(), &account, "bo", NOW + 30.0).unwrap();
+        assert!(next.waits());
+        assert_eq!((next.by.as_str(), next.at), ("bo", NOW + 30.0));
+        assert_eq!(next.result, None);
+    }
 
     /// One Station claims first; the other, which read the same room, gets nothing and takes the
     /// next route instead.
