@@ -1270,10 +1270,21 @@ impl Roster {
                 .into_iter()
                 .map(|(id, definition)| (id, AgentEntry::Defined(definition)))
                 .collect();
+            let mut fragments = BTreeMap::new();
+            for (name, definition) in document.fragment {
+                definition.check().map_err(|reason| {
+                    error(format!(
+                        "{}: fragment {name:?}: {reason}",
+                        agents_file.display()
+                    ))
+                })?;
+                fragments.insert(name, definition.text);
+            }
             for (id, definition) in document.role {
-                roster
-                    .roles
-                    .insert(id.clone(), definition.resolve(id, &agents_file.display())?);
+                roster.roles.insert(
+                    id.clone(),
+                    definition.resolve(id, &fragments, &agents_file.display())?,
+                );
             }
             if let Some(mut assistant) = document.assistant {
                 assistant.resolve_paths(&root);
@@ -1987,6 +1998,7 @@ pub(crate) fn unreadable_agents(
 /// The role records that cannot be read, each with why.
 pub(crate) fn unreadable_roles(
     definitions: &[(String, serde_json::Value)],
+    fragments: &BTreeMap<String, String>,
     source: &dyn fmt::Display,
 ) -> Vec<(String, String)> {
     definitions
@@ -1996,7 +2008,7 @@ pub(crate) fn unreadable_roles(
                 .map_err(|reason| reason.to_string())
                 .and_then(|definition| {
                     definition
-                        .resolve(id.clone(), source)
+                        .resolve(id.clone(), fragments, source)
                         .map(|_| ())
                         .map_err(|reason| reason.to_string())
                 });
@@ -2012,6 +2024,8 @@ struct AgentsDocument {
     agent: BTreeMap<String, AgentDefinition>,
     #[map(default)]
     role: BTreeMap<String, AgentRoleDefinition>,
+    #[map(default)]
+    fragment: BTreeMap<String, FragmentDefinition>,
     assistant: Option<AssistantSettings>,
 }
 
@@ -2775,12 +2789,103 @@ pub(crate) struct AgentRoleDefinition {
     deliverables: Vec<String>,
 }
 
+/// Text several roles' policies share: a `[fragment.<name>]` table. A policy takes it in where
+/// it writes `{{fragment.<name>}}`.
+#[derive(Debug, Clone, Default, ToValue, FromValue, Schema, Form)]
+#[map(deny_unknown_fields)]
+pub(crate) struct FragmentDefinition {
+    /// What every policy that names this fragment holds at that place. It may not name another
+    /// fragment.
+    #[schema(title = "Text")]
+    #[map(default)]
+    #[form(widget = "textarea")]
+    text: String,
+}
+
+/// What a role's policy writes to take a fragment in: `{{fragment.NAME}}`.
+const FRAGMENT_OPEN: &str = "{{fragment.";
+
+impl FragmentDefinition {
+    fn check(&self) -> Result<(), String> {
+        if self.text.contains(FRAGMENT_OPEN) {
+            return Err("a fragment cannot name another fragment".to_owned());
+        }
+        if self
+            .text
+            .chars()
+            .any(|character| character.is_control() && !matches!(character, '\n' | '\t'))
+        {
+            return Err("a fragment holds a control character".to_owned());
+        }
+        Ok(())
+    }
+}
+
+/// `policy` with each `{{fragment.NAME}}` replaced by that fragment's text, trimmed. A name no
+/// fragment has, or a reference never closed, is refused. What is inserted is not read again,
+/// so expansion ends.
+fn expand_fragments(policy: &str, fragments: &BTreeMap<String, String>) -> Result<String, String> {
+    let mut expanded = String::with_capacity(policy.len());
+    let mut rest = policy;
+    while let Some(start) = rest.find(FRAGMENT_OPEN) {
+        expanded.push_str(&rest[..start]);
+        let after = &rest[start + FRAGMENT_OPEN.len()..];
+        let Some(end) = after.find("}}") else {
+            return Err("the policy opens a fragment reference it never closes".to_owned());
+        };
+        let name = after[..end].trim();
+        let text = fragments
+            .get(name)
+            .ok_or_else(|| format!("the policy names fragment {name:?}, which does not exist"))?;
+        expanded.push_str(text.trim());
+        rest = &after[end + 2..];
+    }
+    expanded.push_str(rest);
+    Ok(expanded)
+}
+
+/// The text of each fragment among `definitions` that can be read, by name.
+pub(crate) fn fragment_texts(
+    definitions: &[(String, serde_json::Value)],
+) -> BTreeMap<String, String> {
+    definitions
+        .iter()
+        .filter_map(|(name, definition)| {
+            let read = records::from_json::<FragmentDefinition>(definition).ok()?;
+            read.check().ok()?;
+            Some((name.clone(), read.text))
+        })
+        .collect()
+}
+
+/// The fragment records that cannot be read, each with why.
+pub(crate) fn unreadable_fragments(
+    definitions: &[(String, serde_json::Value)],
+) -> Vec<(String, String)> {
+    definitions
+        .iter()
+        .filter_map(|(name, definition)| {
+            let read = records::from_json::<FragmentDefinition>(definition)
+                .map_err(|reason| reason.to_string())
+                .and_then(|read| read.check());
+            read.err().map(|reason| (name.clone(), reason))
+        })
+        .collect()
+}
+
 impl AgentRoleDefinition {
-    fn resolve(self, id: String, source: &dyn fmt::Display) -> Result<AgentRole, RosterError> {
+    fn resolve(
+        self,
+        id: String,
+        fragments: &BTreeMap<String, String>,
+        source: &dyn fmt::Display,
+    ) -> Result<AgentRole, RosterError> {
+        let policy = expand_fragments(&self.policy, fragments)
+            .map_err(|reason| error(format!("{source}: Agent role {id}: {reason}")))?;
         let role = AgentRole {
             id,
             purpose: self.purpose,
-            policy: self.policy,
+            policy,
             review: self.review,
             require_approval_before_done: self.require_approval_before_done,
             deliverables: self.deliverables,
@@ -2800,6 +2905,8 @@ pub(crate) struct RosterDefinitions {
     pub(crate) agents: Vec<(String, serde_json::Value)>,
     /// `[role.<id>]` tables.
     pub(crate) roles: Vec<(String, serde_json::Value)>,
+    /// `[fragment.<name>]` tables.
+    pub(crate) fragments: Vec<(String, serde_json::Value)>,
     /// `[review.<name>]` tables.
     pub(crate) reviews: Vec<(String, serde_json::Value)>,
     /// `[charge.<scope>]` tables.
@@ -2827,6 +2934,7 @@ pub(crate) fn roster_from_definitions(
         operations,
         agents,
         roles,
+        fragments,
         reviews,
         charges,
         assistant,
@@ -2864,11 +2972,20 @@ pub(crate) fn roster_from_definitions(
                 .map_err(|reason| error(format!("{source}: {reason}")))
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let mut fragment_texts = BTreeMap::new();
+    for (name, definition) in fragments {
+        let definition: FragmentDefinition = records::from_json(&definition)
+            .map_err(|reason| invalid("fragment", &name, &reason))?;
+        definition
+            .check()
+            .map_err(|reason| invalid("fragment", &name, &reason))?;
+        fragment_texts.insert(name, definition.text);
+    }
     let mut typed_roles = Vec::new();
     for (id, definition) in roles {
         let definition: AgentRoleDefinition = records::from_json(&definition)
             .map_err(|reason| invalid("Agent role", &id, &reason))?;
-        typed_roles.push(definition.resolve(id, source)?);
+        typed_roles.push(definition.resolve(id, &fragment_texts, source)?);
     }
     let assistant = match assistant {
         Some(definition) => {
@@ -3137,9 +3254,9 @@ fn parse_file<T: FromValue>(path: &Path) -> Result<T, RosterError> {
 
 fn parse_operation_agents(path: &Path) -> Result<AgentsDocument, RosterError> {
     let document: AgentsDocument = parse_file(path)?;
-    if !document.role.is_empty() {
+    if !document.role.is_empty() || !document.fragment.is_empty() {
         return Err(error(format!(
-            "{}: Agent roles must be configured in the global agents.toml",
+            "{}: Agent roles and fragments must be configured in the global agents.toml",
             path.display()
         )));
     }
@@ -3895,6 +4012,62 @@ sources = {{ jira = \"GUA\" }}\n",
         );
 
         assert!(Roster::load(&directory.0).is_err());
+    }
+
+    #[test]
+    fn a_role_that_names_a_fragment_carries_its_text() {
+        let directory = TestDirectory::new();
+        directory.write(
+            "agents.toml",
+            "[fragment.brief]\ntext = \"File requests with a brief.\\n\"\n\
+             [role.a]\npurpose = \"p\"\npolicy = \"Start. {{fragment.brief}} End.\"\n\
+             [role.b]\npurpose = \"p\"\npolicy = \"{{fragment.brief}}\"\n",
+        );
+        let roster = Roster::load(&directory.0).unwrap();
+        assert_eq!(
+            roster.roles["a"].policy,
+            "Start. File requests with a brief. End."
+        );
+        assert_eq!(roster.roles["b"].policy, "File requests with a brief.");
+    }
+
+    #[test]
+    fn a_role_naming_an_unknown_fragment_is_refused_by_name_and_fragments_do_not_nest() {
+        let directory = TestDirectory::new();
+        directory.write(
+            "agents.toml",
+            "[role.a]\npurpose = \"p\"\npolicy = \"x {{fragment.missing}}\"\n",
+        );
+        let refused = Roster::load(&directory.0).unwrap_err().to_string();
+        assert!(
+            refused.contains("role a") && refused.contains("\"missing\""),
+            "{refused}"
+        );
+
+        directory.write(
+            "agents.toml",
+            "[fragment.outer]\ntext = \"see {{fragment.inner}}\"\n[fragment.inner]\ntext = \"i\"\n\
+             [role.a]\npurpose = \"p\"\npolicy = \"{{fragment.outer}}\"\n",
+        );
+        let refused = Roster::load(&directory.0).unwrap_err().to_string();
+        assert!(refused.contains("another fragment"), "{refused}");
+
+        // A stored record set: the role is refused alone, naming the fragment.
+        let fragments = vec![("ok".to_owned(), serde_json::json!({"text": "shared"}))];
+        let roles = vec![
+            (
+                "good".to_owned(),
+                serde_json::json!({"purpose": "p", "policy": "{{fragment.ok}}"}),
+            ),
+            (
+                "bad".to_owned(),
+                serde_json::json!({"purpose": "p", "policy": "{{fragment.gone}}"}),
+            ),
+        ];
+        let refused = unreadable_roles(&roles, &fragment_texts(&fragments), &"test");
+        assert_eq!(refused.len(), 1, "{refused:?}");
+        assert_eq!(refused[0].0, "bad");
+        assert!(refused[0].1.contains("\"gone\""), "{refused:?}");
     }
 
     #[test]

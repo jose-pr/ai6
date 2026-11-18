@@ -20,7 +20,7 @@ use crate::directorates::m::family_forms::{
 };
 use crate::directorates::m::review::ReviewPolicy;
 use crate::directorates::m::roster::{
-    AgentDefinition, AgentRoleDefinition, OperationDefinition, RosterSettings,
+    AgentDefinition, AgentRoleDefinition, FragmentDefinition, OperationDefinition, RosterSettings,
 };
 
 /// `T` from a value.
@@ -157,6 +157,10 @@ impl ConfigRecord {
             Self::Role => built::<AgentRoleDefinition>(named(
                 "Role name",
                 "Short and without spaces, such as case-officer. It cannot be changed later.",
+            )),
+            Self::Fragment => built::<FragmentDefinition>(named(
+                "Fragment name",
+                "What a role's policy names it by, as {{fragment.NAME}}. It cannot be changed later.",
             )),
             Self::Cover => built::<CoverDefinition>(named(
                 "Cover name",

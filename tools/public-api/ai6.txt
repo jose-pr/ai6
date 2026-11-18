@@ -1078,6 +1078,7 @@ pub ai6::directorates::m::config::ConfigRecord::Cables
 pub ai6::directorates::m::config::ConfigRecord::Charge
 pub ai6::directorates::m::config::ConfigRecord::Compartment
 pub ai6::directorates::m::config::ConfigRecord::Cover
+pub ai6::directorates::m::config::ConfigRecord::Fragment
 pub ai6::directorates::m::config::ConfigRecord::Loadout
 pub ai6::directorates::m::config::ConfigRecord::Mcp
 pub ai6::directorates::m::config::ConfigRecord::Operation
@@ -1097,7 +1098,7 @@ pub ai6::directorates::m::config::ConfigRecord::Theater
 pub ai6::directorates::m::config::ConfigRecord::Tls
 pub ai6::directorates::m::config::ConfigRecord::Unex
 impl ai6::directorates::m::config::ConfigRecord
-pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 25]
+pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 26]
 pub const ai6::directorates::m::config::ConfigRecord::SINGLETON_KEY: &'static str
 pub const fn ai6::directorates::m::config::ConfigRecord::applies_live(self) -> bool
 pub const fn ai6::directorates::m::config::ConfigRecord::file(self) -> &'static str
@@ -1348,7 +1349,7 @@ pub fn ai6::directorates::m::config::UnexRecord::running_with(&self, &Self) -> S
 pub fn ai6::directorates::m::config::UnexRecord::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::directorates::m::config::UnexRecord
 pub fn ai6::directorates::m::config::UnexRecord::default() -> Self
-pub const ai6::directorates::m::config::IMPORT_ORDER: [ai6::directorates::m::config::ConfigRecord; 25]
+pub const ai6::directorates::m::config::IMPORT_ORDER: [ai6::directorates::m::config::ConfigRecord; 26]
 pub const ai6::directorates::m::config::TRUST_ROOT: [ai6::directorates::m::config::ConfigRecord; 4]
 pub trait ai6::directorates::m::config::ConfigProvider: core::marker::Send + core::marker::Sync
 pub fn ai6::directorates::m::config::ConfigProvider::changes_since(&self, &str, ai6::directorates::m::config::ConfigRevision) -> core::result::Result<core::option::Option<ai6::directorates::m::config::ConfigSnapshot>, ai6::directorates::m::roster::RosterError>
@@ -10329,6 +10330,7 @@ pub ai6::ConfigRecord::Cables
 pub ai6::ConfigRecord::Charge
 pub ai6::ConfigRecord::Compartment
 pub ai6::ConfigRecord::Cover
+pub ai6::ConfigRecord::Fragment
 pub ai6::ConfigRecord::Loadout
 pub ai6::ConfigRecord::Mcp
 pub ai6::ConfigRecord::Operation
@@ -10348,7 +10350,7 @@ pub ai6::ConfigRecord::Theater
 pub ai6::ConfigRecord::Tls
 pub ai6::ConfigRecord::Unex
 impl ai6::directorates::m::config::ConfigRecord
-pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 25]
+pub const ai6::directorates::m::config::ConfigRecord::ALL: [Self; 26]
 pub const ai6::directorates::m::config::ConfigRecord::SINGLETON_KEY: &'static str
 pub const fn ai6::directorates::m::config::ConfigRecord::applies_live(self) -> bool
 pub const fn ai6::directorates::m::config::ConfigRecord::file(self) -> &'static str

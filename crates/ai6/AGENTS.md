@@ -1063,6 +1063,11 @@ occupant. An `AgentRole` (`[role.<id>]`) is a job description only: a `purpose` 
 Agent's `roles` lists the roles it is qualified for; a qualified role name may carry a
 suffix (`case-officer/implementation` resolves to `case-officer`).
 
+A `[fragment.<name>]` (`text`) is text roles share, in the `agents` family beside `role`: a policy writes
+`{{fragment.<name>}}` and the roster holds the role with the fragment's trimmed text there. A name no
+fragment has refuses the role naming it, and a fragment that names another is refused, so expansion
+never recurses. Fragments are global only (an Operation's `agents.toml` carries none).
+
 `agent` accepts a codename or unambiguous alias and an optional Operation key. It reads
 `.ai6/agents.toml` only for a registered Operation, merges inherited `env` and `limits` by
 key, and rejects Agents outside the Operation's roster or above its clearance.
@@ -1394,15 +1399,15 @@ pub trait ConfigProvider: Send + Sync {
     /// Global and each Station scope that holds records (default: Global).
     fn scopes(&self) -> Result<Vec<ConfigScope>, RosterError>;
 }
-pub const IMPORT_ORDER: [ConfigRecord; 24];   // each family after those it refers to
+pub const IMPORT_ORDER: [ConfigRecord; 26];   // each family after those it refers to
 pub fn family_document(record: ConfigRecord, records) -> Result<String, RosterError>;   // TOML
 pub fn export(provider: &dyn ConfigProvider, dir: &Path) -> Result<usize, RosterError>;
 #[non_exhaustive] #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
-pub enum ConfigRecord { Operation, Agent, Role, Assistant, Cover, Theater, Loadout, Sandbox,
+pub enum ConfigRecord { Operation, Agent, Role, Fragment, Assistant, Cover, Theater, Loadout, Sandbox,
     Mcp, Overlay, Secret, Pool, Cables, Plugin, Station, Tls, Access, OperationAccess, Unex,
     Roster, Compartment, Review, Charge, Registry }      // Charge: `[charge.<scope>]`, file `charges`, global
 impl ConfigRecord {
-    pub const ALL: [Self; 25];                  // Roster first
+    pub const ALL: [Self; 26];                  // Roster first
     pub const SINGLETON_KEY: &'static str;      // "settings": a singleton family's one record
     pub const fn name(self) -> &'static str;    // "operation", "agent", ... "unex", "roster"
     pub fn from_name(name: &str) -> Option<Self>;
@@ -1462,7 +1467,7 @@ Station scope, or a singleton under another key, is `Invalid`.
 `cfg`, `toml`, `json`, `yaml`, `yml` (`ai6::bootstrap::format`), and a Station's own records
 from `stations/<id>/` beside them. Each top-level table of a file names a family that file
 holds: `operations` (`[operation.<id>]`), `agents` (`[agent.<codename>]`, `[role.<id>]`,
-`[assistant]`), `covers` (`[cover.<name>]`), `theaters` (`[theater.<id>]`), `loadouts`
+`[fragment.<name>]`, `[assistant]`), `covers` (`[cover.<name>]`), `theaters` (`[theater.<id>]`), `loadouts`
 (`[loadout.*]`, `[sandbox.*]`, `[mcp.*]`, `[overlay.*]`, `[secret.*]`, `[pool.*]`); `plugins` is `[[library]]`
 entries keyed by `file`; `cables`, `station`, `tls`, `access` and `unex` are each one record,
 the whole file; `operation_access` (`[operation_access.<id>]`) is one record per Operation. Anything else is `Invalid`, naming the table, and two files for one family

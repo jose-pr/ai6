@@ -127,10 +127,11 @@ pub(crate) const CONFIG_KINDS: [(&str, ConfigRecord); 15] = [
 ];
 
 /// The route kinds gated by `roster.read` and `roster.manage` on `config:roster`.
-const ROSTER_KINDS: [(&str, ConfigRecord); 7] = [
+const ROSTER_KINDS: [(&str, ConfigRecord); 8] = [
     ("operations", ConfigRecord::Operation),
     ("agents", ConfigRecord::Agent),
     ("roles", ConfigRecord::Role),
+    ("fragments", ConfigRecord::Fragment),
     ("covers", ConfigRecord::Cover),
     ("reviews", ConfigRecord::Review),
     ("assistant", ConfigRecord::Assistant),

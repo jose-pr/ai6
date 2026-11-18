@@ -80,6 +80,25 @@ purpose = "Own a bounded Mission and coordinate its delivery within the Operatio
 policy = "Follow the Mission brief and Operation rules; request authorization for restricted actions."
 ```
 
+### Sharing text between roles
+
+Text that several roles' policies repeat lives once, as a `[fragment.<name>]` in the same file as the
+roles. A policy takes it in where it writes `{{fragment.<name>}}`; each role then holds the fragment's
+text there, so one edit changes every role that names it.
+
+```toml
+[fragment.request-brief]
+text = "File a request with its brief, the files it touches and what you expect."
+
+[role.case-officer]
+purpose = "Own a bounded Mission and coordinate its delivery."
+policy = "Follow the Mission brief. {{fragment.request-brief}}"
+```
+
+A role that names a fragment that does not exist is refused, naming the role and the fragment. A
+fragment may not name another fragment, so there is nothing to expand twice. The expanded policy keeps
+a role's own size limit. Fragments are global: an Operation's own `agents.toml` carries none.
+
 ### Retirement
 
 A model's end of life is a date the operator configures; no provider publishes one that the

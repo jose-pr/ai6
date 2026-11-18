@@ -914,7 +914,7 @@ no-op is stored at once.
 | Family | Directory provider file | Station's own | Singleton | Applies | Edited in | Holds |
 | --- | --- | --- | --- | --- | --- | --- |
 | `operation` | `operations` | no | no | live | Roster page, route | `[operation.<id>]`, sleepers included |
-| `agent`, `role` | `agents` | no | no | live | Roster page, route | `[agent.<codename>]`, `[role.<id>]` |
+| `agent`, `role`, `fragment` | `agents` | no | no | live | Roster page, route | `[agent.<codename>]`, `[role.<id>]`, `[fragment.<name>]` |
 | `assistant` | `agents` | no | yes | live | Roster page, route | `[assistant]`, Moneypenny's settings |
 | `cover` | `covers` | no | no | live | Roster page, route | `[cover.<name>]` |
 | `theater` | `theaters` | yes | no | live | Roster page (Theaters), `ai6ctl`, route `theaters` | `[theater.<id>]` |

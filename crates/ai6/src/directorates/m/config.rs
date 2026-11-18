@@ -64,6 +64,8 @@ pub enum ConfigRecord {
     Agent,
     /// An Agent role: the keys of a `[role.<id>]` table.
     Role,
+    /// Text role policies share: the keys of a `[fragment.<name>]` table.
+    Fragment,
     /// Moneypenny's settings ([`AssistantSettings`](crate::AssistantSettings)): the keys of
     /// the `[assistant]` table; a singleton.
     Assistant,
@@ -130,11 +132,12 @@ pub enum ConfigRecord {
 
 impl ConfigRecord {
     /// Every family, in the order a snapshot is built.
-    pub const ALL: [Self; 25] = [
+    pub const ALL: [Self; 26] = [
         Self::Roster,
         Self::Registry,
         Self::Operation,
         Self::Agent,
+        Self::Fragment,
         Self::Role,
         Self::Assistant,
         Self::Cover,
@@ -171,6 +174,7 @@ impl ConfigRecord {
             Self::Operation => "operation",
             Self::Agent => "agent",
             Self::Role => "role",
+            Self::Fragment => "fragment",
             Self::Assistant => "assistant",
             Self::Cover => "cover",
             Self::Theater => "theater",
@@ -205,7 +209,7 @@ impl ConfigRecord {
     pub const fn file(self) -> &'static str {
         match self {
             Self::Operation | Self::Roster => "operations",
-            Self::Agent | Self::Role | Self::Assistant => "agents",
+            Self::Agent | Self::Role | Self::Fragment | Self::Assistant => "agents",
             Self::Cover => "covers",
             Self::Theater => "theaters",
             Self::Loadout
@@ -1733,9 +1737,10 @@ pub fn references_to(
 
 /// The families in the order an import stores them, so each refers only to records already
 /// stored: roles before the Agents that hold them, Agents before the Operations that name them.
-pub const IMPORT_ORDER: [ConfigRecord; 25] = [
+pub const IMPORT_ORDER: [ConfigRecord; 26] = [
     ConfigRecord::Roster,
     ConfigRecord::Registry,
+    ConfigRecord::Fragment,
     ConfigRecord::Role,
     ConfigRecord::Cover,
     ConfigRecord::Assistant,
@@ -2254,6 +2259,7 @@ pub(crate) fn assemble(
             operations: family(ConfigRecord::Operation),
             agents: family(ConfigRecord::Agent),
             roles: family(ConfigRecord::Role),
+            fragments: family(ConfigRecord::Fragment),
             reviews: family(ConfigRecord::Review),
             charges: family(ConfigRecord::Charge),
             assistant,

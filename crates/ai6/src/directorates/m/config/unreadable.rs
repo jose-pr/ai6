@@ -74,9 +74,18 @@ pub(super) fn without_unreadable(
         ConfigRecord::Agent,
         roster::unreadable_agents(&definitions(view, ConfigRecord::Agent)),
     );
+    let fragments = definitions(view, ConfigRecord::Fragment);
+    leave_out(
+        ConfigRecord::Fragment,
+        roster::unreadable_fragments(&fragments),
+    );
     leave_out(
         ConfigRecord::Role,
-        roster::unreadable_roles(&definitions(view, ConfigRecord::Role), source),
+        roster::unreadable_roles(
+            &definitions(view, ConfigRecord::Role),
+            &roster::fragment_texts(&fragments),
+            source,
+        ),
     );
     // What names a refused record goes with it, and what names that in turn: the rest would be
     // refused for them, and a start must not exit on a stored record. A record names another as
