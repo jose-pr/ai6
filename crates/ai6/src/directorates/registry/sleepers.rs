@@ -556,7 +556,7 @@ pub(super) fn fire_round<R: BriefStore + ?Sized>(
     let brief = fired_brief(operation, name, sleeper, window, received_by);
     let entry = round_entry(operation, name, sleeper, window);
     let enter = || match registry.enter_brief(&brief, &entry) {
-        Ok(_) => Ok(Fire::Queued),
+        Ok(queued) => confirm_queued(registry, &queued).map(|()| Fire::Queued),
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(Fire::AlreadyFired),
         Err(error) => Err(error),
     };
@@ -566,7 +566,7 @@ pub(super) fn fire_round<R: BriefStore + ?Sized>(
     let label = window_label(window);
     let this_window = |filed: &Brief| window_of(filed) == Some(label.as_str());
     match registry.reenter_brief(&brief, &entry, &|filed| !this_window(filed))? {
-        Reentry::Queued(_) => Ok(Fire::Queued),
+        Reentry::Queued(queued) => confirm_queued(registry, &queued).map(|()| Fire::Queued),
         Reentry::Unchanged(filed)
             if this_window(&filed.brief) || matches!(filed.state.as_str(), "done" | "failed") =>
         {
@@ -574,6 +574,27 @@ pub(super) fn fire_round<R: BriefStore + ?Sized>(
         }
         Reentry::Unchanged(_) => Ok(Fire::InFlight),
         _ => enter(),
+    }
+}
+
+/// Reads back a brief just queued and refuses when the Registry files it as finished or not at
+/// all: a queue that wrote a revision but left the state behind would otherwise report a window
+/// fired that no Station can ever claim.
+pub(super) fn confirm_queued<R: BriefStore + ?Sized>(
+    registry: &R,
+    queued: &Brief,
+) -> io::Result<()> {
+    match registry.filed_brief(&queued.key())? {
+        Some(filed) if matches!(filed.state.as_str(), "done" | "failed") => {
+            Err(io::Error::other(format!(
+                "the brief was queued but is filed {}, so no Station can claim it",
+                filed.state
+            )))
+        }
+        Some(_) => Ok(()),
+        None => Err(io::Error::other(
+            "the brief was queued but the Registry does not hold it",
+        )),
     }
 }
 
@@ -728,6 +749,7 @@ pub(super) mod tests {
         approval_covers_one_exact_definition,
         a_standing_sleeper_s_windows_are_runs_of_one_mission,
         a_standing_sleeper_past_the_run_limit_still_requeues_a_lapse,
+        a_requeued_standing_run_is_waiting_to_be_claimed_and_a_failed_brief_is_refused,
         a_mark_lives_on_its_approval,
     );
 
@@ -846,6 +868,53 @@ pub(super) mod tests {
                 );
             }
         }
+    }
+
+    fn a_requeued_standing_run_is_waiting_to_be_claimed_and_a_failed_brief_is_refused(
+        store: &dyn Store,
+    ) {
+        let registry = store.handle();
+        let standing = Sleeper {
+            standing: true,
+            ..nightly()
+        };
+        let window = |day: i64| at("2026-10-25") + 3 * 3600 + day * 86_400;
+        let fire = |day: i64| {
+            registry
+                .fire_sleeper("G", "deps", &standing, window(day), "hq")
+                .unwrap()
+        };
+        assert_eq!(fire(0), Fire::Queued);
+        let lease = registry
+            .claim_with_lease(None, "hq", crate::DEFAULT_LEASE, BTreeMap::new())
+            .unwrap()
+            .unwrap();
+        let claimed = registry.read_claimed(lease.key()).unwrap().unwrap();
+        registry
+            .finish(
+                &claimed,
+                &serde_json::json!({"state": "failed", "reason": "cancelled"}),
+                false,
+                None,
+                None,
+            )
+            .unwrap();
+        let refused = confirm_queued(registry.as_ref(), &claimed).unwrap_err();
+        assert!(refused.to_string().contains("filed failed"), "{refused}");
+
+        assert_eq!(fire(1), Fire::Queued, "the next window queues it again");
+        let filed = registry.filed_brief(lease.key()).unwrap().unwrap();
+        assert_eq!(filed.state, "new", "its state moved with its revision");
+        assert!(
+            registry
+                .list_new()
+                .unwrap()
+                .iter()
+                .any(|brief| brief.key() == lease.key()),
+            "a Station can claim it"
+        );
+        confirm_queued(registry.as_ref(), &claimed).unwrap();
+        assert_eq!(fire(2), Fire::InFlight, "unclaimed, the window after waits");
     }
 
     fn a_standing_sleeper_past_the_run_limit_still_requeues_a_lapse(store: &dyn Store) {

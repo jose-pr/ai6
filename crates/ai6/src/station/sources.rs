@@ -1489,8 +1489,9 @@ fn fire_window(
             if warned.insert(skipped) {
                 eprintln!(
                     "ai6: sleeper {name} of Operation {operation} has not fired window {}: \
-                     its standing Mission's last run is still in flight",
-                    window_label(window)
+                     {}",
+                    window_label(window),
+                    in_flight_note(registry, operation, name)
                 );
             }
             mark.why = Some(IN_FLIGHT.to_owned());
@@ -1502,6 +1503,30 @@ fn fire_window(
         Err(error) => eprintln!("ai6: sleeper {name} of Operation {operation}: {error}"),
     }
     queued
+}
+
+/// What the standing Mission of a Sleeper is doing while its next window cannot fire: a run
+/// queued and never claimed reads differently from one that is going.
+fn in_flight_note(registry: &dyn RegistryBackend, operation: &str, name: &str) -> String {
+    let state = registry
+        .entered_mission_id(&MissionEntry::standing(operation, name))
+        .ok()
+        .flatten()
+        .and_then(|id| registry.filed_brief(&id).ok().flatten())
+        .map(|filed| filed.state);
+    match state.as_deref() {
+        Some("new") => {
+            "its standing Mission's last run is queued and no Station has claimed it".to_owned()
+        }
+        Some("claimed") => {
+            "its standing Mission's last run is claimed and still in flight".to_owned()
+        }
+        Some("held") => "its standing Mission's last run is held".to_owned(),
+        Some(other) => {
+            format!("its standing Mission's last run is filed {other}, not queued again")
+        }
+        None => "its standing Mission's last run is still in flight".to_owned(),
+    }
 }
 
 /// The fingerprint of the definition the standing Mission of a Sleeper was last briefed from, when
