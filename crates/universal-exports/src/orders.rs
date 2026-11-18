@@ -366,13 +366,15 @@ mod tests {
     async fn a_claim_its_answering_station_says_nothing_runs_for_is_settled() {
         let served = served().await;
         let orphan = claimed_by(&served, "org/repo#3", "worker");
-        let settle = || {
+        let path = format!("G/missions/{orphan}/settle");
+        let settle = || async {
             post(
                 &served,
                 &served.operator,
-                &format!("G/missions/{orphan}/settle"),
+                &path,
                 serde_json::json!({"reason": "no Run behind it"}),
             )
+            .await
         };
         assert_eq!(settle().await.status(), 409, "its Station still answers");
 
