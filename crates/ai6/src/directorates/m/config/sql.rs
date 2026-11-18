@@ -1085,6 +1085,53 @@ mod tests {
         run(a_stored_record_a_release_cannot_read_is_refused_alone_and_an_old_shape_is_migrated);
     }
 
+    /// A pool a release stored with an account kind an earlier one spelled otherwise: it still loads,
+    /// as the same account, and a change stores the new spelling.
+    fn a_stored_pool_with_the_old_codex_key_kind_loads_as_that_account(location: &str) {
+        let provider = SqlProvider::open(location).unwrap();
+        seed(&provider);
+        store_raw(
+            &provider,
+            "ai6_config_secret",
+            "carol",
+            r#"{"env": "CAROL_KEY"}"#,
+        );
+        store_raw(
+            &provider,
+            "ai6_config_pool",
+            "codex-team",
+            r#"{"handler": "codex", "account": {"carol": {"kind": "openai-api-key"}}}"#,
+        );
+        let loaded = provider
+            .load("")
+            .expect("a running Station takes the stored pool");
+        let pool = loaded
+            .settings
+            .loadouts
+            .pool("codex-team")
+            .expect("the pool");
+        assert_eq!(
+            pool.get("carol").map(crate::directorates::q::Account::kind),
+            Some(crate::directorates::q::AccountKind::CodexApiKey)
+        );
+        assert_eq!(loaded.migrated.len(), 1, "{:?}", loaded.migrated);
+        provider
+            .put(
+                ConfigRecord::Pool,
+                &GLOBAL,
+                "codex-team",
+                &json!({"handler": "codex", "account": {"carol": {"kind": "codex-api-key"}}}),
+            )
+            .expect("the new spelling is stored");
+        let after = provider.load("").expect("it loads again");
+        assert!(after.migrated.is_empty(), "{:?}", after.migrated);
+    }
+
+    #[test]
+    fn a_sql_pool_with_the_old_codex_key_kind_loads_as_that_account() {
+        run(a_stored_pool_with_the_old_codex_key_kind_loads_as_that_account);
+    }
+
     fn a_stored_family_a_release_renamed_is_refused_by_name(location: &str) {
         let provider = SqlProvider::open(location).unwrap();
         seed(&provider);

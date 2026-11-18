@@ -636,6 +636,55 @@ mod tests {
     }
 
     #[test]
+    fn a_pool_stored_with_the_old_codex_key_kind_still_loads_as_that_account_and_is_stored_as_the_new_one()
+     {
+        let root = tempfile::tempdir().unwrap();
+        let provider = FileProvider::new(root.path());
+        write(
+            root.path(),
+            "loadouts.toml",
+            "[pool.codex-team]\nhandler = \"codex\"\n\
+             [pool.codex-team.account.carol]\nkind = \"openai-api-key\"\n\
+             [pool.codex-team.account.dave]\nkind = \"codex-access-token\"\n\
+             [secret.carol]\nenv = \"CAROL_KEY\"\n[secret.dave]\nenv = \"DAVE_KEY\"\n",
+        );
+        // A running Station takes it whole: the old spelling is read, never refused.
+        let loaded = provider.load("").expect("the stored pool loads");
+        let pool = loaded
+            .settings
+            .loadouts
+            .pool("codex-team")
+            .expect("the pool");
+        assert_eq!(
+            pool.get("carol").map(crate::directorates::q::Account::kind),
+            Some(crate::directorates::q::AccountKind::CodexApiKey)
+        );
+        assert_eq!(
+            pool.get("dave").map(crate::directorates::q::Account::kind),
+            Some(crate::directorates::q::AccountKind::CodexAccessToken)
+        );
+        assert_eq!(loaded.migrated.len(), 1, "{:?}", loaded.migrated);
+        assert_eq!(
+            (
+                loaded.migrated[0].family.as_str(),
+                loaded.migrated[0].key.as_str()
+            ),
+            ("pool", "codex-team")
+        );
+        // The release's own spelling is not migrated again.
+        write(
+            root.path(),
+            "loadouts.toml",
+            "[pool.codex-team]\nhandler = \"codex\"\n\
+             [pool.codex-team.account.carol]\nkind = \"codex-api-key\"\n\
+             [secret.carol]\nenv = \"CAROL_KEY\"\n",
+        );
+        let current = provider.load("").expect("the new spelling loads");
+        assert!(current.migrated.is_empty());
+        assert!(current.settings.loadouts.pool("codex-team").is_some());
+    }
+
+    #[test]
     fn what_names_an_unreadable_operation_is_left_out_with_it_and_the_rest_works() {
         let root = tempfile::tempdir().unwrap();
         let provider = FileProvider::new(root.path());
