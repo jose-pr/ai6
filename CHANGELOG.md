@@ -233,6 +233,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The gateway serves a brief, a green ink request, a held brief, a Mission's reviews, a charge's report and a
 ### Changed
 
+- The Codex handler starts and runs the app server through `coqui-acp-codex` (its session, requests,
+  approvals, interrupt, steer and exit) on the Station's terminal, instead of its own JSON-RPC code. A turn
+  now waits for the app server to accept it, so a refused turn fails `send_message`; `interrupt` names the
+  running turn; a question that is not a command or file approval is reported to the app server as
+  unanswered rather than left open, and a request the driver does not take is answered `-32601`.
+
 - A Sleeper has no `each_station` (one brief per Station per window); the Chief of Station's charge is
   woken instead. Removing it changes every Sleeper's fingerprint, so each stored authorization must be
   given again, and an Operation record that still sets `each_station` is refused. Gone with it:

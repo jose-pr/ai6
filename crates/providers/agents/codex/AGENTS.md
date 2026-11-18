@@ -5,7 +5,8 @@ signature, contract and gotchas, so a consuming agent skips the source. It ships
 the package and is self-contained. Development documentation lives with the source at
 <https://github.com/jose-pr/ai6>.
 
-No features. MSRV: Rust 1.89. The crate depends on `ai6` (feature `gate`), `serde_json`,
+No features. MSRV: Rust 1.89. The crate depends on `ai6` (feature `gate`), `coqui-acp-codex`
+(the app server's session: its process, requests, approvals, interrupt, steer and exit), `serde_json`,
 `tempfile`, `ai6-process-tree` (`crates/process-tree/`, which kills the sandbox probe's process
 tree), and `libc` (Unix) or `windows-sys` (Windows). It re-exports `CodexHandler` and
 `CodexConfig` from the root, beside the tool check's `TOOL_CHECK_ENV` and `KEPT_FEATURES`. Its
@@ -76,6 +77,18 @@ the terminal cannot tell) and quotes the last eight lines it wrote that were not
 bytes each), and `None` after that; a pending request (`initialize`, `thread/start`,
 `thread/resume`) fails with the same text. `close` kills the terminal and waits up to 2 s for
 its exit status, so the working directory is free when it returns.
+A Run is a `coqui_acp_codex::CodexSession` started through the Station's terminal (`terminal.rs`
+adapts it as the driver's `Spawn`): the terminal's output is read through `JsonLines` (so a line a
+pseudo-terminal broke or coloured reads as Codex wrote it, and is flagged `rebuilt` otherwise), and the
+echo of each request a pseudo-terminal returns is dropped. Every line the app server writes reaches this
+crate first, through the driver's line hook, where the restricted thread's check and the Run's events
+are made from it (`AgentEvent::data` is that line, which the Station reads); the driver answers the
+server's requests. A command or file approval is answered `accept` or `decline` through the driver's
+responder, and a decline is steered into the turn (`turn/steer`); any other question is left unanswered,
+which the driver reports to the app server as nobody having chosen, and a request of a kind the driver
+does not take is answered `-32601` at once. A turn is started with `turn/start` and the Run waits for
+its answer (the turn's id), so a refused turn fails `send_message`; `interrupt` names the running turn,
+and does nothing with none running. The `initialize` request names the client `ai6`, with a title.
 When AI6 supplies `AI6_CABLE_MCP_URL` and `AI6_CABLE_MCP_TOKEN`, app-server receives
 per-process config overrides for the Cable endpoint and token environment-variable name,
 with `default_tools_approval_mode="approve"`.
