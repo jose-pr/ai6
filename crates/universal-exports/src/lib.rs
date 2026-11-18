@@ -2311,6 +2311,10 @@ impl Gateway {
                 get(green_ink::expired),
             )
             .route(
+                "/v1/user/operations/{operation_id}/green-ink/rejected",
+                get(green_ink::rejected),
+            )
+            .route(
                 "/v1/user/operations/{operation_id}/green-ink/sources",
                 get(green_ink::sources),
             )

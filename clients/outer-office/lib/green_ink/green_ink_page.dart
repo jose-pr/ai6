@@ -521,7 +521,7 @@ class ExpiredGreenInkPage extends StatefulWidget {
 }
 
 class _ExpiredGreenInkPageState extends State<ExpiredGreenInkPage> {
-  Future<_Read<ExpiredGreenInkSummary>>? _records;
+  Future<List<_Read<ExpiredGreenInkSummary>>>? _records;
   bool _rearming = false;
 
   OoScope get _scope => OoScope(widget.route, widget.board.greenInkOperations);
@@ -545,16 +545,23 @@ class _ExpiredGreenInkPageState extends State<ExpiredGreenInkPage> {
     setState(() {
       _records = shown.isEmpty
           ? null
-          : readEach(shown, widget.board.loadExpiredGreenInk, const []);
+          : Future.wait([
+              readEach(shown, widget.board.loadExpiredGreenInk, const []),
+              readEach(shown, widget.board.loadRejectedGreenInk, const []),
+            ]);
     });
   }
 
-  Future<void> _rearm(GreenInkRequestSummary request) async {
-    final note = await showDialog<String>(
-      context: context,
-      builder: (context) => _RearmDialog(request: request),
-    );
-    if (note == null || !mounted) return;
+  Future<void> _rearm(GreenInkRequestSummary request, {bool ask = true}) async {
+    var note = '';
+    if (ask) {
+      final given = await showDialog<String>(
+        context: context,
+        builder: (context) => _RearmDialog(request: request),
+      );
+      if (given == null || !mounted) return;
+      note = given;
+    }
     setState(() => _rearming = true);
     try {
       await widget.board.rearmGreenInk(
@@ -630,7 +637,7 @@ class _ExpiredGreenInkPageState extends State<ExpiredGreenInkPage> {
           ),
           const SizedBox(height: 8),
           Expanded(
-            child: FutureBuilder<_Read<ExpiredGreenInkSummary>>(
+            child: FutureBuilder<List<_Read<ExpiredGreenInkSummary>>>(
               future: _records,
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
@@ -639,12 +646,15 @@ class _ExpiredGreenInkPageState extends State<ExpiredGreenInkPage> {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
-                final read = snapshot.data!;
+                final read = snapshot.data![0];
+                final rejected = snapshot.data![1];
                 final several = scope.shown.length > 1;
                 if (read.rows.isEmpty && read.failed.isNotEmpty && !several) {
                   return Center(child: Text(read.failed.values.single));
                 }
-                if (read.rows.isEmpty && read.failed.isEmpty) {
+                if (read.rows.isEmpty &&
+                    read.failed.isEmpty &&
+                    rejected.rows.isEmpty) {
                   return const OoEmptyState(
                     icon: OoIconName.greenInk,
                     title: 'No step has expired without a decision.',
@@ -665,6 +675,24 @@ class _ExpiredGreenInkPageState extends State<ExpiredGreenInkPage> {
                             ? null
                             : () => _rearm(record.request),
                       ),
+                    if (rejected.rows.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Text(
+                          'Rejected. A rejection stands until it is reopened.',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ),
+                    for (final (_, record) in rejected.rows)
+                      _ExpiredCard(
+                        board: widget.board,
+                        record: record,
+                        decided: 'rejected ',
+                        action: 'Reopen',
+                        onRearm: _rearming || widget.board.demo
+                            ? null
+                            : () => _rearm(record.request, ask: false),
+                      ),
                   ],
                 );
               },
@@ -681,11 +709,15 @@ class _ExpiredCard extends StatelessWidget {
     required this.board,
     required this.record,
     required this.onRearm,
+    this.decided = 'expired ',
+    this.action = 'Re-arm…',
   });
 
   final MissionBoard board;
   final ExpiredGreenInkSummary record;
   final VoidCallback? onRearm;
+  final String decided;
+  final String action;
 
   @override
   Widget build(BuildContext context) {
@@ -720,7 +752,7 @@ class _ExpiredCard extends StatelessWidget {
                 const Text(' · '),
                 OoTime(
                   record.expiredAt,
-                  prefix: 'expired ',
+                  prefix: decided,
                   style: DefaultTextStyle.of(context).style,
                 ),
               ],
@@ -734,7 +766,7 @@ class _ExpiredCard extends StatelessWidget {
                   board.loadGreenInkDocument(request.operationId, request.id),
             ),
             const SizedBox(height: 8),
-            OutlinedButton(onPressed: onRearm, child: const Text('Re-arm…')),
+            OutlinedButton(onPressed: onRearm, child: Text(action)),
           ],
         ),
       ),

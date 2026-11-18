@@ -9,7 +9,8 @@ use crate::directorates::m::approvals::ActionScope;
 use crate::directorates::registry::approvals::{
     Approval, ApprovalRequest, ApprovalStatus, ApprovalStore, ClassAuthorization, Decision,
     Rearming, Revocation, Ruling, class_approval, expired, expired_undecided, never_used,
-    newest_expired, rearmed, ruled, validate_note, validate_rearming, validate_ruling,
+    newest_expired, newest_rejected, rearmed, ruled, validate_note, validate_rearming,
+    validate_ruling,
 };
 use crate::directorates::registry::limits::ApprovalLimits;
 use crate::directorates::registry::store::{invalid_data, validate_registry_key};
@@ -417,6 +418,29 @@ impl ApprovalStore for SqlRegistry {
                 }
             }
             Ok(newest_expired(
+                approvals,
+                since,
+                self.current_limits().approvals.expired_listed,
+            ))
+        })
+    }
+
+    fn rejected_approvals(&self, operation: &str, since: f64) -> io::Result<Vec<Approval>> {
+        validate_registry_key(operation)?;
+        self.read(|tx| {
+            let rows = tx.query(
+                "SELECT record FROM ai6_approvals WHERE operation = $1 AND state = 'decided'",
+                &[operation.into()],
+            )?;
+            let mut approvals = Vec::new();
+            for row in rows {
+                if let Ok(approval) = serde_json::from_str::<Approval>(&row.text(0)?)
+                    && approval.request.operation == operation
+                {
+                    approvals.push(approval);
+                }
+            }
+            Ok(newest_rejected(
                 approvals,
                 since,
                 self.current_limits().approvals.expired_listed,

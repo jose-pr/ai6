@@ -285,6 +285,34 @@ pub(crate) async fn sources(
     Ok(Json(pages.unwrap_or_default()))
 }
 
+/// `GET /v1/user/operations/{operation_id}/green-ink/rejected?since=`: the requests a person
+/// rejected, the newest first. Reopening one (the re-arm route) takes it out of the list.
+pub(crate) async fn rejected(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path(operation_id): Path<String>,
+    Query(query): Query<ExpiredQuery>,
+) -> Result<Json<Vec<Approval>>, ApiError> {
+    if query.since.is_some_and(|since| !since.is_finite()) {
+        return Err(ApiError::bad_request());
+    }
+    let (_, operation, registry) =
+        authorized(&gateway, &headers, operation_id, "approval.decide").await?;
+    let now = unix_timestamp()?;
+    let window = gateway.config.unex().text.green_ink_expired_window;
+    let since = query.since.unwrap_or_else(|| {
+        window
+            .get()
+            .map_or(0.0, |window| now - window.as_secs_f64())
+    });
+    let operation = operation.to_string();
+    let found = tokio::task::spawn_blocking(move || registry.rejected_approvals(&operation, since))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(registry_error)?;
+    Ok(Json(found))
+}
+
 /// `GET /v1/user/operations/{operation_id}/green-ink/expired?since=`: the requests that expired
 /// undecided, the newest first. Re-arming one takes it out of the list.
 pub(crate) async fn expired(
@@ -819,6 +847,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_approval_lasts_as_long_as_the_operation_says_when_the_signer_does_not() {
+        use ai6::{ConfigProvider as _, ConfigRecord, ConfigScope, SqlProvider};
+        let config = tempfile::tempdir().unwrap();
+        let location = format!("sqlite:{}", config.path().join("config.db").display());
+        let source = std::sync::Arc::new(SqlProvider::open(&location).unwrap());
+        source
+            .put(
+                ConfigRecord::Operation,
+                &ConfigScope::Global,
+                "G",
+                &serde_json::json!({ "green_ink": { "approval_ttl_secs": 7200 } }),
+            )
+            .unwrap();
+        let served = crate::controls::tests::served_with_roster(ROLES, Some(source)).await;
+        let asked = asked(&served, "long-lived", 3600);
+        let approved: serde_json::Value = call(
+            &served,
+            &served.operator,
+            reqwest::Method::POST,
+            &format!("G/green-ink/{}/approve", asked.id),
+            Some(serde_json::json!({})),
+        )
+        .await
+        .json()
+        .await
+        .unwrap();
+        let lasts = approved["expires_at"].as_f64().unwrap() - approved["at"].as_f64().unwrap();
+        assert!((lasts - 7200.0).abs() < 1.0, "{approved}");
+    }
+
+    #[tokio::test]
     async fn a_rejected_request_is_reopened_by_the_route_that_rearms_an_expired_one() {
         let served = served_with(ROLES).await;
         let refused = asked(&served, "refused", 3600);
@@ -831,6 +890,19 @@ mod tests {
         )
         .await;
         assert_eq!(rejected.status(), 200);
+        let listed: serde_json::Value = call(
+            &served,
+            &served.operator,
+            reqwest::Method::GET,
+            "G/green-ink/rejected",
+            None,
+        )
+        .await
+        .json()
+        .await
+        .unwrap();
+        assert_eq!(listed[0]["request"]["id"], refused.id.as_str(), "{listed}");
+        assert_eq!(listed[0]["note"], "no such tag");
         let path = format!("G/green-ink/{}/rearm", refused.id);
         let reopened = call(
             &served,
@@ -853,6 +925,22 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(pending[0]["id"], refused.id.as_str(), "{pending}");
+        let listed: serde_json::Value = call(
+            &served,
+            &served.operator,
+            reqwest::Method::GET,
+            "G/green-ink/rejected",
+            None,
+        )
+        .await
+        .json()
+        .await
+        .unwrap();
+        assert_eq!(
+            listed,
+            serde_json::json!([]),
+            "reopened, it leaves the list"
+        );
     }
 
     #[tokio::test]

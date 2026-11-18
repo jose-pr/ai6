@@ -3112,7 +3112,30 @@ class MissionBoard extends ChangeNotifier
     ];
   }
 
-  /// Opens a request that expired undecided again: it waits for a decision, and its Mission with
+  /// The requests of an Operation a person rejected, the newest first.
+  Future<List<ExpiredGreenInkSummary>> loadRejectedGreenInk(
+    String operationId,
+  ) async {
+    if (demo) {
+      return const [];
+    }
+    final response = await _userRequest(
+      'GET',
+      '/v1/user/operations/${Uri.encodeComponent(operationId)}/green-ink/rejected',
+    );
+    if (response.statusCode != 200) {
+      throw GatewayRefused(
+        response.statusCode,
+        'The gateway refused the rejected green ink.',
+      );
+    }
+    return [
+      for (final record in jsonDecode(response.body) as List<dynamic>)
+        ExpiredGreenInkSummary.fromJson(record as Map<String, dynamic>),
+    ];
+  }
+
+  /// Opens a request that expired undecided or was rejected again: it waits for a decision, and its Mission with
   /// it.
   Future<void> rearmGreenInk({
     required String operationId,
@@ -3136,7 +3159,9 @@ class MissionBoard extends ChangeNotifier
           'Your account lacks approval.decide in this Operation.',
         );
       case 404 || 409:
-        throw StateError('The request is no longer an expired one.');
+        throw StateError(
+          'The request is no longer an expired or rejected one.',
+        );
       default:
         throw StateError('The gateway refused to re-arm the request.');
     }

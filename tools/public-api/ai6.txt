@@ -4802,6 +4802,7 @@ pub fn ai6::directorates::registry::approvals::ApprovalStore::mission_approvals(
 pub fn ai6::directorates::registry::approvals::ApprovalStore::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
 pub fn ai6::directorates::registry::approvals::ApprovalStore::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::approvals::ApprovalStore::rearm_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Rearming, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalRequest>
+pub fn ai6::directorates::registry::approvals::ApprovalStore::rejected_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::approvals::ApprovalStore::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
 pub fn ai6::directorates::registry::approvals::ApprovalStore::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::approvals::ApprovalStore::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
@@ -4822,6 +4823,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::mission_approvals(&self, &
 pub fn ai6::directorates::registry::sql::SqlRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::rearm_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Rearming, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalRequest>
+pub fn ai6::directorates::registry::sql::SqlRegistry::rejected_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
@@ -4842,6 +4844,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::mission_approvals(&self
 pub fn ai6::directorates::registry::store::FileRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::rearm_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Rearming, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalRequest>
+pub fn ai6::directorates::registry::store::FileRegistry::rejected_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
@@ -5128,6 +5131,7 @@ pub fn ai6::directorates::registry::backend::ApprovalStore::mission_approvals(&s
 pub fn ai6::directorates::registry::backend::ApprovalStore::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
 pub fn ai6::directorates::registry::backend::ApprovalStore::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::backend::ApprovalStore::rearm_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Rearming, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalRequest>
+pub fn ai6::directorates::registry::backend::ApprovalStore::rejected_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::backend::ApprovalStore::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
 pub fn ai6::directorates::registry::backend::ApprovalStore::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::backend::ApprovalStore::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
@@ -5148,6 +5152,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::mission_approvals(&self, &
 pub fn ai6::directorates::registry::sql::SqlRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::rearm_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Rearming, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalRequest>
+pub fn ai6::directorates::registry::sql::SqlRegistry::rejected_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
@@ -5168,6 +5173,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::mission_approvals(&self
 pub fn ai6::directorates::registry::store::FileRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::rearm_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Rearming, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalRequest>
+pub fn ai6::directorates::registry::store::FileRegistry::rejected_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
@@ -7927,6 +7933,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::mission_approvals(&self, &
 pub fn ai6::directorates::registry::sql::SqlRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::rearm_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Rearming, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalRequest>
+pub fn ai6::directorates::registry::sql::SqlRegistry::rejected_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
@@ -8245,6 +8252,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::mission_approvals(&self
 pub fn ai6::directorates::registry::store::FileRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::rearm_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Rearming, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalRequest>
+pub fn ai6::directorates::registry::store::FileRegistry::rejected_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
@@ -12361,6 +12369,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::mission_approvals(&self
 pub fn ai6::directorates::registry::store::FileRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::rearm_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Rearming, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalRequest>
+pub fn ai6::directorates::registry::store::FileRegistry::rejected_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
@@ -14267,6 +14276,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::mission_approvals(&self, &
 pub fn ai6::directorates::registry::sql::SqlRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::rearm_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Rearming, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalRequest>
+pub fn ai6::directorates::registry::sql::SqlRegistry::rejected_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
@@ -15381,6 +15391,7 @@ pub fn ai6::ApprovalStore::mission_approvals(&self, &str, &str, f64) -> core::io
 pub fn ai6::ApprovalStore::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
 pub fn ai6::ApprovalStore::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
 pub fn ai6::ApprovalStore::rearm_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Rearming, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalRequest>
+pub fn ai6::ApprovalStore::rejected_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::ApprovalStore::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
 pub fn ai6::ApprovalStore::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::ApprovalStore::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
@@ -15401,6 +15412,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::mission_approvals(&self, &
 pub fn ai6::directorates::registry::sql::SqlRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::rearm_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Rearming, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalRequest>
+pub fn ai6::directorates::registry::sql::SqlRegistry::rejected_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::sql::SqlRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>
@@ -15421,6 +15433,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::mission_approvals(&self
 pub fn ai6::directorates::registry::store::FileRegistry::pending_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::ApprovalRequest>>
 pub fn ai6::directorates::registry::store::FileRegistry::put_class_authorization(&self, &ai6::directorates::registry::approvals::ClassAuthorization) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::rearm_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Rearming, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalRequest>
+pub fn ai6::directorates::registry::store::FileRegistry::rejected_approvals(&self, &str, f64) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::approvals::Approval>>
 pub fn ai6::directorates::registry::store::FileRegistry::request_approval(&self, &ai6::directorates::registry::approvals::ApprovalRequest) -> core::io::error::Result<ai6::directorates::registry::approvals::ApprovalStatus>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_approval(&self, &str, &str, &ai6::directorates::registry::approvals::Revocation) -> core::io::error::Result<ai6::directorates::registry::approvals::Approval>
 pub fn ai6::directorates::registry::store::FileRegistry::revoke_class_authorization(&self, &str, &str, &str, f64) -> core::io::error::Result<ai6::directorates::registry::approvals::ClassAuthorization>

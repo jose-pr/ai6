@@ -872,6 +872,14 @@ pub trait ApprovalStore {
     fn expired_approvals(&self, operation: &str, since: f64, now: f64)
     -> io::Result<Vec<Approval>>;
 
+    /// The Operation's requests a person rejected at `since` or later, the newest first, up to
+    /// `[registry.limits.approvals] expired_listed`. Reopening one takes it out of the list.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for an Operation that is not a Registry key; I/O errors otherwise.
+    fn rejected_approvals(&self, operation: &str, since: f64) -> io::Result<Vec<Approval>>;
+
     /// Re-opens a request that expired undecided: it is pending again until `expires_at`, as the
     /// same request, and the Mission's Station takes it up.
     ///
@@ -1168,6 +1176,24 @@ impl ApprovalStore for FileRegistry {
         ))
     }
 
+    fn rejected_approvals(&self, operation: &str, since: f64) -> io::Result<Vec<Approval>> {
+        validate_registry_key(operation)?;
+        let _lock = self.lock()?;
+        let mut found = Vec::new();
+        for path in json_files(&self.approvals_dir("decided", operation))? {
+            if let Ok(Some(approval)) = self.read_json::<Approval>(&path)
+                && approval.request.operation == operation
+            {
+                found.push(approval);
+            }
+        }
+        Ok(newest_rejected(
+            found,
+            since,
+            self.current_limits().approvals.expired_listed,
+        ))
+    }
+
     fn rearm_approval(
         &self,
         operation: &str,
@@ -1433,9 +1459,24 @@ pub(super) fn expired_undecided(status: Option<ApprovalStatus>) -> io::Result<Ap
 /// Of the decided `approvals`, those that expired undecided at `since` or later, the newest
 /// `most` first.
 pub(super) fn newest_expired(approvals: Vec<Approval>, since: f64, most: Limit) -> Vec<Approval> {
+    newest_decided(approvals, Decision::Expired, since, most)
+}
+
+/// Of the decided `approvals`, those a person rejected at `since` or later, the newest `most`
+/// first.
+pub(super) fn newest_rejected(approvals: Vec<Approval>, since: f64, most: Limit) -> Vec<Approval> {
+    newest_decided(approvals, Decision::Rejected, since, most)
+}
+
+fn newest_decided(
+    approvals: Vec<Approval>,
+    decision: Decision,
+    since: f64,
+    most: Limit,
+) -> Vec<Approval> {
     let mut expired: Vec<Approval> = approvals
         .into_iter()
-        .filter(|approval| approval.decision == Decision::Expired && approval.at >= since)
+        .filter(|approval| approval.decision == decision && approval.at >= since)
         .collect();
     expired.sort_by(|left, right| {
         right

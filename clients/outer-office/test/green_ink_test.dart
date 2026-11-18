@@ -49,6 +49,9 @@ class FakeGreenInk {
   bool revoked = false;
   bool rearmed = false;
 
+  /// Whether the Operation holds a rejected request and no expired one.
+  bool rejection = false;
+
   /// Operations whose routes answer 503.
   final failing = <String>{};
 
@@ -63,10 +66,28 @@ class FakeGreenInk {
     if (path.endsWith('/green-ink/sources')) {
       return http.Response(jsonEncode(const <Object>[]), 200);
     }
+    if (path.endsWith('/green-ink/rejected')) {
+      return http.Response(
+        jsonEncode(
+          rejection && !rearmed
+              ? [
+                  {
+                    'request': pendingRequest(),
+                    'decision': 'rejected',
+                    'signer': 'operator-007',
+                    'at': 1_798_086_400.0,
+                    'note': 'no such tag',
+                  },
+                ]
+              : [],
+        ),
+        200,
+      );
+    }
     if (path.endsWith('/green-ink/expired')) {
       return http.Response(
         jsonEncode(
-          rearmed
+          rearmed || rejection
               ? []
               : [
                   {
@@ -270,6 +291,32 @@ void main() {
       find.text('No step has expired without a decision.'),
       findsOneWidget,
     );
+  });
+
+  testWidgets('a rejected request is listed and reopened', (tester) async {
+    final gateway = FakeGreenInk()..rejection = true;
+    final board = await signedIn(gateway);
+    addTearDown(board.dispose);
+    await openAdministration(tester, board);
+    await tester.tap(find.widgetWithText(Tab, 'Expired'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('A rejection stands'), findsOneWidget);
+    expect(find.text('push · origin:refs/heads/main'), findsOneWidget);
+    expect(find.textContaining('rejected '), findsWidgets);
+
+    await tester.tap(find.text('Reopen'));
+    await tester.pumpAndSettle();
+
+    final reopened = gateway.requests.singleWhere(
+      (request) => request.url.path.endsWith('/rearm'),
+    );
+    expect(
+      reopened.url.path,
+      '/v1/user/operations/G/green-ink/$requestId/rearm',
+    );
+    expect(find.text('Reopen'), findsNothing);
+    expect(find.textContaining('A rejection stands'), findsNothing);
   });
 
   testWidgets('All Operations is the inbox, each request signed in its own', (
