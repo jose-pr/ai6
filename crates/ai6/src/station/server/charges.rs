@@ -96,7 +96,8 @@ impl ChargeDesk {
 #[derive(Debug, Clone, Serialize)]
 struct ChargeEvent {
     /// `verifying`, `cable`, `health`, `stuck`, `control`, `request` (an Operation's ask of a
-    /// Station), `resources` (a Station's answer) or `timer`.
+    /// Station), `resources` (a Station's answer), `reports` (the open Reports to assess) or
+    /// `timer`.
     kind: &'static str,
     /// When the Station saw it, as Unix seconds.
     at: f64,
@@ -946,7 +947,7 @@ async fn wake(state: &DaemonState, live: &Arc<Live>) {
         return;
     }
     live.interrupt.store(false, Ordering::Release);
-    let events: Vec<ChargeEvent> = live.waiting.lock().map_or_else(
+    let mut events: Vec<ChargeEvent> = live.waiting.lock().map_or_else(
         |_| Vec::new(),
         |mut waiting| {
             let take = charge
@@ -960,6 +961,14 @@ async fn wake(state: &DaemonState, live: &Arc<Live>) {
     if events.is_empty() {
         live.busy.store(false, Ordering::Release);
         return;
+    }
+    // Reports wait for the charge every turn, not once: the oldest open ones are its duty, and
+    // what it leaves open is given again to the next turn.
+    let (looking, asked) = (state.clone(), charge.clone());
+    if let Ok(Some(duty)) =
+        tokio::task::spawn_blocking(move || area::report_duty(&looking, &asked)).await
+    {
+        events.push(ChargeEvent::new("reports", true, duty));
     }
     if let Ok(mut told) = live.told.lock() {
         told.extend(events.iter().filter_map(|event| event.key.clone()));

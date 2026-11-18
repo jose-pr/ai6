@@ -311,3 +311,68 @@ async fn the_charge_assesses_reports_and_what_resolves_them_closes_them() {
     charges::close_all(&state).await;
     state.stopping.store(true, Ordering::Release);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_turn_is_given_the_oldest_open_reports_up_to_its_bound() {
+    let root = tempfile::tempdir().unwrap();
+    let tag = "a9";
+    let state = station(root.path(), tag, "test", "max_reports_per_turn = 2\n", "");
+    for (id, filed) in [("r-new", 300.0), ("r-old", 100.0), ("r-mid", 200.0)] {
+        let mut report = Report::new(
+            id,
+            ReportScope::Operation(names(tag).0),
+            "log",
+            Severity::Info,
+            "routine",
+            "nothing to do",
+            ReportFiler::Agent {
+                agent: "007".to_owned(),
+                run: "run-1".to_owned(),
+                mission: "G-1".to_owned(),
+            },
+            filed,
+        );
+        report.state = ReportState::Open;
+        state.intake.file_report(&report).unwrap();
+    }
+    charges::tend(&state, false, true).await;
+    control(&state, tag, "look");
+    tend_until(&state, "a turn", || turns(&state, tag) == 1).await;
+    let first = calls(&key(tag));
+    let duty = events_of(&first[0].text)
+        .into_iter()
+        .find(|event| event["kind"] == "reports")
+        .unwrap_or_else(|| panic!("no reports event: {}", first[0].text));
+    let ids: Vec<&str> = duty["detail"]["assess_now"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|report| report["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["r-old", "r-mid"], "oldest first, two of three");
+    assert_eq!(duty["detail"]["open"], 3);
+
+    // What stays open is given again; nothing closes a Report but the charge's decision.
+    control(&state, tag, "again");
+    tend_until(&state, "another turn", || turns(&state, tag) == 2).await;
+    let all = calls(&key(tag));
+    assert!(all[1].text.contains("r-old"), "{}", all[1].text);
+    charges::close_all(&state).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_turn_with_no_open_reports_is_given_no_duty() {
+    let root = tempfile::tempdir().unwrap();
+    let tag = "a8";
+    let state = station(root.path(), tag, "test", "", "");
+    charges::tend(&state, false, true).await;
+    control(&state, tag, "look");
+    tend_until(&state, "a turn", || turns(&state, tag) == 1).await;
+    let first = calls(&key(tag));
+    assert!(
+        events_of(&first[0].text)
+            .iter()
+            .all(|event| event["kind"] != "reports")
+    );
+    charges::close_all(&state).await;
+}

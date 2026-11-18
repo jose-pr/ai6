@@ -179,6 +179,11 @@ pub struct ChargeDefinition {
     #[schema(title = "Charge stuck after")]
     #[map(default = ChargeDefinition::DEFAULTS.stuck_charge_after)]
     pub stuck_charge_after: TimeLimit,
+    /// Open Reports a charge is given to assess in one turn, oldest first; it decides each with
+    /// `assess_report`, and `no_action` closes a routine one. `none` gives it every open Report.
+    #[schema(title = "Reports assessed a turn")]
+    #[map(default = ChargeDefinition::DEFAULTS.max_reports_per_turn)]
+    pub max_reports_per_turn: Limit,
     /// Characters of text one of the charge's acts records in the audit log and on the timeline
     /// (a target, a reason); the rest is cut. `none` records it whole.
     #[schema(title = "Text one act records")]
@@ -205,6 +210,7 @@ impl ChargeDefinition {
         stuck_queued_after: TimeLimit::secs(900),
         stuck_blocked_after: TimeLimit::secs(3_600),
         stuck_charge_after: TimeLimit::secs(600),
+        max_reports_per_turn: Limit::at(10),
         max_text_chars: Limit::at(500),
     };
 

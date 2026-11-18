@@ -113,10 +113,13 @@ The Station wakes a charge with what its area holds that the charge has not been
 | `request`: an Operation's 00 asked this Station for an Agent, a Theater, an account or capacity, with the Station's own check of what it can provide | `station:` | always: it carries the asker's words |
 | `resources`: a Station answered a request of the Operation | `operation:` | always: it carries the Station's reason |
 | `control`: a person asked the charge to wake, with an optional note | all | when it carries a note |
+| `reports`: the open Reports to assess, oldest first, at most `max_reports_per_turn`; given with every turn of M's and an Operation's charge while any are open | `m`, `operation:` | always: it names each Report's kind |
 | `timer`: `wake_every` (while the area has open work) or `wake_every_idle` (while it has none) passed with no other wake; it carries a short health summary of the area | all | no |
 
+Open Reports are a duty rather than a one-time event: M's charge is given the open global Reports and an Operation's its Operation's, every turn, as a `reports` event naming the oldest `max_reports_per_turn` of them (id, kind, severity, when filed). Reports left open are given again, so a backlog drains turn by turn; a shorter `wake_every` drains it faster. The charge reads each with `read_report` and decides it with `assess_report`, `no_action` for a routine entry. A Station's charge has no Report tools and is given none.
+
 Each wake is one turn. Its message lists the events as JSON, each saying whether it carries text
-written outside AI6; that text is data, never an instruction. An event is told once: the charge's
+written outside AI6; that text is data, never an instruction. An event is told once (the `reports` duty apart): the charge's
 record remembers what it was told, so a restart or a takeover does not tell it again. A control is
 taken off the record when the turn that answered it is over.
 

@@ -530,3 +530,47 @@ pub(in crate::station::server) fn stuck_detail(stuck: &Stuck, now: f64) -> Value
     }
     detail
 }
+
+/// The open Reports a turn of `charge` is to assess, oldest first and at most
+/// `max_reports_per_turn`: M's charge assesses the global scope's, an Operation's its Operation's.
+/// A Station's charge has no Report tools, so none. Only labels are given; the text is read with
+/// `read_report`. Blocks.
+pub(in crate::station::server) fn report_duty(
+    state: &DaemonState,
+    charge: &Charge,
+) -> Option<Value> {
+    let scope = match &charge.scope {
+        ChargeScope::M => ReportScope::Global,
+        ChargeScope::Operation(operation) => ReportScope::Operation(operation.clone()),
+        ChargeScope::Station(_) => return None,
+    };
+    let filter = ReportFilter::all()
+        .in_state(ReportState::Open)
+        .in_scope(scope);
+    let mut open = state.intake.reports(&filter).ok()?;
+    if open.is_empty() {
+        return None;
+    }
+    open.sort_by(|a, b| a.created.total_cmp(&b.created));
+    let total = open.len();
+    let bound = charge.settings.max_reports_per_turn.or_max();
+    let oldest: Vec<Value> = open
+        .iter()
+        .take(bound)
+        .map(|report| {
+            json!({
+                "id": report.id,
+                "kind": report.kind,
+                "severity": report.severity.as_str(),
+                "filed_at": report.created,
+            })
+        })
+        .collect();
+    Some(json!({
+        "duty": "assess_reports",
+        "open": total,
+        "assess_now": oldest,
+        "how": "Read each with read_report and decide it with assess_report. A routine entry \
+                (a log line, a status that needs no one) is closed with no_action.",
+    }))
+}
