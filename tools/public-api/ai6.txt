@@ -733,6 +733,7 @@ pub ai6::directorates::m::assistant::AssistantLimits::change_bytes: ai6::bounds:
 pub ai6::directorates::m::assistant::AssistantLimits::change_files: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantLimits::commit_message_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantLimits::context_bytes: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantLimits::conversation_cost_micro_usd: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantLimits::event_bytes: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantLimits::events: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantLimits::image_bytes: ai6::bounds::Limit
@@ -744,6 +745,7 @@ pub ai6::directorates::m::assistant::AssistantLimits::page_files: ai6::bounds::L
 pub ai6::directorates::m::assistant::AssistantLimits::personal_walk: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantLimits::shared_bases: ai6::bounds::Limit
 pub ai6::directorates::m::assistant::AssistantLimits::skills: ai6::bounds::Limit
+pub ai6::directorates::m::assistant::AssistantLimits::turn_cost_micro_usd: ai6::bounds::Limit
 impl ai6::AssistantLimits
 pub fn ai6::AssistantLimits::validate(&self) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::AssistantLimits::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
@@ -2378,6 +2380,7 @@ pub ai6::directorates::m::roster::AgentRoute::model: core::option::Option<alloc:
 pub ai6::directorates::m::roster::AgentRoute::pool: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::roster::AgentRoute::priority: i64
 pub ai6::directorates::m::roster::AgentRoute::secrets: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::m::roster::AgentRoute::token_cap: core::option::Option<u64>
 impl ai6::directorates::m::roster::AgentRoute
 pub fn ai6::directorates::m::roster::AgentRoute::new(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::roster::AgentRoute::reference(&self) -> ai6::directorates::m::roster::RouteRef
@@ -3115,6 +3118,7 @@ pub const ai6::directorates::medical::usage::STRICT_RUN_TOKENS: u64
 pub fn ai6::directorates::medical::usage::buckets_of(&coqui_acp_provider::kind::AgentEvent) -> &[coqui_acp_api::usage::Bucket]
 pub fn ai6::directorates::medical::usage::micro_usd(f64) -> u64
 pub fn ai6::directorates::medical::usage::spend_of(&coqui_acp_provider::kind::AgentEvent) -> core::option::Option<&coqui_acp_api::usage::Spend>
+pub fn ai6::directorates::medical::usage::usd_text(u64) -> alloc::string::String
 pub fn ai6::directorates::medical::usage::utc_day(i64) -> alloc::string::String
 pub mod ai6::directorates::medical::watchdog
 pub struct ai6::directorates::medical::watchdog::Watchdog
@@ -4983,6 +4987,7 @@ pub fn ai6::directorates::registry::assistant_log::AssistantLogEntry::with_turn(
 #[non_exhaustive] pub struct ai6::directorates::registry::assistant_log::AssistantTurn
 pub ai6::directorates::registry::assistant_log::AssistantTurn::account: core::option::Option<ai6::directorates::registry::accounts::AccountRef>
 pub ai6::directorates::registry::assistant_log::AssistantTurn::agent: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::assistant_log::AssistantTurn::cost_micro_usd: core::option::Option<u64>
 pub ai6::directorates::registry::assistant_log::AssistantTurn::model: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::assistant_log::AssistantTurn::route: core::option::Option<ai6::directorates::m::roster::RouteRef>
 pub ai6::directorates::registry::assistant_log::AssistantTurn::run: core::option::Option<alloc::string::String>
@@ -6190,6 +6195,7 @@ impl ai6::directorates::registry::charges::ChargeLogEntry
 pub fn ai6::directorates::registry::charges::ChargeLogEntry::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, f64) -> Self
 #[non_exhaustive] pub struct ai6::directorates::registry::charges::ChargeRecord
 pub ai6::directorates::registry::charges::ChargeRecord::agent: alloc::string::String
+pub ai6::directorates::registry::charges::ChargeRecord::context_tokens: core::option::Option<u64>
 pub ai6::directorates::registry::charges::ChargeRecord::controls: alloc::vec::Vec<ai6::directorates::registry::charges::ChargeControl>
 pub ai6::directorates::registry::charges::ChargeRecord::failed_turns: u32
 pub ai6::directorates::registry::charges::ChargeRecord::fence: u64
@@ -6206,6 +6212,7 @@ pub ai6::directorates::registry::charges::ChargeRecord::turns: alloc::vec::Vec<f
 impl ai6::directorates::registry::charges::ChargeRecord
 pub fn ai6::directorates::registry::charges::ChargeRecord::turns_since(&self, f64) -> usize
 #[non_exhaustive] pub struct ai6::directorates::registry::charges::ChargeUpdate
+pub ai6::directorates::registry::charges::ChargeUpdate::context_tokens: core::option::Option<u64>
 pub ai6::directorates::registry::charges::ChargeUpdate::last_wake: core::option::Option<f64>
 pub ai6::directorates::registry::charges::ChargeUpdate::log: alloc::vec::Vec<ai6::directorates::registry::charges::ChargeLogEntry>
 pub ai6::directorates::registry::charges::ChargeUpdate::run: core::option::Option<core::option::Option<(alloc::string::String, alloc::string::String)>>
@@ -9241,6 +9248,8 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::weakenings(&self) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::clearance_reads_only(&str) -> bool
 pub fn ai6::directorates::section_00::agent::clearance_runs_commands(&str) -> bool
+pub fn ai6::directorates::section_00::agent::is_token_cap_refusal(&str) -> bool
+pub fn ai6::directorates::section_00::agent::token_cap_refusal(&serde_json::value::Value) -> core::option::Option<alloc::string::String>
 pub mod ai6::directorates::section_00::assistant
 pub struct ai6::directorates::section_00::assistant::AssistantCable
 pub ai6::directorates::section_00::assistant::AssistantCable::body: core::option::Option<alloc::string::String>
@@ -9348,6 +9357,7 @@ impl ai6::directorates::section_00::assistant::AssistantReport
 pub fn ai6::directorates::section_00::assistant::AssistantReport::cut_texts(&mut self, &ai6::AssistantLimits)
 pub struct ai6::directorates::section_00::assistant::AssistantRun
 pub ai6::directorates::section_00::assistant::AssistantRun::account: core::option::Option<ai6::directorates::registry::accounts::AccountRef>
+pub ai6::directorates::section_00::assistant::AssistantRun::cost_micro_usd: core::option::Option<u64>
 pub ai6::directorates::section_00::assistant::AssistantRun::model: core::option::Option<alloc::string::String>
 pub ai6::directorates::section_00::assistant::AssistantRun::tokens: core::option::Option<u64>
 pub struct ai6::directorates::section_00::assistant::AssistantSharedBase
@@ -9725,6 +9735,8 @@ pub ai6::station::limits::GreenInkLimits::gate_timeout: ai6::bounds::Seconds
 impl core::default::Default for ai6::station::limits::GreenInkLimits
 pub fn ai6::station::limits::GreenInkLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::station::limits::HarnessLimits
+pub ai6::station::limits::HarnessLimits::compact_at_cap_percent: ai6::bounds::Limit
+pub ai6::station::limits::HarnessLimits::compact_at_tokens: ai6::bounds::Limit
 pub ai6::station::limits::HarnessLimits::manifest_bytes: ai6::bounds::Limit
 pub ai6::station::limits::HarnessLimits::manifest_file_bytes: ai6::bounds::Limit
 pub ai6::station::limits::HarnessLimits::manifest_files: ai6::bounds::Limit
@@ -11132,6 +11144,7 @@ pub ai6::AgentRoute::model: core::option::Option<alloc::string::String>
 pub ai6::AgentRoute::pool: core::option::Option<alloc::string::String>
 pub ai6::AgentRoute::priority: i64
 pub ai6::AgentRoute::secrets: alloc::vec::Vec<alloc::string::String>
+pub ai6::AgentRoute::token_cap: core::option::Option<u64>
 impl ai6::directorates::m::roster::AgentRoute
 pub fn ai6::directorates::m::roster::AgentRoute::new(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::roster::AgentRoute::reference(&self) -> ai6::directorates::m::roster::RouteRef
@@ -11417,6 +11430,7 @@ pub ai6::AssistantLimits::change_bytes: ai6::bounds::Limit
 pub ai6::AssistantLimits::change_files: ai6::bounds::Limit
 pub ai6::AssistantLimits::commit_message_bytes: ai6::bounds::Limit
 pub ai6::AssistantLimits::context_bytes: ai6::bounds::Limit
+pub ai6::AssistantLimits::conversation_cost_micro_usd: ai6::bounds::Limit
 pub ai6::AssistantLimits::event_bytes: ai6::bounds::Limit
 pub ai6::AssistantLimits::events: ai6::bounds::Limit
 pub ai6::AssistantLimits::image_bytes: ai6::bounds::Limit
@@ -11428,6 +11442,7 @@ pub ai6::AssistantLimits::page_files: ai6::bounds::Limit
 pub ai6::AssistantLimits::personal_walk: ai6::bounds::Limit
 pub ai6::AssistantLimits::shared_bases: ai6::bounds::Limit
 pub ai6::AssistantLimits::skills: ai6::bounds::Limit
+pub ai6::AssistantLimits::turn_cost_micro_usd: ai6::bounds::Limit
 impl ai6::AssistantLimits
 pub fn ai6::AssistantLimits::validate(&self) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::AssistantLimits::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
@@ -11539,6 +11554,7 @@ impl ai6::directorates::section_00::assistant::AssistantReport
 pub fn ai6::directorates::section_00::assistant::AssistantReport::cut_texts(&mut self, &ai6::AssistantLimits)
 pub struct ai6::AssistantRun
 pub ai6::AssistantRun::account: core::option::Option<ai6::directorates::registry::accounts::AccountRef>
+pub ai6::AssistantRun::cost_micro_usd: core::option::Option<u64>
 pub ai6::AssistantRun::model: core::option::Option<alloc::string::String>
 pub ai6::AssistantRun::tokens: core::option::Option<u64>
 pub struct ai6::AssistantSettings
@@ -11603,6 +11619,7 @@ pub fn ai6::directorates::section_00::assistant::AssistantSharedBase::validate(&
 #[non_exhaustive] pub struct ai6::AssistantTurn
 pub ai6::AssistantTurn::account: core::option::Option<ai6::directorates::registry::accounts::AccountRef>
 pub ai6::AssistantTurn::agent: core::option::Option<alloc::string::String>
+pub ai6::AssistantTurn::cost_micro_usd: core::option::Option<u64>
 pub ai6::AssistantTurn::model: core::option::Option<alloc::string::String>
 pub ai6::AssistantTurn::route: core::option::Option<ai6::directorates::m::roster::RouteRef>
 pub ai6::AssistantTurn::run: core::option::Option<alloc::string::String>
@@ -16214,6 +16231,7 @@ pub fn ai6::interpreter_name(&str) -> bool
 pub fn ai6::is_key_narrowed(&coqui_access::model::Person) -> bool
 pub fn ai6::is_review(&ai6::directorates::registry::store::Brief) -> bool
 pub fn ai6::is_sha256_pin(&str) -> bool
+pub fn ai6::is_token_cap_refusal(&str) -> bool
 pub fn ai6::is_uid(&str) -> bool
 pub fn ai6::is_unsupported(&guatiao::library::kind::ProviderError) -> bool
 pub fn ai6::is_untrusted(&ai6::directorates::registry::store::Brief) -> bool
@@ -16257,6 +16275,7 @@ pub fn ai6::settings_from_table<T: guatiao::value::convert::FromValue>(toml::tab
 pub fn ai6::settled_cursor(&str, u64) -> core::option::Option<alloc::string::String>
 pub fn ai6::source_brief(&str, &str, &ai6::directorates::registry::sources::SourceItem, &ai6::directorates::registry::limits::SourceLimits) -> ai6::directorates::registry::store::Brief
 pub fn ai6::source_pages(&toml::table::Table) -> alloc::vec::Vec<ai6::directorates::m::issues::SourcePage>
+pub fn ai6::token_cap_refusal(&serde_json::value::Value) -> core::option::Option<alloc::string::String>
 pub fn ai6::tool_source(&str, ai6::bounds::Limit) -> alloc::string::String
 pub fn ai6::unsupported(&str) -> guatiao::library::kind::ProviderError
 pub fn ai6::utc_day(i64) -> alloc::string::String

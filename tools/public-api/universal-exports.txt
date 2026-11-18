@@ -194,6 +194,7 @@ pub universal_exports::BoardLoginRequest::by: alloc::string::String
 pub universal_exports::BoardLoginRequest::station: core::option::Option<alloc::string::String>
 #[non_exhaustive] pub struct universal_exports::BoardMission
 pub universal_exports::BoardMission::brief: core::option::Option<universal_exports::LaunchManifest>
+pub universal_exports::BoardMission::conversation_tokens: core::option::Option<u64>
 pub universal_exports::BoardMission::handle: alloc::string::String
 pub universal_exports::BoardMission::history: alloc::vec::Vec<universal_exports::MissionRun>
 pub universal_exports::BoardMission::mission_id: alloc::string::String
