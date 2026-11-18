@@ -9,8 +9,8 @@ use std::time::Instant;
 
 use crate::directorates::q::login_admin::{Commands, apply_requests};
 use crate::directorates::q::logins::{
-    CommandRenewer, LoginNotice, NoticeKind, RunLogin, Synced, assign_renewals, login_accounts,
-    run_leases, sealed_name,
+    LoginNotice, NoticeKind, RunLogin, Synced, assign_renewals, login_accounts, run_leases,
+    sealed_name,
 };
 use crate::directorates::q::sealing::{SEALING_KEY_FILE, SealingKey, Vault};
 use crate::directorates::q::{Account, AccountPool};
@@ -19,6 +19,7 @@ use crate::directorates::registry::backend::RegistryBackend;
 use crate::directorates::registry::sealed::StationSealingKey;
 use crate::directorates::registry::store::AuditRecord;
 use crate::directorates::registry::timeline::TimelineEvent;
+use crate::station::renewer::ProviderRenewer;
 
 use super::DaemonState;
 use super::accounts::Site;
@@ -282,6 +283,7 @@ pub(super) fn round(state: &DaemonState) {
     match assign_renewals(
         state.intake.as_ref(),
         &logins,
+        &ProviderRenewer::default(),
         &state.station_id,
         &live,
         limits,
@@ -321,7 +323,7 @@ pub(super) fn run_renewals(state: &DaemonState) {
     match run_leases(
         vault,
         &logins,
-        &CommandRenewer,
+        &ProviderRenewer::default(),
         &scratch,
         &state.station.limits().accounts,
         state.clock.now() as f64,
@@ -330,7 +332,7 @@ pub(super) fn run_renewals(state: &DaemonState) {
         Err(error) => eprintln!("ai6: leased renewals did not run: {error}"),
     }
     let commands = Commands {
-        renewer: &CommandRenewer,
+        renewer: &ProviderRenewer::default(),
         scratch: &scratch,
         timeout: state.station.limits().accounts.renew_timeout.0,
     };

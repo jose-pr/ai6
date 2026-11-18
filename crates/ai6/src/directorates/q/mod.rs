@@ -23,8 +23,9 @@ pub mod transport;
 
 pub use mcp::claude_mcp_config;
 pub use pools::{
-    Account, AccountKind, AccountLogin, AccountPool, CREDENTIAL_VARIABLES, CommandLogin,
-    PoolChoice, PoolStrategy, RouteStanding, choose_pools, choose_route,
+    Account, AccountKind, AccountLogin, AccountPool, CLAUDE_LOGIN_FILE, CODEX_LOGIN_FILE,
+    CREDENTIAL_VARIABLES, CommandLogin, PoolChoice, PoolStrategy, RouteStanding, choose_pools,
+    choose_route,
 };
 pub use sandbox::{SandboxError, SandboxRequest};
 pub use secret_kind::{SecretFields, SecretKeeper, SecretProvider, SecretSource};

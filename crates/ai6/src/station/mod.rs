@@ -26,6 +26,8 @@ pub mod publisher;
 #[cfg(feature = "daemon")]
 pub(crate) mod reach;
 #[cfg(feature = "daemon")]
+pub mod renewer;
+#[cfg(feature = "daemon")]
 pub(crate) mod resources;
 #[cfg(feature = "daemon")]
 pub mod runner;

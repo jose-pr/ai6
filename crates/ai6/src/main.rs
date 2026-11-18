@@ -1721,8 +1721,8 @@ fn sleeper_command(bootstrap: &BootstrapArg, command: SleeperCommand) -> Result<
 /// sealed and opened with this host's sealing key.
 fn pools_command(bootstrap: &BootstrapArg, command: PoolsCommand) -> Result<String, String> {
     use ai6::directorates::q::login_admin as admin;
-    use ai6::directorates::q::logins::CommandRenewer;
     use ai6::directorates::q::sealing::Recipient;
+    use ai6::station::renewer::ProviderRenewer;
 
     let located = load_bootstrap(bootstrap)?;
     let opened = open_station(&located)?;
@@ -1843,7 +1843,7 @@ fn pools_command(bootstrap: &BootstrapArg, command: PoolsCommand) -> Result<Stri
                 admin::sign_out_and_forget(
                     &vault,
                     admin::Commands {
-                        renewer: &CommandRenewer,
+                        renewer: &ProviderRenewer::default(),
                         scratch: &scratch,
                         timeout: settings.station.accounts.renew_timeout.0,
                     },

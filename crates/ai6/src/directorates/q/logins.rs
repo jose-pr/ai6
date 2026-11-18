@@ -676,6 +676,12 @@ pub enum RenewEnd {
 
 /// Runs a login's renewal command. What it prints is never read: it could hold a token.
 pub trait LoginRenewer: Send + Sync {
+    /// Whether this renewer can renew `account`'s login with no model turn: by default, when the
+    /// account names a `renew_command`.
+    fn can_renew(&self, account: &Account) -> bool {
+        !account.renewal().is_empty()
+    }
+
     /// Runs `account`'s command with `home` as its home, for no longer than `timeout`.
     fn renew(&self, account: &Account, home: &Path, timeout: Duration) -> RenewEnd;
 
@@ -809,8 +815,8 @@ pub fn login_accounts<'a>(
 }
 
 /// The Headquarters Station's round: for each login that is due, grants one Station its renewal
-/// lease, this one when the login names it, else the first named Station in `live`. A login no
-/// command can renew is left to its next real use, and a person is told it may lapse.
+/// lease, this one when the login names it, else the first named Station in `live`. A login the
+/// `renewer` cannot renew is left to its next real use, and a person is told it may lapse.
 ///
 /// A lease is one Registry write that fails when another is still good, so however many Stations
 /// believe they are Headquarters, one holds it. The round's state is the Registry's: the next
@@ -822,6 +828,7 @@ pub fn login_accounts<'a>(
 pub fn assign_renewals(
     registry: &dyn RegistryBackend,
     logins: &[(AccountRef, &Account)],
+    renewer: &dyn LoginRenewer,
     headquarters: &str,
     live: &[String],
     limits: &AccountLimits,
@@ -840,7 +847,7 @@ pub fn assign_renewals(
         if !renewal_due(login, limits, now) || login.leased_at(now).is_some() {
             continue;
         }
-        if account.renewal().is_empty() {
+        if !renewer.can_renew(account) {
             let warned = login
                 .warned_at
                 .is_some_and(|at| at + limits.renew_after.0.as_secs_f64() > now);

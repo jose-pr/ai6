@@ -133,6 +133,14 @@ impl fmt::Display for AccountKind {
     }
 }
 
+/// The file, relative to a home, Claude Code keeps its login in. A `harness-login` account that
+/// names it is renewed by Claude Code's account provider, which knows how.
+pub const CLAUDE_LOGIN_FILE: &str = ".claude/.credentials.json";
+
+/// The file, relative to a home, Codex keeps its ChatGPT login in; renewed by Codex's account
+/// provider as [`CLAUDE_LOGIN_FILE`] is by Claude Code's.
+pub const CODEX_LOGIN_FILE: &str = ".codex/auth.json";
+
 /// How a pool picks among accounts with room.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -322,6 +330,14 @@ impl Account {
     /// Whether its login is kept sealed in the Registry.
     pub fn keeps_login_files(&self) -> bool {
         !self.files.is_empty()
+    }
+
+    /// Whether its login is Claude Code's or Codex's own, which that harness's account provider
+    /// renews with no model turn: no `renew_command` says how, and none is taken.
+    pub fn renews_through_provider(&self) -> bool {
+        self.files
+            .iter()
+            .any(|file| file == CLAUDE_LOGIN_FILE || file == CODEX_LOGIN_FILE)
     }
 
     /// The program and arguments that renew its login with no model turn.
@@ -603,6 +619,13 @@ impl AccountPool {
                 && (!account.renew_command.is_empty() || !account.renew_env.is_empty())
             {
                 return Err(at("`renew_command` and `renew_env` need `files`"));
+            }
+            if account.renews_through_provider()
+                && (!account.renew_command.is_empty() || !account.renew_env.is_empty())
+            {
+                return Err(at(&format!(
+                    "a login in {CLAUDE_LOGIN_FILE} or {CODEX_LOGIN_FILE} is renewed by its harness's account provider: drop `renew_command` and `renew_env`"
+                )));
             }
             if account.files.is_empty() && !account.logout_command.is_empty() {
                 return Err(at("`logout_command` needs `files`"));
@@ -1273,6 +1296,18 @@ mod tests {
                     .files(["x"])
                     .renew_env("A", "1"),
                 "needs a `renew_command`",
+            ),
+            (
+                Account::new("a", AccountKind::HarnessLogin)
+                    .files([CLAUDE_LOGIN_FILE])
+                    .renew_command(["claude", "auth", "status"]),
+                "account provider",
+            ),
+            (
+                Account::new("a", AccountKind::HarnessLogin)
+                    .files([CODEX_LOGIN_FILE])
+                    .renew_env("A", "1"),
+                "account provider",
             ),
             (
                 Account::new("a", AccountKind::HarnessLogin)

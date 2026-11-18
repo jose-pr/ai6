@@ -540,12 +540,30 @@ fn the_round_renews_one_near_its_end_with_runs_running_and_neither_is_signed_out
     let mut run_b = RunLogin::materialize(&b, &reference(), &files(), &home_b).unwrap();
 
     // Far from its end: nothing to do.
-    let notices = assign_renewals(registry.as_ref(), &logins, "a", &live, &limits, NOW).unwrap();
+    let notices = assign_renewals(
+        registry.as_ref(),
+        &logins,
+        &CommandRenewer,
+        "a",
+        &live,
+        &limits,
+        NOW,
+    )
+    .unwrap();
     assert!(notices.is_empty(), "{notices:?}");
 
     // Near it: Headquarters leases it to itself, and only the holder renews.
     let near = NOW + 3_700.0;
-    let notices = assign_renewals(registry.as_ref(), &logins, "a", &live, &limits, near).unwrap();
+    let notices = assign_renewals(
+        registry.as_ref(),
+        &logins,
+        &CommandRenewer,
+        "a",
+        &live,
+        &limits,
+        near,
+    )
+    .unwrap();
     assert_eq!(notices.len(), 1);
     assert_eq!(notices[0].kind, NoticeKind::Leased("a".to_owned()));
     let renewer = Rotating::new(&provider);
@@ -599,9 +617,17 @@ fn the_round_renews_one_near_its_end_with_runs_running_and_neither_is_signed_out
     // Just renewed: the next round has nothing to do.
     let later = near + 3.0;
     assert!(
-        assign_renewals(registry.as_ref(), &logins, "a", &live, &limits, later)
-            .unwrap()
-            .is_empty()
+        assign_renewals(
+            registry.as_ref(),
+            &logins,
+            &CommandRenewer,
+            "a",
+            &live,
+            &limits,
+            later
+        )
+        .unwrap()
+        .is_empty()
     );
 }
 
@@ -627,6 +653,7 @@ fn one_lease_holder_however_many_stations_ask(store: &dyn Store) {
                 assign_renewals(
                     registry.as_ref(),
                     &logins,
+                    &CommandRenewer,
                     headquarters,
                     &live,
                     &limits,
@@ -678,15 +705,31 @@ fn a_login_of_unknown_end_is_renewed_by_its_age(store: &dyn Store) {
     let live = ["a".to_owned()];
     let young = NOW + 86_000.0;
     assert!(
-        assign_renewals(registry.as_ref(), &logins, "a", &live, &limits, young)
-            .unwrap()
-            .is_empty()
+        assign_renewals(
+            registry.as_ref(),
+            &logins,
+            &CommandRenewer,
+            "a",
+            &live,
+            &limits,
+            young
+        )
+        .unwrap()
+        .is_empty()
     );
     let old = NOW + 86_401.0;
     assert_eq!(
-        assign_renewals(registry.as_ref(), &logins, "a", &live, &limits, old)
-            .unwrap()
-            .len(),
+        assign_renewals(
+            registry.as_ref(),
+            &logins,
+            &CommandRenewer,
+            "a",
+            &live,
+            &limits,
+            old
+        )
+        .unwrap()
+        .len(),
         1
     );
     // A command that leaves it as it was succeeds and is not asked again until the age is up.
@@ -705,9 +748,17 @@ fn a_login_of_unknown_end_is_renewed_by_its_age(store: &dyn Store) {
         (Some(old), 0, None)
     );
     assert!(
-        assign_renewals(registry.as_ref(), &logins, "a", &live, &limits, old + 60.0)
-            .unwrap()
-            .is_empty()
+        assign_renewals(
+            registry.as_ref(),
+            &logins,
+            &CommandRenewer,
+            "a",
+            &live,
+            &limits,
+            old + 60.0
+        )
+        .unwrap()
+        .is_empty()
     );
 }
 
@@ -724,6 +775,7 @@ fn a_named_station_renews_when_headquarters_is_not_named(store: &dyn Store) {
         assign_renewals(
             registry.as_ref(),
             &logins,
+            &CommandRenewer,
             "hq",
             &["hq".to_owned()],
             &limits,
@@ -735,6 +787,7 @@ fn a_named_station_renews_when_headquarters_is_not_named(store: &dyn Store) {
     let notices = assign_renewals(
         registry.as_ref(),
         &logins,
+        &CommandRenewer,
         "hq",
         &["hq".to_owned(), "a".to_owned()],
         &limits,
@@ -758,7 +811,16 @@ fn the_round_backs_off_and_then_marks_one_that_will_not_renew(store: &dyn Store)
     provider.rotate_elsewhere();
     let renewer = Rotating::new(&provider);
     let round = |now: f64| {
-        assign_renewals(registry.as_ref(), &logins, "a", &live, &limits, now).unwrap();
+        assign_renewals(
+            registry.as_ref(),
+            &logins,
+            &CommandRenewer,
+            "a",
+            &live,
+            &limits,
+            now,
+        )
+        .unwrap();
         run_leases(&a, &logins, &renewer, &scratch, &limits, now).unwrap()
     };
 
@@ -835,7 +897,16 @@ fn a_renewal_is_judged_by_the_files_not_the_exit_status(store: &dyn Store) {
     // A token was minted and the command then failed: the token must not be lost.
     let mut renewer = Rotating::new(&provider);
     renewer.exit = RenewEnd::Failed(Some(1));
-    assign_renewals(registry.as_ref(), &logins, "a", &live, &limits, NOW).unwrap();
+    assign_renewals(
+        registry.as_ref(),
+        &logins,
+        &CommandRenewer,
+        "a",
+        &live,
+        &limits,
+        NOW,
+    )
+    .unwrap();
     let notices = run_leases(&a, &logins, &renewer, &scratch, &limits, NOW).unwrap();
     assert_eq!(notices[0].kind, NoticeKind::Renewed, "{notices:?}");
     assert_eq!(revision(registry.as_ref()), Some(2));
@@ -843,7 +914,16 @@ fn a_renewal_is_judged_by_the_files_not_the_exit_status(store: &dyn Store) {
     provider.rotate_elsewhere();
     let renewer = Rotating::new(&provider);
     let soon = login_of(registry.as_ref()).expires_at.unwrap() - 10.0;
-    assign_renewals(registry.as_ref(), &logins, "a", &live, &limits, soon).unwrap();
+    assign_renewals(
+        registry.as_ref(),
+        &logins,
+        &CommandRenewer,
+        "a",
+        &live,
+        &limits,
+        soon,
+    )
+    .unwrap();
     let notices = run_leases(&a, &logins, &renewer, &scratch, &limits, soon).unwrap();
     assert_eq!(notices[0].kind, NoticeKind::Failed, "{notices:?}");
     assert!(
@@ -859,7 +939,16 @@ fn a_renewal_is_judged_by_the_files_not_the_exit_status(store: &dyn Store) {
         }
     }
     let ended = soon + 1_000.0;
-    assign_renewals(registry.as_ref(), &logins, "a", &live, &limits, ended).unwrap();
+    assign_renewals(
+        registry.as_ref(),
+        &logins,
+        &CommandRenewer,
+        "a",
+        &live,
+        &limits,
+        ended,
+    )
+    .unwrap();
     let notices = run_leases(&a, &logins, &Idle, &scratch, &limits, ended).unwrap();
     assert_eq!(notices[0].kind, NoticeKind::Failed, "{notices:?}");
 }
@@ -881,7 +970,16 @@ fn a_lost_headquarters_round_carries_on_elsewhere(store: &dyn Store) {
         other.rotate_elsewhere();
         other.0
     }));
-    assign_renewals(registry.as_ref(), &logins, "a", &live, &limits, NOW).unwrap();
+    assign_renewals(
+        registry.as_ref(),
+        &logins,
+        &CommandRenewer,
+        "a",
+        &live,
+        &limits,
+        NOW,
+    )
+    .unwrap();
     run_leases(&a, &logins, &refusing, &scratch, &limits, NOW).unwrap();
     assert_eq!(login_of(registry.as_ref()).failures, 1);
 
@@ -890,13 +988,29 @@ fn a_lost_headquarters_round_carries_on_elsewhere(store: &dyn Store) {
     assert!(handle.elect("b", Duration::from_secs(60)).unwrap());
     let survivor = ["b".to_owned()];
     assert!(
-        assign_renewals(handle.as_ref(), &logins, "b", &survivor, &limits, NOW + 1.0)
-            .unwrap()
-            .is_empty()
+        assign_renewals(
+            handle.as_ref(),
+            &logins,
+            &CommandRenewer,
+            "b",
+            &survivor,
+            &limits,
+            NOW + 1.0
+        )
+        .unwrap()
+        .is_empty()
     );
     let after = NOW + 61.0;
-    let notices =
-        assign_renewals(handle.as_ref(), &logins, "b", &survivor, &limits, after).unwrap();
+    let notices = assign_renewals(
+        handle.as_ref(),
+        &logins,
+        &CommandRenewer,
+        "b",
+        &survivor,
+        &limits,
+        after,
+    )
+    .unwrap();
     assert_eq!(notices[0].kind, NoticeKind::Leased("b".to_owned()));
     let renewer = Rotating::new(&provider);
     let notices = run_leases(&b, &logins, &renewer, &scratch, &limits, after).unwrap();
@@ -916,14 +1030,31 @@ fn a_lost_lease_holder_gives_way_when_its_lease_lapses(store: &dyn Store) {
     let live = ["a".to_owned(), "b".to_owned()];
     let scratch = root.path().join("scratch");
     add(&a, root.path(), NOW + 100.0, &["a", "b"]);
-    assign_renewals(registry.as_ref(), &logins, "a", &live, &limits, NOW).unwrap();
+    assign_renewals(
+        registry.as_ref(),
+        &logins,
+        &CommandRenewer,
+        "a",
+        &live,
+        &limits,
+        NOW,
+    )
+    .unwrap();
     assert_eq!(login_of(registry.as_ref()).lease.unwrap().station, "a");
     // A dies holding it. While it is good, B gets nothing and renews nothing.
     let renewer = Rotating::new(&provider);
     assert!(
-        assign_renewals(registry.as_ref(), &logins, "b", &live, &limits, NOW + 299.0)
-            .unwrap()
-            .is_empty()
+        assign_renewals(
+            registry.as_ref(),
+            &logins,
+            &CommandRenewer,
+            "b",
+            &live,
+            &limits,
+            NOW + 299.0
+        )
+        .unwrap()
+        .is_empty()
     );
     assert!(
         run_leases(&b, &logins, &renewer, &scratch, &limits, NOW + 299.0)
@@ -938,7 +1069,16 @@ fn a_lost_lease_holder_gives_way_when_its_lease_lapses(store: &dyn Store) {
             .unwrap()
             .is_empty()
     );
-    let notices = assign_renewals(registry.as_ref(), &logins, "b", &live, &limits, after).unwrap();
+    let notices = assign_renewals(
+        registry.as_ref(),
+        &logins,
+        &CommandRenewer,
+        "b",
+        &live,
+        &limits,
+        after,
+    )
+    .unwrap();
     assert_eq!(notices[0].kind, NoticeKind::Leased("b".to_owned()));
     let notices = run_leases(&b, &logins, &renewer, &scratch, &limits, after).unwrap();
     assert_eq!(notices[0].kind, NoticeKind::Renewed);
@@ -954,17 +1094,43 @@ fn one_with_no_way_to_renew_is_left_with_a_warning(store: &dyn Store) {
     let logins = [(reference(), &account)];
     let live = ["a".to_owned()];
     add(&a, root.path(), NOW + 100.0, &["a"]);
-    let notices = assign_renewals(registry.as_ref(), &logins, "a", &live, &limits, NOW).unwrap();
+    let notices = assign_renewals(
+        registry.as_ref(),
+        &logins,
+        &CommandRenewer,
+        "a",
+        &live,
+        &limits,
+        NOW,
+    )
+    .unwrap();
     assert_eq!(notices[0].kind, NoticeKind::MayLapse, "{notices:?}");
     assert_eq!(login_of(registry.as_ref()).lease, None);
     assert!(
-        assign_renewals(registry.as_ref(), &logins, "a", &live, &limits, NOW + 60.0)
-            .unwrap()
-            .is_empty(),
+        assign_renewals(
+            registry.as_ref(),
+            &logins,
+            &CommandRenewer,
+            "a",
+            &live,
+            &limits,
+            NOW + 60.0
+        )
+        .unwrap()
+        .is_empty(),
         "told once a while, not at every round"
     );
     let later = NOW + 86_401.0;
-    let notices = assign_renewals(registry.as_ref(), &logins, "a", &live, &limits, later).unwrap();
+    let notices = assign_renewals(
+        registry.as_ref(),
+        &logins,
+        &CommandRenewer,
+        "a",
+        &live,
+        &limits,
+        later,
+    )
+    .unwrap();
     assert_eq!(notices.len(), 1);
     assert!(
         login_of(registry.as_ref()).usable_by("a"),
@@ -993,7 +1159,16 @@ fn a_planted_login_appears_in_no_row_notice_error_or_debug(store: &dyn Store) {
 
     let mut seen = Vec::new();
     // What people read: every notice, error and Debug on the way through a round.
-    let notices = assign_renewals(registry.as_ref(), &logins, "a", &live, &limits, NOW).unwrap();
+    let notices = assign_renewals(
+        registry.as_ref(),
+        &logins,
+        &CommandRenewer,
+        "a",
+        &live,
+        &limits,
+        NOW,
+    )
+    .unwrap();
     seen.push(format!("{notices:?}"));
     let renewer = Rotating::new(&provider);
     let notices = run_leases(&a, &logins, &renewer, &scratch, &limits, NOW).unwrap();
@@ -1013,7 +1188,16 @@ fn a_planted_login_appears_in_no_row_notice_error_or_debug(store: &dyn Store) {
     provider.rotate_elsewhere();
     let refusing = Rotating::new(&provider);
     let soon = login_of(registry.as_ref()).expires_at.unwrap();
-    assign_renewals(registry.as_ref(), &logins, "b", &live, &limits, soon).unwrap();
+    assign_renewals(
+        registry.as_ref(),
+        &logins,
+        &CommandRenewer,
+        "b",
+        &live,
+        &limits,
+        soon,
+    )
+    .unwrap();
     let notices = run_leases(&b, &logins, &refusing, &scratch, &limits, soon).unwrap();
     seen.push(format!("{notices:?}"));
 

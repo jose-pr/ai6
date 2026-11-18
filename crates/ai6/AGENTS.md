@@ -4453,6 +4453,7 @@ pub struct Account;   // Account::new(name, kind) .secret(name) .dir(path) .env(
 impl Account { pub fn name(&self) -> &str; pub fn kind(&self) -> AccountKind;
     pub fn login_files(&self) -> &[String]; pub fn keeps_login_files(&self) -> bool;   // sealed in the Registry
     pub fn renewal(&self) -> &[String]; pub fn renewal_env(&self) -> &BTreeMap<String, String>;
+    pub fn renews_through_provider(&self) -> bool;   // files hold CLAUDE_LOGIN_FILE or CODEX_LOGIN_FILE: no renew_command or renew_env is taken
     pub fn secret_name(&self) -> Option<&str>;        // `secret`, else the account's name; None for ConfigDir
     pub fn login_dir(&self) -> Option<&Path>; pub fn priority_value(&self) -> i64;
     pub fn concurrency(&self) -> Option<usize>; pub fn labels(&self) -> &BTreeMap<String, String>;
@@ -4507,11 +4508,17 @@ impl RunLogin { pub fn materialize(vault, account, files, home) -> Result<Self, 
     pub fn recall(home) -> Option<Self>; pub fn remove(&self) -> io::Result<()>; pub fn harness_starts(&mut self);
     pub fn sync(&mut self, vault, registry_revision: Option<u64>, now) -> Result<Synced, LoginError>; }
 pub enum Synced { Unchanged, Renewed(u64), Rewritten(u64), Restored(u64, &'static str) }
-pub trait LoginRenewer: Send + Sync { fn renew(&self, account: &Account, home: &Path, timeout: Duration) -> RenewEnd; }
+pub trait LoginRenewer: Send + Sync { fn renew(&self, account: &Account, home: &Path, timeout: Duration) -> RenewEnd;
+    fn can_renew(&self, account: &Account) -> bool;   // default: the account names a renew_command
+    fn sign_out(&self, account: &Account, home: &Path, timeout: Duration) -> RenewEnd; }
+pub const CLAUDE_LOGIN_FILE: &str = ".claude/.credentials.json"; pub const CODEX_LOGIN_FILE: &str = ".codex/auth.json";
 pub struct CommandRenewer;   // HOME and USERPROFILE at home, renew_env, PATH and what Windows needs; output never read
+// station::renewer (feature `daemon`): renews a Claude Code or Codex login through coqui-acp-claude's or -codex's account provider,
+// run on this machine over a throwaway home; any other login and every sign-out by the account's commands.
+pub struct ProviderRenewer;   // ProviderRenewer::DEFAULT, Default; .claude_program(exe) .codex_program(exe): the programs, `claude` and `codex` by default
 pub fn renewal_due(login: &LoginState, limits: &station::limits::AccountLimits, now: f64) -> bool;
 pub fn login_accounts(pools) -> Vec<(AccountRef, &Account)>;
-pub fn assign_renewals(registry, logins, headquarters: &str, live: &[String], limits, now) -> io::Result<Vec<LoginNotice>>;   // one lease, one write
+pub fn assign_renewals(registry, logins, renewer: &dyn LoginRenewer, headquarters: &str, live: &[String], limits, now) -> io::Result<Vec<LoginNotice>>;   // one lease, one write
 pub fn run_leases(vault, logins, renewer: &dyn LoginRenewer, scratch: &Path, limits, now) -> io::Result<Vec<LoginNotice>>;   // this Station's leases
 pub struct LoginNotice { pub account: AccountRef, pub kind: NoticeKind, pub text: String }   // Leased(station), Renewed, Unchanged, Failed, NeedsPerson, MayLapse
 /// Runs `<login_command> login <flag>` with CODEX_HOME=home and the credential plus a newline

@@ -464,6 +464,9 @@ fake login and a loopback stand-in, never a real one:
 - A running harness reloads when the file's mtime moves and recovers from disk on a 401 (program text).
 - Unmeasured: whether the provider rotates the refresh token (the owner reports it does), and whether an
   old access token stays good after a renewal. Keep `max_concurrent = 1`.
+- The renewal round does not use a `renew_command` for this login: the Station asks `coqui-acp-claude`'s account
+  provider, which runs `claude auth status` only inside that window and refuses a login that is blank or gone, and the
+  load refuses a `renew_command` or `renew_env` on an account whose `files` name `.claude/.credentials.json`.
 
 ## Gotchas
 

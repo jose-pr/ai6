@@ -1050,14 +1050,18 @@ logout_command = ["grok", "logout"]    # default: none, so removing the account 
   whose end is within `renew_within`, or, where its files do not say when it ends, that has not
   been renewed for `renew_after`. It grants one Station the renewal lease (itself when the login
   names it, else a named Station), one Registry write that fails while another lease is good. Only
-  the holder runs `renew_command`, in a throwaway home, for at most `renew_timeout` and never past
-  its lease (`renew_lease`). Only the files decide how it went, since a refused CLI may exit with
-  success. A failure waits `renew_backoff`, doubled each time up to `renew_backoff_max`, and
+  the holder renews it in a throwaway home, for at most `renew_timeout` and never past
+  its lease (`renew_lease`): by `renew_command`, or, for a Claude Code login (`files` names
+  `.claude/.credentials.json`) or a Codex login (`.codex/auth.json`), by that harness's account
+  provider, which knows how it renews with no model turn and when it has lost the login, so those
+  two take no `renew_command` or `renew_env`. Only the files decide how it went, since a refused CLI
+  may exit with success. A failure waits `renew_backoff`, doubled each time up to `renew_backoff_max`, and
   `renew_attempts` of them mark the account as needing a person: audited
   (`pool.login.needs_person`), on the timeline of each Operation that may draw it (`account`,
   `needs_person`), and on the board. Its Runs then go to the next account or route. All of this
   is in the Registry, so the next Headquarters Station carries on where this one stopped. With no
-  `renew_command`, a login is left to its next real use and a person is told it may lapse.
+  `renew_command` (and not a Claude Code or Codex login), a login is left to its next real use and a
+  person is told it may lapse.
 - **The board.** `pool.read` shows the Stations named, when the login ends, when it was last
   renewed and how that ended, who holds its lease and until when, the changes waiting for a Station
   that holds the login, and why a person is needed: never the login.

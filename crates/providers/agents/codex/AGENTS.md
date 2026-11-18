@@ -382,6 +382,9 @@ source at tag `rust-v0.164.0`:
   `refresh_token_expired` or `refresh_token_invalidated` is permanent (source).
 - Unmeasured: whether the provider rotates the refresh token, whether an old access token stays good
   after a renewal, and how long an unused refresh token lasts. Keep `max_concurrent = 1`.
+- The renewal round does not use a `renew_command` for this login: the Station asks `coqui-acp-codex`'s account
+  provider, which refreshes the login through the app server and refuses one that is lost, and the load refuses a
+  `renew_command` or `renew_env` on an account whose `files` name `.codex/auth.json`.
 
 ## Gotchas
 

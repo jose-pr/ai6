@@ -166,8 +166,9 @@ pub use directorates::q::transport::{
     TransportForward, WriteSpec, describe, is_unsupported, unsupported,
 };
 pub use directorates::q::{
-    Account, AccountKind, AccountLogin, AccountPool, CREDENTIAL_VARIABLES, CommandLogin,
-    PoolChoice, PoolStrategy, RouteStanding, choose_pools, choose_route,
+    Account, AccountKind, AccountLogin, AccountPool, CLAUDE_LOGIN_FILE, CODEX_LOGIN_FILE,
+    CREDENTIAL_VARIABLES, CommandLogin, PoolChoice, PoolStrategy, RouteStanding, choose_pools,
+    choose_route,
 };
 pub use directorates::q::{
     Loadout, LoadoutCatalog, McpServer, QError, QErrorKind, RunEnv, SandboxError, SandboxProfile,
