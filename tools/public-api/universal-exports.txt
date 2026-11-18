@@ -170,6 +170,7 @@ pub universal_exports::BoardAccount::other_runs: usize
 pub universal_exports::BoardAccount::pool: alloc::string::String
 pub universal_exports::BoardAccount::priority: i64
 pub universal_exports::BoardAccount::tokens_today: u64
+pub universal_exports::BoardAccount::usage_read: core::option::Option<universal_exports::BoardUsageRead>
 pub universal_exports::BoardAccount::windows: alloc::vec::Vec<universal_exports::BoardWindow>
 #[non_exhaustive] pub struct universal_exports::BoardClaim
 pub universal_exports::BoardClaim::mission_id: alloc::string::String
@@ -270,6 +271,10 @@ pub universal_exports::BoardTheater::runs: usize
 pub universal_exports::BoardTheater::unavailable: core::option::Option<alloc::string::String>
 pub universal_exports::BoardTheater::weakened: alloc::vec::Vec<alloc::string::String>
 pub universal_exports::BoardTheater::workdir: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct universal_exports::BoardUsageRead
+pub universal_exports::BoardUsageRead::answered_at: core::option::Option<f64>
+pub universal_exports::BoardUsageRead::requested_at: f64
+pub universal_exports::BoardUsageRead::result: core::option::Option<alloc::string::String>
 #[non_exhaustive] pub struct universal_exports::BoardWindow
 pub universal_exports::BoardWindow::models: alloc::vec::Vec<alloc::string::String>
 pub universal_exports::BoardWindow::name: alloc::string::String
