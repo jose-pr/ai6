@@ -143,6 +143,10 @@ pub struct ChargeRecord {
     /// When it last woke, as Unix seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_wake: Option<f64>,
+    /// Tokens its conversation held at its last turn: the prompt that turn took in, cached or not.
+    /// An upper bound for a turn of several requests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_tokens: Option<u64>,
     /// When each of its turns in the last hour began, oldest first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub turns: Vec<f64>,
@@ -182,6 +186,8 @@ pub struct ChargeUpdate {
     pub last_wake: Option<f64>,
     /// When a turn began: counted towards its hour.
     pub turn_at: Option<f64>,
+    /// The size of its conversation after the turn, in tokens.
+    pub context_tokens: Option<u64>,
     /// Lines for its logbook.
     pub log: Vec<ChargeLogEntry>,
     /// What it has been told of now, replacing what it had.
@@ -435,6 +441,7 @@ pub(super) fn claim(
             provider_id: None,
             handler: None,
             last_wake: None,
+            context_tokens: None,
             turns: Vec::new(),
             logbook: Vec::new(),
             seen: Vec::new(),
@@ -508,6 +515,9 @@ pub(super) fn apply(
     }
     if let Some(at) = update.turn_at {
         record.turns.push(at);
+    }
+    if let Some(tokens) = update.context_tokens {
+        record.context_tokens = Some(tokens);
     }
     record.turns.retain(|at| *at > now - TURN_WINDOW_SECS);
     if let Some(failed) = update.turn_failed {

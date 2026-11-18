@@ -776,6 +776,17 @@ pub struct HarnessLimits {
     #[schema(title = "Files in a harness configuration")]
     #[map(default = HarnessLimits::default().manifest_files)]
     pub manifest_files: Limit,
+    /// Tokens a long-lived conversation (a charge's, or a standing Mission's resumed Runs) may
+    /// reach before its next turn starts a fresh session carrying a summary. `none` sets no size
+    /// bound.
+    #[schema(title = "Compact a conversation at (tokens)")]
+    #[map(default = HarnessLimits::default().compact_at_tokens)]
+    pub compact_at_tokens: Limit,
+    /// The same, as a percent of the smallest `token_cap` among its Agent's routes; a route with
+    /// no cap gives no bound. `none` ignores caps.
+    #[schema(title = "Compact a conversation at (percent of the route's token cap)")]
+    #[map(default = HarnessLimits::default().compact_at_cap_percent)]
+    pub compact_at_cap_percent: Limit,
 }
 
 impl Default for HarnessLimits {
@@ -784,6 +795,10 @@ impl Default for HarnessLimits {
             manifest_file_bytes: Limit::at(MIB),
             manifest_bytes: Limit::at(16 * MIB),
             manifest_files: Limit::at(4_096),
+            compact_at_tokens: Limit::UNBOUNDED,
+            // The next turn adds to what the check measured, and a conversation past its cap
+            // is refused every turn, so the margin is a quarter of it.
+            compact_at_cap_percent: Limit::at(75),
         }
     }
 }

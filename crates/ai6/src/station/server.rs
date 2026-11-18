@@ -20,6 +20,7 @@ mod charge_tests;
 mod charges;
 #[cfg(test)]
 mod check_in_cost_tests;
+mod compaction;
 #[cfg(feature = "cables-mcp")]
 mod compartments;
 mod contexts;
@@ -5712,6 +5713,29 @@ async fn start_mission(
     };
     // A standing Sleeper's window may take up the Run its last run left.
     let window_run = standing::of(&state, mission_id.as_str());
+    // A conversation that has taken in as much as the Station lets one hold starts a fresh
+    // session; the last run's own account of what it did goes with it as the summary.
+    let grown = window_run
+        .as_ref()
+        .filter(|run| run.resume)
+        .zip(earlier.as_ref())
+        .and_then(|(_, last)| {
+            let routed = state
+                .roster
+                .agent(mission.operation_id.as_deref(), &agent.id)
+                .ok()?;
+            let limit = compaction::threshold(
+                &state.station.limits().harness,
+                compaction::smallest_cap(&routed),
+            )?;
+            let size = compaction::chain_tokens(
+                &state,
+                mission.operation_id.as_deref(),
+                mission_id.as_str(),
+                last,
+            );
+            (size >= limit).then_some((size, limit))
+        });
     let resume_from = window_run.as_ref().and_then(|run| {
         standing::resume_from(
             &state,
@@ -5723,8 +5747,21 @@ async fn start_mission(
                 mission.resume_refused.is_some(),
                 mission.after_failure,
             ),
+            grown,
         )
     });
+    if let (Some((size, _)), Some(last)) = (grown, earlier.as_ref())
+        && resume_from.is_none()
+        && !last.recent.is_empty()
+    {
+        let lines: Vec<String> = last.recent.iter().map(|line| format!("- {line}")).collect();
+        initial_context.push(format!(
+            "Your earlier session reached {size} tokens and was compacted into this one. What it \n             last did, oldest first:
+{}",
+            lines.join("
+")
+        ));
+    }
     // The Cables that waited for this Agent while it had no Run, now that it has one that
     // can answer them.
     #[cfg(feature = "cables-mcp")]

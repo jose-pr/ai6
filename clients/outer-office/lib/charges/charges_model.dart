@@ -41,6 +41,7 @@ class ChargeSummary {
     this.configured = false,
     this.station,
     this.lastWake,
+    this.contextTokens,
     this.lastTurn,
     this.leaseExpires,
     this.logbook = const [],
@@ -59,6 +60,7 @@ class ChargeSummary {
       held: json['held'] as bool? ?? false,
       leaseExpires: (json['lease_expires'] as num?)?.toDouble(),
       lastWake: (json['last_wake'] as num?)?.toDouble(),
+      contextTokens: (json['context_tokens'] as num?)?.toInt(),
       lastTurn: json['last_turn'] as String?,
       turnsLastHour: (json['turns_last_hour'] as num?)?.toInt() ?? 0,
       canConverse: json['can_converse'] as bool? ?? false,
@@ -87,6 +89,10 @@ class ChargeSummary {
   final bool held;
   final double? leaseExpires;
   final double? lastWake;
+
+  /// Tokens its conversation held at its last turn, an upper bound; the Station starts a fresh
+  /// Run with the logbook once this reaches its compaction setting.
+  final int? contextTokens;
 
   /// What its last turn recorded: what woke it, and the start of what it said.
   final String? lastTurn;

@@ -10,10 +10,11 @@ use coqui_acp_provider::{
 use guatiao::library::Object;
 
 use super::super::accounts::{Holder, Site};
-use super::super::{DaemonState, credentials, routes};
+use super::super::{DaemonState, compaction, credentials, routes};
 use super::Live;
 use crate::directorates::m::charges::{Charge, ChargeScope};
 use crate::directorates::m::identity::{MissionId, RunId};
+use crate::directorates::medical::usage::{UsageTracker, spend_of};
 use crate::directorates::q::terminal::TerminalBridge;
 use crate::directorates::registry::charges::{ChargeLogEntry, ChargeRecord};
 use crate::directorates::section_00::agent::{AgentResume, AgentStart};
@@ -29,6 +30,18 @@ const SAID_BYTES: usize = 1_024;
 pub(super) struct Harnessed {
     run: Object<dyn AgentSession>,
     handler: String,
+    /// What this harness process has reported, so a turn counts only its own addition.
+    usage: std::sync::Mutex<UsageTracker>,
+}
+
+impl Harnessed {
+    fn new(run: Object<dyn AgentSession>, handler: String) -> Self {
+        Self {
+            run,
+            handler,
+            usage: std::sync::Mutex::new(UsageTracker::default()),
+        }
+    }
 }
 
 /// What a turn came to.
@@ -43,6 +56,8 @@ pub(super) struct Outcome {
     pub(super) run: Option<(String, String)>,
     /// What the logbook is to say of how its Run was opened.
     pub(super) log: Vec<ChargeLogEntry>,
+    /// The size of the conversation after the turn, in tokens, when a harness took it.
+    pub(super) context_tokens: Option<u64>,
 }
 
 impl Outcome {
@@ -60,6 +75,7 @@ impl Outcome {
             said: String::new(),
             run: None,
             log: Vec::new(),
+            context_tokens: None,
         }
     }
 }
@@ -314,7 +330,7 @@ fn open(
         ) {
             Ok(run) => {
                 super::super::log_harness_start(&who, "resumed", &handler, &provider);
-                return Ok((Harnessed { run, handler }, Opened::Resumed));
+                return Ok((Harnessed::new(run, handler), Opened::Resumed));
             }
             Err(error) => format!("Run {run} did not resume: {error}"),
         };
@@ -373,7 +389,7 @@ fn open(
     } else {
         Opened::Fresh("it had no Run to resume".to_owned())
     };
-    Ok((Harnessed { run, handler }, opened))
+    Ok((Harnessed::new(run, handler), opened))
 }
 
 /// Starts `request` with a handler and terminal built anew, as a fresh Run for `why`.
@@ -401,13 +417,7 @@ fn start(
     )
     .map_err(|error| format!("the harness did not start: {error}"))?;
     super::super::log_harness_start(who, "started", handler, provider);
-    Ok((
-        Harnessed {
-            run,
-            handler: handler.to_owned(),
-        },
-        Opened::Fresh(why),
-    ))
+    Ok((Harnessed::new(run, handler.to_owned()), Opened::Fresh(why)))
 }
 
 /// How one turn read.
@@ -418,10 +428,13 @@ struct Read {
     answered: bool,
     /// The harness is gone or failed, and must be opened again for the next turn.
     lost: bool,
+    /// What the turn took into the conversation's context.
+    context: u64,
 }
 
 /// Reads `run` until its turn ends, interrupting it past `timeout`.
-fn read_turn(run: &Object<dyn AgentSession>, timeout: Option<Duration>, live: &Live) -> Read {
+fn read_turn(harness: &Harnessed, timeout: Option<Duration>, live: &Live) -> Read {
+    let run = &harness.run;
     let deadline = timeout.map(|timeout| Instant::now() + timeout);
     let mut interrupted: Option<Instant> = None;
     // Whether the Station cut the turn short for its time, rather than a person.
@@ -431,6 +444,7 @@ fn read_turn(run: &Object<dyn AgentSession>, timeout: Option<Duration>, live: &L
         said: String::new(),
         answered: false,
         lost: false,
+        context: 0,
     };
     loop {
         if let Some(at) = interrupted {
@@ -453,6 +467,13 @@ fn read_turn(run: &Object<dyn AgentSession>, timeout: Option<Duration>, live: &L
         let event = match run.next_event(READ_SLICE_MS) {
             Ok(Some(event)) => {
                 live.room.publish_event(&event);
+                if let Some(spend) = spend_of(&event)
+                    && let Ok(mut tracker) = harness.usage.lock()
+                {
+                    read.context = read
+                        .context
+                        .saturating_add(compaction::context_of(&tracker.observe(spend)));
+                }
                 event
             }
             Ok(None) => continue,
@@ -516,8 +537,25 @@ pub(super) fn take(
     };
     let mut log = Vec::new();
     let now = super::unix_now();
-    let previous = record.handler.clone().zip(record.provider_id.clone());
+    let mut previous = record.handler.clone().zip(record.provider_id.clone());
     let mut opened = None;
+    // A conversation that has grown to its limit starts a fresh Run, with the logbook as its
+    // summary, rather than resuming into a refusal.
+    let compacted = match (record.context_tokens, compaction_limit(state, charge)) {
+        (Some(size), Some(limit)) if size >= limit => {
+            close_harness(harness.take());
+            previous = None;
+            log.push(ChargeLogEntry::new(
+                "compacted",
+                format!(
+                    "its conversation held {size} tokens, at or past {limit}: a fresh Run starts \n                     with the logbook"
+                ),
+                now,
+            ));
+            true
+        }
+        _ => false,
+    };
     if let Some(kept) = harness.as_ref()
         && kept
             .run
@@ -561,7 +599,7 @@ pub(super) fn take(
     let Some(kept) = harness.as_ref() else {
         return Outcome::refused("no harness".to_owned());
     };
-    let mut read = read_turn(&kept.run, timeout, live);
+    let mut read = read_turn(kept, timeout, live);
     // A resumed Run that fails before it answers was not there to resume.
     if matches!(opened, Some(Opened::Resumed)) && read.lost && !read.answered {
         let why = format!("the resumed Run {}", read.ended);
@@ -573,7 +611,7 @@ pub(super) fn take(
                     format!("a fresh Run started with the logbook: {why}"),
                     now,
                 ));
-                read = read_turn(&kept.run, timeout, live);
+                read = read_turn(&kept, timeout, live);
                 *harness = Some(kept);
             }
             Err(reason) => {
@@ -600,7 +638,21 @@ pub(super) fn take(
         said: cut(read.said.trim().to_owned(), SAID_BYTES),
         run,
         log,
+        context_tokens: (compacted || read.context > 0).then_some(read.context),
     }
+}
+
+/// The size at which `charge`'s conversation compacts: its Agent's smallest route cap and the
+/// Station's settings.
+fn compaction_limit(state: &DaemonState, charge: &Charge) -> Option<u64> {
+    let agent = state
+        .roster
+        .agent(charge.scope.operation(), &charge.settings.agent)
+        .ok()?;
+    compaction::threshold(
+        &state.station.limits().harness,
+        compaction::smallest_cap(&agent),
+    )
 }
 
 /// Binds the charge's Cable endpoint and principal to its Run `id`, so replies to the

@@ -55,6 +55,10 @@ pub(crate) struct ChargeView {
     /// When it last woke, as Unix seconds.
     #[serde(skip_serializing_if = "Option::is_none")]
     last_wake: Option<f64>,
+    /// Tokens its conversation held at its last turn, an upper bound; the Station starts a fresh
+    /// Run with its logbook once this reaches the compaction setting.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    context_tokens: Option<u64>,
     /// What the last turn recorded: what woke it and the start of what it said.
     #[serde(skip_serializing_if = "Option::is_none")]
     last_turn: Option<String>,
@@ -310,6 +314,7 @@ async fn view(
         held,
         lease_expires: record.as_ref().map(|record| record.lease_expires),
         last_wake: record.as_ref().and_then(|record| record.last_wake),
+        context_tokens: record.as_ref().and_then(|record| record.context_tokens),
         last_ended: record
             .as_ref()
             .and_then(last_turn)
@@ -548,6 +553,7 @@ mod tests {
                 .unwrap();
             let mut update = ChargeUpdate::default();
             update.last_wake = Some(1_000.0);
+            update.context_tokens = Some(123_456);
             update.turn_at = Some(1_000.0);
             update.log = vec![ChargeLogEntry::new("turn", "woke on a timer", 1_000.0)];
             served
@@ -577,6 +583,7 @@ mod tests {
         assert_eq!(charge["station"], "worker");
         assert_eq!(charge["held"], true);
         assert_eq!(charge["last_wake"], 1_000.0);
+        assert_eq!(charge["context_tokens"], 123_456);
         assert_eq!(charge["last_turn"], "woke on a timer");
         assert_eq!(charge["can_converse"], true);
         assert_eq!(charge["can_interrupt"], true);

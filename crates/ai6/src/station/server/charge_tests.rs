@@ -26,7 +26,7 @@ use super::tests::test_state;
 use super::*;
 use crate::directorates::q::terminal::AgentTerminal;
 use crate::directorates::registry::cables::{CableAction, CableGrant, CablePolicy, CableScope};
-use crate::directorates::registry::charges::ChargeRecord;
+use crate::directorates::registry::charges::{ChargeRecord, ChargeUpdate};
 use crate::directorates::registry::quarantine::Quarantine;
 use crate::directorates::registry::runs::{NewRun, RunResult, RunUpdate};
 use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
@@ -889,5 +889,73 @@ async fn a_failing_after_of_none_never_flags_the_charge() {
     tend_until(&state, "a failure", || turns(&state, tag) == 1).await;
     assert_eq!(record(&state, tag).failed_turns, 1);
     assert!(charge_degradations(&state).is_empty());
+    charges::close_all(&state).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_charge_whose_conversation_reached_its_setting_starts_a_fresh_run_with_its_logbook() {
+    let root = tempfile::tempdir().unwrap();
+    let tag = "w9";
+    let mut state = station(root.path(), tag, "test", "", "");
+    let mut limits = state.station.limits().clone();
+    limits.harness.compact_at_tokens = crate::Limit::at(1_000);
+    limits.harness.compact_at_cap_percent = crate::Limit::UNBOUNDED;
+    state.station = state.station.clone().with_limits(limits);
+    charges::tend(&state, false, true).await;
+    control(&state, tag, "first");
+    tend_until(&state, "the first turn", || turns(&state, tag) == 1).await;
+    let first = record(&state, tag);
+    let started = first.provider_id.clone().unwrap();
+
+    // Below the setting the same Run takes the next wake.
+    let mut update = ChargeUpdate::default();
+    update.context_tokens = Some(999);
+    state
+        .intake
+        .update_charge(&scope(tag), "test", first.fence, None, update)
+        .unwrap();
+    control(&state, tag, "second");
+    tend_until(&state, "the second turn", || turns(&state, tag) == 2).await;
+    assert_eq!(
+        record(&state, tag).provider_id.as_deref(),
+        Some(started.as_str())
+    );
+    assert!(
+        !record(&state, tag)
+            .logbook
+            .iter()
+            .any(|entry| entry.kind == "compacted")
+    );
+
+    // At it, the next wake starts a fresh Run that is given the logbook.
+    let mut update = ChargeUpdate::default();
+    update.context_tokens = Some(1_000);
+    state
+        .intake
+        .update_charge(&scope(tag), "test", first.fence, None, update)
+        .unwrap();
+    control(&state, tag, "third");
+    tend_until(&state, "the third turn", || turns(&state, tag) == 3).await;
+    let all = calls(&key(tag));
+    let hows: Vec<&str> = all.iter().map(|call| call.how).collect();
+    assert_eq!(hows, ["start", "message", "start"], "{all:?}");
+    assert_ne!(all[2].run, started);
+    assert!(
+        all[2]
+            .context
+            .iter()
+            .any(|line| line.contains("Your logbook")),
+        "{:?}",
+        all[2].context
+    );
+    let kept = record(&state, tag);
+    let said = kept
+        .logbook
+        .iter()
+        .find(|entry| entry.kind == "compacted")
+        .unwrap();
+    assert!(said.text.contains("1000 tokens"), "{}", said.text);
+    assert_eq!(kept.provider_id.as_deref(), Some(all[2].run.as_str()));
+    assert_eq!(kept.context_tokens, Some(0), "the fresh Run starts small");
     charges::close_all(&state).await;
 }

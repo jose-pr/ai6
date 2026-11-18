@@ -59,6 +59,7 @@ pub(super) fn resume_from(
     run: &WindowRun,
     earlier: Option<&RunRecord>,
     (handler, refused, after_failure): (&str, bool, bool),
+    grown: Option<(u64, u64)>,
 ) -> Option<RunId> {
     if !run.resume {
         return None;
@@ -70,7 +71,7 @@ pub(super) fn resume_from(
                 result.state == "failed" || result.reason.as_deref() == Some(SUPERSEDED)
             });
     let found = earlier
-        .filter(|_| !refused && !failed)
+        .filter(|_| !refused && !failed && grown.is_none())
         .filter(|record| {
             record
                 .launch
@@ -87,13 +88,19 @@ pub(super) fn resume_from(
         None => (
             "started",
             if refused {
-                "the window starts a new Run: the last run's could not be resumed"
+                "the window starts a new Run: the last run's could not be resumed".to_owned()
             } else if failed {
                 "the window starts a new Run: the last run failed, so its is not taken up"
+                    .to_owned()
+            } else if let Some((size, limit)) = grown {
+                format!(
+                    "the window starts a new Run: the conversation has taken in {size} tokens, \
+                     at or past {limit}, so it carries on in a fresh session with a summary"
+                )
             } else {
                 "the window starts a new Run: the last run left none its handler can resume"
-            }
-            .to_owned(),
+                    .to_owned()
+            },
         ),
     };
     if let Some(operation) = operation {
@@ -1019,13 +1026,13 @@ mod tests {
         let handler = "mock-standing";
         let at = (Some("G"), mission.as_str());
         assert_eq!(
-            resume_from(&state, at, &run, Some(&done), (handler, false, false)),
+            resume_from(&state, at, &run, Some(&done), (handler, false, false), None),
             done.provider_id
                 .clone()
                 .map(|id| RunId::try_new(id).unwrap())
         );
         assert_eq!(
-            resume_from(&state, at, &run, Some(&done), (handler, false, true)),
+            resume_from(&state, at, &run, Some(&done), (handler, false, true), None),
             None
         );
         let said = told(&state, "started");
@@ -1033,6 +1040,51 @@ mod tests {
             said.last().unwrap().detail["detail"].contains("the last run failed"),
             "{said:?}"
         );
+        stop(&state);
+    }
+
+    /// A conversation that has taken in as much as the Station allows is not resumed: the window
+    /// starts a fresh Run, and the timeline says why.
+    #[tokio::test]
+    async fn a_conversation_past_its_size_is_not_resumed_by_the_next_window() {
+        let root = tempfile::tempdir().unwrap();
+        let state = order_state(root.path(), "Tidy the tree.", true);
+        let mut warned = BTreeSet::new();
+        let mission = run_window(&state, FIRST, &mut warned).await;
+        let done = runs(&state, &mission).remove(0);
+        let spent = crate::directorates::medical::usage::UsageTotals {
+            input: 700,
+            output: 300,
+            cache_read: 9_000,
+            cache_write: 0,
+            cost_micro_usd: 0,
+        };
+        state
+            .intake
+            .record_usage(Some("G"), &mission, &done.id, &spent, FIRST)
+            .unwrap();
+        let size = super::super::compaction::chain_tokens(&state, Some("G"), &mission, &done);
+        assert_eq!(size, 1_000, "cache reads are not counted again");
+        let run = WindowRun {
+            window: window_label(FIRST + DAY),
+            resume: true,
+        };
+        let at = (Some("G"), mission.as_str());
+        let handler = "mock-standing";
+        assert_eq!(
+            resume_from(
+                &state,
+                at,
+                &run,
+                Some(&done),
+                (handler, false, false),
+                Some((size, 1_000))
+            ),
+            None
+        );
+        let said = told(&state, "started");
+        let detail = &said.last().unwrap().detail["detail"];
+        assert!(detail.contains("1000 tokens, at or past 1000"), "{detail}");
         stop(&state);
     }
 

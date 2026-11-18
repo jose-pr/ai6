@@ -197,6 +197,13 @@ left out as if it did not exist, so a search cannot be used to learn that a Miss
 beyond them is not found) and `filter_bytes` (the longest any one filter). A request over a bound is refused
 `400`.
 
+A standing order whose windows resume the last run's session (`resume = true`) is measured the same
+way: the tokens its resumed Runs have taken in (input, output and cache writes) are summed along the
+chain of Runs that shared one provider session. At or past `[harness] compact_at_tokens`, or
+`compact_at_cap_percent` of the smallest `token_cap` among its Agent's routes, the window starts a
+fresh Run instead, with the last run's own account of what it did as its summary, and the timeline
+says so.
+
 ## Cancel, retry, resume and interrupt
 
 An operator with `mission.control` on the Operation can act on a Mission without reaching

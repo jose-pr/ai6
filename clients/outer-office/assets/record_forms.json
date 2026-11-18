@@ -10164,6 +10164,46 @@
               "title": "Files in a harness configuration",
               "description": "Files in the configuration.",
               "default": 4096
+            },
+            "compact_at_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Compact a conversation at (tokens)",
+              "description": "Tokens a long-lived conversation (a charge's, or a standing Mission's resumed Runs) may reach before its next turn starts a fresh session carrying a summary. `none` sets no size bound.",
+              "default": "none"
+            },
+            "compact_at_cap_percent": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "title": "Compact a conversation at (percent of the route's token cap)",
+              "description": "The same, as a percent of the smallest `token_cap` among its Agent's routes; a route with no cap gives no bound. `none` ignores caps.",
+              "default": 75
             }
           },
           "additionalProperties": false,
@@ -10172,7 +10212,9 @@
           "default": {
             "manifest_file_bytes": 1048576,
             "manifest_bytes": 16777216,
-            "manifest_files": 4096
+            "manifest_files": 4096,
+            "compact_at_tokens": "none",
+            "compact_at_cap_percent": 75
           }
         },
         "overlays": {

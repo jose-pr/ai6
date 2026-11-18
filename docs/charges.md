@@ -98,6 +98,25 @@ what woke each and the start of what the charge said, oldest first. The logbook 
 start, resume, fresh start, takeover and quota. A different Agent named for the charge starts
 fresh as well, since another Agent's Run is not its own.
 
+### Compaction
+
+A conversation that only grows ends at its route's `token_cap`, where the gateway refuses every
+turn. So the Station measures it: after each turn it records on the charge the tokens the turn took
+into the conversation's context (prompt tokens, cached or not; for a turn of several requests this
+counts the context once per request, an upper bound). The charges list shows it beside the record as
+`context_tokens`, and the app as `Conversation: N tokens`.
+
+Before a wake, a conversation at or past the Station's `[harness]` setting is not resumed. The
+Station closes its harness, starts a fresh Run, and hands it the logbook as its summary, as for a
+Run that cannot be resumed; the logbook says `compacted` and why. The setting is
+`compact_at_tokens` (a size; `none` by default) or `compact_at_cap_percent` (75 by default) of the
+smallest `token_cap` among the Agent's routes, whichever is smaller; with no cap and no size nothing
+compacts. Neither is a floor: `0` compacts at every wake. No handler has a compaction of its own
+that AI6 can rely on, so a fresh session with a summary is the only mechanism.
+
+A turn the gateway refuses for its cap fails with the gateway's own words and is not retried: the
+claude and codex handlers end the turn at the first refusal their harness would retry.
+
 The harness runs on the Station's host, in a directory of its own under the Station's state
 directory (`charges/charge--<scope>`), with its Agent's environment and its route's pool account.
 It is issued no loadout secret: a charge reads untrusted text.

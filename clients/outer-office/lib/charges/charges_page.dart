@@ -235,6 +235,8 @@ class _ChargeCard extends StatelessWidget {
                 style: muted,
               ),
               OoTime(charge.lastWake, prefix: 'Last woke '),
+              if (charge.contextTokens case final tokens?)
+                Text('Conversation: $tokens tokens', style: muted),
               if (charge.lastTurn case final turn? when turn.isNotEmpty)
                 Text(
                   turn,

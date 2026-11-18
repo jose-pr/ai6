@@ -1198,6 +1198,7 @@ async fn run_turn(state: &DaemonState, live: &Arc<Live>, events: Vec<ChargeEvent
     if let Some((handler, run)) = outcome.run {
         update = update.run(handler, run);
     }
+    update.context_tokens = outcome.context_tokens;
     let mut seen = record.seen.clone();
     seen.extend(events.iter().filter_map(|event| event.key.clone()));
     update = update.seen(seen).took_controls(

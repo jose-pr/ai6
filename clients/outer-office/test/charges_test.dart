@@ -251,6 +251,17 @@ Future<void> _say(WidgetTester tester, String words) async {
 }
 
 void main() {
+  test('a charge shows the size of its conversation', () {
+    final charge = ChargeSummary.fromJson(
+      _charge('operation:G', extra: {'context_tokens': 123456}),
+    );
+    expect(charge.contextTokens, 123456);
+    expect(
+      ChargeSummary.fromJson(_charge('operation:L')).contextTokens,
+      isNull,
+    );
+  });
+
   testWidgets(
     'the list shows each charge: state, Agent, where it runs, last wake',
     (tester) async {

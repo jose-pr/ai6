@@ -1413,6 +1413,8 @@ provider applied before it was a key; the provider's API header lists them with 
 | `manifest_file_bytes` | 1 MiB | **Largest harness configuration file.** Bytes of one file of a project's harness configuration. |
 | `manifest_bytes` | 16 MiB | **Largest harness configuration.** Bytes of the whole configuration. |
 | `manifest_files` | 4,096 | **Files in a harness configuration.** Files in the configuration. |
+| `compact_at_tokens` | none | **Compact a conversation at (tokens).** Tokens a long-lived conversation (a charge's, or a standing Mission's resumed Runs) may reach before its next turn starts a fresh session carrying a summary. `none` sets no size bound. |
+| `compact_at_cap_percent` | 75 | **Compact a conversation at (percent of the route's token cap).** The same, as a percent of the smallest `token_cap` among its Agent's routes; a route with no cap gives no bound. `none` ignores caps. |
 <!-- schema:record.station.harness:end -->
 
 `[overlays]`: reading the [overlays](agents.md#overlays) loadouts and Operations issue, as `ai6
