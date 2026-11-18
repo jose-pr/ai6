@@ -605,6 +605,40 @@
               "title": "A request waits",
               "description": "How long a request waits for a decision before it expires as refused.",
               "default": 86400
+            },
+            "approval_ttl_secs": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 18446744073709551615,
+              "format": "seconds",
+              "title": "An approval lasts",
+              "description": "How long an approval covers its step when the signer does not choose. A standing Mission whose windows are further apart than this loses the approval before it can spend it.",
+              "default": 3600
+            },
+            "deny": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              },
+              "title": "Steps refused outright",
+              "description": "Steps refused outright, each as `KIND PATTERN` (a glob on the target; a pushed or released ref is matched by its full name), such as `release refs/tags/v0.*`. No request is filed for one."
+            },
+            "park": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              },
+              "title": "Steps that always wait for a person",
+              "description": "Steps that always wait for a person, each as `KIND PATTERN`: no clearance, unattended list or class authorisation lets one through."
             }
           },
           "additionalProperties": false,

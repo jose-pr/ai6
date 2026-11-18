@@ -112,7 +112,10 @@ fn full_example(record: ConfigRecord) -> Value {
                     "requesters": ["field"],
                     "unattended": {"00": ["push"]},
                     "protected": ["main"],
-                    "request_ttl_secs": 60
+                    "request_ttl_secs": 60,
+                    "approval_ttl_secs": 7200,
+                    "deny": ["release refs/tags/v0.*"],
+                    "park": ["merge PR 7"]
                 },
                 "vetting": {
                     "enabled": true,

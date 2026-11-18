@@ -8,8 +8,8 @@ use super::{SqlRegistry, bounded_json, from_json};
 use crate::directorates::m::approvals::ActionScope;
 use crate::directorates::registry::approvals::{
     Approval, ApprovalRequest, ApprovalStatus, ApprovalStore, ClassAuthorization, Decision,
-    Rearming, Revocation, Ruling, class_approval, expired, expired_undecided, newest_expired,
-    rearmed, ruled, validate_note, validate_rearming, validate_ruling,
+    Rearming, Revocation, Ruling, class_approval, expired, expired_undecided, never_used,
+    newest_expired, rearmed, ruled, validate_note, validate_rearming, validate_ruling,
 };
 use crate::directorates::registry::limits::ApprovalLimits;
 use crate::directorates::registry::store::{invalid_data, validate_registry_key};
@@ -224,6 +224,33 @@ impl ApprovalStore for SqlRegistry {
                 revision,
                 &self.current_limits().approvals,
             )
+        })
+    }
+
+    fn step_requests(&self, operation: &str, kind: &str) -> io::Result<Vec<ApprovalStatus>> {
+        validate_registry_key(operation)?;
+        self.read(|tx| {
+            let mut found = Vec::new();
+            for row in tx.query(
+                "SELECT state, record FROM ai6_approvals WHERE operation = $1",
+                &[operation.into()],
+            )? {
+                let status = if row.text(0)? == "decided" {
+                    serde_json::from_str::<Approval>(&row.text(1)?)
+                        .ok()
+                        .map(ApprovalStatus::Decided)
+                } else {
+                    serde_json::from_str::<ApprovalRequest>(&row.text(1)?)
+                        .ok()
+                        .map(ApprovalStatus::Pending)
+                };
+                if let Some(status) = status
+                    && status.request().scope.kind == kind
+                {
+                    found.push(status);
+                }
+            }
+            Ok(found)
         })
     }
 
@@ -480,6 +507,37 @@ impl ApprovalStore for SqlRegistry {
                 settle(tx, &approval, revision, &self.current_limits().approvals)?;
             }
             Ok(())
+        })
+    }
+
+    fn mark_approval_used(&self, operation: &str, id: &str, at: f64) -> io::Result<()> {
+        validate_registry_key(operation)?;
+        validate_registry_key(id)?;
+        self.write(|tx, revision| {
+            let mut approval = decided_in(tx, operation, id)?;
+            if approval.used_at.is_none() {
+                approval.used_at = Some(at);
+                settle(tx, &approval, revision, &self.current_limits().approvals)?;
+            }
+            Ok(())
+        })
+    }
+
+    fn lapsed_approvals(&self, operation: &str, since: f64, now: f64) -> io::Result<Vec<Approval>> {
+        validate_registry_key(operation)?;
+        self.read(|tx| {
+            let mut decided = Vec::new();
+            for row in tx.query(
+                "SELECT record FROM ai6_approvals WHERE operation = $1 AND state = 'decided'",
+                &[operation.into()],
+            )? {
+                if let Ok(approval) = serde_json::from_str::<Approval>(&row.text(0)?)
+                    && approval.request.operation == operation
+                {
+                    decided.push(approval);
+                }
+            }
+            Ok(never_used(decided, since, now))
         })
     }
 

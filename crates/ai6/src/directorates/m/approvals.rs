@@ -195,6 +195,46 @@ impl ActionScope {
         };
         plain(&self.target) == plain(&attempted.target)
     }
+
+    /// Whether `other` asks for the same step as this scope: the same kind and target however
+    /// the target is written. A pushed or released ref is compared by its full name (`v1.2`,
+    /// `tag v1.2`, `refs/tags/v1.2` and `origin:refs/tags/v1.2` are one tag), and a remote only
+    /// when both name one; other targets as in [`ActionScope::covers`].
+    pub fn same_step(&self, other: &Self) -> bool {
+        if self.kind != other.kind {
+            return false;
+        }
+        if matches!(self.kind.as_str(), "push" | "delete" | "release") {
+            let remotes = match (self.remote(), other.remote()) {
+                (Some(left), Some(right)) => left == right,
+                _ => true,
+            };
+            return remotes && self.stepped_ref() == other.stepped_ref();
+        }
+        self.covers(other) && other.covers(self)
+    }
+
+    /// The full ref a `push`, `delete` or `release` target names; a release names a tag.
+    fn stepped_ref(&self) -> String {
+        if self.kind != "release" {
+            return self.pushed_ref();
+        }
+        let named = self
+            .target
+            .rsplit_once(':')
+            .map_or(self.target.as_str(), |(_, named)| named)
+            .trim();
+        let named = named
+            .strip_prefix("tag ")
+            .or_else(|| named.strip_prefix("release "))
+            .unwrap_or(named)
+            .trim();
+        if named.starts_with("refs/") {
+            named.to_owned()
+        } else {
+            format!("refs/tags/{named}")
+        }
+    }
 }
 
 /// What a policy says about one step.
@@ -235,6 +275,30 @@ pub struct GreenInkPolicy {
     protected: Vec<String>,
     matchers: Vec<GlobMatcher>,
     request_ttl: Duration,
+    approval_ttl: Duration,
+    deny: Vec<String>,
+    park: Vec<String>,
+    rules: Vec<StepEntry>,
+}
+
+/// One entry of a policy's `deny` or `park` list, compiled.
+#[derive(Debug, Clone)]
+struct StepEntry {
+    rule: StepRule,
+    kind: String,
+    entry: String,
+    matcher: GlobMatcher,
+}
+
+/// What a policy does with a step it names in `deny` or `park`.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StepRule {
+    /// The step is refused: no request is filed and no approval covers it.
+    Deny,
+    /// The step is filed and waits for a person, whatever the clearance, the unattended list
+    /// or a class authorisation says.
+    Park,
 }
 
 impl PartialEq for GreenInkPolicy {
@@ -245,12 +309,18 @@ impl PartialEq for GreenInkPolicy {
             &self.unattended,
             &self.protected,
             self.request_ttl,
+            self.approval_ttl,
+            &self.deny,
+            &self.park,
         ) == (
             &other.kinds,
             &other.requesters,
             &other.unattended,
             &other.protected,
             other.request_ttl,
+            other.approval_ttl,
+            &other.deny,
+            &other.park,
         )
     }
 }
@@ -279,6 +349,10 @@ impl GreenInkPolicy {
             matchers: compile(&protected).unwrap_or_default(),
             protected,
             request_ttl: DEFAULT_REQUEST_TTL,
+            approval_ttl: DEFAULT_APPROVAL_TTL,
+            deny: Vec::new(),
+            park: Vec::new(),
+            rules: Vec::new(),
         }
     }
 
@@ -298,6 +372,26 @@ impl GreenInkPolicy {
             return Requirement::NotRequired;
         }
         Requirement::GreenInk
+    }
+
+    /// What the Operation's `deny` and `park` lists say of `scope`: the rule and the entry that
+    /// matched. A step on both lists is denied.
+    pub fn rule(&self, scope: &ActionScope) -> Option<(StepRule, &str)> {
+        let named = matches!(scope.kind.as_str(), "push" | "delete" | "release")
+            .then(|| scope.stepped_ref());
+        let listed = |wanted: StepRule| {
+            self.rules.iter().find(|entry| {
+                entry.rule == wanted
+                    && entry.kind == scope.kind
+                    && (entry.matcher.is_match(&scope.target)
+                        || named
+                            .as_deref()
+                            .is_some_and(|named| entry.matcher.is_match(named)))
+            })
+        };
+        listed(StepRule::Deny)
+            .or_else(|| listed(StepRule::Park))
+            .map(|entry| (entry.rule, entry.entry.as_str()))
     }
 
     /// Whether a push to `reference` (a full ref such as `refs/heads/main`) needs green ink. A
@@ -330,6 +424,11 @@ impl GreenInkPolicy {
     /// How long a request waits for a decision.
     pub fn request_ttl(&self) -> Duration {
         self.request_ttl
+    }
+
+    /// How long an approval covers its step when the signer does not choose.
+    pub fn approval_ttl(&self) -> Duration {
+        self.approval_ttl
     }
 
     /// The settings looser than the `strict` default, each in a sentence an operator can act
@@ -385,6 +484,19 @@ pub struct GreenInkDefinition {
     /// How long a request waits for a decision before it expires as refused.
     #[schema(title = "A request waits", format = "seconds", default = Some(DEFAULT_REQUEST_TTL.as_secs()))]
     request_ttl_secs: Option<u64>,
+    /// How long an approval covers its step when the signer does not choose. A standing Mission
+    /// whose windows are further apart than this loses the approval before it can spend it.
+    #[schema(title = "An approval lasts", format = "seconds", default = Some(DEFAULT_APPROVAL_TTL.as_secs()))]
+    approval_ttl_secs: Option<u64>,
+    /// Steps refused outright, each as `KIND PATTERN` (a glob on the target; a pushed or
+    /// released ref is matched by its full name), such as `release refs/tags/v0.*`. No request
+    /// is filed for one.
+    #[schema(title = "Steps refused outright")]
+    deny: Option<Vec<String>>,
+    /// Steps that always wait for a person, each as `KIND PATTERN`: no clearance, unattended
+    /// list or class authorisation lets one through.
+    #[schema(title = "Steps that always wait for a person")]
+    park: Option<Vec<String>>,
 }
 
 impl GreenInkDefinition {
@@ -437,6 +549,40 @@ impl GreenInkDefinition {
                 return Err("green_ink request_ttl_secs must be at least 1".to_owned());
             }
             policy.request_ttl = Duration::from_secs(seconds);
+        }
+        if let Some(seconds) = self.approval_ttl_secs {
+            if seconds == 0 {
+                return Err("green_ink approval_ttl_secs must be at least 1".to_owned());
+            }
+            policy.approval_ttl = Duration::from_secs(seconds);
+        }
+        for (key, rule, listed) in [
+            ("deny", StepRule::Deny, &self.deny),
+            ("park", StepRule::Park, &self.park),
+        ] {
+            for entry in listed.iter().flatten() {
+                let (kind, pattern) = entry.split_once(' ').ok_or_else(|| {
+                    format!("green_ink {key} entry {entry:?} must read `KIND PATTERN`")
+                })?;
+                if !valid_kind(kind) {
+                    return Err(format!(
+                        "green_ink {key} entry {entry:?} has invalid kind {kind:?}"
+                    ));
+                }
+                let matcher = Glob::new(pattern.trim())
+                    .map_err(|error| format!("green_ink {key} pattern {pattern:?}: {error}"))?
+                    .compile_matcher();
+                policy.rules.push(StepEntry {
+                    rule,
+                    kind: kind.to_owned(),
+                    entry: entry.clone(),
+                    matcher,
+                });
+                match rule {
+                    StepRule::Deny => policy.deny.push(entry.clone()),
+                    StepRule::Park => policy.park.push(entry.clone()),
+                }
+            }
         }
         Ok(policy)
     }
@@ -661,5 +807,60 @@ mod tests {
         assert!(clearance_at_least("field", "field"));
         assert!(!clearance_at_least("desk", "field"));
         assert!(!clearance_at_least("root", "desk"));
+    }
+
+    #[test]
+    fn one_step_written_two_ways_is_one_step() {
+        let same = |left: (&str, &str), right: (&str, &str)| {
+            scope(left.0, left.1).same_step(&scope(right.0, right.1))
+        };
+        assert!(same(
+            ("release", "tag v1.2.0"),
+            ("release", "refs/tags/v1.2.0")
+        ));
+        assert!(same(
+            ("release", "v1.2.0"),
+            ("release", "origin:refs/tags/v1.2.0")
+        ));
+        assert!(!same(("release", "tag v1.2.0"), ("release", "tag v1.2.1")));
+        assert!(!same(("release", "origin:v1"), ("release", "upstream:v1")));
+        assert!(same(("push", "main"), ("push", "origin:refs/heads/main")));
+        assert!(!same(("push", "main"), ("delete", "main")));
+        assert!(same(("merge", "PR 42"), ("merge", "pr #42")));
+        assert!(!same(("merge", "PR 42"), ("merge", "PR other/repo#42")));
+    }
+
+    #[test]
+    fn deny_and_park_lists_name_steps_and_a_bad_entry_is_refused_by_name() {
+        let definition: GreenInkDefinition = crate::directorates::m::records::from_toml(
+            "deny = [\"release refs/tags/v0.*\"]\npark = [\"merge PR 7\"]\napproval_ttl_secs = 86400\n",
+        )
+        .unwrap();
+        let policy = definition.resolve().unwrap();
+        assert_eq!(
+            policy.rule(&scope("release", "tag v0.4.0")),
+            Some((StepRule::Deny, "release refs/tags/v0.*"))
+        );
+        assert_eq!(
+            policy.rule(&scope("merge", "PR 7")),
+            Some((StepRule::Park, "merge PR 7"))
+        );
+        assert_eq!(policy.rule(&scope("merge", "PR 8")), None);
+        assert_eq!(policy.rule(&scope("release", "tag v1.0.0")), None);
+        assert_eq!(policy.approval_ttl(), Duration::from_secs(86_400));
+        assert_eq!(
+            GreenInkPolicy::default().approval_ttl(),
+            DEFAULT_APPROVAL_TTL
+        );
+
+        for (text, named) in [
+            ("deny = [\"release\"]", "KIND PATTERN"),
+            ("park = [\"Merge x\"]", "invalid kind"),
+            ("approval_ttl_secs = 0", "approval_ttl_secs"),
+        ] {
+            let bad: GreenInkDefinition = crate::directorates::m::records::from_toml(text).unwrap();
+            let message = bad.resolve().unwrap_err();
+            assert!(message.contains(named), "{text}: {message}");
+        }
     }
 }

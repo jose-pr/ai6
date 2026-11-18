@@ -286,6 +286,9 @@ requesters = ["field", "00"]             # clearances that may ask
 unattended = { "00" = ["push", "merge"], field = [] }   # per clearance named
 protected = ["refs/heads/main", "refs/heads/release/*", "refs/tags/*"]
 request_ttl_secs = 86400                 # an undecided request then expires as refused
+approval_ttl_secs = 3600                 # an approval covers its step this long unless the signer chooses
+deny = ["release refs/tags/v0.*"]        # KIND PATTERN: refused before anything is filed
+park = ["merge PR 7"]                    # KIND PATTERN: always waits for a person
 ```
 
 | Key | Default | Meaning |
@@ -296,6 +299,9 @@ request_ttl_secs = 86400                 # an undecided request then expires as 
 | `unattended` | none (`licensed`: `00 = ["push", "merge", "issue-close"]`) | Kinds a clearance takes without asking; each clearance named replaces its list |
 | `protected` | `refs/heads/main`, `refs/heads/master`, `refs/heads/release/*`, `refs/tags/*` | Ref globs a `push` needs green ink for; a push elsewhere does not |
 | `request_ttl_secs` | `86400` | How long a request waits for a decision |
+| `approval_ttl_secs` | `3600` | How long an approval covers its step when the signer does not choose |
+| `deny` | none | Steps refused outright, each `KIND PATTERN` (a glob on the target; a pushed or released ref is matched by its full name). No request is filed for one |
+| `park` | none | Steps that always wait for a person, whatever the clearance, `unattended` list or class authorisation says |
 
 An invalid value fails the load with an error naming the key. A Station prints each setting
 looser than `strict` when it starts.

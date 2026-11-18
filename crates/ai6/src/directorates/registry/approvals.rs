@@ -340,6 +340,10 @@ pub struct Approval {
     /// one lease, on any Station, ever.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spent_at: Option<f64>,
+    /// When a gate first found the approval covering a step, as Unix seconds. An approval that
+    /// lapses with neither this nor `spent_at` set was never used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub used_at: Option<f64>,
 }
 
 impl Approval {
@@ -789,6 +793,15 @@ pub trait ApprovalStore {
     /// `InvalidInput` for an identity that is not a Registry key; I/O errors otherwise.
     fn approval(&self, operation: &str, id: &str, now: f64) -> io::Result<Option<ApprovalStatus>>;
 
+    /// Every request of `kind` in the Operation, pending or decided, in no order. A pending
+    /// request past its expiry is still listed pending: the caller reads `expires_at`.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for an Operation that is not a Registry key; I/O errors otherwise.
+    /// Unreadable records are skipped.
+    fn step_requests(&self, operation: &str, kind: &str) -> io::Result<Vec<ApprovalStatus>>;
+
     /// The Operation's requests waiting for a decision, oldest first. Requests past their
     /// expiry are recorded as expired and left out.
     ///
@@ -899,6 +912,22 @@ pub trait ApprovalStore {
     /// `NotFound` for a request without a decision; I/O errors otherwise.
     fn spend_approval(&self, operation: &str, id: &str, at: f64) -> io::Result<bool>;
 
+    /// Records that a gate found the approval covering a step, the first time only.
+    ///
+    /// # Errors
+    ///
+    /// `NotFound` for a request without a decision; I/O errors otherwise.
+    fn mark_approval_used(&self, operation: &str, id: &str, at: f64) -> io::Result<()>;
+
+    /// The Operation's approvals that lapsed in `(since, now]` with no step ever taken under
+    /// them: approved, not revoked, never used or spent. Oldest first.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for an Operation that is not a Registry key; I/O errors otherwise.
+    /// Unreadable records are skipped.
+    fn lapsed_approvals(&self, operation: &str, since: f64, now: f64) -> io::Result<Vec<Approval>>;
+
     /// Approves a new request with the first live class authorisation that covers it, counting
     /// one use. `None` when none covers it, or when the request is already stored.
     ///
@@ -994,6 +1023,29 @@ impl ApprovalStore for FileRegistry {
                 .then_with(|| left.id.cmp(&right.id))
         });
         Ok(waiting)
+    }
+
+    fn step_requests(&self, operation: &str, kind: &str) -> io::Result<Vec<ApprovalStatus>> {
+        validate_registry_key(operation)?;
+        let _lock = self.lock()?;
+        let mut found = Vec::new();
+        for path in json_files(&self.approvals_dir("pending", operation))? {
+            if let Ok(Some(request)) = self.read_json::<ApprovalRequest>(&path)
+                && request.operation == operation
+                && request.scope.kind == kind
+            {
+                found.push(ApprovalStatus::Pending(request));
+            }
+        }
+        for path in json_files(&self.approvals_dir("decided", operation))? {
+            if let Ok(Some(approval)) = self.read_json::<Approval>(&path)
+                && approval.request.operation == operation
+                && approval.request.scope.kind == kind
+            {
+                found.push(ApprovalStatus::Decided(approval));
+            }
+        }
+        Ok(found)
     }
 
     fn mission_approvals(
@@ -1196,6 +1248,37 @@ impl ApprovalStore for FileRegistry {
         Ok(())
     }
 
+    fn mark_approval_used(&self, operation: &str, id: &str, at: f64) -> io::Result<()> {
+        validate_registry_key(operation)?;
+        validate_registry_key(id)?;
+        let _lock = self.lock()?;
+        let path = self
+            .approvals_dir("decided", operation)
+            .join(format!("{id}.json"));
+        let mut approval = self.read_json::<Approval>(&path)?.ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, "no decided green ink request")
+        })?;
+        if approval.used_at.is_none() {
+            approval.used_at = Some(at);
+            self.write_json(&path, &approval)?;
+        }
+        Ok(())
+    }
+
+    fn lapsed_approvals(&self, operation: &str, since: f64, now: f64) -> io::Result<Vec<Approval>> {
+        validate_registry_key(operation)?;
+        let _lock = self.lock()?;
+        let mut found = Vec::new();
+        for path in json_files(&self.approvals_dir("decided", operation))? {
+            if let Ok(Some(approval)) = self.read_json::<Approval>(&path)
+                && approval.request.operation == operation
+            {
+                found.push(approval);
+            }
+        }
+        Ok(never_used(found, since, now))
+    }
+
     fn approve_by_class(
         &self,
         request: &ApprovalRequest,
@@ -1300,14 +1383,40 @@ pub(super) fn rearmed(
     request
 }
 
-/// The record of a request `status` found expired undecided, the only kind a person may re-arm.
+/// Of the decided `approvals`, those that lapsed in `(since, now]` unused, oldest first.
+pub(super) fn never_used(approvals: Vec<Approval>, since: f64, now: f64) -> Vec<Approval> {
+    let mut lapsed: Vec<Approval> = approvals
+        .into_iter()
+        .filter(|approval| {
+            approval.decision == Decision::Approved
+                && approval.revoked.is_none()
+                && approval.spent_at.is_none()
+                && approval.used_at.is_none()
+                && approval
+                    .expires_at
+                    .is_some_and(|expires| expires > since && expires <= now)
+        })
+        .collect();
+    lapsed.sort_by(|left, right| {
+        left.expires_at
+            .partial_cmp(&right.expires_at)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| left.request.id.cmp(&right.request.id))
+    });
+    lapsed
+}
+
+/// The record of a request `status` found expired undecided or rejected, the only kinds a person
+/// may re-arm.
 pub(super) fn expired_undecided(status: Option<ApprovalStatus>) -> io::Result<Approval> {
     match status {
         None => Err(io::Error::new(
             io::ErrorKind::NotFound,
             "no such green ink request",
         )),
-        Some(ApprovalStatus::Decided(approval)) if approval.decision == Decision::Expired => {
+        Some(ApprovalStatus::Decided(approval))
+            if matches!(approval.decision, Decision::Expired | Decision::Rejected) =>
+        {
             Ok(approval)
         }
         Some(ApprovalStatus::Decided(approval)) => Err(io::Error::new(
@@ -1385,6 +1494,7 @@ pub(super) fn expired(request: &ApprovalRequest) -> Approval {
         revoked: None,
         notified_at: None,
         spent_at: None,
+        used_at: None,
     }
 }
 
@@ -1400,6 +1510,7 @@ pub(super) fn ruled(request: ApprovalRequest, ruling: &Ruling) -> Approval {
         revoked: None,
         notified_at: None,
         spent_at: None,
+        used_at: None,
     }
 }
 
@@ -1420,6 +1531,7 @@ pub(super) fn class_approval(
         revoked: None,
         notified_at: Some(now),
         spent_at: None,
+        used_at: None,
     }
 }
 
@@ -1507,6 +1619,7 @@ mod tests {
         an_expired_request_lists_as_expired_and_not_pending,
         a_rearmed_request_is_pending_and_decidable,
         only_an_expired_undecided_request_is_rearmed,
+        requests_are_listed_by_the_kind_of_step,
         a_revocation_keeps_its_note,
         a_request_with_links_round_trips,
     );
@@ -1677,18 +1790,28 @@ mod tests {
             io::ErrorKind::AlreadyExists
         );
 
-        for (key, ruling) in [
-            ("approved", Ruling::approve("p", at, at + 60.0)),
-            ("refused", Ruling::reject("p", at, None)),
-        ] {
-            let asked = request(key, "merge", "PR 2").expiring(at - 10.0, HOUR);
-            registry.request_approval(&asked).unwrap();
-            registry.decide_approval("G", &asked.id, &ruling).unwrap();
-            assert_eq!(
-                rearm(&asked.id).unwrap_err().kind(),
-                io::ErrorKind::AlreadyExists
-            );
-        }
+        let approved = request("approved", "merge", "PR 2").expiring(at - 10.0, HOUR);
+        registry.request_approval(&approved).unwrap();
+        registry
+            .decide_approval("G", &approved.id, &Ruling::approve("p", at, at + 60.0))
+            .unwrap();
+        assert_eq!(
+            rearm(&approved.id).unwrap_err().kind(),
+            io::ErrorKind::AlreadyExists
+        );
+
+        // A rejection stands until a person reopens it, as the same request.
+        let refused = request("refused", "merge", "PR 4").expiring(at - 10.0, HOUR);
+        registry.request_approval(&refused).unwrap();
+        registry
+            .decide_approval("G", &refused.id, &Ruling::reject("p", at, None))
+            .unwrap();
+        let reopened = rearm(&refused.id).unwrap();
+        assert_eq!(reopened.id, refused.id);
+        assert!(matches!(
+            registry.approval("G", &refused.id, at).unwrap(),
+            Some(ApprovalStatus::Pending(_))
+        ));
 
         let lapsed = request("lapsed", "merge", "PR 3").expiring(NOW, HOUR);
         registry.request_approval(&lapsed).unwrap();
@@ -1714,6 +1837,32 @@ mod tests {
                 .kind(),
             io::ErrorKind::NotFound
         );
+    }
+
+    fn requests_are_listed_by_the_kind_of_step(store: &dyn Store) {
+        let registry = store.handle();
+        let waiting = request("listed-a", "release", "tag v1").expiring(NOW, HOUR);
+        let decided = request("listed-b", "release", "tag v2").expiring(NOW, HOUR);
+        let other = request("listed-c", "merge", "PR 1").expiring(NOW, HOUR);
+        for asked in [&waiting, &decided, &other] {
+            registry.request_approval(asked).unwrap();
+        }
+        registry
+            .decide_approval("G", &decided.id, &Ruling::reject("p", NOW + 1.0, None))
+            .unwrap();
+        let mut found: Vec<(String, &'static str)> = registry
+            .step_requests("G", "release")
+            .unwrap()
+            .iter()
+            .map(|status| (status.request().id.clone(), status.name()))
+            .collect();
+        found.sort();
+        let mut expected = vec![
+            (waiting.id.clone(), "pending"),
+            (decided.id.clone(), "rejected"),
+        ];
+        expected.sort();
+        assert_eq!(found, expected);
     }
 
     fn a_request_with_links_round_trips(store: &dyn Store) {

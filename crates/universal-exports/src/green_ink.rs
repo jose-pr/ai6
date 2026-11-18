@@ -315,7 +315,7 @@ pub(crate) async fn expired(
 }
 
 /// `POST /v1/user/operations/{operation_id}/green-ink/{request_id}/rearm`: re-opens a request
-/// that expired undecided, under `approval.decide`. Its Mission's Station takes it up and the
+/// that expired undecided or was rejected, under `approval.decide`. Its Mission's Station takes it up and the
 /// person deciding it signs as for any other. Audited as `green_ink.rearmed`, on the timeline.
 pub(crate) async fn rearm(
     State(gateway): State<Gateway>,
@@ -341,7 +341,9 @@ pub(crate) async fn rearm(
         .map_err(|_| ApiError::internal())?
         .map_err(registry_error)?;
     let lapsed = match status {
-        Some(ApprovalStatus::Decided(approval)) if approval.decision == Decision::Expired => {
+        Some(ApprovalStatus::Decided(approval))
+            if matches!(approval.decision, Decision::Expired | Decision::Rejected) =>
+        {
             approval
         }
         Some(_) => return Err(ApiError::from(GatewayError::Conflict)),
@@ -384,6 +386,30 @@ pub(crate) async fn rearm(
     Ok(Json(reopened))
 }
 
+/// How long an approval of `operation` lasts when the signer does not say: the Operation's
+/// `approval_ttl_secs`, or the built-in default on a gateway with no roster or for an Operation
+/// it does not list.
+async fn default_lifetime(gateway: &Gateway, operation: &str) -> f64 {
+    let Some(roster) = gateway.roster.clone() else {
+        return DEFAULT_APPROVAL_TTL.as_secs_f64();
+    };
+    let wanted = operation.to_owned();
+    tokio::task::spawn_blocking(move || {
+        let snapshot = roster.load("").ok()?;
+        let ttl = snapshot
+            .roster
+            .operation(&wanted)
+            .ok()?
+            .green_ink
+            .approval_ttl();
+        Some(ttl.as_secs_f64())
+    })
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or(DEFAULT_APPROVAL_TTL.as_secs_f64())
+}
+
 /// `POST /v1/user/operations/{operation_id}/green-ink/{request_id}/approve`.
 pub(crate) async fn approve(
     State(gateway): State<Gateway>,
@@ -392,11 +418,10 @@ pub(crate) async fn approve(
     Json(request): Json<ApproveRequest>,
 ) -> Result<Json<Approval>, ApiError> {
     valid_id(&request_id)?;
-    let lasts = request
+    let given = request
         .expires_in_secs
-        .map_or(Ok(DEFAULT_APPROVAL_TTL.as_secs_f64()), |seconds| {
-            grant(seconds, gateway.config.unex().text.green_ink_max_grant)
-        })?;
+        .map(|seconds| grant(seconds, gateway.config.unex().text.green_ink_max_grant))
+        .transpose()?;
     let note = note(
         request.note,
         gateway.config.unex().text.green_ink_note_chars,
@@ -404,6 +429,10 @@ pub(crate) async fn approve(
     let (person, operation, registry) =
         authorized(&gateway, &headers, operation_id, "approval.decide").await?;
     let now = unix_timestamp()?;
+    let lasts = match given {
+        Some(lasts) => lasts,
+        None => default_lifetime(&gateway, operation.as_str()).await,
+    };
     // Approving a promotion raises an Agent's clearance: it also takes `agent.configure`.
     let store = registry.clone();
     let (operation_key, id) = (operation.to_string(), request_id.clone());
@@ -787,6 +816,43 @@ mod tests {
             request = request.json(&body);
         }
         request.send().await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_rejected_request_is_reopened_by_the_route_that_rearms_an_expired_one() {
+        let served = served_with(ROLES).await;
+        let refused = asked(&served, "refused", 3600);
+        let rejected = call(
+            &served,
+            &served.operator,
+            reqwest::Method::POST,
+            &format!("G/green-ink/{}/reject", refused.id),
+            Some(serde_json::json!({ "reason": "no such tag" })),
+        )
+        .await;
+        assert_eq!(rejected.status(), 200);
+        let path = format!("G/green-ink/{}/rearm", refused.id);
+        let reopened = call(
+            &served,
+            &served.operator,
+            reqwest::Method::POST,
+            &path,
+            Some(serde_json::json!({ "note": "the tag exists now" })),
+        )
+        .await;
+        assert_eq!(reopened.status(), 200);
+        let pending: serde_json::Value = call(
+            &served,
+            &served.operator,
+            reqwest::Method::GET,
+            "G/green-ink",
+            None,
+        )
+        .await
+        .json()
+        .await
+        .unwrap();
+        assert_eq!(pending[0]["id"], refused.id.as_str(), "{pending}");
     }
 
     #[tokio::test]
