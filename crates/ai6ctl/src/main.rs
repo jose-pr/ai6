@@ -4048,6 +4048,9 @@ struct ModelsFound {
     station: String,
     source: String,
     handler: String,
+    /// Tokens one request to the route may hold, when it has a cap.
+    #[serde(default)]
+    token_cap: Option<u64>,
     listing: ModelsListing,
 }
 
@@ -4064,13 +4067,21 @@ struct ModelsInfo {
 }
 
 fn print_models(found: &[ModelsFound]) {
-    println!("STATION\tSOURCE\tHANDLER\tKNOWN\tMODELS\tUNKNOWN_BECAUSE");
+    print!("{}", models_table(found));
+}
+
+fn models_table(found: &[ModelsFound]) -> String {
+    let mut table =
+        String::from("STATION\tSOURCE\tHANDLER\tTOKEN_CAP\tKNOWN\tMODELS\tUNKNOWN_BECAUSE\n");
     for entry in found {
-        println!(
-            "{}\t{}\t{}\t{}\t{}\t{}",
+        table.push_str(&format!(
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
             plain(&entry.station),
             plain(&entry.source),
             plain(&entry.handler),
+            entry
+                .token_cap
+                .map_or("-".to_owned(), |cap| cap.to_string()),
             entry.listing.known,
             if entry.listing.models.is_empty() {
                 "-".to_owned()
@@ -4088,8 +4099,9 @@ fn print_models(found: &[ModelsFound]) {
                 .unknown_because
                 .as_deref()
                 .map_or("-".to_owned(), plain),
-        );
+        ));
     }
+    table
 }
 
 fn print_agents(agents: &[AgentView]) {
@@ -4846,6 +4858,23 @@ fn plain(value: &str) -> String {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn the_models_listing_shows_a_routes_cap_and_a_dash_for_none() {
+        let found: Vec<ModelsFound> = serde_json::from_value(serde_json::json!([
+            {"station": "s", "source": "007/claude/a", "handler": "claude", "token_cap": 300000,
+             "listing": {"known": true, "unknown_because": null, "models": [{"id": "a"}]}},
+            {"station": "s", "source": "007/claude/b", "handler": "claude",
+             "listing": {"known": true, "unknown_because": null, "models": [{"id": "b"}]}}
+        ]))
+        .unwrap();
+        let table = models_table(&found);
+        let rows: Vec<&str> = table.lines().collect();
+        assert!(rows[0].contains("TOKEN_CAP"));
+        let cap = |row: &str| row.split("\t").nth(3).map(str::to_owned);
+        assert_eq!(cap(rows[1]).as_deref(), Some("300000"));
+        assert_eq!(cap(rows[2]).as_deref(), Some("-"));
+    }
 
     #[test]
     fn the_model_column_prefers_the_record_and_guesses_nothing() {

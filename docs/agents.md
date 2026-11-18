@@ -1193,6 +1193,12 @@ a model at all; an Agent that needs another model's behaviour is another Agent.
   least recently used, the highest `priority`, and the order listed. `round_robin` takes the least
   recently used, and `priority` the highest priority with room, then the order listed. The default
   is `headroom`.
+- **A route's cap**: `token_cap` is the most tokens one request to the route may hold, for a route
+  whose gateway refuses more (an error such as `Current cap is 300000 tokens`). Nothing is checked
+  against it when a request is sent; it is what the Station's compaction measures a conversation
+  against. The models listing (in `ai6ctl` too) and the app's Models page show it beside the
+  route. A harness that reports such a refusal fails the turn with the gateway's words instead of
+  retrying it.
 - **A route with no pool** has one account of its own that hands over nothing, kept in the Registry
   under a `route-…` ID and labelled with the Agent, handler and model. So every Station sees its
   limit, its Runs count and the board shows it as `harness-login`.

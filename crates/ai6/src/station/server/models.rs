@@ -45,6 +45,9 @@ pub struct Found {
     pub route: Option<RouteRef>,
     /// The handler asked.
     pub handler: String,
+    /// Tokens one request to the route may hold, when the route has a cap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_cap: Option<u64>,
     /// What it said.
     pub listing: ModelListing,
     /// When, as Unix seconds.
@@ -297,6 +300,7 @@ impl Found {
             agent: None,
             route: None,
             handler: String::new(),
+            token_cap: None,
             listing: ModelListing::unknown("the handler did not answer"),
             at,
         }
@@ -312,6 +316,7 @@ fn unanswered(pool: &AccountPool, account: &Account, now: f64) -> Found {
         agent: None,
         route: None,
         handler: pool.handler().to_owned(),
+        token_cap: None,
         listing: ModelListing::unknown("this Station has no loadouts to lease its credential"),
         at: now,
     }
@@ -371,6 +376,7 @@ fn of_account(
         account: Some(account.name().to_owned()),
         agent: None,
         route: None,
+        token_cap: None,
         handler: pool.handler().to_owned(),
         listing,
         at: now,
@@ -398,6 +404,7 @@ fn of_route(state: &DaemonState, agent: &Agent, route: &AgentRoute, now: f64) ->
         account: None,
         agent: Some(agent.id.clone()),
         route: Some(reference),
+        token_cap: route.token_cap,
         handler: route.handler.clone(),
         listing,
         at: now,

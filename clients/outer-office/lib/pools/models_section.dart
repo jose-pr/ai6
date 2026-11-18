@@ -33,6 +33,7 @@ class DiscoveredModels {
     required this.known,
     this.unknownBecause,
     this.models = const [],
+    this.tokenCap,
   });
 
   final String station;
@@ -46,6 +47,9 @@ class DiscoveredModels {
   final String? unknownBecause;
   final List<DiscoveredModel> models;
 
+  /// Tokens one request to a route may hold, when the route has a cap.
+  final int? tokenCap;
+
   factory DiscoveredModels.fromJson(Map<String, dynamic> json) {
     final listing = json['listing'] as Map<String, dynamic>? ?? const {};
     return DiscoveredModels(
@@ -54,6 +58,7 @@ class DiscoveredModels {
       handler: json['handler'] as String,
       known: listing['known'] as bool? ?? false,
       unknownBecause: listing['unknown_because'] as String?,
+      tokenCap: (json['token_cap'] as num?)?.toInt(),
       models: [
         for (final model in listing['models'] as List<dynamic>? ?? const [])
           DiscoveredModel.fromJson(model as Map<String, dynamic>),
@@ -65,6 +70,10 @@ class DiscoveredModels {
   String get label => known
       ? (models.isEmpty ? 'Lists no model' : models.map((m) => m.id).join(', '))
       : 'Unknown: ${unknownBecause ?? 'the handler did not say'}';
+
+  /// `Capped at 300000 tokens a request`, or empty for a route with no cap.
+  String get capLabel =>
+      tokenCap == null ? '' : 'Capped at $tokenCap tokens a request';
 }
 
 /// The models each account and route may use, as the Stations found them through their handlers.
@@ -131,6 +140,8 @@ class _ModelsSectionState extends State<ModelsSection> {
                     style: theme.textTheme.titleSmall,
                   ),
                   Text(entry.label, style: theme.textTheme.bodySmall),
+                  if (entry.tokenCap != null)
+                    Text(entry.capLabel, style: theme.textTheme.bodySmall),
                 ],
               ),
             ),

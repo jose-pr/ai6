@@ -1829,6 +1829,39 @@ env = { GATEWAY_URL = "https://llm.example", SHARED = "route" }
     }
 
     #[test]
+    fn a_route_with_a_token_cap_shows_it_in_the_models_listing_and_one_without_shows_none() {
+        let root = tempfile::tempdir().unwrap();
+        let agents = "[agent.007]
+[[agent.007.route]]
+handler = \"mock-pooled\"
+model = \"capped\"
+token_cap = 300000
+[[agent.007.route]]
+handler = \"mock-pooled\"
+model = \"open\"
+";
+        let (state, _now) = routed_state(root.path(), "", agents, ROUTE_POOLS);
+        super::super::models::look(&state);
+        let found = state.models.found();
+        let cap_of = |model: &str| {
+            found
+                .iter()
+                .find(|found| {
+                    found
+                        .route
+                        .as_ref()
+                        .and_then(|route| route.model.as_deref())
+                        == Some(model)
+                })
+                .map(|found| found.token_cap)
+        };
+        assert_eq!(cap_of("capped"), Some(Some(300_000)));
+        assert_eq!(cap_of("open"), Some(None));
+        let reported = serde_json::to_value(&found).unwrap();
+        assert!(reported.to_string().contains("\"token_cap\":300000"));
+    }
+
+    #[test]
     fn a_handler_that_cannot_list_or_is_not_here_says_unknown() {
         let root = tempfile::tempdir().unwrap();
         let (state, _now, _logins) = pooled_state(

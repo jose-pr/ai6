@@ -188,6 +188,10 @@ pub struct AgentRoute {
     #[schema(title = "Priority", advanced)]
     #[map(default = 0)]
     pub priority: i64,
+    /// Tokens one request to this route may hold, when its gateway refuses more; empty when it
+    /// states none. Long-lived conversations compact before it, and the models listing shows it.
+    #[schema(title = "Token cap", advanced)]
+    pub token_cap: Option<u64>,
 }
 
 impl AgentRoute {
