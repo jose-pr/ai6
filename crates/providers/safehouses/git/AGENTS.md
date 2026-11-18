@@ -30,7 +30,7 @@ them in `[providers.git]`.
   most 40 characters) and `{operation}` are filled in and characters Git rejects become `-`.
   `state_root` must lie outside `source`. Worktrees whose directory is gone are pruned first. The
   Mission path already holding a worktree registered with `source` on a branch is adopted, work
-  and all; any other directory there is renamed beside it (`.stale-<nanoseconds>`), not deleted.
+  and all; a leftover worktree of `source` that Git no longer lists is renamed beside it (`.stale-<nanoseconds>`), not deleted; any other directory there is refused.
   A branch of that name left by an earlier run is checked out again rather than refused; one
   another worktree has checked out, or one a template with no `{id}` expands alike for every
   Mission, gets `-<mission>` appended so each Mission has its own.

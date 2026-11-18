@@ -118,6 +118,13 @@ impl Worktree {
             if let Some(house) = Self::adopt(run, &repository, &path, &commit)? {
                 return Ok(house);
             }
+            if !was_worktree_of(run, &repository, &path)? {
+                return Err(format!(
+                    "safe-house path {} already exists and is not a worktree of {}",
+                    path.display(),
+                    repository.display()
+                ));
+            }
             set_aside(&path)?;
         }
         if let Some(parent) = path.parent() {
@@ -664,6 +671,25 @@ fn free_branch(
     Ok(own)
 }
 
+/// Whether `path` is a leftover worktree of `repository`: its `.git` file points into the
+/// repository's own worktree records, though Git no longer lists it. Anything else at a
+/// Mission's path is not this provider's to move.
+fn was_worktree_of(run: &Runner, repository: &Path, path: &Path) -> Result<bool, Failure> {
+    let Ok(pointer) = fs::read_to_string(path.join(".git")) else {
+        return Ok(false);
+    };
+    let Some(target) = pointer.trim().strip_prefix("gitdir:") else {
+        return Ok(false);
+    };
+    let common = git(
+        run,
+        repository,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )?;
+    let normal = |text: &str| text.trim().replace('\\', "/").to_lowercase();
+    Ok(normal(target).starts_with(&format!("{}/worktrees/", normal(&common))))
+}
+
 /// Moves a directory that is not a worktree out of the way, keeping whatever it holds.
 fn set_aside(path: &Path) -> Result<(), Failure> {
     let stamp = std::time::SystemTime::now()
@@ -1208,7 +1234,19 @@ mod tests {
         assert!(open(&inside).is_err());
         let spec = temp.spec(&repo, "mission-3", "{id}-{slug}");
         let house = open(&spec).unwrap();
-        assert!(open(&spec).is_err());
+        // The Mission's own registered worktree is adopted, not refused (the Station runs one Run
+        // of a Mission at a time); a directory that is nobody's worktree is.
+        assert_eq!(open(&spec).unwrap().path, house.path);
+        let other = temp.spec(&repo, "mission-3b", "{id}-{slug}");
+        let taken = house
+            .path
+            .parent()
+            .unwrap()
+            .join(super::path_segment(&other.mission_id));
+        fs::create_dir_all(&taken).unwrap();
+        fs::write(taken.join("theirs.txt"), "theirs\n").unwrap();
+        assert!(open(&other).is_err());
+        assert!(taken.join("theirs.txt").exists(), "it was left as it was");
         house.finish().unwrap();
     }
 
@@ -1469,6 +1507,7 @@ mod tests {
         let repo = temp.repo();
         let spec = temp.spec(&repo, "standing-3", "{id}-{slug}");
         let first = open(&spec).unwrap();
+        let pointer = fs::read_to_string(first.path.join(".git")).unwrap();
         temp.git(
             &repo,
             &[
@@ -1479,6 +1518,7 @@ mod tests {
             ],
         );
         fs::create_dir_all(&first.path).unwrap();
+        fs::write(first.path.join(".git"), pointer).unwrap();
         fs::write(first.path.join("keep.txt"), "kept\n").unwrap();
 
         let again = open(&spec).unwrap();
