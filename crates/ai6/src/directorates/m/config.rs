@@ -1579,6 +1579,14 @@ impl fmt::Display for ConfigReference {
 /// Settings whose value names a program or a model, which a record of the same name is not.
 const NOT_RECORD_NAMES: [&str; 4] = ["handler", "provider", "model", "effort"];
 
+/// Whether `policy` writes `{{fragment.NAME}}` for the fragment `name`.
+fn policy_names_fragment(policy: &str, name: &str) -> bool {
+    policy.split("{{fragment.").skip(1).any(|rest| {
+        rest.split_once("}}")
+            .is_some_and(|(named, _)| named.trim() == name)
+    })
+}
+
 /// Every place in `value` that holds `key` as a whole string or as a table's key, but a field in
 /// `skip`.
 fn places_naming(
@@ -1708,7 +1716,17 @@ pub fn references_to(
                 {
                     places.push(String::new());
                 }
-                if record == ConfigRecord::Secret {
+                if record == ConfigRecord::Fragment {
+                    // A role's policy names a fragment inside its text.
+                    if family == ConfigRecord::Role
+                        && definition
+                            .get("policy")
+                            .and_then(serde_json::Value::as_str)
+                            .is_some_and(|policy| policy_names_fragment(policy, key))
+                    {
+                        places.push("policy".to_owned());
+                    }
+                } else if record == ConfigRecord::Secret {
                     secret_places(family, &definition, key, "", &mut places);
                 } else {
                     // A secret, or an instance's credential, names an instance as its `provider`.

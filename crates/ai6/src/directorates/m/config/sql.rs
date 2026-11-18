@@ -955,6 +955,48 @@ mod tests {
         assert!(references_to(&provider, ConfigRecord::Agent, &GLOBAL, "007").is_err());
     }
 
+    /// A fragment a role's policy writes is named by that role.
+    fn a_fragment_in_use_is_named_by_its_roles(location: &str) {
+        let provider = SqlProvider::open(location).unwrap();
+        provider
+            .put(
+                ConfigRecord::Fragment,
+                &GLOBAL,
+                "brief",
+                &json!({"text": "shared"}),
+            )
+            .unwrap();
+        provider
+            .put(
+                ConfigRecord::Fragment,
+                &GLOBAL,
+                "idle",
+                &json!({"text": "unused"}),
+            )
+            .unwrap();
+        provider
+            .put(
+                ConfigRecord::Role,
+                &GLOBAL,
+                "officer",
+                &json!({"purpose": "p", "policy": "Start. {{ fragment.brief }} {{fragment.brief}}"}),
+            )
+            .unwrap();
+        let used = references_to(&provider, ConfigRecord::Fragment, &GLOBAL, "brief").unwrap();
+        assert_eq!(used.len(), 1, "{used:?}");
+        assert_eq!(used[0].to_string(), "role officer (global): policy");
+        assert!(
+            references_to(&provider, ConfigRecord::Fragment, &GLOBAL, "idle")
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_fragment_in_use_is_named_by_its_roles_on_every_database() {
+        run(a_fragment_in_use_is_named_by_its_roles);
+    }
+
     #[test]
     fn a_record_that_cannot_be_read_stops_the_search_on_every_database() {
         run(a_record_that_cannot_be_read_stops_the_search);
