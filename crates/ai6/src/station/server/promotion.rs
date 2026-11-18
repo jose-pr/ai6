@@ -14,7 +14,7 @@
 
 use super::{DaemonState, agents, medical};
 use crate::directorates::m::approvals::ActionScope;
-use crate::directorates::m::promotion::CLEARANCE_KIND;
+use crate::directorates::m::promotion::{CLEARANCE_KIND, PromotionSubject};
 use crate::directorates::m::roster::{Operation, Retirement};
 use crate::directorates::registry::agent_records::NO_OPERATION;
 use crate::directorates::registry::approvals::{
@@ -91,17 +91,33 @@ fn consider(
     // Missions count only for the model that occupies the codename now; incidents of any
     // model, and quarantines of every Operation, keep the quiet period.
     let here = record.in_operation(&operation.id);
+    let counted = here.tally_of_model(agent.occupant_model().as_deref());
+    let elsewhere = record.in_operation(NO_OPERATION);
+    let incidents = [&here.tally, &elsewhere.tally];
     let Some(promotion) = operation.promotion.due(
         &current,
         &operation.clearance,
-        &here.tally_of_model(agent.occupant_model().as_deref()),
-        &[&here.tally, &record.in_operation(NO_OPERATION).tally],
+        &counted,
+        &incidents,
         now as f64,
     ) else {
         return;
     };
+    let occupant = agent.occupant_model();
+    let brief = operation.promotion.brief(
+        &promotion,
+        &PromotionSubject {
+            agent: &agent.id,
+            model: occupant.as_deref(),
+            operation: &operation.id,
+            ceiling: &operation.clearance,
+        },
+        &counted,
+        &incidents,
+        now as f64,
+    );
     let target = promotion_target(&agent.id, &promotion.to, &operation.id);
-    let request = match promotion_request(state, operation, &agent.id, &target, &promotion) {
+    let request = match promotion_request(state, operation, &agent.id, &target, &promotion, brief) {
         Ok(request) => request,
         Err(error) => {
             eprintln!("ai6: promotion of Agent {:?} not filed: {error}", agent.id);
@@ -148,19 +164,46 @@ fn promotion_request(
     agent: &str,
     target: &str,
     promotion: &crate::directorates::m::promotion::Promotion,
+    brief: String,
 ) -> std::io::Result<ApprovalRequest> {
     let invalid = |_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid identity");
+    // The brief is the signer's whole picture; one too large for the Registry's reason bound
+    // falls back to the one-clause summary.
+    let reason = if state
+        .intake
+        .limits()
+        .approvals
+        .reason_bytes
+        .allows(brief.len())
+    {
+        brief
+    } else {
+        eprintln!(
+            "ai6: promotion brief for Agent {agent:?} is longer than a request's reason may be; \
+             filing the summary"
+        );
+        promotion.reason.clone()
+    };
     let request = ApprovalRequest::try_new(
         operation.id.clone(),
         MissionId::try_new(promotion_mission(agent)).map_err(invalid)?,
         RunId::try_new(PROMOTION_RUN).map_err(invalid)?,
         agent,
         ActionScope::try_new(CLEARANCE_KIND, target)?,
-        promotion.reason.clone(),
+        reason,
         &format!("{target}#{}", promotion.round),
         &state.intake.limits().approvals,
     )?;
     Ok(request.expiring(state.clock.now() as f64, operation.green_ink.request_ttl()))
+}
+
+/// The heading of a promotion brief, or the reason itself when it is not one.
+fn summary_of(reason: &str) -> String {
+    reason
+        .lines()
+        .find_map(|line| line.strip_prefix("# "))
+        .unwrap_or(reason)
+        .to_owned()
 }
 
 /// Spends the approval, then writes the grant it earned for the Agent's current occupant, but
@@ -199,7 +242,7 @@ fn raise(
         now,
     )
     .for_occupant(agent.occupant_model(), agent.clearance.clone())
-    .because(request.reason.clone());
+    .because(summary_of(&request.reason));
     match state
         .intake
         .replace_clearance_grant(current.as_ref(), &grant)
@@ -343,6 +386,50 @@ mod tests {
             .into_iter()
             .map(|request| request.scope.target)
             .collect()
+    }
+
+    #[test]
+    fn a_promotion_request_is_a_brief_a_person_can_decide_from() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(root.path(), SETTINGS, AGENTS);
+        done(&state, 12);
+        super::round(&state);
+        let now = state.clock.now() as f64;
+        let request = state.intake.pending_approvals("G", now).unwrap().remove(0);
+        let brief = &request.reason;
+        assert!(
+            brief.starts_with("---\nkind: \"clearance_promotion\"\n"),
+            "{brief}"
+        );
+        for wanted in [
+            "agent: \"007\"",
+            "operation: \"G\"",
+            "from: \"desk\"",
+            "to: \"field\"",
+            "# Raise 007 from desk to field in G",
+            "| Threshold | Required | Record | Met |",
+            "| Missions done | at least 10 | 12 | yes |",
+            "## What approval grants",
+            "## If you refuse",
+            "app:/missions?operation_id=G",
+        ] {
+            assert!(brief.contains(wanted), "{wanted:?} missing from\n{brief}");
+        }
+        state
+            .intake
+            .decide_approval(
+                "G",
+                &request.id,
+                &Ruling::approve("alice", now, now + 3600.0),
+            )
+            .unwrap();
+        super::round(&state);
+        let grant = state.intake.clearance_grant("G", "007").unwrap().unwrap();
+        assert_eq!(
+            grant.reason.as_deref(),
+            Some("Raise 007 from desk to field in G"),
+            "the grant keeps the heading, not the whole brief"
+        );
     }
 
     #[test]

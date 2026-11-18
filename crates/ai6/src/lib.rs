@@ -83,7 +83,7 @@ pub use directorates::m::placement::{
 pub use directorates::m::promotion::{
     CLEARANCE_KIND, DEFAULT_00_MAX_FAILURE_RATE, DEFAULT_00_MISSIONS, DEFAULT_00_QUIET_DAYS,
     DEFAULT_FIELD_MISSIONS, DEFAULT_FIELD_QUIET_DAYS, Promotion, PromotionDefinition,
-    PromotionPolicy, PromotionStep,
+    PromotionPolicy, PromotionStep, PromotionSubject,
 };
 pub use directorates::m::records::{
     RecordForm, RecordFormError, RecordKey, from_json as read_definition,

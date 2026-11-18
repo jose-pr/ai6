@@ -184,6 +184,130 @@ impl PromotionPolicy {
     }
 }
 
+/// Who a promotion is for, as the brief names it.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy)]
+pub struct PromotionSubject<'a> {
+    /// The Agent's codename.
+    pub agent: &'a str,
+    /// The model that occupies the codename now.
+    pub model: Option<&'a str>,
+    /// The Operation the clearance is raised in.
+    pub operation: &'a str,
+    /// The clearance the Operation allows at most.
+    pub ceiling: &'a str,
+}
+
+/// One threshold of a step set against the record.
+struct Row {
+    threshold: &'static str,
+    required: String,
+    record: String,
+    met: bool,
+}
+
+impl PromotionStep {
+    fn rows(&self, counted: &AgentTally, incidents: &[&AgentTally], now: f64) -> Vec<Row> {
+        let mut rows = vec![Row {
+            threshold: "Missions done",
+            required: format!("at least {}", self.missions),
+            record: counted.done.to_string(),
+            met: counted.done >= self.missions,
+        }];
+        if let Some(limit) = self.max_failure_rate {
+            let rate = counted.failure_rate();
+            rows.push(Row {
+                threshold: "Failed or blown",
+                required: format!("at most {:.0} %", limit * 100.0),
+                record: rate.map_or("none ended".to_owned(), |rate| {
+                    format!("{:.0} %", rate * 100.0)
+                }),
+                met: rate.is_none_or(|rate| rate <= limit),
+            });
+        }
+        if self.quiet_days > 0 && !self.quiet_on.is_empty() {
+            let latest = incidents
+                .iter()
+                .filter_map(|tally| tally.latest(&self.quiet_on))
+                .reduce(f64::max);
+            let names = self
+                .quiet_on
+                .iter()
+                .map(|outcome| outcome.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            rows.push(Row {
+                threshold: "Quiet days",
+                required: format!("none of {names} in {} days", self.quiet_days),
+                record: latest.map_or("none on record".to_owned(), |at| {
+                    format!("last {:.0} days ago", ((now - at) / 86_400.0).max(0.0))
+                }),
+                met: latest.is_none_or(|at| at <= now - self.quiet_days as f64 * 86_400.0),
+            });
+        }
+        rows
+    }
+}
+
+impl PromotionPolicy {
+    /// The brief a person decides a promotion from, as Markdown with frontmatter: who is put up
+    /// for what, the record against each threshold, what the grant is bounded by, and what
+    /// refusing does. `counted` and `incidents` are as for [`PromotionStep::shortfall`].
+    pub fn brief(
+        &self,
+        promotion: &Promotion,
+        subject: &PromotionSubject<'_>,
+        counted: &AgentTally,
+        incidents: &[&AgentTally],
+        now: f64,
+    ) -> String {
+        let step = if promotion.from == "desk" {
+            &self.field
+        } else {
+            &self.double_o
+        };
+        let PromotionSubject {
+            agent,
+            model,
+            operation,
+            ceiling,
+        } = *subject;
+        let (from, to) = (&promotion.from, &promotion.to);
+        let model_line = model.map_or(String::new(), |model| format!("model: {model:?}\n"));
+        let model_text = model.map_or(String::new(), |model| format!(" (model `{model}`)"));
+        let mut table =
+            String::from("| Threshold | Required | Record | Met |\n| --- | --- | --- | --- |\n");
+        for row in step.rows(counted, incidents, now) {
+            table.push_str(&format!(
+                "| {} | {} | {} | {} |\n",
+                row.threshold,
+                row.required,
+                row.record,
+                if row.met { "yes" } else { "no" }
+            ));
+        }
+        let next = (promotion.round + 1) * step.missions;
+        format!(
+            "---\nkind: \"clearance_promotion\"\nagent: {agent:?}\n{model_line}operation: {operation:?}\n\
+             from: {from:?}\nto: {to:?}\n---\n\n\
+             # Raise {agent} from {from} to {to} in {operation}\n\n\
+             M puts up Agent `{agent}`{model_text} because its record in Operation `{operation}` \
+             meets every threshold of the step.\n\n\
+             ## Record\n\n{table}\n\
+             ## What approval grants\n\n\
+             Clearance `{to}` for `{agent}` in `{operation}` only, never above the Operation's \
+             `{ceiling}`. It belongs to the model that holds the codename now; another model \
+             does not inherit it, and a quarantine takes it back at once. A signature is spent \
+             once.\n\n\
+             ## If you refuse\n\n\
+             `{agent}` stays at `{from}` and keeps working. M asks again only when the record \
+             reaches {next} Missions done.\n\n\
+             ## Links\n\n\
+             - [Missions of {operation}](app:/missions?operation_id={operation})\n"
+        )
+    }
+}
+
 /// One step as written in configuration; unset keys keep the default.
 #[derive(
     Debug,

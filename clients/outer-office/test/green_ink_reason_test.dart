@@ -130,6 +130,32 @@ void main() {
     );
   });
 
+  testWidgets('a promotion brief shows its frontmatter and its table', (
+    tester,
+  ) async {
+    const brief =
+        '---\n'
+        'kind: "clearance_promotion"\n'
+        'agent: "007"\n'
+        'operation: "G"\n'
+        'from: "field"\n'
+        'to: "00"\n'
+        '---\n\n'
+        '# Raise 007 from field to 00 in G\n\n'
+        '## Record\n\n'
+        '| Threshold | Required | Record | Met |\n'
+        '| --- | --- | --- | --- |\n'
+        '| Missions done | at least 25 | 30 | yes |\n\n'
+        '## If you refuse\n\n'
+        'It stays at `field`.\n';
+    await _shown(tester, reason: brief);
+    expect(find.text('Raise 007 from field to 00 in G'), findsOneWidget);
+    expect(find.text('Threshold'), findsOneWidget);
+    expect(find.text('at least 25'), findsOneWidget);
+    expect(find.text('clearance_promotion'), findsOneWidget);
+    expect(find.textContaining('---'), findsNothing);
+  });
+
   testWidgets('an Agent\'s link shows where it goes before it opens', (
     tester,
   ) async {

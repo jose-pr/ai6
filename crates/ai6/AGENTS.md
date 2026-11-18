@@ -3068,7 +3068,14 @@ impl PromotionStep { pub fn after(missions: u64) -> Self;
 // Default: field 10 Missions, quiet 30 days on blown + quarantined;
 //          00 25 Missions, max_failure_rate 0.1, quiet 60 days on every incident.
 impl PromotionPolicy { pub fn due(&self, current: &str, ceiling: &str, counted: &AgentTally,
-                                  incidents: &[&AgentTally], now: f64) -> Option<Promotion> }
+                                  incidents: &[&AgentTally], now: f64) -> Option<Promotion>;
+    /// The brief M files a promotion request with: Markdown with frontmatter (kind
+    /// `clearance_promotion`, agent, model, operation, from, to), the record against each
+    /// threshold as a table, what the grant is bounded by, what refusing does, links.
+    pub fn brief(&self, promotion: &Promotion, subject: &PromotionSubject<'_>, counted: &AgentTally,
+                 incidents: &[&AgentTally], now: f64) -> String }
+#[non_exhaustive] pub struct PromotionSubject<'a> { pub agent: &'a str, pub model: Option<&'a str>,
+                                                    pub operation: &'a str, pub ceiling: &'a str }
 #[non_exhaustive] pub struct Promotion { pub from: String, pub to: String,
     pub round: u64 /* done / missions: a refused step is asked again when it grows */, pub reason: String }
 pub struct PromotionDefinition;   // [operation.ID.promotion.field] / ["00"]: missions,

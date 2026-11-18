@@ -1988,6 +1988,8 @@ pub fn ai6::directorates::m::promotion::PromotionPolicy::default() -> Self
 #[non_exhaustive] pub struct ai6::directorates::m::promotion::PromotionStep
 pub ai6::directorates::m::promotion::PromotionStep::max_failure_rate: core::option::Option<f64>
 pub ai6::directorates::m::promotion::PromotionStep::missions: u64
+pub fn ai6::directorates::m::promotion::PromotionPolicy::brief(&self, &ai6::directorates::m::promotion::Promotion, &ai6::directorates::m::promotion::PromotionSubject<'_>, &ai6::directorates::registry::agent_records::AgentTally, &[&ai6::directorates::registry::agent_records::AgentTally], f64) -> alloc::string::String
+impl ai6::directorates::m::promotion::PromotionPolicy
 pub ai6::directorates::m::promotion::PromotionStep::quiet_days: u64
 pub ai6::directorates::m::promotion::PromotionStep::quiet_on: alloc::vec::Vec<ai6::directorates::registry::agent_records::AgentOutcome>
 impl ai6::directorates::m::promotion::PromotionStep
@@ -1999,6 +2001,11 @@ pub const ai6::directorates::m::promotion::DEFAULT_00_MISSIONS: u64
 pub const ai6::directorates::m::promotion::DEFAULT_00_QUIET_DAYS: u64
 pub const ai6::directorates::m::promotion::DEFAULT_FIELD_MISSIONS: u64
 pub const ai6::directorates::m::promotion::DEFAULT_FIELD_QUIET_DAYS: u64
+#[non_exhaustive] pub struct ai6::directorates::m::promotion::PromotionSubject<'a>
+pub ai6::directorates::m::promotion::PromotionSubject::agent: &'a str
+pub ai6::directorates::m::promotion::PromotionSubject::ceiling: &'a str
+pub ai6::directorates::m::promotion::PromotionSubject::model: core::option::Option<&'a str>
+pub ai6::directorates::m::promotion::PromotionSubject::operation: &'a str
 pub mod ai6::directorates::m::records
 #[non_exhaustive] pub struct ai6::directorates::m::records::RecordForm
 pub ai6::directorates::m::records::RecordForm::form: serde_json::value::Value
@@ -13218,6 +13225,8 @@ pub ai6::Provenance::received_by: alloc::string::String
 pub ai6::Provenance::reference: core::option::Option<alloc::string::String>
 impl ai6::directorates::registry::bona_fides::Provenance
 pub fn ai6::directorates::registry::bona_fides::Provenance::matches(&self, &ai6::directorates::registry::store::Brief) -> bool
+pub fn ai6::directorates::m::promotion::PromotionPolicy::brief(&self, &ai6::directorates::m::promotion::Promotion, &ai6::directorates::m::promotion::PromotionSubject<'_>, &ai6::directorates::registry::agent_records::AgentTally, &[&ai6::directorates::registry::agent_records::AgentTally], f64) -> alloc::string::String
+impl ai6::directorates::m::promotion::PromotionPolicy
 pub fn ai6::directorates::registry::bona_fides::Provenance::new(ai6::directorates::registry::bona_fides::Origin, &ai6::directorates::registry::store::Brief, impl core::convert::Into<alloc::string::String>, i64) -> Self
 pub fn ai6::directorates::registry::bona_fides::Provenance::registry_drop(&ai6::directorates::registry::store::Brief, impl core::convert::Into<alloc::string::String>, i64) -> Self
 pub fn ai6::directorates::registry::bona_fides::Provenance::with_item_url(self, core::option::Option<alloc::string::String>) -> Self
@@ -13229,6 +13238,11 @@ pub ai6::ProvisionSpec::install_timeout_secs: core::option::Option<u64>
 pub ai6::ProvisionSpec::plugins: alloc::vec::Vec<alloc::string::String>
 pub ai6::ProvisionSpec::runner: core::option::Option<alloc::string::String>
 impl ai6::directorates::q::provision::ProvisionSpec
+#[non_exhaustive] pub struct ai6::PromotionSubject<'a>
+pub ai6::PromotionSubject::agent: &'a str
+pub ai6::PromotionSubject::ceiling: &'a str
+pub ai6::PromotionSubject::model: core::option::Option<&'a str>
+pub ai6::PromotionSubject::operation: &'a str
 pub fn ai6::directorates::q::provision::ProvisionSpec::with_install(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::q::provision::ProvisionSpec::with_plugin(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::q::provision::ProvisionSpec::with_runner(self, impl core::convert::Into<alloc::string::String>) -> Self
