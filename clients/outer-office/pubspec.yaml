@@ -9,6 +9,30 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # The chat's model and widgets, shared with the other agent apps; all three from one coqui-acp
+  # commit, since the two packages name coqui_acp by path.
+  coqui_acp:
+    git:
+      url: https://github.com/Boriken-Dev/coqui-acp.git
+      ref: abf7a6ec351fff718566a59790e49d4652301fc8
+      path: bindings/dart/coqui_acp
+  coqui_acp_chat:
+    git:
+      url: https://github.com/Boriken-Dev/coqui-acp.git
+      ref: abf7a6ec351fff718566a59790e49d4652301fc8
+      path: bindings/dart/coqui_acp_chat
+  coqui_acp_chat_ui:
+    git:
+      url: https://github.com/Boriken-Dev/coqui-acp.git
+      ref: abf7a6ec351fff718566a59790e49d4652301fc8
+      path: bindings/dart/coqui_acp_chat_ui
+  # Reads the frontmatter of a document by the Agent Overlay Specification's rule, which refuses
+  # anchors and aliases.
+  coqui_aos:
+    git:
+      url: https://github.com/Boriken-Dev/coqui-aos.git
+      ref: c4babfd9f15347a7d35d0fc25fa28cbe398ac02f
+      path: dart
   fl_chart: ^1.3.0
   flutter_svg: ^2.3.0
   guatiao:
@@ -29,6 +53,8 @@ dependencies:
   http: ^1.6.0
   # Draws the provisioning link of a one-time code app as a QR code.
   qr: ^3.0.2
+  # The Markdown parser the shared chat draws with; a document's references are a syntax of it.
+  markdown: ^7.3.1
   material_ui: ^1.1.0
   shared_preferences: ^2.5.5
   # ai6.cfg: TOML, or JSON or YAML when its first line names them.

@@ -65,6 +65,42 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.1.2"
+  coqui_acp:
+    dependency: "direct main"
+    description:
+      path: "bindings/dart/coqui_acp"
+      ref: abf7a6ec351fff718566a59790e49d4652301fc8
+      resolved-ref: abf7a6ec351fff718566a59790e49d4652301fc8
+      url: "https://github.com/Boriken-Dev/coqui-acp.git"
+    source: git
+    version: "0.0.0-alpha.0"
+  coqui_acp_chat:
+    dependency: "direct main"
+    description:
+      path: "bindings/dart/coqui_acp_chat"
+      ref: abf7a6ec351fff718566a59790e49d4652301fc8
+      resolved-ref: abf7a6ec351fff718566a59790e49d4652301fc8
+      url: "https://github.com/Boriken-Dev/coqui-acp.git"
+    source: git
+    version: "0.0.0-alpha.0"
+  coqui_acp_chat_ui:
+    dependency: "direct main"
+    description:
+      path: "bindings/dart/coqui_acp_chat_ui"
+      ref: abf7a6ec351fff718566a59790e49d4652301fc8
+      resolved-ref: abf7a6ec351fff718566a59790e49d4652301fc8
+      url: "https://github.com/Boriken-Dev/coqui-acp.git"
+    source: git
+    version: "0.0.0-alpha.0"
+  coqui_aos:
+    dependency: "direct main"
+    description:
+      path: dart
+      ref: c4babfd9f15347a7d35d0fc25fa28cbe398ac02f
+      resolved-ref: c4babfd9f15347a7d35d0fc25fa28cbe398ac02f
+      url: "https://github.com/Boriken-Dev/coqui-aos.git"
+    source: git
+    version: "0.0.0-alpha.0"
   crypto:
     dependency: "direct dev"
     description:
@@ -73,6 +109,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.0.7"
+  cryptography:
+    dependency: transitive
+    description:
+      name: cryptography
+      sha256: "3eda3029d34ec9095a27a198ac9785630fe525c0eb6a49f3d575272f8e792ef0"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.9.0"
   cupertino_ui:
     dependency: transitive
     description:
@@ -139,6 +183,14 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
+  flutter_markdown_plus:
+    dependency: transitive
+    description:
+      name: flutter_markdown_plus
+      sha256: fce641d6c2106cc495de1cd603f97a4f9d615a97a64011928ded380dbdade935
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.12"
   flutter_svg:
     dependency: "direct main"
     description:
@@ -264,6 +316,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.3.0"
+  markdown:
+    dependency: "direct main"
+    description:
+      name: markdown
+      sha256: ee85086ad7698b42522c6ad42fe195f1b9898e4d974a1af4576c1a3a176cada9
+      url: "https://pub.dev"
+    source: hosted
+    version: "7.3.1"
   matcher:
     dependency: transitive
     description:
@@ -296,6 +356,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.19.0"
+  mustache_template:
+    dependency: transitive
+    description:
+      name: mustache_template
+      sha256: "544ff0b837836f5ad6b351e7a676ff7c2cad4fa412c465908aeb9358caddb6fc"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.0.4"
   path:
     dependency: transitive
     description:
@@ -360,6 +428,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.1.8"
+  pointycastle:
+    dependency: transitive
+    description:
+      name: pointycastle
+      sha256: "92aa3841d083cc4b0f4709b5c74fd6409a3e6ba833ffc7dc6a8fee096366acf5"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.0.0"
   pub_semver:
     dependency: transitive
     description:
