@@ -537,6 +537,16 @@ impl Assistant {
         ) else {
             return;
         };
+        // What it spent before the restart is in its log: each harness entry carries its turn's
+        // tokens and cost.
+        for turn in rows.iter().filter_map(|row| row.turn.as_ref()) {
+            conversation.spent_tokens = conversation
+                .spent_tokens
+                .saturating_add(turn.tokens.unwrap_or(0));
+            conversation.spent_micro_usd = conversation
+                .spent_micro_usd
+                .saturating_add(turn.cost_micro_usd.unwrap_or(0));
+        }
         conversation.log = self.log.get().cloned();
         conversation.agent = Some(self.config().agent_id.clone());
         let mut desk = self.desk();

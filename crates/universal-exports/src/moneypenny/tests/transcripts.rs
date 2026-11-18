@@ -43,6 +43,13 @@ async fn a_stopping_gateway_keeps_what_her_log_still_queued() {
 
 /// A second gateway on the same Registry: the first one, restarted.
 async fn restarted(served: &Served) -> (String, tokio::task::JoinHandle<()>) {
+    restarted_with(served, AssistantConfig::default()).await
+}
+
+async fn restarted_with(
+    served: &Served,
+    config: AssistantConfig,
+) -> (String, tokio::task::JoinHandle<()>) {
     let gateway = Gateway::with_access(
         GatewayConfig::new(
             "https://localhost",
@@ -59,7 +66,7 @@ async fn restarted(served: &Served) -> (String, tokio::task::JoinHandle<()>) {
             Arc::new(access_from_toml(ROLES, ai6::Limit::UNBOUNDED).unwrap()),
         ),
     )
-    .with_assistant(AssistantConfig::default());
+    .with_assistant(config);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let router = gateway.router();
@@ -467,4 +474,73 @@ async fn a_conversation_past_its_budget_refuses_the_next_message_with_the_reason
     let words = refused["message"].as_str().unwrap();
     assert!(words.contains("$1.25 of $1.00"), "{words}");
     assert!(nothing_for(&served, "hq").await, "no job was queued");
+}
+
+#[tokio::test]
+async fn a_conversation_over_its_budget_is_still_refused_after_the_gateway_restarts() {
+    let mut limits = AssistantLimits::default();
+    limits.conversation_cost_micro_usd = Limit::at(1_000_000);
+    let config = || {
+        AssistantConfig::default()
+            .with_limits(limits.clone())
+            .unwrap()
+    };
+    let served = served(config()).await;
+    let (mut app, ready) = open(&served, &served.operator).await;
+    let conversation = ready["conversation"].as_str().unwrap().to_owned();
+    say(&mut app, "Summarize the board.", None).await;
+    let job = take(&served, "hq").await;
+    report(
+        &served,
+        "hq",
+        &job,
+        Some(&job.job_id),
+        vec![AssistantEvent::new(EVENT_ACCEPTED, None)],
+    )
+    .await;
+    let spent = AssistantReport {
+        route: None,
+        run: Some(AssistantRun {
+            account: None,
+            model: None,
+            tokens: Some(4_000_000),
+            cost_micro_usd: Some(1_250_000),
+        }),
+        station_id: "hq".to_owned(),
+        conversation_id: conversation.clone(),
+        job_id: None,
+        run_id: Some("provider-spent".to_owned()),
+        events: vec![
+            AssistantEvent::new(EVENT_TEXT, Some("Done.".to_owned())),
+            AssistantEvent::new(EVENT_COMPLETED, None),
+        ],
+    };
+    reqwest::Client::new()
+        .post(format!("{}/v1/station/assistant/reports", served.base))
+        .bearer_auth(STATION_TOKEN)
+        .json(&spent)
+        .send()
+        .await
+        .unwrap();
+    receive_until(&mut app, |frame| {
+        frame["type"] == "busy" && frame["busy"] == false
+    })
+    .await;
+    logged(&served, &conversation, |rows| {
+        rows.iter().any(|row| {
+            row.turn
+                .as_ref()
+                .is_some_and(|turn| turn.cost_micro_usd.is_some())
+        })
+    })
+    .await;
+    drop(app);
+
+    let (base, server) = restarted_with(&served, config()).await;
+    let (mut app, ready) = reopen(&base, &served.operator, &conversation).await;
+    assert_eq!(ready["usage"]["cost_micro_usd"], 1_250_000, "{ready}");
+    say(&mut app, "And again.", None).await;
+    let frames = receive_until(&mut app, |frame| frame["type"] == "error").await;
+    assert_eq!(frames.last().unwrap()["code"], "budget", "{frames:?}");
+    server.abort();
 }
