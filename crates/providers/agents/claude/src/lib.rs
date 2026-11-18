@@ -5,16 +5,17 @@
 
 ai6::guatiao::providers!(ClaudeHandler);
 
+mod terminal;
+
 use std::collections::{BTreeMap, VecDeque};
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::ffi::OsString;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 use ai6::directorates::m::assistant::SKILLS_PLUGIN;
 use ai6::directorates::m::identity::RunId;
-use ai6::directorates::q::terminal::{
-    AgentTerminal, ExitInfo, JsonLines, READ_TIMED_OUT, STREAM_COLS, Spec, StreamLine, TerminalRun,
-    exit_code_text,
-};
+use ai6::directorates::q::terminal::{AgentTerminal, exit_code_text};
 use ai6::directorates::section_00::agent::{
     AgentHandler, AgentResume, AgentStart, AssistantMode, ModelInfo, ModelListing, RunOverlays,
     RunRecordFile, RunRecordQuery, clearance_reads_only, clearance_runs_commands,
@@ -32,8 +33,14 @@ use ai6::{
     AgentEvent, AgentMessage, AgentSession, Bucket, BucketStatus, DENIED_EVENT, LIMIT_EVENT,
     LimitHit, Refill, Spend, UsageReport, UsageSource, UsageSupport, infer_limit,
 };
-use serde::Serialize;
+use coqui_acp_claude::harness::event::{Content, Event as ClaudeEvent};
+use coqui_acp_claude::{
+    ClaudeLaunch, ClaudeSession as Session, ClaudeSettings as DriverSettings, Error as ClaudeError,
+    SessionStart,
+};
 use serde_json::{Value, json};
+
+use terminal::{Link, TerminalSpawn};
 
 /// Claude Code AgentHandler configuration.
 #[derive(Debug, Clone, ToValue, FromValue, Schema)]
@@ -339,16 +346,7 @@ impl AgentHandler for ClaudeHandler {
         request: AgentStart,
         terminal: Object<dyn AgentTerminal>,
     ) -> Result<Object<dyn ai6::AgentSession>, ProviderError> {
-        let mut argv = vec![
-            self.config.executable.clone(),
-            "-p".to_string(),
-            "--input-format".to_string(),
-            "stream-json".to_string(),
-            "--output-format".to_string(),
-            "stream-json".to_string(),
-            "--verbose".to_string(),
-            "--replay-user-messages".to_string(),
-        ];
+        let mut argv = Vec::new();
         add_launch_options(
             &mut argv,
             &request
@@ -374,19 +372,20 @@ impl AgentHandler for ClaudeHandler {
             request.assistant.as_ref(),
             &request.overlays,
         )?;
-        let run = spawn(
+        let operation = open(Opening {
+            config: &self.config,
             terminal,
-            argv,
-            &request.working_directory,
-            &harness_environment(
+            flags: argv,
+            cwd: &request.working_directory,
+            environment: harness_environment(
                 &request.environment,
                 request.answer_only || request.assistant.is_some(),
                 request.assistant.as_ref(),
             ),
-        )?;
-        let operation = ClaudeRun::new(run, None)
-            .limited_by(&self.config)
-            .restricted_to(restriction(request.answer_only, request.assistant.as_ref()));
+            session: SessionStart::Chosen,
+            expected_run_id: None,
+            restricted: restriction(request.answer_only, request.assistant.as_ref()),
+        })?;
         operation.send(&request.prompt)?;
         Ok(operation.into_object())
     }
@@ -397,18 +396,7 @@ impl AgentHandler for ClaudeHandler {
         terminal: Object<dyn AgentTerminal>,
     ) -> Result<Object<dyn ai6::AgentSession>, ProviderError> {
         let expected_run_id = request.run_id.clone();
-        let mut argv = vec![
-            self.config.executable.clone(),
-            "-p".to_string(),
-            "--input-format".to_string(),
-            "stream-json".to_string(),
-            "--output-format".to_string(),
-            "stream-json".to_string(),
-            "--verbose".to_string(),
-            "--replay-user-messages".to_string(),
-            "--resume".to_string(),
-            request.run_id.to_string(),
-        ];
+        let mut argv = Vec::new();
         // Claude Code 2.1.310 reuses the system prompt it recorded with the Run
         // (`--system-prompt-snapshot`, on by default) until the Run is compacted; after
         // that, or with the snapshot off, it builds the prompt from this launch's flags.
@@ -439,22 +427,20 @@ impl AgentHandler for ClaudeHandler {
             request.assistant.as_ref(),
             &request.overlays,
         )?;
-        let run = spawn(
+        let operation = open(Opening {
+            config: &self.config,
             terminal,
-            argv,
-            &request.working_directory,
-            &harness_environment(
+            flags: argv,
+            cwd: &request.working_directory,
+            environment: harness_environment(
                 &request.environment,
                 request.answer_only || request.assistant.is_some(),
                 request.assistant.as_ref(),
             ),
-        )?;
-        let operation = ClaudeRun::new(run, Some(expected_run_id))
-            .limited_by(&self.config)
-            .restricted_to(restriction(request.answer_only, request.assistant.as_ref()));
-        // With stream-json input Claude Code writes nothing, not even its stream's
-        // initialization, until it has read a message: the message goes first, and the Run
-        // it reports is checked as its events are read.
+            session: SessionStart::Resume(request.run_id.to_string()),
+            expected_run_id: Some(expected_run_id),
+            restricted: restriction(request.answer_only, request.assistant.as_ref()),
+        })?;
         if let Some(message) = request.message
             && let Err(error) = operation.send(&message)
         {
@@ -1534,120 +1520,145 @@ fn decode_report(value: &Value) -> Option<UsageReport> {
     Some(report)
 }
 
-struct ClaudeRun {
-    terminal: Object<dyn TerminalRun>,
-    output: Mutex<JsonLines>,
+/// Everything `open` needs to start Claude Code.
+struct Opening<'a> {
+    config: &'a ClaudeConfig,
+    terminal: Object<dyn AgentTerminal>,
+    /// The flags after those the driver always passes, as AI6 builds them.
+    flags: Vec<String>,
+    cwd: &'a str,
+    environment: BTreeMap<String, String>,
+    session: SessionStart,
+    /// The Run a resumed launch must report.
+    expected_run_id: Option<RunId>,
+    /// For a restricted (answer-only or assistant) Run, what it may call.
+    restricted: Option<Allowed>,
+}
+
+/// Starts Claude Code on the Station's terminal through `coqui-acp-claude`, and waits for it to
+/// answer its `initialize` request.
+fn open(opening: Opening<'_>) -> Result<ClaudeRun, ProviderError> {
+    let Opening {
+        config,
+        terminal,
+        flags,
+        cwd,
+        environment,
+        session,
+        expected_run_id,
+        restricted,
+    } = opening;
+    let mut launch = ClaudeLaunch::new(cwd);
+    launch.executable = config.executable.clone().into();
+    launch.session = session;
+    // AI6 reads the stream's whole messages, and decides each permission by flags and settings.
+    launch.partial_messages = false;
+    launch.permission_prompts = false;
+    launch.extra_args = flags.into_iter().map(OsString::from).collect();
+
+    let link = Arc::new(Link::default());
+    let shared = Arc::new(Shared::new(restricted, expected_run_id, Arc::clone(&link)));
+    let mut settings = DriverSettings::new();
+    settings.max_line = config.json_line_bytes;
+    settings.tail_lines = usize::try_from(config.tail_lines).unwrap_or(usize::MAX);
+    settings.tail_line_bytes = usize::try_from(config.tail_line_bytes).unwrap_or(usize::MAX);
+    settings.exit_wait = Duration::from_millis(config.exit_wait_ms);
+    settings.close_wait = Duration::from_millis(config.close_wait_ms);
+    settings.version_wait = Duration::ZERO;
+    {
+        let shared = Arc::clone(&shared);
+        settings.on_line = Some(Arc::new(move |value| shared.line(value)));
+    }
+    let mut limits = ai6::station::limits::TerminalOutputLimits::default();
+    limits.json_line_bytes = ai6::Limit::at(config.json_line_bytes);
+    limits.csi_bytes = ai6::Limit::at(config.csi_bytes);
+    let spawner = TerminalSpawn {
+        terminal,
+        environment,
+        limits,
+        link,
+    };
+    let sink = Arc::clone(&shared);
+    let session = match Session::start(&launch, &spawner, settings, move |event| sink.tell(event)) {
+        Ok(session) => Some(session),
+        // It ended, or refused to start, before it answered: the Run reports how, as one that
+        // ends later does.
+        Err(ClaudeError::Harness(reason)) => {
+            shared.ended(&reason);
+            None
+        }
+        Err(ClaudeError::Refused(why)) => {
+            return Err(refuse(Status::GUATIAO_ERR_UNSUPPORTED, why));
+        }
+        Err(other) => {
+            return Err(refuse(
+                Status::GUATIAO_ERR_INTERNAL,
+                polished(&other.to_string()),
+            ));
+        }
+    };
+    Ok(ClaudeRun { session, shared })
+}
+
+/// An exit reason in the words of a Run: how the driver words it, with a negative exit code also
+/// as Windows names it.
+fn polished(reason: &str) -> String {
+    let mut text = reason
+        .replace("before completing the session", "before completing the Run")
+        .replace("closed its output", "closed its terminal");
+    const CODE: &str = "exited with code ";
+    if let Some(at) = text.find(CODE) {
+        let start = at + CODE.len();
+        let digits = text[start..]
+            .char_indices()
+            .find(|(index, c)| !(c.is_ascii_digit() || (*index == 0 && *c == '-')))
+            .map_or(text.len(), |(index, _)| start + index);
+        if let Ok(code) = text[start..digits].parse::<i64>() {
+            text.replace_range(start..digits, &exit_code_text(code));
+        }
+    }
+    text
+}
+
+/// What a Run's reader thread and its caller share.
+struct Shared {
+    events: Mutex<VecDeque<AgentEvent>>,
+    arrived: Condvar,
     /// The provider ID, once Claude has reported it.
     run_id: Mutex<Option<RunId>>,
     expected_run_id: Option<RunId>,
-    eof: AtomicBool,
-    eof_reported: AtomicBool,
+    /// Why the Run ended on a line Claude wrote, for the caller of `next_event` to be told once.
+    refused: Mutex<Option<ProviderError>>,
     /// For a restricted (answer-only or assistant) Run, what it may call.
     restricted: Option<Allowed>,
     /// Set once a restricted Run called a tool it may not, and was ended: nothing it
     /// wrote after that is read.
     tripped: AtomicBool,
-    /// The last lines Claude wrote that were not JSON: its own diagnostics, which say why it
-    /// exited when it exits.
-    tail: Mutex<VecDeque<String>>,
-    /// The event a `result` line owes after the [`DENIED_EVENT`] read from the same line.
-    pending: Mutex<Option<AgentEvent>>,
-    /// Numbers the control requests written to Claude, for their `request_id`.
-    requests: AtomicU64,
-    /// How many of the last non-JSON lines a `failed` event quotes, and how long each may be.
-    tail_lines: usize,
-    tail_line_bytes: usize,
-    /// How long `close` waits for the harness to have exited, for a terminal whose `kill` does
-    /// not.
-    close_wait_ms: i64,
-    /// How long the end of the output waits for the harness's exit status.
-    exit_wait_ms: i64,
+    /// Set once the end of Claude Code was reported as a `failed` event, or needs none.
+    ended_reported: AtomicBool,
+    link: Arc<Link>,
 }
 
-impl ClaudeRun {
-    fn new(terminal: Object<dyn TerminalRun>, expected_run_id: Option<RunId>) -> Self {
+impl Shared {
+    fn new(restricted: Option<Allowed>, expected_run_id: Option<RunId>, link: Arc<Link>) -> Self {
         Self {
-            terminal,
-            output: Mutex::new(JsonLines::new(&Default::default())),
+            events: Mutex::new(VecDeque::new()),
+            arrived: Condvar::new(),
             run_id: Mutex::new(None),
             expected_run_id,
-            eof: AtomicBool::new(false),
-            eof_reported: AtomicBool::new(false),
-            restricted: None,
+            refused: Mutex::new(None),
+            restricted,
             tripped: AtomicBool::new(false),
-            tail: Mutex::new(VecDeque::new()),
-            pending: Mutex::new(None),
-            requests: AtomicU64::new(0),
-            tail_lines: 8,
-            tail_line_bytes: 512,
-            close_wait_ms: 2_000,
-            exit_wait_ms: 1_000,
+            ended_reported: AtomicBool::new(false),
+            link,
         }
     }
 
-    /// Takes the bounds and waits from the handler's configuration.
-    fn limited_by(mut self, config: &ClaudeConfig) -> Self {
-        let mut limits = ai6::station::limits::TerminalOutputLimits::default();
-        limits.json_line_bytes = ai6::Limit::at(config.json_line_bytes);
-        limits.csi_bytes = ai6::Limit::at(config.csi_bytes);
-        self.output = Mutex::new(JsonLines::new(&limits));
-        self.tail_lines = usize::try_from(config.tail_lines).unwrap_or(usize::MAX);
-        self.tail_line_bytes = usize::try_from(config.tail_line_bytes).unwrap_or(usize::MAX);
-        self.close_wait_ms = i64::try_from(config.close_wait_ms).unwrap_or(i64::MAX);
-        self.exit_wait_ms = i64::try_from(config.exit_wait_ms).unwrap_or(i64::MAX);
-        self
-    }
-
-    /// How the harness ended, once its terminal says it has; `None` while it runs or when the
-    /// terminal cannot tell.
-    fn exited(&self, timeout_ms: i64) -> Option<ExitInfo> {
-        let status = self.terminal.exit_status(timeout_ms).ok()?;
-        ExitInfo::from_value(&status)
-            .ok()
-            .filter(|exit| !exit.running)
-    }
-
-    /// Why the Run ended without completing: the exit status and the last lines Claude
-    /// wrote outside its stream.
-    fn exit_reason(&self) -> String {
-        let how = match self.exited(self.exit_wait_ms) {
-            Some(ExitInfo {
-                code: Some(code), ..
-            }) => format!("exited with code {}", exit_code_text(code)),
-            Some(ExitInfo {
-                signal: Some(signal),
-                ..
-            }) => format!("was ended by signal {signal}"),
-            Some(_) => "exited".to_owned(),
-            None => "closed its terminal".to_owned(),
-        };
-        let mut reason = format!("Claude Code {how} before completing the Run");
-        if let Ok(tail) = self.tail.lock()
-            && !tail.is_empty()
-        {
-            reason.push_str("; its last output:\n");
-            reason.push_str(&tail.iter().cloned().collect::<Vec<_>>().join("\n"));
+    fn push(&self, event: AgentEvent) {
+        if let Ok(mut events) = self.events.lock() {
+            events.push_back(event);
+            self.arrived.notify_all();
         }
-        reason
-    }
-
-    fn remember_output(&self, line: &str) {
-        if let Ok(mut tail) = self.tail.lock() {
-            if tail.len() >= self.tail_lines {
-                tail.pop_front();
-            }
-            let mut end = line.len().min(self.tail_line_bytes);
-            while !line.is_char_boundary(end) {
-                end -= 1;
-            }
-            tail.push_back(line[..end].to_owned());
-        }
-    }
-
-    /// Restricts the Run to what `allowed` names: calling any other tool ends it.
-    fn restricted_to(mut self, allowed: Option<Allowed>) -> Self {
-        self.restricted = allowed;
-        self
     }
 
     /// The `failed` event that ends a restricted Run whose `seen` event calls a tool outside
@@ -1683,101 +1694,32 @@ impl ClaudeRun {
             forbidden.join(", ")
         );
         eprintln!("ai6: {reason}");
-        let _ = self.terminal.kill();
+        self.link.kill();
         self.tripped.store(true, Ordering::Release);
+        self.ended_reported.store(true, Ordering::Release);
         Some(event("failed", Some(reason)))
     }
 
-    /// Writes `input` as one line in a single write, so a line written from another thread (an
-    /// interrupt during a message) cannot land inside it.
-    fn write_line(&self, input: &impl Serialize) -> Result<(), ProviderError> {
-        let mut line = serde_json::to_vec(input).map_err(internal)?;
-        line.push(b'\n');
-        self.terminal.write(&line)
-    }
-
-    fn send(&self, text: &str) -> Result<(), ProviderError> {
-        self.write_line(&user_input(text))
-    }
-
-    fn read_event(&self, timeout_ms: i64) -> Result<Option<AgentEvent>, ProviderError> {
+    /// Takes one line Claude Code wrote, before the driver reads it; `false` ends Claude Code.
+    fn line(&self, value: &Value) -> bool {
         if self.tripped.load(Ordering::Acquire) {
-            return Ok(None);
+            return false;
         }
-        if let Some(event) = lock(&self.pending)?.take() {
-            return Ok(Some(event));
-        }
-        let deadline =
-            std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms as u64);
-        let line = loop {
-            // What the terminal wrote before it closed is read before the exit is reported.
-            let ended = self.eof.load(Ordering::Acquire);
-            let next = {
-                let mut output = lock(&self.output)?;
-                if ended {
-                    output.finish()
-                } else {
-                    output.next_line()
-                }
-            };
-            if let Some(line) = next {
-                break line;
-            }
-            if ended {
-                if self.eof_reported.swap(true, Ordering::AcqRel) {
-                    return Ok(None);
-                }
-                let reason = self.exit_reason();
-                eprintln!("ai6: {reason}");
-                return Ok(Some(event("failed", Some(reason))));
-            }
-            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            if remaining.is_zero() {
-                return Ok(None);
-            }
-            let mut bytes = [0_u8; 8192];
-            let count = self.terminal.read(
-                &mut bytes,
-                remaining.as_millis().min(i64::MAX as u128) as i64,
-            )?;
-            if count == READ_TIMED_OUT {
-                // A terminal may keep its output open after the harness exits.
-                if self.exited(0).is_some() {
-                    self.eof.store(true, Ordering::Release);
-                    continue;
-                }
-                return Ok(None);
-            }
-            if count == 0 {
-                self.eof.store(true, Ordering::Release);
-                continue;
-            }
-            if count < 0 {
-                return Err(refuse(
-                    Status::GUATIAO_ERR_INTERNAL,
-                    "Claude terminal returned an invalid read count",
-                ));
-            }
-            lock(&self.output)?.push(&bytes[..count as usize]);
-        };
-        let (value, line) = match line {
-            StreamLine::Json { value, text, .. } => (value, text),
-            StreamLine::Text(text) => {
-                self.remember_output(&text);
-                return Ok(Some(event("output", Some(text))));
-            }
-        };
         if let Some(id) = value.get("session_id").and_then(Value::as_str) {
-            let run_id = RunId::try_from(id.to_string())
-                .map_err(|error| refuse(Status::GUATIAO_ERR_BAD_VALUE, error))?;
+            let run_id = match RunId::try_from(id.to_string()) {
+                Ok(run_id) => run_id,
+                Err(error) => return self.refuse(refuse(Status::GUATIAO_ERR_BAD_VALUE, error)),
+            };
             let different = self
                 .expected_run_id
                 .as_ref()
                 .is_some_and(|expected| expected != &run_id);
             // Kept even when it is the wrong one: `run_id` is how the Station learns that.
-            *lock(&self.run_id)? = Some(run_id);
+            if let Ok(mut known) = self.run_id.lock() {
+                *known = Some(run_id);
+            }
             if different {
-                return Err(refuse(
+                return self.refuse(refuse(
                     Status::GUATIAO_ERR_BAD_VALUE,
                     "Claude resumed a different Run than requested",
                 ));
@@ -1785,23 +1727,101 @@ impl ClaudeRun {
         }
         let kind = value.get("type").and_then(Value::as_str);
         if kind == Some("control_response") {
-            control_answered(&value);
+            control_answered(value);
         }
         if matches!(kind, Some("user" | "control_response")) {
-            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            return self.read_event(remaining.as_millis().min(i64::MAX as u128) as i64);
+            return true;
         }
-        if let Some(event) = decode_event(&value, line.clone()) {
-            if let Some(ended) = self.tripped(&event, &value) {
-                return Ok(Some(ended));
+        let text = self
+            .link
+            .last
+            .lock()
+            .map(|last| last.clone())
+            .unwrap_or_default();
+        if let Some(event) = decode_event(value, text) {
+            if let Some(ended) = self.tripped(&event, value) {
+                self.push(ended);
+                return false;
             }
-            if let Some(denied) = decode_denials(&value) {
-                *lock(&self.pending)? = Some(event);
-                return Ok(Some(denied));
+            if let Some(denied) = decode_denials(value) {
+                self.push(denied);
             }
-            return Ok(Some(event));
+            self.push(event);
         }
-        Ok(None)
+        true
+    }
+
+    /// Ends the Run on a line it should not have written; the caller of `next_event` is told why.
+    fn refuse(&self, error: ProviderError) -> bool {
+        if let Ok(mut refused) = self.refused.lock() {
+            refused.get_or_insert(error);
+        }
+        self.ended_reported.store(true, Ordering::Release);
+        // Waking the caller is how it learns.
+        if let Ok(_events) = self.events.lock() {
+            self.arrived.notify_all();
+        }
+        false
+    }
+
+    /// Takes what the driver tells of Claude Code.
+    fn tell(&self, told: ClaudeEvent) -> bool {
+        match told {
+            ClaudeEvent::Output(text) => self.push(AgentEvent {
+                kind: "output".to_owned(),
+                text: Some(text),
+                data: None,
+                limit: None,
+                tools: Vec::new(),
+                report: None,
+            }),
+            ClaudeEvent::Exited(reason) => self.ended(&reason),
+            _ => {}
+        }
+        true
+    }
+
+    /// The end of Claude Code ends the Run once, with the reason.
+    fn ended(&self, reason: &str) {
+        if !self.ended_reported.swap(true, Ordering::AcqRel) {
+            let reason = polished(reason);
+            eprintln!("ai6: {reason}");
+            self.push(event("failed", Some(reason)));
+        }
+    }
+}
+
+/// A started Claude Code, as one of AI6's Runs.
+struct ClaudeRun {
+    /// `None` for a Claude Code that ended before it was started: its Run only reports that.
+    session: Option<Session>,
+    shared: Arc<Shared>,
+}
+
+impl ClaudeRun {
+    fn send(&self, text: &str) -> Result<(), ProviderError> {
+        match &self.session {
+            Some(session) => session
+                .prompt(&contents(text))
+                .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error)),
+            None => Ok(()),
+        }
+    }
+}
+
+/// A message in AI6's content form as the driver's blocks: the images it carries, then its text.
+fn contents(text: &str) -> Vec<Content> {
+    match ai6::MessageContent::decode(text) {
+        Some(content) => content
+            .images
+            .iter()
+            .map(|image| Content::Image {
+                mime_type: image.media_type.clone(),
+                data: image.data.clone(),
+            })
+            .chain([Content::Text(content.text)])
+            .collect(),
+        None => vec![Content::Text(text.to_owned())],
     }
 }
 
@@ -1823,7 +1843,7 @@ fn control_answered(value: &Value) {
 
 impl ai6::AgentSession for ClaudeRun {
     fn session_id(&self) -> Result<Option<String>, ProviderError> {
-        Ok(lock(&self.run_id)?.clone().map(String::from))
+        Ok(lock(&self.shared.run_id)?.clone().map(String::from))
     }
 
     fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {
@@ -1831,68 +1851,56 @@ impl ai6::AgentSession for ClaudeRun {
     }
 
     fn next_event(&self, timeout_ms: i64) -> Result<Option<AgentEvent>, ProviderError> {
-        self.read_event(timeout_ms.max(0))
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms.max(0) as u64);
+        let mut events = lock(&self.shared.events)?;
+        loop {
+            if let Some(event) = events.pop_front() {
+                return Ok(Some(event));
+            }
+            if let Some(error) = lock(&self.shared.refused)?.take() {
+                return Err(error);
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Ok(None);
+            }
+            events = self
+                .shared
+                .arrived
+                .wait_timeout(events, remaining)
+                .map_err(|_| refuse(Status::GUATIAO_ERR_INTERNAL, "run lock was poisoned"))?
+                .0;
+        }
     }
 
     /// Stops the running turn with stream-json's `interrupt` control request, in the Agent
     /// SDK's shape; the `control_response` Claude answers with is read and dropped.
     fn interrupt(&self) -> Result<(), ProviderError> {
-        let number = self.requests.fetch_add(1, Ordering::Relaxed) + 1;
-        self.write_line(&json!({
-            "type": "control_request",
-            "request_id": format!("ai6-interrupt-{number}"),
-            "request": { "subtype": "interrupt" },
-        }))
+        match &self.session {
+            Some(session) => session
+                .interrupt()
+                .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error)),
+            None => Ok(()),
+        }
     }
 
+    /// Ends Claude Code. The caller may remove the working directory next, which it holds until
+    /// it has exited, so this waits for that.
     fn close(&self) -> Result<(), ProviderError> {
-        self.terminal.kill()?;
-        // The caller may remove the working directory next, which the harness holds until it
-        // has exited; a terminal that cannot tell is not waited for.
-        let _ = self.terminal.exit_status(self.close_wait_ms);
+        if let Some(session) = &self.session {
+            session.close();
+        }
         Ok(())
     }
 }
 
 /// A user message in stream-json's shape: its text, after the images a message in AI6's
 /// content form carries, each as a base64 `image` block.
+/// A user message as the driver writes it, for the tests that hold its shape.
+#[cfg(test)]
 fn user_input(text: &str) -> Value {
-    let content: Vec<Value> = match ai6::MessageContent::decode(text) {
-        Some(content) => content
-            .images
-            .iter()
-            .map(|image| {
-                json!({
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": image.media_type,
-                        "data": image.data,
-                    },
-                })
-            })
-            .chain([json!({"type": "text", "text": content.text})])
-            .collect(),
-        None => vec![json!({"type": "text", "text": text})],
-    };
-    json!({"type": "user", "message": {"role": "user", "content": content}})
-}
-
-fn spawn(
-    terminal: Object<dyn AgentTerminal>,
-    argv: Vec<String>,
-    cwd: &str,
-    environment: &std::collections::BTreeMap<String, String>,
-) -> Result<Object<dyn TerminalRun>, ProviderError> {
-    let spec = Spec {
-        argv,
-        cwd: Some(cwd.to_string()),
-        env: Some(environment.clone()),
-        rows: 24,
-        cols: STREAM_COLS,
-    };
-    let value = spec.to_value().map_err(internal)?;
-    terminal.spawn(&value)
+    let blocks = coqui_acp_claude::user_blocks(&contents(text)).unwrap();
+    json!({"type": "user", "message": {"role": "user", "content": blocks}})
 }
 
 fn event(kind: &str, text: Option<String>) -> AgentEvent {
@@ -2192,6 +2200,7 @@ fn lock<T>(mutex: &Mutex<T>) -> Result<std::sync::MutexGuard<'_, T>, ProviderErr
         .map_err(|_| refuse(Status::GUATIAO_ERR_INTERNAL, "run lock was poisoned"))
 }
 
+#[cfg(test)]
 fn internal(error: impl std::fmt::Display) -> ProviderError {
     refuse(Status::GUATIAO_ERR_INTERNAL, error)
 }
@@ -2203,6 +2212,10 @@ fn refuse(status: Status, error: impl std::fmt::Display) -> ProviderError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ai6::directorates::q::terminal::{
+        ExitInfo, READ_TIMED_OUT, STREAM_COLS, Spec, TerminalRun,
+    };
+    use ai6::guatiao::{FromValue, ToValue};
     use std::collections::VecDeque;
 
     #[test]
@@ -2533,6 +2546,17 @@ mod tests {
         let run_id = std::env::var("CLAUDE_FIXTURE_RUN_ID").unwrap();
         let mut initialized = false;
         for line in std::io::stdin().lock().lines() {
+            let message: Value = serde_json::from_str(&line.unwrap()).unwrap();
+            if message["type"] == "control_request" {
+                if message.pointer("/request/subtype") == Some(&json!("initialize")) {
+                    let answer = json!({"type": "control_response", "response": {
+                        "subtype": "success", "request_id": message["request_id"],
+                        "response": {}}});
+                    writeln!(stdout, "{answer}").unwrap();
+                    stdout.flush().unwrap();
+                }
+                continue;
+            }
             if !std::mem::replace(&mut initialized, true) {
                 writeln!(
                     stdout,
@@ -2541,7 +2565,6 @@ mod tests {
                 )
                 .unwrap();
             }
-            let message: Value = serde_json::from_str(&line.unwrap()).unwrap();
             let Some(text) = message
                 .pointer("/message/content/0/text")
                 .and_then(Value::as_str)
@@ -2670,8 +2693,8 @@ mod tests {
         assert!(
             specs[1]
                 .argv
-                .windows(2)
-                .any(|pair| { pair == ["--resume", run_id.as_str()] })
+                .iter()
+                .any(|argument| *argument == format!("--resume={run_id}"))
         );
     }
 
@@ -2695,34 +2718,8 @@ mod tests {
         );
     }
 
-    struct EofTerminalRun;
-
-    impl TerminalRun for EofTerminalRun {
-        fn pid(&self) -> i64 {
-            1
-        }
-
-        fn read(&self, _dst: &mut [u8], _timeout_ms: i64) -> Result<i64, ProviderError> {
-            Ok(0)
-        }
-
-        fn write(&self, _data: &[u8]) -> Result<(), ProviderError> {
-            Ok(())
-        }
-
-        fn resize(&self, _rows: i64, _cols: i64) -> Result<(), ProviderError> {
-            Ok(())
-        }
-
-        fn kill(&self) -> Result<(), ProviderError> {
-            Ok(())
-        }
-
-        fn exit_status(&self, _timeout_ms: i64) -> Result<ai6::guatiao::Value, ProviderError> {
-            Err(refuse(Status::GUATIAO_ERR_INTERNAL, "unused in EOF test"))
-        }
-    }
-
+    /// A terminal whose Claude Code answers `initialize` as the real one does, with no message
+    /// written, and then writes `input`, so a stream is read once the driver waits for it.
     struct ResumeTerminal {
         spec: Arc<Mutex<Option<Spec>>>,
         input: Vec<u8>,
@@ -2742,17 +2739,90 @@ mod tests {
             value: &ai6::guatiao::Value,
         ) -> Result<Object<dyn TerminalRun>, ProviderError> {
             *self.spec.lock().unwrap() = Some(Spec::from_value(value).map_err(internal)?);
-            Ok(ResumeTerminalRun {
-                input: Mutex::new(self.input.clone()),
-                writes: self.writes.clone(),
-            }
-            .into_object())
+            Ok(
+                ResumeTerminalRun::new(self.input.clone(), self.writes.clone(), false)
+                    .into_object(),
+            )
         }
     }
 
-    struct ResumeTerminalRun {
-        input: Mutex<Vec<u8>>,
+    /// A terminal that answers `initialize` and then closes its output.
+    struct EofTerminal;
+
+    impl AgentTerminal for EofTerminal {
+        fn spawn_private(
+            &self,
+            value: &ai6::guatiao::Value,
+        ) -> Result<Object<dyn TerminalRun>, ProviderError> {
+            self.spawn(value)
+        }
+
+        fn spawn(
+            &self,
+            _value: &ai6::guatiao::Value,
+        ) -> Result<Object<dyn TerminalRun>, ProviderError> {
+            Ok(ResumeTerminalRun::new(Vec::new(), Arc::default(), true).into_object())
+        }
+    }
+
+    /// Like [`ResumeTerminal`], with the stream held back until `hold` is cleared.
+    struct HeldTerminal {
+        spec: Arc<Mutex<Option<Spec>>>,
+        input: Vec<u8>,
         writes: Arc<Mutex<Vec<u8>>>,
+        hold: Arc<AtomicBool>,
+    }
+
+    impl AgentTerminal for HeldTerminal {
+        fn spawn_private(
+            &self,
+            value: &ai6::guatiao::Value,
+        ) -> Result<Object<dyn TerminalRun>, ProviderError> {
+            self.spawn(value)
+        }
+
+        fn spawn(
+            &self,
+            value: &ai6::guatiao::Value,
+        ) -> Result<Object<dyn TerminalRun>, ProviderError> {
+            *self.spec.lock().unwrap() = Some(Spec::from_value(value).map_err(internal)?);
+            let mut run = ResumeTerminalRun::new(self.input.clone(), self.writes.clone(), false);
+            run.hold = self.hold.clone();
+            Ok(run.into_object())
+        }
+    }
+
+    struct Script {
+        answers: VecDeque<u8>,
+        output: VecDeque<u8>,
+        released: bool,
+    }
+
+    struct ResumeTerminalRun {
+        script: Mutex<Script>,
+        arrived: Condvar,
+        stream: Vec<u8>,
+        writes: Arc<Mutex<Vec<u8>>>,
+        eof: bool,
+        /// While set, the stream is not read: only the answers to what was written.
+        hold: Arc<AtomicBool>,
+    }
+
+    impl ResumeTerminalRun {
+        fn new(stream: Vec<u8>, writes: Arc<Mutex<Vec<u8>>>, eof: bool) -> Self {
+            Self {
+                script: Mutex::new(Script {
+                    answers: VecDeque::new(),
+                    output: VecDeque::new(),
+                    released: false,
+                }),
+                arrived: Condvar::new(),
+                stream,
+                writes,
+                eof,
+                hold: Arc::new(AtomicBool::new(false)),
+            }
+        }
     }
 
     impl TerminalRun for ResumeTerminalRun {
@@ -2760,19 +2830,58 @@ mod tests {
             7
         }
 
-        fn read(&self, dst: &mut [u8], _timeout_ms: i64) -> Result<i64, ProviderError> {
-            let mut input = self.input.lock().unwrap();
-            if input.is_empty() {
-                return Ok(READ_TIMED_OUT);
+        fn read(&self, dst: &mut [u8], timeout_ms: i64) -> Result<i64, ProviderError> {
+            let mut script = self.script.lock().unwrap();
+            let held = |script: &Script| {
+                script.answers.is_empty()
+                    && (script.output.is_empty() || self.hold.load(Ordering::Acquire))
+            };
+            if held(&script) {
+                // Short waits, so a stream let go of is read at once.
+                let wait = Duration::from_millis(timeout_ms.clamp(0, 20) as u64);
+                script = self.arrived.wait_timeout(script, wait).unwrap().0;
             }
-            let count = dst.len().min(input.len());
-            dst[..count].copy_from_slice(&input[..count]);
-            input.drain(..count);
+            if held(&script) {
+                return Ok(if self.eof && script.released && script.output.is_empty() {
+                    0
+                } else {
+                    READ_TIMED_OUT
+                });
+            }
+            let from_answers = !script.answers.is_empty();
+            let source = if from_answers {
+                &mut script.answers
+            } else {
+                &mut script.output
+            };
+            let count = dst.len().min(source.len());
+            for byte in &mut dst[..count] {
+                *byte = source.pop_front().unwrap();
+            }
             Ok(count as i64)
         }
 
         fn write(&self, data: &[u8]) -> Result<(), ProviderError> {
             self.writes.lock().unwrap().extend_from_slice(data);
+            for line in data.split(|byte| *byte == b'\n') {
+                let Ok(message) = serde_json::from_slice::<Value>(line) else {
+                    continue;
+                };
+                if message["type"] != "control_request"
+                    || message.pointer("/request/subtype") != Some(&json!("initialize"))
+                {
+                    continue;
+                }
+                let mut script = self.script.lock().unwrap();
+                let answer = json!({"type": "control_response", "response": {
+                    "subtype": "success", "request_id": message["request_id"], "response": {}}});
+                script.answers.extend(format!("{answer}\n").into_bytes());
+                if !script.released {
+                    script.released = true;
+                    script.output.extend(self.stream.iter().copied());
+                }
+                self.arrived.notify_all();
+            }
             Ok(())
         }
 
@@ -2792,17 +2901,47 @@ mod tests {
         }
     }
 
+    /// Claude Code, started with the settings of a Run that is not gated, on `terminal`.
+    fn open_on(terminal: impl AgentTerminal + 'static, allowed: Option<Allowed>) -> ClaudeRun {
+        let config = ClaudeConfig::default();
+        open(Opening {
+            config: &config,
+            terminal: terminal.into_object(),
+            flags: Vec::new(),
+            cwd: "/work",
+            environment: BTreeMap::new(),
+            session: SessionStart::Chosen,
+            expected_run_id: None,
+            restricted: allowed,
+        })
+        .unwrap()
+    }
+
+    /// A Run that reads `input` after its start, restricted to what `allowed` names.
+    fn restricted_run(input: Vec<u8>, allowed: Option<Allowed>) -> ClaudeRun {
+        open_on(
+            ResumeTerminal {
+                spec: Arc::new(Mutex::new(None)),
+                input,
+                writes: Arc::new(Mutex::new(Vec::new())),
+            },
+            allowed,
+        )
+    }
+
     #[test]
     fn resume_uses_the_provider_id_and_stream_json_message() {
         let run_id = RunId::try_new("claude-session-42").unwrap();
         let spec = Arc::new(Mutex::new(None));
         let writes = Arc::new(Mutex::new(Vec::new()));
-        let terminal = ResumeTerminal {
+        let hold = Arc::new(AtomicBool::new(true));
+        let terminal = HeldTerminal {
             spec: spec.clone(),
             input:
                 b"{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"claude-session-42\"}\n"
                     .to_vec(),
             writes: writes.clone(),
+            hold: hold.clone(),
         };
         let handler = ClaudeHandler::try_from(ClaudeConfig {
             executable: "claude-test".to_owned(),
@@ -2837,15 +2976,16 @@ mod tests {
             None,
             "unknown until Claude reports it"
         );
-        let event = run.next_event(50).unwrap().unwrap();
+        hold.store(false, Ordering::Release);
+        let event = run.next_event(2_000).unwrap().unwrap();
         assert_eq!(event.kind, "system");
         assert_eq!(run.session_id().unwrap(), Some(run_id.to_string()));
 
         let spec = spec.lock().unwrap().clone().unwrap();
         assert!(
             spec.argv
-                .windows(2)
-                .any(|pair| pair == ["--resume", "claude-session-42"])
+                .iter()
+                .any(|argument| argument == "--resume=claude-session-42")
         );
         assert!(spec.argv.iter().any(|arg| arg == "--model=sonnet"));
         assert!(spec.argv.iter().any(|arg| arg == "--effort=high"));
@@ -2855,8 +2995,18 @@ mod tests {
             Some("fresh")
         );
 
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline
+            && !String::from_utf8_lossy(&writes.lock().unwrap()).contains("\"user\"")
+        {
+            std::thread::sleep(Duration::from_millis(20));
+        }
         let written = String::from_utf8(writes.lock().unwrap().clone()).unwrap();
-        let message: Value = serde_json::from_str(written.trim()).unwrap();
+        let message = written
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .find(|message| message["type"] == "user")
+            .expect("the message was written");
         assert_eq!(message["type"], "user");
         assert_eq!(
             message["message"]["content"][0]["text"],
@@ -2917,7 +3067,7 @@ mod tests {
                 terminal.into_object(),
             )
             .unwrap();
-        let kinds_and_texts = std::iter::from_fn(|| run.next_event(50).unwrap())
+        let kinds_and_texts = std::iter::from_fn(|| run.next_event(400).unwrap())
             .map(|event| (event.kind, event.text))
             .collect::<Vec<_>>();
         assert_eq!(
@@ -2984,23 +3134,37 @@ mod tests {
         run.interrupt().unwrap();
         run.interrupt().unwrap();
 
+        // The driver writes on a thread of its own.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline
+            && String::from_utf8_lossy(&writes.lock().unwrap())
+                .matches("\"interrupt\"")
+                .count()
+                < 2
+        {
+            std::thread::sleep(Duration::from_millis(20));
+        }
         let written = String::from_utf8(writes.lock().unwrap().clone()).unwrap();
         assert!(!written.contains('\u{3}'), "no ^C byte reaches the stream");
-        let requests = written
+        // The driver numbers its own requests: the shape is the contract, the id is its own.
+        let mut requests = written
             .lines()
             .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .filter(|request| request.pointer("/request/subtype") == Some(&json!("interrupt")))
             .collect::<Vec<_>>();
-        assert_eq!(
-            requests,
-            [1, 2].map(|number| json!({
-                "type": "control_request",
-                "request_id": format!("ai6-interrupt-{number}"),
-                "request": { "subtype": "interrupt" },
-            }))
-        );
+        assert!(requests.iter().all(|request| {
+            request["request_id"]
+                .as_str()
+                .is_some_and(|id| !id.is_empty())
+        }));
+        for request in &mut requests {
+            request.as_object_mut().unwrap().remove("request_id");
+        }
+        let interrupt = json!({"type": "control_request", "request": { "subtype": "interrupt" }});
+        assert_eq!(requests, [interrupt.clone(), interrupt]);
         assert!(written.ends_with('\n'));
 
-        let kinds_and_texts = std::iter::from_fn(|| run.next_event(50).unwrap())
+        let kinds_and_texts = std::iter::from_fn(|| run.next_event(400).unwrap())
             .map(|event| (event.kind, event.text))
             .collect::<Vec<_>>();
         assert_eq!(
@@ -3073,7 +3237,7 @@ mod tests {
                     .into_object(),
                 )
                 .unwrap();
-            let kinds = std::iter::from_fn(|| run.next_event(50).unwrap())
+            let kinds = std::iter::from_fn(|| run.next_event(400).unwrap())
                 .map(|event| (event.kind, event.text))
                 .collect::<Vec<_>>();
             if ends {
@@ -3126,7 +3290,7 @@ mod tests {
                 terminal.into_object(),
             )
             .unwrap();
-        let error = match run.next_event(50) {
+        let error = match run.next_event(400) {
             Ok(event) => panic!("a different provider ID was read as {event:?}"),
             Err(error) => error.to_string(),
         };
@@ -3545,9 +3709,9 @@ mod tests {
 
     #[test]
     fn terminal_eof_emits_one_failed_event_instead_of_polling_forever() {
-        let run = ClaudeRun::new(EofTerminalRun.into_object(), None);
+        let run = open_on(EofTerminal, None);
 
-        let event = run.next_event(100).unwrap().unwrap();
+        let event = run.next_event(2_000).unwrap().unwrap();
         assert_eq!(event.kind, "failed");
         assert_eq!(run.next_event(100).unwrap(), None);
     }
@@ -4271,7 +4435,7 @@ denied_tools = [\"Bash(rm *)\"]
                 {"tool_name": "Write", "tool_use_id": "t3", "tool_input": {"content": "secret"}},
             ],
         }));
-        let events = std::iter::from_fn(|| run.next_event(50).unwrap()).collect::<Vec<_>>();
+        let events = std::iter::from_fn(|| run.next_event(400).unwrap()).collect::<Vec<_>>();
         let kinds_and_texts = events
             .iter()
             .map(|event| (event.kind.as_str(), event.text.as_deref()))
@@ -4305,7 +4469,7 @@ denied_tools = [\"Bash(rm *)\"]
                 "result": "finished",
                 "permission_denials": denials,
             }));
-            let kinds = std::iter::from_fn(|| run.next_event(50).unwrap())
+            let kinds = std::iter::from_fn(|| run.next_event(400).unwrap())
                 .map(|event| event.kind)
                 .collect::<Vec<_>>();
             assert_eq!(kinds, ["completed"]);
@@ -4896,16 +5060,8 @@ denied_tools = [\"Bash(rm *)\"]
                 .as_bytes(),
             );
             input.extend_from_slice(b"{\"type\":\"result\",\"result\":\"done\"}\n");
-            let run = ClaudeRun::new(
-                ResumeTerminalRun {
-                    input: Mutex::new(input),
-                    writes: Arc::new(Mutex::new(Vec::new())),
-                }
-                .into_object(),
-                None,
-            )
-            .restricted_to(restriction(false, Some(&mode)));
-            let kinds = std::iter::from_fn(|| run.next_event(50).unwrap())
+            let run = restricted_run(input, restriction(false, Some(&mode)));
+            let kinds = std::iter::from_fn(|| run.next_event(400).unwrap())
                 .map(|event| event.kind)
                 .collect::<Vec<_>>();
             assert_eq!(
@@ -5045,16 +5201,8 @@ denied_tools = [\"Bash(rm *)\"]
                   \"id\":\"t\",\"name\":\"Skill\",\"input\":{\"skill\":\"ai6:charts\"}}]}}\n",
             );
             input.extend_from_slice(b"{\"type\":\"result\",\"result\":\"done\"}\n");
-            let run = ClaudeRun::new(
-                ResumeTerminalRun {
-                    input: Mutex::new(input),
-                    writes: Arc::new(Mutex::new(Vec::new())),
-                }
-                .into_object(),
-                None,
-            )
-            .restricted_to(restriction(false, Some(mode)));
-            let kinds = std::iter::from_fn(|| run.next_event(50).unwrap())
+            let run = restricted_run(input, restriction(false, Some(mode)));
+            let kinds = std::iter::from_fn(|| run.next_event(400).unwrap())
                 .map(|event| event.kind)
                 .collect::<Vec<_>>();
             assert_eq!(kinds.contains(&"failed".to_owned()), ends, "{kinds:?}");
@@ -5756,16 +5904,8 @@ denied_tools = [\"Bash(rm *)\"]
                 .as_bytes(),
             );
             input.extend_from_slice(b"{\"type\":\"result\",\"result\":\"done\"}\n");
-            let run = ClaudeRun::new(
-                ResumeTerminalRun {
-                    input: Mutex::new(input),
-                    writes: Arc::new(Mutex::new(Vec::new())),
-                }
-                .into_object(),
-                None,
-            )
-            .restricted_to(restriction(false, Some(&mode)));
-            let kinds = std::iter::from_fn(|| run.next_event(50).unwrap())
+            let run = restricted_run(input, restriction(false, Some(&mode)));
+            let kinds = std::iter::from_fn(|| run.next_event(400).unwrap())
                 .map(|event| event.kind)
                 .collect::<Vec<_>>();
             assert_eq!(
@@ -5911,16 +6051,11 @@ denied_tools = [\"Bash(rm *)\"]
                     .as_bytes(),
             );
             input.extend_from_slice(b"{\"type\":\"result\",\"result\":\"done\"}\n");
-            let run = ClaudeRun::new(
-                ResumeTerminalRun {
-                    input: Mutex::new(input),
-                    writes: Arc::new(Mutex::new(Vec::new())),
-                }
-                .into_object(),
-                None,
-            )
-            .restricted_to(restriction(false, Some(&AssistantMode::moneypenny())));
-            let kinds = std::iter::from_fn(|| run.next_event(50).unwrap())
+            let run = restricted_run(
+                input,
+                restriction(false, Some(&AssistantMode::moneypenny())),
+            );
+            let kinds = std::iter::from_fn(|| run.next_event(400).unwrap())
                 .map(|event| (event.kind, event.text.unwrap_or_default()))
                 .collect::<Vec<_>>();
             assert_eq!(kinds.len(), 2, "{block}: {kinds:?}");
@@ -5939,17 +6074,12 @@ denied_tools = [\"Bash(rm *)\"]
             {"type": "tool_use", "id": "t", "name": "mcp__moneypenny__board", "input": {}},
         ]}});
         assert!(unexpected_blocks(&message).is_empty());
-        let run = ClaudeRun::new(
-            ResumeTerminalRun {
-                input: Mutex::new(Vec::new()),
-                writes: Arc::new(Mutex::new(Vec::new())),
-            }
-            .into_object(),
-            None,
-        )
-        .restricted_to(restriction(false, Some(&AssistantMode::moneypenny())));
+        let run = restricted_run(
+            Vec::new(),
+            restriction(false, Some(&AssistantMode::moneypenny())),
+        );
         let event = decode_event(&message, Vec::new()).unwrap();
-        assert!(run.tripped(&event, &message).is_none());
+        assert!(run.shared.tripped(&event, &message).is_none());
     }
 
     #[test]

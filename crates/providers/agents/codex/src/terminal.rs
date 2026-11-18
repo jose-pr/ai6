@@ -234,10 +234,11 @@ impl Process for Program {
     }
 
     fn try_wait(&self) -> io::Result<Option<Exit>> {
-        // A terminal that cannot say is one whose program has not exited as far as anyone knows.
-        let Ok(status) = self.run.exit_status(0) else {
-            return Ok(None);
-        };
+        // A terminal that cannot say makes the driver stop asking.
+        let status = self
+            .run
+            .exit_status(0)
+            .map_err(|error| io::Error::other(error.to_string()))?;
         Ok(ExitInfo::from_value(&status)
             .ok()
             .filter(|exit| !exit.running)
