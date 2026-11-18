@@ -184,6 +184,12 @@ pub struct ChargeDefinition {
     #[schema(title = "Reports assessed a turn")]
     #[map(default = ChargeDefinition::DEFAULTS.max_reports_per_turn)]
     pub max_reports_per_turn: Limit,
+    /// Turns in a row that end failed, or take no harness, before the Station reports itself
+    /// degraded naming the charge; an operator's acknowledgement or a turn that ends well starts
+    /// the count again. `0` flags the first, `none` never flags one.
+    #[schema(title = "Failed turns before degraded")]
+    #[map(default = ChargeDefinition::DEFAULTS.failing_after)]
+    pub failing_after: Limit,
     /// Characters of text one of the charge's acts records in the audit log and on the timeline
     /// (a target, a reason); the rest is cut. `none` records it whole.
     #[schema(title = "Text one act records")]
@@ -211,6 +217,7 @@ impl ChargeDefinition {
         stuck_blocked_after: TimeLimit::secs(3_600),
         stuck_charge_after: TimeLimit::secs(600),
         max_reports_per_turn: Limit::at(10),
+        failing_after: Limit::at(3),
         max_text_chars: Limit::at(500),
     };
 

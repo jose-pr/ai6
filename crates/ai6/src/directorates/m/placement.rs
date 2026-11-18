@@ -197,9 +197,9 @@ impl OperationPolicy {
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Degradation {
-    /// What kind of thing it is: `library`, `source-poll`, `source-write` or `sessions`.
+    /// What kind of thing it is: `library`, `source-poll`, `source-write`, `charge` or `sessions`.
     pub kind: String,
-    /// What it names: a library's file, a Source's tracker or the Station's Runs.
+    /// What it names: a library's file, a Source's tracker, a charge's scope or the Station's Runs.
     pub subject: String,
     /// Why, in a sentence.
     pub reason: String,

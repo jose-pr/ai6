@@ -835,3 +835,59 @@ async fn a_retry_that_ends_well_clears_the_failure_and_is_not_followed_by_anothe
     assert_eq!(turns(&state, tag), 2);
     charges::close_all(&state).await;
 }
+
+fn charge_degradations(state: &DaemonState) -> Vec<crate::directorates::m::placement::Degradation> {
+    health::degradations(state)
+        .into_iter()
+        .filter(|found| found.kind == "charge")
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn turns_that_keep_failing_degrade_the_station_naming_the_charge_until_it_is_acknowledged() {
+    let root = tempfile::tempdir().unwrap();
+    let tag = "f3";
+    FAILING.lock().unwrap().insert(key(tag));
+    let state = station(root.path(), tag, "test", "", "");
+    charges::tend(&state, false, true).await;
+    control(&state, tag, "one");
+    tend_until(&state, "the first failure", || turns(&state, tag) == 1).await;
+    tend_until(&state, "the retry", || turns(&state, tag) == 2).await;
+    assert!(
+        charge_degradations(&state).is_empty(),
+        "two failures are under the setting"
+    );
+    control(&state, tag, "three");
+    tend_until(&state, "the third failure", || turns(&state, tag) == 3).await;
+    let found = charge_degradations(&state);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].subject, scope(tag));
+    assert!(
+        found[0].reason.contains("3 turns") && found[0].reason.contains("the model refused"),
+        "{}",
+        found[0].reason
+    );
+
+    state
+        .intake
+        .acknowledge_charge(&scope(tag), "person-1")
+        .unwrap();
+    FAILING.lock().unwrap().remove(&key(tag));
+    tend_for(&state, 5).await;
+    assert!(charge_degradations(&state).is_empty());
+    charges::close_all(&state).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_failing_after_of_none_never_flags_the_charge() {
+    let root = tempfile::tempdir().unwrap();
+    let tag = "f4";
+    FAILING.lock().unwrap().insert(key(tag));
+    let state = station(root.path(), tag, "test", "failing_after = \"none\"\n", "");
+    charges::tend(&state, false, true).await;
+    control(&state, tag, "one");
+    tend_until(&state, "a failure", || turns(&state, tag) == 1).await;
+    assert_eq!(record(&state, tag).failed_turns, 1);
+    assert!(charge_degradations(&state).is_empty());
+    charges::close_all(&state).await;
+}

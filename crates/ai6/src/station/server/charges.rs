@@ -70,6 +70,26 @@ impl ChargeDesk {
         })
     }
 
+    /// The charges this Station runs whose turns failed in a row as often as their `failing_after`
+    /// says: the scope, how many in a row, and how the last one ended.
+    pub(super) fn failing(&self) -> Vec<(String, u32, String)> {
+        self.all()
+            .into_iter()
+            .filter_map(|live| {
+                let failed = live.failed_turns.load(Ordering::Acquire);
+                let after = live.settings().settings.failing_after.get()?;
+                (failed > 0 && u64::from(failed) >= after).then(|| {
+                    let last = live
+                        .last_failure
+                        .lock()
+                        .map(|last| last.clone())
+                        .unwrap_or_default();
+                    (live.scope.to_string(), failed, last)
+                })
+            })
+            .collect()
+    }
+
     fn get(&self, scope: &str) -> Option<Arc<Live>> {
         self.live.lock().ok()?.get(scope).cloned()
     }
@@ -1155,7 +1175,7 @@ async fn run_turn(state: &DaemonState, live: &Arc<Live>, events: Vec<ChargeEvent
                 }
             }
         }
-        note_turn(live, true, &outcome.ended);
+        note_turn(state, live, true, &outcome.ended);
         let _ = write(state, live, update.turn_ended(true)).await;
         return;
     }
@@ -1186,7 +1206,7 @@ async fn run_turn(state: &DaemonState, live: &Arc<Live>, events: Vec<ChargeEvent
             .filter_map(|event| event.control.clone())
             .collect(),
     );
-    note_turn(live, failed, &outcome.ended);
+    note_turn(state, live, failed, &outcome.ended);
     if failed && let Ok(mut retry) = live.retry_at.lock() {
         *retry = now
             + state
@@ -1200,16 +1220,28 @@ async fn run_turn(state: &DaemonState, live: &Arc<Live>, events: Vec<ChargeEvent
     let _ = write(state, live, update.turn_ended(failed)).await;
 }
 
-/// Counts a turn that ended `ended` in the charge's run of failures.
-fn note_turn(live: &Live, failed: bool, ended: &str) {
+/// Counts a turn that ended `ended` in the charge's run of failures, and journals a failed one with
+/// how many failed in a row.
+fn note_turn(state: &DaemonState, live: &Live, failed: bool, ended: &str) {
     if !failed {
         live.failed_turns.store(0, Ordering::Release);
         live.retried.store(false, Ordering::Release);
         return;
     }
-    live.failed_turns.fetch_add(1, Ordering::AcqRel);
+    let in_a_row = live
+        .failed_turns
+        .fetch_add(1, Ordering::AcqRel)
+        .saturating_add(1);
+    let ended: String = ended
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    eprintln!(
+        "ai6: Station {} charge {}: its turn failed ({in_a_row} in a row): {ended}",
+        state.station_id, live.scope
+    );
     if let Ok(mut last) = live.last_failure.lock() {
-        *last = ended.to_owned();
+        *last = ended;
     }
 }
 

@@ -270,6 +270,14 @@ pub(super) fn degradations(state: &DaemonState) -> Vec<Degradation> {
             ));
         }
     }
+    for (scope, failed, ended) in state.charges.failing() {
+        found.push(Degradation::new(
+            "charge",
+            scope,
+            format!("its last {failed} turns failed in a row: {ended}"),
+            vec!["its area being kept by its charge".to_owned()],
+        ));
+    }
     let (running, progressing) = sessions(state);
     if running > 0 && progressing == 0 {
         found.push(Degradation::new(

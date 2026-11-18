@@ -3943,6 +3943,7 @@ impl ChargeScope { pub fn operation(&self) -> Option<&str>; pub fn station(&self
     pub stuck_blocked_after: TimeLimit,   // 3600; blocked or held this long
     pub stuck_charge_after: TimeLimit,    // 600; M's charge: another charge whose lease lapsed, or whose last turn did not run, this long
     pub max_reports_per_turn: Limit,      // 10; open Reports an M or Operation charge is given to assess in a turn, oldest first; none: all
+    pub failing_after: Limit,             // 3; turns in a row that fail before the Station is degraded naming the charge; 0: the first; none: never
     pub max_text_chars: Limit,            // 500; characters of text one act records in the audit log and timeline; none: whole
 }
 impl ChargeDefinition {
@@ -6600,7 +6601,7 @@ intervals), `source-write` (a tracker's write check failed, every `[sources] can
 Headquarters Station only: its provider builds, answers `capabilities` and says it can comment) and
 `sessions` (Runs held, none progressing), `config-record` (a stored record the Station started
 without, named `<family> <key>`), `config` (a revision refused whole; the Station keeps the one it runs),
-`bootstrap` (a table or field of `ai6.cfg` this release does not declare, left out) and `claim` (a
+`bootstrap` (a table or field of `ai6.cfg` this release does not declare, left out), `charge` (a charge this Station runs whose turns failed `failing_after` times in a row, named by its scope; an acknowledgement or a good turn clears it) and `claim` (a
 brief whose claim the Registry failed with an error: journaled with the error, and not tried again
 for `[scheduler] claim_backoff` seconds, doubled for each failure in a row up to `retry_backoff_max`;
 `0` retries on the next round). The check-in also carries `sessions`
