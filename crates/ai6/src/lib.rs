@@ -257,6 +257,7 @@ pub use directorates::section_00::agent::{
     ModelInfo, ModelListing, OverlaySkill, READ_CLEARANCE, RunOverlays, RunRecordFile,
     RunRecordQuery, clearance_reads_only, clearance_runs_commands,
 };
+pub use directorates::section_00::agent::{is_token_cap_refusal, token_cap_refusal};
 pub use directorates::section_00::assistant::{
     ASSISTANT_CABLE_MCP_ENV_PREFIX, ASSISTANT_CABLE_MCP_SERVER, ASSISTANT_CABLE_MCP_TOKEN_ENV,
     ASSISTANT_CABLE_MCP_URL_ENV, ASSISTANT_MCP_ENV_PREFIX, ASSISTANT_MCP_PATH,

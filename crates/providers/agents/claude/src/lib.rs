@@ -2031,6 +2031,17 @@ fn decode_event(value: &Value, line: Vec<u8>) -> Option<AgentEvent> {
             report: decode_report(value),
         });
     }
+    // Claude Code retries a gateway's refusal for hours (`api_retry`); a token-cap refusal is the
+    // same every time, so the turn ends with the gateway's own words.
+    if event_type == "system"
+        && value.get("subtype").and_then(Value::as_str) == Some("api_retry")
+        && let Some(words) = ai6::token_cap_refusal(value)
+    {
+        return Some(AgentEvent {
+            data: Some(line),
+            ..event("failed", Some(words))
+        });
+    }
     let tools = decode_tools(value);
     let error_result = event_type == "result" && result_is_error(value);
     let kind = match event_type {
@@ -3385,6 +3396,37 @@ mod tests {
             }))
             .is_none(),
             "another status is no limit"
+        );
+    }
+
+    /// Claude Code reports each retry of a gateway's refusal as `system`/`api_retry`; a token-cap
+    /// refusal ends the turn at the first one, and a transient error is left to its retries.
+    #[test]
+    fn a_token_cap_refusal_in_a_retry_fails_the_turn_once_with_the_gateways_words() {
+        let words = "400 Request rejected: Current cap is 300000 tokens";
+        let capped = json!({
+            "type": "system",
+            "subtype": "api_retry",
+            "attempt": 10,
+            "max_retries": 300,
+            "error_status": 400,
+            "error": words,
+        });
+        let event = decode_event(&capped, b"{}".to_vec()).unwrap();
+        assert_eq!(event.kind, "failed");
+        assert_eq!(event.text.as_deref(), Some(words));
+
+        let transient = json!({
+            "type": "system",
+            "subtype": "api_retry",
+            "attempt": 1,
+            "max_retries": 300,
+            "error_status": 529,
+            "error": "overloaded",
+        });
+        assert_eq!(
+            decode_event(&transient, b"{}".to_vec()).unwrap().kind,
+            "system"
         );
     }
 

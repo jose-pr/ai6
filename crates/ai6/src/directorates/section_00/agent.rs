@@ -568,3 +568,47 @@ mod tests {
         assert!(refused.to_string().contains("cannot record"), "{refused}");
     }
 }
+
+/// Whether `text` is a model gateway's refusal of a request over its per-request token cap
+/// (`Current cap is 300000 tokens`, `context_length_exceeded`): the same request is refused again
+/// whenever it is sent, so a handler fails the turn with these words instead of letting its
+/// harness retry.
+pub fn is_token_cap_refusal(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    if lower.contains("context_length_exceeded") || lower.contains("context length exceeded") {
+        return true;
+    }
+    // `cap is 300000 tokens`, `token cap of 300000`, `exceeds the cap`.
+    let named_cap = lower.contains("cap is ") || lower.contains("token cap");
+    named_cap && lower.contains("token")
+}
+
+/// The words of the first string in a harness's error event that are a token-cap refusal.
+pub fn token_cap_refusal(event: &serde_json::Value) -> Option<String> {
+    match event {
+        serde_json::Value::String(text) => is_token_cap_refusal(text).then(|| text.clone()),
+        serde_json::Value::Array(items) => items.iter().find_map(token_cap_refusal),
+        serde_json::Value::Object(fields) => fields.values().find_map(token_cap_refusal),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod cap_tests {
+    use super::*;
+
+    #[test]
+    fn a_cap_refusal_is_told_from_a_transient_error() {
+        assert!(is_token_cap_refusal("Current cap is 300000 tokens"));
+        assert!(is_token_cap_refusal("error: context_length_exceeded"));
+        assert!(!is_token_cap_refusal("overloaded, try again"));
+        assert!(!is_token_cap_refusal(
+            "the cap of your plan resets tomorrow"
+        ));
+        let nested = serde_json::json!({"a": [{"b": "Request rejected. Current cap is 5 tokens"}]});
+        assert_eq!(
+            token_cap_refusal(&nested).as_deref(),
+            Some("Request rejected. Current cap is 5 tokens")
+        );
+    }
+}

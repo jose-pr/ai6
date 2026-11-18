@@ -1582,6 +1582,20 @@ fn decode_event(message: &Value, hint: Option<&LimitHit>) -> Option<AgentEvent> 
             report: None,
         });
     }
+    // Codex retries a gateway's refusal while `willRetry` is set; a token-cap refusal is the same
+    // every time, so the turn ends with the gateway's own words.
+    if method == "error"
+        && let Some(words) = message.get("params").and_then(ai6::token_cap_refusal)
+    {
+        return Some(AgentEvent {
+            kind: "failed".to_owned(),
+            text: Some(words),
+            data: serde_json::to_vec(message).ok(),
+            limit: None,
+            tools: Vec::new(),
+            report: None,
+        });
+    }
     let kind = match method {
         "item/agentMessage/delta" => "text",
         "turn/completed" => "completed",
@@ -4017,6 +4031,29 @@ mod tests {
         let event = decode_event(&other, None).unwrap();
         assert_eq!(event.kind, "error");
         assert_eq!(event.limit, None);
+    }
+
+    #[test]
+    fn a_token_cap_refusal_that_will_retry_fails_the_turn_with_the_gateways_words() {
+        let words = "400 Request rejected: Current cap is 300000 tokens";
+        let capped = json!({
+            "method": "error",
+            "params": {
+                "error": { "message": words, "codexErrorInfo": "badRequest" },
+                "willRetry": true
+            }
+        });
+        let event = decode_event(&capped, None).unwrap();
+        assert_eq!(event.kind, "failed");
+        assert_eq!(event.text.as_deref(), Some(words));
+        let transient = json!({
+            "method": "error",
+            "params": {
+                "error": { "message": "stream disconnected", "codexErrorInfo": "other" },
+                "willRetry": true
+            }
+        });
+        assert_eq!(decode_event(&transient, None).unwrap().kind, "error");
     }
 
     #[test]
