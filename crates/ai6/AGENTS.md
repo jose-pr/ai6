@@ -6647,12 +6647,19 @@ intervals), `source-write` (a tracker's write check failed, every `[sources] can
 Headquarters Station only: its provider builds, answers `capabilities` and says it can comment) and
 `sessions` (Runs held, none progressing), `config-record` (a stored record the Station started
 without, named `<family> <key>`), `config` (a revision refused whole; the Station keeps the one it runs),
-`bootstrap` (a table or field of `ai6.cfg` this release does not declare, left out), `charge` (a charge this Station runs whose turns failed `failing_after` times in a row, named by its scope; an acknowledgement or a good turn clears it) and `claim` (a
+`bootstrap` (a table or field of `ai6.cfg` this release does not declare, left out), `charge` (a charge this Station runs whose turns failed `failing_after` times in a row, named by its scope; an acknowledgement or a good turn clears it), `claim` (a
 brief whose claim the Registry failed with an error: journaled with the error, and not tried again
 for `[scheduler] claim_backoff` seconds, doubled for each failure in a row up to `retry_backoff_max`;
-`0` retries on the next round). The check-in also carries `sessions`
-(`{running, progressing}`), `source_polls` (each Source's `last_completed`) and `declined` (briefs this
-Station gave back, with when it may take them again). A Run quiet for `[scheduler] claim_progress` has
+`0` retries on the next round), `controls` (the control loop applied one control past
+`[scheduler] control_timeout`, which was rejected back to the operator and journaled, or did not come
+round for that long; cleared by the next control that finishes) and `orphaned-claim` (a working or
+blocked Mission held here with no live Run, nothing queued and no re-attach waiting). The check-in also carries `sessions`
+(`{running, progressing}`), `source_polls` (each Source's `last_completed`), `controls`
+(`{processed, failed_back, heartbeat}` of the control loop), `orphaned` (the Missions of `orphaned-claim`;
+Universal Exports settles such a claim although the Station answers, and the Station renews neither its
+claim nor its Run lease and hands it back once the claim lapses) and `declined` (briefs this
+Station gave back, with when it may take them again). A Run that sent no output and no event with content within `[scheduler] start_deadline` of starting is a
+failed start: its brief is given back and this Station may take it again at once. A Run quiet for `[scheduler] claim_progress` has
 its brief given back; placement leaves that Station out for `[scheduler] claim_exclusion`
 (`PlacementRequest.brief`, `StationFacts.declined`). A provider event with no text, data, tool call or
 end does not reset the stall clock (`Watchdog::record_event`).

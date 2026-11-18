@@ -216,6 +216,11 @@ fn check_lease(state: &DaemonState, mission_id: &str) -> Result<(), String> {
 }
 
 async fn cancel(state: &DaemonState, mission: &Mission) -> Result<Applied, String> {
+    // A Mission still being re-attached is not re-attached once it is cancelled.
+    if let Ok(mut pending) = state.startup_recovery.lock() {
+        pending.remove(mission.mission_id.as_str());
+    }
+    clear_waits(state, mission.mission_id.as_str());
     if is_terminal_state(mission.state) {
         return Ok(Applied {
             state: mission.state,
@@ -1113,5 +1118,43 @@ mod tests {
         );
         stop(&state);
         looping.await.unwrap();
+    }
+
+    /// A Mission whose re-attach keeps failing yields to a cancel: it leaves the queue, and the
+    /// round that would have tried it again leaves it alone, as it does one ended some other way.
+    #[tokio::test]
+    async fn a_cancel_ends_the_re_attach_loop_of_a_mission() {
+        use super::super::schedule_recovered_once;
+        let root = tempfile::tempdir().unwrap();
+        let state = state_in(root.path(), TWO_AGENTS);
+        for id in ["mission-1", "mission-2"] {
+            state
+                .missions
+                .lock()
+                .unwrap()
+                .transition(id, MissionState::Working)
+                .unwrap();
+            state.startup_recovery.lock().unwrap().insert(id.to_owned());
+        }
+
+        let outcome = apply(&state, &control("mission-1", ControlAction::Cancel)).await;
+        assert_eq!(outcome.outcome, "applied", "{outcome:?}");
+        assert!(!state.startup_recovery.lock().unwrap().contains("mission-1"));
+
+        // Ended some other way while its re-attach was waiting to be tried again.
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .transition("mission-2", MissionState::Abandoned)
+            .unwrap();
+        schedule_recovered_once(&state).await;
+        assert!(state.startup_recovery.lock().unwrap().is_empty());
+        assert!(state.runs.lock().unwrap().is_empty(), "nothing was resumed");
+        assert_eq!(
+            mission_state(&state, "mission-1").state,
+            MissionState::Abandoned
+        );
+        stop(&state);
     }
 }
