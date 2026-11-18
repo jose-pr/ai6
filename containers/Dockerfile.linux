@@ -66,7 +66,7 @@ RUN set -eu; umask 0; \
 # deps' pub/ is the pub cache, its cdn/ is what tool/cdn_files.dart fill --deps reads, and its
 # crates/ is the vendor directory that `crates.py use "$AI6_SDK_DEPS"` points cargo at.
 ARG DEPS_GIT_URL=https://github.com/jose-pr/ai6.git
-ARG DEPS_REF=26bf67d9046912db015ef3c0aa5c38baba22b606
+ARG DEPS_REF=8e9204d3596ab2cdf949a6a9335dfd6948963e43
 RUN set -eu; umask 0; \
     git init -q /tmp/deps; \
     git -C /tmp/deps fetch -q --depth 1 "$DEPS_GIT_URL" "$DEPS_REF" || { \
