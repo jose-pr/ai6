@@ -2404,7 +2404,10 @@ bogus = true
         assert!(mine[0].1.contains("ended: done"));
         assert!(mine[0].1.contains("agent/fix"));
         assert!(mine[0].1.contains("007"));
-        assert!(mine[0].1.contains("sess-1"));
+        assert!(
+            !mine[0].1.contains("sess-1"),
+            "a Run ID is not for the tracker"
+        );
     }
 
     #[test]
@@ -3137,7 +3140,11 @@ title = \"Update dependencies\"
         assert!(assisted.body.contains("AI-assisted"));
         assert!(assisted.body.contains("m-9"));
         let full = compose_report(Disclosure::Full, &finished(true));
-        assert!(full.body.contains("sess-9") && full.body.contains("007"));
+        assert!(
+            full.body.contains("007") && !full.body.contains("sess-9"),
+            "{}",
+            full.body
+        );
     }
 
     fn roster_issues(sources: &str, issues: &str) -> (tempfile::TempDir, Roster) {
