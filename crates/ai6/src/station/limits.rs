@@ -216,6 +216,12 @@ pub struct SchedulerLimits {
     #[schema(title = "Retry a failed brief claim after")]
     #[map(default = SchedulerLimits::default().claim_backoff)]
     pub claim_backoff: Seconds,
+    /// Seconds an operator control may take to apply, and the longest the control loop may go
+    /// without coming round, before the control is rejected back to the operator and the Station
+    /// reports itself degraded; `none` never does.
+    #[schema(title = "A control may take")]
+    #[map(default = SchedulerLimits::default().control_timeout)]
+    pub control_timeout: TimeLimit,
     /// Seconds the Station waits for each of its loops when it stops.
     #[schema(title = "Wait for each loop when stopping")]
     #[map(default = SchedulerLimits::default().shutdown_wait)]
@@ -238,6 +244,7 @@ impl Default for SchedulerLimits {
             claim_progress: TimeLimit::secs(30 * 60),
             claim_exclusion: Seconds::new(15 * 60),
             claim_backoff: Seconds::new(5),
+            control_timeout: TimeLimit::secs(120),
             shutdown_wait: Seconds::new(2),
         }
     }

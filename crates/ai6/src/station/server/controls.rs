@@ -16,9 +16,9 @@ use tokio::task::JoinHandle;
 use ai6_diptel::{ControlAction, MissionControl};
 
 use super::{
-    ApiErrorResponse, DaemonState, ResumeMission, TransitionMission, agents, interrupt_mission,
-    is_terminal_state, lifecycle_name, medical, resume_mission, run_hold, transition_mission,
-    unix_now,
+    ApiErrorResponse, DaemonState, ResumeMission, TransitionMission, agents, health,
+    interrupt_mission, is_terminal_state, lifecycle_name, medical, resume_mission, run_hold,
+    transition_mission, unix_now,
 };
 use crate::bounds::Limit;
 use crate::directorates::m::issues::OnSecret;
@@ -39,15 +39,64 @@ pub(super) fn spawn(state: &DaemonState) -> std::io::Result<Option<JoinHandle<()
     Ok(Some(tokio::spawn(serve(state.clone(), receiver))))
 }
 
-async fn serve(state: DaemonState, mut receiver: Receiver<ControlDelivery>) {
+async fn serve(state: DaemonState, receiver: Receiver<ControlDelivery>) {
+    serve_with(state, receiver, |state, control| async move {
+        apply(&state.current(), &control).await
+    })
+    .await;
+}
+
+/// The control loop, applying each control with `applier`. A control that outlasts `[scheduler]
+/// control_timeout` is rejected back to the operator and the loop moves on.
+async fn serve_with<F, Fut>(state: DaemonState, mut receiver: Receiver<ControlDelivery>, applier: F)
+where
+    F: Fn(DaemonState, MissionControl) -> Fut,
+    Fut: std::future::Future<Output = ControlOutcome> + Send + 'static,
+{
     while !state.stopping.load(Ordering::Acquire) {
+        health::control_beat(&state);
         match tokio::time::timeout(STOP_CHECK, receiver.recv()).await {
             Ok(Some(delivery)) => {
-                let outcome = apply(&state.current(), &delivery.control).await;
+                let mission = delivery.control.mission_id().as_str().to_owned();
+                health::control_started(&state, &mission);
+                let work = tokio::spawn(applier(state.clone(), delivery.control.clone()));
+                let outcome = bounded(&state, &mission, work).await;
                 let _ = delivery.outcome.send(outcome);
             }
             Ok(None) => break,
             Err(_) => {}
+        }
+    }
+}
+
+/// Waits for `work` as long as `[scheduler] control_timeout` allows, then aborts it and says so.
+async fn bounded(
+    state: &DaemonState,
+    mission: &str,
+    mut work: JoinHandle<ControlOutcome>,
+) -> ControlOutcome {
+    let limit = state.current().station.limits().scheduler.control_timeout;
+    let finished = match limit.get() {
+        Some(wait) => tokio::time::timeout(wait, &mut work).await.ok(),
+        None => Some((&mut work).await),
+    };
+    match finished {
+        Some(Ok(outcome)) => {
+            health::control_finished(state);
+            outcome
+        }
+        Some(Err(_)) => {
+            health::control_failed_back(state, mission, 0.0);
+            ControlOutcome::rejected(None, "this Station failed while applying the control")
+        }
+        None => {
+            work.abort();
+            let waited = limit.as_secs_f64();
+            health::control_failed_back(state, mission, waited);
+            ControlOutcome::rejected(
+                None,
+                format!("this Station did not finish the control within {waited:.0} seconds"),
+            )
         }
     }
 }
@@ -998,5 +1047,71 @@ mod tests {
             MissionState::Blocked
         );
         stop(&state);
+    }
+
+    /// The loop applies a control that never ends past `control_timeout`: it comes back rejected,
+    /// the Station reports itself degraded, and the next control still gets through.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_control_that_never_finishes_is_rejected_back_and_degrades_the_station() {
+        let root = tempfile::tempdir().unwrap();
+        let mut state = state_in(root.path(), TWO_AGENTS);
+        state.station_id = "control-wedge".to_owned();
+        std::sync::Arc::make_mut(&mut state.station.limits)
+            .scheduler
+            .control_timeout = crate::bounds::TimeLimit::at(Duration::from_millis(200));
+        let (deliveries, receiver) = tokio::sync::mpsc::channel(4);
+        let looping = tokio::spawn(serve_with(
+            state.clone(),
+            receiver,
+            |_, control| async move {
+                if control.mission_id().as_str() == "wedged" {
+                    std::future::pending::<()>().await;
+                }
+                ControlOutcome::applied("done")
+            },
+        ));
+        let send = |mission: &'static str| {
+            let (outcome, answer) = tokio::sync::oneshot::channel();
+            let delivery = ControlDelivery {
+                control: control(mission, ControlAction::Cancel),
+                outcome,
+            };
+            let deliveries = deliveries.clone();
+            async move {
+                deliveries.send(delivery).await.ok().unwrap();
+                tokio::time::timeout(Duration::from_secs(10), answer)
+                    .await
+                    .expect("the control is answered")
+                    .unwrap()
+            }
+        };
+        let degraded = |state: &DaemonState| {
+            health::degradations(state)
+                .into_iter()
+                .find(|found| found.kind == "controls")
+        };
+
+        let rejected = send("wedged").await;
+        assert_eq!(rejected.outcome, "rejected");
+        assert!(
+            rejected.reason.unwrap().contains("did not finish"),
+            "the operator is told why"
+        );
+        assert!(
+            degraded(&state).is_some(),
+            "the Station says so at check-in"
+        );
+        let mut facts = std::collections::BTreeMap::new();
+        health::check_in_facts(&state, &mut facts);
+        assert_eq!(facts["controls"]["processed"], 1);
+        assert_eq!(facts["controls"]["failed_back"], 1);
+
+        assert_eq!(send("fine").await, ControlOutcome::applied("done"));
+        assert!(
+            degraded(&state).is_none(),
+            "a control that finishes clears it"
+        );
+        stop(&state);
+        looping.await.unwrap();
     }
 }

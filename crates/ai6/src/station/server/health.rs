@@ -78,6 +78,90 @@ pub(super) fn claim_succeeded(state: &DaemonState, key: &str) {
     lock(&CLAIM_FAILURES).remove(&(state.station_id.clone(), key.to_owned()));
 }
 
+/// What a Station's control loop has done, so a loop that stopped taking controls shows.
+#[derive(Debug, Clone, Default, PartialEq)]
+struct ControlLoop {
+    /// Controls the loop finished, however they ended.
+    processed: u64,
+    /// Controls it gave up on and rejected for taking too long.
+    failed_back: u64,
+    /// When the loop last came round, as Unix seconds.
+    beat: f64,
+    /// The Mission of the control being applied and when it began.
+    active: Option<(String, f64)>,
+    /// Why the last control it gave up on did not finish; cleared by the next that does.
+    stalled: Option<String>,
+}
+
+/// The control loops by Station.
+static CONTROL_LOOPS: Mutex<BTreeMap<String, ControlLoop>> = Mutex::new(BTreeMap::new());
+
+fn with_loop<R>(state: &DaemonState, change: impl FnOnce(&mut ControlLoop) -> R) -> R {
+    change(
+        lock(&CONTROL_LOOPS)
+            .entry(state.station_id.clone())
+            .or_default(),
+    )
+}
+
+/// Records that the control loop came round.
+pub(super) fn control_beat(state: &DaemonState) {
+    with_loop(state, |control| control.beat = unix_now());
+}
+
+/// Records that the loop began applying a control to `mission`.
+pub(super) fn control_started(state: &DaemonState, mission: &str) {
+    with_loop(state, |control| {
+        control.active = Some((mission.to_owned(), unix_now()));
+    });
+}
+
+/// Records that the loop finished the control it was applying.
+pub(super) fn control_finished(state: &DaemonState) {
+    with_loop(state, |control| {
+        control.active = None;
+        control.processed += 1;
+        control.stalled = None;
+        control.beat = unix_now();
+    });
+}
+
+/// Journals a control the loop gave up on after `[scheduler] control_timeout`, and keeps the
+/// Station degraded until a later control finishes.
+pub(super) fn control_failed_back(state: &DaemonState, mission: &str, waited: f64) {
+    let reason =
+        format!("a control for Mission {mission} did not finish within {waited:.0} seconds");
+    eprintln!("ai6: {reason}; it was rejected back to the operator");
+    with_loop(state, |control| {
+        control.active = None;
+        control.processed += 1;
+        control.failed_back += 1;
+        control.stalled = Some(reason);
+        control.beat = unix_now();
+    });
+}
+
+/// Whether the control loop is stuck: a control in hand past `[scheduler] control_timeout`, or no
+/// pass of the loop for that long. `None` while the loop has not started or no timeout is set.
+fn control_wedge(state: &DaemonState, now: f64) -> Option<String> {
+    let limit = state.station.limits().scheduler.control_timeout;
+    let held = lock(&CONTROL_LOOPS).get(&state.station_id).cloned()?;
+    if let Some((mission, since)) = &held.active
+        && !limit.allows_secs(now - since)
+    {
+        return Some(format!(
+            "a control for Mission {mission} has been applied for {:.0} seconds",
+            now - since
+        ));
+    }
+    (held.active.is_none() && !limit.allows_secs(now - held.beat)).then(|| {
+        format!(
+            "the control loop has not run for {:.0} seconds",
+            now - held.beat
+        )
+    })
+}
+
 /// The write checks by Station and `operation/instance`.
 static CANARIES: Mutex<BTreeMap<(String, String), Canary>> = Mutex::new(BTreeMap::new());
 
@@ -278,6 +362,17 @@ pub(super) fn degradations(state: &DaemonState) -> Vec<Degradation> {
             vec!["its area being kept by its charge".to_owned()],
         ));
     }
+    let stalled = lock(&CONTROL_LOOPS)
+        .get(&state.station_id)
+        .and_then(|control| control.stalled.clone());
+    if let Some(why) = control_wedge(state, now).or(stalled) {
+        found.push(Degradation::new(
+            "controls",
+            "control loop",
+            why,
+            vec!["operator controls (cancel, retry, resume, interrupt)".to_owned()],
+        ));
+    }
     let (running, progressing) = sessions(state);
     if running > 0 && progressing == 0 {
         found.push(Degradation::new(
@@ -351,6 +446,16 @@ pub(super) fn check_in_facts(state: &DaemonState, info: &mut BTreeMap<String, se
         "source_polls".to_owned(),
         serde_json::json!(source_polls(state)),
     );
+    if let Some(control) = lock(&CONTROL_LOOPS).get(&state.station_id) {
+        info.insert(
+            "controls".to_owned(),
+            serde_json::json!({
+                "processed": control.processed,
+                "failed_back": control.failed_back,
+                "heartbeat": control.beat,
+            }),
+        );
+    }
     let declined = declined_here(state, unix_now());
     if !declined.is_empty() {
         info.insert("declined".to_owned(), serde_json::json!(declined));
@@ -471,5 +576,34 @@ mod tests {
                 .all(|found| found.kind != "source-poll"),
             "a poll that finished clears it"
         );
+    }
+
+    #[test]
+    fn a_control_loop_that_stopped_coming_round_degrades_the_station_until_it_does() {
+        let root = tempfile::tempdir().unwrap();
+        let mut state = station(root.path());
+        state.station_id = "loop-heartbeat".to_owned();
+        let found = |state: &DaemonState| {
+            degradations(state)
+                .into_iter()
+                .find(|found| found.kind == "controls")
+        };
+        assert!(found(&state).is_none(), "no loop, nothing to report");
+
+        control_beat(&state);
+        assert!(found(&state).is_none());
+        with_loop(&state, |control| control.beat -= 600.0);
+        let stuck = found(&state).expect("a loop silent past the timeout is degraded");
+        assert!(stuck.reason.contains("has not run"), "{}", stuck.reason);
+
+        std::sync::Arc::make_mut(&mut state.station.limits)
+            .scheduler
+            .control_timeout = crate::bounds::TimeLimit::UNBOUNDED;
+        assert!(found(&state).is_none(), "`none` never degrades");
+        std::sync::Arc::make_mut(&mut state.station.limits)
+            .scheduler
+            .control_timeout = crate::bounds::TimeLimit::secs(120);
+        control_beat(&state);
+        assert!(found(&state).is_none());
     }
 }
