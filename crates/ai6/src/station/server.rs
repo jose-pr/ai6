@@ -1968,6 +1968,7 @@ fn schedule_intake_once(state: &DaemonState) -> bool {
             .intake
             .elect(station, state.station.headquarters_lease)
             .unwrap_or_default();
+    let orphans = health::orphaned(state);
     if is_headquarters && let Ok(expired) = state.intake.expired() {
         for lease in expired {
             if lease.station() != station
@@ -1998,6 +1999,18 @@ fn schedule_intake_once(state: &DaemonState) -> bool {
                 &serde_json::json!({"state":"failed", "reason":error}),
                 false,
             );
+            continue;
+        }
+        let held = lease
+            .meta()
+            .get("mission_id")
+            .and_then(|id| id.as_str())
+            .unwrap_or(lease.key());
+        if orphans.contains(held) {
+            // Nothing runs for this claim, so renewing it would keep the brief from being placed.
+            if lease.expires() <= unix_now() {
+                recovery::give_up(state, held, None, "its claim had no live Run behind it");
+            }
             continue;
         }
         if lease.expires() <= unix_now() + state.mission_lease().as_secs_f64() / 2.0 {
@@ -2144,6 +2157,26 @@ async fn schedule_recovered_once(state: &DaemonState) {
     for mission_id in pending {
         if state.stopping.load(Ordering::Acquire) {
             break;
+        }
+        // A control may have ended the Mission or dropped it from the queue since the round began.
+        let wanted = state
+            .startup_recovery
+            .lock()
+            .map_or(true, |pending| pending.contains(&mission_id))
+            && state.missions.lock().map_or(true, |missions| {
+                missions
+                    .get(&mission_id)
+                    .is_some_and(|mission| !is_terminal_state(mission.state))
+            });
+        if !wanted {
+            if let Ok(mut pending) = state.startup_recovery.lock() {
+                pending.remove(&mission_id);
+            }
+            if let Ok(mut retries) = state.retry_after.lock() {
+                retries.remove(&mission_id);
+            }
+            recovery::reattached(state, &mission_id);
+            continue;
         }
         let now = Instant::now();
         let should_wait = state
@@ -2537,6 +2570,7 @@ fn holds_headquarters_now(state: &DaemonState) -> bool {
 
 /// Extends the lease on every Run this Station holds, fencing out any it has lost.
 fn renew_run_leases(state: &DaemonState) {
+    let orphans = health::orphaned(state);
     let held = state
         .missions
         .lock()
@@ -2553,6 +2587,9 @@ fn renew_run_leases(state: &DaemonState) {
         })
         .unwrap_or_default();
     for (mission_id, hold) in held {
+        if orphans.contains(&mission_id) {
+            continue;
+        }
         match state.intake.renew_run(
             &hold.id,
             &state.station_id,
@@ -4861,6 +4898,7 @@ fn resolve_working_area(
     state_root: Option<&Path>,
     mission: &Mission,
     checkpoint: Option<SafeHouseCheckpoint>,
+    roll_over: bool,
 ) -> Result<WorkingArea, AreaError> {
     let requested = requested.filter(|path| !path.trim().is_empty());
     let Some(operation_id) = operation_id else {
@@ -4918,20 +4956,35 @@ fn resolve_working_area(
         }
         None => checkout.to_string_lossy().into_owned(),
     };
-    let safe_house = open_safe_house(
-        plugins,
-        operation,
-        mission
-            .handle
-            .as_deref()
-            .unwrap_or(mission.mission_id.as_str()),
-        &mission.prompt,
-        state_root,
-        isolate,
-        // A later run continues in the safe house the earlier one left.
-        mission.safe_house.clone().filter(|report| report.kept),
-        checkpoint,
-    )
+    let name = mission
+        .handle
+        .as_deref()
+        .unwrap_or(mission.mission_id.as_str());
+    // A later run continues in the safe house the earlier one left.
+    let kept = mission.safe_house.clone().filter(|report| report.kept);
+    let open = |reopen| {
+        open_safe_house(
+            plugins,
+            operation,
+            name,
+            &mission.prompt,
+            state_root,
+            isolate,
+            reopen,
+            checkpoint.clone(),
+        )
+    };
+    let safe_house = match open(kept.clone()) {
+        // A standing Mission is not stuck behind a safe house that cannot be resumed: its next
+        // window starts in a fresh one.
+        Err(error) if roll_over && kept.is_some() => {
+            eprintln!(
+                "ai6: Mission {name:?} could not resume its safe house, so it starts a fresh one: {error}"
+            );
+            open(None)
+        }
+        opened => opened,
+    }
     .map_err(AreaError::permanent)?;
     let path = match safe_house.as_ref().filter(|house| house.is_isolated()) {
         Some(house) => house.path().to_string_lossy().into_owned(),
@@ -5367,6 +5420,7 @@ async fn start_mission(
         .filter(|record| record.status == RunStatus::Lost && mission.safe_house.is_none())
         .and_then(|record| record.checkpoint.clone());
     let area_checkpoint = checkpoint.clone();
+    let roll_over = standing::of(&state, &mission_id).is_some();
     let area_state = state.station.state_dir();
     let area = tokio::task::spawn_blocking(move || {
         let state_dir = area_state.map_err(|error| AreaError::from(error.to_string()))?;
@@ -5391,6 +5445,7 @@ async fn start_mission(
                 Some(&state_dir),
                 &area_mission,
                 area_checkpoint,
+                roll_over,
             )
         }
     })
@@ -10127,6 +10182,13 @@ queue = 1
                 .lock()
                 .unwrap()
                 .push((spec.mission_id.clone(), spec.checkpoint.clone()));
+            if spec
+                .reopen
+                .as_ref()
+                .is_some_and(|report| report.path.ends_with("vanished"))
+            {
+                return Err(test_provider_error("No such file or directory"));
+            }
             // A kept safe house is re-attached where its report says it is.
             let path = match &spec.reopen {
                 Some(report) => PathBuf::from(&report.path),
@@ -12854,6 +12916,7 @@ theater = \"other-box\"
             Some(&root.join("state")),
             &mission,
             None,
+            false,
         )
         .unwrap();
         let house = area.safe_house.unwrap();
@@ -12879,9 +12942,68 @@ theater = \"other-box\"
             Some(&root.join("state")),
             &mission,
             None,
+            false,
         );
         assert!(refused.is_err(), "isolated workdirs are allocated by AI6");
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_standing_mission_whose_safe_house_cannot_resume_rolls_to_a_fresh_one() {
+        let root = tempfile::tempdir().unwrap();
+        let checkout = root.path().join("checkout");
+        fs::create_dir_all(&checkout).unwrap();
+        fs::write(
+            root.path().join("operations.toml"),
+            format!(
+                "[operation.G]\npath = {:?}\nworkspace = {{ provider = \"mock-safehouse\" }}\n",
+                checkout.to_string_lossy()
+            ),
+        )
+        .unwrap();
+        let roster = Roster::load(root.path()).unwrap();
+        let plugins = test_plugins();
+        let mut mission = MissionStore::default()
+            .create(
+                MissionId::try_new("mission-roll").unwrap(),
+                Some("G".to_owned()),
+                "Nightly".to_owned(),
+                Some("007".to_owned()),
+                None,
+            )
+            .unwrap();
+        mission.safe_house = Some(SafeHouseReport {
+            path: root.path().join("vanished").to_string_lossy().into_owned(),
+            branch: Some("old".to_owned()),
+            base: Some("base0".to_owned()),
+            kept: true,
+            changes: Vec::new(),
+        });
+        let state = root.path().join("state");
+        let area = |roll_over| {
+            resolve_working_area(
+                &roster,
+                &plugins,
+                Some("G"),
+                None,
+                Some(&state),
+                &mission,
+                None,
+                roll_over,
+            )
+        };
+
+        let stuck = area(false)
+            .err()
+            .expect("a safe house that cannot resume is refused");
+        assert!(
+            stuck.reason.contains("No such file or directory"),
+            "{}",
+            stuck.reason
+        );
+        let fresh = area(true).unwrap().safe_house.unwrap();
+        assert!(fresh.path().starts_with(&state) && fresh.path().is_dir());
+        assert!(!fresh.path().ends_with("vanished"));
     }
 
     #[test]
@@ -12912,6 +13034,7 @@ theater = \"other-box\"
             None,
             &mission,
             None,
+            false,
         )
         .unwrap();
         assert_eq!(area.path, checkout.to_string_lossy());
@@ -12954,6 +13077,7 @@ theater = \"other-box\"
             None,
             &mission,
             None,
+            false,
         )
         .unwrap();
         let house = area.safe_house.unwrap();

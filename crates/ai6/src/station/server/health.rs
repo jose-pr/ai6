@@ -2,7 +2,7 @@
 //! each Source's poll last finished, whether each tracker still takes writes, and the briefs it
 //! gave back for making no progress. A fault in any of them makes the Station `degraded`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 
 use super::{DaemonState, recovery, unix_now};
@@ -307,6 +307,53 @@ impl Surrender {
     }
 }
 
+/// The orphans already journaled, by Station, so each is named once.
+static ORPHANS: Mutex<BTreeSet<(String, String)>> = Mutex::new(BTreeSet::new());
+
+/// The Missions this Station holds that should have a harness running but have none: working or
+/// blocked, with no live Run, not starting, and not waiting to be re-attached. Their claims are
+/// not renewed, and the check-in names them so an operator can settle them.
+pub(super) fn orphaned(state: &DaemonState) -> BTreeSet<String> {
+    let live: BTreeSet<String> = lock_runs(state).keys().cloned().collect();
+    let mut waiting: BTreeSet<String> = state
+        .starting
+        .lock()
+        .map(|starting| starting.clone())
+        .unwrap_or_default();
+    waiting.extend(
+        state
+            .startup_recovery
+            .lock()
+            .map(|pending| pending.clone())
+            .unwrap_or_default(),
+    );
+    let found: BTreeSet<String> = state
+        .missions
+        .lock()
+        .map(|missions| {
+            missions
+                .list()
+                .into_iter()
+                .filter(|mission| {
+                    matches!(mission.state, MissionState::Working | MissionState::Blocked)
+                })
+                .map(|mission| mission.mission_id.to_string())
+                .filter(|id| !live.contains(id) && !waiting.contains(id))
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut journaled = lock(&ORPHANS);
+    journaled.retain(|(station, id)| *station != state.station_id || found.contains(id));
+    for id in &found {
+        if journaled.insert((state.station_id.clone(), id.clone())) {
+            eprintln!(
+                "ai6: Mission {id:?} is held here with no live Run; its claim is no longer renewed"
+            );
+        }
+    }
+    found
+}
+
 /// Each Source's last finished poll, for the check-in.
 pub(super) fn source_polls(state: &DaemonState) -> Vec<serde_json::Value> {
     state
@@ -393,6 +440,14 @@ pub(super) fn degradations(state: &DaemonState) -> Vec<Degradation> {
             scope,
             format!("its last {failed} turns failed in a row: {ended}"),
             vec!["its area being kept by its charge".to_owned()],
+        ));
+    }
+    for id in orphaned(state) {
+        found.push(Degradation::new(
+            "orphaned-claim",
+            id,
+            "the claim is held with no live Run behind it".to_owned(),
+            vec!["this Mission making progress".to_owned()],
         ));
     }
     let stalled = lock(&CONTROL_LOOPS)
@@ -488,6 +543,10 @@ pub(super) fn check_in_facts(state: &DaemonState, info: &mut BTreeMap<String, se
                 "heartbeat": control.beat,
             }),
         );
+    }
+    let orphans = orphaned(state);
+    if !orphans.is_empty() {
+        info.insert("orphaned".to_owned(), serde_json::json!(orphans));
     }
     let declined = declined_here(state, unix_now());
     if !declined.is_empty() {

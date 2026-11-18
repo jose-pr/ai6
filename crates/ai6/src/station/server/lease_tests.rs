@@ -251,3 +251,59 @@ async fn a_run_that_sends_nothing_after_it_starts_is_a_failed_start_and_its_brie
         .stopping
         .store(true, std::sync::atomic::Ordering::Release);
 }
+
+#[tokio::test]
+async fn a_claim_with_no_live_run_is_reported_not_renewed_and_given_back_once_it_lapses() {
+    let root = tempfile::tempdir().unwrap();
+    let state = empty_book(root.path(), "[agent.007]\nhandler = \"mock-agent\"\n");
+    let id = started_quiet(&state, "orphan-claim").await;
+    let record = |state: &DaemonState| state.intake.latest_run(&id).unwrap().unwrap();
+    assert!(health::orphaned(&state).is_empty(), "its Run is live");
+
+    // The harness is gone and nothing is queued for the claim.
+    state.runs.lock().unwrap().remove(&id);
+    assert_eq!(health::orphaned(&state), BTreeSet::from([id.clone()]));
+    let mut facts = BTreeMap::new();
+    health::check_in_facts(&state, &mut facts);
+    assert_eq!(facts["orphaned"], serde_json::json!([id]));
+    assert!(
+        health::degradations(&state)
+            .iter()
+            .any(|found| found.kind == "orphaned-claim" && found.subject == id)
+    );
+
+    // Both leases are short enough that a held claim would be renewed this round.
+    let station = state.station_id.clone();
+    let soon = Duration::from_secs(20);
+    state.intake.renew(&id, &station, soon).unwrap();
+    let hold = run_hold(&state, &id).unwrap();
+    state
+        .intake
+        .renew_run(&hold.id, &station, hold.fence, soon)
+        .unwrap();
+    schedule_intake_once(&state);
+    renew_run_leases(&state);
+    let left = state.intake.lease(&id).unwrap().unwrap().expires() - unix_now();
+    assert!(left < 25.0, "the claim was renewed: {left} s left");
+    assert!(
+        record(&state).lease_expires - unix_now() < 25.0,
+        "the Run lease was renewed"
+    );
+
+    state
+        .intake
+        .renew(&id, &station, Duration::from_nanos(1))
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(20));
+    schedule_intake_once(&state);
+    assert!(
+        !matches!(
+            super::tests::mission_state(&state, &id).state,
+            MissionState::Working
+        ),
+        "the lapsed claim was handed back"
+    );
+    state
+        .stopping
+        .store(true, std::sync::atomic::Ordering::Release);
+}

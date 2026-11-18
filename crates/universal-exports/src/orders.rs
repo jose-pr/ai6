@@ -208,10 +208,19 @@ fn settle_claim(
     let Some(lease) = registry.lease(key)? else {
         return Ok(Err(refused("the Mission has no claim")));
     };
+    // A Station that answers is asked with `mission cancel`, unless its own check-in says it holds
+    // this claim with nothing running or queued for it.
     let live = registry
         .stations(registry.limits().stations.gone_dark_after.0)?
         .into_iter()
-        .any(|record| record.station() == lease.station());
+        .any(|record| {
+            record.station() == lease.station()
+                && !record
+                    .info()
+                    .get("orphaned")
+                    .and_then(serde_json::Value::as_array)
+                    .is_some_and(|keys| keys.iter().any(|orphan| orphan.as_str() == Some(key)))
+        });
     if live {
         return Ok(Err(refused(
             "its Station still answers: use `mission cancel`",
@@ -351,6 +360,36 @@ mod tests {
         )
         .await;
         assert_eq!(again.status(), 409, "it is no longer claimed");
+    }
+
+    #[tokio::test]
+    async fn a_claim_its_answering_station_says_nothing_runs_for_is_settled() {
+        let served = served().await;
+        let orphan = claimed_by(&served, "org/repo#3", "worker");
+        let settle = || {
+            post(
+                &served,
+                &served.operator,
+                &format!("G/missions/{orphan}/settle"),
+                serde_json::json!({"reason": "no Run behind it"}),
+            )
+        };
+        assert_eq!(settle().await.status(), 409, "its Station still answers");
+
+        served
+            .registry
+            .check_in(
+                "worker",
+                BTreeMap::from([
+                    ("operations".to_owned(), serde_json::json!(["G", "L"])),
+                    ("orphaned".to_owned(), serde_json::json!([orphan])),
+                ]),
+            )
+            .unwrap();
+        assert_eq!(settle().await.status(), 200);
+        let filed = served.registry.filed_brief(&orphan).unwrap().unwrap();
+        assert_eq!(filed.state, "failed");
+        assert_eq!(filed.outcome.unwrap()["reason"], "no Run behind it");
     }
 
     #[tokio::test]
