@@ -12,7 +12,9 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use super::{ConfigRecord, ConfigScope};
+use super::ConfigRecord;
+#[cfg(any(feature = "sqlite", feature = "postgres"))]
+use super::ConfigScope;
 use crate::bootstrap::format::EXTENSIONS;
 
 /// The step that renames the account kind `openai-api-key` to `codex-api-key`, the id Codex's
@@ -41,6 +43,7 @@ struct Step {
     says: &'static str,
     family: ConfigRecord,
     /// Rewrites the record; `true` when it was in the old shape.
+    #[cfg_attr(not(any(feature = "sqlite", feature = "postgres")), allow(dead_code))]
     apply: fn(&mut Value) -> bool,
 }
 
@@ -87,6 +90,7 @@ pub struct Stepped {
 
 /// Applies every step of `family` to one stored record and returns the steps that changed it, as
 /// `(name, says)`; a record no step changes is left as it was.
+#[cfg(any(feature = "sqlite", feature = "postgres"))]
 pub(super) fn rewrite(
     family: ConfigRecord,
     definition: &mut Value,
@@ -99,6 +103,7 @@ pub(super) fn rewrite(
 }
 
 /// Where a step changed a record: `<family> "<key>"`, and its scope when a Station's own.
+#[cfg(any(feature = "sqlite", feature = "postgres"))]
 pub(super) fn place(family: ConfigRecord, scope: &ConfigScope, key: &str) -> String {
     match scope {
         ConfigScope::Global => format!("{family} {key:?}"),
