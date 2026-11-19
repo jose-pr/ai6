@@ -256,7 +256,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `coqui-acp-claude`, `coqui-acp-codex` and `coqui-acp-harness` with no feature on.
 
 - A sealed Claude Code or Codex login (`files` naming `.claude/.credentials.json` or `.codex/auth.json`) is renewed by
-  that harness's account provider (`coqui-acp-claude`, `coqui-acp-codex`, at coqui-acp `e4a59a9`) instead of a
+  that harness's account provider (`coqui-acp-claude`, `coqui-acp-codex`, at coqui-acp `b81c78a`) instead of a
   `renew_command`, which those two logins no longer take (the load refuses one, naming the provider). The provider
   renews only inside the harness's own window, answers a lost login as a refusal the round marks failed, and the round
   reads the files back as before. `LoginRenewer` gains `can_renew`, and `assign_renewals` takes the renewer, so a login
