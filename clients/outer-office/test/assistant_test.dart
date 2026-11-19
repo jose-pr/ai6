@@ -130,6 +130,7 @@ void main() {
     addTearDown(controller.dispose);
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: const [flutterMaterialLocalizations],
         home: Scaffold(body: AssistantPanel(controller: controller)),
       ),
     );
