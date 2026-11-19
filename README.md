@@ -12,7 +12,7 @@ reaches nobody until the lock moves to it.
 
 It holds the packages from `pub.dev` (`pub/hosted/`, with their hashes in
 `pub/hosted-hashes/`) and the `guatiao` repository's files at the pinned revision
-(`pub/git/guatiao-<revision>/`), at the versions `clients/outer-office/pubspec.lock` names on `main`
+(`pub/git/guatiao-<revision>/`), the `coqui-acp` repository's `bindings/dart` and the `coqui-aos` repository's `dart` at the pinned revisions (`pub/git/coqui-acp-<revision>/`, `pub/git/coqui-aos-<revision>/`, those directories alone), at the versions `clients/outer-office/pubspec.lock` names on `main`
 at the commit below. There is no `pub/git/cache/`: an offline `pub get` takes a git package from
 its checkout and needs no clone, once the checkout has a `.git/pub-packages` file (empty is enough;
 pub fills it in). Git cannot carry a `.git` path, so whoever copies `pub/` adds it, as below,

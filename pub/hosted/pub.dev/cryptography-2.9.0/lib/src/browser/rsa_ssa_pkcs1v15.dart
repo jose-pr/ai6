@@ -1,0 +1,258 @@
+// Copyright 2019-2020 Gohilla.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+import 'dart:js_interop';
+import 'dart:math';
+
+import 'package:cryptography/cryptography.dart';
+
+import '_javascript_bindings.dart'
+    show base64UrlEncode, base64UrlEncodeMaybe, base64UrlDecode;
+import '_javascript_bindings.dart' as web_crypto;
+import 'hash.dart';
+
+/// RSA-SSA-PKCS1v15 implementation that uses _Web Cryptography API_ in browsers.
+///
+/// See [BrowserCryptography].
+class BrowserRsaSsaPkcs1v15 extends RsaSsaPkcs1v15 {
+  static const _webCryptoAlgorithm = 'RSASSA-PKCS1-v1_5';
+
+  @override
+  final BrowserHashAlgorithmMixin hashAlgorithm;
+
+  const BrowserRsaSsaPkcs1v15(
+    this.hashAlgorithm, {
+    Random? random,
+  }) : super.constructor();
+
+  String get webCryptoHash {
+    final h = hashAlgorithm;
+    if (h is Sha1) {
+      return 'SHA-1';
+    }
+    if (h is Sha256) {
+      return 'SHA-256';
+    }
+    if (h is Sha384) {
+      return 'SHA-384';
+    }
+    if (h is Sha512) {
+      return 'SHA-512';
+    }
+    throw StateError(
+      'Hash function not supported by Web Cryptography API: $hashAlgorithm',
+    );
+  }
+
+  @override
+  Future<RsaKeyPair> newKeyPair({
+    int modulusLength = RsaSsaPkcs1v15.defaultModulusLength,
+    List<int> publicExponent = RsaSsaPkcs1v15.defaultPublicExponent,
+  }) async {
+    // Generate CryptoKeyPair
+    final jsCryptoKeyPair = await web_crypto.generateKeyWhenKeyPair(
+      web_crypto.RsaHashedKeyGenParams(
+        name: _webCryptoAlgorithm.toJS,
+        modulusLength: modulusLength.toJS,
+        publicExponent: web_crypto.jsUint8ListFrom(publicExponent),
+        hash: webCryptoHash.toJS,
+      ).jsObject,
+      true.toJS,
+      ['sign'.toJS, 'verify'.toJS].toJS,
+    );
+    return _BrowserRsaSsaPkcs1v15KeyPair(
+      jsCryptoKeyPair,
+      webCryptoAlgorithm: _webCryptoAlgorithm,
+      webCryptoHash: webCryptoHash,
+    );
+  }
+
+  @override
+  Future<Signature> sign(List<int> message, {required KeyPair keyPair}) async {
+    final keyPairData = await keyPair.extract();
+    if (keyPairData is! RsaKeyPairData) {
+      throw ArgumentError.value(
+        keyPair,
+        'keyPair',
+        'Should be an instance of RsaKeyPair',
+      );
+    }
+    final publicKeyFuture = keyPairData.extractPublicKey();
+    final jsCryptoKey = await _jsCryptoKeyFromRsaKeyPair(
+      keyPairData,
+      webCryptoAlgorithm: _webCryptoAlgorithm,
+      webCryptoHash: webCryptoHash,
+    );
+    final signatureBytes = await web_crypto.sign(
+      _webCryptoAlgorithm.toJS,
+      jsCryptoKey,
+      web_crypto.jsUint8ListFrom(message),
+    );
+    return Signature(
+      signatureBytes,
+      publicKey: await publicKeyFuture,
+    );
+  }
+
+  @override
+  Future<bool> verify(List<int> message, {required Signature signature}) async {
+    final publicKey = signature.publicKey;
+    if (publicKey is! RsaPublicKey) {
+      throw ArgumentError.value(
+        signature,
+        'signature',
+        'Public key should be an instance of RsaPublicKey, not: $publicKey',
+      );
+    }
+    final jsCryptoKey = await _jsCryptoKeyFromRsaPublicKey(
+      signature.publicKey,
+      webCryptoAlgorithm: _webCryptoAlgorithm,
+      webCryptoHash: webCryptoHash,
+    );
+    return await web_crypto.verify(
+      _webCryptoAlgorithm.toJS,
+      jsCryptoKey,
+      web_crypto.jsUint8ListFrom(signature.bytes),
+      web_crypto.jsUint8ListFrom(message),
+    );
+  }
+
+  Future<web_crypto.CryptoKey> _jsCryptoKeyFromRsaKeyPair(
+    KeyPair keyPair, {
+    required String webCryptoAlgorithm,
+    required String webCryptoHash,
+  }) async {
+    if (keyPair is _BrowserRsaSsaPkcs1v15KeyPair &&
+        keyPair.webCryptoAlgorithm == webCryptoAlgorithm &&
+        keyPair.webCryptoHash == webCryptoHash) {
+      return keyPair.jsCryptoKeyPair.privateKey;
+    }
+    final keyPairData = await keyPair.extract() as RsaKeyPairData;
+    if (!KeyPairType.rsa.isValidKeyPairData(keyPairData)) {
+      throw ArgumentError.value(
+        keyPair,
+        'keyPair',
+      );
+    }
+    // Import JWK key
+    return web_crypto.importKeyWhenJwk(
+      web_crypto.Jwk(
+        kty: 'RSA'.toJS,
+        n: base64UrlEncode(keyPairData.n).toJS,
+        e: base64UrlEncode(keyPairData.e).toJS,
+        p: base64UrlEncode(keyPairData.p).toJS,
+        d: base64UrlEncode(keyPairData.d).toJS,
+        q: base64UrlEncode(keyPairData.q).toJS,
+        dp: base64UrlEncodeMaybe(keyPairData.dp)?.toJS,
+        dq: base64UrlEncodeMaybe(keyPairData.dq)?.toJS,
+        qi: base64UrlEncodeMaybe(keyPairData.qi)?.toJS,
+      ),
+      web_crypto.RsaHashedImportParams(
+        name: webCryptoAlgorithm.toJS,
+        hash: webCryptoHash.toJS,
+      ).jsObject,
+      false.toJS,
+      ['sign'.toJS].toJS,
+    );
+  }
+
+  Future<web_crypto.CryptoKey> _jsCryptoKeyFromRsaPublicKey(
+    PublicKey publicKey, {
+    required String webCryptoAlgorithm,
+    required String webCryptoHash,
+  }) async {
+    if (publicKey is _BrowserRsaPublicKey &&
+        webCryptoAlgorithm == publicKey.webCryptoAlgorithm &&
+        webCryptoHash == publicKey.webCryptoHash) {
+      return publicKey.jsCryptoKey;
+    }
+    if (publicKey is! RsaPublicKey) {
+      throw ArgumentError.value(
+        publicKey,
+        'publicKey',
+        'Should be RsaPublicKey',
+      );
+    }
+    return web_crypto.importKeyWhenJwk(
+      web_crypto.Jwk(
+        kty: 'RSA'.toJS,
+        n: base64UrlEncode(publicKey.n).toJS,
+        e: base64UrlEncode(publicKey.e).toJS,
+      ),
+      web_crypto.RsaHashedImportParams(
+        name: webCryptoAlgorithm.toJS,
+        hash: webCryptoHash.toJS,
+      ).jsObject,
+      false.toJS,
+      ['verify'.toJS].toJS,
+    );
+  }
+}
+
+class _BrowserRsaPublicKey extends RsaPublicKey {
+  final web_crypto.CryptoKey jsCryptoKey;
+  final String webCryptoAlgorithm;
+  final String webCryptoHash;
+
+  _BrowserRsaPublicKey({
+    required this.jsCryptoKey,
+    required this.webCryptoAlgorithm,
+    required this.webCryptoHash,
+    required super.n,
+    required super.e,
+  });
+}
+
+class _BrowserRsaSsaPkcs1v15KeyPair extends KeyPair implements RsaKeyPair {
+  final web_crypto.CryptoKeyPair jsCryptoKeyPair;
+  final String webCryptoAlgorithm;
+  final String webCryptoHash;
+
+  _BrowserRsaSsaPkcs1v15KeyPair(
+    this.jsCryptoKeyPair, {
+    required this.webCryptoAlgorithm,
+    required this.webCryptoHash,
+  });
+
+  @override
+  Future<RsaKeyPairData> extract() async {
+    final jsJwk = await web_crypto.exportKeyWhenJwk(
+      jsCryptoKeyPair.privateKey,
+    );
+    return RsaKeyPairData(
+      n: web_crypto.base64UrlDecode(jsJwk.n!.toDart),
+      e: web_crypto.base64UrlDecode(jsJwk.e!.toDart),
+      d: web_crypto.base64UrlDecode(jsJwk.d!.toDart),
+      p: web_crypto.base64UrlDecode(jsJwk.p!.toDart),
+      q: web_crypto.base64UrlDecode(jsJwk.q!.toDart),
+      dp: web_crypto.base64UrlDecodeMaybe(jsJwk.dp?.toDart),
+      dq: web_crypto.base64UrlDecodeMaybe(jsJwk.dq?.toDart),
+      qi: web_crypto.base64UrlDecodeMaybe(jsJwk.qi?.toDart),
+    );
+  }
+
+  @override
+  Future<RsaPublicKey> extractPublicKey() async {
+    final jsJwk = await web_crypto.exportKeyWhenJwk(
+      jsCryptoKeyPair.publicKey,
+    );
+    return _BrowserRsaPublicKey(
+      jsCryptoKey: jsCryptoKeyPair.publicKey,
+      webCryptoAlgorithm: webCryptoAlgorithm,
+      webCryptoHash: webCryptoHash,
+      n: base64UrlDecode(jsJwk.n!.toDart),
+      e: base64UrlDecode(jsJwk.e!.toDart),
+    );
+  }
+}
