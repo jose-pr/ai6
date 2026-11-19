@@ -898,9 +898,9 @@ async fn models_prints_what_each_station_found_and_why_a_handler_could_not_say()
     assert_eq!(
         printed,
         [
-            "STATION\tSOURCE\tHANDLER\tKNOWN\tMODELS\tUNKNOWN_BECAUSE",
-            "station-02\tteam/alpha\tclaude\ttrue\topus,haiku\t-",
-            "station-02\t007/acp/-\tacp\tfalse\t-\tthis handler has no way to list models",
+            "STATION\tSOURCE\tHANDLER\tTOKEN_CAP\tKNOWN\tMODELS\tUNKNOWN_BECAUSE",
+            "station-02\tteam/alpha\tclaude\t-\ttrue\topus,haiku\t-",
+            "station-02\t007/acp/-\tacp\t-\tfalse\t-\tthis handler has no way to list models",
         ]
     );
     let _ = shutdown.send(());
