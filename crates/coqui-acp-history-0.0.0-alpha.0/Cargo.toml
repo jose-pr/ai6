@@ -1,5 +1,5 @@
-# coqui-acp/crates/coqui-acp-history at d099e4b71690ef6a1d77c70d1efd94de9f4f5c8c, with what it inherits written out.
-bin = [{ name = "coqui-acp-history", path = "src/main.rs", required-features = ["cli"] }]
+# coqui-acp/crates/coqui-acp-history at b81c78a42e8f83fca48c4f0913775d59309c5831, with what it inherits written out.
+example = [{ name = "history", required-features = ["cli"] }]
 [package]
 name = "coqui-acp-history"
 description = "One file format for an Agent Client Protocol session's history: write, read, bound, redact, seed from a compaction and move it between harnesses"

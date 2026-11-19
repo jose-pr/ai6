@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use coqui_acp_harness::{Launch, McpServer, McpTransport};
+use coqui_acp_harness::{Access, Launch, McpServer, McpTransport, Target};
 use serde_json::{Map, Value, json};
 
 /// Which thread Codex opens.
@@ -80,6 +80,9 @@ pub struct CodexLaunch {
     pub approval_policy: Option<String>,
     /// The sandbox: `read-only`, `workspace-write` or `danger-full-access`.
     pub sandbox: Option<String>,
+    /// The harness-neutral access a session starts with: [`CodexLaunch::apply_access`] turns it into `approval_policy`,
+    /// `sandbox` and the workspace sandbox's network setting, for each the launch does not name itself.
+    pub access: Option<Access>,
     /// Whether the Bypass mode is offered: never ask, no sandbox.
     pub allow_bypass: bool,
     /// The modes a client may choose, when the host names them: a widening of the default, which is the mode the
@@ -115,6 +118,7 @@ impl core::fmt::Debug for CodexLaunch {
             .field("additional_directories", &self.additional_directories)
             .field("approval_policy", &self.approval_policy)
             .field("sandbox", &self.sandbox)
+            .field("access", &self.access)
             .field("env", &self.env.keys().collect::<Vec<_>>())
             .field("remove_env", &self.remove_env)
             .field("clear_env", &self.clear_env)
@@ -138,6 +142,7 @@ impl CodexLaunch {
             working_roots: Vec::new(),
             approval_policy: None,
             sandbox: None,
+            access: None,
             allow_bypass: false,
             modes: None,
             thread_config: Map::new(),
@@ -147,6 +152,30 @@ impl CodexLaunch {
             env: BTreeMap::new(),
             remove_env: Vec::new(),
             clear_env: false,
+        }
+    }
+
+    /// Puts `access` into the launch, in Codex's words: the sandbox is `danger-full-access`, `workspace-write` or `read-only`;
+    /// the approval policy is `untrusted` for Ask, `on-request` for Edits and `never` for Never; the network is the workspace
+    /// sandbox's `network_access` (the other two sandboxes decide it themselves, which `read-only` and a workspace sandbox
+    /// with the network off both close and `danger-full-access` leaves open). A policy or sandbox the launch already names is
+    /// kept.
+    pub fn apply_access(&mut self, access: Access) {
+        self.access = Some(access);
+        let words = access.translate(Target::Codex);
+        if self.sandbox.is_none() {
+            self.sandbox = words.sandbox.word.map(str::to_string);
+        }
+        if self.approval_policy.is_none() {
+            self.approval_policy = words.approvals.word.map(str::to_string);
+        }
+        if let Some(open) = words.network.word {
+            let mut table = own_table(&self.thread_config, "sandbox_workspace_write");
+            table
+                .entry("network_access")
+                .or_insert_with(|| json!(open == "true"));
+            self.thread_config
+                .insert("sandbox_workspace_write".into(), Value::Object(table));
         }
     }
 

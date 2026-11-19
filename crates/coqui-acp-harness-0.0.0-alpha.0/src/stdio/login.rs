@@ -117,6 +117,12 @@ pub struct Child {
 }
 
 impl Child {
+    /// The program's standard input, for a prompt that waits for the person's answer to be typed.
+    #[must_use]
+    pub fn input(&self) -> Arc<Cli> {
+        Arc::clone(&self.cli)
+    }
+
     fn lines(buffer: &mut Vec<u8>, bytes: &[u8], lines: &mut Vec<String>) {
         buffer.extend_from_slice(bytes);
         while let Some(end) = buffer.iter().position(|b| *b == b'\n') {

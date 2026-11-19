@@ -1,4 +1,4 @@
-# coqui-acp/crates/coqui-acp-provider at d099e4b71690ef6a1d77c70d1efd94de9f4f5c8c, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-provider at b81c78a42e8f83fca48c4f0913775d59309c5831, with what it inherits written out.
 example = [{ name = "echo_provider", crate-type = ["cdylib"] }]
 [package]
 name = "coqui-acp-provider"

@@ -104,8 +104,6 @@ struct Log {
     prompter_destroyed: bool,
     /// Whether the spawner was destroyed when `closed` came.
     spawner_gone_at_close: Option<bool>,
-    /// Whether the keeper was destroyed when `closed` came.
-    keeper_gone_at_close: Option<bool>,
     broken: Vec<String>,
     /// Every spec the spawner was asked to start.
     specs: Vec<SpawnSpec>,
@@ -179,7 +177,6 @@ impl ChannelSink for Sink {
         log.closed = Some(status);
         log.reason = reason.to_owned();
         log.spawner_gone_at_close = Some(log.spawner_destroyed);
-        log.keeper_gone_at_close = Some(log.keeper_destroyed);
         drop(log);
         self.0.changed.notify_all();
     }
@@ -664,7 +661,8 @@ pub(super) fn start_in(
         sink,
         keeper,
     } = handed_in(root);
-    match harness.start(request, spawner, sink, keeper) {
+    drop(keeper);
+    match harness.start(request, spawner, sink) {
         Ok(channel) => Ok(Conn {
             shared,
             channel: Some(Arc::new(channel)),
@@ -852,11 +850,6 @@ impl Conn {
         self.must("closed", |log| log.spawner_gone_at_close)
     }
 
-    /// Whether the keeper was destroyed by the time `closed` came.
-    pub(super) fn keeper_gone_at_close(&self) -> Result<bool, String> {
-        self.must("closed", |log| log.keeper_gone_at_close)
-    }
-
     /// Waits for every handed object to be destroyed.
     pub(super) fn destroyed(&self) -> Result<(), String> {
         self.must("the sink's destruction", |log| {
@@ -864,9 +857,6 @@ impl Conn {
         })?;
         self.must("the spawner's destruction", |log| {
             log.spawner_destroyed.then_some(())
-        })?;
-        self.must("the keeper's destruction", |log| {
-            log.keeper_destroyed.then_some(())
         })
     }
 
@@ -921,9 +911,6 @@ impl Conn {
         }
         if !self.spawner_gone_at_close()? {
             return Err("the spawner was still alive when the provider called closed".to_owned());
-        }
-        if !self.keeper_gone_at_close()? {
-            return Err("the keeper was still alive when the provider called closed".to_owned());
         }
         self.destroyed()
     }

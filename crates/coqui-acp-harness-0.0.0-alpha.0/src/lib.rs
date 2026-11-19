@@ -4,6 +4,7 @@
 
 extern crate alloc;
 
+pub mod access;
 #[cfg(feature = "kind")]
 #[cfg_attr(docsrs, doc(cfg(feature = "kind")))]
 pub mod account;
@@ -31,6 +32,7 @@ pub mod stdio;
 pub mod stream;
 pub mod version;
 
+pub use access::{ACCESS_META, Access, Approvals, Part, Sandbox, Target, Translation};
 pub use acp::{
     AgentInfo, ConfigOption, Conversation, EventSink, Harness, HarnessError, McpServer,
     McpTransport, Open, OpenRequest, OptionValue, Settings, Takes, UsageTracker, serve,
@@ -39,7 +41,7 @@ pub use event::{Event, Outcome, PermissionRequest, Responder};
 pub use mode::Mode;
 pub use process::{
     ErrorStream, Exit, Launch, LineWriter, PlainSpawn, Process, Spawn, Spawned, Starter,
-    ending_once, exit_text, line_writer, set_starter, watch_exit,
+    ending_once, exit_text, line_writer, set_program_dirs, set_starter, watch_exit,
 };
 #[cfg(feature = "kind")]
 pub use spawner::{LocalSpawner, ThroughSpawner};

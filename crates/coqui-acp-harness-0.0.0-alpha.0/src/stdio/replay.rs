@@ -19,6 +19,8 @@ use std::time::Instant;
 
 use serde_json::{Value, json};
 
+use super::opencode_history::{host_id_of, native_id_of};
+
 /// How many imports may wait to be opened by default, so a host that imports and never opens cannot make the
 /// provider hold histories without limit.
 pub(crate) const WAITING_MAX: u64 = 64;
@@ -188,9 +190,44 @@ pub(crate) struct Mapping {
     live: BTreeMap<String, (String, String, Option<Value>)>,
     /// The agent's id to the UUID as the host spells it.
     by_agent: BTreeMap<String, String>,
+    /// The agent keeps an imported session under an id made from its UUID ([`native_id_of`]), so the UUID is the agent's
+    /// id on the way in and that id is the UUID on the way out, with nothing remembered.
+    native: bool,
+}
+
+/// The id as the agent says it, in the places a session's id is in a message of the agent's, as the UUID the host
+/// spells it ([`host_id_of`]). Whether it changed the message.
+fn host_ids(message: &mut Value) -> bool {
+    fn swap(slot: Option<&mut Value>) -> bool {
+        let Some(slot) = slot else {
+            return false;
+        };
+        let Some(uuid) = slot.as_str().and_then(host_id_of) else {
+            return false;
+        };
+        *slot = Value::String(uuid);
+        true
+    }
+    let mut changed = swap(message.pointer_mut("/params/sessionId"));
+    changed |= swap(message.pointer_mut("/result/sessionId"));
+    if let Some(Value::Array(sessions)) = message.pointer_mut("/result/sessions") {
+        for session in sessions {
+            changed |= swap(session.get_mut("sessionId"));
+        }
+    }
+    changed
 }
 
 impl Mapping {
+    /// A mapping that also turns the UUIDs of sessions written into OpenCode's store into the ids they have there, and
+    /// back.
+    pub(crate) fn native() -> Self {
+        Self {
+            native: true,
+            ..Self::default()
+        }
+    }
+
     /// Rewrites a message of the host for the agent: an open of an imported session becomes
     /// `session/new`, and the UUID becomes the agent's id, the first prompt carrying the context.
     /// Answers the request id of an open it turned into `session/new`, for [`Mapping::undo`].
@@ -231,7 +268,13 @@ impl Mapping {
             return Some(id);
         }
         let Some((_, agent, context)) = self.live.get_mut(&normal(&session)) else {
-            // An open of a session that is no import: it is live if the agent opens it.
+            // An open of a session that is no import by replay: it is live if the agent opens it.
+            if self.native
+                && let Some(agent) = native_id_of(&session)
+                && let Some(params) = object.get_mut("params").and_then(Value::as_object_mut)
+            {
+                params.insert("sessionId".into(), Value::String(agent));
+            }
             if opens
                 && free
                 && let Some(id) = id
@@ -283,6 +326,15 @@ impl Mapping {
     /// answer to the resume or load, and the agent's id becomes the UUID. Whether it changed the
     /// message.
     pub(crate) fn inbound(&mut self, replays: &Replays, message: &mut Value) -> bool {
+        let changed = self.inbound_replay(replays, message);
+        if self.native {
+            host_ids(message) | changed
+        } else {
+            changed
+        }
+    }
+
+    fn inbound_replay(&mut self, replays: &Replays, message: &mut Value) -> bool {
         let Some(object) = message.as_object_mut() else {
             return false;
         };
@@ -585,5 +637,50 @@ mod tests {
         assert!(mapping.opening.is_empty());
         assert!(replays.take("u1").is_some());
         assert!(replays.take("u1").is_none());
+    }
+
+    #[test]
+    fn a_session_in_opencodes_store_is_the_hosts_uuid_outside_and_its_stored_id_inside() {
+        let uuid = "7d8c1f4e-2b9a-4c63-8f10-5a6b7c8d9e0f";
+        let stored = "ses_7d8c1f4e2b9a4c638f105a6b7c8d9e0f";
+        let made_by_opencode = "ses_e11822fdeffeQonF7BHkuhxiss";
+        let replays = Replays::default();
+        let mut mapping = Mapping::native();
+        for (method, session) in [
+            ("session/load", uuid),
+            ("session/prompt", uuid),
+            ("session/cancel", uuid),
+            ("session/load", made_by_opencode),
+        ] {
+            let mut request = json!({"jsonrpc": "2.0", "id": 1, "method": method,
+                "params": {"sessionId": session, "cwd": "/w", "mcpServers": []}});
+            assert_eq!(mapping.outbound(&replays, &mut request), None);
+            let wanted = if session == uuid { stored } else { session };
+            assert_eq!(request["params"]["sessionId"], wanted, "{method} {session}");
+        }
+        let mut update = json!({"jsonrpc": "2.0", "method": "session/update",
+            "params": {"sessionId": stored, "update": {}}});
+        assert!(mapping.inbound(&replays, &mut update));
+        assert_eq!(update["params"]["sessionId"], uuid);
+        let mut listed = json!({"jsonrpc": "2.0", "id": 2, "result": {"sessions": [
+            {"sessionId": stored, "cwd": "/w"}, {"sessionId": made_by_opencode, "cwd": "/w"}]}});
+        assert!(mapping.inbound(&replays, &mut listed));
+        assert_eq!(listed["result"]["sessions"][0]["sessionId"], uuid);
+        assert_eq!(
+            listed["result"]["sessions"][1]["sessionId"],
+            made_by_opencode
+        );
+        let mut opened = json!({"jsonrpc": "2.0", "id": 3, "result": {"sessionId": stored}});
+        assert!(mapping.inbound(&replays, &mut opened));
+        assert_eq!(opened["result"]["sessionId"], uuid);
+        // Another harness's mapping leaves every id as it is.
+        let mut plain = Mapping::default();
+        let mut request = json!({"jsonrpc": "2.0", "id": 1, "method": "session/load",
+            "params": {"sessionId": uuid, "cwd": "/w", "mcpServers": []}});
+        plain.outbound(&replays, &mut request);
+        assert_eq!(request["params"]["sessionId"], uuid);
+        let mut update = json!({"jsonrpc": "2.0", "method": "session/update",
+            "params": {"sessionId": stored, "update": {}}});
+        assert!(!plain.inbound(&replays, &mut update));
     }
 }

@@ -4,20 +4,31 @@
 //! Measured on Codex 0.166.0. A `rotates` nobody measured is `true` (except where a kind says why not), a
 //! `history_portable` nobody measured `false`.
 
+use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
+use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::time::Duration;
+use std::ffi::OsString;
+use std::sync::{Mutex, PoisonError};
 
 use coqui_acp_api::guatiao::library::ProviderError;
-use coqui_acp_api::guatiao::{Status, Wipe};
+use coqui_acp_api::guatiao::{Secret, Status, Wipe};
 use coqui_acp_api::standard::{CODEX, OPENAI_API};
 use coqui_acp_api::{
-    ASK, AUTH, Accepted, AcceptedSlot, AccountCatalog, AccountGrant, AccountKindInfo, AccountRef,
-    EndpointSlot, HARNESS_LOGIN, LoginMethodInfo, MODEL_API, OPEN_URL, PASTE_CODE, USER_CODE,
+    ASK, AUTH, Accepted, AcceptedSlot, AccountCatalog, AccountGrant, AccountKindInfo, AccountOffer,
+    AccountRef, Credentials, EndpointSlot, HARNESS_LOGIN, LoginMethodInfo, MODEL_API, OPEN_URL,
+    PASTE_CODE, USER_CODE,
 };
-use coqui_acp_harness::account::{Watched, jwt_expiry};
+use coqui_acp_harness::ThroughSpawner;
+use coqui_acp_harness::account::{
+    Accounts, Files, Hold, Watched, fingerprint, jwt_expiry, same_name,
+};
 use coqui_acp_harness::provider::{credential, resolve, schema, to_json};
 use serde_json::{Value, json};
+
+use crate::{CodexLaunch, signin};
 
 /// The kind of a ChatGPT login made by `codex login`, kept in `auth.json` of `CODEX_HOME`.
 pub const CHATGPT: &str = "codex-chatgpt";
@@ -61,6 +72,10 @@ pub(crate) const VARIABLES: &[&str] = &[
     "OPENAI_BASE_URL",
 ];
 
+/// The part of [`VARIABLES`] whose value is itself a secret: a key or a token. Not an endpoint, an issuer or where
+/// Codex keeps its state, which a person sets on purpose and which a start still clears.
+pub(crate) const SECRETS: &[&str] = &["CODEX_API_KEY", "OPENAI_API_KEY", "CODEX_ACCESS_TOKEN"];
+
 fn settings(secret: &str, endpoint: &str) -> Value {
     json!({
         "type": "object",
@@ -87,9 +102,8 @@ fn method(id: &str, title: &str, description: &str, produces: &str) -> LoginMeth
     method
 }
 
-/// What the provider takes as an account.
-#[must_use]
-pub fn catalog() -> AccountCatalog {
+/// Every kind and sign-in method Codex's accounts have, as the account provider lists them and the harness takes them.
+fn full() -> AccountCatalog {
     let mut catalog = AccountCatalog::new();
 
     let mut chatgpt = kind(
@@ -187,7 +201,49 @@ pub fn catalog() -> AccountCatalog {
     }
     catalog.accepts = accepts();
     catalog.credential_variables = VARIABLES.iter().map(|v| (*v).to_string()).collect();
+    catalog.secret_variables = SECRETS.iter().map(|v| (*v).to_string()).collect();
     catalog
+}
+
+/// What the harness takes as an account: the kinds it applies and the standards it accepts. It signs no one in and
+/// renews nothing: the account provider ([`offer`]) does.
+#[must_use]
+pub fn catalog() -> AccountCatalog {
+    let mut catalog = full();
+    catalog.logins.clear();
+    for kind in &mut catalog.kinds {
+        kind.renews = false;
+    }
+    catalog
+}
+
+/// What the account provider offers: the kinds of account it makes (the harness's own login, which it cannot sign in
+/// to, left out), the ways to sign in, and the kinds whose plan usage it reads.
+#[must_use]
+pub fn offer() -> AccountOffer {
+    let full = full();
+    let mut offer = AccountOffer::new();
+    offer.kinds = full
+        .kinds
+        .into_iter()
+        .filter(|kind| kind.id != HARNESS_LOGIN)
+        .collect();
+    offer.logins = full.logins;
+    offer.usage = [CHATGPT, ACCESS_TOKEN, API_KEY]
+        .iter()
+        .map(|id| (*id).to_string())
+        .collect();
+    offer
+}
+
+/// Why an account is not one the account provider keeps: `BAD_VALUE` for an id that is not one or a kind it does not
+/// list. Nothing of another standard is taken: a harness applies those, the provider makes its own.
+pub(crate) fn own(grant: &AccountGrant) -> Result<(), ProviderError> {
+    grant.check_id()?;
+    if offer().kind(&grant.kind).is_none() {
+        return Err(bad("this provider keeps no account of that kind"));
+    }
+    Ok(())
 }
 
 /// The standards Codex starts on, and how each is applied: a Codex login (`auth.json` in `CODEX_HOME`, or an access token
@@ -286,7 +342,7 @@ pub(crate) struct StdinLogin {
 
 /// What applying a grant does.
 #[non_exhaustive]
-pub(crate) struct Applied {
+pub(crate) struct Plan {
     /// The variables removed before, every credential variable.
     pub remove: Vec<String>,
     /// The variables Codex is given.
@@ -332,13 +388,35 @@ pub(crate) fn check(account: &AccountRef) -> Result<(), ProviderError> {
     Ok(())
 }
 
+/// The variables applying `grant` sets in Codex's environment that hold no credential, by name: its home
+/// (`CODEX_HOME`, for every kind but `harness-login`, when the grant has a directory). A host reads them to tell its
+/// profile's layers what an account sets before a session starts; an endpoint is Codex's configuration, not a
+/// variable, and the credentials' own are never listed. A grant this provider cannot apply lists none.
+#[must_use]
+pub fn variables(grant: &AccountGrant) -> Vec<(String, String)> {
+    let Ok(grant) = resolved(grant) else {
+        return Vec::new();
+    };
+    match grant.state_dir.as_deref().filter(|dir| !dir.is_empty()) {
+        Some(dir) if grant.kind != HARNESS_LOGIN => {
+            vec![("CODEX_HOME".to_string(), dir.to_string())]
+        }
+        _ => Vec::new(),
+    }
+}
+
 /// What applying `grant` does; `None` for `harness-login`, which hands nothing over and clears nothing.
 ///
 /// # Errors
 ///
 /// `BAD_VALUE`: an id that is not one, a kind not listed, settings the kind refuses, a credential missing, empty or
 /// one the kind does not take, a missing directory.
-pub(crate) fn plan(grant: &AccountGrant) -> Result<Option<Applied>, ProviderError> {
+pub(crate) fn plan(grant: &AccountGrant) -> Result<Option<Plan>, ProviderError> {
+    plan_as(grant, false)
+}
+
+/// [`plan`], where a ChatGPT login with no file in the grant (`in_place`) is the home as it is.
+fn plan_as(grant: &AccountGrant, in_place: bool) -> Result<Option<Plan>, ProviderError> {
     let grant = &resolved(grant)?;
     check(&grant.reference())?;
     let credentials = grant.credentials.expose();
@@ -355,9 +433,12 @@ pub(crate) fn plan(grant: &AccountGrant) -> Result<Option<Applied>, ProviderErro
     };
     let secret = credentials
         .get(key)
-        .filter(|value| !value.is_empty() && credentials.keys().all(|k| k == key))
-        .ok_or_else(|| bad("the credential is missing or not the kind's"))?;
-    let mut applied = Applied {
+        .filter(|value| !value.is_empty() && credentials.keys().all(|k| k == key));
+    let there = in_place && grant.kind == CHATGPT && credentials.is_empty();
+    if secret.is_none() && !there {
+        return Err(bad("the credential is missing or not the kind's"));
+    }
+    let mut applied = Plan {
         remove: VARIABLES.iter().map(|v| (*v).to_string()).collect(),
         set: Vec::new(),
         config: Vec::new(),
@@ -374,22 +455,24 @@ pub(crate) fn plan(grant: &AccountGrant) -> Result<Option<Applied>, ProviderErro
     }
     match grant.kind.as_str() {
         CHATGPT => {
-            applied.watched = vec![
-                Watched::new(AUTH_FILE, FILE_KEY)
-                    .usable(usable)
-                    .expires(expires)
-                    .identity(identity),
-            ];
+            if !there {
+                applied.watched = vec![
+                    Watched::new(AUTH_FILE, FILE_KEY)
+                        .usable(usable)
+                        .expires(expires)
+                        .identity(identity),
+                ];
+            }
         }
         API_KEY => {
-            applied.login = Some(StdinLogin {
+            applied.login = secret.map(|secret| StdinLogin {
                 flag: "--with-api-key",
                 key: "api_key",
                 secret: secret.to_string(),
             });
         }
         _ => {
-            applied.login = Some(StdinLogin {
+            applied.login = secret.map(|secret| StdinLogin {
                 flag: "--with-access-token",
                 key: "access_token",
                 secret: secret.to_string(),
@@ -397,6 +480,252 @@ pub(crate) fn plan(grant: &AccountGrant) -> Result<Option<Applied>, ProviderErro
         }
     }
     Ok(Some(applied))
+}
+
+/// How long [`apply`] lets `codex login` run to save a key or token, in milliseconds.
+pub const DEFAULT_LOGIN_TIMEOUT_MS: u64 = 60_000;
+
+/// How [`apply_with`] runs the command that saves a key or token.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct ApplyOptions {
+    /// The longest `codex login` may take; [`DEFAULT_LOGIN_TIMEOUT_MS`].
+    pub timeout: Duration,
+    /// What follows the program, before `login`, when it is a wrapper (`wsl` for `wsl codex`); none.
+    pub leading: Vec<OsString>,
+}
+
+impl Default for ApplyOptions {
+    fn default() -> Self {
+        Self {
+            timeout: Duration::from_millis(DEFAULT_LOGIN_TIMEOUT_MS),
+            leading: Vec::new(),
+        }
+    }
+}
+
+impl ApplyOptions {
+    /// The defaults.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Lets `codex login` run for at most `timeout`.
+    #[must_use]
+    pub const fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
+    /// Starts the login as `program leading... login <flag>`, `program` being the launch's `executable`.
+    #[must_use]
+    pub fn leading(mut self, leading: impl IntoIterator<Item = impl Into<OsString>>) -> Self {
+        self.leading = leading.into_iter().map(Into::into).collect();
+        self
+    }
+}
+
+/// What is left to do for an account [`apply`] has applied to a launch: the files of a login the account keeps.
+///
+/// It holds no credential a log or a `Debug` would show.
+#[must_use = "a login kept in files is placed only by `hold`"]
+pub struct Applied {
+    id: String,
+    revision: u64,
+    credentials: Secret<Credentials>,
+    dir: String,
+    watched: Vec<Watched>,
+}
+
+impl core::fmt::Debug for Applied {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Applied")
+            .field("id", &self.id)
+            .field("dir", &self.dir)
+            .field("watched", &self.watched.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Applied {
+    /// Codex's home directory; empty for `harness-login`.
+    #[must_use]
+    pub fn dir(&self) -> &str {
+        &self.dir
+    }
+
+    /// Whether the account keeps a ChatGPT login in a file that [`hold`](Self::hold) places and watches.
+    #[must_use]
+    pub fn keeps_files(&self) -> bool {
+        !self.watched.is_empty()
+    }
+
+    /// Places the file of a ChatGPT login in the account's home through `files` and holds it in `accounts`, which sees
+    /// to it that the grant's copy replaces only one that is blank, older or not a file, and tells a renewal or a loss
+    /// to the keepers of a live hold. `None` for an account that keeps no such file (a key or token was saved by
+    /// [`apply`] already): nothing is written. The hold lasts until [`Hold::finish`] or its drop; keep it as long as
+    /// Codex runs.
+    ///
+    /// # Errors
+    ///
+    /// `BAD_VALUE` when the grant carries no copy of the login; the spawner's refusal to read or write a file.
+    pub fn hold(
+        self,
+        accounts: &Arc<Accounts>,
+        files: &Files,
+    ) -> Result<Option<Hold>, ProviderError> {
+        if self.watched.is_empty() {
+            return Ok(None);
+        }
+        accounts
+            .hold(
+                files.clone(),
+                None,
+                &self.id,
+                &self.dir,
+                self.revision,
+                self.credentials.expose(),
+                self.watched,
+            )
+            .map(Some)
+    }
+}
+
+/// [`apply_with`] with the defaults.
+///
+/// # Errors
+///
+/// As [`apply_with`].
+pub fn apply(
+    grant: &AccountGrant,
+    launch: &mut CodexLaunch,
+    files: &Files,
+) -> Result<Applied, ProviderError> {
+    apply_with(grant, launch, files, &ApplyOptions::default())
+}
+
+/// Applies `grant` to `launch`, as `start` does: every credential variable is removed from what Codex starts with,
+/// including those of `launch.env`, `CODEX_HOME` is set to the grant's `state_dir`, the endpoint the account names goes
+/// to `launch.config_overrides`, and the home is made to keep its credentials in `auth.json` (a `config.toml` written
+/// through `files` when none is there). A key or token is saved there by `launch.executable login --with-api-key` or
+/// `--with-access-token`, the secret on its standard input and in no argument, log or error, through `files`' spawner
+/// and within `options.timeout`; a key `auth.json` already holds is not saved again. `harness-login` changes nothing.
+///
+/// A ChatGPT login whose grant carries no `auth_file` and a `state_dir` is applied **in place**: Codex runs on that home
+/// as it is and nothing is written, not even `config.toml`. A login is placed only when the grant carries its copy, and
+/// only by [`Applied::hold`].
+///
+/// The endpoint variables are cleared and set only from the grant's settings: a host that keeps a person's own choice
+/// (`OPENAI_BASE_URL`) puts it back afterwards. They are among the catalog's `credential_variables` and not among its
+/// `secret_variables`.
+///
+/// # Errors
+///
+/// `BAD_VALUE`: an id that is not one, a kind not listed, settings the kind refuses, a credential missing or not the
+/// kind's, a missing `state_dir`, or a key Codex refuses (`login refused: ...`); `UNSUPPORTED`: a home to write on a
+/// spawner with no files; `INTERNAL` when Codex could not be run or did not finish in time.
+pub fn apply_with(
+    grant: &AccountGrant,
+    launch: &mut CodexLaunch,
+    files: &Files,
+    options: &ApplyOptions,
+) -> Result<Applied, ProviderError> {
+    apply_as(grant, launch, files, options, true, None)
+}
+
+/// For each home a key or token was saved in, a fingerprint of it.
+pub(crate) type Saved = Mutex<BTreeMap<String, u64>>;
+
+/// [`apply_with`] for `start` and the other calls of the harness, which refuse a login that carries no copy
+/// (`in_place` false) and, given `saved`, do not save a token again for a home it was saved in.
+pub(crate) fn apply_as(
+    grant: &AccountGrant,
+    launch: &mut CodexLaunch,
+    files: &Files,
+    options: &ApplyOptions,
+    in_place: bool,
+    saved: Option<&Saved>,
+) -> Result<Applied, ProviderError> {
+    let grant = &resolved(grant)?;
+    let Some(mut plan) = plan_as(grant, in_place)? else {
+        return Ok(Applied {
+            id: grant.id.clone(),
+            revision: grant.revision,
+            credentials: Secret::new(Credentials::new()),
+            dir: String::new(),
+            watched: Vec::new(),
+        });
+    };
+    let writes = !plan.watched.is_empty() || plan.login.is_some() || !in_place;
+    if writes && !files.available() {
+        return Err(ProviderError::new(
+            Status::GUATIAO_ERR_UNSUPPORTED,
+            "this spawner serves no private files, which the credential is kept in",
+        ));
+    }
+    // What the host's environment holds under a credential name does not reach Codex beside the account's.
+    launch.env.retain(|name, _| {
+        !plan
+            .remove
+            .iter()
+            .any(|v| same_name(&name.to_string_lossy(), v))
+    });
+    launch.remove_env = plan.remove.iter().map(OsString::from).collect();
+    for (name, value) in &plan.set {
+        launch.env.insert(name.into(), value.into());
+    }
+    launch.config_overrides.extend(plan.config.iter().cloned());
+    if writes {
+        signin::configure(files)?;
+    }
+    if let Some(login) = &plan.login {
+        let spawn = ThroughSpawner::shared(Arc::clone(files.spawner()));
+        let print = fingerprint(&login.secret);
+        let there = files.info(AUTH_FILE)?.is_some();
+        // A key already in `auth.json` is not saved again. A token, which Codex does not show back, is saved once for
+        // this home while the file is there when the caller keeps a record: a poll of the account's usage does not run
+        // `codex login` each time.
+        let done = if login.key == "api_key" {
+            files
+                .read(AUTH_FILE)?
+                .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+                .is_some_and(|auth| auth["OPENAI_API_KEY"].as_str() == Some(&login.secret))
+        } else {
+            there
+                && saved.is_some_and(|saved| {
+                    saved
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .get(&plan.dir)
+                        == Some(&print)
+                })
+        };
+        if !done {
+            signin::save(
+                &spawn,
+                &launch.executable,
+                &options.leading,
+                &plan.dir,
+                login,
+                options.timeout,
+                None,
+            )?;
+            if let Some(saved) = saved {
+                saved
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .insert(plan.dir.clone(), print);
+            }
+        }
+    }
+    Ok(Applied {
+        id: grant.id.clone(),
+        revision: grant.revision,
+        credentials: Secret::new(grant.credentials.expose().clone()),
+        dir: core::mem::take(&mut plan.dir),
+        watched: core::mem::take(&mut plan.watched),
+    })
 }
 
 /// Whom the login in the file's text is for: its `tokens.account_id`.
@@ -426,10 +755,10 @@ impl core::fmt::Debug for StdinLogin {
     }
 }
 
-impl core::fmt::Debug for Applied {
+impl core::fmt::Debug for Plan {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         // The variables set may hold a credential: only their names are shown.
-        f.debug_struct("Applied")
+        f.debug_struct("Plan")
             .field(
                 "set",
                 &self.set.iter().map(|(name, _)| name).collect::<Vec<_>>(),
@@ -452,7 +781,7 @@ impl Drop for StdinLogin {
     }
 }
 
-impl Drop for Applied {
+impl Drop for Plan {
     fn drop(&mut self) {
         for (_, value) in &mut self.set {
             value.wipe();

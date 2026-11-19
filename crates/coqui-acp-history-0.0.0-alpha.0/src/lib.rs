@@ -31,6 +31,9 @@
 extern crate alloc;
 
 mod canon;
+#[cfg(feature = "cli")]
+#[cfg_attr(docsrs, doc(cfg(feature = "cli")))]
+pub mod cli;
 pub mod conversation;
 mod document;
 mod error;

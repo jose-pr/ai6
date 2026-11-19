@@ -25,7 +25,7 @@ use crate::spawner::{
     ErrorOutput, LinkState, ProcessExit, READ_TIMED_OUT, SpawnSpec, SpawnedProcess, TerminalSize,
 };
 
-/// The variable that names the home the suite gives its programs, set by `acp-harness-check --program-agent` for the
+/// The variable that names the home the suite gives its programs, set by the `check` command's `--program-agent` for the
 /// process it runs the suite in, and by a test that does the same. A stand-in program runs only where it is set.
 pub const HOME_VARIABLE: &str = "ACP_HARNESS_CHECK_HOME";
 

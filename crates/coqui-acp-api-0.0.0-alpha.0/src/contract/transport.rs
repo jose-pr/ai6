@@ -80,15 +80,12 @@ impl Write for Outbox {
 
 pub(super) fn serves_the_client(harness: &dyn AcpHarness, cwd: &str) -> Result<(), String> {
     let (tx, rx) = mpsc::channel();
-    let host::Handed {
-        spawner, keeper, ..
-    } = host::handed();
+    let host::Handed { spawner, .. } = host::handed();
     let channel = harness
         .start(
             StartRequest::new(),
             spawner,
             Forward(Some(tx)).into_object(),
-            keeper,
         )
         .map_err(|e| format!("start refused: {}", e.message()))?;
     let inbox = Inbox {

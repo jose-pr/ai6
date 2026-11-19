@@ -33,6 +33,10 @@ pub const GEMINI_API: &str = "gemini-api";
 pub const ANTIGRAVITY: &str = "antigravity";
 /// A login only Pi takes: `auth_json` (the `auth.json` of Pi's own sign-in).
 pub const PI: &str = "pi";
+/// A key for one of OpenCode's providers: `api_key`, read from the variable the account's `variable` setting names.
+pub const OPENCODE_KEY: &str = "opencode-key";
+/// A login only OpenCode takes: `auth_json` (the `auth.json` its own sign-in wrote, one entry per provider).
+pub const OPENCODE: &str = "opencode";
 
 /// One well-known standard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,6 +106,18 @@ pub const WELL_KNOWN: &[StandardInfo] = &[
         id: PI,
         title: "Pi sign-in",
         meaning: "A sign-in that only Pi takes: the `auth.json` its own sign-in wrote.",
+        credentials: &["auth_json"],
+    },
+    StandardInfo {
+        id: OPENCODE_KEY,
+        title: "OpenCode provider key",
+        meaning: "A key for one provider OpenCode takes, which it reads from the variable the account names (`variable` setting). Only OpenCode can use it.",
+        credentials: &["api_key"],
+    },
+    StandardInfo {
+        id: OPENCODE,
+        title: "OpenCode sign-in",
+        meaning: "A sign-in that only OpenCode takes: the `auth.json` its own sign-in wrote, holding a key or a login for each provider it was signed in to.",
         credentials: &["auth_json"],
     },
 ];

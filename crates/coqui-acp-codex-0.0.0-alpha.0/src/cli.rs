@@ -1,4 +1,5 @@
-//! `coqui-acp-codex`: Codex as an Agent Client Protocol agent on standard input and output.
+//! Codex's agent as library code: its arguments as a `clap::Args` type and a [`run`] that serves ACP on standard input
+//! and output. A program that people run is the host's; `examples/serve_codex.rs` is one for this crate's tests.
 
 #![allow(
     clippy::std_instead_of_core,
@@ -8,76 +9,104 @@
 
 use std::ffi::OsString;
 use std::path::PathBuf;
-use std::process::ExitCode;
 use std::sync::Arc;
 
-use clap::Parser;
-use coqui_acp_codex::harness::{Settings, serve};
-use coqui_acp_codex::{CodexAgent, CodexLaunch};
+use crate::harness::{Settings, serve};
+use crate::{CodexAgent, CodexLaunch};
 
 /// Serves Codex as an Agent Client Protocol agent on standard input and output, in ACP version 1 or 2, whichever the
 /// client asks for. Each session runs `codex app-server` with one thread; approvals are asked through ACP.
 /// Diagnostics go to standard error.
-#[derive(Debug, Parser)]
-#[command(
-    name = "coqui-acp-codex",
-    version,
-    after_help = "Codex reads its own variables (CODEX_HOME, OPENAI_API_KEY \
-    and others) from the environment it is given."
-)]
-struct Cli {
-    #[cfg(feature = "history")]
-    #[command(subcommand)]
-    command: Option<Command>,
+///
+/// Codex reads its own variables (`CODEX_HOME`, `OPENAI_API_KEY` and others) from the environment it is given.
+#[derive(Debug, clap::Args)]
+pub struct Args {
     /// The Codex program.
     #[arg(long, env = "COQUI_ACP_CODEX_EXECUTABLE", default_value = "codex")]
-    executable: OsString,
+    pub executable: OsString,
     /// The model every session starts with, until the client chooses another.
     #[arg(long)]
-    model: Option<String>,
+    pub model: Option<String>,
     /// The reasoning effort every session starts with, such as low or high.
     #[arg(long)]
-    effort: Option<String>,
+    pub effort: Option<String>,
     /// The approval policy: untrusted, on-failure, on-request or never.
     #[arg(long)]
-    approval_policy: Option<String>,
+    pub approval_policy: Option<String>,
     /// Offer the Bypass mode: never ask, and no sandbox.
     #[arg(long)]
-    allow_bypass: bool,
+    pub allow_bypass: bool,
     /// The sandbox: read-only, workspace-write or danger-full-access.
     #[arg(long)]
-    sandbox: Option<String>,
+    pub sandbox: Option<String>,
     /// The highest ACP version answered.
     #[arg(long, default_value_t = 2, value_parser = clap::value_parser!(u8).range(1..=2))]
-    max_acp_version: u8,
+    pub max_acp_version: u8,
     /// Sessions at once.
     #[arg(long, default_value_t = 8)]
-    max_sessions: usize,
+    pub max_sessions: usize,
     /// A directory every session's `cwd` and more directories must lie in, repeated for more; none takes any.
     #[arg(long = "working-root", value_name = "DIRECTORY")]
-    working_roots: Vec<PathBuf>,
+    pub working_roots: Vec<PathBuf>,
     /// Refuse a session that a client gives MCP servers.
     #[arg(long)]
-    no_client_mcp_servers: bool,
+    pub no_client_mcp_servers: bool,
     /// Take a network path (`\\\\host\\share`) as a session's `cwd` or more directories.
     #[arg(long)]
-    allow_network_paths: bool,
+    pub allow_network_paths: bool,
 }
 
-/// What `coqui_acp_codex` does besides serving.
-#[cfg(feature = "history")]
-#[derive(Debug, clap::Subcommand)]
-enum Command {
-    /// Moves a session in and out of the standard history format (`docs/session-history.md`).
-    History {
-        #[command(subcommand)]
-        action: Action,
-    },
+impl Args {
+    /// The settings the harness serves with.
+    #[must_use]
+    pub fn settings(&self) -> Settings {
+        let mut settings = Settings::new();
+        settings.max_version = self.max_acp_version;
+        settings.max_sessions = self.max_sessions;
+        settings.working_roots.clone_from(&self.working_roots);
+        settings.client_mcp_servers = !self.no_client_mcp_servers;
+        settings.network_paths = self.allow_network_paths;
+        settings.on_notice = Some(Arc::new(|_, text: &str| {
+            eprintln!("coqui-acp-codex: {text}");
+        }));
+        settings
+    }
+
+    /// The agent, with these arguments as what each session starts with.
+    #[must_use]
+    pub fn agent(&self) -> CodexAgent {
+        let mut defaults = CodexLaunch::new(".");
+        defaults.executable.clone_from(&self.executable);
+        defaults.model.clone_from(&self.model);
+        defaults.effort.clone_from(&self.effort);
+        defaults.approval_policy.clone_from(&self.approval_policy);
+        defaults.sandbox.clone_from(&self.sandbox);
+        defaults.allow_bypass = self.allow_bypass;
+        CodexAgent::new().defaults(defaults)
+    }
 }
 
+/// Serves the agent on standard input and output until the client closes it.
+///
+/// # Errors
+///
+/// The connection failed; the message says how.
+pub fn run(args: &Args) -> Result<u8, String> {
+    serve(
+        Arc::new(args.agent()),
+        args.settings(),
+        std::io::stdin(),
+        std::io::stdout(),
+    )
+    .map(|()| 0)
+    .map_err(|error| error.to_string())
+}
+
+/// What the agent's history commands do: move a session in and out of the standard history format
+/// (`docs/session-history.md`).
 #[cfg(feature = "history")]
 #[derive(Debug, clap::Subcommand)]
-enum Action {
+pub enum History {
     /// Writes the session's history to standard output, as it is.
     Export {
         /// Codex's home directory; by default `CODEX_HOME`, else `.codex` in the home directory.
@@ -105,30 +134,35 @@ enum Action {
     },
 }
 
+/// Runs one history command on standard input and output.
+///
+/// # Errors
+///
+/// The home directory is unknown, or the session or the history could not be read or written.
 #[cfg(feature = "history")]
-fn history_main(action: Action) -> Result<(), String> {
+pub fn run_history(action: &History) -> Result<u8, String> {
     use std::io::{Read, Write};
 
-    use coqui_acp_codex::history::{DEFAULT_MAX_BYTES, ImportOptions, export_file, import_file};
+    use crate::history::{DEFAULT_MAX_BYTES, ImportOptions, export_file, import_file};
 
-    let place = |given: Option<PathBuf>| {
+    let place = |given: &Option<PathBuf>| {
         given
-            .or_else(|| {
-                coqui_acp_codex::history::codex_home(&std::collections::BTreeMap::new(), false)
-            })
+            .clone()
+            .or_else(|| crate::history::codex_home(&std::collections::BTreeMap::new(), false))
             .ok_or_else(|| "the home directory is unknown: pass --config".to_owned())
     };
     match action {
-        Action::Export { config, id } => {
+        History::Export { config, id } => {
             let config = place(config)?;
             let doc =
-                export_file(&config, &id, DEFAULT_MAX_BYTES).map_err(|error| error.to_string())?;
+                export_file(&config, id, DEFAULT_MAX_BYTES).map_err(|error| error.to_string())?;
             let bytes = doc.to_vec().map_err(|error| error.to_string())?;
             std::io::stdout()
                 .write_all(&bytes)
-                .map_err(|error| error.to_string())
+                .map_err(|error| error.to_string())?;
+            Ok(0)
         }
-        Action::Import {
+        History::Import {
             config,
             cwd,
             id,
@@ -144,11 +178,11 @@ fn history_main(action: Action) -> Result<(), String> {
                 .map_err(|error| error.to_string())?;
             let options = ImportOptions::default().use_summary(!no_summary);
             let options = match model_provider {
-                Some(provider) => options.model_provider(provider),
+                Some(provider) => options.model_provider(provider.clone()),
                 None => options,
             };
-            let imported = import_file(&config, &cwd, &id, &doc, &options)
-                .map_err(|error| error.to_string())?;
+            let imported =
+                import_file(&config, cwd, id, &doc, &options).map_err(|error| error.to_string())?;
             let lost: Vec<String> = imported
                 .report
                 .losses()
@@ -156,55 +190,7 @@ fn history_main(action: Action) -> Result<(), String> {
                 .map(|loss| format!("{}:{}", loss.kind, loss.count))
                 .collect();
             eprintln!("imported; lost: [{}]", lost.join(", "));
-            Ok(())
-        }
-    }
-}
-
-fn settings_of(cli: &Cli) -> Settings {
-    let mut settings = Settings::new();
-    settings.max_version = cli.max_acp_version;
-    settings.max_sessions = cli.max_sessions;
-    settings.working_roots.clone_from(&cli.working_roots);
-    settings.client_mcp_servers = !cli.no_client_mcp_servers;
-    settings.network_paths = cli.allow_network_paths;
-    settings.on_notice = Some(Arc::new(|_, text: &str| {
-        eprintln!("coqui-acp-codex: {text}")
-    }));
-    settings
-}
-
-fn main() -> ExitCode {
-    let cli = Cli::parse();
-    #[cfg(feature = "history")]
-    if let Some(Command::History { action }) = cli.command {
-        return match history_main(action) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => {
-                eprintln!("coqui-acp-codex: {error}");
-                ExitCode::FAILURE
-            }
-        };
-    }
-    let settings = settings_of(&cli);
-    let mut defaults = CodexLaunch::new(".");
-    defaults.executable = cli.executable;
-    defaults.model = cli.model;
-    defaults.effort = cli.effort;
-    defaults.approval_policy = cli.approval_policy;
-    defaults.sandbox = cli.sandbox;
-    defaults.allow_bypass = cli.allow_bypass;
-    let agent = CodexAgent::new().defaults(defaults);
-    match serve(
-        Arc::new(agent),
-        settings,
-        std::io::stdin(),
-        std::io::stdout(),
-    ) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("coqui-acp-codex: {error}");
-            ExitCode::FAILURE
+            Ok(0)
         }
     }
 }
@@ -213,7 +199,13 @@ fn main() -> ExitCode {
 mod tests {
     use clap::{CommandFactory, Parser};
 
-    use super::{Cli, settings_of};
+    use super::Args;
+
+    #[derive(Parser)]
+    struct Cli {
+        #[command(flatten)]
+        args: Args,
+    }
 
     #[test]
     fn the_command_line_is_well_formed() {
@@ -222,14 +214,16 @@ mod tests {
 
     #[test]
     fn what_a_host_narrows_on_the_command_line_reaches_the_settings() {
-        let settings = settings_of(&Cli::parse_from([
-            "coqui-acp-codex",
+        let settings = Cli::parse_from([
+            "codex",
             "--working-root",
             "/w",
             "--working-root",
             "/x",
             "--no-client-mcp-servers",
-        ]));
+        ])
+        .args
+        .settings();
         assert_eq!(settings.working_roots.len(), 2);
         assert!(!settings.client_mcp_servers);
         assert!(!settings.network_paths);

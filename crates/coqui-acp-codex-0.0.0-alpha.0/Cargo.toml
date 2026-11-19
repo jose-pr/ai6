@@ -1,5 +1,4 @@
-# coqui-acp/crates/coqui-acp-codex at d099e4b71690ef6a1d77c70d1efd94de9f4f5c8c, with what it inherits written out.
-bin = [{ name = "coqui-acp-codex", path = "src/main.rs" }]
+# coqui-acp/crates/coqui-acp-codex at b81c78a42e8f83fca48c4f0913775d59309c5831, with what it inherits written out.
 example = [{ name = "codex_provider", crate-type = ["cdylib"] }]
 [package]
 name = "coqui-acp-codex"
@@ -12,7 +11,7 @@ repository = "https://github.com/Boriken-Dev/coqui-acp"
 homepage = "https://boriken-dev.github.io/coqui-acp/"
 readme = "README.md"
 keywords = ["acp", "agent", "codex", "app-server"]
-categories = ["development-tools", "command-line-utilities"]
+categories = ["development-tools"]
 exclude = [".*", "*.local.*"]
 publish = false
 [package.metadata]

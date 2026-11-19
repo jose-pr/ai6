@@ -25,7 +25,8 @@ use serde_json::Value;
 #[derive(Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Launch {
-    /// The program, found on `PATH` when it names no directory.
+    /// The program. A name with no directory is found on this process's `PATH` (and in the folders [`set_program_dirs`] names),
+    /// not on a `PATH` this launch's `env` sets, so a folder the environment puts first never decides which program starts.
     pub program: OsString,
     /// Its arguments, each passed as one argument with no shell between.
     pub args: Vec<OsString>,
@@ -355,6 +356,104 @@ pub fn set_starter(starter: Arc<dyn Starter>) {
     *STARTER.lock().unwrap_or_else(PoisonError::into_inner) = Some(starter);
 }
 
+type ProgramDirs = fn() -> Vec<PathBuf>;
+
+static PROGRAM_DIRS: Mutex<Option<ProgramDirs>> = Mutex::new(None);
+
+/// Names a function whose folders are searched, after this process's own `PATH`, for the program of a launch that names no
+/// directory and whose environment sets `PATH`: a host that keeps programs of its own (a runtime it installed) for its
+/// children. It is asked at each start.
+pub fn set_program_dirs(dirs: fn() -> Vec<PathBuf>) {
+    *PROGRAM_DIRS.lock().unwrap_or_else(PoisonError::into_inner) = Some(dirs);
+}
+
+/// `program` where this process finds it when `env` sets `PATH`, else as given. The system looks a bare name up on the child's
+/// own `PATH` when the environment it is started with sets one, which would let a folder put first by a profile decide which
+/// program an agent is; a name with a directory, and one this process cannot find, are left to the system.
+fn found_on_own_path(program: &OsStr, env: &BTreeMap<OsString, OsString>) -> OsString {
+    if !env.keys().any(|name| name.eq_ignore_ascii_case("PATH"))
+        || program.to_string_lossy().contains(['/', '\\'])
+    {
+        return program.to_owned();
+    }
+    let extra = PROGRAM_DIRS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .map_or_else(Vec::new, |dirs| dirs());
+    let own = std::env::var_os("PATH").unwrap_or_default();
+    let pathext = std::env::var("PATHEXT").unwrap_or_default();
+    find_in(&own, &extra, &pathext, &program.to_string_lossy())
+        .map_or_else(|| program.to_owned(), PathBuf::into_os_string)
+}
+
+/// The first runnable file called `name` in an absolute folder of `path`, then of `extra`. On Windows a name takes each of
+/// `pathext`'s extensions (the usual four when it is empty) unless it has one.
+fn find_in(path: &OsStr, extra: &[PathBuf], pathext: &str, name: &str) -> Option<PathBuf> {
+    let suffixes: Vec<String> = if cfg!(windows) {
+        let listed: Vec<String> = pathext
+            .split(';')
+            .filter(|ext| ext.starts_with('.') && ext.len() > 1)
+            .map(str::to_ascii_lowercase)
+            .collect();
+        let listed = if listed.is_empty() {
+            [".com", ".exe", ".bat", ".cmd"].map(String::from).to_vec()
+        } else {
+            listed
+        };
+        if listed
+            .iter()
+            .any(|ext| name.to_ascii_lowercase().ends_with(ext))
+        {
+            vec![String::new()]
+        } else {
+            listed
+        }
+    } else {
+        vec![String::new()]
+    };
+    std::env::split_paths(path)
+        .chain(extra.iter().cloned())
+        .filter(|folder| folder.is_absolute())
+        .flat_map(|folder| {
+            suffixes
+                .iter()
+                .map(move |suffix| folder.join(format!("{name}{suffix}")))
+        })
+        .find(|candidate| runnable(candidate))
+}
+
+fn runnable(file: &std::path::Path) -> bool {
+    let Ok(meta) = std::fs::metadata(file) else {
+        return false;
+    };
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::PermissionsExt::mode(&meta.permissions()) & 0o111 != 0 && meta.is_file()
+    }
+    #[cfg(not(unix))]
+    {
+        meta.is_file()
+    }
+}
+
+/// Runs `start`, again after a short wait while it fails with "text file busy" (Unix `ETXTBSY`): a program just written is
+/// refused by `exec` while another thread's `fork` still holds a copy of its write descriptor, which it drops at its own `exec`.
+/// Any other failure, and the sixth refusal, are the answer.
+pub(crate) fn retry_busy<T>(
+    #[cfg_attr(not(unix), allow(unused_mut))] mut start: impl FnMut() -> io::Result<T>,
+) -> io::Result<T> {
+    #[cfg(unix)]
+    for wait in [50, 100, 200, 300, 350] {
+        match start() {
+            Err(error) if error.raw_os_error() == Some(26) => {
+                thread::sleep(Duration::from_millis(wait));
+            }
+            other => return other,
+        }
+    }
+    start()
+}
+
 /// Where a started process's standard error goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -382,10 +481,11 @@ pub(crate) fn start(launch: &Launch, errors: ErrorStream) -> io::Result<Spawned>
     if let Some(starter) = starter {
         return starter.start(launch, errors);
     }
+    let found = found_on_own_path(&launch.program, &launch.env);
     // A batch file does not start in a folder on a share: what it names starts there instead.
     let (program, args) = match &launch.cwd {
-        Some(cwd) => coqui_acp_api::batch::start_in(&launch.program, &launch.args, cwd)?,
-        None => (launch.program.clone(), launch.args.clone()),
+        Some(cwd) => coqui_acp_api::batch::start_in(&found, &launch.args, cwd)?,
+        None => (found, launch.args.clone()),
     };
     let mut command = Command::new(program);
     command
@@ -418,7 +518,7 @@ pub(crate) fn start(launch: &Launch, errors: ErrorStream) -> io::Result<Spawned>
     }
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
-    let mut child = command.spawn()?;
+    let mut child = retry_busy(|| command.spawn())?;
     // The pipe's write ends are the child's now: the reader sees the end once it and its tree close theirs.
     drop(command);
     let abandon = |child: &mut Child| {
@@ -688,4 +788,76 @@ fn contain(child: &Child) -> io::Result<win32job::Job> {
     job.assign_process(child.as_raw_handle() as isize)
         .map_err(io::Error::other)?;
     Ok(job)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[cfg(unix)]
+    fn a_start_refused_as_busy_is_tried_again_and_any_other_error_is_not() {
+        let mut calls = 0;
+        let started = retry_busy(|| {
+            calls += 1;
+            if calls < 3 {
+                Err(io::Error::from_raw_os_error(26))
+            } else {
+                Ok(calls)
+            }
+        });
+        assert_eq!(started.expect("started on the third try"), 3);
+        let mut calls = 0;
+        let refused = retry_busy(|| -> io::Result<()> {
+            calls += 1;
+            Err(io::Error::from_raw_os_error(2))
+        });
+        assert_eq!((calls, refused.is_err()), (1, true));
+        let mut calls = 0;
+        let busy = retry_busy(|| -> io::Result<()> {
+            calls += 1;
+            Err(io::Error::from_raw_os_error(26))
+        });
+        assert_eq!((calls, busy.is_err()), (6, true));
+    }
+
+    #[test]
+    fn a_program_is_found_in_an_absolute_folder_of_the_path_then_in_the_extra_ones() {
+        let root = std::env::temp_dir().join(format!("acp-find-{}", std::process::id()));
+        let (first, second) = (root.join("first"), root.join("second"));
+        for folder in [&first, &second] {
+            std::fs::create_dir_all(folder).expect("a folder");
+        }
+        let file = if cfg!(windows) { "tool.exe" } else { "tool" };
+        for folder in [&first, &second] {
+            let path = folder.join(file);
+            std::fs::write(&path, "").expect("a file");
+            #[cfg(unix)]
+            std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+                .expect("executable");
+        }
+        let path = std::env::join_paths([&first]).expect("a path");
+        assert_eq!(
+            find_in(&path, core::slice::from_ref(&second), ".EXE", "tool"),
+            Some(first.join(file))
+        );
+        let none = std::env::join_paths([root.join("none")]).expect("a path");
+        assert_eq!(
+            find_in(&none, core::slice::from_ref(&second), ".EXE", "tool"),
+            Some(second.join(file))
+        );
+        assert_eq!(find_in(&none, &[], ".EXE", "tool"), None);
+        // A folder that is not absolute is not searched, and a file that cannot run is not found.
+        assert_eq!(find_in(OsStr::new("first"), &[], "", "tool"), None);
+        #[cfg(unix)]
+        {
+            std::fs::set_permissions(
+                first.join(file),
+                std::os::unix::fs::PermissionsExt::from_mode(0o644),
+            )
+            .expect("not executable");
+            assert_eq!(find_in(&path, &[], "", "tool"), None);
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

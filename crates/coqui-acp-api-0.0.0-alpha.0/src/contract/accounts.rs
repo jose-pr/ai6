@@ -1,5 +1,6 @@
-//! The checks of accounts: the catalog, applying a grant, credentials that never come back, a login
-//! the harness renewed or lost, `renew`, and the sign-in methods.
+//! The checks of accounts a harness takes: the catalog, applying a grant and credentials that never
+//! come back. Signing in, renewing and watching are the account provider's, held by its own suite;
+//! the helpers it shares are here.
 //!
 //! The suite hands a provider a spawner that is virtual (it starts nothing: it records the specs it
 //! is asked to start and hands back idle processes) and serves files in a directory of the suite's.
@@ -22,13 +23,13 @@ use super::Contract;
 use super::checks::{
     CANARY, Outcome, Place, fresh_uuid, initialize, new_session, open_session_in, text,
 };
-use super::host::{self, GRACE, PATIENCE, Script, status};
+use super::host::{self, PATIENCE, Script, status};
 use super::json::{from_json, to_json};
 use crate::{
     ACCOUNT_ID_MAX, AccountCatalog, AccountGrant, AccountKindInfo, AccountRef, AcpHarness,
     Credentials, HARNESS_LOGIN, LoginMethodInfo, LoginOutcome, LoginPrompter, LoginRequest,
-    ModelsRequest, ProcessSpawner, RenewRequest, Requirement, SessionExport, SessionImport,
-    StartRequest, UsageQuery, is_account_id,
+    ModelsRequest, ProcessSpawner, Requirement, SessionExport, SessionImport, StartRequest,
+    UsageQuery, is_account_id,
 };
 
 pub(super) const OK: u32 = 0;
@@ -68,18 +69,6 @@ pub(super) fn all(
         (
             "refuses an account it cannot take, saying nothing of its credentials",
             refuses(contract, harness, place),
-        ),
-        (
-            "reports a login it saw renewed or lost",
-            keeps_watch(contract, harness, place),
-        ),
-        (
-            "renews as its catalog says",
-            renews(contract, harness, place),
-        ),
-        (
-            "signs in as its catalog says",
-            signs_in(contract, harness, place),
         ),
     ]
 }
@@ -365,6 +354,18 @@ fn catalog(contract: &Contract, harness: &dyn AcpHarness) -> Outcome {
         ensure!(!variables.contains(&name), "{name} is listed twice");
         variables.push(name);
     }
+    let mut secrets: Vec<&String> = Vec::new();
+    for name in &catalog.secret_variables {
+        ensure!(
+            catalog.credential_variables.contains(name),
+            "secret_variables names {name}, which credential_variables does not list, so a start would not clear it"
+        );
+        ensure!(
+            !secrets.contains(&name),
+            "{name} is listed twice as a secret"
+        );
+        secrets.push(name);
+    }
     let mut standards = Vec::new();
     for accepted in &catalog.accepts {
         ensure!(
@@ -409,19 +410,11 @@ fn catalog(contract: &Contract, harness: &dyn AcpHarness) -> Outcome {
             }
         }
     }
-    login_rules(&catalog.kinds, &catalog.logins)?;
-    if contract.logins {
-        ensure!(
-            !catalog.logins.is_empty(),
-            "the catalog lists no login method; a provider with none is run with logins off"
-        );
-    } else {
-        ensure!(
-            catalog.logins.is_empty(),
-            "logins are off, and the catalog lists {} method(s)",
-            catalog.logins.len()
-        );
-    }
+    ensure!(
+        catalog.logins.is_empty(),
+        "the catalog lists {} login method(s); signing in is an account provider's",
+        catalog.logins.len()
+    );
     kinds(contract, &catalog)?;
     Ok(())
 }
@@ -492,31 +485,6 @@ fn applied_to(
     Ok(())
 }
 
-/// Checks that a program the provider started to sign in cleared every credential variable, and
-/// that at least one was started.
-fn clears_all(specs: &[crate::SpawnSpec], catalog: &AccountCatalog) -> Outcome {
-    ensure!(
-        !specs.is_empty(),
-        "no program was started through the spawner, so nothing shows that it clears the credential variables"
-    );
-    for spec in specs {
-        ensure!(
-            !spec.args.iter().any(|arg| arg.contains(CANARY)),
-            "a program was started with a credential in its command line"
-        );
-        let missed: Vec<&String> = catalog
-            .credential_variables
-            .iter()
-            .filter(|name| !spec.clear_environment && !spec.remove_environment.contains(name))
-            .collect();
-        ensure!(
-            missed.is_empty(),
-            "a program was started without clearing {missed:?}"
-        );
-    }
-    Ok(())
-}
-
 fn applies(contract: &Contract, harness: &dyn AcpHarness, place: &Place) -> Outcome {
     let catalog = catalog_of(harness)?;
     // With no account nothing is cleared.
@@ -563,18 +531,18 @@ fn applies(contract: &Contract, harness: &dyn AcpHarness, place: &Place) -> Outc
         );
 
         // import, export, models and usage on the account.
-        let (watch, spawner, keeper) = host::spawner_in(Some(&dir));
+        let (watch, spawner, _) = host::spawner_in(Some(&dir));
         let listing = harness
-            .models(ModelsRequest::new().account(grant.clone()), spawner, keeper)
+            .models(ModelsRequest::new().account(grant.clone()), spawner)
             .map_err(|e| format!("{}: models: {}", info.id, why(&e)))?;
         ensure!(
             watch.destroyed() && !format!("{listing:?}").contains(CANARY),
             "{}: models kept an object it was handed, or answered a credential",
             info.id
         );
-        let (watch, spawner, keeper) = host::spawner_in(Some(&dir));
+        let (watch, spawner, _) = host::spawner_in(Some(&dir));
         let report = harness
-            .usage(UsageQuery::new().account(grant.clone()), spawner, keeper)
+            .usage(UsageQuery::new().account(grant.clone()), spawner)
             .map_err(|e| format!("{}: usage: {}", info.id, why(&e)))?;
         ensure!(
             watch.destroyed() && !format!("{report:?}").contains(CANARY),
@@ -589,12 +557,11 @@ fn applies(contract: &Contract, harness: &dyn AcpHarness, place: &Place) -> Outc
         );
         if contract.imports {
             let session = fresh_uuid();
-            let (watch, spawner, keeper) = host::spawner_in(Some(&dir));
+            let (watch, spawner, _) = host::spawner_in(Some(&dir));
             let imported = harness
                 .import_session(
                     SessionImport::new(session.as_str(), &place.root, "").account(grant.clone()),
                     spawner,
-                    keeper,
                 )
                 .map_err(|e| format!("{}: import_session: {}", info.id, why(&e)))?;
             ensure!(
@@ -602,12 +569,11 @@ fn applies(contract: &Contract, harness: &dyn AcpHarness, place: &Place) -> Outc
                 "{}: import_session kept an object it was handed, or answered a credential",
                 info.id
             );
-            let (watch, spawner, keeper) = host::spawner_in(Some(&dir));
+            let (watch, spawner, _) = host::spawner_in(Some(&dir));
             let exported = harness
                 .export_session(
                     SessionExport::new(session.as_str(), &place.root).account(grant.clone()),
                     spawner,
-                    keeper,
                 )
                 .map_err(|e| format!("{}: export_session: {}", info.id, why(&e)))?;
             ensure!(
@@ -658,32 +624,20 @@ fn refuses(contract: &Contract, harness: &dyn AcpHarness, place: &Place) -> Outc
         Some(strange.reference()),
     );
     refused("refusal", answer.err())?;
-    let (watch, spawner, keeper) = host::spawner();
-    let answer = harness.models(
-        ModelsRequest::new().account(strange.clone()),
-        spawner,
-        keeper,
-    );
+    let (watch, spawner, _) = host::spawner();
+    let answer = harness.models(ModelsRequest::new().account(strange.clone()), spawner);
     ensure!(
         watch.destroyed(),
         "models refused with an object it was handed alive"
     );
     refused("models", answer.err())?;
-    let (watch, spawner, keeper) = host::spawner();
-    let answer = harness.usage(UsageQuery::new().account(strange.clone()), spawner, keeper);
+    let (watch, spawner, _) = host::spawner();
+    let answer = harness.usage(UsageQuery::new().account(strange.clone()), spawner);
     ensure!(
         watch.destroyed(),
         "usage refused with an object it was handed alive"
     );
     refused("usage", answer.err())?;
-    let (watch, spawner, _keeper) = host::spawner();
-    let answer = harness.renew(RenewRequest::new(strange.clone()), spawner);
-    ensure!(
-        watch.spawner_destroyed(),
-        "renew refused with the spawner it was handed alive"
-    );
-    refused("renew", answer.err())?;
-
     // An id that is not an id.
     for id in [
         String::new(),
@@ -806,28 +760,6 @@ fn refuses(contract: &Contract, harness: &dyn AcpHarness, place: &Place) -> Outc
     Ok(())
 }
 
-/// The relative path of the file a provider wrote with a canary in it, and the file's directory.
-pub(super) fn credential_file(writes: &[(String, Vec<u8>)]) -> Option<String> {
-    writes
-        .iter()
-        .find(|(_, bytes)| String::from_utf8_lossy(bytes).contains(CANARY))
-        .map(|(path, _)| path.clone())
-}
-
-/// What the keepers of the `models` calls made so far have heard; the connection's own keeper is
-/// read in full each time.
-#[derive(Default)]
-struct Heard {
-    renewed: Vec<crate::AccountRenewal>,
-    lost: Vec<crate::AccountLoss>,
-}
-
-/// What every keeper heard, each event once by (account, sequence), as a host deduplicates.
-struct Events {
-    renewed: Vec<crate::AccountRenewal>,
-    lost: Vec<crate::AccountLoss>,
-}
-
 pub(super) fn distinct<T: Clone>(
     items: impl Iterator<Item = T>,
     key: impl Fn(&T) -> (String, u64),
@@ -842,356 +774,6 @@ pub(super) fn distinct<T: Clone>(
         }
     }
     kept
-}
-
-/// Asks the provider, with `models` calls on the same account, until `done` holds of how many
-/// distinct renewals and losses every keeper heard in all, or `patience` passes.
-fn polling(
-    harness: &dyn AcpHarness,
-    grant: &AccountGrant,
-    dir: &Path,
-    conn: &super::host::Conn,
-    heard: &mut Heard,
-    patience: Duration,
-    mut done: impl FnMut(usize, usize) -> bool,
-) -> Result<Events, String> {
-    let deadline = Instant::now() + patience;
-    loop {
-        let (watch, spawner, keeper) = host::spawner_in(Some(dir));
-        harness
-            .models(ModelsRequest::new().account(grant.clone()), spawner, keeper)
-            .map_err(|e| format!("models: {}", why(&e)))?;
-        heard.renewed.extend(watch.renewed());
-        heard.lost.extend(watch.lost());
-        let held = conn.watch();
-        let events = Events {
-            renewed: distinct(heard.renewed.iter().cloned().chain(held.renewed()), |e| {
-                (e.id.clone(), e.sequence)
-            }),
-            lost: distinct(heard.lost.iter().cloned().chain(held.lost()), |e| {
-                (e.id.clone(), e.sequence)
-            }),
-        };
-        if done(events.renewed.len(), events.lost.len()) || Instant::now() >= deadline {
-            return Ok(events);
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-}
-
-/// How many times the connection's own keeper heard the renewal with `sequence`.
-fn conn_renewals(conn: &super::host::Conn, sequence: u64) -> usize {
-    conn.watch()
-        .renewed()
-        .iter()
-        .filter(|e| e.sequence == sequence)
-        .count()
-}
-
-fn conn_losses(conn: &super::host::Conn, sequence: u64) -> usize {
-    conn.watch()
-        .lost()
-        .iter()
-        .filter(|e| e.sequence == sequence)
-        .count()
-}
-
-fn keeps_watch(contract: &Contract, harness: &dyn AcpHarness, place: &Place) -> Outcome {
-    let catalog = catalog_of(harness)?;
-    for info in kinds(contract, &catalog)? {
-        // A kind that keeps a rotating login in a directory keeps it in a file the suite can see.
-        if !(info.state_dir && info.rotates) {
-            continue;
-        }
-        for scenario in ["rotated twice then blanked", "deleted"] {
-            let label = format!("{} ({scenario})", info.id);
-            let dir = place.scratch()?;
-            let grant = grant_of(&info, Some(&dir), 1)?;
-            let (conn, _) = running(contract, harness, place, grant.clone(), &dir)
-                .map_err(|e| format!("{label}: {e}"))?;
-            let writes = conn.watch().writes();
-            let Some(path) = credential_file(&writes) else {
-                return Err(format!(
-                    "{label}: a rotating kind that needs a directory wrote no file holding its \
-                     credential there, so nothing shows that it watches the login"
-                ));
-            };
-            let file = dir.join(&path);
-            let mut heard = Heard::default();
-            let original = std::fs::read_to_string(&file)
-                .map_err(|e| format!("{label}: the file {path} cannot be read: {e}"))?;
-            if scenario == "deleted" {
-                std::fs::remove_file(&file).map_err(|e| format!("{label}: {e}"))?;
-                let events = polling(
-                    harness,
-                    &grant,
-                    &dir,
-                    &conn,
-                    &mut heard,
-                    PATIENCE,
-                    |_, lost| lost >= 1,
-                )?;
-                ensure!(
-                    events.renewed.is_empty(),
-                    "{label}: a deleted file was reported renewed"
-                );
-                ensure!(
-                    events.lost.len() == 1,
-                    "{label}: {} losses reported, not one: {:?}",
-                    events.lost.len(),
-                    events.lost
-                );
-                let loss = &events.lost[0];
-                ensure!(
-                    loss.id == grant.id
-                        && loss.sequence >= 1
-                        && !loss.reason.is_empty()
-                        && !loss.reason.contains(CANARY),
-                    "{label}: the loss is {loss:?}"
-                );
-                std::thread::sleep(GRACE);
-                let again = polling(harness, &grant, &dir, &conn, &mut heard, GRACE, |_, _| true)?;
-                ensure!(
-                    again.renewed.is_empty() && again.lost.len() == 1,
-                    "{label}: a deleted file was reported again ({} renewed, {} lost)",
-                    again.renewed.len(),
-                    again.lost.len()
-                );
-                ensure!(
-                    conn_losses(&conn, loss.sequence) == 1,
-                    "{label}: the connection's own keeper did not hear the loss once"
-                );
-            } else {
-                let rotated = original.replace(CANARY, ROTATED);
-                ensure!(
-                    rotated != original,
-                    "{label}: the file does not hold the credential"
-                );
-                std::fs::write(&file, &rotated).map_err(|e| format!("{label}: {e}"))?;
-                let first = polling(
-                    harness,
-                    &grant,
-                    &dir,
-                    &conn,
-                    &mut heard,
-                    PATIENCE,
-                    |renewed, _| renewed >= 1,
-                )?;
-                ensure!(
-                    first.lost.is_empty(),
-                    "{label}: a rotated file was reported lost"
-                );
-                ensure!(
-                    first.renewed.len() == 1,
-                    "{label}: {} renewals reported, not one",
-                    first.renewed.len()
-                );
-                let one = &first.renewed[0];
-                ensure!(
-                    one.id == grant.id && one.from_revision == grant.revision && one.sequence >= 1,
-                    "{label}: the renewal is for {} at revision {}, sequence {}",
-                    one.id,
-                    one.from_revision,
-                    one.sequence
-                );
-                let held = one.credentials.expose();
-                ensure!(
-                    held.iter().any(|(_, value)| value.contains(ROTATED))
-                        && !held.iter().any(|(_, value)| value.contains(CANARY)),
-                    "{label}: the renewal does not hold the rotated credential alone"
-                );
-                std::thread::sleep(GRACE);
-                let settled =
-                    polling(harness, &grant, &dir, &conn, &mut heard, GRACE, |_, _| true)?;
-                ensure!(
-                    settled.renewed.len() == 1,
-                    "{label}: the rotation was reported as {} events",
-                    settled.renewed.len()
-                );
-                // Every live keeper hears it, the connection's whichever call noticed it, and once.
-                ensure!(
-                    conn_renewals(&conn, one.sequence) == 1,
-                    "{label}: the connection's own keeper heard the rotation {} times, not once",
-                    conn_renewals(&conn, one.sequence)
-                );
-
-                // A second rotation, chained on the first: a later sequence.
-                let again = rotated.replace(ROTATED, SECOND);
-                std::fs::write(&file, &again).map_err(|e| format!("{label}: {e}"))?;
-                let second = polling(
-                    harness,
-                    &grant,
-                    &dir,
-                    &conn,
-                    &mut heard,
-                    PATIENCE,
-                    |renewed, _| renewed >= 2,
-                )?;
-                ensure!(
-                    second.renewed.len() == 2 && second.lost.is_empty(),
-                    "{label}: {} renewals and {} losses after the second rotation",
-                    second.renewed.len(),
-                    second.lost.len()
-                );
-                let two = second
-                    .renewed
-                    .iter()
-                    .find(|e| e.sequence != one.sequence)
-                    .ok_or("the second rotation has the first one's sequence")?;
-                ensure!(
-                    two.sequence > one.sequence
-                        && two
-                            .credentials
-                            .expose()
-                            .iter()
-                            .any(|(_, value)| value.contains(SECOND)),
-                    "{label}: the second rotation has sequence {} after {} and holds {:?}",
-                    two.sequence,
-                    one.sequence,
-                    two.credentials
-                );
-
-                // Blanked: lost, never renewed, and later than both.
-                std::fs::write(&file, "").map_err(|e| format!("{label}: {e}"))?;
-                let blank = polling(
-                    harness,
-                    &grant,
-                    &dir,
-                    &conn,
-                    &mut heard,
-                    PATIENCE,
-                    |_, lost| lost >= 1,
-                )?;
-                ensure!(
-                    blank.renewed.len() == 2,
-                    "{label}: a blanked file was reported renewed"
-                );
-                ensure!(
-                    blank.lost.len() == 1,
-                    "{label}: {} losses reported, not one: {:?}",
-                    blank.lost.len(),
-                    blank.lost
-                );
-                let loss = &blank.lost[0];
-                ensure!(
-                    loss.id == grant.id
-                        && !loss.reason.contains(CANARY)
-                        && loss.sequence > two.sequence,
-                    "{label}: the loss is {loss:?}, after sequence {}",
-                    two.sequence
-                );
-                ensure!(
-                    conn_losses(&conn, loss.sequence) == 1,
-                    "{label}: the connection's own keeper did not hear the loss once"
-                );
-            }
-            ensure!(
-                !conn.watch().traffic().contains(ROTATED),
-                "{label}: a credential came back in the connection's messages"
-            );
-            conn.close_with(OK).map_err(|e| format!("{label}: {e}"))?;
-        }
-    }
-    Ok(())
-}
-
-fn renews(contract: &Contract, harness: &dyn AcpHarness, place: &Place) -> Outcome {
-    let catalog = catalog_of(harness)?;
-    for info in kinds(contract, &catalog)? {
-        let dir = place.scratch()?;
-        let grant = grant_of(&info, Some(&dir), 1)?;
-        // A connection on the account first, so the files it keeps are where renew looks.
-        let held = if info.renews && info.state_dir {
-            Some(
-                running(contract, harness, place, grant.clone(), &dir)
-                    .map_err(|e| format!("{}: {e}", info.id))?
-                    .0,
-            )
-        } else {
-            None
-        };
-        let renew = |grant: &AccountGrant| {
-            let (watch, spawner, keeper) = host::spawner_in(Some(&dir));
-            drop(keeper);
-            let answer = harness.renew(RenewRequest::new(grant.clone()), spawner);
-            (watch.spawner_destroyed(), answer)
-        };
-        let (gone, answer) = renew(&grant);
-        ensure!(
-            gone,
-            "{}: renew answered with the spawner it was handed alive",
-            info.id
-        );
-        if info.renews {
-            let report = answer.map_err(|e| format!("{}: renew: {}", info.id, why(&e)))?;
-            ensure!(
-                report.credentials.is_some()
-                    || report
-                        .not_renewed_because
-                        .as_deref()
-                        .is_some_and(|reason| !reason.is_empty()),
-                "{}: renew changed nothing and gave no reason",
-                info.id
-            );
-            ensure!(
-                !report
-                    .not_renewed_because
-                    .as_deref()
-                    .unwrap_or_default()
-                    .contains(CANARY)
-                    && !report
-                        .expires_at
-                        .as_deref()
-                        .unwrap_or_default()
-                        .contains(CANARY),
-                "{}: renew's report carried a credential",
-                info.id
-            );
-            if let Some(conn) = held {
-                // A login the harness lost is GONE, whatever is left of its file: never a renewal
-                // made of nothing.
-                if let Some(path) = credential_file(&conn.watch().writes()) {
-                    let file = dir.join(&path);
-                    for (how, make) in [("blank", true), ("missing", false)] {
-                        if make {
-                            std::fs::write(&file, "").map_err(|e| format!("{}: {e}", info.id))?;
-                        } else {
-                            std::fs::remove_file(&file).map_err(|e| format!("{}: {e}", info.id))?;
-                        }
-                        let (_, lost) = renew(&grant);
-                        let error = lost.err().ok_or_else(|| {
-                            format!("{}: renew of a {how} login file answered a report", info.id)
-                        })?;
-                        ensure!(
-                            status(&error) == GONE
-                                && !error.message().is_empty()
-                                && !error.message().contains(CANARY),
-                            "{}: renew of a {how} login file refused with {}, not {GONE} and a reason",
-                            info.id,
-                            why(&error)
-                        );
-                    }
-                }
-                conn.close_with(OK)?;
-            }
-        } else {
-            let error = answer.err().ok_or_else(|| {
-                format!(
-                    "{}: renew answered where the catalog says it cannot",
-                    info.id
-                )
-            })?;
-            ensure!(
-                status(&error) == UNSUPPORTED
-                    && !error.message().is_empty()
-                    && !error.message().contains(CANARY),
-                "{}: renew refused with {}, not {UNSUPPORTED} and a reason",
-                info.id,
-                why(&error)
-            );
-        }
-    }
-    Ok(())
 }
 
 /// Inputs a method's schema accepts.
@@ -1226,8 +808,7 @@ pub(super) type LoginCall<'a> = dyn Fn(
     ) -> Result<LoginOutcome, ProviderError>
     + 'a;
 
-/// What a provider's sign-in is held to, whoever owns it: the harness's `login` or the account
-/// provider's.
+/// What an account provider's sign-in is held to.
 pub(super) struct SignIn<'a> {
     /// Whether the provider offers any login method; when not, `login` must refuse.
     pub offers: bool,
@@ -1239,60 +820,6 @@ pub(super) struct SignIn<'a> {
     pub login: &'a LoginCall<'a>,
     /// Holds what a sign-in that completed made to the provider's own further rules.
     pub made: &'a dyn Fn(&LoginMethodInfo, &LoginOutcome, &host::Watch) -> Outcome,
-}
-
-fn signs_in(contract: &Contract, harness: &dyn AcpHarness, place: &Place) -> Outcome {
-    let catalog = catalog_of(harness)?;
-    let login = |request, spawner, prompter| harness.login(request, spawner, prompter);
-    let made = |method: &LoginMethodInfo, outcome: &LoginOutcome, watch: &host::Watch| -> Outcome {
-        let label = method.id.as_str();
-        clears_all(&watch.specs(), &catalog)
-            .map_err(|e| format!("{label}: the sign-in's program: {e}"))?;
-        let made = catalog
-            .kind(&outcome.kind)
-            .ok_or_else(|| format!("{label}: it made a kind the catalog does not list"))?;
-        ensure!(
-            outcome.kind == method.produces,
-            "{label}: it produces {}, and made {}",
-            method.produces,
-            outcome.kind
-        );
-        ensure!(
-            made.id == HARNESS_LOGIN || !outcome.credentials.expose().is_empty(),
-            "{label}: it made an account with no credentials"
-        );
-        let shown = format!(
-            "{} {:?}",
-            to_json(&outcome.settings),
-            (&outcome.label, &outcome.expires_at)
-        );
-        ensure!(
-            !shown.contains(CANARY),
-            "{label}: the outcome's settings or label carry a secret"
-        );
-        let kept = place.scratch()?;
-        let mut account = AccountGrant::new("contract-signed-in", &outcome.kind)
-            .settings(outcome.settings.clone())
-            .credentials(outcome.credentials.expose().clone())
-            .revision(1);
-        if made.state_dir {
-            account = account.state_dir(text(&kept));
-        }
-        let (conn, _) = running(contract, harness, place, account, &kept)
-            .map_err(|e| format!("{label}: what it made does not start: {e}"))?;
-        conn.close_with(OK)?;
-        Ok(())
-    };
-    sign_in(
-        place,
-        &SignIn {
-            offers: contract.logins,
-            methods: &catalog.logins,
-            only: contract.account.as_deref(),
-            login: &login,
-            made: &made,
-        },
-    )
 }
 
 pub(super) fn sign_in(place: &Place, held: &SignIn<'_>) -> Outcome {

@@ -23,7 +23,7 @@ use coqui_acp_api::{
 use serde_json::{Value, json};
 
 use super::replay::{Mapping, Replays};
-use crate::account::{Hold, Watcher};
+use crate::account::Hold;
 use crate::provider::track;
 
 /// How many messages wait for the sink before a sender is held back.
@@ -43,10 +43,12 @@ pub(crate) struct Params {
     pub max_message_bytes: usize,
     pub max_requests: usize,
     pub roots: WorkingRoots,
-    /// The account's hold, and how often its files are looked at.
-    pub hold: Option<(Hold, Duration)>,
+    /// The account's hold, which the end of the connection lets go of.
+    pub hold: Option<Hold>,
     /// The sessions imported by replay, which this connection may open.
     pub replays: Arc<Replays>,
+    /// Whether the program keeps an imported session under an id made from its UUID (OpenCode does).
+    pub native_ids: bool,
 }
 
 #[derive(Default)]
@@ -412,7 +414,7 @@ fn drain_errors(shared: &Shared) {
 /// What ending the connection takes, which the delivering thread owns.
 struct Ending {
     spawner: Arc<Object<dyn ProcessSpawner>>,
-    hold: Option<(Hold, Option<Watcher>)>,
+    hold: Option<Hold>,
 }
 
 enum Step {
@@ -522,10 +524,7 @@ fn deliver(mut sink: Object<dyn ChannelSink>, shared: &Shared, ending: Ending) {
         .unwrap_or_else(PoisonError::into_inner)
         .restore_all(&shared.replays);
     let Ending { spawner, hold } = ending;
-    if let Some((hold, watcher)) = hold {
-        if let Some(watcher) = watcher {
-            watcher.stop();
-        }
+    if let Some(hold) = hold {
         hold.finish();
     }
     let (status, reason) = {
@@ -578,11 +577,12 @@ pub(crate) fn open(params: Params) -> Result<Object<dyn Channel>, ProviderError>
         roots,
         hold,
         replays,
+        native_ids,
     } = params;
     let process = match spawner.spawn(spec) {
         Ok(process) => Arc::new(process),
         Err(error) => {
-            if let Some((hold, _)) = hold {
+            if let Some(hold) = hold {
                 hold.finish();
             }
             return Err(error);
@@ -597,15 +597,13 @@ pub(crate) fn open(params: Params) -> Result<Object<dyn Channel>, ProviderError>
         max_message_bytes,
         max_requests,
         replays,
-        mapping: Mutex::new(Mapping::default()),
-    });
-    let ending = Ending {
-        spawner,
-        hold: hold.map(|(hold, poll)| {
-            let watcher = (!poll.is_zero()).then(|| hold.watch(poll));
-            (hold, watcher)
+        mapping: Mutex::new(if native_ids {
+            Mapping::native()
+        } else {
+            Mapping::default()
         }),
-    };
+    });
+    let ending = Ending { spawner, hold };
     let started = (|| {
         let reading = Arc::clone(&shared);
         spawn_thread("coqui-acp-stdio-read", move || read_output(&reading))?;

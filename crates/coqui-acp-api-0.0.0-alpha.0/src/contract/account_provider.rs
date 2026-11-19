@@ -44,6 +44,7 @@ pub struct AccountContract {
     name: String,
     logins: bool,
     kind: Option<String>,
+    program: bool,
 }
 
 impl AccountContract {
@@ -53,6 +54,7 @@ impl AccountContract {
             name: name.into(),
             logins: true,
             kind: None,
+            program: false,
         }
     }
 
@@ -70,13 +72,21 @@ impl AccountContract {
         self
     }
 
+    /// Whether the provider runs the account's own program (a CLI it signs in with), which the suite's spawner then
+    /// starts for real, in a home of the suite's (the default is a spawner that starts nothing). The provider's settings
+    /// name a stand-in for the program that behaves as the account's own does for the commands the provider runs.
+    pub const fn program(mut self, program: bool) -> Self {
+        self.program = program;
+        self
+    }
+
     /// Runs every check against `provider`.
     ///
     /// # Errors
     ///
     /// Every rule it broke.
     pub fn run(&self, provider: &dyn AccountProvider) -> Result<(), Failures> {
-        let _running = host::Running::on(false);
+        let _running = host::Running::on(self.program);
         let failures: Vec<Failure> = all(self, provider)
             .into_iter()
             .filter_map(|(check, outcome)| outcome.err().map(|message| Failure { check, message }))
@@ -200,17 +210,14 @@ fn signs_in(contract: &AccountContract, provider: &dyn AccountProvider, place: &
     let login = |request, spawner, prompter| provider.login(request, spawner, prompter);
     let made = |method: &LoginMethodInfo, outcome: &LoginOutcome, watch: &host::Watch| -> Outcome {
         let label = method.id.as_str();
+        // A variable set to it is the one place a credential may go to a program: the program that checks a key reads it
+        // there. A command line is read by every process on the machine.
         ensure!(
-            watch.specs().iter().all(|spec| {
-                !format!("{:?}", spec.args).contains(CANARY)
-                    && !spec
-                        .environment
-                        .expose()
-                        .iter()
-                        .any(|(_, v)| v.contains(CANARY))
-            }),
-            "{label}: the sign-in's program was handed a secret the person typed on its command line or in its \
-             environment"
+            watch
+                .specs()
+                .iter()
+                .all(|spec| !format!("{:?}", spec.args).contains(CANARY)),
+            "{label}: the sign-in's program was handed a secret the person typed on its command line"
         );
         ensure!(
             offer.kind(&outcome.kind).is_some(),
@@ -260,16 +267,54 @@ struct Made {
     by_login: bool,
 }
 
-fn holding(writes: &[(String, Vec<u8>)], credentials: &Credentials) -> Option<String> {
+/// The file under `dir` that holds a credential, by its path from `dir` with `/` between the parts: looked for in the
+/// directory and in the folders below it, to a depth of three, where a program keeps its own (`opencode/auth.json`).
+fn found_in(
+    dir: &std::path::Path,
+    from: &str,
+    depth: usize,
+    holds: &dyn Fn(&[u8]) -> bool,
+) -> Option<String> {
+    let mut folders = Vec::new();
+    for entry in std::fs::read_dir(dir.join(from)).ok()?.flatten() {
+        let name = entry.file_name().to_str()?.to_string();
+        let path = if from.is_empty() {
+            name
+        } else {
+            format!("{from}/{name}")
+        };
+        if entry.file_type().ok()?.is_dir() {
+            folders.push(path);
+        } else if std::fs::read(entry.path()).is_ok_and(|bytes| holds(&bytes)) {
+            return Some(path);
+        }
+    }
+    if depth == 0 {
+        return None;
+    }
+    folders
+        .iter()
+        .find_map(|folder| found_in(dir, folder, depth - 1, holds))
+}
+
+/// The file of the account's directory that holds a credential: one the sign-in wrote through the spawner, or, for a
+/// sign-in whose own program writes it, a file of the directory itself or of a folder in it.
+fn holding(
+    writes: &[(String, Vec<u8>)],
+    credentials: &Credentials,
+    dir: &std::path::Path,
+) -> Option<String> {
+    let holds = |bytes: &[u8]| {
+        let content = String::from_utf8_lossy(bytes);
+        credentials
+            .iter()
+            .any(|(_, value)| !value.is_empty() && content.contains(value.as_str()))
+    };
     writes
         .iter()
-        .find(|(_, bytes)| {
-            let content = String::from_utf8_lossy(bytes);
-            credentials
-                .iter()
-                .any(|(_, value)| !value.is_empty() && content.contains(value.as_str()))
-        })
+        .find(|(_, bytes)| holds(bytes))
         .map(|(path, _)| path.clone())
+        .or_else(|| found_in(dir, "", 3, &holds))
 }
 
 /// A new account of `info`.
@@ -313,11 +358,12 @@ fn make(
     if info.state_dir {
         grant = grant.state_dir(text(&dir));
     }
+    let file = holding(&watch.writes(), outcome.credentials.expose(), &dir);
     Ok(Made {
         info: info.clone(),
         grant,
         dir,
-        file: holding(&watch.writes(), outcome.credentials.expose()),
+        file,
         by_login: true,
     })
 }

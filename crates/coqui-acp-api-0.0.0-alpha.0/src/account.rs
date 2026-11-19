@@ -147,7 +147,7 @@ fn empty_settings() -> Value {
 }
 
 /// The account a call runs on, with its credentials: what a host hands every call that runs the
-/// harness (`start`, `import_session`, `export_session`, `models`, `usage`, `renew`).
+/// harness (`start`, `import_session`, `export_session`, `models`, `usage`).
 ///
 /// A provider that applies it (sets variables, writes files into `state_dir`) clears every name
 /// in its catalog's `credential_variables` first, then sets the chosen kind's, and shows no
@@ -335,6 +335,14 @@ pub struct AccountCatalog {
     /// chosen kind's.
     #[map(default)]
     pub credential_variables: Vec<String>,
+    /// The part of `credential_variables` that is itself a credential: a key, a token, a secret, or what names
+    /// where one is kept (a configuration or credentials file, a profile). Not an endpoint, a switch that picks a
+    /// cloud provider, a region or a project, which `credential_variables` also lists because applying an account
+    /// clears them. A host that refuses a variable because it would stand in for the account's credential reads this
+    /// and leaves the endpoints and switches to the person. A catalog that does not say lists none; every name here
+    /// is also in `credential_variables`.
+    #[map(default)]
+    pub secret_variables: Vec<String>,
     /// The standards the harness starts on, most preferred first, and how each is applied. An
     /// account whose `kind` this catalog does not list is applied as the first of these that it
     /// provides ([`accepted_by`](Self::accepted_by)).
@@ -350,6 +358,7 @@ impl AccountCatalog {
             kinds: alloc::vec![AccountKindInfo::harness_login()],
             logins: Vec::new(),
             credential_variables: Vec::new(),
+            secret_variables: Vec::new(),
             accepts: Vec::new(),
         }
     }
@@ -396,7 +405,7 @@ pub struct AccountKindInfo {
     /// The kind needs a private directory where the harness runs ([`AccountGrant::state_dir`]).
     #[map(default)]
     pub state_dir: bool,
-    /// [`renew`](crate::AcpHarness::renew) can renew it with no model turn.
+    /// [`renew`](crate::AccountProvider::renew) can renew it with no model turn.
     #[map(default)]
     pub renews: bool,
     /// What using it weakens, shown when the account is added and logged at start.
@@ -708,7 +717,7 @@ impl LoginMethodInfo {
     }
 }
 
-/// A sign-in to run, for [`AcpHarness::login`](crate::AcpHarness::login).
+/// A sign-in to run, for [`AccountProvider::login`](crate::AccountProvider::login).
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq)]
 #[map(crate = ::guatiao, deny_unknown_fields)]
 #[non_exhaustive]
@@ -753,7 +762,7 @@ impl LoginRequest {
     }
 }
 
-/// The account a sign-in made, from [`AcpHarness::login`](crate::AcpHarness::login). The host
+/// The account a sign-in made, from [`AccountProvider::login`](crate::AccountProvider::login). The host
 /// stores it as an account of `kind`.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq)]
 #[map(crate = ::guatiao)]
@@ -791,7 +800,7 @@ impl LoginOutcome {
     }
 }
 
-/// An account to renew, for [`AcpHarness::renew`](crate::AcpHarness::renew).
+/// An account to renew, for [`AccountProvider::renew`](crate::AccountProvider::renew).
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq)]
 #[map(crate = ::guatiao, deny_unknown_fields)]
 #[non_exhaustive]
@@ -808,7 +817,7 @@ impl RenewRequest {
     }
 }
 
-/// What a renewal did, from [`AcpHarness::renew`](crate::AcpHarness::renew).
+/// What a renewal did, from [`AccountProvider::renew`](crate::AccountProvider::renew).
 #[derive(ToValue, FromValue, Schema, Debug, Clone, Default, PartialEq)]
 #[map(crate = ::guatiao)]
 #[non_exhaustive]
@@ -879,7 +888,7 @@ impl ModelsRequest {
     }
 }
 
-/// Credentials a harness renewed, reported through [`AccountKeeper::renewed`].
+/// Credentials an account provider found renewed, reported through [`AccountKeeper::renewed`].
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq)]
 #[map(crate = ::guatiao)]
 #[non_exhaustive]
@@ -918,7 +927,7 @@ impl AccountRenewal {
     }
 }
 
-/// A login a harness lost, reported through [`AccountKeeper::lost`].
+/// A login an account provider found lost, reported through [`AccountKeeper::lost`].
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::guatiao)]
 #[non_exhaustive]
@@ -943,23 +952,19 @@ impl AccountLoss {
     }
 }
 
-/// Where a provider reports what happens to an account's credentials behind the host's back. The
-/// host implements it and hands one to every call that runs the harness; the provider owns it from
-/// then on, and destroys it by the time it calls the sink's `closed` (or when the call returns).
+/// Where an account provider reports what happens to an account's credentials behind the host's
+/// back. The host implements it and hands one to [`watch`](crate::AccountProvider::watch) and to
+/// [`usage`](crate::AccountProvider::usage); the provider owns it from then on, and destroys it when
+/// the watch stops or the call returns.
 ///
-/// **Every live keeper of the account hears each event**, not the first to ask: a connection's
-/// keeper hears a rotation a `models` call noticed, and the other way round. An event carries a
+/// **Every live keeper of the account hears each event**, not the first to ask. An event carries a
 /// sequence the provider counts per account; **the host deduplicates by (account, sequence)** and
 /// orders chained rotations by it, so a keeper that hears an event twice, or two keepers of one
 /// host that hear it once each, store it once.
 ///
-/// A provider of a kind with files watches them through the spawner while the connection runs
-/// (every `renew_poll_ms`, 30000 by default) and after each import, export, models call and close,
-/// and reports a changed file here. A file deleted or blanked is [`lost`](Self::lost), never
-/// [`renewed`](Self::renewed).
-///
-/// An [`AccountProvider`](crate::AccountProvider) is handed one by `watch` and by `usage`, and tells
-/// it the same events of the accounts it keeps.
+/// A watch looks at an account's files through the spawner (every `renew_poll_ms`, 30000 by
+/// default) and reports a changed file here. A file deleted or blanked is [`lost`](Self::lost),
+/// never [`renewed`](Self::renewed).
 #[guatiao::kind(object, name = "account_keeper")]
 pub trait AccountKeeper: Send + Sync {
     /// The harness renewed the credentials. The host stores them only when they are newer.
@@ -1044,7 +1049,7 @@ impl LoginAnswer {
 }
 
 /// How a login relays its steps to the person. The host implements it, hands one to
-/// [`login`](crate::AcpHarness::login) and renders each call; the provider owns it from then on and
+/// [`login`](crate::AccountProvider::login) and renders each call; the provider owns it from then on and
 /// destroys it when the login ends. `ask` goes sealed from the person's frontend to where the
 /// provider runs, never through a model, a channel the agent reads or a log.
 ///

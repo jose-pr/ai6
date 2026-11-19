@@ -45,12 +45,14 @@ const URL_SETTINGS: &[Setting] = &[
         required: false,
         url: true,
         choices: &[],
+        suggestions: &[],
     },
     Setting {
         name: "xai_api_base_url",
         required: false,
         url: true,
         choices: &[],
+        suggestions: &[],
     },
 ];
 
@@ -60,18 +62,21 @@ const OIDC_SETTINGS: &[Setting] = &[
         required: true,
         url: true,
         choices: &[],
+        suggestions: &[],
     },
     Setting {
         name: "client_id",
         required: true,
         url: false,
         choices: &[],
+        suggestions: &[],
     },
     Setting {
         name: "proxy_base_url",
         required: false,
         url: true,
         choices: &[],
+        suggestions: &[],
     },
 ];
 
@@ -425,7 +430,7 @@ fn api_key(ctx: &Ctx<'_>, program: &str, dir: &str) -> Result<LoginOutcome, Prov
 ///
 /// # Errors
 ///
-/// As [`AcpHarness::login`](coqui_acp_api::AcpHarness::login).
+/// As [`AccountProvider::login`](coqui_acp_api::AccountProvider::login).
 pub fn sign_in(
     program: alloc::string::String,
     request: LoginRequest,

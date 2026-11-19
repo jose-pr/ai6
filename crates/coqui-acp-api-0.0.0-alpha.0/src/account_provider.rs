@@ -185,6 +185,21 @@ impl AccountUsage {
         }
     }
 
+    /// The plan usage a [`UsageReport`] holds: its allowances and windows. What a report keeps of a session (`spend`) or
+    /// of a refusal a run met (`limit`) is no account's, and is left out.
+    #[must_use]
+    pub fn from_report(report: UsageReport) -> Self {
+        Self {
+            supported: report.supported,
+            unsupported_because: report.unsupported_because,
+            sources: report.sources,
+            account: report.account,
+            revision: report.revision,
+            observed_at: report.observed_at,
+            buckets: report.buckets,
+        }
+    }
+
     /// How much of `bucket` is used, in thousandths and at most 1000, as
     /// [`UsageReport::fraction_permille`] reads it.
     #[must_use]

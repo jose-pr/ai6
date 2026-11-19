@@ -16,6 +16,10 @@
 //!   copy (so a loss, once reported, is not reported again by the next hold);
 //! - there with a record and another hold on it: kept (it may have been renewed since), unless the grant is newer.
 //!
+//! A hold made by [`Accounts::observe`] places nothing: it reads each file as it is, takes the grant's copy (or the
+//! login last recorded) as what the host holds, tells a login that differs as `renewed` and one that is missing, blank
+//! or another account's as `lost` (once, at once when it begins), and never writes.
+//!
 //! A change is read twice, a moment apart, and reported only when both reads agree: a file the harness is still
 //! writing is not a renewal, and one it has just truncated is not a loss. A login that is missing or blank is `lost`,
 //! once, and comes back as a renewal when a login appears again. A login that names another account than the
@@ -45,7 +49,8 @@ use base64::Engine;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{Secret, Status, Wipe};
 use coqui_acp_api::{
-    AccountKeeper, AccountLoss, AccountRenewal, Credentials, FileInfo, ProcessSpawner, SecretBytes,
+    AccountKeeper, AccountLoss, AccountRenewal, AccountWatch, Credentials, FileInfo,
+    ProcessSpawner, SecretBytes,
 };
 
 /// The most a credential file may hold, in bytes.
@@ -127,6 +132,12 @@ impl Files {
     #[must_use]
     pub const fn new(spawner: Arc<Object<dyn ProcessSpawner>>) -> Self {
         Self { spawner }
+    }
+
+    /// The spawner these files are served by, for a call that also starts a program through it.
+    #[must_use]
+    pub const fn spawner(&self) -> &Arc<Object<dyn ProcessSpawner>> {
+        &self.spawner
     }
 
     /// Whether the spawner serves files at all.
@@ -482,6 +493,58 @@ impl Accounts {
         credentials: &Credentials,
         watched: Vec<Watched>,
     ) -> Result<Hold, ProviderError> {
+        self.open(
+            files,
+            keeper,
+            id,
+            dir,
+            revision,
+            credentials,
+            watched,
+            false,
+        )
+    }
+
+    /// Holds the account `id` to look at its files and write none: the files are read as they are and compared with
+    /// the grant's copy, so a login that is missing, blank or another account's is `lost` (told at once to `keeper`
+    /// and to every other keeper live for the account) and one that differs from the grant's is `renewed`. This is
+    /// how an account provider watches an account whose harness placed the files: it never puts the grant's copy back.
+    ///
+    /// # Errors
+    ///
+    /// As [`hold`](Self::hold).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one call carries everything a grant does"
+    )]
+    pub fn observe(
+        self: &Arc<Self>,
+        files: Files,
+        keeper: Option<Object<dyn AccountKeeper>>,
+        id: &str,
+        dir: &str,
+        revision: u64,
+        credentials: &Credentials,
+        watched: Vec<Watched>,
+    ) -> Result<Hold, ProviderError> {
+        self.open(files, keeper, id, dir, revision, credentials, watched, true)
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one call carries everything a grant does"
+    )]
+    fn open(
+        self: &Arc<Self>,
+        files: Files,
+        keeper: Option<Object<dyn AccountKeeper>>,
+        id: &str,
+        dir: &str,
+        revision: u64,
+        credentials: &Credentials,
+        watched: Vec<Watched>,
+        observing: bool,
+    ) -> Result<Hold, ProviderError> {
         for file in &watched {
             if credentials.get(&file.key).is_none() {
                 return Err(ProviderError::new(
@@ -516,7 +579,11 @@ impl Accounts {
             done: AtomicBool::new(false),
         }));
         // A failure leaves the hold to drop, which lets go of everything it took.
-        hold.0.place()?;
+        if observing {
+            hold.0.observe()?;
+        } else {
+            hold.0.place()?;
+        }
         Ok(hold)
     }
 
@@ -842,6 +909,71 @@ impl Inner {
         Ok(())
     }
 
+    /// The first look of a hold that writes nothing: what the files hold against the grant's copy, or against what the
+    /// account was last recorded as.
+    fn observe(&self) -> Result<(), ProviderError> {
+        let files = self.files()?;
+        let gate = self.accounts.gate(&self.id);
+        let serial = lock(&gate);
+        let mut pending = Vec::new();
+        for file in &self.watched {
+            let grant = self.granted(file);
+            let key = self.key(file);
+            let recorded = lock(&self.accounts.entries)
+                .get(&self.id)
+                .and_then(|entry| entry.files.get(&key))
+                .map(|r| r.fingerprint);
+            // The login the account was last known by: the recorded one, or the grant's copy.
+            let baseline = recorded.unwrap_or_else(|| Some(fingerprint(&grant)));
+            let now = self.settled(&files, file, baseline)?;
+            let (print, event) = match now {
+                // The writer was not done: the next look settles it.
+                None => (baseline, None),
+                Some(Now::Has(text)) => {
+                    let print = fingerprint(&text);
+                    let event = (baseline != Some(print))
+                        .then(|| Event::Renewed(self.whole(file, &text), (file.expires)(&text)));
+                    (Some(print), event)
+                }
+                Some(lost) => {
+                    let reason = if matches!(lost, Now::Foreign) {
+                        tracing::warn!(
+                            account = %self.id,
+                            path = %file.path,
+                            reason = "the login is for another account than the grant's",
+                            "a login is refused"
+                        );
+                        format!("the login in {} is for another account", file.path)
+                    } else {
+                        lost_reason(file)
+                    };
+                    (None, baseline.map(|_| Event::Lost(reason)))
+                }
+            };
+            {
+                let mut entries = lock(&self.accounts.entries);
+                let entry = entries.entry(self.id.clone()).or_default();
+                let record = entry.files.entry(key).or_insert(Record {
+                    fingerprint: None,
+                    revision: self.revision,
+                    live: 0,
+                });
+                record.fingerprint = print;
+                record.live += 1;
+                record.revision = record.revision.max(self.revision);
+            }
+            if let Some(event) = event {
+                pending.push(self.accounts.assign(&self.id, event));
+            }
+        }
+        self.placed.store(true, Ordering::SeqCst);
+        drop(serial);
+        for one in pending {
+            Accounts::deliver(&self.id, self.revision, one);
+        }
+        Ok(())
+    }
+
     fn look(&self) -> Result<Looked, ProviderError> {
         let files = self.files()?;
         let gate = self.accounts.gate(&self.id);
@@ -1087,6 +1219,53 @@ impl Watcher {
 }
 
 impl Drop for Watcher {
+    fn drop(&mut self) {
+        self.end();
+    }
+}
+
+/// The watch an account provider hands the host: a [`Hold`] looked at every poll until it is stopped or dropped.
+#[derive(Debug)]
+pub struct Watching {
+    hold: Hold,
+    watcher: Mutex<Option<Watcher>>,
+    ended: AtomicBool,
+}
+
+impl Watching {
+    /// Watches `hold` every `poll`; a `poll` of zero looks only when the watch begins and ends.
+    #[must_use]
+    pub fn begin(hold: Hold, poll: Duration) -> Object<dyn AccountWatch> {
+        let watcher = (!poll.is_zero()).then(|| hold.watch(poll));
+        Self {
+            hold,
+            watcher: Mutex::new(watcher),
+            ended: AtomicBool::new(false),
+        }
+        .into_object()
+    }
+
+    fn end(&self) {
+        if self.ended.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let watcher = lock(&self.watcher).take();
+        if let Some(watcher) = watcher {
+            watcher.stop();
+        }
+        // The last look, then the keeper and the spawner are let go of.
+        self.hold.finish();
+    }
+}
+
+impl AccountWatch for Watching {
+    fn stop(&self) -> Result<(), ProviderError> {
+        self.end();
+        Ok(())
+    }
+}
+
+impl Drop for Watching {
     fn drop(&mut self) {
         self.end();
     }

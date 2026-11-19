@@ -35,7 +35,8 @@ pub const DEFAULT_ENDPOINT: &str = "https://chatgpt.com/backend-api";
 #[non_exhaustive]
 pub struct ReadOptions {
     /// The address to read from, in place of the account's `chatgpt_base_url` and [`DEFAULT_ENDPOINT`]: for a test's
-    /// stand-in. The token is sent there.
+    /// stand-in or a network's own route. The token is sent there. It is also where an API key whose account names no
+    /// `openai_base_url` is read.
     pub endpoint: Option<String>,
     /// How long the read may take in all.
     pub timeout: Duration,
@@ -108,7 +109,11 @@ fn read_key(
             )
         })?;
     let custom = accounts::endpoint(&grant.settings, "openai_base_url")?;
-    let base = custom.as_deref().unwrap_or(API).trim_end_matches('/');
+    let base = custom
+        .as_deref()
+        .or(options.endpoint.as_deref())
+        .unwrap_or(API)
+        .trim_end_matches('/');
     let bearer = format!("Bearer {secret}");
     let headers = [("Authorization", bearer.as_str())];
     let url = format!("{base}/models");

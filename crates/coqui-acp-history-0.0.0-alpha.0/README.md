@@ -34,14 +34,15 @@ reference implementation, and `vectors/session_history/` holds the cases a reade
 - `LossReport`: what an import could not carry (thinking dropped, tools turned into notes, attachments known only by digest).
 - Settings as Guatiao values: `Bounds`, `ReaderSettings`, `WriterSettings`, `RedactionSettings`, each with defaults, unknown keys
   refused, and `non_defaults()`.
-- `coqui-acp-history`, a command (feature `cli`): `list`, `show` (both print what a history says with control and
+- `cli` (feature `cli`): the history commands as library code, a `cli::Command` a host's command line parses and `cli::run`:
+  `list`, `show` (both print what a history says with control and
   bidirectional characters escaped), `convert` (checked, and its lines copied as they are unless redaction removes something or
   `--seal` is asked for), and `export` and `import`, which need a harness's codec and say so.
 
 ## Installation
 
 Not published: `publish = false` until a release is chosen. `cargo build -p coqui-acp-history` builds the library;
-`--features cli` adds the command.
+`--features cli` adds the `cli` module; `cargo run --example history --features cli -- --help` is a command line over it.
 
 ## Quick start
 

@@ -9,6 +9,9 @@ mod account_provider;
 pub mod batch;
 #[cfg(feature = "contract")]
 #[cfg_attr(docsrs, doc(cfg(feature = "contract")))]
+pub mod check;
+#[cfg(feature = "contract")]
+#[cfg_attr(docsrs, doc(cfg(feature = "contract")))]
 pub mod contract;
 mod environment;
 pub mod files;

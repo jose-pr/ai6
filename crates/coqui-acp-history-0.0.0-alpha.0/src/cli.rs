@@ -1,60 +1,56 @@
-//! The `coqui-acp-history` command: look at histories and move them between files.
+//! Looking at histories and moving them between files, as library code: a [`Command`] a host's command line parses
+//! (it is a `clap::Subcommand`) and a [`run`] that does it.
 //!
 //! `export` and `import` need a harness's codec, which lives in that harness's crate; here they
-//! say so and fail. `convert` writes a history in this format to another file of the same format:
+//! say so and end with status 2. `convert` writes a history in this format to another file of the same format:
 //! its lines as they are, unless redaction that removes something or a digest is asked for.
 //!
 //! Everything a history says is printed with the characters a terminal acts on written as
-//! `\u{..}`: a history comes from elsewhere.
+//! `\u{..}`: a history comes from elsewhere. `examples/history.rs` is a program over it for this crate's tests.
+
+#![allow(
+    clippy::std_instead_of_core,
+    clippy::std_instead_of_alloc,
+    clippy::alloc_instead_of_core
+)]
 
 use core::fmt::Write as _;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Subcommand};
 
-use coqui_acp_history::{
+use crate::{
     Body, Document, HistoryError, Reader, ReaderSettings, RedactionSettings, Redactor, non_defaults,
 };
 
-#[derive(Parser)]
-#[command(
-    name = "coqui-acp-history",
-    version,
-    about = "Look at and move Agent Client Protocol session histories"
-)]
-struct Cli {
-    #[command(subcommand)]
-    command: Command,
-}
-
 /// The sizes a history is held to. Each is a setting with a default; a looser one is reported.
-#[derive(Args)]
-struct Limits {
+#[derive(Debug, Args)]
+pub struct Limits {
     /// The longest line, in bytes.
     #[arg(long)]
-    max_line_bytes: Option<u64>,
+    pub max_line_bytes: Option<u64>,
     /// The most lines.
     #[arg(long)]
-    max_lines: Option<u64>,
+    pub max_lines: Option<u64>,
     /// The most bytes in all.
     #[arg(long)]
-    max_total_bytes: Option<u64>,
+    pub max_total_bytes: Option<u64>,
     /// The deepest nesting in a line (the parser stops at 127 whatever this says).
     #[arg(long)]
-    max_depth: Option<u64>,
+    pub max_depth: Option<u64>,
     /// The most values in a line.
     #[arg(long)]
-    max_values: Option<u64>,
+    pub max_values: Option<u64>,
 }
 
 impl Limits {
     /// The settings to read with. A history held in memory as a whole starts from a smaller
     /// `max_total_bytes` than one that is only streamed through.
-    fn settings(&self, in_memory: bool) -> ReaderSettings {
+    #[must_use]
+    pub fn settings(&self, in_memory: bool) -> ReaderSettings {
         let mut settings = if in_memory {
             ReaderSettings::for_document()
         } else {
@@ -76,12 +72,14 @@ impl Limits {
     }
 }
 
-#[derive(Subcommand)]
-enum Command {
+/// What a history command does.
+#[derive(Debug, Subcommand)]
+pub enum Command {
     /// List the histories in a directory (the `.jsonl` files), by their headers.
     List {
         /// The directory; the current one by default.
         dir: Option<PathBuf>,
+        /// The sizes the history is held to.
         #[command(flatten)]
         limits: Limits,
     },
@@ -89,10 +87,11 @@ enum Command {
     Show {
         /// The history file.
         file: PathBuf,
+        /// The sizes the history is held to.
         #[command(flatten)]
         limits: Limits,
     },
-    /// Export a harness's session to a history (`coqui-acp-claude history export` and `coqui-acp-codex history export` do it).
+    /// Export a harness's session to a history (each agent crate's `cli::History` does it).
     Export {
         /// The harness: claude, codex, agy.
         #[arg(long)]
@@ -134,37 +133,40 @@ enum Command {
         /// (a history that redaction changed loses its digest otherwise).
         #[arg(long)]
         seal: bool,
+        /// The sizes the history is held to.
         #[command(flatten)]
         limits: Limits,
     },
 }
 
-fn main() -> ExitCode {
-    match run(Cli::parse()) {
-        Ok(code) => code,
-        Err(error) => {
-            eprintln!("error: {error}");
-            ExitCode::FAILURE
-        }
-    }
+/// Runs `command`: what it prints goes to standard output and its reports to standard error.
+///
+/// Returns the status: 0, or 2 for `export` and `import`, which a harness's own crate does.
+///
+/// # Errors
+///
+/// The history is refused or a file could not be read or written; the message says why.
+pub fn run(command: &Command) -> Result<u8, String> {
+    work(command).map_err(|error| error.to_string())
 }
 
-fn run(cli: Cli) -> Result<ExitCode, HistoryError> {
-    match cli.command {
+fn work(command: &Command) -> Result<u8, HistoryError> {
+    match command {
         Command::List { dir, limits } => list(
             dir.as_deref().unwrap_or(Path::new(".")),
             &limits.settings(false),
         ),
-        Command::Show { file, limits } => show(&file, &limits.settings(true)),
+        Command::Show { file, limits } => show(file, &limits.settings(true)),
         Command::Export { harness, .. } | Command::Import { harness, .. } => {
             eprintln!(
-                "this command cannot read a harness's own files: run `coqui-acp-{}` `history export` or                  `history import` (the program built with its `history` feature)",
+                "this command cannot read a harness's own files: the {} agent's own `history export` and `history import` do \
+                 (`coqui_acp_{0}::cli::History`, built with its `history` feature)",
                 harness
                     .chars()
                     .filter(char::is_ascii_alphanumeric)
                     .collect::<String>()
             );
-            Ok(ExitCode::from(2))
+            Ok(2)
         }
         Command::Convert {
             input,
@@ -179,7 +181,7 @@ fn run(cli: Cli) -> Result<ExitCode, HistoryError> {
                 None
             } else {
                 let mut settings = RedactionSettings::default();
-                settings.patterns = redact_patterns;
+                settings.patterns.clone_from(redact_patterns);
                 if let Some(path) = redact_values {
                     let text = fs::read_to_string(path)?;
                     settings.values = text
@@ -189,11 +191,11 @@ fn run(cli: Cli) -> Result<ExitCode, HistoryError> {
                         .collect();
                 }
                 if let Some(replacement) = replacement {
-                    settings.replacement = replacement;
+                    settings.replacement.clone_from(replacement);
                 }
                 Some(settings)
             };
-            convert(&input, &output, redaction, seal, &limits)
+            convert(input, output, redaction, *seal, limits)
         }
     }
 }
@@ -232,7 +234,7 @@ fn open(path: &Path, settings: &ReaderSettings) -> Result<Reader<File>, HistoryE
         .open()
 }
 
-fn list(dir: &Path, settings: &ReaderSettings) -> Result<ExitCode, HistoryError> {
+fn list(dir: &Path, settings: &ReaderSettings) -> Result<u8, HistoryError> {
     let mut paths: Vec<PathBuf> = fs::read_dir(dir)?
         .filter_map(Result::ok)
         .map(|entry| entry.path())
@@ -259,10 +261,10 @@ fn list(dir: &Path, settings: &ReaderSettings) -> Result<ExitCode, HistoryError>
             ),
         }
     }
-    Ok(ExitCode::SUCCESS)
+    Ok(0)
 }
 
-fn show(path: &Path, settings: &ReaderSettings) -> Result<ExitCode, HistoryError> {
+fn show(path: &Path, settings: &ReaderSettings) -> Result<u8, HistoryError> {
     let document = Document::from_reader(open(path, settings)?)?;
     let header = &document.header;
     println!("session   {}", header.id);
@@ -352,7 +354,7 @@ fn show(path: &Path, settings: &ReaderSettings) -> Result<ExitCode, HistoryError
             _ => {}
         }
     }
-    Ok(ExitCode::SUCCESS)
+    Ok(0)
 }
 
 fn convert(
@@ -361,7 +363,7 @@ fn convert(
     redaction: Option<RedactionSettings>,
     seal: bool,
     limits: &Limits,
-) -> Result<ExitCode, HistoryError> {
+) -> Result<u8, HistoryError> {
     let mut bytes = Vec::new();
     let copy = |bytes: &mut Vec<u8>| -> Result<(), HistoryError> {
         let summary = open(input, &limits.settings(false))?.copy_to(bytes)?;
@@ -398,7 +400,7 @@ fn convert(
         }
     }
     write_whole(output, &bytes)?;
-    Ok(ExitCode::SUCCESS)
+    Ok(0)
 }
 
 /// Writes `bytes` to `output` whole or not at all: to a new file beside it that no one else could

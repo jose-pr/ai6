@@ -75,11 +75,15 @@ fn main() -> std::io::Result<()> {
 }
 ```
 
-## Command line
+## Arguments
+
+`coqui_acp_codex::cli::Args` is a `clap::Args` type for a host's command line to flatten in, and `cli::run(&args)` serves the
+agent on standard input and output. The crate runs no program of its own: `cargo run --example serve_codex -- --help` is a
+command line over them.
 
 ```sh
-coqui-acp-codex                                       # codex from PATH, its own defaults
-coqui-acp-codex --effort low --approval-policy untrusted --sandbox workspace-write
+cargo run --example serve_codex --                          # the default program from PATH, its own defaults
+cargo run --example serve_codex -- --effort low --approval-policy untrusted --sandbox workspace-write
 ```
 
 | Flag | Default | What |
@@ -95,7 +99,7 @@ coqui-acp-codex --effort low --approval-policy untrusted --sandbox workspace-wri
 | `--no-client-mcp-servers` | off | Refuse a session that a client gives MCP servers |
 | `--allow-network-paths` | off | Take a network path as a session's `cwd` or more directories |
 
-Exit status: 0 when the client closes the connection, 1 when reading it failed, 2 for a wrong invocation.
+`run` answers 0 when the client closes the connection, or an `Err` saying why reading it failed.
 
 ## API overview
 
