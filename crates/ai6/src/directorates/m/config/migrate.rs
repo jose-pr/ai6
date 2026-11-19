@@ -31,45 +31,11 @@ struct Migration {
 }
 
 /// Every migration, oldest first. A new one goes at the end.
-const MIGRATIONS: &[Migration] = &[
-    Migration {
-        family: ConfigRecord::Operation,
-        says: "workspace.base, branch, isolate, checkpoint_remote and checkpoint_secs moved under \
-               workspace.settings",
-        apply: workspace_settings,
-    },
-    Migration {
-        family: ConfigRecord::Pool,
-        says: "an account's kind `openai-api-key` is `codex-api-key`, the id Codex's account \
-               provider gives it",
-        apply: account_kinds,
-    },
-];
-
-/// The account kinds a release spelled otherwise, with the spelling that replaced each: the id the
-/// harness's account provider gives the kind.
-const RENAMED_KINDS: [(&str, &str); 1] = [("openai-api-key", "codex-api-key")];
-
-fn account_kinds(definition: &mut Value) -> bool {
-    let Some(accounts) = definition.get_mut("account").and_then(Value::as_object_mut) else {
-        return false;
-    };
-    let mut changed = false;
-    for account in accounts.values_mut() {
-        let Some(kind) = account.get_mut("kind") else {
-            continue;
-        };
-        let Some((_, now)) = RENAMED_KINDS
-            .iter()
-            .find(|(was, _)| kind.as_str() == Some(was))
-        else {
-            continue;
-        };
-        *kind = Value::String((*now).to_owned());
-        changed = true;
-    }
-    changed
-}
+const MIGRATIONS: &[Migration] = &[Migration {
+    family: ConfigRecord::Operation,
+    says: "workspace.base, branch, isolate, checkpoint_remote and checkpoint_secs moved under            workspace.settings",
+    apply: workspace_settings,
+}];
 
 /// The workspace keys the chosen safe house owns now, which an Operation once declared itself.
 const SAFE_HOUSE_KEYS: [&str; 5] = [
@@ -161,62 +127,6 @@ mod tests {
             (changed[0].family.as_str(), changed[0].key.as_str()),
             ("operation", "g")
         );
-    }
-
-    fn pool(definition: Value) -> Layer {
-        Layer::from([(ConfigRecord::Pool, [("team".to_owned(), definition)].into())])
-    }
-
-    #[test]
-    fn a_pool_account_of_the_old_codex_key_kind_is_read_as_the_providers_kind_and_nothing_else_moves()
-     {
-        let old = pool(json!({
-            "handler": "codex",
-            "account": {
-                "carol": {"kind": "openai-api-key", "secret": "carol-key", "priority": 2},
-                "dave": {"kind": "codex-access-token"},
-                "erin": {"kind": "config-dir", "dir": "/logins/erin"},
-                "frank": {"kind": "harness-login"},
-            }
-        }));
-        let (layer, changed) = migrated(&old).expect("it needs a migration");
-        assert_eq!(
-            layer[&ConfigRecord::Pool]["team"],
-            json!({
-                "handler": "codex",
-                "account": {
-                    "carol": {"kind": "codex-api-key", "secret": "carol-key", "priority": 2},
-                    "dave": {"kind": "codex-access-token"},
-                    "erin": {"kind": "config-dir", "dir": "/logins/erin"},
-                    "frank": {"kind": "harness-login"},
-                }
-            })
-        );
-        assert_eq!(changed.len(), 1);
-        assert_eq!(
-            (changed[0].family.as_str(), changed[0].key.as_str()),
-            ("pool", "team")
-        );
-    }
-
-    #[test]
-    fn migrating_a_pool_twice_changes_nothing_the_second_time_and_a_new_record_needs_none() {
-        let old = pool(json!({"handler": "codex", "account": {"a": {"kind": "openai-api-key"}}}));
-        let (once, _) = migrated(&old).expect("the first read migrates");
-        assert!(migrated(&once).is_none(), "idempotent");
-        let new = pool(json!({"handler": "claude", "account": {
-            "a": {"kind": "claude-oauth-token"},
-            "b": {"kind": "anthropic-api-key"},
-            "c": {"kind": "anthropic-auth-token"},
-        }}));
-        assert!(migrated(&new).is_none());
-        let odd = pool(json!({"handler": "codex", "account": {"a": {"kind": 3}, "b": 4, "c": {}}}));
-        assert!(
-            migrated(&odd).is_none(),
-            "refused as it stands, not guessed at"
-        );
-        let none = pool(json!({"handler": "codex"}));
-        assert!(migrated(&none).is_none());
     }
 
     #[test]

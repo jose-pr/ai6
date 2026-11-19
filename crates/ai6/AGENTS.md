@@ -6601,6 +6601,12 @@ declare (or a value it does not accept), naming the provider and the key. `handl
   show and approve an Operation's standing orders. It reads the roster from the
   configuration provider and the Registry the bootstrap file names, like the Station.
 - `ai6 config path [--config PATH]` prints the bootstrap file in use, or `none (defaults)`.
+- `ai6 config migrate [--config PATH]`: runs the one-time steps (`directorates::m::config::steps`) on the
+  configuration the bootstrap file names, with every Station and gateway stopped: a SQL provider record by
+  record (`ConfigProvider::run_steps`), a directory in place, text-wise so comments stay (`steps::run_on_files`). Each rewrite
+  prints `migration STEP: PLACE (SAYS)`; a second run prints `nothing to migrate`. The step `codex-api-key-kind`
+  renames the account kind `openai-api-key` to `codex-api-key`; until it has run a pool with the old kind is
+  refused, naming the step (`steps::renamed_kind_refusal`).
 - `ai6 config public [--output PATH] [--config PATH]` writes the public `ai6.cfg` a web page reads
   (`bootstrap::public`): an allow list of the gateway's address, written as `[unex] url` (the host's
   `[unex] public_origin`, else its `[unex] url`) and, of `[oo]`, its tables' numbers and booleans
@@ -6623,7 +6629,9 @@ A family whose declared fields move ships a migration in `directorates::m::confi
 record in the old shape is migrated each time it is read (`ConfigSnapshot::migrated` names it, and the
 Station and gateway journal it), so nothing hand-edits a database. The first: an Operation's
 `workspace.base`, `branch`, `isolate`, `checkpoint_remote` and `checkpoint_secs` move under
-`workspace.settings` (a key already there wins). A renamed table is refused by name: `[watch]` is now
+`workspace.settings` (a key already there wins). A value a release renamed (an account kind) is not read
+as the old spelling: a one-time step (`ai6 config migrate`, `directorates::m::config::steps`) rewrites it once and
+the old spelling is refused, naming the step. A renamed table is refused by name: `[watch]` is now
 `[charge]` wherever a document is imported (`parse_document`, `ai6ctl apply`) or a family file is read
 (`FileProvider`, including a `watches.*` file, "now `charges`"), and `SqlProvider` refuses a
 non-empty `ai6_config_watch`.

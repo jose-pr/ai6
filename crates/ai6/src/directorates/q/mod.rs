@@ -789,10 +789,13 @@ impl RawPool {
         }
         for (name, raw) in self.account {
             let kind = AccountKind::parse(&raw.kind).ok_or_else(|| {
-                format!(
-                    "pool {id:?} account {name:?}: kind {:?} is unknown",
-                    raw.kind
-                )
+                match crate::directorates::m::config::steps::renamed_kind_refusal(&raw.kind) {
+                    Some(refusal) => format!("pool {id:?} account {name:?}: {refusal}"),
+                    None => format!(
+                        "pool {id:?} account {name:?}: kind {:?} is unknown",
+                        raw.kind
+                    ),
+                }
             })?;
             let mut account = Account::new(&name, kind).priority(raw.priority);
             if let Some(secret) = raw.secret {

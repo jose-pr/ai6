@@ -636,19 +636,35 @@ mod tests {
     }
 
     #[test]
-    fn a_pool_stored_with_the_old_codex_key_kind_still_loads_as_that_account_and_is_stored_as_the_new_one()
-     {
+    fn the_old_codex_key_kind_is_refused_by_the_step_that_renames_it_and_stored_once_it_has_run() {
         let root = tempfile::tempdir().unwrap();
         let provider = FileProvider::new(root.path());
-        write(
-            root.path(),
-            "loadouts.toml",
-            "[pool.codex-team]\nhandler = \"codex\"\n\
-             [pool.codex-team.account.carol]\nkind = \"openai-api-key\"\n\
-             [pool.codex-team.account.dave]\nkind = \"codex-access-token\"\n\
-             [secret.carol]\nenv = \"CAROL_KEY\"\n[secret.dave]\nenv = \"DAVE_KEY\"\n",
-        );
-        // A running Station takes it whole: the old spelling is read, never refused.
+        let old = "# the team's keys
+[pool.codex-team]
+handler = \"codex\"
+                   [pool.codex-team.account.carol]
+kind = \"openai-api-key\"
+                   [pool.codex-team.account.dave]
+kind = \"codex-access-token\"
+                   [secret.carol]
+env = \"CAROL_KEY\"
+[secret.dave]
+env = \"DAVE_KEY\"
+";
+        write(root.path(), "loadouts.toml", old);
+        // Read as it is stored, the old spelling is refused, naming the step.
+        let refused = provider
+            .load("")
+            .expect_err("the old kind is not read")
+            .to_string();
+        assert!(refused.contains("codex-api-key-kind"), "{refused}");
+        assert!(refused.contains("ai6 config migrate"), "{refused}");
+        // The step renames it, once, and says where.
+        let done = crate::directorates::m::config::steps::run_on_files(root.path()).unwrap();
+        assert_eq!(done.len(), 1, "{done:?}");
+        assert_eq!(done[0].step, "codex-api-key-kind");
+        let text = fs::read_to_string(root.path().join("loadouts.toml")).unwrap();
+        assert_eq!(text, old.replace("openai-api-key", "codex-api-key"));
         let loaded = provider.load("").expect("the stored pool loads");
         let pool = loaded
             .settings
@@ -659,29 +675,20 @@ mod tests {
             pool.get("carol").map(crate::directorates::q::Account::kind),
             Some(crate::directorates::q::AccountKind::CodexApiKey)
         );
+        assert!(loaded.migrated.is_empty(), "{:?}", loaded.migrated);
+        // A second run changes nothing.
+        assert!(
+            crate::directorates::m::config::steps::run_on_files(root.path())
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(
-            pool.get("dave").map(crate::directorates::q::Account::kind),
-            Some(crate::directorates::q::AccountKind::CodexAccessToken)
+            fs::read_to_string(root.path().join("loadouts.toml")).unwrap(),
+            text
         );
-        assert_eq!(loaded.migrated.len(), 1, "{:?}", loaded.migrated);
-        assert_eq!(
-            (
-                loaded.migrated[0].family.as_str(),
-                loaded.migrated[0].key.as_str()
-            ),
-            ("pool", "codex-team")
-        );
-        // The release's own spelling is not migrated again.
-        write(
-            root.path(),
-            "loadouts.toml",
-            "[pool.codex-team]\nhandler = \"codex\"\n\
-             [pool.codex-team.account.carol]\nkind = \"codex-api-key\"\n\
-             [secret.carol]\nenv = \"CAROL_KEY\"\n",
-        );
-        let current = provider.load("").expect("the new spelling loads");
-        assert!(current.migrated.is_empty());
-        assert!(current.settings.loadouts.pool("codex-team").is_some());
+        // A record that carries the old name again is refused again.
+        write(root.path(), "loadouts.toml", old);
+        assert!(provider.load("").is_err());
     }
 
     #[test]

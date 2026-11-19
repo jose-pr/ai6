@@ -282,6 +282,57 @@ impl SqlProvider {
 }
 
 impl ConfigProvider for SqlProvider {
+    fn run_steps(&self) -> Result<Vec<super::steps::Stepped>, RosterError> {
+        use super::steps;
+        // Written as stored, not checked as a configuration: while a step has not run, the
+        // configuration is refused whole, and each step makes it readable again.
+        let outcome = self.db.write(Clock::Config, |tx, revision| {
+            let mut done = Vec::new();
+            for record in ConfigRecord::ALL {
+                for (scope, key, text) in family(tx, record)? {
+                    let Ok(mut definition) = serde_json::from_str::<serde_json::Value>(&text)
+                    else {
+                        continue;
+                    };
+                    let moved = steps::rewrite(record, &mut definition);
+                    if moved.is_empty() {
+                        continue;
+                    }
+                    let sql = format!(
+                        "UPDATE {} SET definition = $1, revision = $2 WHERE scope = $3 AND key = $4",
+                        table(record)
+                    );
+                    tx.execute(
+                        &sql,
+                        &[
+                            definition.to_string().into(),
+                            revision.into(),
+                            scope.as_str().into(),
+                            key.as_str().into(),
+                        ],
+                    )?;
+                    let scope = ConfigScope::parse(&scope).unwrap_or_default();
+                    for (step, says) in moved {
+                        done.push(steps::Stepped {
+                            step,
+                            says,
+                            place: steps::place(record, &scope, &key),
+                        });
+                    }
+                }
+            }
+            if done.is_empty() {
+                return Err(io::Error::new(io::ErrorKind::NotFound, "nothing to migrate"));
+            }
+            Ok(done)
+        });
+        match outcome {
+            Ok(done) => Ok(done),
+            Err(reason) if reason.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
+            Err(reason) => Err(failed(reason)),
+        }
+    }
+
     fn load(&self, station: &str) -> Result<ConfigSnapshot, RosterError> {
         let rows = self
             .db
@@ -1085,9 +1136,9 @@ mod tests {
         run(a_stored_record_a_release_cannot_read_is_refused_alone_and_an_old_shape_is_migrated);
     }
 
-    /// A pool a release stored with an account kind an earlier one spelled otherwise: it still loads,
-    /// as the same account, and a change stores the new spelling.
-    fn a_stored_pool_with_the_old_codex_key_kind_loads_as_that_account(location: &str) {
+    /// A pool a release stored with an account kind an earlier one spelled otherwise: it is
+    /// refused naming the step, the step renames it once, and the pool then loads.
+    fn a_stored_pool_with_the_old_codex_key_kind_is_renamed_by_its_step_once(location: &str) {
         let provider = SqlProvider::open(location).unwrap();
         seed(&provider);
         store_raw(
@@ -1096,15 +1147,23 @@ mod tests {
             "carol",
             r#"{"env": "CAROL_KEY"}"#,
         );
-        store_raw(
-            &provider,
-            "ai6_config_pool",
-            "codex-team",
-            r#"{"handler": "codex", "account": {"carol": {"kind": "openai-api-key"}}}"#,
-        );
-        let loaded = provider
+        for pool in ["codex-team", "codex-spare"] {
+            store_raw(
+                &provider,
+                "ai6_config_pool",
+                pool,
+                r#"{"handler": "codex", "account": {"carol": {"kind": "openai-api-key"}, "dave": {"kind": "codex-access-token"}}}"#,
+            );
+        }
+        let refused = provider
             .load("")
-            .expect("a running Station takes the stored pool");
+            .expect_err("the old kind is not read")
+            .to_string();
+        assert!(refused.contains("codex-api-key-kind"), "{refused}");
+        let done = provider.run_steps().expect("the step runs");
+        assert_eq!(done.len(), 2, "{done:?}");
+        assert!(done.iter().all(|moved| moved.step == "codex-api-key-kind"));
+        let loaded = provider.load("").expect("the renamed pools load");
         let pool = loaded
             .settings
             .loadouts
@@ -1114,22 +1173,28 @@ mod tests {
             pool.get("carol").map(crate::directorates::q::Account::kind),
             Some(crate::directorates::q::AccountKind::CodexApiKey)
         );
-        assert_eq!(loaded.migrated.len(), 1, "{:?}", loaded.migrated);
-        provider
-            .put(
-                ConfigRecord::Pool,
-                &GLOBAL,
-                "codex-team",
-                &json!({"handler": "codex", "account": {"carol": {"kind": "codex-api-key"}}}),
-            )
-            .expect("the new spelling is stored");
-        let after = provider.load("").expect("it loads again");
-        assert!(after.migrated.is_empty(), "{:?}", after.migrated);
+        assert_eq!(
+            pool.get("dave").map(crate::directorates::q::Account::kind),
+            Some(crate::directorates::q::AccountKind::CodexAccessToken)
+        );
+        assert!(loaded.migrated.is_empty(), "{:?}", loaded.migrated);
+        let revision = loaded.revision;
+        // A second run changes nothing, the revision included.
+        assert!(provider.run_steps().unwrap().is_empty());
+        assert_eq!(provider.load("").unwrap().revision, revision);
+        // A record that carries the old name again is refused again.
+        store_raw(
+            &provider,
+            "ai6_config_pool",
+            "codex-team",
+            r#"{"handler": "codex", "account": {"carol": {"kind": "openai-api-key"}}}"#,
+        );
+        assert!(provider.load("").is_err());
     }
 
     #[test]
-    fn a_sql_pool_with_the_old_codex_key_kind_loads_as_that_account() {
-        run(a_stored_pool_with_the_old_codex_key_kind_loads_as_that_account);
+    fn a_sql_pool_with_the_old_codex_key_kind_is_renamed_by_its_step_once() {
+        run(a_stored_pool_with_the_old_codex_key_kind_is_renamed_by_its_step_once);
     }
 
     fn a_stored_family_a_release_renamed_is_refused_by_name(location: &str) {

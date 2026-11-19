@@ -82,6 +82,7 @@ ai6 pools [--config PATH] add-login POOL ACCOUNT --handler HANDLER [--from DIR] 
 ai6 pools [--config PATH] add-station|remove-station POOL ACCOUNT STATION
 ai6 pools [--config PATH] remove-login POOL ACCOUNT [--sign-out]
 ai6 config path [--config PATH]
+ai6 config migrate [--config PATH]
 ai6 config public [--output PATH] [--config PATH]
 ai6 config schema [SECTION]
 ```

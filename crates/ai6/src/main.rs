@@ -125,6 +125,14 @@ enum ConfigCommand {
         #[command(flatten)]
         bootstrap: BootstrapArg,
     },
+    /// Run the one-time steps a release's stored records need, once, with every Station and
+    /// gateway stopped: a SQL database is updated record by record, a directory of family files
+    /// in place. Each step is named as it runs; a second run changes nothing. Until it has run, a
+    /// record still in the old shape is refused by name.
+    Migrate {
+        #[command(flatten)]
+        bootstrap: BootstrapArg,
+    },
     /// Write the public ai6.cfg a web page reads beside index.html, from this host's file: the
     /// gateway's address ([unex] public_origin, else url) and what the page needs of [oo], and
     /// nothing else.
@@ -522,6 +530,18 @@ async fn main() -> ExitCode {
             }
         },
         Command::Config {
+            command: ConfigCommand::Migrate { bootstrap },
+        } => match migrate_command(&bootstrap) {
+            Ok(output) => {
+                print!("{output}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("ai6: {error}");
+                ExitCode::FAILURE
+            }
+        },
+        Command::Config {
             command: ConfigCommand::Path { bootstrap },
         } => match ai6::bootstrap::SearchPath::new(
             ai6::bootstrap::FILE_NAME,
@@ -896,9 +916,38 @@ fn config_command(command: ConfigCommand) -> Result<String, String> {
                     .map_err(|error| error.to_string())
             }
         },
-        ConfigCommand::Path { .. } => Ok(String::new()),
+        ConfigCommand::Path { .. } | ConfigCommand::Migrate { .. } => Ok(String::new()),
         ConfigCommand::Public { output, bootstrap } => public_config(output.as_deref(), &bootstrap),
     }
+}
+
+/// Runs `ai6 config migrate`: every one-time step on the configuration the bootstrap file names,
+/// each rewrite reported with its step's name.
+fn migrate_command(bootstrap: &BootstrapArg) -> Result<String, String> {
+    use ai6::directorates::m::config::steps;
+    let located = load_bootstrap(bootstrap)?;
+    let location = located
+        .provider_location()
+        .map_err(|error| error.to_string())?;
+    let done = if is_sql_location(&location) {
+        let provider = open_provider(&location, &located.value)?;
+        provider.run_steps().map_err(|error| error.to_string())?
+    } else {
+        steps::run_on_files(Path::new(&location))
+            .map_err(|error| format!("the configuration in {location}: {error}"))?
+    };
+    if done.is_empty() {
+        return Ok("nothing to migrate\n".to_owned());
+    }
+    Ok(done
+        .iter()
+        .map(|moved| {
+            format!(
+                "migration {}: {} ({})\n",
+                moved.step, moved.place, moved.says
+            )
+        })
+        .collect())
 }
 
 /// Runs `ai6 config public`. A key the allow list refused is named on standard error, so a person

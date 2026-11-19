@@ -21,6 +21,7 @@ mod file;
 mod migrate;
 #[cfg(any(feature = "sqlite", feature = "postgres"))]
 mod sql;
+pub mod steps;
 mod unreadable;
 
 pub use file::FileProvider;
@@ -1549,6 +1550,18 @@ pub trait ConfigProvider: Send + Sync {
     /// As [`load`](ConfigProvider::load).
     fn scopes(&self) -> Result<Vec<ConfigScope>, RosterError> {
         Ok(vec![ConfigScope::Global])
+    }
+
+    /// Runs every one-time step ([`steps`]) on the stored records, in one transaction, and
+    /// reports what each rewrote. A second run finds nothing.
+    ///
+    /// # Errors
+    ///
+    /// [`RosterErrorKind::ReadOnly`] from a provider that holds no stored records (the
+    /// default; a directory of files is migrated by [`steps::run_on_files`]); otherwise
+    /// [`RosterErrorKind::Unavailable`].
+    fn run_steps(&self) -> Result<Vec<steps::Stepped>, RosterError> {
+        Err(read_only())
     }
 }
 

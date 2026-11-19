@@ -946,8 +946,8 @@ kind = "codex-api-key"
 | `harness-login` | nothing is handed over: the harness uses the login it has where it runs, and the account only counts its use and its limits, so several routes can share one budget. With `files`, the login is [kept in the Registry](#logins-kept-in-the-registry) and written under a home of the Run's own |
 
 The kind names are the ids Claude Code's and Codex's account providers give them (`codex-api-key` was
-`openai-api-key`: a stored pool still spelling it is read as the new one, and saving it stores the new
-spelling). What each kind reads, the variables a Run is stripped of and the login that saves a Codex key
+`openai-api-key`: `ai6 config migrate` renames every stored one, once, and a pool that still spells the
+old kind is refused, naming the step `codex-api-key-kind`). What each kind reads, the variables a Run is stripped of and the login that saves a Codex key
 are those providers' (`coqui-acp-claude` and `coqui-acp-codex`), not AI6's.
 
 `env = "VAR"` puts the value (or directory) in another variable, which no provider applies; a handler other than

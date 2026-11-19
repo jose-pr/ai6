@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `ai6 config migrate` runs the one-time steps a release's stored records need, with every Station and gateway stopped,
+  on the configuration `ai6.cfg` names: a SQL database record by record, a directory of family files in place (comments
+  and order kept). Each rewrite is printed with its step's name and a second run changes nothing. The first step,
+  `codex-api-key-kind`, renames the account kind `openai-api-key` to `codex-api-key`. Until it has run, a pool that
+  still spells the old kind is refused, and the refusal names the step and the command.
+
+- Moneypenny can have a spend bound per turn and per conversation: `[assistant.limits] turn_cost_micro_usd` and
+  `conversation_cost_micro_usd`, in millionths of a dollar. By default there is none. A turn past its bound is
+  interrupted and she says what it spent; a conversation past its bound refuses its next message with the reason. The
+  cost counts retries, and Outer Office shows a conversation's total.
+
 - A Report can hold what AI6 knows: a `memory`, `tradecraft`, `rule` or `contact`, in the new scopes
   `person:ID` and `global` as well as an Operation's, with a one-line `summary`, `topics`, a `revision` a write
   names (refused once the Report has moved on), `updated_by`, the exposure mark a Run that reads it takes, a
@@ -243,8 +254,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Account kinds are the ids Claude Code's and Codex's account providers give them, and what applying one does is
   those providers' (`coqui_acp_claude::accounts::apply`, `coqui_acp_codex::accounts::apply_with`). `AccountKind::OpenaiApiKey`
-  (`openai-api-key`) is `CodexApiKey` (`codex-api-key`); a stored `pool` record that still spells it is read as the new
-  one at every load and saved in the new spelling (a `pool` record migration, in the journal as the others). The
+  (`openai-api-key`) is `CodexApiKey` (`codex-api-key`); `ai6 config migrate` renames every stored one, once (the
+  step `codex-api-key-kind`; see "Added"), and a `pool` record that still spells the old kind is refused, the
+  refusal naming the step. The
   environment kinds, a `config-dir` of handler `claude` or `codex` (the harness runs on the directory as it is, nothing
   is written there) and the Codex key or token login (`CommandLogin`, now `accounts::apply_with` run on the home) go through
   `apply`; an account with its own `env`, a `config-dir` of another handler and a `harness-login` are set by AI6 alone.
