@@ -720,6 +720,20 @@ impl Desk {
         }))
     }
 
+    /// Bounds one turn's spend at `bound` millionths of a dollar, the rest of the roster's
+    /// tables kept; the default sets none.
+    #[cfg(test)]
+    fn cap_turn_cost(&mut self, bound: u64) {
+        let tables = self.tables.clone();
+        let capped: Tables = Arc::new(move || {
+            let (mut limits, desk) = tables();
+            limits.turn_cost_micro_usd = crate::bounds::Limit::at(bound);
+            (limits, desk)
+        });
+        self.outbox = self.outbox.clone().with_tables(capped.clone());
+        self.tables = capped;
+    }
+
     #[cfg(test)]
     fn with_beside_missions(mut self, beside: bool) -> Self {
         self.beside_missions = Arc::new(move || beside);
@@ -5813,7 +5827,10 @@ event_bytes = 7
 
     #[tokio::test]
     async fn a_turn_past_its_budget_is_stopped_and_the_person_told_what_it_spent() {
-        let fixture = scripted(true, IDLE, Script::Costly, Script::Costly);
+        let mut fixture = scripted(true, IDLE, Script::Costly, Script::Costly);
+        Arc::get_mut(&mut fixture.desk)
+            .expect("the desk is not shared yet")
+            .cap_turn_cost(5_000_000);
         fixture
             .desk
             .handle(job("c-cost", "Summarize every board."))

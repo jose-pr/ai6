@@ -28,6 +28,12 @@ arbitrary, and a checkout could plant a file there.
 
 `ai6 config path` prints the file in use, or `none (defaults)`.
 
+`ai6 config migrate` runs the one-time steps a release's stored records need, once, with every Station and
+gateway stopped, and prints each rewrite with its step's name: a SQL database is updated record by record, a
+directory of family files in place. A second run changes nothing. A record still in the old shape is refused,
+and the refusal names the step. The steps so far: `codex-api-key-kind` renames the account kind
+`openai-api-key` to `codex-api-key`.
+
 A relative path in the file is relative to the file's directory. A key nobody knows is refused by
 every program, naming it, in any section but `[oo]`, which only Outer Office reads and judges. Each
 program says when a key it needs is missing: `universal-exports` needs `[unex] public_origin` and
@@ -1659,8 +1665,8 @@ Universal Exports when it starts.
 | `page_bytes` | 16 MiB | **All the files read for a page.** Bytes over all the files of one page the Station reads. |
 | `images` | 4 | **Images in one message.** Images one message carries. |
 | `image_bytes` | 5 MiB | **Largest image in a message.** Bytes of one image a message carries. |
-| `turn_cost_micro_usd` | 5,000,000 | **Spend in one turn (millionths of a dollar).** Millionths of a dollar one turn of hers may spend, retries included; past it the turn is stopped and she says so. `none` sets no bound. |
-| `conversation_cost_micro_usd` | 50,000,000 | **Spend in one conversation (millionths of a dollar).** Millionths of a dollar one conversation may spend in all; past it a message is refused with the reason. `none` sets no bound. |
+| `turn_cost_micro_usd` | none | **Spend in one turn (millionths of a dollar).** Millionths of a dollar one turn of hers may spend, retries included; past it the turn is stopped and she says so. Default: no bound. |
+| `conversation_cost_micro_usd` | none | **Spend in one conversation (millionths of a dollar).** Millionths of a dollar one conversation may spend in all; past it a message is refused with the reason. Default: no bound. |
 <!-- schema:record.assistant.limits:end -->
 
 `[assistant.desk]`: how each Station's desk runs her harnesses. Read for each job and harness

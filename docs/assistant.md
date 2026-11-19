@@ -1272,13 +1272,14 @@ tried by hand.
 
 ## Her budget
 
-She has a budget per turn and per conversation, both in `[assistant.limits]`, in millionths of a
-dollar, and `none` takes either away. A turn past `turn_cost_micro_usd` (default 5000000, five
-dollars) is interrupted and she says what it spent. A conversation past `conversation_cost_micro_usd`
-(default 50000000) refuses its next message with the same reason, and the person starts another. The
-defaults sit well above a turn that reads a board and answers, which costs cents, and well below the
-turn that read every board and cost tens of dollars. The harness is also given the conversation's
-budget as its own cost cap, so it cannot spend past it on its own.
+She can have a budget per turn and per conversation, both in `[assistant.limits]`, in millionths of a
+dollar. By default there is none: set `turn_cost_micro_usd` and `conversation_cost_micro_usd` in
+`ai6.cfg` to bound them (`none` takes a bound away again). A turn past `turn_cost_micro_usd` is
+interrupted and she says what it spent. A conversation past `conversation_cost_micro_usd` refuses its
+next message with the same reason, and the person starts another. The harness is also given the
+conversation's budget as its own cost cap, so it cannot spend past it on its own. A turn that reads a
+board and answers costs cents; one that read every board has cost tens of dollars, which a bound of a
+few dollars per turn would have stopped.
 
 The cost counts what the harness reports, which includes its retries. Each report of a turn carries
 the tokens and cost since the last, the conversation log keeps them with the turn, and the app's

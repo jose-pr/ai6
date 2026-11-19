@@ -3657,8 +3657,8 @@
                 }
               ],
               "title": "Spend in one turn (millionths of a dollar)",
-              "description": "Millionths of a dollar one turn of hers may spend, retries included; past it the turn is stopped and she says so. `none` sets no bound.",
-              "default": 5000000
+              "description": "Millionths of a dollar one turn of hers may spend, retries included; past it the turn is stopped and she says so. Default: no bound.",
+              "default": "none"
             },
             "conversation_cost_micro_usd": {
               "anyOf": [
@@ -3677,8 +3677,8 @@
                 }
               ],
               "title": "Spend in one conversation (millionths of a dollar)",
-              "description": "Millionths of a dollar one conversation may spend in all; past it a message is refused with the reason. `none` sets no bound.",
-              "default": 50000000
+              "description": "Millionths of a dollar one conversation may spend in all; past it a message is refused with the reason. Default: no bound.",
+              "default": "none"
             }
           },
           "additionalProperties": false,
@@ -3703,8 +3703,8 @@
             "page_bytes": 16777216,
             "images": 4,
             "image_bytes": 5242880,
-            "turn_cost_micro_usd": 5000000,
-            "conversation_cost_micro_usd": 50000000
+            "turn_cost_micro_usd": "none",
+            "conversation_cost_micro_usd": "none"
           }
         },
         "desk": {

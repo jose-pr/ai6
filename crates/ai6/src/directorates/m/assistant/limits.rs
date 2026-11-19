@@ -88,12 +88,12 @@ pub struct AssistantLimits {
     #[map(default = AssistantLimits::default().image_bytes)]
     pub image_bytes: Limit,
     /// Millionths of a dollar one turn of hers may spend, retries included; past it the turn is
-    /// stopped and she says so. `none` sets no bound.
+    /// stopped and she says so. Default: no bound.
     #[schema(title = "Spend in one turn (millionths of a dollar)")]
     #[map(default = AssistantLimits::default().turn_cost_micro_usd)]
     pub turn_cost_micro_usd: Limit,
     /// Millionths of a dollar one conversation may spend in all; past it a message is refused
-    /// with the reason. `none` sets no bound.
+    /// with the reason. Default: no bound.
     #[schema(title = "Spend in one conversation (millionths of a dollar)")]
     #[map(default = AssistantLimits::default().conversation_cost_micro_usd)]
     pub conversation_cost_micro_usd: Limit,
@@ -118,10 +118,10 @@ impl Default for AssistantLimits {
             page_bytes: Limit::at(16 * MIB),
             images: Limit::at(4),
             image_bytes: Limit::at(5 * MIB),
-            // A turn that reads a board and answers costs cents; the 4M-token summary that
-            // prompted these cost tens of dollars. Five dollars stops that and clears the work.
-            turn_cost_micro_usd: Limit::at(5_000_000),
-            conversation_cost_micro_usd: Limit::at(50_000_000),
+            // A spend bound is the person's to set: with none, a turn and a conversation spend
+            // what the harness and the model gateway allow.
+            turn_cost_micro_usd: Limit::UNBOUNDED,
+            conversation_cost_micro_usd: Limit::UNBOUNDED,
         }
     }
 }
@@ -838,6 +838,19 @@ impl AssistantGatewayLimits {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn her_spend_is_unbounded_until_a_person_sets_a_bound() {
+        let limits = AssistantLimits::default();
+        assert_eq!(limits.turn_cost_micro_usd.get(), None);
+        assert_eq!(limits.conversation_cost_micro_usd.get(), None);
+        let set: AssistantLimits = crate::directorates::m::records::from_toml(
+            "turn_cost_micro_usd = 2000000\nconversation_cost_micro_usd = 9000000\n",
+        )
+        .unwrap();
+        assert_eq!(set.turn_cost_micro_usd.get(), Some(2_000_000));
+        assert_eq!(set.conversation_cost_micro_usd.get(), Some(9_000_000));
+    }
 
     #[test]
     fn page_limits_default_open_validate_and_never_weaken() {
