@@ -1449,6 +1449,12 @@ pub struct DenialLimits {
     #[schema(title = "Longest target of a refused call", format = "bytes")]
     #[map(default = DenialLimits::default().target_bytes)]
     pub target_bytes: Limit,
+    /// Tools a Mission needs to do any work. A Mission whose Run was taken up again after a
+    /// Station restart and finishes with a call of one of them refused is failed, not done: the
+    /// gate that holds its calls may have lost its Station. Empty never fails one.
+    #[schema(title = "Core tools whose refusal fails a re-attached Mission")]
+    #[map(default = DenialLimits::default().core_tools)]
+    pub core_tools: Vec<String>,
 }
 
 impl Default for DenialLimits {
@@ -1456,6 +1462,9 @@ impl Default for DenialLimits {
         Self {
             kept: Limit::at(20),
             target_bytes: Limit::at(200),
+            core_tools: ["Bash", "PowerShell", "Read", "Edit", "Write"]
+                .map(str::to_owned)
+                .to_vec(),
         }
     }
 }

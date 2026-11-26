@@ -207,6 +207,12 @@ the Operation's cover hides it, a line in the report on its source issue. A log 
 says the same. A command the green ink gate held is listed too, since the harness refuses it the
 same way; a resume clears the list, so a held command that later ran is not in the report.
 
+A Mission whose Run the Station took up again after a restart (or another Station adopted) and that
+would finish done with one of `[denials] core_tools` refused is failed instead, with that said: a
+harness that lost its Station refuses every shell call, and finishing "done" with Read and Bash
+refused hides it. The list defaults to `Bash`, `PowerShell`, `Read`, `Edit` and `Write`; an empty list
+turns the check off.
+
 ## What an Antigravity CLI Mission may call
 
 The `antigravity` handler holds a Run to a list the same way, with agy's own means, measured on

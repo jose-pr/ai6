@@ -6796,6 +6796,10 @@ async fn resume_mission(
     // A harness a runner still supervises keeps the environment it started with, and the
     // account its Run record names.
     if reattach.is_some() {
+        REATTACHED
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert((daemon_key(&state), mission_id.clone()));
         let record = run_hold(&state, &mission_id)
             .and_then(|hold| state.intake.run(&hold.id).ok().flatten());
         if let Some(record) = record {
@@ -8142,7 +8146,7 @@ fn apply_event_state(
     mission_id: &str,
     event: &AgentEvent,
 ) -> Option<MissionState> {
-    let target = match event.kind.as_str() {
+    let mut target = match event.kind.as_str() {
         // A turn the agent gave up waits for a person, as one it was blocked in does.
         "blocked" | CANCELLED_EVENT => MissionState::Blocked,
         "stalled" => MissionState::Stalled,
@@ -8159,6 +8163,18 @@ fn apply_event_state(
     let Some(current) = missions.get(mission_id).map(|mission| mission.state) else {
         return Some(target);
     };
+    let mut gate_lost = None;
+    if target == MissionState::Done
+        && reattached_here(state, mission_id)
+        && let Some(tool) = missions.get(mission_id).and_then(|mission| {
+            core_refusal(&mission.denials, &state.station.limits().denials.core_tools)
+        })
+    {
+        gate_lost = Some(format!(
+            "its Run was taken up again after a Station restart and ended with {tool} refused,              so its gate may have lost the Station"
+        ));
+        target = MissionState::Failed;
+    }
     if current != target {
         if matches!(
             target,
@@ -8170,6 +8186,7 @@ fn apply_event_state(
         let said = (target == MissionState::Failed)
             .then_some(event.text.as_deref())
             .flatten()
+            .or(gate_lost.as_deref())
             .map(|said| {
                 said.chars()
                     .take(state.intake.limits().runs.recent_event_chars.or_max())
@@ -8222,6 +8239,25 @@ fn queue_issue_status(state: &DaemonState, mission_id: &str, mission_state: Miss
         branch.as_deref(),
         state.clock.now() as f64,
     );
+}
+
+/// The Missions whose Run this process took up again from a runner, by daemon and Mission.
+static REATTACHED: Mutex<BTreeSet<(usize, String)>> = Mutex::new(BTreeSet::new());
+
+/// Whether this process took up the Mission's Run again instead of starting it.
+fn reattached_here(state: &DaemonState, mission_id: &str) -> bool {
+    REATTACHED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains(&(daemon_key(state), mission_id.to_owned()))
+}
+
+/// The first of `denials` that names one of `core_tools`.
+fn core_refusal<'a>(denials: &'a [Denial], core_tools: &[String]) -> Option<&'a str> {
+    denials
+        .iter()
+        .map(|denial| denial.tool.as_str())
+        .find(|tool| core_tools.iter().any(|core| core == tool))
 }
 
 /// What a harness says of a refused call besides the tool's name.

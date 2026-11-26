@@ -9789,6 +9789,7 @@ pub ai6::station::limits::AuditLimits::target_bytes: ai6::bounds::Limit
 impl core::default::Default for ai6::station::limits::AuditLimits
 pub fn ai6::station::limits::AuditLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::station::limits::DenialLimits
+pub ai6::station::limits::DenialLimits::core_tools: alloc::vec::Vec<alloc::string::String>
 pub ai6::station::limits::DenialLimits::kept: ai6::bounds::Limit
 pub ai6::station::limits::DenialLimits::target_bytes: ai6::bounds::Limit
 impl core::default::Default for ai6::station::limits::DenialLimits

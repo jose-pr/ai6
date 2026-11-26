@@ -11797,6 +11797,21 @@
               "title": "Longest target of a refused call",
               "description": "Bytes of what a refused call reached (a path, a command, an address) that are kept; the rest is cut, and a credential in it is replaced first.",
               "default": 200
+            },
+            "core_tools": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "title": "Core tools whose refusal fails a re-attached Mission",
+              "description": "Tools a Mission needs to do any work. A Mission whose Run was taken up again after a Station restart and finishes with a call of one of them refused is failed, not done: the gate that holds its calls may have lost its Station. Empty never fails one.",
+              "default": [
+                "Bash",
+                "PowerShell",
+                "Read",
+                "Edit",
+                "Write"
+              ]
             }
           },
           "additionalProperties": false,
@@ -11804,7 +11819,14 @@
           "description": "`[denials]`: the calls a harness refused, as a Run's outcome keeps them.",
           "default": {
             "kept": 20,
-            "target_bytes": 200
+            "target_bytes": 200,
+            "core_tools": [
+              "Bash",
+              "PowerShell",
+              "Read",
+              "Edit",
+              "Write"
+            ]
           }
         },
         "partial_line_bytes": {

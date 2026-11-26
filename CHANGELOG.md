@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A Mission whose Run was taken up again after a Station restart fails instead of finishing done when a core tool
+  (`[denials] core_tools`) was refused, and a tracker credential that cannot write (a GitHub classic token without
+  `repo`, a GitLab token without `api`, a Jira account without Add Comments) now fails the Station's write check
+  and degrades it naming the Source.
+
 - A person asks a charge to run its next turn now: `POST /v1/user/charges/{scope}/wake`, `ai6ctl charges wake SCOPE`, a
   **Run now** button on Outer Office's Charges page and Moneypenny's `propose_charge_wake`. It needs the scope's control (the one
   that acknowledges), is audited as `charge.wake`, and a turn already running is reported rather than doubled; the timer

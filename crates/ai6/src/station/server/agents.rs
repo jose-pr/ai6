@@ -800,6 +800,46 @@ mod tests {
     }
 
     #[test]
+    fn a_re_attached_mission_that_ends_with_a_core_tool_refused_is_failed_not_done() {
+        use crate::directorates::m::mission::Denial;
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(root.path(), "", AGENTS);
+        let refuse = |mission: &str, tool: &str, reattached: bool| {
+            create(&state, mission, None);
+            work(&state, mission);
+            state
+                .missions
+                .lock()
+                .unwrap()
+                .note_denials(mission, vec![Denial::named(tool, None, "rules")])
+                .unwrap();
+            if reattached {
+                super::super::REATTACHED
+                    .lock()
+                    .unwrap()
+                    .insert((super::super::daemon_key(&state), mission.to_owned()));
+            }
+            apply_event_state(&state, mission, &event("completed"));
+            state.missions.lock().unwrap().get(mission).unwrap().state
+        };
+        assert_eq!(refuse("m-1", "Bash", true), MissionState::Failed);
+        let missions = state.missions.lock().unwrap();
+        let said = missions.get("m-1").unwrap().reported_failure.clone();
+        drop(missions);
+        assert!(said.unwrap().contains("Bash refused"));
+        assert_eq!(
+            refuse("m-2", "Bash", false),
+            MissionState::Done,
+            "a Run started here is judged as it always was"
+        );
+        assert_eq!(
+            refuse("m-3", "WebFetch", true),
+            MissionState::Done,
+            "a tool no work depends on"
+        );
+    }
+
+    #[test]
     fn a_held_run_counts_once_per_run_and_outcome_under_its_launch_model() {
         let root = tempfile::tempdir().unwrap();
         // The roster now names sonnet; the Runs were launched with opus.

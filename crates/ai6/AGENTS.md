@@ -5349,7 +5349,10 @@ at most `[denials] kept`, each target screened for credentials and cut to `[deni
 logs them, keeps the event, publishes a Mission that FAILED after them with the reason
 `permission-denied`, and gives them to a source Mission's outcome (`denials`), which the CX
 report quotes ("N tool calls denied", with "(permission denied)" only when it failed) unless the
-disclosure is `Hidden`. The Mission's state is whatever the turn ended in.
+disclosure is `Hidden`. The Mission's state is whatever the turn ended in, except that a Mission whose
+Run this process took up again from a runner (a Station restart or adoption) and that ends done with a
+tool of `[denials] core_tools` (default `Bash`, `PowerShell`, `Read`, `Edit`, `Write`; empty never)
+refused is failed instead, since its gate may have lost the Station.
 
 `report` is what the provider reported with the event (Claude Code on `result`, Codex on its
 token-usage notification): the run's `spend` is running totals for the provider process, which a
@@ -6656,7 +6659,11 @@ Station from being whole; the check-in carries them as `degraded`, `/v1/stations
 the Stations view as "Degraded". Kinds: `library` (a pin set refused a found library; `depends` names
 the Agents without a loaded handler), `source-poll` (no finished poll for `[sources] missed_polls`
 intervals), `source-write` (a tracker's write check failed, every `[sources] canary_every`, run by the
-Headquarters Station only: its provider builds, answers `capabilities` and says it can comment) and
+Headquarters Station only: its provider builds, answers `capabilities` and says it can comment; a
+provider's `comment` is false when the credential cannot write: GitHub from a classic token's
+`X-OAuth-Scopes` (no `repo`, or `public_repo` on a private repository) or an archived repository,
+GitLab from `/personal_access_tokens/self` scopes without `api`, Jira from `mypermissions`
+`ADD_COMMENTS`; an answer a provider cannot get counts as able) and
 `sessions` (Runs held, none progressing), `config-record` (a stored record the Station started
 without, named `<family> <key>`), `config` (a revision refused whole; the Station keeps the one it runs),
 `bootstrap` (a table or field of `ai6.cfg` this release does not declare, left out), `charge` (a charge this Station runs whose turns failed `failing_after` times in a row, named by its scope; an acknowledgement or a good turn clears it), `claim` (a
