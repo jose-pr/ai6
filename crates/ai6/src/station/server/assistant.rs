@@ -1480,7 +1480,7 @@ impl Desk {
             clearance: None,
             review: false,
         };
-        let (on, same) = routes::for_conversation(state, &agent, earlier, &place)?;
+        let (on, same) = routes::for_conversation(state, None, &agent, earlier, &place)?;
         let agent = agent.on_route(&on.route);
         Ok((agent, Some(on), same))
     }

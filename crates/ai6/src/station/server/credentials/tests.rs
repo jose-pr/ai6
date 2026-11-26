@@ -315,3 +315,14 @@ fn a_harness_gets_the_platform_variables_a_process_needs_unless_its_loadout_sets
         assert!(defaults.iter().any(|name| name == needed), "{needed}");
     }
 }
+
+#[test]
+fn a_platform_variable_may_not_name_a_credential_or_an_ai6_variable() {
+    let mut limits = crate::station::limits::StationLimits::default();
+    limits.validate().unwrap();
+    for name in ["ANTHROPIC_API_KEY", "ai6_exports_token", "A=B", ""] {
+        limits.harness.os_env = vec!["SystemRoot".to_owned(), name.to_owned()];
+        let refusal = limits.validate().unwrap_err();
+        assert!(refusal.contains("os_env"), "{name:?}: {refusal}");
+    }
+}

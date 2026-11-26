@@ -185,7 +185,7 @@ Read,Glob,Grep`, `--permission-mode dontAsk`, the deny list of `desk` and all th
 runs, and `--allowedTools [mcp__ai6-cables,]Read(/**)`: a `Read` rule given as a flag is rooted at
 the working directory and covers `Glob` and `Grep`. Measured with 2.1.326 against the loopback
 stand-in: a file inside the working directory read, and `Read`, `Grep` and `Glob` of the directory
-above it were denied, which the bare `Read,Glob,Grep` rules had allowed. No setting adds to it.
+above it were denied, which the bare `Read,Glob,Grep` rules had allowed, and so were a symlink in the working directory to a file outside it and one to a directory (Windows). No setting of AI6 adds to it; the user's own settings file still loads (`--setting-sources user`).
 
 An `allowed_tools` rule for a tool on the deny list takes that tool off it; an `mcp__` rule offers
 nothing, since `--tools` is about built-in tools. In remote-hands mode the eight tools

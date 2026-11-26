@@ -116,7 +116,12 @@ pub(super) fn implicit_pool_named(pool: &str, handler: &str) -> AccountPool {
 /// Why a Run of `agent` in `operation` is private work, when it is: its Operation is marked
 /// private, or an overlay its loadout or Operation issues is.
 fn private_work(state: &DaemonState, operation: Option<&str>, agent: &Agent) -> Option<String> {
-    let operation = operation.and_then(|id| state.roster.operation(id).ok());
+    // An Operation that cannot be read is private work: the check fails closed.
+    let operation = match operation.map(|id| state.roster.operation(id)) {
+        Some(Ok(operation)) => Some(operation),
+        Some(Err(_)) => return Some(format!("its Operation {operation:?} cannot be read")),
+        None => None,
+    };
     if let Some(operation) = operation.as_ref().filter(|operation| operation.private) {
         return Some(format!("Operation {:?} is private", operation.id));
     }
@@ -320,11 +325,12 @@ pub(super) fn choose(
 /// Why no route has room, naming each and why.
 pub(super) fn for_conversation(
     state: &DaemonState,
+    operation: Option<&str>,
     agent: &Agent,
     earlier: Option<&RouteRef>,
     place: &Place<'_>,
 ) -> Result<(OnRoute, bool), String> {
-    let found = survey(state, None, agent, place);
+    let found = survey(state, operation, agent, place);
     if let Some(on) = earlier.and_then(|earlier| found.open_named(earlier)) {
         return Ok((on.clone(), true));
     }

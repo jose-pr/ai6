@@ -194,7 +194,7 @@ fn open(
             clearance: None,
             review: false,
         };
-        let (route, _) = routes::for_conversation(state, &agent, None, &place)?;
+        let (route, _) = routes::for_conversation(state, operation, &agent, None, &place)?;
         agent = agent.on_route(&route.route);
         on = Some(route);
     }

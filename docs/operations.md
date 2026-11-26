@@ -320,7 +320,9 @@ looser than `strict` when it starts.
 `private = true` keeps an Operation's Missions off every route whose source may train on what it is
 sent (a route marked `trains_on_input`, [Agents](agents.md#routes)). Such a route is passed over
 for its Runs, with the reason in the Mission's record; an Agent whose routes are all marked waits.
-It is off by default, so an Operation that is not marked uses those routes; a private
+It is off by default, and a subordinate Operation that sets `private = false`, or `inherit =
+false`, lifts it from its parent. A watch (charge) of an Operation follows its mark; Moneypenny's
+conversations name no Operation, so they are not held back. An Operation that is not marked uses those routes; a private
 [overlay](agents.md#overlays) does the same for the Runs that carry it.
 
 ## Harness project settings

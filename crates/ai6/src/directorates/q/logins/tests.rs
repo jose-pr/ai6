@@ -540,6 +540,16 @@ fn a_login_written_back_names_the_account_it_had(store: &dyn Store) {
         Synced::Restored(1, "its login names another account")
     ));
 
+    // The same tokens with another account's API key beside them, which a harness may prefer.
+    let mut keyed: serde_json::Value =
+        serde_json::from_str(&identified_login("user-a", "acct-a", "r2")).unwrap();
+    keyed["OPENAI_API_KEY"] = serde_json::json!("sk-another-account");
+    std::fs::write(home.join(FILE), keyed.to_string()).unwrap();
+    assert!(matches!(
+        run.sync(&a, Some(1), NOW + 2.5).unwrap(),
+        Synced::Restored(1, "its login names another account")
+    ));
+
     // The same account renewing its tokens is kept.
     std::fs::write(home.join(FILE), identified_login("user-a", "acct-a", "r2")).unwrap();
     assert_eq!(

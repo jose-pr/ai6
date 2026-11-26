@@ -1063,8 +1063,8 @@ fn check_candidate(
                     .push(format!("{shown}: no directory for verified copies"));
                 return None;
             };
-            let held = copy_verified(directory, &digest, &bytes)
-                .and_then(|copy| Held::new(copy, digest.clone()));
+            let held =
+                copy_verified(directory, &digest, &bytes).and_then(|copy| Held::new(copy, digest));
             match held {
                 Ok(held) => {
                     let copy = held.copy.clone();

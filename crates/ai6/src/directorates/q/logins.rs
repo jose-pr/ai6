@@ -334,6 +334,9 @@ fn jwt_claims(token: &str) -> Option<serde_json::Value> {
 /// every name gone. A login that names none (Claude Code's credentials file holds opaque tokens
 /// and no account) has nothing to compare, and is kept as before.
 fn names_another_account(old: &serde_json::Value, new: &serde_json::Value) -> bool {
+    if gained_api_key(old, new) {
+        return true;
+    }
     let (old, new) = (identities(old), identities(new));
     if old.is_empty() {
         return false;
@@ -342,6 +345,31 @@ fn names_another_account(old: &serde_json::Value, new: &serde_json::Value) -> bo
         || old
             .iter()
             .any(|(at, value)| new.get(at).is_some_and(|now| now != value))
+}
+
+/// Whether `new` holds an API key that `old` did not: a harness may prefer a key in its login
+/// file to the tokens beside it, so one added there would send every Run of the account to
+/// another account's quota.
+fn gained_api_key(old: &serde_json::Value, new: &serde_json::Value) -> bool {
+    let Some(map) = new.as_object() else {
+        return false;
+    };
+    map.iter().any(|(key, value)| {
+        let lower = key.to_ascii_lowercase();
+        match value {
+            serde_json::Value::String(text)
+                if !text.is_empty() && (lower.contains("api_key") || lower.contains("apikey")) =>
+            {
+                old.get(key)
+                    .and_then(serde_json::Value::as_str)
+                    .is_none_or(str::is_empty)
+            }
+            serde_json::Value::Object(_) => {
+                gained_api_key(old.get(key).unwrap_or(&serde_json::Value::Null), value)
+            }
+            _ => false,
+        }
+    })
 }
 
 fn scan_expiry(value: &serde_json::Value, named: &mut Option<f64>, token: &mut Option<f64>) {

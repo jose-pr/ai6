@@ -132,6 +132,21 @@ impl StationLimits {
                 return Err(format!("station.{key}: at least 1"));
             }
         }
+        for name in &self.harness.os_env {
+            let credential = crate::directorates::q::harness_accounts::CREDENTIAL_VARIABLES
+                .iter()
+                .any(|variable| variable.eq_ignore_ascii_case(name));
+            if name.is_empty()
+                || name.contains('=')
+                || credential
+                || name.to_ascii_uppercase().starts_with("AI6_")
+            {
+                return Err(format!(
+                    "station.harness.os_env: {name:?} is no platform variable (a credential's \
+                     variable and AI6's own are left to the account and the Station)"
+                ));
+            }
+        }
         if self.accounts.unknown_use_permille > 1000 {
             return Err("station.accounts.unknown_use_permille: 0 to 1000".to_owned());
         }
