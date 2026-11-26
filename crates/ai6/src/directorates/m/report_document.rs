@@ -79,10 +79,8 @@ mod tests {
 
     #[test]
     fn the_authors_own_front_matter_goes_back_in_front_of_the_body() {
-        let document = read(
-            "---\nkind: \"memory\"\nauthor: |2\n  tags: x\n\n  more: y\n---\n\nBody",
-        )
-        .unwrap();
+        let document =
+            read("---\nkind: \"memory\"\nauthor: |2\n  tags: x\n\n  more: y\n---\n\nBody").unwrap();
         assert!(!document.fields.contains_key("author"));
         assert_eq!(document.text, "---\ntags: x\n\nmore: y\n---\nBody");
     }

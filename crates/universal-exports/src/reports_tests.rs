@@ -1713,8 +1713,19 @@ async fn every_kind_of_report_exports_with_its_fields_as_frontmatter_and_imports
         assert_eq!(status, StatusCode::OK, "{markdown}");
         let head = markdown.split("\n---\n").next().unwrap();
         for key in [
-            "id", "scope", "kind", "title", "source", "filer", "state", "revision", "created",
-            "updated", "exposed", "untrusted", "sight",
+            "id",
+            "scope",
+            "kind",
+            "title",
+            "source",
+            "filer",
+            "state",
+            "revision",
+            "created",
+            "updated",
+            "exposed",
+            "untrusted",
+            "sight",
         ] {
             assert!(head.contains(&format!("\n{key}:")), "{key} in\n{head}");
         }

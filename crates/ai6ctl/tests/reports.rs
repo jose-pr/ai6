@@ -356,7 +356,16 @@ async fn reports_are_exported_as_markdown_files_and_applied_back() {
         .await,
     );
     let id = filed.split('\t').next().unwrap().to_owned();
-    let shown = printed(&run(vec!["reports".into(), "show".into(), id.clone(), "-o".into(), "md".into()]).await);
+    let shown = printed(
+        &run(vec![
+            "reports".into(),
+            "show".into(),
+            id.clone(),
+            "-o".into(),
+            "md".into(),
+        ])
+        .await,
+    );
     assert!(shown.starts_with("---\n"), "{shown}");
     assert!(shown.contains("title: \"The parser leaks\""), "{shown}");
     assert!(shown.trim_end().ends_with("RSS grows"), "{shown}");
@@ -364,15 +373,28 @@ async fn reports_are_exported_as_markdown_files_and_applied_back() {
     let folder = tempfile::tempdir().unwrap();
     let dir = folder.path().to_string_lossy().into_owned();
     let exported = printed(
-        &run(vec!["reports".into(), "export".into(), dir.clone(), "--scope".into(), "operation:G".into()]).await,
+        &run(vec![
+            "reports".into(),
+            "export".into(),
+            dir.clone(),
+            "--scope".into(),
+            "operation:G".into(),
+        ])
+        .await,
     );
     assert!(exported.starts_with("1 written"), "{exported}");
     let file = folder.path().join("finding").join(format!("{id}.md"));
-    assert_eq!(std::fs::read_to_string(&file).unwrap().trim_end(), shown.trim_end());
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap().trim_end(),
+        shown.trim_end()
+    );
 
     // What was exported applies back as the same Report, and a hand-written document files one.
     let back = printed(&run(vec!["apply".into(), "-f".into(), dir.clone()]).await);
-    assert_eq!(back.trim_end(), format!("{id}\tunchanged\tThe parser leaks"));
+    assert_eq!(
+        back.trim_end(),
+        format!("{id}\tunchanged\tThe parser leaks")
+    );
     let written = folder.path().join("new.md");
     std::fs::write(
         &written,
@@ -380,10 +402,23 @@ async fn reports_are_exported_as_markdown_files_and_applied_back() {
     )
     .unwrap();
     let dry = printed(
-        &run(vec!["apply".into(), "-f".into(), written.to_string_lossy().into_owned(), "--dry-run".into()]).await,
+        &run(vec![
+            "apply".into(),
+            "-f".into(),
+            written.to_string_lossy().into_owned(),
+            "--dry-run".into(),
+        ])
+        .await,
     );
     assert!(dry.contains("would be created"), "{dry}");
-    let made = printed(&run(vec!["reports".into(), "import".into(), written.to_string_lossy().into_owned()]).await);
+    let made = printed(
+        &run(vec![
+            "reports".into(),
+            "import".into(),
+            written.to_string_lossy().into_owned(),
+        ])
+        .await,
+    );
     assert!(made.contains("\tcreated\tSeen later"), "{made}");
     let _ = shutdown.send(());
 }

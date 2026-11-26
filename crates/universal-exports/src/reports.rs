@@ -1043,10 +1043,7 @@ fn file_report(
             }
             _ => Refused::from(ApiError::internal()),
         })?;
-    Ok((
-        StatusCode::CREATED,
-        Json(shown(registry, reader, &report)),
-    ))
+    Ok((StatusCode::CREATED, Json(shown(registry, reader, &report))))
 }
 
 /// What is known is filed as its title, text, summary, topics and compartments: the kinds'

@@ -553,8 +553,8 @@ fn split_markdown(files: &[String]) -> (Vec<PathBuf>, Vec<String>) {
             continue;
         }
         if path.is_dir() {
-            let inside = crate::reports::markdown_files(std::slice::from_ref(&path))
-                .unwrap_or_default();
+            let inside =
+                crate::reports::markdown_files(std::slice::from_ref(&path)).unwrap_or_default();
             let configuration = std::fs::read_dir(&path).is_ok_and(|entries| {
                 entries.flatten().any(|entry| {
                     let inner = entry.path();
