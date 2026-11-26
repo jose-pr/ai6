@@ -781,7 +781,7 @@ async fn green_ink_held_briefs_reviews_charges_and_reports_are_documents() {
         .await;
     let markdown = document["markdown"].as_str().unwrap();
     for line in [
-        "kind: \"report\"",
+        "kind: \"finding\"",
         "scope: \"operation:G\"",
         "title: \"Release notes are stale\"",
         "sight: \"content\"",

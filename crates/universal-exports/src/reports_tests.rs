@@ -1621,3 +1621,352 @@ async fn a_proposal_waits_for_a_person_who_may_write_and_who_may_see() {
         .await;
     assert_eq!(found["total"], 0, "{found}");
 }
+
+/// `operator-007` files observations in G and writes what is known in G and the global scope.
+const FILER_KEEPER_ROLES: &str = r#"
+    [role.viewer]
+    actions = ["mission.read"]
+
+    [role.keeper]
+    actions = ["mission.read", "mission.create", "memory.write"]
+
+    [[rule]]
+    subject = "person:viewer-007"
+    scope = "operation:G"
+    role = "viewer"
+
+    [[rule]]
+    subject = "person:operator-007"
+    scope = "operation:G"
+    role = "keeper"
+
+    [role.memory]
+    actions = ["memory.write"]
+
+    [[rule]]
+    subject = "person:operator-007"
+    scope = "config:memory"
+    role = "memory"
+"#;
+
+impl Fixture {
+    /// A Report's document as `token` reads it: the status and the Markdown.
+    async fn document(&self, token: &str, id: &str) -> (StatusCode, String) {
+        let response = reqwest::Client::new()
+            .get(format!("{}/v1/reports/{id}/document", self.served.base))
+            .bearer_auth(token)
+            .header("accept", "text/markdown")
+            .send()
+            .await
+            .unwrap();
+        (response.status(), response.text().await.unwrap())
+    }
+
+    /// Imports `markdown` as `token`.
+    async fn import(&self, token: &str, markdown: &str, query: &str) -> (StatusCode, Value) {
+        let response = reqwest::Client::new()
+            .post(format!("{}/v1/reports/import{query}", self.served.base))
+            .bearer_auth(token)
+            .header("content-type", "text/markdown")
+            .body(markdown.to_owned())
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        (status, response.json().await.unwrap_or(Value::Null))
+    }
+}
+
+#[tokio::test]
+async fn every_kind_of_report_exports_with_its_fields_as_frontmatter_and_imports_back_the_same() {
+    let fixture = fixture_with(FILER_KEEPER_ROLES).await;
+    let operator = fixture.served.operator.clone();
+    let observation = fixture
+        .file(json!({
+            "title": "Release notes are stale",
+            "text": "---\ntags: x\n---\nThey name 0.3.\n\n- a list",
+            "priority": "low",
+            "severity": "warning",
+            "sub_source": "the intern",
+            "topics": ["docs"],
+        }))
+        .await;
+    let mut ids = vec![("finding", observation)];
+    for kind in ["memory", "tradecraft", "rule", "contact"] {
+        let (status, made) = fixture
+            .call(
+                &operator,
+                Method::POST,
+                "/v1/reports",
+                Some(json!({
+                    "scope": "operation:G", "kind": kind, "title": format!("A {kind}"),
+                    "text": format!("What a {kind} says.\n\nSecond paragraph."),
+                    "summary": "one line", "topics": ["a", "b"],
+                })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::CREATED, "{made}");
+        ids.push((kind, made["id"].as_str().unwrap().to_owned()));
+    }
+    for (kind, id) in &ids {
+        let (status, markdown) = fixture.document(&operator, id).await;
+        assert_eq!(status, StatusCode::OK, "{markdown}");
+        let head = markdown.split("\n---\n").next().unwrap();
+        for key in [
+            "id", "scope", "kind", "title", "source", "filer", "state", "revision", "created",
+            "updated", "exposed", "untrusted", "sight",
+        ] {
+            assert!(head.contains(&format!("\n{key}:")), "{key} in\n{head}");
+        }
+        assert!(head.contains(&format!("kind: \"{kind}\"")), "{head}");
+        assert_eq!(head.matches("\nkind:").count(), 1, "one kind\n{head}");
+        if *kind == "finding" {
+            for line in [
+                "severity: \"warning\"",
+                "priority: \"low\"",
+                "sub_source: \"the intern\"",
+            ] {
+                assert!(head.contains(line), "{line} in\n{head}");
+            }
+            assert!(
+                markdown.contains("author: |2"),
+                "the text's own front matter is kept\n{markdown}"
+            );
+            assert!(markdown.ends_with("- a list"), "{markdown}");
+        } else {
+            assert!(head.contains("summary: \"one line\""), "{head}");
+            assert!(markdown.ends_with("Second paragraph."), "{markdown}");
+        }
+        // Read back as it was written: the same record, and nothing stored.
+        let before = fixture.served.registry.report(id).unwrap().unwrap();
+        let (status, same) = fixture.import(&operator, &markdown, "").await;
+        assert_eq!(status, StatusCode::OK, "{kind}: {same}");
+        assert_eq!(same["change"], "unchanged");
+        assert_eq!(fixture.served.registry.report(id).unwrap().unwrap(), before);
+    }
+
+    // A known Report is revised by its document, from the revision it was read at.
+    let (_, id) = ids.iter().find(|(kind, _)| *kind == "tradecraft").unwrap();
+    let (_, markdown) = fixture.document(&operator, id).await;
+    let edited = markdown.replace("What a tradecraft says.", "What it says now.");
+    let (status, dry) = fixture.import(&operator, &edited, "?dry_run=true").await;
+    assert_eq!(
+        (status, dry["change"].as_str()),
+        (StatusCode::OK, Some("changed")),
+        "{dry}"
+    );
+    assert_eq!(
+        fixture
+            .served
+            .registry
+            .report(id)
+            .unwrap()
+            .unwrap()
+            .revision,
+        1,
+        "a dry run stores nothing"
+    );
+    let (status, changed) = fixture.import(&operator, &edited, "").await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    assert_eq!(
+        (changed["change"].as_str(), changed["revision"].as_u64()),
+        (Some("changed"), Some(2))
+    );
+    let (status, stale) = fixture.import(&operator, &edited, "").await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "the revision it was read at has moved: {stale}"
+    );
+    assert_eq!(stale["revision"], 2);
+
+    // An observation's text is what was filed.
+    let (_, id) = &ids[0];
+    let (_, markdown) = fixture.document(&operator, id).await;
+    let (status, refused) = fixture
+        .import(
+            &operator,
+            &markdown.replace("They name 0.3.", "They name 0.4."),
+            "",
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
+    assert!(
+        refused["error"].as_str().unwrap().contains("text"),
+        "{refused}"
+    );
+
+    // The gateway's keys are checked, never taken on trust.
+    let (_, id) = ids.iter().find(|(kind, _)| *kind == "memory").unwrap();
+    let (_, markdown) = fixture.document(&operator, id).await;
+    for (from, to) in [
+        ("operator-007", "someone-else"),
+        ("untrusted: false", "untrusted: true"),
+        ("revision: 1", "revision: 9"),
+    ] {
+        assert!(markdown.contains(from), "{from} in\n{markdown}");
+        let (status, refused) = fixture
+            .import(&operator, &markdown.replace(from, to), "")
+            .await;
+        assert!(
+            matches!(status, StatusCode::BAD_REQUEST | StatusCode::CONFLICT),
+            "{from}: {status} {refused}"
+        );
+    }
+    let (status, _) = fixture
+        .import(
+            &operator,
+            &markdown.replace(&format!("id: \"{id}\""), "id: \"report-nope\""),
+            "",
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "an id the gateway never made"
+    );
+}
+
+#[tokio::test]
+async fn a_document_written_by_hand_files_a_report_once_and_does_not_set_what_the_gateway_owns() {
+    let fixture = fixture_with(FILER_KEEPER_ROLES).await;
+    let (operator, viewer) = (
+        fixture.served.operator.clone(),
+        fixture.served.viewer.clone(),
+    );
+    let guide = "---\nscope: global\nkind: tradecraft\ntitle: Reading a repository\nsummary: what one is\ntopics: [repo, search]\n---\n\nA repository is a Source's code.";
+    let (status, filed) = fixture.import(&viewer, guide, "").await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "someone who may not write global: {filed}"
+    );
+    let (status, dry) = fixture.import(&operator, guide, "?dry_run=true").await;
+    assert_eq!(
+        (status, dry["change"].as_str()),
+        (StatusCode::OK, Some("created")),
+        "{dry}"
+    );
+    let (status, filed) = fixture.import(&operator, guide, "").await;
+    assert_eq!(status, StatusCode::CREATED, "{filed}");
+    assert_eq!(filed["change"], "created");
+    let id = filed["id"].as_str().unwrap().to_owned();
+    let stored = fixture.served.registry.report(&id).unwrap().unwrap();
+    assert_eq!(stored.title, "Reading a repository");
+    assert_eq!(stored.text, "A repository is a Source's code.");
+    assert_eq!(stored.topics, ["repo", "search"]);
+    // Applied again it is the same Report, not a second one.
+    let (status, again) = fixture.import(&operator, guide, "").await;
+    assert_eq!(status, StatusCode::CONFLICT, "{again}");
+    assert_eq!(
+        (again["id"].as_str(), again["revision"].as_u64()),
+        (Some(id.as_str()), Some(1))
+    );
+
+    // A new Report carries none of what the gateway keeps.
+    for key in [
+        "id: report-x",
+        "revision: 4",
+        "filer: {}",
+        "state: standing",
+        "created: 5",
+    ] {
+        let marked = guide
+            .replace("kind: tradecraft", &format!("kind: tradecraft\n{key}"))
+            .replace("Reading a repository", "Another");
+        let (status, refused) = fixture.import(&operator, &marked, "").await;
+        assert!(
+            status == StatusCode::BAD_REQUEST
+                || (key.starts_with("id:") && status == StatusCode::NOT_FOUND),
+            "{key}: {status} {refused}"
+        );
+    }
+    for (document, why) in [
+        ("no front matter", "front matter"),
+        (
+            "---\nscope: global\nkind: memory\ntitle: t\nflavour: x\n---\n\nbody",
+            "flavour",
+        ),
+        ("---\ntitle: t\n---\n\nbody", "scope"),
+        (
+            "---\nscope: global\ntruncated: true\ntitle: t\nkind: memory\n---\n\nbo",
+            "cut short",
+        ),
+    ] {
+        let (status, refused) = fixture.import(&operator, document, "").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{why}: {refused}");
+        assert!(
+            refused["error"].as_str().unwrap().contains(why),
+            "{why}: {refused}"
+        );
+    }
+    // An observation is filed as the person, and shown as theirs.
+    let observed =
+        "---\nscope: operation:G\ntitle: Seen\nseverity: warning\n---\n\nThe build is slow.";
+    let (status, filed) = fixture.import(&operator, observed, "").await;
+    assert_eq!(status, StatusCode::CREATED, "{filed}");
+    assert_eq!(filed["filer"]["person"], "operator-007");
+    let (status, _) = fixture.import(&viewer, observed, "").await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "reading is not filing");
+}
+
+#[tokio::test]
+async fn what_a_reader_may_not_see_is_not_in_their_export_and_a_tearline_reader_gets_the_tearline()
+{
+    let fixture = fixture_with(FILER_KEEPER_ROLES).await;
+    let (operator, viewer) = (
+        fixture.served.operator.clone(),
+        fixture.served.viewer.clone(),
+    );
+    fixture.read_in("KESTREL", &["person:operator-007"]);
+    let marked = fixture
+        .file(json!({
+            "title": "A key leaked",
+            "text": "the deploy key is in the CI log",
+            "compartments": ["KESTREL"],
+        }))
+        .await;
+    let classified = fixture
+        .file(json!({
+            "title": "Vendor compromise", "text": "the vendor signs with a stolen key",
+            "classification": "restricted", "tearline": {"text": "hold vendor upgrades"},
+        }))
+        .await;
+    let known = fixture
+        .keep("operation:G", "Behind a compartment", &["KESTREL"])
+        .await;
+
+    // Outside the compartment: nothing of the observation but its markings, nothing of the memory.
+    let (status, body) = fixture.document(&viewer, &marked).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(
+        !body.contains("deploy key") && !body.contains("A key leaked"),
+        "{body}"
+    );
+    let (status, body) = fixture.document(&viewer, &known).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(!body.contains("Behind"), "{body}");
+    // Nor can that reader write a change to it back.
+    let (_, seen) = fixture.document(&operator, &known).await;
+    let (status, refused) = fixture.import(&viewer, &seen, "").await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{refused}");
+
+    // A tearline reader's document holds the tearline as its body and not the text.
+    let (status, body) = fixture.document(&viewer, &classified).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.ends_with("hold vendor upgrades"), "{body}");
+    assert!(
+        body.contains("sight: \"tearline\"") && body.contains("classification: \"restricted\""),
+        "{body}"
+    );
+    assert!(
+        !body.contains("stolen") && !body.contains("Vendor compromise"),
+        "{body}"
+    );
+    let (status, refused) = fixture.import(&viewer, &body, "").await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "a tearline is not a Report to write back: {refused}"
+    );
+}

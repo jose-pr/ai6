@@ -1990,6 +1990,7 @@ impl Gateway {
             )
             .route("/v1/reports/{id}/versions", get(reports::versions))
             .route("/v1/reports/{id}/document", get(reports::document))
+            .route("/v1/reports/import", post(reports::import))
             .route(
                 "/v1/reports/{id}/reopen",
                 post(reports::reopen),

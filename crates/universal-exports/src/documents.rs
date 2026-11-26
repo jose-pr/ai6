@@ -134,11 +134,41 @@ pub(crate) struct Draft {
 impl Draft {
     /// A document of `kind`, about a record of `operation` when it has one.
     pub(crate) fn new(kind: &str, operation: Option<&str>) -> Self {
+        let mut draft = Self::bare(operation);
+        draft.meta.push(("kind".to_owned(), Value::from(kind)));
+        draft
+    }
+
+    /// A document with no keys yet, for a record whose own fields (a Report's `kind`) are all
+    /// its frontmatter.
+    pub(crate) fn bare(operation: Option<&str>) -> Self {
         Self {
-            meta: vec![("kind".to_owned(), Value::from(kind))],
+            meta: Vec::new(),
             body: String::new(),
             operation: operation.map(str::to_owned),
         }
+    }
+
+    /// Adds the keys of `map` named in `order` first, in that order, then the others in the
+    /// map's own, except `except`.
+    #[must_use]
+    pub(crate) fn with_ordered(
+        mut self,
+        map: &Map<String, Value>,
+        order: &[&str],
+        except: &[&str],
+    ) -> Self {
+        for key in order {
+            if let Some(value) = map.get(*key).filter(|_| !except.contains(key)) {
+                self = self.with(key, value.clone());
+            }
+        }
+        for (key, value) in map {
+            if !order.contains(&key.as_str()) && !except.contains(&key.as_str()) {
+                self = self.with(key, value.clone());
+            }
+        }
+        self
     }
 
     /// Adds a key, unless the value says nothing (null, empty text, empty list or map).

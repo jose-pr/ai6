@@ -892,6 +892,41 @@ pub(crate) async fn show(
     .await
 }
 
+/// The order a Report's fields come in as frontmatter: what it is, who said it and how far to
+/// trust it, how it is marked, where it stands, then what the gateway keeps.
+const DOCUMENT_ORDER: [&str; 30] = [
+    "id",
+    "scope",
+    "kind",
+    "title",
+    "summary",
+    "topics",
+    "source",
+    "filer",
+    "sub_source",
+    "from",
+    "links",
+    "severity",
+    "credibility",
+    "reliability",
+    "classification",
+    "handling",
+    "compartments",
+    "tearline",
+    "priority",
+    "deadline",
+    "state",
+    "assessment",
+    "resolution",
+    "proposes",
+    "revision",
+    "updated_by",
+    "created",
+    "updated",
+    "exposed",
+    "untrusted",
+];
+
 /// `GET /v1/reports/{id}/document`: the Report as a document, as far as the person may see it:
 /// its title and text are the body, everything else the frontmatter. The same sight rules as
 /// the Report itself: one they are not read in to answers `403`.
@@ -905,8 +940,14 @@ pub(crate) async fn document(
     let registry = registry_of(&gateway)?;
     let (shown, scope) = blocking(move || {
         let missing = || refused(StatusCode::NOT_FOUND, "No such report.");
-        let report = registry.report(&id).ok().flatten().ok_or_else(missing)?;
+        let report = ai6::directorates::m::guides::find(&id)
+            .cloned()
+            .or_else(|| registry.report(&id).ok().flatten())
+            .ok_or_else(missing)?;
         if !reader.reads_report(&report) {
+            return Err(missing());
+        }
+        if report.is_known() && sight(&reader, &report, &reader.rules()) != ReportSight::Content {
             return Err(missing());
         }
         let shown = shown(registry.as_ref(), &reader, &report);
@@ -926,10 +967,10 @@ pub(crate) async fn document(
         ReportScope::Operation(operation) => Some(operation.to_string()),
         _ => None,
     };
-    let mut draft = crate::documents::Draft::new("report", operation.as_deref());
+    let mut draft = crate::documents::Draft::bare(operation.as_deref());
     let mut body = String::new();
     if let Value::Object(map) = &shown {
-        draft = draft.with_all(map, &["text"]);
+        draft = draft.with_ordered(map, &DOCUMENT_ORDER, &["text"]);
         if let Some(text) = map.get("text").and_then(Value::as_str) {
             body.push_str(text);
         }
@@ -959,46 +1000,53 @@ pub(crate) async fn file(
     let filing: ReportFiling = serde_json::from_value(body)
         .map_err(|error| refused(StatusCode::BAD_REQUEST, error.to_string()))?;
     let at = unix_timestamp()?;
-    blocking(move || {
-        if filing.kind.as_deref().is_some_and(is_known_kind) {
-            return file_knowledge(registry.as_ref(), &reader, scope, filing);
-        }
-        if !reader.files_in(&scope) {
-            return Err(refused(
-                StatusCode::FORBIDDEN,
-                format!("You may not file reports in {scope}."),
-            ));
-        }
-        let filer = ReportFiler::Person {
-            person: reader.person.id.clone(),
-        };
-        let report = filing
-            .into_report(
-                scope,
-                filer,
-                [],
-                at,
-                &registry.limits().reports,
-                &reader.settings,
-            )
-            .map_err(|reason| refused(StatusCode::BAD_REQUEST, reason))?;
-        registry
-            .file_report(&report)
-            .map_err(|error| match error.kind() {
-                std::io::ErrorKind::InvalidInput => {
-                    refused(StatusCode::BAD_REQUEST, error.to_string())
-                }
-                std::io::ErrorKind::InvalidData | std::io::ErrorKind::QuotaExceeded => {
-                    refused(StatusCode::CONFLICT, error.to_string())
-                }
-                _ => Refused::from(ApiError::internal()),
-            })?;
-        Ok((
-            StatusCode::CREATED,
-            Json(shown(registry.as_ref(), &reader, &report)),
-        ))
-    })
-    .await
+    blocking(move || file_report(registry.as_ref(), &reader, scope, filing, at)).await
+}
+
+/// Files `filing` in `scope` as the reader: a known kind through the knowledge rules, anything
+/// else as an observation of theirs.
+fn file_report(
+    registry: &dyn RegistryBackend,
+    reader: &PersonReader,
+    scope: ReportScope,
+    filing: ReportFiling,
+    at: f64,
+) -> Result<(StatusCode, Json<Value>), Refused> {
+    if filing.kind.as_deref().is_some_and(is_known_kind) {
+        return file_knowledge(registry, reader, scope, filing);
+    }
+    if !reader.files_in(&scope) {
+        return Err(refused(
+            StatusCode::FORBIDDEN,
+            format!("You may not file reports in {scope}."),
+        ));
+    }
+    let filer = ReportFiler::Person {
+        person: reader.person.id.clone(),
+    };
+    let report = filing
+        .into_report(
+            scope,
+            filer,
+            [],
+            at,
+            &registry.limits().reports,
+            &reader.settings,
+        )
+        .map_err(|reason| refused(StatusCode::BAD_REQUEST, reason))?;
+    registry
+        .file_report(&report)
+        .map_err(|error| match error.kind() {
+            std::io::ErrorKind::InvalidInput => refused(StatusCode::BAD_REQUEST, error.to_string()),
+            std::io::ErrorKind::InvalidData | std::io::ErrorKind::QuotaExceeded => {
+                refused(StatusCode::CONFLICT, error.to_string())
+            }
+            _ => Refused::from(ApiError::internal()),
+        })?;
+    Ok((
+        StatusCode::CREATED,
+        Json(shown(registry, reader, &report)),
+    ))
 }
 
 /// What is known is filed as its title, text, summary, topics and compartments: the kinds'
@@ -1585,6 +1633,10 @@ pub(crate) async fn revoke(
     .await?;
     Ok(Json(json!({ "revoked": revoked })))
 }
+
+#[path = "report_import.rs"]
+mod report_import;
+pub(crate) use report_import::import;
 
 #[cfg(test)]
 #[path = "reports_tests.rs"]
