@@ -65,6 +65,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   than a Station's, signs in once more. A policy that offers no sign-in is accepted:
   the gateway starts, says so, and only API keys work; `ai6ctl access sign-in show|set|clear` with a key holding
   `access.manage` changes it.
+- Every Report is a Markdown document: `GET /v1/reports/{id}/document` writes each field but the text as front matter in a fixed
+  order (`kind` is the Report's own), and `POST /v1/reports/import` reads it back, filing a new Report or giving a stored one
+  its next revision, with the gateway's own keys checked, never trusted. `ai6ctl reports show -o md`, `reports export`,
+  `reports import` and `apply -f *.md`; `ai6::directorates::m::report_document::read`.
 - The gateway serves a brief, a green ink request, a held brief, a Mission's reviews, a charge's report and a
   Report as documents (`.../missions/{mission}/brief`, `.../green-ink/{id}/document`,
   `.../held-briefs/{key}/document`, `.../reviews/document`, `/v1/user/charges/{scope}/document`,

@@ -313,6 +313,71 @@ knowledge: `knowledge_text_bytes` (256 KiB, a known Report's text; observations 
 refuses the next one even when its writer sees room; the refusal names no count and nothing of what is
 hidden.
 
+## As Markdown documents
+
+Every Report, of every kind, is a Markdown document: each field but the text is front matter, the text is
+the body as it was written. `GET /v1/reports/{id}/document` with `Accept: text/markdown` returns it
+(`ai6ctl reports show ID -o md`), and `ai6ctl reports export DIR --scope ...` writes every Report a scope
+or search lists, one file each under `DIR/KIND/`.
+
+```markdown
+---
+id: "report-..."
+scope: "operation:G"
+kind: "tradecraft"
+title: "Writing a brief"
+summary: "what a brief must say"
+topics: ["brief"]
+source: "person:operator"
+filer: {"kind":"person","person":"operator"}
+state: "standing"
+revision: 2
+created: 1763000000.0
+updated: 1763000100.0
+exposed: false
+untrusted: false
+sight: "content"
+---
+
+The text, as written.
+```
+
+The front matter holds `id`, `scope`, `kind`, `title`, `summary`, `topics`, `source` and `filer`,
+`sub_source`, `from`, `links`, `severity`, `credibility` and the source's `reliability`, the markings
+(`classification`, `handling`, `compartments`, `tearline`), `priority`, `deadline`, `state`, `assessment`,
+`resolution`, `revision`, `updated_by`, `created`, `updated`, `exposed` (an exposed Run wrote it),
+`untrusted` and `sight`; a key with nothing to say is left out. A reader who sees only the tearline gets
+the tearline as the body and the markings, no title and no text; one who may not read it gets nothing
+(`403` with its markings alone where the Report is an observation they may know exists, `404` for a
+memory, tradecraft, rule or contact, which hides as missing). A text that opens with front matter of its
+own keeps it, as text, under `author`; a document whose body was cut by `[text] document_bytes` says
+`truncated: true`.
+
+**Importing.** `POST /v1/reports/import` (a `text/markdown` body; `ai6ctl reports import FILE...`, or
+`ai6ctl apply -f FILE-or-DIR` for `.md` files, `--dry-run` to check) reads that form back, as the person
+importing it and under the rules of filing, revising and marking by hand:
+
+- **No `id`**: a new Report. `scope` is required and `kind` is `finding` when left out; `title`,
+  `summary`, `topics`, `severity`, `priority`, `deadline`, `from`, `sub_source`, the markings and `links`
+  are as `reports file` takes them (a memory, tradecraft, rule or contact takes title, summary, topics and
+  compartments only). Keys the gateway owns (`id`, `revision`, `created`, `updated`, `updated_by`, `filer`,
+  `source`, `reliability`, `state`, `assessment`, `resolution`, `exposed`, `untrusted`, `sight`) are
+  refused: it files the Report as the person importing it. A known Report with the title of a standing one
+  in that scope and kind is refused `409` with that one's `id` and `revision`, so applying a directory of
+  tradecraft twice changes nothing.
+- **An `id`**: the stored Report, which must be one the person reads in full. Everything the gateway owns
+  must repeat what is stored, and `revision` must be the one stored (`409` with the current one
+  otherwise). A document that changes nothing answers `unchanged`. A known Report takes a new title,
+  summary, topics, compartments and text as its next revision; any other field, or any change to an
+  observation, is refused (its markings change at `PUT .../markings`, its verdict at `PUT
+  .../assessment`). A built-in guide is read only: to override one, import a Report with its title and
+  kind in `global`.
+- A key that is no field of a Report, a body cut short and a front matter that does not read are `400`.
+
+The answer is the Report as the person sees it, with `change` (`created`, `changed`, `unchanged` or
+`proposed`) and `201`, `200` or `202`; `?dry_run=true` checks the document against the stored Report and
+stores nothing.
+
 ## The Reports page
 
 Outer Office's **Reports** page, under Work, is where a person reads and assesses Reports. It is

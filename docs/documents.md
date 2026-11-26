@@ -48,7 +48,7 @@ a wildcard), with `Vary: Accept`.
 | `GET /v1/user/operations/{op}/held-briefs/{key}/document` | `mission.create` | `held_brief`: `operation`, `key`, `mission`, `handle`, `title`, `name`, `source`, `agent`, `role`, `url`, `stations`, `priority`, `created`, `held_at`, `verdict`, `findings` (kind, detail, related), `origin`. The body is the brief's text |
 | `GET /v1/user/operations/{op}/missions/{mission}/reviews/document` | `mission.read` | `review`: `operation`, `mission`, `reviews` (each gate's policy, status, iteration, round, panel, turns, tokens and overrule). The body is a section per gate: the votes, and each reviewer's reasons as block quotes |
 | `GET /v1/user/charges/{scope}/document` | `charge.converse` | `charge`: `scope`, `agent`, `route`, `configured`, `station`, `held`, `lease_expires`, `last_wake`, `last_ended`, `turns_last_hour`. The body is what its last turn said, then its logbook |
-| `GET /v1/reports/{id}/document` | reading the Report's scope, as the Report | `report`: the Report's fields as `GET /v1/reports/{id}` gives them (`title` among them, `sight` saying how much the reader sees). The body is its `text` |
+| `GET /v1/reports/{id}/document` | reading the Report's scope, as the Report | The Report's fields as `GET /v1/reports/{id}` gives them, in the order [Reports](reports.md#as-markdown-documents) lists, `kind` being the Report's own (`finding`, `tradecraft`, ...) and `sight` saying how much the reader sees. The body is its `text` |
 
 A record the person may not read answers as its own route does (`403`, or `404` for another
 Operation's or an unknown one).
