@@ -925,6 +925,7 @@ pub ai6::directorates::m::charges::ChargeDefinition::stuck_verifying_after: ai6:
 pub ai6::directorates::m::charges::ChargeDefinition::turn_timeout: ai6::bounds::TimeLimit
 pub ai6::directorates::m::charges::ChargeDefinition::wake_every: ai6::bounds::TimeLimit
 pub ai6::directorates::m::charges::ChargeDefinition::wake_every_idle: ai6::bounds::TimeLimit
+pub ai6::directorates::m::charges::ChargeDefinition::wake_restarts_timer: bool
 impl ai6::directorates::m::charges::ChargeDefinition
 pub const ai6::directorates::m::charges::ChargeDefinition::DEFAULTS: Self
 pub fn ai6::directorates::m::charges::ChargeDefinition::cable_operation<'a>(&'a self, &'a ai6::directorates::m::charges::ChargeScope) -> core::option::Option<&'a str>
@@ -5377,6 +5378,7 @@ pub fn ai6::directorates::registry::backend::ChargeStore::charges(&self) -> core
 pub fn ai6::directorates::registry::backend::ChargeStore::claim_charge(&self, &str, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::charges::ChargeRecord, ai6::directorates::registry::charges::ChargeError>
 pub fn ai6::directorates::registry::backend::ChargeStore::request_charge_wake(&self, &str, &str, &str) -> core::result::Result<ai6::directorates::registry::charges::ChargeControl, ai6::directorates::registry::charges::ChargeError>
 pub fn ai6::directorates::registry::backend::ChargeStore::update_charge(&self, &str, &str, u64, core::option::Option<core::time::Duration>, ai6::directorates::registry::charges::ChargeUpdate) -> core::result::Result<ai6::directorates::registry::charges::ChargeRecord, ai6::directorates::registry::charges::ChargeError>
+pub fn ai6::directorates::registry::backend::ChargeStore::wake_charge_now(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::charges::ChargeWake, ai6::directorates::registry::charges::ChargeError>
 impl ai6::directorates::registry::charges::ChargeStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::acknowledge_charge(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::charges::ChargeRecord, ai6::directorates::registry::charges::ChargeError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::charge(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::charges::ChargeRecord>>
@@ -5384,6 +5386,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::charges(&self) -> core::io
 pub fn ai6::directorates::registry::sql::SqlRegistry::claim_charge(&self, &str, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::charges::ChargeRecord, ai6::directorates::registry::charges::ChargeError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::request_charge_wake(&self, &str, &str, &str) -> core::result::Result<ai6::directorates::registry::charges::ChargeControl, ai6::directorates::registry::charges::ChargeError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::update_charge(&self, &str, &str, u64, core::option::Option<core::time::Duration>, ai6::directorates::registry::charges::ChargeUpdate) -> core::result::Result<ai6::directorates::registry::charges::ChargeRecord, ai6::directorates::registry::charges::ChargeError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::wake_charge_now(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::charges::ChargeWake, ai6::directorates::registry::charges::ChargeError>
 impl ai6::directorates::registry::charges::ChargeStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::acknowledge_charge(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::charges::ChargeRecord, ai6::directorates::registry::charges::ChargeError>
 pub fn ai6::directorates::registry::store::FileRegistry::charge(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::charges::ChargeRecord>>
@@ -5391,6 +5394,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::charges(&self) -> core:
 pub fn ai6::directorates::registry::store::FileRegistry::claim_charge(&self, &str, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::charges::ChargeRecord, ai6::directorates::registry::charges::ChargeError>
 pub fn ai6::directorates::registry::store::FileRegistry::request_charge_wake(&self, &str, &str, &str) -> core::result::Result<ai6::directorates::registry::charges::ChargeControl, ai6::directorates::registry::charges::ChargeError>
 pub fn ai6::directorates::registry::store::FileRegistry::update_charge(&self, &str, &str, u64, core::option::Option<core::time::Duration>, ai6::directorates::registry::charges::ChargeUpdate) -> core::result::Result<ai6::directorates::registry::charges::ChargeRecord, ai6::directorates::registry::charges::ChargeError>
+pub fn ai6::directorates::registry::store::FileRegistry::wake_charge_now(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::charges::ChargeWake, ai6::directorates::registry::charges::ChargeError>
 pub trait ai6::directorates::registry::backend::ClearanceStore
 pub fn ai6::directorates::registry::backend::ClearanceStore::clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::backend::ClearanceStore::clearance_grant_reads(&self) -> core::io::error::Result<ai6::directorates::registry::clearance::GrantReads>
@@ -6212,6 +6216,11 @@ impl core::error::Error for ai6::directorates::registry::charges::ChargeError
 pub fn ai6::directorates::registry::charges::ChargeError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Display for ai6::directorates::registry::charges::ChargeError
 pub fn ai6::directorates::registry::charges::ChargeError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum ai6::directorates::registry::charges::ChargeWake
+pub ai6::directorates::registry::charges::ChargeWake::Pending(ai6::directorates::registry::charges::ChargeControl)
+pub ai6::directorates::registry::charges::ChargeWake::Requested(ai6::directorates::registry::charges::ChargeControl)
+pub ai6::directorates::registry::charges::ChargeWake::Running
+pub ai6::directorates::registry::charges::ChargeWake::Running::since: f64
 #[non_exhaustive] pub struct ai6::directorates::registry::charges::ChargeControl
 pub ai6::directorates::registry::charges::ChargeControl::at: f64
 pub ai6::directorates::registry::charges::ChargeControl::by: alloc::string::String
@@ -6244,6 +6253,7 @@ pub ai6::directorates::registry::charges::ChargeRecord::lease_expires: f64
 pub ai6::directorates::registry::charges::ChargeRecord::logbook: alloc::vec::Vec<ai6::directorates::registry::charges::ChargeLogEntry>
 pub ai6::directorates::registry::charges::ChargeRecord::opened_at: f64
 pub ai6::directorates::registry::charges::ChargeRecord::provider_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::charges::ChargeRecord::running_since: core::option::Option<f64>
 pub ai6::directorates::registry::charges::ChargeRecord::scope: alloc::string::String
 pub ai6::directorates::registry::charges::ChargeRecord::seen: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::registry::charges::ChargeRecord::station: alloc::string::String
@@ -6252,17 +6262,21 @@ impl ai6::directorates::registry::charges::ChargeRecord
 pub fn ai6::directorates::registry::charges::ChargeRecord::turns_since(&self, f64) -> usize
 #[non_exhaustive] pub struct ai6::directorates::registry::charges::ChargeUpdate
 pub ai6::directorates::registry::charges::ChargeUpdate::context_tokens: core::option::Option<u64>
+pub ai6::directorates::registry::charges::ChargeUpdate::idle: bool
 pub ai6::directorates::registry::charges::ChargeUpdate::last_wake: core::option::Option<f64>
 pub ai6::directorates::registry::charges::ChargeUpdate::log: alloc::vec::Vec<ai6::directorates::registry::charges::ChargeLogEntry>
 pub ai6::directorates::registry::charges::ChargeUpdate::run: core::option::Option<core::option::Option<(alloc::string::String, alloc::string::String)>>
+pub ai6::directorates::registry::charges::ChargeUpdate::running_since: core::option::Option<f64>
 pub ai6::directorates::registry::charges::ChargeUpdate::seen: core::option::Option<alloc::vec::Vec<alloc::string::String>>
 pub ai6::directorates::registry::charges::ChargeUpdate::taken_controls: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::registry::charges::ChargeUpdate::turn_at: core::option::Option<f64>
 pub ai6::directorates::registry::charges::ChargeUpdate::turn_failed: core::option::Option<bool>
 impl ai6::directorates::registry::charges::ChargeUpdate
 pub fn ai6::directorates::registry::charges::ChargeUpdate::forget_run(self) -> Self
+pub fn ai6::directorates::registry::charges::ChargeUpdate::idle(self) -> Self
 pub fn ai6::directorates::registry::charges::ChargeUpdate::log(self, ai6::directorates::registry::charges::ChargeLogEntry) -> Self
 pub fn ai6::directorates::registry::charges::ChargeUpdate::run(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::charges::ChargeUpdate::running(self, f64) -> Self
 pub fn ai6::directorates::registry::charges::ChargeUpdate::seen(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::charges::ChargeUpdate::took_controls(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::charges::ChargeUpdate::turn_ended(self, bool) -> Self
@@ -6275,6 +6289,7 @@ pub fn ai6::directorates::registry::charges::ChargeStore::charges(&self) -> core
 pub fn ai6::directorates::registry::charges::ChargeStore::claim_charge(&self, &str, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::charges::ChargeRecord, ai6::directorates::registry::charges::ChargeError>
 pub fn ai6::directorates::registry::charges::ChargeStore::request_charge_wake(&self, &str, &str, &str) -> core::result::Result<ai6::directorates::registry::charges::ChargeControl, ai6::directorates::registry::charges::ChargeError>
 pub fn ai6::directorates::registry::charges::ChargeStore::update_charge(&self, &str, &str, u64, core::option::Option<core::time::Duration>, ai6::directorates::registry::charges::ChargeUpdate) -> core::result::Result<ai6::directorates::registry::charges::ChargeRecord, ai6::directorates::registry::charges::ChargeError>
+pub fn ai6::directorates::registry::charges::ChargeStore::wake_charge_now(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::charges::ChargeWake, ai6::directorates::registry::charges::ChargeError>
 impl ai6::directorates::registry::charges::ChargeStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::acknowledge_charge(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::charges::ChargeRecord, ai6::directorates::registry::charges::ChargeError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::charge(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::charges::ChargeRecord>>
@@ -6282,6 +6297,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::charges(&self) -> core::io
 pub fn ai6::directorates::registry::sql::SqlRegistry::claim_charge(&self, &str, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::charges::ChargeRecord, ai6::directorates::registry::charges::ChargeError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::request_charge_wake(&self, &str, &str, &str) -> core::result::Result<ai6::directorates::registry::charges::ChargeControl, ai6::directorates::registry::charges::ChargeError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::update_charge(&self, &str, &str, u64, core::option::Option<core::time::Duration>, ai6::directorates::registry::charges::ChargeUpdate) -> core::result::Result<ai6::directorates::registry::charges::ChargeRecord, ai6::directorates::registry::charges::ChargeError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::wake_charge_now(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::charges::ChargeWake, ai6::directorates::registry::charges::ChargeError>
 impl ai6::directorates::registry::charges::ChargeStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::acknowledge_charge(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::charges::ChargeRecord, ai6::directorates::registry::charges::ChargeError>
 pub fn ai6::directorates::registry::store::FileRegistry::charge(&self, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::charges::ChargeRecord>>
@@ -6289,6 +6305,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::charges(&self) -> core:
 pub fn ai6::directorates::registry::store::FileRegistry::claim_charge(&self, &str, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::charges::ChargeRecord, ai6::directorates::registry::charges::ChargeError>
 pub fn ai6::directorates::registry::store::FileRegistry::request_charge_wake(&self, &str, &str, &str) -> core::result::Result<ai6::directorates::registry::charges::ChargeControl, ai6::directorates::registry::charges::ChargeError>
 pub fn ai6::directorates::registry::store::FileRegistry::update_charge(&self, &str, &str, u64, core::option::Option<core::time::Duration>, ai6::directorates::registry::charges::ChargeUpdate) -> core::result::Result<ai6::directorates::registry::charges::ChargeRecord, ai6::directorates::registry::charges::ChargeError>
+pub fn ai6::directorates::registry::store::FileRegistry::wake_charge_now(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::charges::ChargeWake, ai6::directorates::registry::charges::ChargeError>
 pub mod ai6::directorates::registry::clearance
 #[non_exhaustive] pub struct ai6::directorates::registry::clearance::ClearanceGrant
 pub ai6::directorates::registry::clearance::ClearanceGrant::agent: alloc::string::String
@@ -8013,6 +8030,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::charges(&self) -> core::io
 pub fn ai6::directorates::registry::sql::SqlRegistry::claim_charge(&self, &str, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::charges::ChargeRecord, ai6::directorates::registry::charges::ChargeError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::request_charge_wake(&self, &str, &str, &str) -> core::result::Result<ai6::directorates::registry::charges::ChargeControl, ai6::directorates::registry::charges::ChargeError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::update_charge(&self, &str, &str, u64, core::option::Option<core::time::Duration>, ai6::directorates::registry::charges::ChargeUpdate) -> core::result::Result<ai6::directorates::registry::charges::ChargeRecord, ai6::directorates::registry::charges::ChargeError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::wake_charge_now(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::charges::ChargeWake, ai6::directorates::registry::charges::ChargeError>
 impl ai6::directorates::registry::clearance::ClearanceStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grant_reads(&self) -> core::io::error::Result<ai6::directorates::registry::clearance::GrantReads>
@@ -8334,6 +8352,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::charges(&self) -> core:
 pub fn ai6::directorates::registry::store::FileRegistry::claim_charge(&self, &str, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::charges::ChargeRecord, ai6::directorates::registry::charges::ChargeError>
 pub fn ai6::directorates::registry::store::FileRegistry::request_charge_wake(&self, &str, &str, &str) -> core::result::Result<ai6::directorates::registry::charges::ChargeControl, ai6::directorates::registry::charges::ChargeError>
 pub fn ai6::directorates::registry::store::FileRegistry::update_charge(&self, &str, &str, u64, core::option::Option<core::time::Duration>, ai6::directorates::registry::charges::ChargeUpdate) -> core::result::Result<ai6::directorates::registry::charges::ChargeRecord, ai6::directorates::registry::charges::ChargeError>
+pub fn ai6::directorates::registry::store::FileRegistry::wake_charge_now(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::charges::ChargeWake, ai6::directorates::registry::charges::ChargeError>
 impl ai6::directorates::registry::clearance::ClearanceStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::store::FileRegistry::clearance_grant_reads(&self) -> core::io::error::Result<ai6::directorates::registry::clearance::GrantReads>
@@ -12055,6 +12074,7 @@ pub ai6::ChargeDefinition::stuck_verifying_after: ai6::bounds::TimeLimit
 pub ai6::ChargeDefinition::turn_timeout: ai6::bounds::TimeLimit
 pub ai6::ChargeDefinition::wake_every: ai6::bounds::TimeLimit
 pub ai6::ChargeDefinition::wake_every_idle: ai6::bounds::TimeLimit
+pub ai6::ChargeDefinition::wake_restarts_timer: bool
 impl ai6::directorates::m::charges::ChargeDefinition
 pub const ai6::directorates::m::charges::ChargeDefinition::DEFAULTS: Self
 pub fn ai6::directorates::m::charges::ChargeDefinition::cable_operation<'a>(&'a self, &'a ai6::directorates::m::charges::ChargeScope) -> core::option::Option<&'a str>
@@ -12480,6 +12500,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::charges(&self) -> core:
 pub fn ai6::directorates::registry::store::FileRegistry::claim_charge(&self, &str, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::charges::ChargeRecord, ai6::directorates::registry::charges::ChargeError>
 pub fn ai6::directorates::registry::store::FileRegistry::request_charge_wake(&self, &str, &str, &str) -> core::result::Result<ai6::directorates::registry::charges::ChargeControl, ai6::directorates::registry::charges::ChargeError>
 pub fn ai6::directorates::registry::store::FileRegistry::update_charge(&self, &str, &str, u64, core::option::Option<core::time::Duration>, ai6::directorates::registry::charges::ChargeUpdate) -> core::result::Result<ai6::directorates::registry::charges::ChargeRecord, ai6::directorates::registry::charges::ChargeError>
+pub fn ai6::directorates::registry::store::FileRegistry::wake_charge_now(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::charges::ChargeWake, ai6::directorates::registry::charges::ChargeError>
 impl ai6::directorates::registry::clearance::ClearanceStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::store::FileRegistry::clearance_grant_reads(&self) -> core::io::error::Result<ai6::directorates::registry::clearance::GrantReads>
@@ -14391,6 +14412,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::charges(&self) -> core::io
 pub fn ai6::directorates::registry::sql::SqlRegistry::claim_charge(&self, &str, &str, &str, core::time::Duration) -> core::result::Result<ai6::directorates::registry::charges::ChargeRecord, ai6::directorates::registry::charges::ChargeError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::request_charge_wake(&self, &str, &str, &str) -> core::result::Result<ai6::directorates::registry::charges::ChargeControl, ai6::directorates::registry::charges::ChargeError>
 pub fn ai6::directorates::registry::sql::SqlRegistry::update_charge(&self, &str, &str, u64, core::option::Option<core::time::Duration>, ai6::directorates::registry::charges::ChargeUpdate) -> core::result::Result<ai6::directorates::registry::charges::ChargeRecord, ai6::directorates::registry::charges::ChargeError>
+pub fn ai6::directorates::registry::sql::SqlRegistry::wake_charge_now(&self, &str, &str) -> core::result::Result<ai6::directorates::registry::charges::ChargeWake, ai6::directorates::registry::charges::ChargeError>
 impl ai6::directorates::registry::clearance::ClearanceStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grant(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::clearance::ClearanceGrant>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::clearance_grant_reads(&self) -> core::io::error::Result<ai6::directorates::registry::clearance::GrantReads>
