@@ -1,8 +1,10 @@
 //! `ai6ctl reports`: file, list and show Reports through the gateway's `/v1/reports` routes. A
 //! Report you are not read in to, or not cleared for, lists by its ID and markings alone.
 
+use std::path::{Path, PathBuf};
+
 use clap::{Args, Subcommand};
-use reqwest::{Client, Method, Url};
+use reqwest::{Client, Method, StatusCode, Url};
 use serde_json::{Value, json};
 
 use crate::access::{exchange, list, text};
@@ -81,6 +83,51 @@ pub(crate) enum ReportsCommand {
     Show {
         /// Its ID.
         id: String,
+        /// `md` prints its Markdown document: every field but the text as front matter.
+        #[arg(short = 'o', long, value_parser = ["text", "md"], default_value = "text")]
+        output: String,
+    },
+    /// Write every Report a search or scope lists as a Markdown document, one file each under
+    /// `DIR/KIND/`. What you may not read is not written; Reports listed by their markings alone
+    /// are counted, since the listing already told you they exist.
+    Export {
+        /// The directory the files go in (made when missing).
+        dir: PathBuf,
+        /// operation:ID, station:ID, person:ID, global or m.
+        #[arg(
+            long,
+            required_unless_present_any = ["mission", "words", "topics", "title", "kind"]
+        )]
+        scope: Option<String>,
+        /// Only those tied to this Mission.
+        #[arg(long)]
+        mission: Option<String>,
+        /// open, assessed, closed or standing.
+        #[arg(long)]
+        state: Option<String>,
+        /// Words of the title, summary, topics and text.
+        #[arg(long)]
+        words: Option<String>,
+        /// Only Reports on each of these topics, comma separated.
+        #[arg(long)]
+        topics: Option<String>,
+        /// Only Reports whose title holds each of these words.
+        #[arg(long)]
+        title: Option<String>,
+        /// Only this kind.
+        #[arg(long)]
+        kind: Option<String>,
+    },
+    /// File or change Reports from Markdown documents (`ai6ctl apply -f` reads them the same
+    /// way): without an `id` in the front matter a new Report, with one the stored Report at
+    /// the `revision` read. The front matter holds the fields, the body the text.
+    Import {
+        /// Documents, or directories of `.md` files.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+        /// Check them against the stored Reports and say what would change; store nothing.
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Assess an open Report (needs mission.control on its Operation and reading it): `mission`
     /// (a Source item is queued as a brief; any other names its Mission with --mission),
@@ -239,6 +286,141 @@ fn address(server: &Url, segments: &[&str]) -> Result<Url, String> {
     Ok(url)
 }
 
+/// `/v1/reports` with each filter that is given.
+fn list_url(server: &Url, filters: [(&str, Option<String>); 7]) -> Result<Url, String> {
+    let mut url = address(server, &["reports"])?;
+    {
+        let mut query = url.query_pairs_mut();
+        for (key, value) in filters {
+            if let Some(value) = value {
+                query.append_pair(key, &value);
+            }
+        }
+    }
+    Ok(url)
+}
+
+/// `text` with what is not safe in a file name replaced.
+fn file_name(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// A Report's document, as the Markdown alone.
+async fn fetch_document(
+    client: &Client,
+    token: &str,
+    url: Url,
+) -> Result<(StatusCode, String), String> {
+    let response = client
+        .get(url)
+        .bearer_auth(token)
+        .header("accept", "text/markdown")
+        .send()
+        .await
+        .map_err(|_| "could not contact Universal Exports".to_owned())?;
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    Ok((status, body))
+}
+
+/// The `.md` files `paths` name: each file, and a directory's, in name order, folders and all.
+pub(crate) fn markdown_files(paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
+    let mut found = Vec::new();
+    for path in paths {
+        let metadata =
+            std::fs::metadata(path).map_err(|error| format!("{}: {error}", path.display()))?;
+        if metadata.is_dir() {
+            let mut inside = Vec::new();
+            for entry in
+                std::fs::read_dir(path).map_err(|error| format!("{}: {error}", path.display()))?
+            {
+                let inner = entry
+                    .map_err(|error| format!("{}: {error}", path.display()))?
+                    .path();
+                if inner.is_dir() || is_markdown(&inner) {
+                    inside.push(inner);
+                }
+            }
+            inside.sort();
+            found.extend(markdown_files(&inside)?);
+        } else {
+            found.push(path.clone());
+        }
+    }
+    Ok(found)
+}
+
+/// Whether `path` names a Markdown document.
+pub(crate) fn is_markdown(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(extension.to_ascii_lowercase().as_str(), "md" | "markdown")
+        })
+}
+
+/// Imports each document in turn, printing its ID, what became of it and its title. A document
+/// the gateway refuses stops the run, after the ones before it were stored.
+pub(crate) async fn import_documents(
+    client: &Client,
+    server: &Url,
+    token: &str,
+    files: &[PathBuf],
+    dry_run: bool,
+) -> Result<(), String> {
+    let files = markdown_files(files)?;
+    if files.is_empty() {
+        return Err("no Markdown document to import".to_owned());
+    }
+    for file in files {
+        let document = std::fs::read_to_string(&file)
+            .map_err(|error| format!("{}: {error}", file.display()))?;
+        let mut url = address(server, &["reports", "import"])?;
+        if dry_run {
+            url.query_pairs_mut().append_pair("dry_run", "true");
+        }
+        let response = client
+            .post(url)
+            .bearer_auth(token)
+            .header("content-type", "text/markdown")
+            .body(document)
+            .send()
+            .await
+            .map_err(|_| "could not contact Universal Exports".to_owned())?;
+        let status = response.status();
+        let answer: Value = response.json().await.unwrap_or(Value::Null);
+        if !status.is_success() {
+            let reason = answer
+                .get("error")
+                .and_then(Value::as_str)
+                .map_or_else(String::new, |reason| format!(": {}", plain(reason)));
+            return Err(format!(
+                "{}: Universal Exports returned HTTP {status}{reason}",
+                file.display()
+            ));
+        }
+        let verb = if dry_run {
+            format!("would be {}", text(&answer["change"]))
+        } else {
+            text(&answer["change"])
+        };
+        println!(
+            "{}\t{verb}\t{}",
+            text(&answer["id"]),
+            text(&answer["title"])
+        );
+    }
+    Ok(())
+}
+
 fn link_of(text: &str) -> Result<Value, String> {
     let (kind, id) = text
         .split_once(':')
@@ -368,10 +550,9 @@ pub(crate) async fn run(
         } => {
             let searching =
                 words.is_some() || topics.is_some() || title.is_some() || kind.is_some();
-            let mut url = address(server, &["reports"])?;
-            {
-                let mut query = url.query_pairs_mut();
-                for (key, value) in [
+            let url = list_url(
+                server,
+                [
                     ("scope", scope),
                     ("mission", mission),
                     ("state", state),
@@ -379,12 +560,8 @@ pub(crate) async fn run(
                     ("topics", topics),
                     ("title", title),
                     ("kind", kind),
-                ] {
-                    if let Some(value) = value {
-                        query.append_pair(key, &value);
-                    }
-                }
-            }
+                ],
+            )?;
             let listed = exchange(client, token, Method::GET, url, None, None).await?;
             if searching {
                 print_found(&listed);
@@ -540,7 +717,78 @@ pub(crate) async fn run(
         ReportsCommand::Clearance { command } => {
             run_clearance(client, server, token, command).await?;
         }
-        ReportsCommand::Show { id } => {
+        ReportsCommand::Show { id, output } if output == "md" => {
+            let (status, markdown) = fetch_document(
+                client,
+                token,
+                address(server, &["reports", &id, "document"])?,
+            )
+            .await?;
+            if !status.is_success() {
+                return Err(format!("Universal Exports returned HTTP {status}"));
+            }
+            print!("{markdown}");
+            if !markdown.ends_with('\n') {
+                println!();
+            }
+        }
+        ReportsCommand::Export {
+            dir,
+            scope,
+            mission,
+            state,
+            words,
+            topics,
+            title,
+            kind,
+        } => {
+            let url = list_url(
+                server,
+                [
+                    ("scope", scope),
+                    ("mission", mission),
+                    ("state", state),
+                    ("words", words),
+                    ("topics", topics),
+                    ("title", title),
+                    ("kind", kind),
+                ],
+            )?;
+            let listed = exchange(client, token, Method::GET, url, None, None).await?;
+            let (mut written, mut markings_only) = (0usize, 0usize);
+            for report in listed["reports"].as_array().into_iter().flatten() {
+                let id = text(&report["id"]);
+                let (status, markdown) = fetch_document(
+                    client,
+                    token,
+                    address(server, &["reports", &id, "document"])?,
+                )
+                .await?;
+                if status == StatusCode::FORBIDDEN {
+                    markings_only += 1;
+                    continue;
+                }
+                if !status.is_success() {
+                    continue;
+                }
+                let kind = report["kind"].as_str().filter(|kind| !kind.is_empty());
+                let folder = dir.join(file_name(kind.unwrap_or("report")));
+                std::fs::create_dir_all(&folder)
+                    .map_err(|error| format!("{}: {error}", folder.display()))?;
+                let path = folder.join(format!("{}.md", file_name(&id)));
+                std::fs::write(&path, markdown)
+                    .map_err(|error| format!("{}: {error}", path.display()))?;
+                written += 1;
+            }
+            println!("{written} written to {}", dir.display());
+            if markings_only > 0 {
+                println!("{markings_only} listed by their markings alone, not written");
+            }
+        }
+        ReportsCommand::Import { files, dry_run } => {
+            import_documents(client, server, token, &files, dry_run).await?;
+        }
+        ReportsCommand::Show { id, .. } => {
             let report = exchange(
                 client,
                 token,

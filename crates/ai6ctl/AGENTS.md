@@ -124,6 +124,10 @@ origin leaves the public roots alone.
   [--operation <ID>]` posts `.../verify` and prints `MISSION run N: DECISION by PERSON`; `--reason` is
   required, `--amend` only with `redispatch`; a `RECOMMENDED` line shows what an Operation charge at `desk` clearance advises. `ai6ctl missions create` takes `--deliverable KIND[:TARGET]`,
   repeatable.
+- `ai6ctl reports show ID -o md` prints a Report's Markdown document; `reports export DIR (--scope|--words|...)` writes each
+  Report the listing names as `DIR/KIND/ID.md` (Reports listed by their markings alone are counted, not written);
+  `reports import FILE|DIR... [--dry-run]` and `apply -f FILE.md|DIR` post documents to `/v1/reports/import` and print
+  `ID CHANGE TITLE`, stopping at the first the gateway refuses.
 - `ai6ctl reports file|list|show|clearance` use the gateway's `/v1/reports` routes (see its page); `file` takes
   `--summary` and `--topics` (a known `--kind`: memory, tradecraft, rule or contact stands, or waits), `list` takes
   `--words`, `--topics`, `--title` and `--kind` to search, `revise ID --revision N`, `forget ID` and `versions ID`

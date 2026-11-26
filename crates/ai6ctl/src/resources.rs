@@ -91,7 +91,8 @@ pub(crate) struct Get {
 #[derive(Debug, Args)]
 pub(crate) struct Apply {
     /// A document, or a directory of them (but `ai6.cfg`, the bootstrap), or `-` for standard
-    /// input read as a `.cfg` is. Each holds the tables of any kinds: `[charge.KEY]`,
+    /// input read as a `.cfg` is. A `.md` file is a Report document, imported as `ai6ctl reports
+    /// import` does. Each other holds the tables of any kinds: `[charge.KEY]`,
     /// `[agent.KEY]`, `[assistant]`, ...
     #[arg(
         short = 'f',
@@ -540,7 +541,59 @@ fn confirmed(weakened: &[Value]) -> Result<bool, String> {
     Ok(answer.trim().eq_ignore_ascii_case("y"))
 }
 
-pub(crate) async fn apply(gateway: &Gateway<'_>, command: Apply) -> Result<(), String> {
+/// The Markdown documents `files` name (a `.md` file, or the `.md` files of a directory): Reports,
+/// which are imported rather than stored as configuration. A directory that holds only
+/// those has no configuration in it.
+fn split_markdown(files: &[String]) -> (Vec<PathBuf>, Vec<String>) {
+    let (mut reports, mut records) = (Vec::new(), Vec::new());
+    for file in files {
+        let path = PathBuf::from(file);
+        if path.is_file() && crate::reports::is_markdown(&path) {
+            reports.push(path);
+            continue;
+        }
+        if path.is_dir() {
+            let inside = crate::reports::markdown_files(std::slice::from_ref(&path))
+                .unwrap_or_default();
+            let configuration = std::fs::read_dir(&path).is_ok_and(|entries| {
+                entries.flatten().any(|entry| {
+                    let inner = entry.path();
+                    inner.is_file()
+                        && inner.file_stem().is_none_or(|stem| stem != "ai6")
+                        && inner
+                            .extension()
+                            .and_then(|extension| extension.to_str())
+                            .is_some_and(|extension| {
+                                EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())
+                            })
+                })
+            });
+            reports.extend(inside);
+            if !configuration {
+                continue;
+            }
+        }
+        records.push(file.clone());
+    }
+    (reports, records)
+}
+
+pub(crate) async fn apply(gateway: &Gateway<'_>, mut command: Apply) -> Result<(), String> {
+    let (reports, records) = split_markdown(&command.files);
+    if !reports.is_empty() {
+        crate::reports::import_documents(
+            gateway.client,
+            gateway.server,
+            gateway.token,
+            &reports,
+            command.dry_run,
+        )
+        .await?;
+        if records.is_empty() {
+            return Ok(());
+        }
+    }
+    command.files = records;
     let documents = read_documents(&command.files, command.format.map(Input::format))?;
     let records: Vec<Value> = documents
         .iter()
