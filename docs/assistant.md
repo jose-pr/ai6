@@ -429,9 +429,9 @@ makes the change from what it holds now.
 ## Your memory in the app
 
 What she remembers about you is yours to read and correct. In the app, **Ask Moneypenny**'s menu opens
-**Her memory of you**: your memories, a search, and a form to add, edit and forget one (after you
-confirm). The same page shows the global scope and each Operation's you may read
-([Reports](reports.md#in-the-app)).
+**Her memory of you**: the Reports page on the `memory` kind, with your memories, a search, and a form to
+add, edit and forget one (after you confirm). The same page shows the global scope and each Operation's
+you may read, beside the tradecraft, rules and contacts ([Reports](reports.md#in-the-app)).
 
 **Export conversation**, in the same menu, saves the conversation as you see it as a Markdown
 file: a heading per entry with who said it and when, and the data of a proposal, view or page as a
