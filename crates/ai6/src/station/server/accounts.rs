@@ -2317,6 +2317,95 @@ pool = "nowhere"
         );
     }
 
+    const TRAINING_ROUTES: &str = r#"[agent.007]
+balance = "priority"
+[[agent.007.route]]
+handler = "mock-pooled"
+model = "free"
+priority = 9
+trains_on_input = true
+[[agent.007.route]]
+handler = "mock-pooled"
+model = "paid"
+priority = 1
+"#;
+
+    fn chosen_model(
+        root: &Path,
+        operation: &str,
+        loadouts: &str,
+        agents: &str,
+    ) -> Result<Option<String>, String> {
+        let (state, _now) = routed_state(root, operation, agents, loadouts);
+        let agent = state.roster.agent(Some("G"), "007").unwrap();
+        let place = routes::Place {
+            refuses: &|_| None,
+            clearance: None,
+            review: false,
+        };
+        routes::choose(&state, Some("G"), &agent, &place).map(|on| on.route.model)
+    }
+
+    #[test]
+    fn a_route_that_trains_on_its_input_is_refused_for_a_private_operation_and_a_private_overlay() {
+        let root = tempfile::tempdir().unwrap();
+        let free = Some("free".to_owned());
+        // Nothing private: the higher priority route is the free one.
+        assert_eq!(
+            chosen_model(root.path(), "", ROUTE_POOLS, TRAINING_ROUTES).unwrap(),
+            free
+        );
+        // A private Operation passes it over for the next route.
+        assert_eq!(
+            chosen_model(
+                root.path(),
+                "private = true\n",
+                ROUTE_POOLS,
+                TRAINING_ROUTES
+            )
+            .unwrap(),
+            Some("paid".to_owned())
+        );
+        // So does a loadout's private overlay, on an Operation that is not private.
+        let overlay = format!(
+            "[overlay.notes]\npath = {:?}\nprivate = true\n[loadout.007]\noverlays = [\"notes\"]\n",
+            root.path().to_string_lossy()
+        );
+        assert_eq!(
+            chosen_model(root.path(), "", &overlay, TRAINING_ROUTES).unwrap(),
+            Some("paid".to_owned())
+        );
+        // And an overlay the Operation adds.
+        let added = format!(
+            "[overlay.notes]\npath = {:?}\nprivate = true\n",
+            root.path().to_string_lossy()
+        );
+        assert_eq!(
+            chosen_model(
+                root.path(),
+                "overlays = [\"notes\"]\n",
+                &added,
+                TRAINING_ROUTES
+            )
+            .unwrap(),
+            Some("paid".to_owned())
+        );
+        // With nothing else to run on, it says why.
+        let only =
+            "[agent.007]\n[[agent.007.route]]\nhandler = \"mock-pooled\"\ntrains_on_input = true\n";
+        let reason = chosen_model(root.path(), "private = true\n", ROUTE_POOLS, only).unwrap_err();
+        assert!(reason.contains("trains on what it is sent"), "{reason}");
+        // An overlay that is not marked private does not hold it back.
+        let plain = format!(
+            "[overlay.notes]\npath = {:?}\n[loadout.007]\noverlays = [\"notes\"]\n",
+            root.path().to_string_lossy()
+        );
+        assert_eq!(
+            chosen_model(root.path(), "", &plain, TRAINING_ROUTES).unwrap(),
+            free
+        );
+    }
+
     #[tokio::test]
     async fn a_limit_moves_a_resumable_run_to_a_route_of_the_same_handler_and_says_so() {
         let root = tempfile::tempdir().unwrap();

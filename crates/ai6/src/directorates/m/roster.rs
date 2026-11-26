@@ -192,6 +192,12 @@ pub struct AgentRoute {
     /// states none. Long-lived conversations compact before it, and the models listing shows it.
     #[schema(title = "Token cap", advanced)]
     pub token_cap: Option<u64>,
+    /// Whether the source of this route may train on what it is sent (a free tier's terms
+    /// often say so). A private Operation, or a Run carrying a private overlay, is never placed
+    /// on a route marked so; an Operation that is not `private` and no private overlay can use it.
+    #[schema(title = "Trains on its input", advanced)]
+    #[map(default)]
+    pub trains_on_input: bool,
 }
 
 impl AgentRoute {
@@ -630,6 +636,9 @@ pub struct Operation {
     pub theater: Option<String>,
     /// Alternate local location for this Operation's trusted `.ai6` config.
     pub config: Option<PathBuf>,
+    /// Whether its work stays off routes whose source may train on what it is sent
+    /// ([`AgentRoute::trains_on_input`]).
+    pub private: bool,
     /// Allowed Agent codenames or aliases; empty allows every Agent.
     pub roster: Vec<String>,
     /// Highest Agent clearance allowed at this Operation.
@@ -2101,6 +2110,11 @@ pub(crate) struct OperationDefinition {
     #[schema(title = "Project settings directory", section = "checkout", advanced)]
     config: Option<String>,
 
+    /// Keep this Operation's work off any route whose source may train on what it is sent. Set it
+    /// for a project whose text must not reach such a source; unset, its Runs may use those routes.
+    #[schema(title = "Private", section = "roster", advanced)]
+    #[map(default)]
+    private: bool,
     /// The Agents allowed to work here, by codename. Empty allows every Agent.
     #[schema(title = "Agents", section = "roster", format = "record:agents")]
     #[map(default)]
@@ -2268,6 +2282,7 @@ impl Default for OperationDefinition {
             theater: None,
             workspace: WorkspaceDefinition::default(),
             config: None,
+            private: false,
             roster: Vec::new(),
             clearance: ClearanceLevel::default(),
             stations: Vec::new(),
@@ -2450,6 +2465,7 @@ impl OperationDefinition {
             path,
             theater: self.theater,
             config,
+            private: self.private,
             roster: self.roster,
             clearance: self.clearance.as_str().to_owned(),
             max_concurrent: self.max_concurrent,

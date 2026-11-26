@@ -873,6 +873,8 @@ struct RawOverlay {
     pin: Option<String>,
     #[serde(default)]
     secrets: Vec<String>,
+    #[serde(default)]
+    private: bool,
 }
 
 impl RawOverlay {
@@ -913,7 +915,7 @@ impl RawOverlay {
             validate_name(secret, QErrorKind::Schema, None)
                 .map_err(|_| format!("{key}.secrets: {secret:?} is not a secret name"))?;
         }
-        Ok(record.with_secrets(self.secrets))
+        Ok(record.with_secrets(self.secrets).with_private(self.private))
     }
 }
 

@@ -158,6 +158,7 @@ fn full_example(record: ConfigRecord) -> Value {
             operation["issues"] = issue_policy_example();
             // Set apart: one more key in the literal above passes `json!`'s recursion limit.
             operation["memory_write"] = json!("field");
+            operation["private"] = json!(true);
             operation["overlays"] = json!(["engineering"]);
             operation["intake"] = json!("direct");
             operation["scorecard"] = json!({
@@ -188,7 +189,8 @@ fn full_example(record: ConfigRecord) -> Value {
                 "pool": "team",
                 "env": {"GATEWAY": "https://llm.example"},
                 "secrets": ["litellm"],
-                "priority": 2
+                "priority": 2,
+                "trains_on_input": true
             }],
             "balance": "round_robin",
             "roles": ["case-officer"],
@@ -583,7 +585,8 @@ fn family_example(record: ConfigRecord) -> Value {
             "path": "/overlays/house",
             "pin": null,
             "source": null,
-            "secrets": ["token"]
+            "secrets": ["token"],
+            "private": true
         }),
         ConfigRecord::Secret => json!({
             "env": "TOKEN",

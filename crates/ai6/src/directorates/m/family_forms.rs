@@ -298,6 +298,10 @@ pub(crate) struct OverlayForm {
     #[schema(title = "Secrets", format = "record:secrets")]
     #[map(default)]
     secrets: Vec<String>,
+    /// Keep what it issues off routes whose source may train on what it is sent.
+    #[schema(title = "Private", advanced)]
+    #[map(default)]
+    private: bool,
 }
 
 /// How a loadout secret reaches a Run, never its value: the keys of a `[secret.<name>]` table.

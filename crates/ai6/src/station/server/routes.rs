@@ -113,6 +113,31 @@ pub(super) fn implicit_pool_named(pool: &str, handler: &str) -> AccountPool {
         .account(Account::new(IMPLICIT_ACCOUNT, AccountKind::HarnessLogin))
 }
 
+/// Why a Run of `agent` in `operation` is private work, when it is: its Operation is marked
+/// private, or an overlay its loadout or Operation issues is.
+fn private_work(state: &DaemonState, operation: Option<&str>, agent: &Agent) -> Option<String> {
+    let operation = operation.and_then(|id| state.roster.operation(id).ok());
+    if let Some(operation) = operation.as_ref().filter(|operation| operation.private) {
+        return Some(format!("Operation {:?} is private", operation.id));
+    }
+    let catalog = state.station.credentials.catalog()?;
+    let loadout = catalog
+        .for_agent(&agent.id)
+        .ok()
+        .map(|loadout| loadout.overlay_names().to_vec())
+        .unwrap_or_default();
+    let added = operation.map(|operation| operation.overlays.clone());
+    loadout
+        .iter()
+        .chain(added.iter().flatten())
+        .find(|name| {
+            catalog
+                .overlay(name)
+                .is_some_and(|record| record.is_private())
+        })
+        .map(|name| format!("overlay {name:?} is private"))
+}
+
 /// The standing of `route`: `Err` says why it does not count.
 fn standing_of(
     state: &DaemonState,
@@ -140,6 +165,13 @@ fn standing_of(
         if let Some(reason) = refusal {
             return Err(format!("it cannot hold {clearance} clearance: {reason}"));
         }
+    }
+    if route.trains_on_input
+        && let Some(why) = private_work(state, operation, agent)
+    {
+        return Err(format!(
+            "its source trains on what it is sent, and {why}: unmark the route, or the private work"
+        ));
     }
     let catalog = state.station.credentials.catalog();
     if let Some(catalog) = catalog {

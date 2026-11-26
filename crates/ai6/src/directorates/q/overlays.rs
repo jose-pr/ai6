@@ -78,6 +78,7 @@ pub struct OverlayRecord {
     from: OverlayFrom,
     pin: Option<Digest>,
     secrets: Vec<String>,
+    private: bool,
 }
 
 impl OverlayRecord {
@@ -89,7 +90,16 @@ impl OverlayRecord {
             from,
             pin: None,
             secrets: Vec::new(),
+            private: false,
         }
+    }
+
+    /// The record marked private (`private = true`) or not: text a route whose source may train
+    /// on its input must not be sent.
+    #[must_use]
+    pub fn with_private(mut self, private: bool) -> Self {
+        self.private = private;
+        self
     }
 
     /// The record with the tree digest its files must have.
@@ -129,6 +139,12 @@ impl OverlayRecord {
     /// The secrets a private source is fetched with, by name; never their values.
     pub fn secrets(&self) -> &[String] {
         &self.secrets
+    }
+
+    /// Whether what it issues is private: marked so, or fetched with a secret, which only a
+    /// private source needs.
+    pub fn is_private(&self) -> bool {
+        self.private || !self.secrets.is_empty()
     }
 }
 
