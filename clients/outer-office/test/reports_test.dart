@@ -53,9 +53,14 @@ class Gateway {
     this.byScope, {
     this.actions = const ['mission.read', 'mission.control'],
     this.mActions = const [],
+    this.searchable = const [],
   });
 
   final Map<String, List<Map<String, Object?>>> byScope;
+
+  /// What a search of every scope finds, by kind (the shipped guides, and what a compartment
+  /// gives): each as the search lists it.
+  final List<Map<String, Object?>> searchable;
   final List<String> actions;
 
   /// What the profile says the person holds on M's own Reports.
@@ -77,9 +82,27 @@ class Gateway {
           headers: {'content-type': 'application/json'},
         );
         final path = request.url.path;
+        if (path == '/v1/reports' && request.method == 'POST') {
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          return json({
+            ...body,
+            'id': 'new-entry',
+            'sight': 'content',
+            'state': 'standing',
+            'revision': 1,
+          }, 201);
+        }
         if (path == '/v1/reports' && request.method == 'GET') {
           final scope = request.url.queryParameters['scope'];
           final mission = request.url.queryParameters['mission'];
+          if (request.url.queryParameters['words'] != null) {
+            final kind = request.url.queryParameters['kind'];
+            final found = [
+              for (final one in searchable)
+                if (kind == null || one['kind'] == kind) one,
+            ];
+            return json({'reports': found, 'total': found.length});
+          }
           final all = [for (final list in byScope.values) ...list];
           final shown = scope != null
               ? byScope[scope] ?? const []
@@ -123,14 +146,32 @@ class Gateway {
           });
         }
         if (path.startsWith('/v1/reports/')) {
-          final id = path.split('/')[3];
+          final id = Uri.decodeComponent(path.split('/')[3]);
+          if (path.endsWith('/document')) {
+            return json({
+              'markdown': '---\nid: "$id"\n---\n\nThe text of $id',
+              'references': <Object>[],
+              'trackers': <Object>[],
+            });
+          }
+          if (request.method == 'DELETE') return json({'forgotten': id});
+          if (request.method == 'PUT' && !path.endsWith('/assessment')) {
+            final body = jsonDecode(request.body) as Map<String, dynamic>;
+            return json({
+              'id': id,
+              'sight': 'content',
+              'scope': 'global',
+              ...body,
+              'state': 'standing',
+            });
+          }
           if (request.method == 'PUT') {
             return json(assessed.$2, assessed.$1);
           }
           if (request.method == 'POST') {
             return json(report(id, 'Reopened', state: 'open'));
           }
-          for (final list in byScope.values) {
+          for (final list in [...byScope.values, searchable]) {
             for (final one in list) {
               if (one['id'] == id) return json(one);
             }
@@ -178,7 +219,7 @@ class Gateway {
   /// The PUT assessments sent, decoded.
   List<Map<String, dynamic>> get puts => [
     for (final request in seen)
-      if (request.method == 'PUT')
+      if (request.method == 'PUT' && request.url.path.endsWith('/assessment'))
         jsonDecode(request.body) as Map<String, dynamic>,
   ];
 }
@@ -235,7 +276,16 @@ void main() {
         if (request.url.path == '/v1/reports')
           request.url.queryParameters['scope'],
     ];
-    expect(scopes, unorderedEquals(['operation:G', 'operation:L']));
+    expect(
+      scopes.whereType<String>(),
+      unorderedEquals([
+        'operation:G',
+        'operation:L',
+        'global',
+        'person:operator-007',
+      ]),
+      reason: 'each Operation, and what everyone and this person know',
+    );
   });
 
   testWidgets('the state and Operation filters narrow the list', (
@@ -600,7 +650,16 @@ void main() {
           if (request.url.path == '/v1/reports')
             request.url.queryParameters['scope'],
       ];
-      expect(scopes, unorderedEquals(['operation:G', 'operation:L', 'm']));
+      expect(
+        scopes.whereType<String>(),
+        unorderedEquals([
+          'operation:G',
+          'operation:L',
+          'm',
+          'global',
+          'person:operator-007',
+        ]),
+      );
 
       // Reading M's Reports is not assessing them: that is station.configure.
       await tester.tap(find.text('Upstream advisory'));
@@ -623,6 +682,14 @@ void main() {
         if (request.url.path == '/v1/reports')
           request.url.queryParameters['scope'],
     ];
-    expect(scopes, unorderedEquals(['operation:G', 'operation:L']));
+    expect(
+      scopes.whereType<String>(),
+      unorderedEquals([
+        'operation:G',
+        'operation:L',
+        'global',
+        'person:operator-007',
+      ]),
+    );
   });
 }

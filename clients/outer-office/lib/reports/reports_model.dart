@@ -137,6 +137,19 @@ class ReportResolutionSummary {
   final String? outcome;
 }
 
+/// What AI6 knows, as Reports: told apart from observations by kind.
+const knowledgeKinds = ['memory', 'tradecraft', 'rule', 'contact'];
+
+/// A kind in a person's words.
+String reportKindWords(String kind) => switch (kind) {
+  'memory' => 'Memory',
+  'tradecraft' => 'Tradecraft',
+  'rule' => 'Rule',
+  'contact' => 'Contact',
+  'finding' => 'Finding',
+  _ => kind.isEmpty ? kind : kind[0].toUpperCase() + kind.substring(1),
+};
+
 /// The words for each assessment.
 const reportVerdicts = {
   'mission': 'Mission',
@@ -181,6 +194,12 @@ class ReportSummary {
     this.untrusted = true,
     this.title,
     this.text,
+    this.summary,
+    this.topics = const [],
+    this.revision,
+    this.updatedBy,
+    this.exposed = false,
+    this.proposes,
     this.filer,
     this.source,
     this.reliability,
@@ -213,6 +232,15 @@ class ReportSummary {
     untrusted: json['untrusted'] as bool? ?? true,
     title: json['title'] as String?,
     text: json['text'] as String?,
+    summary: json['summary'] as String?,
+    topics: [
+      for (final topic in json['topics'] as List<dynamic>? ?? const [])
+        topic as String,
+    ],
+    revision: (json['revision'] as num?)?.toInt(),
+    updatedBy: json['updated_by'] as String?,
+    exposed: json['exposed'] as bool? ?? false,
+    proposes: json['proposes'] as Map<String, dynamic>?,
     filer: json['filer'] as Map<String, dynamic>?,
     source: json['source'] as String?,
     reliability: json['reliability'] as String?,
@@ -265,6 +293,24 @@ class ReportSummary {
   /// The filed text; the tearline's, when [sight] is `tearline`.
   final String? text;
 
+  /// One line saying what a known Report is for.
+  final String? summary;
+
+  /// Free words a facet and a search use.
+  final List<String> topics;
+
+  /// The revision a change to a known Report names.
+  final int? revision;
+
+  /// Who last wrote a known Report: `person:ID`, `agent:CODENAME`, ...
+  final String? updatedBy;
+
+  /// Whether an Agent wrote it after reading text from outside.
+  final bool exposed;
+
+  /// What a known Report waiting for a verdict would change: `{target, revision, forget}`.
+  final Map<String, dynamic>? proposes;
+
   /// `{"type": "agent", "agent", "run", "mission"}`, `source`, `charge` or `person`.
   final Map<String, dynamic>? filer;
 
@@ -299,6 +345,16 @@ class ReportSummary {
   /// The person's ID, when a person filed it.
   String? get filerPerson =>
       origin == 'person' ? (filer?['person'] as String?) : null;
+
+  /// Whether it is knowledge (a memory, tradecraft, a rule or a contact) and not an
+  /// observation: standing, written by revision, never assessed into a Mission.
+  bool get isKnowledge => knowledgeKinds.contains(kind);
+
+  /// A guide shipped with the build: read only, and listed under the ID prefix `built-in.`.
+  bool get builtIn => id.startsWith('built-in.');
+
+  /// A write to knowledge waiting for a person to decide it.
+  bool get isProposal => isKnowledge && state == 'open';
 
   /// A Source item's Report, which a `mission` assessment queues as a brief.
   bool get isSourceItem => kind == 'source-item';

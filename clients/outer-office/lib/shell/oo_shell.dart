@@ -59,7 +59,7 @@ enum OoPage {
     'reports',
     'Reports',
     OoIconName.reports,
-    'What was reported to each Operation, assessed and closed by what resolves it.',
+    'What was reported to each Operation, assessed and resolved; and what AI6 knows.',
   ),
   roster(
     'roster',
@@ -102,9 +102,6 @@ enum OoPage {
     OoIconName.newMission,
     'Write the brief, see where it would run, and queue it.',
   ),
-
-  /// Her memory of the person; opened from her chat, not the rail.
-  memory('memory', "Moneypenny's memory", OoIconName.moneypenny, ''),
 
   /// The pages she published for the person and those shared with them; opened from her chat
   /// or a page's link, not the rail.

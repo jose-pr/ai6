@@ -29,27 +29,23 @@ class OoRouteParser extends RouteInformationParser<OoRoute> {
       RouteInformation(uri: Uri.parse(configuration.location));
 }
 
-/// Holds the current [OoRoute] and builds the app for it: [shell] for every page, and [memory]
-/// or [pages] above the page the person came from while the route is `memory` or `pages`.
+/// Holds the current [OoRoute] and builds the app for it: [shell] for every page, and [pages]
+/// above the page the person came from while the route is `pages`.
 ///
 /// A page change is a new history entry; a change of filters on the same page replaces the
 /// current one, so browser back leaves the page instead of undoing each filter.
 class OoRouterDelegate extends RouterDelegate<OoRoute>
     with ChangeNotifier, PopNavigatorRouterDelegateMixin<OoRoute> {
-  OoRouterDelegate({required this.shell, this.memory, this.pages});
+  OoRouterDelegate({required this.shell, this.pages});
 
-  /// The app for a route that is not `memory`.
+  /// The app for a route that is not `pages`.
   final Widget Function(BuildContext context, OoRouterDelegate router) shell;
-
-  /// The memory page for the route; `null` (or no builder) shows only the page behind it.
-  final Widget? Function(BuildContext context, OoRoute route)? memory;
 
   /// Her pages, at the page a link names when it names one; `null` (or no builder), as before
   /// sign-in, shows only the page behind it.
   final Widget? Function(BuildContext context, String? pageId)? pages;
 
-  static bool _above(OoRoute route) =>
-      route.page == OoPage.memory || route.page == OoPage.pages;
+  static bool _above(OoRoute route) => route.page == OoPage.pages;
 
   @override
   final navigatorKey = GlobalKey<NavigatorState>();
@@ -61,7 +57,7 @@ class OoRouterDelegate extends RouterDelegate<OoRoute>
   /// The current route.
   OoRoute get route => _route;
 
-  /// The page shown under her memory page or her pages, or the current route.
+  /// The page shown under her pages, or the current route.
   OoRoute get page => _above(_route) ? _behind : _route;
 
   /// [unknownLinkNotice] with the reason, while it has not been dismissed.
@@ -127,9 +123,6 @@ class OoRouterDelegate extends RouterDelegate<OoRoute>
 
   @override
   Widget build(BuildContext context) {
-    final memoryPage = _route.page == OoPage.memory
-        ? memory?.call(context, _route)
-        : null;
     final pagesPage = _route.page == OoPage.pages
         ? pages?.call(context, _route['page_id'])
         : null;
@@ -140,14 +133,11 @@ class OoRouterDelegate extends RouterDelegate<OoRoute>
           key: const ValueKey('shell'),
           child: shell(context, this),
         ),
-        if (memoryPage != null)
-          MaterialPage<void>(key: const ValueKey('memory'), child: memoryPage),
         if (pagesPage != null)
           MaterialPage<void>(key: const ValueKey('pages'), child: pagesPage),
       ],
       onDidRemovePage: (page) {
-        if (page.key == const ValueKey('memory') ||
-            page.key == const ValueKey('pages')) {
+        if (page.key == const ValueKey('pages')) {
           _set(_behind);
         }
       },

@@ -34,7 +34,7 @@ enum BoardRead {
       const {BoardRead.board, BoardRead.stations, BoardRead.attention},
       const {BoardRead.missions},
     ),
-    OoPage.memory || OoPage.pages => (
+    OoPage.pages => (
       const {BoardRead.board, BoardRead.stations},
       const {BoardRead.missions},
     ),

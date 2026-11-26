@@ -169,7 +169,9 @@ class _OperationSummaryState extends State<OperationSummary> {
           child: TextButton.icon(
             key: const ValueKey('operation-memory'),
             onPressed: () => widget.onRoute(
-              OoRoute(OoPage.memory).withField('operation_id', _id),
+              OoRoute(OoPage.reports)
+                  .withField('operation', [_id])
+                  .withField('report_kind', ['memory']),
             ),
             icon: const Icon(Icons.menu_book_outlined),
             label: Text("$_id's memory"),

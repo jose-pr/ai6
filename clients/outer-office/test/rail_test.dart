@@ -32,7 +32,7 @@ List<double> tops(WidgetTester tester, List<String> labels) => [
 void main() {
   group('the groups', () {
     test(
-      'every page but her memory and the New Mission form is in one group',
+      'every page but her pages and the New Mission form is in one group',
       () {
         final grouped = [
           for (final group in OoRailGroup.values) ...group.pages,
@@ -41,7 +41,6 @@ void main() {
         expect(
           grouped.toSet(),
           OoPage.values.toSet()
-            ..remove(OoPage.memory)
             ..remove(OoPage.pages)
             ..remove(OoPage.newMission),
         );

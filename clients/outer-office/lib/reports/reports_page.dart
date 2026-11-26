@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:material_ui/material_ui.dart';
 
+import '../assistant/export.dart' as exporting;
 import '../held/held_briefs_page.dart' show revealInvisible;
 import '../main.dart';
 import '../routes/oo_route.dart';
@@ -9,6 +12,7 @@ import '../theme/oo_icon.dart';
 import '../theme/oo_tokens.dart';
 import '../widgets/oo_data_table.dart';
 import '../widgets/oo_principals.dart';
+import 'knowledge_editor.dart';
 import 'report_detail.dart';
 import 'reports_model.dart';
 
@@ -16,19 +20,25 @@ import 'reports_model.dart';
 /// The page width from which the selected Report sits beside the list.
 const _splitFrom = 1000.0;
 
-const _stateOrder = ['open', 'assessed', 'closed'];
+const _stateOrder = ['open', 'assessed', 'closed', 'standing'];
 
-/// The Reports page: one row per Report across the Operations and Stations this person reads,
-/// with its filters, and the selected Report beside the list (under it on a narrow screen).
+/// The Reports and knowledge page: one row per Report across the Operations and Stations this
+/// person reads, and what AI6 knows (memories, tradecraft, rules, contacts: their own, everyone's
+/// and each Operation's), told apart by kind and topic, with the selected Report beside the list
+/// (under it on a narrow screen).
 class ReportsPage extends StatefulWidget {
   const ReportsPage({
     required this.board,
     required this.route,
     required this.onRoute,
+    this.saveText = exporting.saveText,
     super.key,
   });
 
   final MissionBoard board;
+
+  /// Saves a Report's Markdown document: a download in a browser, a file on a desktop.
+  final Future<String?> Function(String name, String text) saveText;
 
   /// A Reports route: `report_id` selects one, and its table fields narrow and sort the list.
   final OoRoute route;
@@ -73,6 +83,18 @@ class _ReportsPageState extends State<ReportsPage> {
     );
   }
 
+  Future<void> _add() async {
+    final done = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => KnowledgeEditorPage(board: widget.board),
+      ),
+    );
+    if (done == null || !mounted) return;
+    ScaffoldMessenger.maybeOf(context)
+        ?.showSnackBar(SnackBar(content: Text(done)));
+    _refresh();
+  }
+
   void _select(ReportSummary report) =>
       widget.onRoute(widget.route.withField('report_id', report.id));
 
@@ -98,6 +120,11 @@ class _ReportsPageState extends State<ReportsPage> {
                 others: listing.reports,
                 onRoute: widget.onRoute,
                 onChanged: (_) => _refresh(),
+                onGone: () {
+                  _refresh();
+                  _closeDetail();
+                },
+                saveText: widget.saveText,
                 onClose: split ? null : _closeDetail,
               );
         if (!split && detail != null) return detail;
@@ -163,6 +190,13 @@ class _ReportsPageState extends State<ReportsPage> {
           overflow: TextOverflow.ellipsis,
         ),
       ),
+    ),
+    OoColumn(
+      id: 'kind',
+      label: 'Kind',
+      width: 110,
+      sortKey: (report) => report.kind,
+      cell: (context, report) => Text(reportKindWords(report.kind ?? '')),
     ),
     OoColumn(
       id: 'operation',
@@ -232,7 +266,9 @@ class _ReportsPageState extends State<ReportsPage> {
       id: 'report_kind',
       label: 'Kind',
       values: (report) => [?report.kind],
+      valueLabel: reportKindWords,
     ),
+    OoFacet(id: 'topic', label: 'Topic', values: (report) => report.topics),
     OoFacet(
       id: 'priority',
       label: 'Priority',
@@ -246,7 +282,12 @@ class _ReportsPageState extends State<ReportsPage> {
       : scope;
 
   static String _scopeOf(String value) =>
-      value == 'm' || value.startsWith('station:') ? value : 'operation:$value';
+      value == 'm' ||
+          value == 'global' ||
+          value.startsWith('station:') ||
+          value.startsWith('person:')
+      ? value
+      : 'operation:$value';
 
   Widget _table(
     BuildContext context,
@@ -259,7 +300,7 @@ class _ReportsPageState extends State<ReportsPage> {
         title: 'No Reports yet.',
         body:
             'A Report is what an Agent, a Source or a person tells an Operation: a finding, an '
-            'idea, a changed issue. They show here once one is filed.',
+            'idea, a changed issue. They show here once one is filed, with what AI6 knows.',
         action: ('Refresh', _refresh),
       );
     }
@@ -273,11 +314,21 @@ class _ReportsPageState extends State<ReportsPage> {
       noun: 'Reports',
       defaultSort: ('priority', true),
       searchText: (report) =>
-          '${report.title ?? ''} ${report.text ?? ''} ${report.id} '
+          '${report.title ?? ''} ${report.summary ?? ''} ${report.topics.join(' ')} '
+          '${report.text ?? ''} ${report.id} '
           '${reportScopeLabel(report.scope)} ${reportFilerWords(report, principals)} '
           '${report.kind ?? ''} ${report.source ?? ''}',
       facets: _facets(listing, principals),
       presets: [
+        OoPreset(
+          label: 'Knowledge',
+          apply: (route) => route.withField('report_kind', knowledgeKinds),
+          active: (route) {
+            final kinds = route.listOf('report_kind');
+            return kinds.length == knowledgeKinds.length &&
+                kinds.toSet().containsAll(knowledgeKinds);
+          },
+        ),
         for (final (label, state) in const [
           ('Needs assessment', 'open'),
           ('Assessed', 'assessed'),
@@ -293,6 +344,12 @@ class _ReportsPageState extends State<ReportsPage> {
           ),
       ],
       leading: [
+        IconButton(
+          key: const ValueKey('knowledge-add'),
+          tooltip: 'Add to what is known',
+          onPressed: () => unawaited(_add()),
+          icon: const Icon(Icons.add),
+        ),
         IconButton(
           tooltip: 'Refresh Reports',
           onPressed: _refresh,

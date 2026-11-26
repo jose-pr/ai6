@@ -32,7 +32,6 @@ import 'assistant/chat_region.dart';
 import 'assistant/chat_window.dart';
 import 'assistant/demo_conversation.dart';
 import 'assistant/images.dart' show platformImageInput;
-import 'assistant/memory_page.dart';
 import 'assistant/mission_draft.dart';
 import 'assistant/navigation_card.dart';
 import 'assistant/pages.dart';
@@ -1772,6 +1771,15 @@ class MissionBoard extends ChangeNotifier
     if (demo || (userSession?.reports.contains('station.read') ?? false)) 'm',
   ];
 
+  /// Where this person keeps what is known: their own memory, everyone's, and each Operation
+  /// they read. The first is where a new entry starts.
+  List<String> get knowledgeScopes => [
+    if (userSession?.personId case final person?) 'person:$person',
+    'global',
+    for (final operation in _operationsWith('mission.read'))
+      'operation:$operation',
+  ];
+
   /// Whether this account may assess or reopen a Report of [scope]: `mission.control` on an
   /// Operation, `station.configure` on a Station or on M's own.
   bool controlsReports(String scope) {
@@ -1910,7 +1918,12 @@ class MissionBoard extends ChangeNotifier
   Future<ReportsListing> loadReports() async {
     if (demo) return _demoReports;
     final sweep = await _sweep<ReportsRead>(
-      reportScopes,
+      [
+        ...reportScopes,
+        // What everyone knows, and what is known of this person: read by whoever signs in.
+        'global',
+        if (userSession?.personId case final person?) 'person:$person',
+      ],
       (scope) async => [
         ReportsRead.fromJson(
           await _reportsCall(
@@ -1921,12 +1934,35 @@ class MissionBoard extends ChangeNotifier
         ),
       ],
     );
+    // What is known in the Operations read through a compartment, and the guides shipped with
+    // the build, are found by a search of every scope; a Report the scopes gave is kept as it is.
+    final found = await _sweep<ReportsRead>(
+      knowledgeKinds,
+      (kind) async => [
+        ReportsRead.fromJson(
+          await _reportsCall(
+            'GET',
+            '/v1/reports?words=&kind=${Uri.encodeQueryComponent(kind)}',
+            'what is known as $kind',
+          ),
+        ),
+      ],
+    );
+    final reports = <String, ReportSummary>{
+      for (final read in [...found.items, ...sweep.items])
+        for (final report in read.reports) report.id: report,
+    };
+    final first = sweep.items.firstOrNull;
     return ReportsListing(
-      reports: [for (final read in sweep.items) ...read.reports],
-      priorities: sweep.items.firstOrNull?.priorities ?? const [],
-      classifications: sweep.items.firstOrNull?.classifications ?? const [],
-      handlings: sweep.items.firstOrNull?.handlings ?? const [],
-      unread: sweep.unread,
+      reports: [
+        for (final read in sweep.items)
+          for (final report in read.reports) ?reports.remove(report.id),
+        ...reports.values,
+      ],
+      priorities: first?.priorities ?? const [],
+      classifications: first?.classifications ?? const [],
+      handlings: first?.handlings ?? const [],
+      unread: {...sweep.unread, ...found.unread},
       refused: sweep.refused,
     );
   }
@@ -2662,148 +2698,78 @@ class MissionBoard extends ChangeNotifier
     }
   }
 
-  /// The scope of a memory shelf: [scope] as the gateway names it, or the signed-in person's own.
-  String _memoryScope(String? scope) =>
-      scope ?? 'person:${userSession?.personId ?? ''}';
-
-  /// The memories (Reports of kind `memory`) of [scope], or of the signed-in person when it is
-  /// `null`: the newest, or what matches [query], best first. Throws [MemoryRefused] with the
-  /// gateway's own words.
-  Future<MemoryListing> loadMemory({String? scope, String? query}) async {
-    if (demo) return MemoryListing.demo();
-    final response = await _userRequest(
-      'GET',
-      Uri(
-        path: _reportsPath,
-        queryParameters: {
-          'kind': 'memory',
-          'scope': _memoryScope(scope),
-          'words': query ?? '',
-        },
-      ).toString(),
-    );
-    if (response.statusCode != 200) throw _memoryRefused(response);
-    return MemoryListing.fromJson(
-      jsonDecode(response.body) as Map<String, dynamic>,
-    );
-  }
-
-  /// One memory, by its ID.
-  Future<MemoryRecord> readMemory(String id, {String? scope}) async {
-    if (demo) {
-      return MemoryRecord(
-        summary: MemoryListing.demo().entries.firstWhere(
-          (entry) => entry.id == id,
-        ),
-        content: 'Prefers tables to prose, and the short version first.\n',
-      );
-    }
-    final response = await _userRequest('GET', '$_reportsPath/$id');
-    if (response.statusCode != 200) throw _memoryRefused(response);
-    return MemoryRecord.fromJson(
-      jsonDecode(response.body) as Map<String, dynamic>,
-    );
-  }
-
-  /// Files a memory in the scope [scope] names, or with [id] changes that one from [revision],
-  /// which is refused when it has moved on. [compartments], when given, protect it; [topics]
-  /// are kept as they were.
-  Future<void> saveMemory({
+  /// Writes a memory, tradecraft, rule or contact: a new one of [kind] in [scope], or, with
+  /// [id], its next revision from [revision], which is refused once it has moved on.
+  /// [compartments], when given, protect it; [topics] are kept as they were when null. Answers
+  /// the Report as it is now: `standing`, or `open` where the person may only propose.
+  Future<ReportSummary> saveKnowledge({
     required String title,
-    required String content,
-    String summary = '',
+    required String text,
     String? scope,
+    String kind = 'memory',
+    String summary = '',
     String? id,
     int? revision,
     List<String>? topics,
     List<String>? compartments,
   }) async {
-    if (demo) throw StateError('Memory changes are unavailable in preview.');
+    if (demo) throw StateError('Changes are unavailable in preview.');
     final body = {
-      if (id == null) 'scope': _memoryScope(scope),
-      if (id == null) 'kind': 'memory',
+      if (id == null) 'scope': scope,
+      if (id == null) 'kind': kind,
       'title': title,
       if (summary.isNotEmpty) 'summary': summary,
-      'text': content,
+      'text': text,
       'revision': ?revision,
       'topics': ?topics,
       'compartments': ?compartments,
     };
-    final response = id == null
-        ? await _userRequest('POST', _reportsPath, body: body)
-        : await _userRequest('PUT', '$_reportsPath/$id', body: body);
-    if (![200, 201, 202].contains(response.statusCode)) {
-      throw _memoryRefused(response);
-    }
-  }
-
-  /// Forgets one memory, with its earlier revisions.
-  Future<void> forgetMemory(String id, {String? scope}) async {
-    if (demo) throw StateError('Memory changes are unavailable in preview.');
-    final response = await _userRequest('DELETE', '$_reportsPath/$id');
-    if (![200, 202].contains(response.statusCode)) {
-      throw _memoryRefused(response);
-    }
-  }
-
-  /// What Agents proposed for the memory [scope] names that the person may decide, oldest first.
-  Future<List<MemoryProposalSummary>> loadMemoryProposals(String scope) async {
-    if (demo) return const [];
-    final response = await _userRequest(
-      'GET',
-      Uri(
-        path: _reportsPath,
-        queryParameters: {'kind': 'memory', 'scope': scope, 'state': 'open'},
-      ).toString(),
+    return ReportSummary.fromJson(
+      await _reportsCall(
+        id == null ? 'POST' : 'PUT',
+        id == null ? '/v1/reports' : '/v1/reports/${Uri.encodeComponent(id)}',
+        'the change',
+        body: body,
+      ),
     );
-    if (response.statusCode != 200) throw _memoryRefused(response);
-    final json = jsonDecode(response.body) as Map<String, dynamic>;
-    return [
-      for (final proposal in json['reports'] as List<dynamic>? ?? const [])
-        MemoryProposalSummary.fromJson(proposal as Map<String, dynamic>),
-    ];
   }
 
-  /// Accepts a proposal, or closes it with no action.
-  Future<void> decideMemoryProposal(String id, {required bool approve}) async {
-    if (demo) throw StateError('Memory changes are unavailable in preview.');
-    final response = await _userRequest(
-      'PUT',
-      '$_reportsPath/$id/assessment',
-      body: {
-        'assessment': approve ? 'accepted' : 'no_action',
-        'reason': approve
-            ? 'Accepted in Outer Office.'
-            : 'Declined in Outer Office.',
-      },
+  /// Forgets a memory with its earlier revisions, or retires tradecraft, a rule or a contact;
+  /// where the person may only propose it, it waits for a verdict.
+  Future<void> forgetKnowledge(String id) async {
+    if (demo) throw StateError('Changes are unavailable in preview.');
+    await _reportsCall(
+      'DELETE',
+      '/v1/reports/${Uri.encodeComponent(id)}',
+      'forgetting it',
     );
-    if (response.statusCode != 200) throw _memoryRefused(response);
   }
 
-  /// The Operations whose memory the person may read: those they read, and those a compartment
-  /// gives them something on.
-  List<String> get memoryOperations => [
-    for (final operation
-        in userSession?.operations ?? const <UserOperationAccess>[])
-      if (operation.actions.contains('mission.read') ||
-          operation.compartments.isNotEmpty)
-        operation.operationId,
-  ];
+  /// Accepts what an Agent proposed for knowledge, or closes it with no action.
+  Future<void> decideKnowledge(String id, {required bool approve}) async {
+    if (demo) throw StateError('Changes are unavailable in preview.');
+    await assessReport(id, {
+      'assessment': approve ? 'accepted' : 'no_action',
+      'reason': approve
+          ? 'Accepted in Outer Office.'
+          : 'Declined in Outer Office.',
+    });
+  }
 
-  static const _reportsPath = '/v1/reports';
-
-  /// Universal Exports' own words for a refused memory request, when it gave any.
-  MemoryRefused _memoryRefused(http.Response response) {
-    try {
-      final error =
-          (jsonDecode(response.body) as Map<String, dynamic>)['error'];
-      if (error is String && error.isNotEmpty) return MemoryRefused(error);
-    } on Object {
-      // Not Universal Exports' JSON: fall back to the status.
+  /// The Report [id] as the Markdown document the gateway writes: its fields as front matter,
+  /// its text as the body.
+  Future<String> loadReportMarkdown(String id) async {
+    if (demo) {
+      final report = _demoReports.reports.firstWhere(
+        (report) => report.id == id,
+        orElse: () => throw const GatewayRefused(404, 'No such report.'),
+      );
+      return '---\nid: ${jsonEncode(report.id)}\nkind: ${jsonEncode(report.kind)}\n'
+          'title: ${jsonEncode(report.title)}\n---\n\n${report.text ?? ''}';
     }
-    return MemoryRefused(
-      'Universal Exports refused it (HTTP ${response.statusCode}).',
-    );
+    return (await loadDocument(
+      '/v1/reports/${Uri.encodeComponent(id)}/document',
+    )).markdown;
   }
 
   /// Why a read of [what] came back with [status]: the person may not, or it failed.
@@ -5969,16 +5935,6 @@ class _OuterOfficeAppState extends State<OuterOfficeApp>
       chatSettings: widget.chatSettings,
       router: router,
     ),
-    memory: (context, route) => MemoryPage(
-      key: ValueKey(route),
-      board: widget.board,
-      shelf: switch ((route['scope'], route['operation_id'])) {
-        (_, final String operation) => MemoryShelf.operation(operation),
-        ('global', _) => MemoryShelf.global,
-        _ when !widget.board.moneypennyServed => MemoryShelf.global,
-        _ => MemoryShelf.person,
-      },
-    ),
     pages: (context, pageId) =>
         widget.board.accessToken == null || widget.board.demo
         ? null
@@ -6309,7 +6265,8 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
         board.classAuthorizationOperations.isNotEmpty)
       OoPage.greenInk,
     if (board.proposalOperations.isNotEmpty) OoPage.briefings,
-    if (board.reportScopes.isNotEmpty) OoPage.reports,
+    // What everyone knows is read by whoever signs in, so the page is always there.
+    OoPage.reports,
     if (board.canReadAnyRecords) OoPage.roster,
     if (board.proposalOperations.isNotEmpty) OoPage.newMission,
     if (board.poolOperations.isNotEmpty) OoPage.pools,
@@ -6339,7 +6296,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
 
   /// The board sources the page shows, whose staleness it says.
   static List<BoardSource> _sourcesOf(OoPage page) => switch (page) {
-    OoPage.overview || OoPage.memory || OoPage.pages => const [
+    OoPage.overview || OoPage.pages => const [
       BoardSource.board,
       BoardSource.stations,
       ...attentionSources,
@@ -6361,7 +6318,7 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
           final board = widget.board;
           final onRoute = widget.onRoute;
           return switch (route.page) {
-            OoPage.overview || OoPage.memory || OoPage.pages => OverviewPage(
+            OoPage.overview || OoPage.pages => OverviewPage(
               board: board,
               pages: pages,
               onOpen: _open,
@@ -6639,10 +6596,8 @@ class _MissionBoardPageState extends State<MissionBoardPage> {
           operation.operationId,
       ],
       onLink: _openLink,
-      onMemory: (context) => Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => MemoryPage(board: widget.board),
-        ),
+      onMemory: (context) => _openRoute(
+        OoRoute(OoPage.reports).withField('report_kind', ['memory']),
       ),
       child: OoShell(
         pages: pages,

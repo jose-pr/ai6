@@ -142,6 +142,7 @@ const _fields = <OoPage, List<_Field>>{
     _Field('origin', _Kind.list),
     _Field('classification', _Kind.list),
     _Field('report_kind', _Kind.list),
+    _Field('topic', _Kind.list),
     _Field('priority', _Kind.list),
     _Field('text', _Kind.text),
     _Field('sort', _Kind.oneOf, _reportSorts),
@@ -209,10 +210,6 @@ const _fields = <OoPage, List<_Field>>{
     _Field('order', _Kind.oneOf, _orders),
   ],
   OoPage.newMission: [_Field('operation_id', _Kind.identifier)],
-  OoPage.memory: [
-    _Field('scope', _Kind.oneOf, ['global']),
-    _Field('operation_id', _Kind.identifier),
-  ],
   OoPage.pages: [_Field('page_id', _Kind.identifier)],
   OoPage.compartments: [_Field('compartment_id', _Kind.identifier)],
   OoPage.charges: [

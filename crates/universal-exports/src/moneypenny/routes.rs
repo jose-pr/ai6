@@ -93,7 +93,6 @@ const ROSTER_KINDS: &[&str] = &[
     "unex",
     "registry",
 ];
-const MEMORY_SCOPES: &[&str] = &["global"];
 
 /// What a field holds.
 #[derive(Debug, Clone, Copy)]
@@ -127,7 +126,6 @@ pub(crate) enum Page {
     Timeline,
     Audit,
     Access,
-    Memory,
     Compartments,
     Pages,
     Charges,
@@ -135,7 +133,7 @@ pub(crate) enum Page {
 }
 
 impl Page {
-    const ALL: [Self; 19] = [
+    const ALL: [Self; 18] = [
         Self::Overview,
         Self::Operations,
         Self::Missions,
@@ -151,7 +149,6 @@ impl Page {
         Self::Audit,
         Self::Access,
         Self::Compartments,
-        Self::Memory,
         Self::Pages,
         Self::Charges,
         Self::NewMission,
@@ -175,7 +172,6 @@ impl Page {
             Self::Audit => "audit",
             Self::Access => "access",
             Self::Compartments => "compartments",
-            Self::Memory => "memory",
             Self::Pages => "pages",
             Self::Charges => "charges",
             Self::NewMission => "new_mission",
@@ -194,10 +190,6 @@ impl Page {
         use Kind::{Identifier, List, OneOf, States, Text};
         match self {
             Self::Overview => &[],
-            Self::Memory => &[
-                ("scope", OneOf(MEMORY_SCOPES)),
-                ("operation_id", Identifier),
-            ],
             Self::Operations => &[("operation_id", Identifier)],
             Self::Missions => &[
                 ("operation_id", Identifier),
@@ -257,6 +249,7 @@ impl Page {
                 ("origin", List),
                 ("classification", List),
                 ("report_kind", List),
+                ("topic", List),
                 ("priority", List),
                 ("text", Text),
                 ("sort", OneOf(REPORT_SORTS)),

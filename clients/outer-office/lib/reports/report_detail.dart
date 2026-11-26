@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:material_ui/material_ui.dart';
 
+import '../assistant/export.dart' as exporting;
 import '../held/held_briefs_page.dart' show revealInvisible;
 import '../main.dart';
 import '../routes/oo_route.dart';
@@ -10,10 +13,16 @@ import '../shell/oo_shell.dart';
 import '../theme/oo_theme.dart';
 import '../widgets/oo_principals.dart';
 import 'assess_report.dart';
+import 'knowledge_editor.dart';
 import 'reports_model.dart';
 
-/// The place a scope is, as a person reads it: the Operation's name, `Station ID`, or `M`.
+/// The place a scope is, as a person reads it: the Operation's name, `Station ID`, `M`, or
+/// whose knowledge it is.
 String reportScopeLabel(String scope) {
+  if (scope == 'global') return 'Everyone';
+  if (scope.startsWith('person:')) {
+    return 'Person ${scope.substring('person:'.length)}';
+  }
   if (scope.startsWith('operation:')) {
     return OperationNames.of(scope.substring('operation:'.length));
   }
@@ -43,6 +52,9 @@ String reportFilerWords(ReportSummary report, OoPrincipals? principals) {
     'agent' => 'Agent ${filer?['agent']}',
     'charge' => 'Agent ${filer?['agent']}, on a charge',
     'source' => 'Source ${report.source ?? filer?['source']}',
+    'assistant' =>
+      'Moneypenny, for ${ooPrincipalText(principals, 'person:${filer?['person'] ?? ''}')}',
+    'built_in' => 'This build',
     _ => report.source ?? 'unknown',
   };
 }
@@ -61,7 +73,9 @@ class ReportDetail extends StatefulWidget {
     this.handlings = const [],
     this.others = const [],
     this.onChanged,
+    this.onGone,
     this.onClose,
+    this.saveText = exporting.saveText,
     super.key,
   });
 
@@ -81,8 +95,14 @@ class ReportDetail extends StatefulWidget {
   /// Told when an assessment or a reopening changed the Report.
   final ValueChanged<ReportSummary>? onChanged;
 
+  /// Told when the Report was forgotten or retired, so it is no longer where it was.
+  final VoidCallback? onGone;
+
   /// Set where the list is not beside it: a button back to the list.
   final VoidCallback? onClose;
+
+  /// Saves the Markdown document of the Report: a download in a browser, a file on a desktop.
+  final Future<String?> Function(String name, String text) saveText;
 
   @override
   State<ReportDetail> createState() => _ReportDetailState();
@@ -101,6 +121,11 @@ class _ReportDetailState extends State<ReportDetail> {
     setState(() {
       _report = widget.board.loadReport(widget.reportId);
     });
+  }
+
+  void _gone() {
+    widget.onGone?.call();
+    widget.onClose?.call();
   }
 
   void _changed(ReportSummary report) {
@@ -143,6 +168,8 @@ class _ReportDetailState extends State<ReportDetail> {
         others: widget.others,
         onRoute: widget.onRoute,
         onChanged: _changed,
+        onGone: _gone,
+        saveText: widget.saveText,
         back: widget.onClose == null ? null : _back(),
       );
     },
@@ -167,6 +194,8 @@ class _Facts extends StatelessWidget {
     required this.others,
     required this.onRoute,
     required this.onChanged,
+    required this.onGone,
+    required this.saveText,
     this.back,
   });
 
@@ -177,6 +206,8 @@ class _Facts extends StatelessWidget {
   final List<ReportSummary> others;
   final ValueChanged<OoRoute> onRoute;
   final ValueChanged<ReportSummary> onChanged;
+  final VoidCallback onGone;
+  final Future<String?> Function(String name, String text) saveText;
   final Widget? back;
 
   @override
@@ -243,13 +274,15 @@ class _Facts extends StatelessWidget {
                         'what you are read in to or cleared for.'
                   : 'You are not read in to this Report, or not cleared for it.',
             ),
-          if (report.untrusted && report.whole)
+          if (report.isKnowledge && report.whole) ..._knowledge(context),
+          if (report.untrusted && report.whole && !report.builtIn)
             const _Note(
               'Filed by an Agent or a Source: its words are reported, not '
               'verified.',
             ),
           if (report.text case final body?)
             Padding(
+              key: const ValueKey('report-text'),
               padding: const EdgeInsets.only(top: 4, bottom: 12),
               child: SelectableText(
                 revealInvisible(body),
@@ -289,6 +322,14 @@ class _Facts extends StatelessWidget {
               _Row('Passed on by', Text(revealInvisible(sub))),
             if (report.from != null)
               _Row('Information from', OoTime(report.from)),
+            if (report.isKnowledge && report.revision != null)
+              _Row(
+                'Revision',
+                Text(
+                  '${report.revision}'
+                  '${report.updatedBy == null ? '' : ', changed by ${report.updatedBy}'}',
+                ),
+              ),
             _Row('Filed', OoTime(report.created)),
             _Row('Updated', OoTime(report.updated)),
             if (report.deadline != null)
@@ -374,7 +415,9 @@ class _Facts extends StatelessWidget {
               _Link(link, report, board, onRoute),
           ],
           const SizedBox(height: 20),
-          if (report.state == 'open')
+          if (report.isKnowledge && report.whole)
+            ..._knowledgeActions(context)
+          else if (report.state == 'open')
             _Action(
               label: 'Assess this Report',
               allowed: canAssess,
@@ -408,9 +451,192 @@ class _Facts extends StatelessWidget {
                 if (changed != null) onChanged(changed);
               },
             ),
+          if (report.sight != 'markings' &&
+              !(report.isKnowledge && report.whole))
+            Align(alignment: Alignment.centerLeft, child: _download(context)),
         ],
       ),
     );
+  }
+
+  /// What a memory, tradecraft, rule or contact says about itself, above its text.
+  List<Widget> _knowledge(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final proposes = report.proposes;
+    return [
+      if (report.summary case final summary? when summary.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Text(revealInvisible(summary), style: text.bodyLarge),
+        ),
+      if (report.topics.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            children: [
+              for (final topic in report.topics)
+                Chip(
+                  label: Text(revealInvisible(topic)),
+                  visualDensity: VisualDensity.compact,
+                ),
+            ],
+          ),
+        ),
+      if (report.builtIn)
+        const _Note(
+          'Shipped with this build, so it is read only. Override it for this '
+          'deployment to change what Agents read: a Report of the same title '
+          'ranks above it.',
+          key: ValueKey('report-built-in'),
+        ),
+      if (report.exposed)
+        const _Note(
+          'An Agent wrote this after reading text from outside, so it is marked '
+          'until a person saves an edit.',
+          key: ValueKey('report-exposed'),
+        ),
+      if (report.isProposal && proposes != null)
+        _Note(
+          proposes['forget'] == true
+              ? 'Proposes forgetting ${proposes['target']}.'
+              : 'Proposes the next revision of ${proposes['target']}.',
+        )
+      else if (report.isProposal)
+        const _Note('An Agent proposed this; it waits for a person to decide.'),
+    ];
+  }
+
+  Widget _download(BuildContext context) => TextButton.icon(
+    key: const ValueKey('report-download'),
+    onPressed: () => unawaited(_save(context)),
+    icon: const Icon(Icons.download_outlined, size: 18),
+    label: const Text('Download as Markdown'),
+  );
+
+  /// The actions on knowledge: edit and forget, accept and decline a proposal, or override a
+  /// shipped guide for this deployment.
+  List<Widget> _knowledgeActions(BuildContext context) => [
+    Wrap(
+      spacing: 12,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        if (report.builtIn)
+          FilledButton(
+            key: const ValueKey('report-override'),
+            onPressed: () => unawaited(_override(context)),
+            child: const Text('Override for this deployment'),
+          )
+        else if (report.isProposal) ...[
+          FilledButton(
+            key: const ValueKey('report-accept'),
+            onPressed: () => unawaited(_decide(context, approve: true)),
+            child: const Text('Accept'),
+          ),
+          OutlinedButton(
+            key: const ValueKey('report-decline'),
+            onPressed: () => unawaited(_decide(context, approve: false)),
+            child: const Text('Decline'),
+          ),
+        ] else ...[
+          FilledButton(
+            key: const ValueKey('report-edit'),
+            onPressed: () => unawaited(_edit(context)),
+            child: const Text('Edit'),
+          ),
+          OutlinedButton(
+            key: const ValueKey('report-forget'),
+            onPressed: () => unawaited(_forget(context)),
+            child: const Text('Forget'),
+          ),
+        ],
+        _download(context),
+      ],
+    ),
+  ];
+
+  void _say(BuildContext context, String words) =>
+      ScaffoldMessenger.maybeOf(context)
+          ?.showSnackBar(SnackBar(content: Text(words)));
+
+  Future<void> _reload(BuildContext context) async {
+    try {
+      onChanged(await board.loadReport(report.id));
+    } on Object {
+      onGone();
+    }
+  }
+
+  Future<void> _edit(BuildContext context) async {
+    final done = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => KnowledgeEditorPage(board: board, entry: report),
+      ),
+    );
+    if (done == null || !context.mounted) return;
+    _say(context, done);
+    await _reload(context);
+  }
+
+  Future<void> _override(BuildContext context) async {
+    final done = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => KnowledgeEditorPage(
+          board: board,
+          template: report,
+          scope: 'global',
+        ),
+      ),
+    );
+    if (done == null || !context.mounted) return;
+    _say(context, done);
+    onGone();
+  }
+
+  Future<void> _forget(BuildContext context) async {
+    final what = report.title ?? report.id;
+    if (!await confirmForget(context, what) || !context.mounted) return;
+    try {
+      await board.forgetKnowledge(report.id);
+    } on Object catch (error) {
+      if (context.mounted) _say(context, '$error');
+      return;
+    }
+    if (!context.mounted) return;
+    _say(context, 'Forgotten: $what.');
+    onGone();
+  }
+
+  Future<void> _decide(BuildContext context, {required bool approve}) async {
+    try {
+      await board.decideKnowledge(report.id, approve: approve);
+    } on Object catch (error) {
+      if (context.mounted) _say(context, '$error');
+      return;
+    }
+    if (!context.mounted) return;
+    _say(
+      context,
+      approve ? 'Accepted: ${report.title}.' : 'Declined: ${report.title}.',
+    );
+    await _reload(context);
+  }
+
+  Future<void> _save(BuildContext context) async {
+    final name = '${report.id.replaceAll(RegExp(r'[^A-Za-z0-9_.-]'), '-')}.md';
+    try {
+      final markdown = await board.loadReportMarkdown(report.id);
+      final where = await saveText(name, markdown);
+      if (context.mounted) {
+        _say(context, where == null ? 'Downloaded $name.' : 'Saved to $where');
+      }
+    } on Object catch (error) {
+      if (context.mounted) {
+        _say(context, 'The Report was not downloaded: $error');
+      }
+    }
   }
 
   String _why() => report.whole
@@ -420,7 +646,7 @@ class _Facts extends StatelessWidget {
 }
 
 class _Note extends StatelessWidget {
-  const _Note(this.words);
+  const _Note(this.words, {super.key});
 
   final String words;
 
