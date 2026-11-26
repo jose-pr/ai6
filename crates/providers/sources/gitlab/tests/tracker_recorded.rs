@@ -60,14 +60,20 @@ fn answered(exchange: &str, pointer: &str) -> serde_json::Value {
 
 #[test]
 fn capabilities_read_the_recorded_project() {
-    let fake = serve(|_| vec![replay(PROJECT, &[]), replay(LABELS, &["link"])]);
+    let fake = serve(|_| {
+        vec![
+            replay(PROJECT, &[]),
+            replay(LABELS, &["link"]),
+            canned(200, r#"{"scopes": ["api"]}"#),
+        ]
+    });
     let capabilities = provider(&fake.base).capabilities(None).unwrap();
     assert_eq!(capabilities.visibility, "private");
     assert!(capabilities.create);
     assert!(capabilities.labels.iter().any(|label| label == "ai6:ready"));
     let requests = fake.requests.lock().unwrap();
     assert_eq!(requests[0].target, "/api/v4/projects/o%2Fr");
-    assert_eq!(requests.len(), 2, "the recorded Link names no next page");
+    assert_eq!(requests.len(), 3, "the recorded Link names no next page");
 }
 
 #[test]
@@ -214,6 +220,7 @@ fn a_recorded_child_is_a_task_attached_by_global_ids() {
         vec![
             replay(PROJECT, &[]),
             replay(LABELS, &[]),
+            canned(200, r#"{"scopes": ["api"]}"#),
             replay(PARENT, &[]),
             replay(TASK_CREATED, &[]),
             replay(GRAPHQL_ATTACH, &[]),
@@ -232,10 +239,10 @@ fn a_recorded_child_is_a_task_attached_by_global_ids() {
     assert_eq!(child.parent.as_deref(), Some("o/r#12"));
     assert_eq!(child.labels, ["ai6:working"]);
     let requests = fake.requests.lock().unwrap();
-    let created = json(&requests[3].body);
+    let created = json(&requests[4].body);
     assert_eq!(created["issue_type"], "task");
     assert_eq!(created["labels"], "ai6:working");
-    let attach = json(&requests[4].body);
+    let attach = json(&requests[5].body);
     assert_eq!(
         attach["variables"]["id"],
         format!("gid://gitlab/WorkItem/{}", answered(TASK_CREATED, "/id"))
@@ -252,6 +259,7 @@ fn a_recorded_refusal_to_attach_leaves_the_child_created_with_no_parent() {
         vec![
             replay(PROJECT, &[]),
             replay(LABELS, &[]),
+            canned(200, r#"{"scopes": ["api"]}"#),
             replay(PARENT, &[]),
             replay(TASK_CREATED, &[]),
             replay(GRAPHQL_ATTACH_REFUSED, &[]),

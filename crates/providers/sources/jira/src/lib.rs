@@ -490,6 +490,29 @@ impl Jira {
         }
     }
 
+    /// Whether Jira says the credential may add comments in the project. An answer it does not
+    /// give (no project, a refused request, no such permission in the reply) is taken as yes.
+    fn may_comment(&self) -> bool {
+        let Some(project) = &self.settings.project else {
+            return true;
+        };
+        self.get_json(
+            &self.api("/mypermissions"),
+            &[
+                ("projectKey", project.clone()),
+                ("permissions", "ADD_COMMENTS".to_owned()),
+            ],
+            "Jira rejected asking what the credential may do",
+        )
+        .ok()
+        .and_then(|reply| {
+            reply
+                .pointer("/permissions/ADD_COMMENTS/havePermission")?
+                .as_bool()
+        })
+        .unwrap_or(true)
+    }
+
     fn discover(&self) -> Result<Discovered, ProviderError> {
         let ttl = Duration::from_secs(self.settings.capability_ttl_secs);
         if let Ok(cache) = self.discovered.lock()
@@ -552,10 +575,11 @@ impl Jira {
             (Deployment::Server, Some(_)) => "subtasks",
             (Deployment::Server, None) => "none",
         };
+        let comments = self.may_comment();
         let discovered = Discovered {
             capabilities: TrackerCapabilities {
-                comment: true,
-                edit_comment: true,
+                comment: comments,
+                edit_comment: comments,
                 labels: Vec::new(),
                 free_labels: true,
                 transitions: Vec::new(),

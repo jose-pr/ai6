@@ -81,8 +81,11 @@ never reach the provider, nor do the Station's own keys (`status_labels`, `statu
 - **Capabilities**: comment, edit, labels (the repository's own), assign, close, create,
   replies, markers, `children = sub_issues` (`none` when an item's sub-issues endpoint
   answers an error), no transitions, no issue types or priorities, no link kinds besides
-  naming an issue in text, `visibility` from the repository's `private`. Repository answers
-  are cached `capability_ttl_secs`.
+  naming an issue in text, `visibility` from the repository's `private`. The writing ones
+  (`comment`, `edit_comment`, `assign`, `close`, `create`) are false for an archived repository
+  and for a classic token whose `X-OAuth-Scopes` lack `repo` (`public_repo` suffices for a public
+  repository); a response with no such header does not say, so it counts as able. Repository
+  answers are cached `capability_ttl_secs`.
 - **Post** comments (`POST .../comments`) or edits (`PATCH .../issues/comments/{id}`; the ID
   is digits only). Every post ends with an HTML comment `<!-- ai6:NAME -->` (`NAME` the `marker`,
   `comment` without one), which GitHub keeps in `body` and which alone makes a reply `own`. A

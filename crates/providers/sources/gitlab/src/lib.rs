@@ -394,6 +394,19 @@ impl Gitlab {
         Ok((items, more))
     }
 
+    /// Whether the credential may write: a personal, project or group access token names its
+    /// scopes, and only `api` writes. A credential that answers no scopes (an OAuth token, a
+    /// job token) does not say, so it is taken to write.
+    fn token_writes(&self) -> bool {
+        let Ok(token) = self.get_json(&self.endpoint("/personal_access_tokens/self"), &[]) else {
+            return true;
+        };
+        token
+            .get("scopes")
+            .and_then(serde_json::Value::as_array)
+            .is_none_or(|scopes| scopes.iter().any(|scope| scope.as_str() == Some("api")))
+    }
+
     fn project_capabilities(&self) -> Result<TrackerCapabilities, ProviderError> {
         let ttl = Duration::from_secs(self.settings.capability_ttl_secs);
         if let Ok(cache) = self.capabilities.lock()
@@ -429,15 +442,16 @@ impl Gitlab {
                 .get("issues_access_level")
                 .and_then(serde_json::Value::as_str)
                 != Some("disabled");
+        let writes = self.token_writes();
         let capabilities = TrackerCapabilities {
-            comment: true,
-            edit_comment: true,
+            comment: writes,
+            edit_comment: writes,
             labels,
             free_labels: false,
             transitions: Vec::new(),
-            assign: true,
-            close: true,
-            create: issues_enabled,
+            assign: writes,
+            close: writes,
+            create: issues_enabled && writes,
             issue_types: Vec::new(),
             priorities: Vec::new(),
             children: "subtasks".to_owned(),

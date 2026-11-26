@@ -805,3 +805,41 @@ impl FromText for Github {
         Github::new(ai6::provider_settings::settings_from_text(text)?)
     }
 }
+
+/// A repository answer carrying a classic token's scopes.
+fn repo_with_scopes(scopes: &str, body: &str) -> Canned {
+    let mut canned = canned(200, body);
+    canned.headers.push(("x-oauth-scopes", scopes.to_owned()));
+    canned
+}
+
+#[test]
+fn a_token_without_the_write_scope_cannot_comment_and_one_with_it_can() {
+    let body = r#"{"private": false, "has_issues": true}"#;
+    for (scopes, writes) in [
+        ("read:org, notifications", false),
+        ("public_repo", true),
+        ("repo, read:org", true),
+        ("", false),
+    ] {
+        let fake = serve(|_| vec![repo_with_scopes(scopes, body), canned(200, "[]")]);
+        let capabilities = provider(&fake.base, "").capabilities(None).unwrap();
+        assert_eq!(capabilities.comment, writes, "scopes {scopes:?}");
+        assert_eq!(capabilities.create, writes, "scopes {scopes:?}");
+    }
+    // A private repository needs `repo`, not `public_repo`.
+    let private = r#"{"private": true, "has_issues": true}"#;
+    let fake = serve(|_| vec![repo_with_scopes("public_repo", private), canned(200, "[]")]);
+    assert!(!provider(&fake.base, "").capabilities(None).unwrap().comment);
+}
+
+#[test]
+fn an_archived_repository_takes_no_comments() {
+    let fake = serve(|_| {
+        vec![
+            canned(200, r#"{"private": false, "archived": true}"#),
+            canned(200, "[]"),
+        ]
+    });
+    assert!(!provider(&fake.base, "").capabilities(None).unwrap().comment);
+}

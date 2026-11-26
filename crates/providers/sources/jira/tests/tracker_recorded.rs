@@ -52,6 +52,10 @@ fn capabilities_read_the_recorded_metadata_and_transitions() {
         vec![
             canned(200, META),
             canned(200, PRIORITIES),
+            canned(
+                200,
+                r#"{"permissions": {"ADD_COMMENTS": {"havePermission": true}}}"#,
+            ),
             canned(200, TRANSITIONS),
         ]
     });
@@ -195,6 +199,10 @@ fn a_child_of_a_standard_issue_is_a_subtask_under_it() {
         vec![
             canned(200, META),
             canned(200, PRIORITIES),
+            canned(
+                200,
+                r#"{"permissions": {"ADD_COMMENTS": {"havePermission": true}}}"#,
+            ),
             canned(200, PARENT_STANDARD),
             canned(201, CREATED),
             canned(200, &reread),
@@ -208,7 +216,7 @@ fn a_child_of_a_standard_issue_is_a_subtask_under_it() {
         })
         .unwrap();
     let requests = fake.requests.lock().unwrap();
-    let sent = json(&requests[3].body);
+    let sent = json(&requests[4].body);
     assert_eq!(sent["fields"]["issuetype"]["name"], "Sub-task");
     assert_eq!(sent["fields"]["parent"]["key"], "AI6-1");
     assert!(
@@ -224,6 +232,10 @@ fn a_child_of_a_subtask_is_created_beside_it_and_linked() {
         vec![
             canned(200, META),
             canned(200, PRIORITIES),
+            canned(
+                200,
+                r#"{"permissions": {"ADD_COMMENTS": {"havePermission": true}}}"#,
+            ),
             canned(200, PARENT_SUBTASK),
             canned(201, CREATED),
             canned(201, ""),
@@ -238,11 +250,11 @@ fn a_child_of_a_subtask_is_created_beside_it_and_linked() {
         })
         .unwrap();
     let requests = fake.requests.lock().unwrap();
-    let sent = json(&requests[3].body);
+    let sent = json(&requests[4].body);
     assert_eq!(sent["fields"]["issuetype"]["name"], "Task");
     assert!(sent["fields"].get("parent").is_none());
-    assert_eq!(requests[4].target, "/rest/api/3/issueLink");
-    let link = json(&requests[4].body);
+    assert_eq!(requests[5].target, "/rest/api/3/issueLink");
+    let link = json(&requests[5].body);
     assert_eq!(link["type"]["name"], "Relates");
     assert_eq!(link["inwardIssue"]["key"], "AI6-6");
     assert_eq!(link["outwardIssue"]["key"], "AI6-5");

@@ -82,7 +82,9 @@ never reach the provider, nor do the Station's own keys (`status_labels`, `statu
   close, create (unless the project has issues off), replies, markers, `links = ["issue_links"]`,
   `children = subtasks`, no transitions, no issue types or priorities, `visibility` `private` or
   `public` from the project (`internal` is `unknown`). With an item, `children` is `none` unless
-  the item is an issue: a task takes no children. Project answers are cached
+  the item is an issue: a task takes no children. The writing ones are false when
+  `GET /personal_access_tokens/self` lists scopes and `api` is not one; a credential that
+  answers none (OAuth, job token) counts as able. Project answers are cached
   `capability_ttl_secs`.
 - **Post** comments (`POST .../issues/{iid}/notes`) or edits (`PUT .../notes/{id}`; the ID is
   digits only). Every post ends with an HTML comment `<!-- ai6:NAME -->` (`NAME` the `marker`,

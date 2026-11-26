@@ -571,6 +571,7 @@ fn capabilities_are_discovered_once_cached_and_ask_each_item_its_type() {
         vec![
             replay(PROJECT, &[]),
             replay(LABELS, &[]),
+            canned(200, r#"{"scopes": ["api"]}"#),
             canned(200, r#"{"iid": 12, "issue_type": "task"}"#),
             replay(ISSUE, &[]),
         ]
@@ -588,7 +589,7 @@ fn capabilities_are_discovered_once_cached_and_ask_each_item_its_type() {
     assert_eq!(capabilities.children, "subtasks");
     assert_eq!(capabilities.links, ["issue_links"]);
     assert!(capabilities.transitions.is_empty());
-    assert_eq!(fake.requests.lock().unwrap().len(), 2);
+    assert_eq!(fake.requests.lock().unwrap().len(), 3);
 
     // Cached: the project answers are not asked again; the item adds one read.
     let capabilities = gitlab.capabilities(Some("o/r#12".to_owned())).unwrap();
@@ -596,8 +597,8 @@ fn capabilities_are_discovered_once_cached_and_ask_each_item_its_type() {
     let capabilities = gitlab.capabilities(Some("o/r#1".to_owned())).unwrap();
     assert_eq!(capabilities.children, "subtasks");
     let requests = fake.requests.lock().unwrap();
-    assert_eq!(requests.len(), 4);
-    assert_eq!(requests[2].target, format!("{ISSUES}/12"));
+    assert_eq!(requests.len(), 5);
+    assert_eq!(requests[3].target, format!("{ISSUES}/12"));
 }
 
 #[test]
@@ -827,6 +828,7 @@ fn a_created_issue_keeps_known_labels() {
         vec![
             canned(200, r#"{"visibility": "public", "issues_enabled": true}"#),
             canned(200, r#"[{"name": "bug"}]"#),
+            canned(200, r#"{"scopes": ["api"]}"#),
             canned(201, created),
         ]
     });
@@ -841,8 +843,8 @@ fn a_created_issue_keeps_known_labels() {
     assert_eq!(issue.id, "o/r#20");
     assert_eq!(issue.state, "open", "GitLab's `opened`");
     let requests = fake.requests.lock().unwrap();
-    assert_eq!(requests[2].target, ISSUES);
-    let sent = body_of(&requests[2]);
+    assert_eq!(requests[3].target, ISSUES);
+    let sent = body_of(&requests[3]);
     assert_eq!(
         sent["labels"], "bug",
         "a label the project lacks is never created"
@@ -857,6 +859,7 @@ fn a_child_of_a_task_is_created_as_an_issue_with_no_parent() {
         vec![
             canned(200, r#"{"visibility": "private"}"#),
             canned(200, "[]"),
+            canned(200, r#"{"scopes": ["api"]}"#),
             canned(200, r#"{"id": 50, "iid": 3, "issue_type": "task"}"#),
             canned(
                 201,
@@ -875,8 +878,8 @@ fn a_child_of_a_task_is_created_as_an_issue_with_no_parent() {
     assert_eq!(issue.id, "o/r#21");
     assert_eq!(issue.parent, None);
     let requests = fake.requests.lock().unwrap();
-    assert_eq!(requests.len(), 4, "no GraphQL call");
-    assert!(body_of(&requests[3]).get("issue_type").is_none());
+    assert_eq!(requests.len(), 5, "no GraphQL call");
+    assert!(body_of(&requests[4]).get("issue_type").is_none());
 }
 
 #[test]
@@ -1028,5 +1031,19 @@ trait FromText: Sized {
 impl FromText for Gitlab {
     fn from_settings(text: &str) -> Result<Self, String> {
         Gitlab::new(ai6::provider_settings::settings_from_text(text)?)
+    }
+}
+
+#[test]
+fn a_read_only_token_cannot_comment_and_a_credential_that_names_no_scopes_can() {
+    for (token, writes) in [
+        (canned(200, r#"{"scopes": ["read_api"]}"#), false),
+        (canned(200, r#"{"scopes": ["read_api", "api"]}"#), true),
+        (canned(401, r#"{"message": "401 Unauthorized"}"#), true),
+    ] {
+        let fake = serve(|_| vec![replay(PROJECT, &[]), replay(LABELS, &[]), token]);
+        let capabilities = provider(&fake.base, "").capabilities(None).unwrap();
+        assert_eq!(capabilities.comment, writes);
+        assert_eq!(capabilities.create, writes);
     }
 }

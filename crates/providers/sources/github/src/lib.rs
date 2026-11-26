@@ -356,10 +356,20 @@ impl Github {
         {
             return Ok(capabilities.clone());
         }
-        let repo = self.get_json(
+        let response = self.get(
             &self.endpoint(&format!("/repos/{}", self.settings.repo)),
             &[],
         )?;
+        let scopes = response
+            .headers()
+            .get("x-oauth-scopes")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let repo = read_json(response)?;
+        let archived = repo
+            .get("archived")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
         let visibility = match repo.get("private").and_then(serde_json::Value::as_bool) {
             Some(true) => "private",
             Some(false) => "public",
@@ -393,18 +403,20 @@ impl Github {
                 None => break,
             }
         }
+        let writes = !archived && token_writes(scopes.as_deref(), visibility);
         let capabilities = TrackerCapabilities {
-            comment: true,
-            edit_comment: true,
+            comment: writes,
+            edit_comment: writes,
             labels,
             free_labels: false,
             transitions: Vec::new(),
-            assign: true,
-            close: true,
-            create: repo
-                .get("has_issues")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(true),
+            assign: writes,
+            close: writes,
+            create: writes
+                && repo
+                    .get("has_issues")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(true),
             issue_types: Vec::new(),
             priorities: Vec::new(),
             children: "sub_issues".to_owned(),
@@ -845,6 +857,19 @@ fn read_json(
         .body_mut()
         .read_json()
         .map_err(|e| failure(&format!("unreadable response: {e}")))
+}
+
+/// Whether a classic token's scopes (the `X-OAuth-Scopes` header) let it write to a repository
+/// of this visibility: `repo`, or `public_repo` for a public one. A response with no such header
+/// (a fine-grained token or an app) does not say, so it is taken to write.
+fn token_writes(scopes: Option<&str>, visibility: &str) -> bool {
+    let Some(scopes) = scopes else {
+        return true;
+    };
+    scopes
+        .split(',')
+        .map(str::trim)
+        .any(|scope| scope == "repo" || (scope == "public_repo" && visibility == "public"))
 }
 
 /// The number at the end of an API URL such as `.../issues/12`.

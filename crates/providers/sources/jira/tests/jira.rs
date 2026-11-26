@@ -516,6 +516,10 @@ fn capabilities_come_from_create_metadata_and_transitions_per_item() {
                                    {"name": "Sub-task", "subtask": true}]}"#,
             ),
             canned(200, r#"[{"name": "High"}, {"name": "Low"}]"#),
+            canned(
+                200,
+                r#"{"permissions": {"ADD_COMMENTS": {"havePermission": true}}}"#,
+            ),
             canned(200, CATEGORIZED),
         ]
     });
@@ -532,7 +536,7 @@ fn capabilities_come_from_create_metadata_and_transitions_per_item() {
     let with_item = jira.capabilities(Some("AI6-12".to_owned())).unwrap();
     assert_eq!(with_item.transitions, ["To Do", "Done"]);
     let requests = fake.requests.lock().unwrap();
-    assert_eq!(requests.len(), 3, "the project answers are cached");
+    assert_eq!(requests.len(), 4, "the project answers are cached");
     assert_eq!(
         requests[0].target,
         "/rest/api/3/issue/createmeta/AI6/issuetypes"
@@ -702,6 +706,10 @@ fn a_child_is_created_with_the_subtask_type_and_its_parent() {
         vec![
             canned(200, meta),
             canned(200, r#"[{"name": "High"}]"#),
+            canned(
+                200,
+                r#"{"permissions": {"ADD_COMMENTS": {"havePermission": true}}}"#,
+            ),
             canned(201, r#"{"id": "10020", "key": "AI6-20"}"#),
             canned(200, created_issue),
         ]
@@ -719,9 +727,9 @@ fn a_child_is_created_with_the_subtask_type_and_its_parent() {
     assert_eq!(issue.id, "AI6-20");
     assert_eq!(issue.parent.as_deref(), Some("AI6-3"));
     let requests = fake.requests.lock().unwrap();
-    assert_eq!(requests[2].method, "POST");
-    assert_eq!(requests[2].target, "/rest/api/2/issue");
-    let fields = &body_of(&requests[2])["fields"];
+    assert_eq!(requests[3].method, "POST");
+    assert_eq!(requests[3].target, "/rest/api/2/issue");
+    let fields = &body_of(&requests[3])["fields"];
     assert_eq!(fields["project"]["key"], "AI6");
     assert_eq!(fields["issuetype"]["name"], "Sub-task");
     assert_eq!(fields["parent"]["key"], "AI6-3");
@@ -742,6 +750,10 @@ fn a_cloud_issue_uses_the_configured_type_and_adf() {
                 r#"{"issueTypes": [{"name": "Story", "subtask": false}]}"#,
             ),
             canned(200, r#"[{"name": "High"}]"#),
+            canned(
+                200,
+                r#"{"permissions": {"ADD_COMMENTS": {"havePermission": true}}}"#,
+            ),
             canned(201, r#"{"key": "AI6-21"}"#),
             canned(
                 200,
@@ -758,7 +770,7 @@ fn a_cloud_issue_uses_the_configured_type_and_adf() {
         })
         .unwrap();
     let requests = fake.requests.lock().unwrap();
-    let fields = &body_of(&requests[2])["fields"];
+    let fields = &body_of(&requests[3])["fields"];
     assert_eq!(fields["issuetype"]["name"], "Story");
     assert_eq!(fields["description"]["content"][0]["type"], "bulletList");
     assert_eq!(fields["priority"]["name"], "High");
@@ -925,5 +937,40 @@ trait FromText: Sized {
 impl FromText for Jira {
     fn from_settings(text: &str) -> Result<Self, String> {
         Jira::new(ai6::provider_settings::settings_from_text(text)?)
+    }
+}
+
+#[test]
+fn a_credential_without_the_comment_permission_cannot_comment() {
+    for (permissions, comments) in [
+        (
+            r#"{"permissions": {"ADD_COMMENTS": {"havePermission": false}}}"#,
+            false,
+        ),
+        (
+            r#"{"permissions": {"ADD_COMMENTS": {"havePermission": true}}}"#,
+            true,
+        ),
+        ("{}", true),
+    ] {
+        let fake = serve(|_| {
+            vec![
+                canned(
+                    200,
+                    r#"{"issueTypes": [{"name": "Task", "subtask": false}]}"#,
+                ),
+                canned(200, r#"[{"name": "High"}]"#),
+                canned(200, permissions),
+            ]
+        });
+        let capabilities = cloud(&fake.base, "").capabilities(None).unwrap();
+        assert_eq!(capabilities.comment, comments, "{permissions}");
+        let requests = fake.requests.lock().unwrap();
+        assert!(
+            requests[2].target.starts_with("/rest/api/3/mypermissions?")
+                && requests[2].target.contains("projectKey=AI6"),
+            "{}",
+            requests[2].target
+        );
     }
 }

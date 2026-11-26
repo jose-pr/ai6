@@ -97,8 +97,9 @@ never reach the provider, nor do the Station's own keys (`status_labels`, `statu
   types and priorities from `GET /issue/createmeta/{project}/issuetypes` and `GET /priority`,
   `children = parent` on Cloud and `subtasks` on Server (`none` when the project has no
   sub-task type), `issue_links` and `remote_links`, `visibility = unknown`, markers, and
-  the transitions open on the item asked about. Project answers are cached
-  `capability_ttl_secs`.
+  the transitions open on the item asked about. `comment` and `edit_comment` are false when
+  `GET /mypermissions?projectKey=KEY&permissions=ADD_COMMENTS` says the credential lacks it; no
+  answer counts as able. Project answers are cached `capability_ttl_secs`.
 - **Post** comments (ADF on Cloud, plain text on Server) or edits
   (`PUT /issue/{key}/comment/{id}`). Cloud text goes through the Markdown subset headings,
   bullet and numbered lists, fenced code blocks and `http(s)` links; raw HTML stays literal.
