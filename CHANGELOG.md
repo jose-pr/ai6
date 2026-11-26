@@ -42,6 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   before it ranks or counts. The Report tools, the `/v1/reports` routes (`PUT`, `DELETE` and `/versions` too) and
   `ai6ctl reports` take the new fields and filters.
 
+- Outer Office's Reports page is the one place for what AI6 knows: memories, tradecraft, rules and contacts (a person's
+  own, everyone's, each Operation's and the guides shipped with the build) are listed beside the Reports with kind and
+  topic filters, opened with edit, forget, accept or decline a proposal, and **Override for this deployment** on a built-in
+  guide, and every Report downloads as Markdown. The Memory page and its `memory` route are gone; Moneypenny's `open_page`
+  takes `reports` with `report_kind` and `topic`.
 - Memories are Reports of kind `memory`: Moneypenny's memory of a person, an Operation's and everyone's are read and written
   by `reports`, `read_report`, `file_report` and `forget_report` (hers and an Agent's) and by `/v1/reports`, and Outer
   Office's Memory page reads and writes through those routes. Her starting context lists a person's memory summaries

@@ -296,13 +296,18 @@ Operation, where its timeline shows them, the global scope's under `config:memor
 
 ### In the app
 
-Outer Office's **Memory** page (`app:/memory`, `?scope=global`, `?operation_id=G`) shows the memories
-(Reports of kind `memory`) of one scope at a time, chosen at its top: what Moneypenny keeps of you,
-everyone's, or an Operation's you may read. It lists them, newest change first, with a warning on one an
-exposed Run wrote; searches them; and opens one in a form (title, summary, compartments, text) saved from
-the revision that was opened, or forgotten once you confirm. Where you may change that scope, what Agents
-proposed for it waits at the top, with who asked and their mark, to accept or reject. It reads and
-writes through `/v1/reports` with `kind=memory`.
+Outer Office's **Reports** page lists what is known beside the Reports: memories, tradecraft, rules and
+contacts, with the `kind` and `topic` filters (and a **Knowledge** preset that keeps the four kinds), so
+one place holds everything AI6 knows. The page reads each scope the person may read, the guides shipped
+with the build, and what a compartment gives; what is known of a person is theirs alone, and the gateway
+decides that, never the app. Opening one shows its summary, topics, revision and who wrote it, with a
+warning on one an exposed Run wrote. **Edit** opens a form (title, summary, compartments, text) saved
+from the revision that was opened, **Forget** asks first, and **+** adds a memory, tradecraft, a rule or a
+contact to the person's own, everyone's or an Operation's. What Agents proposed waits as an open Report
+with **Accept** and **Decline**. A shipped guide opens read only with **Override for this deployment**,
+which files a Report of the same title in `global` to rank above it. Every Report has **Download as
+Markdown**, the document of [As Markdown documents](#as-markdown-documents). Moneypenny's menu entry
+**Her memory of you** opens the page on the `memory` kind.
 
 ### Limits
 
@@ -380,9 +385,10 @@ stores nothing.
 
 ## The Reports page
 
-Outer Office's **Reports** page, under Work, is where a person reads and assesses Reports. It is
-there for anyone who reads an Operation (`mission.read`) or a Station (`station.read`), and lists one
-row per Report across them, most urgent first. Its table has the app's usual sort, search and density,
+Outer Office's **Reports** page, under Work, is where a person reads and assesses Reports, and
+reads what AI6 knows ([In the app](#in-the-app)). It is there for everyone, and lists one
+row per Report across the Operations they read (`mission.read`) and the Stations (`station.read`)
+and what is known, most urgent first. Its table has the app's usual sort, search and density,
 and filters by Operation, state, who filed it (a Source, an Agent, a charge or a person),
 classification, kind and priority; **Needs assessment**, **Assessed** and **Closed** are one click.
 A view is a link (`/reports?state=open&operation=G`), and a scope the person cannot read is said in a

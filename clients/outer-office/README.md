@@ -179,11 +179,10 @@ Mission → Run board, Mission briefs, live Run terminals, administration and au
   ends an answer she is still giving. **Copy** beside each of her answers copies it as she wrote
   it, Markdown included, and any text in the app can be selected and copied. Her menu's **Export
   conversation** saves the conversation as Markdown: a download in a browser, a new file in
-  Downloads on a desktop. Her menu opens **Her memory of you**: the entries she keeps
-  of the operator, searched, opened in a form, saved, added or forgotten (after a confirmation).
-  The same page shows the global memory and each Operation's the operator may read (Reports of kind
-  `memory`, read and written through `/v1/reports`), with a mark on what an exposed Run wrote and what Agents
-  proposed for it. See the
+  Downloads on a desktop. Her menu opens **Her memory of you**: the Reports page on the
+  `memory` kind, where the entries she keeps of the operator are searched, opened, saved, added or forgotten
+  (after a confirmation), beside everyone's and each Operation's memory, tradecraft, rules and contacts the
+  operator may read, with a mark on what an exposed Run wrote and what Agents proposed for it. See the
   [assistant guide](https://jose-pr.github.io/ai6/assistant/) and
   [reports](https://jose-pr.github.io/ai6/reports/#knowledge).
 - Pages she publishes (a dashboard of live data, a report or a file) appear in her chat as a

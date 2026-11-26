@@ -31,13 +31,14 @@ native windows build their app with `boardThemedApp`.
   link; a view the parser refuses is shown as refused with its reason. Proposals run only on
   the operator's Confirm. `test/fixtures/assistant_views.json` is shared with the gateway's
   tests: change both sides together.
-- The Memory page (`lib/assistant/memory_page.dart`, route `memory` with `scope=global` or
-  `operation_id`) shows one scope's memories at a time: Reports of kind `memory` of the signed-in person, the
-  global scope or an Operation, through `/v1/reports` (search with `words`, a save by `POST` or `PUT`, a forget
-  by `DELETE`, a proposal decided by `PUT ./assessment`).
-  Rows by ID; a save names the revision it opened, and a refusal shows in Universal Exports' own
-  words. Each entry shows its summary and any mark, and the open one who wrote it and its compartments; proposals waiting for the
-  person sit above the entries. `test/fixtures/assistant_routes.json` holds the route's cases.
+- What AI6 knows (memories, tradecraft, rules, contacts) is on the Reports page (`lib/reports/`), by kind and
+  topic: `loadReports` reads `global`, the person's own `person:ID`, each Operation and a search per known kind
+  (the shipped guides, and what a compartment gives); the gateway decides what a person sees, never the app.
+  A save is `POST` or `PUT /v1/reports` from `KnowledgeEditorPage` and names the revision it opened, a forget
+  `DELETE`, a proposal is decided by `PUT ./assessment` (`accepted` or `no_action`), a built-in (`built-in.` ID)
+  is read only and overridden by filing a `global` Report with its title, and **Download as Markdown** saves
+  `GET /v1/reports/{id}/document`. A refusal shows in Universal Exports' own words. There is no memory route:
+  Moneypenny's menu opens `/reports?report_kind=memory`.
 
 - `lib/forms/` renders any schema and form and names no kind of record, which
   `test/record_forms_test.dart` checks; what is about the roster is in `lib/roster/`. No field,
