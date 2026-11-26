@@ -526,6 +526,49 @@ static WRITE_TOOLS: &[WriteTool] = &[
         },
     },
     WriteTool {
+        name: "propose_charge_wake",
+        description: "Propose asking a charge (M's, an Operation's or a Station's) to run its \
+                      next turn now, as if its timer had fired: a check between its timer \
+                      turns. Nothing changes until the person confirms it in the app; a turn \
+                      already running is reported and no second one is asked for. Needs the \
+                      control of the charge's scope (mission.control on an Operation, \
+                      station.configure on a Station or M) and charge.converse.",
+        schema: || {
+            object(
+                &[(
+                    "scope",
+                    text(
+                        "The charge: `m`, `operation:CODENAME` or `station:ID`, as charges lists it.",
+                    ),
+                )],
+                &["scope"],
+            )
+        },
+        plan: |input, _| {
+            let scope = string(input, "scope").ok_or("scope is required")?;
+            let (rights, action) = match scope.parse::<ai6::ChargeScope>() {
+                Ok(ai6::ChargeScope::Operation(operation)) => {
+                    (Scope::Operation(operation), "mission.control")
+                }
+                Ok(ai6::ChargeScope::Station(station)) => (
+                    Scope::Resource(format!("station:{station}")),
+                    "station.configure",
+                ),
+                Ok(ai6::ChargeScope::M) => (
+                    Scope::Resource("config:charge".to_owned()),
+                    "station.configure",
+                ),
+                _ => return Err(format!("{scope:?} is not a charge")),
+            };
+            Ok(Draft {
+                summary: format!("Run the next turn of the charge {scope} now"),
+                call: post(format!("/v1/user/charges/{}/wake", encode(scope)), None),
+                scope: rights,
+                action,
+            })
+        },
+    },
+    WriteTool {
         name: "propose_class_authorization",
         description: "Propose a class authorisation (a standing approval of a kind of \
                       irreversible step) in an Operation. Nothing changes until the person \
@@ -1346,6 +1389,11 @@ mod tests {
                 "propose_account_change",
                 json!({"name": "ann", "change": "disable"}),
                 Some("app:/access?tab=accounts"),
+            ),
+            (
+                "propose_charge_wake",
+                json!({"scope": "operation:G"}),
+                Some("app:/charges?operation_id=G"),
             ),
             (
                 "propose_class_authorization",

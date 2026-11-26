@@ -2256,3 +2256,67 @@ async fn a_charge_whose_turns_failed_is_acknowledged_from_the_command_line() {
     assert_eq!(missing.status.code(), Some(1));
     let _ = shutdown.send(());
 }
+
+#[tokio::test]
+async fn a_charge_is_woken_now_from_the_command_line_and_a_running_turn_is_reported() {
+    let (server, shutdown, access_token, registry_dir) = start_gateway().await;
+    let registry = FileRegistry::open(registry_dir.path());
+    let record = registry
+        .claim_charge(
+            "operation:station-01",
+            "007",
+            "station-01",
+            Duration::from_secs(60),
+        )
+        .unwrap();
+    macro_rules! wake {
+        ($scope:expr) => {
+            ai6ctl(
+                server.clone(),
+                Some(access_token.clone()),
+                &["charges", "wake", $scope],
+            )
+            .await
+        };
+    }
+    let woken = wake!("operation:station-01");
+    assert!(
+        woken.status.success(),
+        "{}",
+        String::from_utf8_lossy(&woken.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(woken.stdout).unwrap(),
+        "CHARGE\tWAKE\noperation:station-01\trequested\n"
+    );
+    let waiting = registry.charge("operation:station-01").unwrap().unwrap();
+    assert_eq!(waiting.controls.len(), 1);
+
+    // The Station takes it and a turn begins: the next ask says so and adds nothing.
+    registry
+        .update_charge(
+            "operation:station-01",
+            "station-01",
+            record.fence,
+            None,
+            ai6::directorates::registry::charges::ChargeUpdate::default()
+                .took_controls(vec![waiting.controls[0].id.clone()])
+                .running(1.0),
+        )
+        .unwrap();
+    let running = wake!("operation:station-01");
+    assert_eq!(
+        String::from_utf8(running.stdout).unwrap(),
+        "CHARGE\tWAKE\noperation:station-01\trunning\n"
+    );
+    assert!(
+        registry
+            .charge("operation:station-01")
+            .unwrap()
+            .unwrap()
+            .controls
+            .is_empty()
+    );
+    assert_eq!(wake!("operation:nowhere").status.code(), Some(1));
+    let _ = shutdown.send(());
+}

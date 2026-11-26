@@ -852,6 +852,13 @@ pub(crate) fn opens(tool: &str, call: &Call) -> Option<Route> {
                 "actions",
             ],
         ) => json!({"page": "missions", "operation_id": operation, "mission_id": mission}),
+        ("propose_charge_wake", ["v1", "user", "charges", scope, "wake"]) => {
+            match scope.split_once(':') {
+                Some(("operation", id)) => json!({"page": "charges", "operation_id": id}),
+                Some(("station", id)) => json!({"page": "charges", "station_id": id}),
+                _ => json!({"page": "charges", "charge": "m"}),
+            }
+        }
         ("propose_station_settings", ["v1", "user", "stations", station, "settings"]) => {
             json!({"page": "stations", "station_id": station, "tab": "settings"})
         }

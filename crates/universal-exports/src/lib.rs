@@ -2369,6 +2369,7 @@ impl Gateway {
                 "/v1/user/charges/{scope}/acknowledge",
                 post(charges::acknowledge),
             )
+            .route("/v1/user/charges/{scope}/wake", post(charges::wake))
             .route("/v1/socket/attach", get(run_attach::socket))
             .route("/v1/station/hub/next", get(run_attach::next))
             .route("/v1/station/hub/frames", post(run_attach::frames))

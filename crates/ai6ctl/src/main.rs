@@ -231,7 +231,8 @@ enum Command {
         #[command(subcommand)]
         control: Option<MissionCommand>,
     },
-    /// Attach to a charge's standing Run.
+    /// Attach to a charge's standing Run, acknowledge its failures, or wake it now.
+    #[command(alias = "charges")]
     Charge {
         #[command(subcommand)]
         command: ChargeCommand,
@@ -982,6 +983,14 @@ enum ChargeCommand {
     /// that interrupts its turn on its scope): its "failed its last turn" attention item ends and
     /// the Station stops counting the failures, until its next turn fails.
     Acknowledge {
+        /// The charge's scope: `m`, `operation:CODENAME` or `station:ID`.
+        scope: String,
+    },
+    /// Ask a charge to run its next turn now, as if its timer had fired (needs charge.converse
+    /// and the control that interrupts its turn on its scope). It says whether the wake was
+    /// requested, is already waiting, or a turn is already running, in which case no second
+    /// one is asked for.
+    Wake {
         /// The charge's scope: `m`, `operation:CODENAME` or `station:ID`.
         scope: String,
     },
@@ -2352,11 +2361,24 @@ async fn run() -> Result<(), String> {
             command: ChargeCommand::Acknowledge { scope },
         } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
-            let acknowledged = acknowledge_charge(&client, &server, &token, &scope).await?;
+            let acknowledged =
+                post_to_charge(&client, &server, &token, &scope, "acknowledge").await?;
             println!("CHARGE\tACKNOWLEDGED");
             println!(
                 "{}\tyes",
                 plain(acknowledged["scope"].as_str().unwrap_or(&scope))
+            );
+        }
+        Command::Charge {
+            command: ChargeCommand::Wake { scope },
+        } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            let woken = post_to_charge(&client, &server, &token, &scope, "wake").await?;
+            println!("CHARGE\tWAKE");
+            println!(
+                "{}\t{}",
+                plain(woken["scope"].as_str().unwrap_or(&scope)),
+                plain(woken["state"].as_str().unwrap_or("unknown"))
             );
         }
         Command::Charge {
@@ -3699,18 +3721,19 @@ async fn send<T: DeserializeOwned>(
         .map_err(|_| format!("Universal Exports returned an invalid {what}"))
 }
 
-/// Asks Universal Exports to record that the person saw the charge `scope` fail, and reads the
-/// charge as it stands, naming what each refusal means.
-async fn acknowledge_charge(
+/// Posts `verb` (`acknowledge` or `wake`) to the charge `scope` on Universal Exports and reads its
+/// answer, naming what each refusal means.
+async fn post_to_charge(
     client: &Client,
     server: &Url,
     access_token: &str,
     scope: &str,
+    verb: &str,
 ) -> Result<serde_json::Value, String> {
     let mut url = server.clone();
     url.path_segments_mut()
         .map_err(|_| "Universal Exports URL cannot contain path segments".to_owned())?
-        .extend(["v1", "user", "charges", scope, "acknowledge"]);
+        .extend(["v1", "user", "charges", scope, verb]);
     let response = client
         .post(url)
         .bearer_auth(access_token)

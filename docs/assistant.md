@@ -268,6 +268,7 @@ Moneypenny changes nothing herself. Her write tools only propose:
 | `propose_station_settings` | A Station's limits | `station.configure` |
 | `propose_access_change` | A role, the rule list or the delegation cap, global or of one Operation | `access.manage` there |
 | `propose_account_change` | An account made, disabled, enabled, given groups or its password reset | `account.manage` |
+| `propose_charge_wake` | A charge asked to run its next turn now, as if its timer had fired | `mission.control` on an Operation's charge, `station.configure` on a Station's or M's |
 | `propose_class_authorization` | A class authorisation | `approval.class` |
 | `propose_shared_change` | One file of a group's shared repository ([workspace](#her-workspace)) | membership of the group |
 

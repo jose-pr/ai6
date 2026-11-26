@@ -80,6 +80,7 @@ ai6ctl held-briefs release source_jira--OPS-12 --operation G
 | `mission cancel <MISSION_ID>` | Stops the live Run, if any, and abandons the Mission |
 | `charge attach <SCOPE> [--after <SEQ>] [--connect-timeout <SECONDS>] [--hello-timeout <SECONDS>] [--leave-wait <SECONDS>]` | Attaches to a charge's live Run (`charge.converse`): its history and what it shows, a line each; typed lines prompt it, `/answer`, `/allow`, `/refuse`, `/interrupt` and `/detach` act on it |
 | `charge acknowledge <SCOPE>` | Records that you saw the charge fail its last turns (`charge.converse` and the scope's control): its "failed its last turn" attention item ends and the Station stops counting the failure |
+| `charge wake <SCOPE>` | Asks the charge to run its next turn now (`charge.converse` and the scope's control); says `requested`, `pending` (a wake already waits) or `running` (a turn is under way, so no second one is asked for) |
 | `mission attach <MISSION_ID> [--operation <ID>] [--after <SEQ>] [--connect-timeout <SECONDS>] [--hello-timeout <SECONDS>] [--leave-wait <SECONDS>]` | The same for a Mission's live Run (`mission.control`) |
 | `mission retry <MISSION_ID> [--agent <CODENAME>]` | Queues a stalled or finished Mission again as a new run |
 | `mission resume <MISSION_ID> [--message <TEXT>]` | Resumes a parked, blocked or stalled Mission now |

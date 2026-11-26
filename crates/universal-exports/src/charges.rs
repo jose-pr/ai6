@@ -66,6 +66,9 @@ pub(crate) struct ChargeView {
     /// what it recorded.
     #[serde(skip_serializing_if = "Option::is_none")]
     last_ended: Option<String>,
+    /// Whether a turn is under way now: it began under a lease that is still live.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    running: bool,
     /// Turns it began in the last hour.
     turns_last_hour: usize,
     /// Whether the person may attach to it, type and answer.
@@ -321,6 +324,10 @@ async fn view(
             .as_deref()
             .and_then(turn_ended),
         last_turn: record.as_ref().and_then(last_turn),
+        running: held
+            && record
+                .as_ref()
+                .is_some_and(|record| record.running_since.is_some()),
         turns_last_hour: record.as_ref().map_or(0, |record| {
             record.turns_since(sources.now - TURN_WINDOW_SECS)
         }),
@@ -375,18 +382,25 @@ pub(crate) async fn show(
     }))
 }
 
-/// `POST /v1/user/charges/{scope}/acknowledge`: records that the person saw the charge fail its
-/// last turns, which ends its 'failed its last turn' attention item and the Station's count of
-/// failures. Needs `charge.converse` and the control that interrupts its turn; audited before it
-/// is recorded.
-pub(crate) async fn acknowledge(
-    State(gateway): State<Gateway>,
-    headers: HeaderMap,
-    Path(scope): Path<String>,
-) -> Result<Json<ChargeView>, ApiError> {
-    let person = resolve_user(&gateway, bearer(&headers)?).await?;
-    let current = sources(&gateway).await?;
-    let Some((own, _)) = view(&gateway, &person, &current, &scope).await else {
+/// A person who holds the control of a charge's scope, whose act on it is audited: the one who
+/// acts, and the Registry the act goes to.
+struct Controller {
+    person: Person,
+    registry: std::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>,
+}
+
+/// Resolves the caller, checks that they see the charge `scope` and hold `charge.converse` and the
+/// control that interrupts its turn, and records `action` in the audit log before anything is
+/// done.
+async fn controller(
+    gateway: &Gateway,
+    headers: &HeaderMap,
+    scope: &str,
+    action: &str,
+) -> Result<Controller, ApiError> {
+    let person = resolve_user(gateway, bearer(headers)?).await?;
+    let current = sources(gateway).await?;
+    let Some((own, _)) = view(gateway, &person, &current, scope).await else {
         return Err(ApiError::not_found());
     };
     if !own.can_interrupt {
@@ -403,23 +417,33 @@ pub(crate) async fn acknowledge(
     let record = ai6::AuditRecord {
         id: uuid::Uuid::new_v4().to_string(),
         actor: crate::actor_of(&person),
-        action: "charge.acknowledge".to_owned(),
+        action: action.to_owned(),
         operation,
         resource: Some(rights_resource),
-        target: scope.clone(),
+        target: scope.to_owned(),
         at: unix_timestamp()?,
     };
-    let (audited, acknowledging, by, target) = (
-        registry.clone(),
-        registry,
-        crate::actor_of(&person),
-        scope.clone(),
-    );
+    let audited = registry.clone();
     tokio::task::spawn_blocking(move || audited.record_audit(&record))
         .await
         .map_err(|_| ApiError::internal())?
         .map_err(|_| ApiError::internal())?;
-    tokio::task::spawn_blocking(move || acknowledging.acknowledge_charge(&target, &by))
+    Ok(Controller { person, registry })
+}
+
+/// `POST /v1/user/charges/{scope}/acknowledge`: records that the person saw the charge fail its
+/// last turns, which ends its 'failed its last turn' attention item and the Station's count of
+/// failures. Needs `charge.converse` and the control that interrupts its turn; audited before it
+/// is recorded.
+pub(crate) async fn acknowledge(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path(scope): Path<String>,
+) -> Result<Json<ChargeView>, ApiError> {
+    let Controller { person, registry } =
+        controller(&gateway, &headers, &scope, "charge.acknowledge").await?;
+    let (by, target) = (crate::actor_of(&person), scope.clone());
+    tokio::task::spawn_blocking(move || registry.acknowledge_charge(&target, &by))
         .await
         .map_err(|_| ApiError::internal())?
         .map_err(|_| ApiError::not_found())?;
@@ -428,6 +452,63 @@ pub(crate) async fn acknowledge(
         .await
         .ok_or_else(ApiError::not_found)?;
     Ok(Json(shown))
+}
+
+/// What a person's "run now" came to.
+#[derive(Serialize)]
+pub(crate) struct WakeAnswer {
+    /// The charge's scope.
+    scope: String,
+    /// `requested`: the Station that runs it takes the wake at its next check-in and runs a turn;
+    /// `pending`: a wake already waits, and answers this one; `running`: a turn is under way, and
+    /// no second one was asked for.
+    state: &'static str,
+    /// The ID of the wake that waits, for `requested` and `pending`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    control: Option<String>,
+    /// When the turn under way began, as Unix seconds, for `running`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    running_since: Option<f64>,
+    /// Whether a Station holds the charge now: with none, the wake waits for one to claim it.
+    held: bool,
+}
+
+/// `POST /v1/user/charges/{scope}/wake`: asks the Station that holds the charge to run its next
+/// turn now, as if its timer had fired. A turn already running is reported and no second one is
+/// asked for. Needs `charge.converse` and the control that interrupts its turn, as
+/// [`acknowledge`] does; audited before it is recorded, naming who asked.
+pub(crate) async fn wake(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path(scope): Path<String>,
+) -> Result<Json<WakeAnswer>, ApiError> {
+    use ai6::directorates::registry::charges::ChargeWake;
+
+    let Controller { person, registry } =
+        controller(&gateway, &headers, &scope, "charge.wake").await?;
+    let (by, target) = (crate::actor_of(&person), scope.clone());
+    let woken = tokio::task::spawn_blocking(move || registry.wake_charge_now(&target, &by))
+        .await
+        .map_err(|_| ApiError::internal())?
+        .map_err(|_| ApiError::not_found())?;
+    let current = sources(&gateway).await?;
+    let held = current
+        .records
+        .iter()
+        .any(|record| record.scope == scope && record.lease_expires > current.now);
+    let (state, control, running_since) = match woken {
+        ChargeWake::Requested(control) => ("requested", Some(control.id), None),
+        ChargeWake::Pending(control) => ("pending", Some(control.id), None),
+        ChargeWake::Running { since } => ("running", None, Some(since)),
+        _ => return Err(ApiError::internal()),
+    };
+    Ok(Json(WakeAnswer {
+        scope,
+        state,
+        control,
+        running_since,
+        held,
+    }))
 }
 
 /// Unix seconds as an RFC 3339 time, or the number itself when it is out of range.
@@ -503,7 +584,7 @@ mod tests {
     use ai6::directorates::registry::backend::*;
     use ai6::directorates::registry::charges::{ChargeLogEntry, ChargeUpdate};
     use reqwest::StatusCode;
-    use serde_json::Value;
+    use serde_json::{Value, json};
 
     use crate::controls::tests::{Served, served_with};
 
@@ -704,5 +785,113 @@ mod tests {
             .collect();
         assert_eq!(audited.len(), 1);
         assert_eq!(audited[0].target, "operation:G");
+    }
+
+    async fn post_wake(served: &Served, token: &str, scope: &str) -> reqwest::Response {
+        reqwest::Client::new()
+            .post(format!("{}/v1/user/charges/{scope}/wake", served.base))
+            .bearer_auth(token)
+            .send()
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_person_who_may_control_a_charge_wakes_it_now_once_and_it_is_audited() {
+        let served = served_charges().await;
+
+        // Reading shows no control; a charge that is not theirs is not there to wake.
+        assert_eq!(
+            post_wake(&served, &served.viewer, "operation:G")
+                .await
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            post_wake(&served, &served.operator, "operation:L")
+                .await
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            post_wake(&served, "not-a-token", "operation:G")
+                .await
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+        let waiting = |served: &Served| {
+            served
+                .registry
+                .charge("operation:G")
+                .unwrap()
+                .unwrap()
+                .controls
+        };
+        assert!(waiting(&served).is_empty(), "a refused ask leaves nothing");
+
+        let first: Value = post_wake(&served, &served.operator, "operation:G")
+            .await
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(first["state"], "requested");
+        assert_eq!(first["held"], true);
+        let waits = waiting(&served);
+        assert_eq!(waits.len(), 1);
+        assert_eq!(first["control"], waits[0].id.as_str());
+        assert!(waits[0].note.is_empty());
+
+        // The next ask before the Station takes the first is answered by it.
+        let second: Value = post_wake(&served, &served.operator, "operation:G")
+            .await
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(
+            (&second["state"], &second["control"]),
+            (&json!("pending"), &first["control"])
+        );
+        assert_eq!(waiting(&served).len(), 1);
+
+        // The Station takes it and begins the turn: a further ask is reported, never doubled.
+        served
+            .registry
+            .update_charge(
+                "operation:G",
+                "worker",
+                1,
+                None,
+                ChargeUpdate::default()
+                    .took_controls(vec![waits[0].id.clone()])
+                    .running(2_000.0),
+            )
+            .unwrap();
+        let running: Value = post_wake(&served, &served.operator, "operation:G")
+            .await
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(running["state"], "running");
+        assert_eq!(running["running_since"], 2_000.0);
+        assert!(running.get("control").is_none());
+        assert!(waiting(&served).is_empty());
+        let listed: Vec<Value> = get(&served, &served.operator, "")
+            .await
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(listed[0]["running"], true);
+
+        // Every ask is audited with who made it, the refused ones apart.
+        let audited: Vec<_> = served
+            .registry
+            .list_audit(100)
+            .unwrap()
+            .into_iter()
+            .filter(|audit| audit.action == "charge.wake")
+            .collect();
+        assert_eq!(audited.len(), 3, "{audited:?}");
+        assert!(audited.iter().all(|audit| audit.target == "operation:G"));
+        assert!(audited.iter().all(|audit| !audit.actor.is_empty()));
     }
 }

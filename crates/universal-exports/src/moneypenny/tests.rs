@@ -1446,6 +1446,68 @@ async fn a_person_lacking_the_permission_gets_no_proposal_at_all() {
     );
 }
 
+#[tokio::test]
+async fn a_charge_wake_is_proposed_for_those_who_control_the_charge_and_opens_its_page() {
+    let served = served(AssistantConfig::default()).await;
+    let (mut app, job) = accepted(&served, &served.operator, "Check on the charge now.").await;
+    let token = &job.mcp_token;
+
+    let refused = call_tool(
+        &served,
+        token,
+        "propose_charge_wake",
+        json!({"scope": "bogus"}),
+    )
+    .await;
+    assert_eq!(refused["isError"], true);
+    let text = refused["content"][0]["text"].as_str().unwrap();
+    assert!(text.starts_with("INVALID_INPUT"), "{text}");
+
+    let proposed = call_tool(
+        &served,
+        token,
+        "propose_charge_wake",
+        json!({"scope": "operation:G"}),
+    )
+    .await;
+    assert_eq!(proposed["isError"], false, "{proposed}");
+    let frames = finish(&served, &mut app, &job).await;
+    let proposal = proposal_of(&frames);
+    assert_eq!(proposal["status"], "pending");
+    assert_eq!(proposal["request"]["method"], "POST");
+    assert_eq!(
+        proposal["request"]["path"],
+        "/v1/user/charges/operation%3AG/wake"
+    );
+    assert_eq!(proposal["needs"]["action"], "mission.control");
+    assert_eq!(proposal["opens"], "app:/charges?operation_id=G");
+    assert!(audits(&served, "moneypenny.confirmed").is_empty());
+
+    // A person without the control gets no proposal.
+    let (mut app, job) = accepted(&served, &served.viewer, "Check on the charge now.").await;
+    let refused = call_tool(
+        &served,
+        &job.mcp_token,
+        "propose_charge_wake",
+        json!({"scope": "operation:G"}),
+    )
+    .await;
+    assert_eq!(refused["isError"], true);
+    assert!(
+        refused["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("mission.control")
+    );
+    let frames = finish(&served, &mut app, &job).await;
+    assert!(
+        frames
+            .iter()
+            .all(|frame| frame["type"] != "proposal" && frame["entry"]["role"] != "proposal"),
+        "{frames:?}"
+    );
+}
+
 #[cfg(feature = "cli")]
 #[tokio::test]
 async fn a_confirmed_roster_edit_goes_through_the_roster_with_its_checks_and_audit() {
