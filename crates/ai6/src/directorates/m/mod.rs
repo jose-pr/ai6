@@ -23,6 +23,7 @@ pub mod placement;
 pub mod promotion;
 pub mod records;
 pub mod recovery;
+pub mod report_document;
 pub mod reports;
 pub mod review;
 pub mod roster;

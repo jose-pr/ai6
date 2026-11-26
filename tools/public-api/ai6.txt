@@ -2051,6 +2051,11 @@ pub mod ai6::directorates::m::recovery
 pub const ai6::directorates::m::recovery::DEFAULT_LOST_AFTER_SECS: u64
 pub fn ai6::directorates::m::recovery::adopter(&ai6::directorates::m::placement::OperationPolicy, &ai6::directorates::m::placement::PlacementRequest, &[ai6::directorates::m::placement::StationFacts], &ai6::directorates::registry::runs::RunRecord) -> core::result::Result<ai6::directorates::m::placement::PlacementChoice, alloc::string::String>
 pub fn ai6::directorates::m::recovery::reattach_delay(u32, &ai6::station::limits::RecoveryLimits) -> core::time::Duration
+pub mod ai6::directorates::m::report_document
+pub struct ai6::directorates::m::report_document::ReportDocument
+pub ai6::directorates::m::report_document::ReportDocument::fields: serde_json::map::Map<alloc::string::String, serde_json::value::Value>
+pub ai6::directorates::m::report_document::ReportDocument::text: alloc::string::String
+pub fn ai6::directorates::m::report_document::read(&str) -> core::result::Result<ai6::directorates::m::report_document::ReportDocument, alloc::string::String>
 pub mod ai6::directorates::m::reports
 #[non_exhaustive] pub enum ai6::directorates::m::reports::ReportSight
 pub ai6::directorates::m::reports::ReportSight::Content

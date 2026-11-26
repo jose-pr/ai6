@@ -2958,6 +2958,10 @@ pub fn sight(&dyn ReportReader, &Report, &ReportRules<'_>) -> ReportSight;
     // anything that only links to it. Nobody is exempt, a chief included.
 pub fn report_json(&Report, ReportSight, Option<&ReportSource>) -> Value;
     // always id, scope, classification, handling, compartments, sight; never title or text below Content
+pub struct ReportDocument { pub fields: Map<String, Value>, pub text: String }  // ai6::directorates::m::report_document
+pub fn report_document::read(&str) -> Result<ReportDocument, String>;
+    // a Report's Markdown document read back: front matter is fields (minus `author`), body is text (author's own front
+    // matter put back in front); Err for no front matter, unreadable front matter, `truncated: true`, non-text `author`
 pub struct ReportMarkings { pub classification, pub handling, pub compartments, pub tearline: Option<TearlineFiling> }
 pub fn remark(&dyn ReportReader, &mut Report, ReportMarkings, &ReportRules<'_>) -> Result<(), String>;
     // the reader sees Content before and after, so lowering needs someone read in
