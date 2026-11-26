@@ -2396,6 +2396,7 @@ pub ai6::directorates::m::roster::AgentRoute::pool: core::option::Option<alloc::
 pub ai6::directorates::m::roster::AgentRoute::priority: i64
 pub ai6::directorates::m::roster::AgentRoute::secrets: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::roster::AgentRoute::token_cap: core::option::Option<u64>
+pub ai6::directorates::m::roster::AgentRoute::trains_on_input: bool
 impl ai6::directorates::m::roster::AgentRoute
 pub fn ai6::directorates::m::roster::AgentRoute::new(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::roster::AgentRoute::reference(&self) -> ai6::directorates::m::roster::RouteRef
@@ -2429,6 +2430,7 @@ pub ai6::directorates::m::roster::Operation::parent: core::option::Option<alloc:
 pub ai6::directorates::m::roster::Operation::path: core::option::Option<std::path::PathBuf>
 pub ai6::directorates::m::roster::Operation::placement: ai6::directorates::m::placement::PlacementStrategy
 pub ai6::directorates::m::roster::Operation::pools: core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub ai6::directorates::m::roster::Operation::private: bool
 pub ai6::directorates::m::roster::Operation::promotion: ai6::directorates::m::promotion::PromotionPolicy
 pub ai6::directorates::m::roster::Operation::quarantine: ai6::directorates::medical::quarantine::QuarantinePolicy
 pub ai6::directorates::m::roster::Operation::review: ai6::directorates::m::review::ReviewChoice
@@ -3414,11 +3416,13 @@ pub struct ai6::directorates::q::overlays::OverlayRecord
 impl ai6::directorates::q::overlays::OverlayRecord
 pub fn ai6::directorates::q::overlays::OverlayRecord::from(&self) -> &ai6::directorates::q::overlays::OverlayFrom
 pub fn ai6::directorates::q::overlays::OverlayRecord::identity(&self) -> alloc::string::String
+pub fn ai6::directorates::q::overlays::OverlayRecord::is_private(&self) -> bool
 pub fn ai6::directorates::q::overlays::OverlayRecord::name(&self) -> &str
 pub fn ai6::directorates::q::overlays::OverlayRecord::new(impl core::convert::Into<alloc::string::String>, ai6::directorates::q::overlays::OverlayFrom) -> Self
 pub fn ai6::directorates::q::overlays::OverlayRecord::pin(&self) -> core::option::Option<coqui_aos::digest::Digest>
 pub fn ai6::directorates::q::overlays::OverlayRecord::pinned(self, coqui_aos::digest::Digest) -> Self
 pub fn ai6::directorates::q::overlays::OverlayRecord::secrets(&self) -> &[alloc::string::String]
+pub fn ai6::directorates::q::overlays::OverlayRecord::with_private(self, bool) -> Self
 pub fn ai6::directorates::q::overlays::OverlayRecord::with_secrets(self, alloc::vec::Vec<alloc::string::String>) -> Self
 pub struct ai6::directorates::q::overlays::ReadOverlay
 pub ai6::directorates::q::overlays::ReadOverlay::digest: coqui_aos::digest::TreeDigest
@@ -9800,6 +9804,7 @@ pub ai6::station::limits::HarnessLimits::compact_at_tokens: ai6::bounds::Limit
 pub ai6::station::limits::HarnessLimits::manifest_bytes: ai6::bounds::Limit
 pub ai6::station::limits::HarnessLimits::manifest_file_bytes: ai6::bounds::Limit
 pub ai6::station::limits::HarnessLimits::manifest_files: ai6::bounds::Limit
+pub ai6::station::limits::HarnessLimits::os_env: alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::station::limits::HarnessLimits
 pub fn ai6::station::limits::HarnessLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::station::limits::HeadOfStationLimits
@@ -11218,6 +11223,7 @@ pub ai6::AgentRoute::pool: core::option::Option<alloc::string::String>
 pub ai6::AgentRoute::priority: i64
 pub ai6::AgentRoute::secrets: alloc::vec::Vec<alloc::string::String>
 pub ai6::AgentRoute::token_cap: core::option::Option<u64>
+pub ai6::AgentRoute::trains_on_input: bool
 impl ai6::directorates::m::roster::AgentRoute
 pub fn ai6::directorates::m::roster::AgentRoute::new(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::m::roster::AgentRoute::reference(&self) -> ai6::directorates::m::roster::RouteRef
@@ -13147,6 +13153,7 @@ pub ai6::Operation::parent: core::option::Option<alloc::string::String>
 pub ai6::Operation::path: core::option::Option<std::path::PathBuf>
 pub ai6::Operation::placement: ai6::directorates::m::placement::PlacementStrategy
 pub ai6::Operation::pools: core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub ai6::Operation::private: bool
 pub ai6::Operation::promotion: ai6::directorates::m::promotion::PromotionPolicy
 pub ai6::Operation::quarantine: ai6::directorates::medical::quarantine::QuarantinePolicy
 pub ai6::Operation::review: ai6::directorates::m::review::ReviewChoice

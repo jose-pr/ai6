@@ -656,6 +656,8 @@ pub struct Agent {
     pub env: RunEnv,                          // no credential's or AI6's variable (refused)
     pub secrets: Vec<String>,                     // `[secret.NAME]`s, issued whatever the Run read
     pub priority: i64,
+    pub token_cap: Option<u64>,
+    pub trains_on_input: bool,                    // false; true: never placed for a private Operation or overlay
 }
 impl AgentRoute { pub fn new(handler: impl Into<String>) -> Self; pub fn reference(&self) -> RouteRef; }
 /// Which route ran; serde; Display `handler model (pool name)`.
@@ -718,6 +720,7 @@ pub struct Operation {
     pub path: Option<PathBuf>,
     pub theater: Option<String>,
     pub config: Option<PathBuf>,
+    pub private: bool,                            // false; true: no route marked `trains_on_input`
     pub roster: Vec<String>,
     pub clearance: String,
     pub max_concurrent: Option<usize>,
@@ -4690,6 +4693,7 @@ pub fn hooks_asked(manifest: &Document, files: &OverlayTree) -> Option<String>; 
 pub struct OverlayRecord;   // [overlay.<name>]
 impl OverlayRecord {
     pub fn new(name, from: OverlayFrom) -> Self; pub fn pinned(self, Digest) -> Self; pub fn with_secrets(self, Vec<String>) -> Self;
+    pub fn with_private(self, bool) -> Self; pub fn is_private(&self) -> bool;   // `private = true`, or fetched with secrets
     pub fn name(&self) -> &str; pub fn identity(&self) -> String; pub fn from(&self) -> &OverlayFrom;
     pub fn pin(&self) -> Option<Digest>; pub fn secrets(&self) -> &[String];
 }

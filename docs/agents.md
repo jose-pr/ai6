@@ -306,12 +306,15 @@ a `review-unavailable` finding. The review Mission:
 Answer-only is the `answer_only` field of the handler's start request. Claude Code gets
 `--restricted` (2.1.248 or later), `--tools=` (no built-in tool), `--disallowedTools` naming
 its shell, file, web, sub-agent and every MCP tool, `--setting-sources user` and
-`--strict-mcp-config` with an empty `--mcp-config`. Codex gets its command execution off
+`--strict-mcp-config` with an empty `--mcp-config`, and `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` so no
+instruction file loads, the user's own `CLAUDE.md` included. Codex gets its command execution off
 (`features.shell_tool = false`), web search, sub-agents (`features.multi_agent`,
 `agents.enabled`) and app connectors off, questions to the user off
 (`tools.experimental_request_user_input`), an empty skills catalog
 (`skills.max_context_tokens = 1`), every other feature it enables switched off, each of the
-user's MCP servers switched off by name and the working directory's project layer skipped,
+user's MCP servers switched off by name, the working directory's project layer skipped and its
+`AGENTS.md` unread (`project_doc_max_bytes = 0`; the instructions file in Codex's own home still
+loads, since 0.166 has no setting that drops it),
 and its thread in the `read-only` sandbox with approval policy `never`; it starts only after
 the [tool check](#codex-tool-check) finds it offers no tool at all, which Codex 0.164 never
 does. A Claude Code too old for one of its flags refuses to start, which ends the review
@@ -891,6 +894,11 @@ env = { PATH = "/opt/tools/bin:/usr/bin:/bin", TZ = "UTC" }
 - A harness's environment is what AI6 gives it and nothing of the Station's own, so the `PATH` a
   harness needs is one you set: here or in the Agent's own `[agent.<codename>.env]`; a loadout's value wins over
   the Agent's for the same name, and a start or resume request's wins over both.
+- **The platform's own variables are added.** A process on Windows cannot start without a few
+  (`SystemRoot`: Claude Code exits at once without it), and none of them is secret, so the Station
+  gives every harness the ones `[harness] os_env` names (`SystemRoot`, `windir`, `ComSpec` and
+  `PATHEXT` by default) from its own environment, wherever the Agent's or loadout's `env` does not
+  set the name. Change the list in the `station` record; an empty one passes none.
 - **Exposure does not take it away.** A Run an Operation's [exposure](medical.md) policy
   restricts with `secrets` loses its secrets, which is how a Mission from a Source runs under
   `strict`, and keeps this table. A `PATH` given as a secret would be lost with them.
@@ -1213,6 +1221,11 @@ a model at all; an Agent that needs another model's behaviour is another Agent.
   against. The models listing (in `ai6ctl` too) and the app's Models page show it beside the
   route. A harness that reports such a refusal fails the turn with the gateway's words instead of
   retrying it.
+- **A route that trains on its input**: `trains_on_input = true` marks a route whose source may
+  train on what it is sent, a free tier for one. A route so marked is passed over, and says why,
+  for a Run of an Operation with `private = true` and for a Run that carries an overlay that is
+  private, whether its loadout or its Operation issues it; an Agent with only marked routes waits
+  with those reasons. Unmark the route, the Operation or the overlay to lift it.
 - **A route with no pool** has one account of its own that hands over nothing, kept in the Registry
   under a `route-…` ID and labelled with the Agent, handler and model. So every Station sees its
   limit, its Runs count and the board shows it as `harness-login`.
@@ -1337,6 +1350,7 @@ and gives the Run a read-only copy outside its working directory, so no commit c
 source = "https://github.com/example/agents.git@4b825dc642cb6eb9a060e54bf8d69288fbee4904#overlays/engineering"
 pin = "sha256:5d0c..."                     # what `ai6 overlay pin DIR` prints
 secrets = ["agents-deploy-key"]            # [secret.<name>] names a private source is fetched with
+private = true                             # its text stays off routes whose source trains on input
 
 [overlay.rust]
 path = "/srv/overlays/rust"                # a directory on the Station
@@ -1355,6 +1369,9 @@ overlays = ["rust"]
   name is the overlay's identity, compared in lower case with `_` and `.` as `-`: `Team_Review`
   and `team-review` are one overlay, and two records naming it are refused. `default`,
   `overlay`, `system`, `user`, `project`, `project-root` and Windows device names are refused.
+- **`private`** marks an overlay whose text must not reach a route that trains on its input
+  (`trains_on_input`, [Routes](#routes)); an overlay fetched with `secrets` counts as private too.
+  A Run that carries a private overlay is never placed on such a route.
 - **`overlays`** on a loadout and on an Operation name records by identity, each once. A
   loadout's must name records its document defines.
 - **Order.** A Run gets the loadout's list, then the Operation's. Each overlay's `requires`

@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   that acknowledges), is audited as `charge.wake`, and a turn already running is reported rather than doubled; the timer
   is left where it was unless the charge's `wake_restarts_timer` says otherwise.
 
+- A route can be marked `trains_on_input = true` (its source may train on what it is sent), and an Operation or an
+  overlay `private = true`. A Run of a private Operation, or carrying a private overlay (or one fetched with secrets), is
+  never placed on a marked route, and the route's reason says so. `[harness] os_env` names the platform variables
+  (`SystemRoot`, `windir`, `ComSpec`, `PATHEXT` by default) every harness is given from the Station's environment
+  unless its `env` sets them, so a Windows harness under strict exposure starts.
+
 - `ai6 config migrate` runs the one-time steps a release's stored records need, with every Station and gateway stopped,
   on the configuration `ai6.cfg` names: a SQL database record by record, a directory of family files in place (comments
   and order kept). Each rewrite is printed with its step's name and a second run changes nothing. The first step,
@@ -244,6 +250,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   buckets covering a parked Mission's models frees the account and resumes it, and a reset moved later re-parks it.
   A refusal's stated `retry-after` parks a Mission ahead of the Operation's fallback. The Account Pools page and
   `ai6ctl pools` show the models a window covers and when it was read.
+
+### Fixed
+
+- A Claude Code Run held to reading until its plan passes reads only under its working directory (`Read(/**)`); an
+  answer-only Claude Run loads no `CLAUDE.md`, the user's own included, and an answer-only Codex thread reads no
+  `AGENTS.md` of the checkout; a Codex thread held to `desk` is told it has no tool that reads a file. A login a Run
+  writes back that names another account than the sealed one is refused and the Registry's copy put back. A verified
+  plugin copy that changed between the check and the load is not loaded, and the verified directory is the Station
+  user's alone on Unix.
 
 ### Removed
 
