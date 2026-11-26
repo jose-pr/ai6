@@ -280,6 +280,16 @@ impl Plugins {
     /// Scans each directory or library path under `policy`; see [`PluginPolicy`] for what
     /// each profile loads and from where. A directory is not searched recursively.
     pub fn scan_with(paths: &[PathBuf], policy: &PluginPolicy) -> Self {
+        Self::scan_checked(paths, policy, &|_| {})
+    }
+
+    /// [`Plugins::scan_with`], calling `before_load` with the verified copies after they are
+    /// written and before Guatiao opens them.
+    fn scan_checked(
+        paths: &[PathBuf],
+        policy: &PluginPolicy,
+        before_load: &dyn Fn(&[PathBuf]),
+    ) -> Self {
         let mut registry = Registry::new("ai6", env!("CARGO_PKG_VERSION"));
         register_builtins(&mut registry);
         let mut summary = PluginScanSummary {
@@ -294,6 +304,7 @@ impl Plugins {
             .as_deref()
             .filter(|_| policy.profile == PluginProfile::Strict);
         let scanning = verified.map(enter_verified);
+        let mut holds = Vec::new();
         if policy.profile == PluginProfile::Off {
             summary
                 .weakened
@@ -302,11 +313,34 @@ impl Plugins {
                 search.push(path.clone());
             }
         } else {
+            let mut chosen = Vec::new();
             for candidate in candidates(paths, &mut summary) {
-                if let Some(load) = check_candidate(&candidate, policy, true, &mut summary) {
-                    found_at.insert(load.clone(), candidate);
-                    search.push(load);
+                if let Some(load) =
+                    check_candidate(&candidate, policy, true, &mut summary, &mut holds)
+                {
+                    chosen.push((load, candidate));
                 }
+            }
+            before_load(
+                &chosen
+                    .iter()
+                    .map(|(load, _)| load.clone())
+                    .collect::<Vec<_>>(),
+            );
+            // Guatiao opens a library by its path: each copy is seen to be what was verified
+            // just before, and a copy that is not is left out.
+            for (load, candidate) in chosen {
+                if let Some(held) = holds.iter().find(|held| held.copy == load)
+                    && let Err(error) = held.still_whole()
+                {
+                    summary.failed.push(format!(
+                        "{}: the verified copy {error}",
+                        candidate.display()
+                    ));
+                    continue;
+                }
+                found_at.insert(load.clone(), candidate);
+                search.push(load);
             }
         }
         let report = scan_path_with(&mut registry, &search, Order::Ascending, declares_ai6_kind);
@@ -340,7 +374,12 @@ impl Plugins {
                     .loaded
                     .iter()
                     .filter(|(path, _)| found_at.contains_key(path))
-                    .filter_map(|(path, _)| hold_copy(path)),
+                    .filter_map(|(path, _)| {
+                        match holds.iter().position(|held| held.copy == *path) {
+                            Some(at) => Some(holds.swap_remove(at).file),
+                            None => hold_copy(path),
+                        }
+                    }),
             );
             clear_verified(
                 directory,
@@ -963,6 +1002,7 @@ fn check_candidate(
     policy: &PluginPolicy,
     copy: bool,
     summary: &mut PluginScanSummary,
+    holds: &mut Vec<Held>,
 ) -> Option<PathBuf> {
     let shown = candidate.display().to_string();
     let not_ai6 = match probe(candidate) {
@@ -1023,11 +1063,15 @@ fn check_candidate(
                     .push(format!("{shown}: no directory for verified copies"));
                 return None;
             };
-            match copy_verified(directory, &digest, &bytes) {
-                Ok(copy) => {
+            let held = copy_verified(directory, &digest, &bytes)
+                .and_then(|copy| Held::new(copy, digest.clone()));
+            match held {
+                Ok(held) => {
+                    let copy = held.copy.clone();
                     if let Some(check) = summary.checked.last_mut() {
                         check.loaded_from = Some(copy.display().to_string());
                     }
+                    holds.push(held);
                     Some(copy)
                 }
                 Err(error) => {
@@ -1159,11 +1203,68 @@ impl PluginScanSummary {
     }
 }
 
+/// A verified copy, held open and shared-locked from the moment it is written until it is loaded.
+/// Where the system allows, the handle denies other processes writing or deleting the file (on
+/// Windows a share mode of read alone), so the copy cannot be swapped between the check and the
+/// load; elsewhere [`Held::still_whole`] reads the path again right before the load.
+struct Held {
+    copy: PathBuf,
+    file: File,
+    digest: PeerId,
+}
+
+impl Held {
+    /// Opens `copy`, locks it shared and checks that it holds `digest`.
+    fn new(copy: PathBuf, digest: PeerId) -> std::io::Result<Self> {
+        use std::io::Read;
+        let mut options = OpenOptions::new();
+        options.read(true);
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            // FILE_SHARE_READ: nobody else may write, rename or delete it while it is held.
+            options.share_mode(1);
+        }
+        let mut file = options.open(&copy)?;
+        file.lock_shared()?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+        if library_pin(&bytes) != digest {
+            return Err(std::io::Error::other("changed after it was verified"));
+        }
+        Ok(Self { copy, file, digest })
+    }
+
+    /// Reads the copy by its path, as Guatiao will open it, and checks it is the file held and
+    /// still holds the digest.
+    fn still_whole(&self) -> std::io::Result<()> {
+        let changed = || std::io::Error::other("changed after it was verified");
+        if library_pin(&std::fs::read(&self.copy)?) != self.digest {
+            return Err(changed());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let (held, found) = (self.file.metadata()?, std::fs::metadata(&self.copy)?);
+            if (held.dev(), held.ino()) != (found.dev(), found.ino()) {
+                return Err(changed());
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Writes `bytes` into `directory` as `sha256-HEX.EXT`, unless a file of that name already
-/// holds them, and returns its path.
+/// holds them, and returns its path. On Unix the directory is the Station user's alone and the
+/// copy is read-only, so no other account can replace it.
 fn copy_verified(directory: &Path, digest: &PeerId, bytes: &[u8]) -> std::io::Result<PathBuf> {
     use std::io::Write;
     std::fs::create_dir_all(directory)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700))?;
+    }
     let path = directory.join(format!("sha256-{}.{DLL_EXTENSION}", digest.hex()));
     if std::fs::read(&path).is_ok_and(|held| library_pin(&held) == *digest) {
         return Ok(path);
@@ -1171,6 +1272,12 @@ fn copy_verified(directory: &Path, digest: &PeerId, bytes: &[u8]) -> std::io::Re
     let mut copy = tempfile::NamedTempFile::new_in(directory)?;
     copy.write_all(bytes)?;
     copy.as_file().sync_all()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        copy.as_file()
+            .set_permissions(std::fs::Permissions::from_mode(0o500))?;
+    }
     copy.persist(&path).map_err(|error| error.error)?;
     Ok(path)
 }
@@ -1344,7 +1451,7 @@ pub fn check_libraries(paths: &[PathBuf], pins: &PinSet) -> PluginScanSummary {
         ..PluginScanSummary::default()
     };
     for candidate in candidates(paths, &mut summary) {
-        check_candidate(&candidate, &policy, false, &mut summary);
+        check_candidate(&candidate, &policy, false, &mut summary, &mut Vec::new());
     }
     summary
 }
@@ -2275,6 +2382,43 @@ tty = false
             ),
             "the mapping outlives the value, and so does the lock"
         );
+    }
+
+    /// Puts other bytes where the verified copy stands, by renaming a file over it as a process
+    /// that may write the directory could. A platform that refuses the replacement while the
+    /// copy is held is as good: the copy is then untouched.
+    fn swap_copy(copy: &Path, other: &[u8]) {
+        let beside = copy.with_extension("swap");
+        std::fs::write(&beside, other).unwrap();
+        if std::fs::rename(&beside, copy).is_err() {
+            let _ = std::fs::remove_file(&beside);
+        }
+    }
+
+    #[test]
+    fn a_copy_replaced_after_it_was_verified_is_never_loaded() {
+        let (directory, _library, bytes) = one_library();
+        let verified = scratch();
+        let other = rebuilt(&bytes);
+        let plugins = Plugins::scan_checked(
+            &[directory.path().to_path_buf()],
+            &digest_policy(&bytes, verified.path()),
+            &|copies| copies.iter().for_each(|copy| swap_copy(copy, &other)),
+        );
+        let copy = copy_of(&bytes, verified.path());
+        let held = std::fs::read(&copy).unwrap();
+        if has_roles(&plugins) {
+            assert_eq!(held, bytes, "what loaded is what was verified");
+        } else {
+            let summary = plugins.scan_summary();
+            assert!(
+                summary
+                    .failed
+                    .iter()
+                    .any(|failure| failure.contains("changed after it was verified")),
+                "{summary:?}"
+            );
+        }
     }
 
     #[test]
