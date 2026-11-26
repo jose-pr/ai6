@@ -313,6 +313,10 @@ class _ChargeDetail extends StatelessWidget {
             header: true,
             child: Text('${charge.title}\'s charge', style: text.titleLarge),
           ),
+          if (charge.canInterrupt) ...[
+            const SizedBox(height: 8),
+            _RunNow(board: board, charge: charge),
+          ],
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
@@ -520,6 +524,72 @@ class _WithDetailState extends State<_WithDetail> {
         }
         return widget.builder(context, read);
       },
+    );
+  }
+}
+
+/// "Run now": asks the Station that holds [charge] to take its next turn at once, as if its timer
+/// had fired, and says what came of it. Shown to a person who holds the control of its scope.
+class _RunNow extends StatefulWidget {
+  const _RunNow({required this.board, required this.charge});
+
+  final MissionBoard board;
+  final ChargeSummary charge;
+
+  @override
+  State<_RunNow> createState() => _RunNowState();
+}
+
+class _RunNowState extends State<_RunNow> {
+  var _asking = false;
+  String? _said;
+
+  Future<void> _ask() async {
+    setState(() {
+      _asking = true;
+      _said = null;
+    });
+    String said;
+    try {
+      said = switch (await widget.board.wakeCharge(widget.charge.scope)) {
+        'running' => 'A turn is already running; no second one was asked for.',
+        'pending' => 'A run is already waiting for the Station to take it.',
+        _ => 'Asked to run now: the Station takes it at its next check-in.',
+      };
+    } on Object catch (error) {
+      said = '$error';
+    }
+    if (!mounted) return;
+    setState(() {
+      _asking = false;
+      _said = said;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = TextStyle(color: OoTokens.of(context).muted);
+    final held = widget.charge.held;
+    return Row(
+      spacing: 12,
+      children: [
+        OutlinedButton.icon(
+          key: const ValueKey('charge-run-now'),
+          onPressed: held && !_asking ? _ask : null,
+          icon: const Icon(Icons.play_arrow, size: 18),
+          label: const Text('Run now'),
+        ),
+        Expanded(
+          child: Text(
+            _said ??
+                (held
+                    ? (widget.charge.turnUnderWay ? 'A turn is running.' : '')
+                    : 'No Station holds this charge, so nothing can run it.'),
+            key: const ValueKey('charge-run-now-said'),
+            style: muted,
+          ),
+        ),
+      ],
     );
   }
 }

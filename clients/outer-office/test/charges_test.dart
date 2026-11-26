@@ -97,6 +97,8 @@ Map<String, Object?> _charge(
 MissionBoard _board(
   List<Map<String, Object?>> charges, {
   AttachChannel Function()? attach,
+  List<String>? wakes,
+  String wakeState = 'requested',
 }) {
   final board = MissionBoard(
     apiOrigin: Uri.parse('https://oo.example'),
@@ -110,6 +112,10 @@ MissionBoard _board(
         headers: {'content-type': 'application/json'},
       );
       final path = request.url.path;
+      if (request.method == 'POST' && path.endsWith('/wake')) {
+        wakes?.add(Uri.decodeComponent(path));
+        return json({'scope': 'operation:G', 'state': wakeState});
+      }
       if (path == '/v1/user/charges') return json(charges);
       if (path.startsWith('/v1/user/charges/')) {
         final scope = Uri.decodeComponent(path.substring(17));
@@ -298,6 +304,61 @@ void main() {
       expect(find.textContaining('Session'), findsNothing);
     },
   );
+
+  testWidgets('Run now asks the gateway to wake the charge and says what came '
+      'of it, for a person who holds its control', (tester) async {
+    final wakes = <String>[];
+    final board = _board([
+      _charge('operation:G', interrupt: true),
+    ], wakes: wakes);
+    await _show(tester, _chargesHost(board));
+    await tester.tap(find.byKey(const ValueKey('charge-operation:G')));
+    await tester.pumpAndSettle();
+    expect(find.text('Run now'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('charge-run-now')));
+    await tester.pumpAndSettle();
+    expect(wakes, ['/v1/user/charges/operation:G/wake']);
+    expect(find.textContaining('Asked to run now'), findsOneWidget);
+  });
+
+  testWidgets('Run now reports a turn that is already running', (tester) async {
+    final wakes = <String>[];
+    final board = _board(
+      [_charge('operation:G', interrupt: true)],
+      wakes: wakes,
+      wakeState: 'running',
+    );
+    await _show(tester, _chargesHost(board));
+    await tester.tap(find.byKey(const ValueKey('charge-operation:G')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('charge-run-now')));
+    await tester.pumpAndSettle();
+    expect(wakes, hasLength(1));
+    expect(find.textContaining('already running'), findsOneWidget);
+    expect(find.textContaining('Asked to run now'), findsNothing);
+  });
+
+  testWidgets('Run now is offered only with the control, and only while a '
+      'Station holds the charge', (tester) async {
+    final board = _board([
+      _charge('operation:G'),
+      _charge('station:worker', interrupt: true, held: false),
+    ]);
+    await _show(tester, _chargesHost(board));
+    await tester.tap(find.byKey(const ValueKey('charge-operation:G')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('charge-run-now')), findsNothing);
+    await tester.tap(find.text('Back to Charges'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('charge-station:worker')));
+    await tester.pumpAndSettle();
+    final button = tester.widget<OutlinedButton>(
+      find.byKey(const ValueKey('charge-run-now')),
+    );
+    expect(button.onPressed, isNull);
+    expect(find.textContaining('nothing can run it'), findsOneWidget);
+  });
 
   for (final (name, size) in const [
     ('desktop', Size(1280, 1400)),

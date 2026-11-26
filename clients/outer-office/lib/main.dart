@@ -1871,6 +1871,28 @@ class MissionBoard extends ChangeNotifier
     );
   }
 
+  /// Asks the Station that holds the charge [scope] to run its next turn now. Answers what the
+  /// gateway says came of it: `requested`, `pending` (a wake already waits) or `running` (a turn
+  /// is under way and no second one was asked for).
+  Future<String> wakeCharge(String scope) async {
+    if (demo) return 'requested';
+    final response = await _userRequest(
+      'POST',
+      '/v1/user/charges/${Uri.encodeComponent(scope)}/wake',
+    );
+    if (response.statusCode != 200) {
+      throw GatewayRefused(
+        response.statusCode,
+        response.statusCode == 403
+            ? 'Running a charge now needs charge.converse and its control.'
+            : 'The gateway refused to wake $scope.',
+      );
+    }
+    return (jsonDecode(response.body) as Map<String, dynamic>)['state']
+            as String? ??
+        'requested';
+  }
+
   static const _demoCharges = [
     ChargeSummary(
       scope: 'm',

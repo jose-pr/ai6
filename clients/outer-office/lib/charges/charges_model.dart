@@ -34,6 +34,7 @@ class ChargeSummary {
     required this.turnsLastHour,
     required this.canConverse,
     required this.canInterrupt,
+    this.turnUnderWay = false,
     this.agent,
     this.handler,
     this.model,
@@ -65,6 +66,7 @@ class ChargeSummary {
       turnsLastHour: (json['turns_last_hour'] as num?)?.toInt() ?? 0,
       canConverse: json['can_converse'] as bool? ?? false,
       canInterrupt: json['can_interrupt'] as bool? ?? false,
+      turnUnderWay: json['running'] as bool? ?? false,
       logbook: [
         for (final line in json['logbook'] as List<dynamic>? ?? const [])
           ChargeLogLine.fromJson(line as Map<String, dynamic>),
@@ -101,7 +103,10 @@ class ChargeSummary {
   /// Whether the person may attach to it, type to it and answer it.
   final bool canConverse;
 
-  /// Whether the person may interrupt its turn.
+  /// Whether a turn is under way now, under a Station's live lease.
+  final bool turnUnderWay;
+
+  /// Whether the person may interrupt its turn, and so ask it to run now.
   final bool canInterrupt;
 
   /// Its logbook, oldest first; only in the detail read.
