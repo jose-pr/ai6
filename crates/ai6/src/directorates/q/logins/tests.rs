@@ -224,6 +224,7 @@ backend_tests!(
     a_station_that_died_with_a_copy_made_stale_loses_it,
     a_harness_that_was_refused_does_not_replace_the_login_and_its_home_is_put_back,
     a_blanked_login_does_not_replace_the_one_in_the_registry,
+    a_login_written_back_names_the_account_it_had,
     a_file_past_the_limit_or_a_link_is_no_login,
     the_round_renews_one_near_its_end_with_runs_running_and_neither_is_signed_out,
     one_lease_holder_however_many_stations_ask,
@@ -473,6 +474,76 @@ fn a_blanked_login_does_not_replace_the_one_in_the_registry(store: &dyn Store) {
     .unwrap();
     assert_eq!(
         run.sync(&a, Some(1), NOW + 2.0).unwrap(),
+        Synced::Renewed(2)
+    );
+}
+
+/// A Codex-shaped login whose tokens are JWTs naming `subject`.
+fn identified_login(subject: &str, account: &str, refresh: &str) -> String {
+    let claims = |claims: serde_json::Value| {
+        let part = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        format!(
+            "{}.{}.sig",
+            part.encode(b"{\"alg\":\"none\"}"),
+            part.encode(claims.to_string())
+        )
+    };
+    serde_json::json!({
+        "tokens": {
+            "id_token": claims(serde_json::json!({"sub": subject, "email": format!("{subject}@example.test")})),
+            "access_token": claims(serde_json::json!({"sub": subject, "exp": 4_000_000_000_u64})),
+            "refresh_token": refresh,
+            "account_id": account,
+        }
+    })
+    .to_string()
+}
+
+fn a_login_written_back_names_the_account_it_had(store: &dyn Store) {
+    let registry = store.handle();
+    let a = station(&registry, "a");
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join("logged-in");
+    std::fs::create_dir_all(dir.join(".fake")).unwrap();
+    std::fs::write(dir.join(FILE), identified_login("user-a", "acct-a", "r1")).unwrap();
+    add_login(
+        &a,
+        &reference(),
+        &dir,
+        &files(),
+        &[Recipient::named("a")],
+        NOW,
+    )
+    .unwrap();
+    let home = root.path().join("home");
+    let mut run = RunLogin::materialize(&a, &reference(), &files(), &home).unwrap();
+
+    // Another account's whole login, planted by the Run's own commands.
+    std::fs::write(home.join(FILE), identified_login("user-b", "acct-b", "r2")).unwrap();
+    let synced = run.sync(&a, Some(1), NOW + 1.0).unwrap();
+    assert_eq!(
+        synced,
+        Synced::Restored(1, "its login names another account")
+    );
+    assert_eq!(revision(registry.as_ref()), Some(1));
+    assert!(
+        std::fs::read_to_string(home.join(FILE))
+            .unwrap()
+            .contains("r1"),
+        "the home holds the Registry's login again"
+    );
+
+    // Only the account ID differs, with the same tokens' subject.
+    std::fs::write(home.join(FILE), identified_login("user-a", "acct-b", "r2")).unwrap();
+    assert!(matches!(
+        run.sync(&a, Some(1), NOW + 2.0).unwrap(),
+        Synced::Restored(1, "its login names another account")
+    ));
+
+    // The same account renewing its tokens is kept.
+    std::fs::write(home.join(FILE), identified_login("user-a", "acct-a", "r2")).unwrap();
+    assert_eq!(
+        run.sync(&a, Some(1), NOW + 3.0).unwrap(),
         Synced::Renewed(2)
     );
 }

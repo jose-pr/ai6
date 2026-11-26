@@ -181,7 +181,8 @@ impl LoginFiles {
 
     /// Why this copy is no login to keep, given the copy it would replace; `None` when it can be
     /// kept. A file gone or empty, a file that was JSON and is not, and a text the old copy held
-    /// that is now empty or gone are what a harness that was refused leaves behind.
+    /// that is now empty or gone are what a harness that was refused leaves behind; a copy that
+    /// names another account is what a Run's own commands could plant.
     fn fault_against(&self, older: &Self, files: &[String]) -> Option<&'static str> {
         for file in files {
             let Some(bytes) = self.0.get(file).filter(|bytes| !bytes.is_empty()) else {
@@ -199,6 +200,9 @@ impl LoginFiles {
             };
             if lost_text(&old, &new) {
                 return Some("its harness blanked its login");
+            }
+            if names_another_account(&old, &new) {
+                return Some("its login names another account");
             }
         }
         None
@@ -261,6 +265,83 @@ fn holds_token(value: &serde_json::Value) -> bool {
             _ => false,
         })
     })
+}
+
+/// What a login names of its account, as `(where, value)` pairs: an account ID, subject or email
+/// in the file, and the same claims of any token that is a JWT. Tokens are never kept, only what
+/// they say of whom they are for.
+fn identities(value: &serde_json::Value) -> BTreeMap<String, String> {
+    let mut found = BTreeMap::new();
+    collect_identities(value, "", &mut found);
+    found
+}
+
+fn collect_identities(value: &serde_json::Value, path: &str, found: &mut BTreeMap<String, String>) {
+    const NAMES: [&str; 9] = [
+        "account_id",
+        "accountId",
+        "accountUuid",
+        "chatgpt_account_id",
+        "chatgpt_user_id",
+        "email",
+        "emailAddress",
+        "sub",
+        "user_id",
+    ];
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, value) in map {
+                let here = format!("{path}/{key}");
+                match value {
+                    serde_json::Value::String(text) if NAMES.contains(&key.as_str()) => {
+                        found.insert(here, text.clone());
+                    }
+                    serde_json::Value::String(text) if is_jwt_key(key) => {
+                        if let Some(claims) = jwt_claims(text) {
+                            collect_identities(&claims, &here, found);
+                        }
+                    }
+                    _ => collect_identities(value, &here, found),
+                }
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for (index, value) in values.iter().enumerate() {
+                collect_identities(value, &format!("{path}/{index}"), found);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn is_jwt_key(key: &str) -> bool {
+    matches!(key, "id_token" | "idToken" | "access_token" | "accessToken")
+}
+
+/// The claims of a JWT, unverified: they only say whom a token is for, and the provider decides
+/// whether it is good.
+fn jwt_claims(token: &str) -> Option<serde_json::Value> {
+    let claims = token.split('.').nth(1)?;
+    let bytes = Zeroizing::new(
+        base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(claims.trim_end_matches('='))
+            .ok()?,
+    );
+    serde_json::from_slice(&bytes).ok()
+}
+
+/// Whether `new` names another account than `old` did: a name both carry with another value, or
+/// every name gone. A login that names none (Claude Code's credentials file holds opaque tokens
+/// and no account) has nothing to compare, and is kept as before.
+fn names_another_account(old: &serde_json::Value, new: &serde_json::Value) -> bool {
+    let (old, new) = (identities(old), identities(new));
+    if old.is_empty() {
+        return false;
+    }
+    new.is_empty()
+        || old
+            .iter()
+            .any(|(at, value)| new.get(at).is_some_and(|now| now != value))
 }
 
 fn scan_expiry(value: &serde_json::Value, named: &mut Option<f64>, token: &mut Option<f64>) {
