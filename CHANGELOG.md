@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A person asks a charge to run its next turn now: `POST /v1/user/charges/{scope}/wake`, `ai6ctl charges wake SCOPE`, a
+  **Run now** button on Outer Office's Charges page and Moneypenny's `propose_charge_wake`. It needs the scope's control (the one
+  that acknowledges), is audited as `charge.wake`, and a turn already running is reported rather than doubled; the timer
+  is left where it was unless the charge's `wake_restarts_timer` says otherwise.
+
 - `ai6 config migrate` runs the one-time steps a release's stored records need, with every Station and gateway stopped,
   on the configuration `ai6.cfg` names: a SQL database record by record, a directory of family files in place (comments
   and order kept). Each rewrite is printed with its step's name and a second run changes nothing. The first step,

@@ -66,6 +66,7 @@ allow `00` as well, or the Agent cannot serve it.
 | `operation` | none | **Cables in Operation.** For M's or a Station's charge, the Operation its Cables are sent and received in, under that Operation's Cable grants; without one, no Cable wakes it. An Operation's charge is in its own Operation, which this may only repeat. |
 | `wake_every` | 3,600 | **Woken at least every.** Seconds after its last wake that the charge is woken with nothing else to tell it, while its area has open work (a Mission that is not over, a Report not yet assessed, a request waiting); `none` wakes it only on events. |
 | `wake_every_idle` | none | **Woken at least every, when idle.** As `wake_every`, while its area has no open work; `none` takes no timer turn then. Events still wake the charge. |
+| `wake_restarts_timer` | `false` | **A wake by a person restarts the timer.** Whether a turn that only a person's "run now" woke restarts the timer: with `false`, the next timer turn falls due as if the person had not asked. |
 | `max_turns_per_hour` | 30 | **Turns an hour.** Turns the charge takes in any hour, each wake one turn; past it, events wait for the hour to make room. |
 | `max_events_per_turn` | 50 | **Events one turn is given.** Events one turn is given; the rest wait for the next turn. |
 | `max_waiting_events` | 500 | **Events waiting.** Events waiting for a turn; past it the oldest are dropped, and the charge's logbook says how many. |
@@ -133,7 +134,7 @@ The Station wakes a charge with what its area holds that the charge has not been
 | `stuck`: a Mission of the area judged [stuck](#stuck-work), or for M a charge that is | all | no: the words are AI6's own |
 | `request`: an Operation's 00 asked this Station for an Agent, a Theater, an account or capacity, with the Station's own check of what it can provide | `station:` | always: it carries the asker's words |
 | `resources`: a Station answered a request of the Operation | `operation:` | always: it carries the Station's reason |
-| `control`: a person asked the charge to wake, with an optional note | all | when it carries a note |
+| `control`: a person asked the charge to wake ([run now](#run-now)), with an optional note | all | when it carries a note |
 | `reports`: the open Reports to assess, oldest first, at most `max_reports_per_turn`; given with every turn of M's and an Operation's charge while any are open | `m`, `operation:` | always: it names each Report's kind |
 | `retry`: the charge's last turn failed (it ended `failed`, or no harness took it) and nothing else is due | all | always: it quotes how the turn ended |
 | `timer`: `wake_every` (while the area has open work) or `wake_every_idle` (while it has none) passed with no other wake; it carries a short health summary of the area | all | no |
@@ -175,6 +176,32 @@ yet assessed or a request waiting. `wake_every_idle` applies while it has none, 
 `none`: an idle charge takes no timer turn and events still wake it. The timer's event carries a
 short health summary of the area (Missions by state, the oldest one open, Reports waiting), so a
 quiet turn has something to check.
+
+### Run now
+
+A person who holds the control of the charge's scope (and `charge.converse`, as for acknowledging)
+asks for a turn between timer turns with `POST /v1/user/charges/{scope}/wake`, `ai6ctl charges wake
+SCOPE`, **Run now** on the Charges page, or Moneypenny's `propose_charge_wake` (a proposal the person
+confirms). The ask is a `control` wake with no note: the Station running the charge takes it at its
+next check-in and runs a turn as though its timer had fired. The answer says what came of it:
+
+| `state` | Meaning |
+| --- | --- |
+| `requested` | The wake waits for the Station; its ID is `control`. `held` says whether a Station holds the charge: with none, the wake waits for one to claim it. |
+| `pending` | A wake without a note already waits, and one turn answers both: no second control is added. |
+| `running` | A turn is under way under a live lease (`running_since` says since when): no control is added, so no second turn follows it. |
+
+The check and the write are one change of the charge's record, so two people asking at once cannot
+both add a wake. The Station writes `running_since` as a turn begins and clears it as the turn ends;
+a lease that lapsed, or a Station that restarted, leaves no turn running. `GET /v1/user/charges`
+shows `running` while a turn is under way. Each ask is audited as `charge.wake`, naming who asked,
+before it is recorded; a person without the control gets `403`, and one who may not see the charge,
+`404`.
+
+A turn that only a person's ask woke leaves the timer where it was: the next timer turn falls due
+`wake_every` after the last turn the charge took for another reason. `wake_restarts_timer = true`
+on the charge's record restarts it from the person's turn instead. The logbook still says the charge
+woke, and the turn counts against `max_turns_per_hour`.
 
 ### A failed turn
 
@@ -245,7 +272,7 @@ people's messages named and one's own as "You", the Agent's messages under its c
 folded into one "Sources checked" row, a permission request as a card answered in place with the first
 answer deciding, and Interrupt where the chat has Stop, only for a person who holds the action; talking to
 Moneypenny again detaches, and a dropped socket offers Reconnect from the last frame), Decisions (what the charge said at each
-wake and, for an Operation's, the Reports it assessed) and Logbook. A Mission's detail has a Live Run row with the same **Open in chat**
+wake and, for an Operation's, the Reports it assessed) and Logbook; a person who holds the scope's control also has **Run now** above them ([run now](#run-now)). A Mission's detail has a Live Run row with the same **Open in chat**
 under `mission.control`. The list reads `GET /v1/user/charges`, which also says which controls the person
 holds; the logbook needs `charge.converse`. A charge whose last turn ended failed, or whose lease lapsed so
 that no Station holds it, is in the attention bell and on Overview (`GET /v1/user/attention`), and
