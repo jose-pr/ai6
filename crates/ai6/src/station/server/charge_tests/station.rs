@@ -563,3 +563,57 @@ async fn a_restarted_station_resumes_both_charges() {
     }
     charges::close_all(&after).await;
 }
+
+/// A Station whose only Theater beyond `local` is a remote one labelled `os = freebsd`, running
+/// Operation `TAG`, which wants `station_labels` and is bound to `bound` when given.
+fn claim_state(root: &Path, tag: &str, station_labels: &str, bound: Option<&str>) -> DaemonState {
+    let mut state = station_with(
+        root,
+        tag,
+        &format!("stn-{tag}"),
+        "",
+        "",
+        &Extra {
+            operation: &format!(
+                "station_labels = {station_labels}\n{}",
+                bound.map_or(String::new(), |id| format!("theater = \"{id}\"\n"))
+            ),
+            ..Extra::default()
+        },
+    );
+    state.station.theaters = Theaters::parse(
+        "[theater.bsd]\naccess = { ssh = { host = \"bsd.example\" } }\nlabels = { os = \"freebsd\" }\n",
+    )
+    .unwrap();
+    state
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_station_claims_an_operations_charge_when_one_of_its_theaters_meets_the_labels() {
+    let root = tempfile::tempdir().unwrap();
+
+    // The label is the Theater's, and the Operation is bound to that Theater.
+    let state = claim_state(root.path(), "c1", "{ os = \"freebsd\" }", Some("bsd"));
+    charges::tend(&state, false, true).await;
+    assert!(state.charges.is_live(&scope("c1")));
+    charges::close_all(&state).await;
+
+    // Unbound, any Theater of the Station will do.
+    let other = tempfile::tempdir().unwrap();
+    let state = claim_state(other.path(), "c2", "{ os = \"freebsd\" }", None);
+    charges::tend(&state, false, true).await;
+    assert!(state.charges.is_live(&scope("c2")));
+    charges::close_all(&state).await;
+
+    // No Theater of this Station is a macOS one.
+    let third = tempfile::tempdir().unwrap();
+    let state = claim_state(third.path(), "c3", "{ os = \"macos\" }", None);
+    charges::tend(&state, false, true).await;
+    assert!(!state.charges.is_live(&scope("c3")));
+
+    // A Theater the Station does not have is not one it can run through.
+    let fourth = tempfile::tempdir().unwrap();
+    let state = claim_state(fourth.path(), "c4", "{}", Some("nowhere"));
+    charges::tend(&state, false, true).await;
+    assert!(!state.charges.is_live(&scope("c4")));
+}

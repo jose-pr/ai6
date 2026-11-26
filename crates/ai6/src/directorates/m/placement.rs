@@ -813,6 +813,25 @@ fn station_rejection(
         .and_then(|resources| station.limits.rejection(resources))
 }
 
+/// The `wanted` label patterns (globs) that `labels` do not satisfy, each with why.
+pub(crate) fn unmet_labels(
+    wanted: &BTreeMap<String, String>,
+    labels: &BTreeMap<String, String>,
+) -> Vec<String> {
+    wanted
+        .iter()
+        .filter_map(|(key, pattern)| {
+            let matched = labels.get(key).is_some_and(|value| {
+                Glob::new(pattern).is_ok_and(|glob| glob.compile_matcher().is_match(value))
+            });
+            (!matched).then(|| match labels.get(key) {
+                Some(value) => format!("{key}={pattern} (has {value:?})"),
+                None => format!("{key}={pattern} (not set)"),
+            })
+        })
+        .collect()
+}
+
 /// How a Run would run on `theater`, or the reason it may not.
 fn theater_verdict(
     policy: &OperationPolicy,
@@ -841,19 +860,7 @@ fn theater_verdict(
     // The Theater's own labels win over the Station's, so a Theater can refine them.
     let mut labels = station.labels.clone();
     labels.extend(theater.labels.clone());
-    let unmet: Vec<String> = policy
-        .station_labels
-        .iter()
-        .filter_map(|(key, pattern)| {
-            let matched = labels.get(key).is_some_and(|value| {
-                Glob::new(pattern).is_ok_and(|glob| glob.compile_matcher().is_match(value))
-            });
-            (!matched).then(|| match labels.get(key) {
-                Some(value) => format!("{key}={pattern} (has {value:?})"),
-                None => format!("{key}={pattern} (not set)"),
-            })
-        })
-        .collect();
+    let unmet = unmet_labels(&policy.station_labels, &labels);
     if !unmet.is_empty() {
         return Err(format!(
             "labels do not satisfy station_labels: {}",

@@ -40,6 +40,8 @@ use serde::Serialize;
 use super::attach::{self, RunPort};
 use super::{DaemonState, StationRole, unix_now};
 use crate::directorates::m::charges::{Charge, ChargeScope};
+use crate::directorates::m::placement::unmet_labels;
+use crate::directorates::m::roster::Operation;
 use crate::directorates::medical::exposure::ExposureGate;
 use crate::directorates::registry::cables::CablePrincipal;
 use crate::directorates::registry::charges::{
@@ -299,12 +301,24 @@ fn may_run(state: &DaemonState, charge: &Charge, headquarters: bool) -> bool {
             };
             state.station.roles.contains(&StationRole::Execution)
                 && (operation.stations.is_empty() || operation.stations.contains(&state.station_id))
-                && operation
-                    .station_labels
-                    .iter()
-                    .all(|(key, value)| state.station.labels.get(key) == Some(value))
+                && runs_through_a_theater(state, operation)
         }
     }
+}
+
+/// Whether one of this Station's Theaters can run `operation`'s work: the Theater it is bound
+/// to, or any when it names none, and one whose labels over the Station's meet its
+/// `station_labels`, as placement judges a Mission.
+fn runs_through_a_theater(state: &DaemonState, operation: &Operation) -> bool {
+    let theaters = match operation.theater.as_deref() {
+        Some(id) => state.station.theaters.find(id).into_iter().collect(),
+        None => state.station.theaters.reachable(),
+    };
+    theaters.iter().any(|theater| {
+        let mut labels = state.station.labels.clone();
+        labels.extend(theater.labels.clone());
+        unmet_labels(&operation.station_labels, &labels).is_empty()
+    })
 }
 
 /// Whether the Agent of `charge` has a handler this Station can start.
