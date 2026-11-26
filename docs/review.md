@@ -127,7 +127,7 @@ on the Mission:
 | Handler | Under a plan gate |
 | --- | --- |
 | `claude` | reads and searches (`Read`, `Glob`, `Grep`) and calls `submit_plan`; everything else is denied by name. A resume passes its own tool flags |
-| `codex` | holds the thread to `desk` with no file change at all: a patch ends it. It has no command tool there, so it reads only what its prompt and AI6's tools give it |
+| `codex` | holds the thread to `desk` with no file change at all: a patch ends it. It has no command tool there, so it reads only what its prompt and AI6's tools give it, and its instructions say so, asking it to name the files it could not read |
 | `antigravity`, `acp` | refuses: a resumed conversation keeps the tools of its first launch, or AI6 does not choose the agent's tools |
 
 A Mission in remote-hands mode does not start under a plan gate: the Theater's tools can change it

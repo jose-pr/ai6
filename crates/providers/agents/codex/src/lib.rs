@@ -378,6 +378,11 @@ impl CodexHandler {
         let mut instructions = request
             .overlays
             .with_routing(&request.initial_context, false);
+        let desk = held_to_desk(
+            &request.clearance,
+            request.answer_only,
+            request.assistant.as_ref(),
+        );
         if let Some(mode) = &request.assistant {
             instructions.extend(assistant_instructions(
                 mode,
@@ -385,15 +390,13 @@ impl CodexHandler {
                 self.config.context_file_bytes,
             )?);
         }
+        if desk {
+            instructions.push(DESK_READS_NOTHING.to_owned());
+        }
         let profile = scripts_profile(
             &self.config.executable,
             &request.working_directory,
             &request.environment,
-            request.assistant.as_ref(),
-        );
-        let desk = held_to_desk(
-            &request.clearance,
-            request.answer_only,
             request.assistant.as_ref(),
         );
         let gate = gate.filter(|_| !(request.answer_only || request.assistant.is_some()));
@@ -430,6 +433,12 @@ impl CodexHandler {
         Ok(run.into_object())
     }
 }
+
+/// What a `desk` thread is told: Codex reads files through commands, and it has none, so what it
+/// writes down about the checkout is not from reading it.
+const DESK_READS_NOTHING: &str = "This conversation has no tool that reads a file, so you cannot \
+     read the checkout: work from the brief and the AI6 tools only, and say in what you submit \
+     which files you would have read and could not.";
 
 /// What a restricted (answer-only, assistant or `desk`) thread may use besides answering.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -1771,7 +1780,9 @@ fn no_built_in_tools(shell: bool) -> Vec<String> {
 
 /// The app server of an answer-only thread: an empty `mcp_servers` table, AI6's servers left
 /// out, and no built-in tool ([`NO_BUILT_IN_TOOLS`]). Codex merges the table into the user's
-/// own servers, which the tool check switches off by name ([`tools`]).
+/// own servers, which the tool check switches off by name ([`tools`]). The checkout's own
+/// `AGENTS.md` is no input (`project_doc_max_bytes=0`); Codex 0.166.0 has no setting that keeps its
+/// home's own instructions file out, which `codex debug prompt-input` still renders.
 fn answer_only_argv(executable: &str) -> Vec<String> {
     let mut argv = vec![
         executable.to_owned(),
@@ -1780,6 +1791,7 @@ fn answer_only_argv(executable: &str) -> Vec<String> {
         "mcp_servers={}".to_owned(),
     ];
     argv.extend(no_built_in_tools(false));
+    argv.extend(["-c".to_owned(), "project_doc_max_bytes=0".to_owned()]);
     argv
 }
 
@@ -3313,6 +3325,27 @@ mod tests {
                 && event.text.as_deref().unwrap().contains("exec_command")),
             "{events:?}"
         );
+        run.close().unwrap();
+    }
+
+    #[test]
+    fn a_desk_thread_is_told_it_has_no_tool_that_reads_the_checkout() {
+        let desk = DESK_PROMPT.replace('\n', "");
+        let run = desk_start(
+            "codex-desk-told-fixture",
+            "work",
+            &[
+                ("CODEX_FIXTURE_PROMPT_INPUT", &desk),
+                ("CODEX_FIXTURE_SHOW_POLICY", "1"),
+            ],
+        )
+        .unwrap();
+        let events = read_to_completion(&run);
+        let told = reported_policy(&events)["developerInstructions"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        assert!(told.contains("no tool that reads a file"), "{told:?}");
         run.close().unwrap();
     }
 
@@ -5235,6 +5268,11 @@ mod tests {
         let parsed: toml::Table = toml::from_str(&format!("{key} = {value}")).unwrap();
         assert!(parsed["mcp_servers"].as_table().unwrap().is_empty());
         assert_no_built_in_tools(&argv);
+        assert!(
+            argv.windows(2)
+                .any(|pair| pair == ["-c", "project_doc_max_bytes=0"]),
+            "the checkout's AGENTS.md is no input of an answer-only thread: {argv:?}"
+        );
     }
 
     /// Asserts the `-c` overrides that leave Codex no shell, no exec, no image reading, no web

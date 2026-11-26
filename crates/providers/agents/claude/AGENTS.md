@@ -180,6 +180,13 @@ one included:
 --allowedTools [mcp__ai6-cables,][mcp__ai6-theater,]Read,Glob,Grep,Edit(/**),TodoWrite,TaskCreate,TaskGet,TaskList,TaskUpdate[,allowed_tools]
 ```
 
+At `ai6::READ_CLEARANCE` (`read`, a Run held to reading until its plan passes) `--tools
+Read,Glob,Grep`, `--permission-mode dontAsk`, the deny list of `desk` and all that writes or
+runs, and `--allowedTools [mcp__ai6-cables,]Read(/**)`: a `Read` rule given as a flag is rooted at
+the working directory and covers `Glob` and `Grep`. Measured with 2.1.326 against the loopback
+stand-in: a file inside the working directory read, and `Read`, `Grep` and `Glob` of the directory
+above it were denied, which the bare `Read,Glob,Grep` rules had allowed. No setting adds to it.
+
 An `allowed_tools` rule for a tool on the deny list takes that tool off it; an `mcp__` rule offers
 nothing, since `--tools` is about built-in tools. In remote-hands mode the eight tools
 `Bash,PowerShell,Edit,Write,NotebookEdit,Read,Glob,Grep` leave `--tools` and the default allow
@@ -262,7 +269,12 @@ When `AgentStart::answer_only` (or `AgentResume::answer_only`) is `true`, which 
 a Chief of Staff review, start and resume add, in place of the project settings, MCP and gate
 flags: `--restricted`, `--tools=`, `--disallowedTools
 Bash,PowerShell,Edit,Write,NotebookEdit,Read,Glob,Grep,WebFetch,WebSearch,Task,Agent,TodoWrite,mcp__*`,
-`--setting-sources user`, `--strict-mcp-config` and `--mcp-config {"mcpServers":{}}`. An
+`--setting-sources user`, `--strict-mcp-config` and `--mcp-config {"mcpServers":{}}`, and the
+environment variable `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1`. Measured with 2.1.326 against the loopback
+stand-in for the API (no model reached): with
+`--setting-sources user` alone the user's own `CLAUDE.md` still reached the request, though the
+checkout's `CLAUDE.md`, `AGENTS.md`, `CLAUDE.local.md` and `.claude/CLAUDE.md` and a parent
+directory's did not; with `--restricted`, or with the variable, none reached it. An
 assistant Run's list is the same with `Skill` in place of `mcp__*`. An assistant whose
 mode names `files` instead gets `--tools Read,Write,Edit,Glob,Grep`, `--permission-mode
 dontAsk`, `--disallowedTools Bash,PowerShell,NotebookEdit,WebFetch,WebSearch,Task,Agent,

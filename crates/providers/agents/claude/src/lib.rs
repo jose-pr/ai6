@@ -552,6 +552,11 @@ const DISABLE_ADVISOR_ENV: &str = "CLAUDE_CODE_DISABLE_ADVISOR_TOOL";
 /// (code.claude.com/docs/en/memory, read 2026-10-27).
 const DISABLE_AUTO_MEMORY_ENV: &str = "CLAUDE_CODE_DISABLE_AUTO_MEMORY";
 
+/// Stops Claude Code loading any `CLAUDE.md` memory file, the user's own among them: with
+/// `--setting-sources user` alone the global one still reached the model
+/// (Claude Code 2.1.326, probed against the loopback stand-in).
+const DISABLE_CLAUDE_MDS_ENV: &str = "CLAUDE_CODE_DISABLE_CLAUDE_MDS";
+
 /// Turns WebFetch off altogether (code.claude.com/docs/en/env-vars, Claude Code 2.1.285 or
 /// later), beside leaving it out of `--tools`.
 const DISABLE_WEB_FETCH_ENV: &str = "CLAUDE_CODE_DISABLE_WEB_FETCH";
@@ -561,9 +566,10 @@ const DISABLE_WEB_FETCH_ENV: &str = "CLAUDE_CODE_DISABLE_WEB_FETCH";
 const MCP_TOOL_TIMEOUT_ENV: &str = "MCP_TOOL_TIMEOUT";
 
 /// The harness's environment: `environment`, with the advisor turned off for a restricted
-/// (answer-only or assistant) Run, auto memory off for an assistant, and WebFetch off for
-/// an assistant whose network reaches no host. A Run with the Theater tools gets
-/// [`MCP_TOOL_TIMEOUT_ENV`] set to the longest call, unless the Agent's own environment sets it.
+/// (answer-only or assistant) Run, instruction files off for an answer-only one, auto memory off
+/// for an assistant, and WebFetch off for an assistant whose network reaches no host. A Run with
+/// the Theater tools gets [`MCP_TOOL_TIMEOUT_ENV`] set to the longest call, unless the Agent's own
+/// environment sets it.
 fn harness_environment(
     environment: &BTreeMap<String, String>,
     restricted: bool,
@@ -579,6 +585,9 @@ fn harness_environment(
     }
     if restricted {
         environment.insert(DISABLE_ADVISOR_ENV.to_owned(), "1".to_owned());
+    }
+    if restricted && assistant.is_none() {
+        environment.insert(DISABLE_CLAUDE_MDS_ENV.to_owned(), "1".to_owned());
     }
     if let Some(mode) = assistant {
         environment.insert(DISABLE_AUTO_MEMORY_ENV.to_owned(), "1".to_owned());
@@ -1365,12 +1374,15 @@ fn add_field_tools(
 }
 
 /// The tools of a Run held to reading until its plan passes: reading and searching, and AI6's
-/// Cable server, whose only tool it then has is `submit_plan`. What could change anything is denied
-/// by name, and no setting adds to the list: `allowed_tools` is a field Run's. A resume at the
+/// Cable server, whose only tool it then has is `submit_plan`. Reading is allowed as `Read(/**)`,
+/// which Claude Code roots at the working directory when given as a flag and applies to `Glob` and
+/// `Grep` too, so nothing outside the checkout is read (Claude Code 2.1.326, probed against the
+/// loopback stand-in). What could change anything is denied by name, and no setting adds to the
+/// list: `allowed_tools` is a field Run's. A resume at the
 /// Mission's clearance builds the field list again, since each launch passes its own flags
 /// (`--resume` keeps the conversation, not the tools).
 fn add_read_only_tools(argv: &mut Vec<String>, environment: &BTreeMap<String, String>) {
-    let mut allowed = vec!["Read", "Glob", "Grep"];
+    let mut allowed = vec![READ_WITHIN_CHECKOUT];
     if has_endpoint(environment, "AI6_CABLE_MCP") {
         allowed.insert(0, "mcp__ai6-cables");
     }
@@ -1390,6 +1402,9 @@ fn add_read_only_tools(argv: &mut Vec<String>, environment: &BTreeMap<String, St
         allowed.join(","),
     ]);
 }
+
+/// The allow rule for reading under the working directory only.
+const READ_WITHIN_CHECKOUT: &str = "Read(/**)";
 
 /// What a Run held to reading is denied besides [`FIELD_DENIED`]: everything that writes or runs.
 const READ_ONLY_DENIED: [&str; 12] = [
@@ -4239,8 +4254,8 @@ denied_tools = [\"Bash(rm *)\"]
         );
         assert_eq!(flags[0].0, "Read,Glob,Grep", "nothing offered but reading");
         assert_eq!(
-            flags[0].2, "mcp__ai6-cables,Read,Glob,Grep",
-            "no setting adds to it"
+            flags[0].2, "mcp__ai6-cables,Read(/**)",
+            "reading is rooted at the working directory, and no setting adds to it"
         );
         for denied in [
             "Edit",
@@ -4746,6 +4761,20 @@ denied_tools = [\"Bash(rm *)\"]
             "answer-only has no advisor"
         );
         assert_eq!(advisor(0), None, "an Operation's Run keeps its own");
+        let instructions = |index: usize| {
+            specs[index]
+                .env
+                .as_ref()
+                .unwrap()
+                .get("CLAUDE_CODE_DISABLE_CLAUDE_MDS")
+                .cloned()
+        };
+        assert_eq!(
+            instructions(3).as_deref(),
+            Some("1"),
+            "answer-only loads no CLAUDE.md, the user's own included"
+        );
+        assert_eq!(instructions(0), None, "an Operation's Run keeps its own");
     }
 
     /// Claude Code 2.1.310 warns that a deny rule naming `MultiEdit` or `LS` matches no known
