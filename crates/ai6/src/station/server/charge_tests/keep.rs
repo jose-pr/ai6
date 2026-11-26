@@ -231,6 +231,42 @@ async fn an_idle_charge_takes_no_timer_turn_and_wakes_again_when_a_mission_opens
     charges::close_all(&state).await;
 }
 
+/// What the charge's timer counts from after a person's ask has been answered by a turn, with
+/// `settings` on its record.
+async fn timer_base_after_a_wake_now(tag: &str, settings: &str) -> Option<f64> {
+    let root = tempfile::tempdir().unwrap();
+    let state = station(root.path(), tag, "test", settings, "");
+    charges::tend(&state, false, true).await;
+    state
+        .intake
+        .wake_charge_now(&scope(tag), "person-1")
+        .unwrap();
+    tend_until(&state, "the person's turn", || turns(&state, tag) == 1).await;
+    let told = calls(&key(tag));
+    assert!(
+        told.iter().any(|call| call.text.contains("\"control\"")),
+        "{told:?}"
+    );
+    let base = state.charges.timer_from(&scope(tag));
+    charges::close_all(&state).await;
+    base
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_wake_now_leaves_the_timer_where_it_was_unless_the_record_says_it_restarts_it() {
+    assert_eq!(
+        timer_base_after_a_wake_now("k8", "wake_every = 4\n").await,
+        None,
+        "the timer still counts from the claim, as if the person had not asked"
+    );
+    assert!(
+        timer_base_after_a_wake_now("k9", "wake_every = 4\nwake_restarts_timer = true\n")
+            .await
+            .is_some(),
+        "the record asks for the timer to restart at the person's turn"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn m_looks_at_a_charge_whose_lease_lapsed_or_whose_turn_did_not_run() {
     let root = tempfile::tempdir().unwrap();

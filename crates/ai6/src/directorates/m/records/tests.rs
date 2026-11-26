@@ -294,6 +294,7 @@ fn full_example(record: ConfigRecord) -> Value {
             "operation": "G",
             "wake_every": "none",
             "wake_every_idle": 7200,
+            "wake_restarts_timer": true,
             "max_turns_per_hour": 12,
             "max_events_per_turn": 20,
             "max_waiting_events": "none",

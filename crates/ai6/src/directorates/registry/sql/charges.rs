@@ -6,8 +6,8 @@ use std::time::Duration;
 use super::SqlRegistry;
 use super::db::Tx;
 use crate::directorates::registry::charges::{
-    ChargeControl, ChargeError, ChargeRecord, ChargeStore, ChargeUpdate, acknowledge, add_control,
-    apply, claim, parse_record, record_json, validate_scope,
+    ChargeControl, ChargeError, ChargeRecord, ChargeStore, ChargeUpdate, ChargeWake, acknowledge,
+    add_control, apply, claim, parse_record, record_json, validate_scope, wake_now,
 };
 use crate::directorates::registry::limits::RegistryLimits;
 
@@ -116,6 +116,12 @@ impl ChargeStore for SqlRegistry {
             add_control(record, by, note, now, &limits)
         })
         .map(|(control, _)| control)
+    }
+
+    fn wake_charge_now(&self, scope: &str, by: &str) -> Result<ChargeWake, ChargeError> {
+        let limits = self.current_limits().charges.clone();
+        self.change_charge(scope, |record, now| wake_now(record, by, now, &limits))
+            .map(|(wake, _)| wake)
     }
 
     fn acknowledge_charge(&self, scope: &str, by: &str) -> Result<ChargeRecord, ChargeError> {

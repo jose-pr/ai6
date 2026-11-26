@@ -69,6 +69,15 @@ impl ChargeDesk {
                 .is_some_and(|live| !live.closing.load(Ordering::Acquire))
         })
     }
+    /// When the timer of the charge of `scope` counts from: the last turn that restarted it.
+    #[cfg(test)]
+    pub(super) fn timer_from(&self, scope: &str) -> Option<f64> {
+        self.get(scope)?
+            .last_wake
+            .lock()
+            .ok()
+            .and_then(|last| *last)
+    }
 
     /// The charges this Station runs whose turns failed in a row as often as their `failing_after`
     /// says: the scope, how many in a row, and how the last one ended.
@@ -417,6 +426,10 @@ async fn post(state: &DaemonState, charge: Charge) {
         if record.failed_turns == 0 {
             live.retried.store(false, Ordering::Release);
         }
+    }
+    // A turn recorded while none runs here is one a Station that stopped left behind.
+    if record.running_since.is_some() && !live.busy.load(Ordering::Acquire) {
+        let _ = write(state, &live, ChargeUpdate::default().idle()).await;
     }
     let (looking, live_for_scan) = (state.clone(), live.clone());
     let events = tokio::task::spawn_blocking(move || scan(&looking, &live_for_scan, &record))
@@ -1021,6 +1034,7 @@ async fn wake(state: &DaemonState, live: &Arc<Live>) {
         live.busy.store(false, Ordering::Release);
         return;
     }
+    let person_only = events.iter().all(|event| event.kind == "control");
     // Reports wait for the charge every turn, not once: the oldest open ones are its duty, and
     // what it leaves open is given again to the next turn.
     let (looking, asked) = (state.clone(), charge.clone());
@@ -1035,7 +1049,11 @@ async fn wake(state: &DaemonState, live: &Arc<Live>) {
     if let Ok(mut turns) = live.turns.lock() {
         turns.push(now);
     }
-    if let Ok(mut last) = live.last_wake.lock() {
+    // A turn that only a person's "run now" woke leaves the timer where it was, unless the
+    // charge's record says it restarts it.
+    if (!person_only || charge.settings.wake_restarts_timer)
+        && let Ok(mut last) = live.last_wake.lock()
+    {
         *last = Some(now);
     }
     let (state, live) = (state.clone(), live.clone());
@@ -1123,6 +1141,8 @@ async fn run_turn(state: &DaemonState, live: &Arc<Live>, events: Vec<ChargeEvent
         }
         return;
     };
+    // A person asking for a turn now reads this to learn one is already under way.
+    let _ = write(state, live, ChargeUpdate::default().running(now)).await;
     let prompt = render(&live.scope, &events);
     live.room.publish_prompt("station", &prompt);
     live.room.turn(true, "station");

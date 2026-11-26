@@ -5852,6 +5852,12 @@
           "description": "As `wake_every`, while its area has no open work; `none` takes no timer turn then. Events still wake the charge.",
           "default": "none"
         },
+        "wake_restarts_timer": {
+          "type": "boolean",
+          "title": "A wake by a person restarts the timer",
+          "description": "Whether a turn that only a person's \"run now\" woke restarts the timer: with `false`, the next timer turn falls due as if the person had not asked.",
+          "default": false
+        },
         "max_turns_per_hour": {
           "anyOf": [
             {

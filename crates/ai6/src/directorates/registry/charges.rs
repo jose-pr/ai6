@@ -117,6 +117,21 @@ pub struct ChargeControl {
     pub at: f64,
 }
 
+/// What a person's wake of a charge came to.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub enum ChargeWake {
+    /// The wake waits for the Station that runs the charge, which takes it at its next check-in.
+    Requested(ChargeControl),
+    /// A wake without a note already waits, so none was added: it will run one turn.
+    Pending(ChargeControl),
+    /// A turn is running under a live lease, so no wake was added: it would start a second turn.
+    Running {
+        /// When the turn began, as Unix seconds.
+        since: f64,
+    },
+}
+
 /// One charge as the Registry keeps it.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -163,6 +178,11 @@ pub struct ChargeRecord {
     /// operator's acknowledgement, makes it `0`.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub failed_turns: u32,
+    /// When the turn under way began, as Unix seconds; absent between turns. Its Station writes
+    /// it as the turn starts and clears it as the turn ends, so a reader trusts it only while the
+    /// lease is live.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub running_since: Option<f64>,
 }
 
 fn is_zero(count: &u32) -> bool {
@@ -195,7 +215,13 @@ pub struct ChargeUpdate {
     /// The controls its Station took, by ID.
     pub taken_controls: Vec<String>,
     /// Whether the turn that ended failed (or took no harness): counted, or with `false` reset.
+    /// A turn's end also clears [`ChargeRecord::running_since`].
     pub turn_failed: Option<bool>,
+    /// When a turn began running, as Unix seconds.
+    pub running_since: Option<f64>,
+    /// Clears [`ChargeRecord::running_since`] without a turn having ended: a Station that finds
+    /// it set with no turn under way.
+    pub idle: bool,
 }
 
 impl ChargeUpdate {
@@ -241,6 +267,20 @@ impl ChargeUpdate {
     #[must_use]
     pub fn turn_ended(mut self, failed: bool) -> Self {
         self.turn_failed = Some(failed);
+        self
+    }
+
+    /// Records that a turn began running at `at`.
+    #[must_use]
+    pub fn running(mut self, at: f64) -> Self {
+        self.running_since = Some(at);
+        self
+    }
+
+    /// Clears the turn under way, which a Station that restarted may have left recorded.
+    #[must_use]
+    pub fn idle(mut self) -> Self {
+        self.idle = true;
         self
     }
 
@@ -341,6 +381,16 @@ pub trait ChargeStore {
         by: &str,
         note: &str,
     ) -> Result<ChargeControl, ChargeError>;
+
+    /// Asks the charge of `scope` to run a turn now, for `by`, as if its timer had fired: the same
+    /// as [`request_charge_wake`](Self::request_charge_wake) with no note, except that it adds
+    /// nothing while a turn is running or a wake without a note already waits, so a person's
+    /// repeated asks never run a turn twice. The check and the write are one change of the record.
+    ///
+    /// # Errors
+    ///
+    /// As `request_charge_wake`.
+    fn wake_charge_now(&self, scope: &str, by: &str) -> Result<ChargeWake, ChargeError>;
 
     /// Records that `by` saw the charge of `scope` fail its last turns: the failed-turn count
     /// starts again and the logbook says who. It needs no lease: a person's word, not a holder's
@@ -447,6 +497,7 @@ pub(super) fn claim(
             seen: Vec::new(),
             controls: Vec::new(),
             failed_turns: 0,
+            running_since: None,
         });
     };
     let mut log = Vec::new();
@@ -464,6 +515,7 @@ pub(super) fn claim(
         ));
         record.station = station.to_owned();
         record.fence = record.fence.saturating_add(1);
+        record.running_since = None;
     }
     if record.agent != agent {
         log.push(ChargeLogEntry::new(
@@ -520,6 +572,12 @@ pub(super) fn apply(
         record.context_tokens = Some(tokens);
     }
     record.turns.retain(|at| *at > now - TURN_WINDOW_SECS);
+    if update.idle || update.turn_failed.is_some() {
+        record.running_since = None;
+    }
+    if let Some(at) = update.running_since {
+        record.running_since = Some(at);
+    }
     if let Some(failed) = update.turn_failed {
         record.failed_turns = if failed {
             record.failed_turns.saturating_add(1)
@@ -562,6 +620,29 @@ pub(super) fn acknowledge(
         limits,
     );
     Ok(())
+}
+
+/// A wake of `record` from `by` at `now`, unless a turn is under way or one already waits.
+pub(super) fn wake_now(
+    record: &mut ChargeRecord,
+    by: &str,
+    now: f64,
+    limits: &ChargeLimits,
+) -> Result<ChargeWake, ChargeError> {
+    if let Some(since) = record.running_since
+        && now < record.lease_expires
+    {
+        return Ok(ChargeWake::Running { since });
+    }
+    // Every other control carries its text in its note, so an empty one is a wake.
+    if let Some(waiting) = record
+        .controls
+        .iter()
+        .find(|control| control.note.is_empty())
+    {
+        return Ok(ChargeWake::Pending(waiting.clone()));
+    }
+    add_control(record, by, "", now, limits).map(ChargeWake::Requested)
 }
 
 /// A control from `by` with `note`, added to `record` at `now`.
@@ -703,6 +784,12 @@ impl ChargeStore for FileRegistry {
         .map(|(control, _)| control)
     }
 
+    fn wake_charge_now(&self, scope: &str, by: &str) -> Result<ChargeWake, ChargeError> {
+        let limits = self.current_limits().charges.clone();
+        self.change_charge(scope, |record, now| wake_now(record, by, now, &limits))
+            .map(|(wake, _)| wake)
+    }
+
     fn acknowledge_charge(&self, scope: &str, by: &str) -> Result<ChargeRecord, ChargeError> {
         let limits = self.current_limits().charges.clone();
         self.change_charge(scope, |record, now| acknowledge(record, by, now, &limits))
@@ -746,6 +833,7 @@ mod tests {
         only_the_holder_writes_and_the_logbook_keeps_the_newest,
         a_control_waits_until_the_holder_takes_it,
         failed_turns_are_counted_and_an_acknowledgement_or_a_good_turn_clears_them,
+        a_wake_now_waits_once_and_is_refused_while_a_turn_runs,
     );
 
     const LONG: Duration = Duration::from_secs(600);
@@ -895,6 +983,97 @@ mod tests {
             )
             .unwrap();
         assert!(taken.controls.is_empty());
+    }
+
+    fn a_wake_now_waits_once_and_is_refused_while_a_turn_runs(store: &dyn Store) {
+        let registry = store.handle();
+        assert!(matches!(
+            registry.wake_charge_now("operation:G", "person-1"),
+            Err(ChargeError::NotFound)
+        ));
+        let record = registry
+            .claim_charge("operation:G", "00", "station-a", LONG)
+            .unwrap();
+        let ChargeWake::Requested(first) =
+            registry.wake_charge_now("operation:G", "person-1").unwrap()
+        else {
+            panic!("an idle charge takes the wake");
+        };
+        assert_eq!((first.by.as_str(), first.note.as_str()), ("person-1", ""));
+        // A second ask before the Station takes the first adds nothing: one turn answers both.
+        assert_eq!(
+            registry.wake_charge_now("operation:G", "person-2").unwrap(),
+            ChargeWake::Pending(first.clone())
+        );
+        assert_eq!(
+            registry
+                .charge("operation:G")
+                .unwrap()
+                .unwrap()
+                .controls
+                .len(),
+            1
+        );
+
+        // The Station takes it and begins the turn.
+        registry
+            .update_charge(
+                "operation:G",
+                "station-a",
+                record.fence,
+                None,
+                ChargeUpdate::default()
+                    .took_controls(vec![first.id])
+                    .running(50.0),
+            )
+            .unwrap();
+        assert_eq!(
+            registry.wake_charge_now("operation:G", "person-1").unwrap(),
+            ChargeWake::Running { since: 50.0 }
+        );
+        assert!(
+            registry
+                .charge("operation:G")
+                .unwrap()
+                .unwrap()
+                .controls
+                .is_empty(),
+            "a turn under way is not given a second one"
+        );
+
+        // The turn ends: the next ask is taken again.
+        registry
+            .update_charge(
+                "operation:G",
+                "station-a",
+                record.fence,
+                None,
+                ChargeUpdate::default().turn_ended(false),
+            )
+            .unwrap();
+        assert!(matches!(
+            registry.wake_charge_now("operation:G", "person-1").unwrap(),
+            ChargeWake::Requested(_)
+        ));
+
+        // A turn recorded by a Station whose lease lapsed is not running: nothing holds it.
+        let gone = registry
+            .claim_charge("station:s", "00", "station-a", Duration::ZERO)
+            .unwrap();
+        registry
+            .update_charge(
+                "station:s",
+                "station-a",
+                gone.fence,
+                None,
+                ChargeUpdate::default().running(1.0),
+            )
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(30));
+        assert!(matches!(
+            registry.wake_charge_now("station:s", "person-1").unwrap(),
+            ChargeWake::Requested(_)
+        ));
     }
 
     fn failed_turns_are_counted_and_an_acknowledgement_or_a_good_turn_clears_them(

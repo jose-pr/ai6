@@ -597,6 +597,71 @@ async fn a_control_wakes_the_charge_once_though_it_is_tended_during_the_turn() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_wake_now_runs_the_next_turn_and_one_asked_during_it_is_reported_running() {
+    use crate::directorates::registry::charges::ChargeWake;
+
+    let root = tempfile::tempdir().unwrap();
+    let tag = "w8";
+    TURNS.lock().unwrap().insert(
+        key(tag),
+        Arc::new(|_: &str, _: &BTreeMap<String, String>| {
+            std::thread::sleep(Duration::from_millis(600));
+        }),
+    );
+    let state = station(root.path(), tag, "test", "", "");
+    charges::tend(&state, false, true).await;
+    let ask = |who: &str| state.intake.wake_charge_now(&scope(tag), who).unwrap();
+    assert!(matches!(ask("person-1"), ChargeWake::Requested(_)));
+
+    // The turn is under way once the record says so; a second ask then adds nothing.
+    tend_until(&state, "the turn begins", || {
+        record(&state, tag).running_since.is_some()
+    })
+    .await;
+    assert!(matches!(ask("person-2"), ChargeWake::Running { .. }));
+    assert_eq!(
+        record(&state, tag).controls.len(),
+        1,
+        "only the wake the turn answers waits; it is taken off when the turn ends"
+    );
+
+    // It ends, is logged once, and leaves nothing running; the next ask is taken.
+    tend_until(&state, "the turn ends", || turns(&state, tag) == 1).await;
+    tend_for(&state, 25).await;
+    assert_eq!(calls(&key(tag)).len(), 1, "one turn for two asks");
+    assert!(record(&state, tag).running_since.is_none());
+    assert!(matches!(ask("person-1"), ChargeWake::Requested(_)));
+    tend_until(&state, "the second turn", || turns(&state, tag) == 2).await;
+    TURNS.lock().unwrap().remove(&key(tag));
+    charges::close_all(&state).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_turn_left_recorded_by_a_station_that_restarted_is_cleared() {
+    let root = tempfile::tempdir().unwrap();
+    let tag = "w9";
+    let state = station(root.path(), tag, "test", "", "");
+    charges::tend(&state, false, true).await;
+    let held = record(&state, tag);
+    state
+        .intake
+        .update_charge(
+            &scope(tag),
+            "test",
+            held.fence,
+            None,
+            ChargeUpdate::default().running(1.0),
+        )
+        .unwrap();
+    charges::tend(&state, false, true).await;
+    assert!(
+        record(&state, tag).running_since.is_none(),
+        "no turn runs here, so none is recorded"
+    );
+    charges::close_all(&state).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_restarted_station_resumes_the_charge_run() {
     let root = tempfile::tempdir().unwrap();
     let tag = "w2";

@@ -118,6 +118,11 @@ pub struct ChargeDefinition {
     #[schema(title = "Woken at least every, when idle")]
     #[map(default = ChargeDefinition::DEFAULTS.wake_every_idle)]
     pub wake_every_idle: TimeLimit,
+    /// Whether a turn that only a person's "run now" woke restarts the timer: with `false`, the next
+    /// timer turn falls due as if the person had not asked.
+    #[schema(title = "A wake by a person restarts the timer")]
+    #[map(default = ChargeDefinition::DEFAULTS.wake_restarts_timer)]
+    pub wake_restarts_timer: bool,
     /// Turns the charge takes in any hour, each wake one turn; past it, events wait for the hour to
     /// make room.
     #[schema(title = "Turns an hour")]
@@ -204,6 +209,7 @@ impl ChargeDefinition {
         operation: None,
         wake_every: TimeLimit::secs(3_600),
         wake_every_idle: TimeLimit::UNBOUNDED,
+        wake_restarts_timer: false,
         max_turns_per_hour: Limit::at(30),
         max_events_per_turn: Limit::at(50),
         max_waiting_events: Limit::at(500),

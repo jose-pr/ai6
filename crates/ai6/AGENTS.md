@@ -3958,6 +3958,7 @@ impl ChargeScope { pub fn operation(&self) -> Option<&str>; pub fn station(&self
     pub agent: String, pub operation: Option<String>,   // operation: M's/a Station's Cables; an Operation's may only repeat its own
     pub wake_every: TimeLimit,            // 3600; while the area has open work (a Mission not over, a Report unassessed); none: events only
     pub wake_every_idle: TimeLimit,       // none; as wake_every while the area has no open work: no timer turn
+    pub wake_restarts_timer: bool,        // false; a turn only a person's "run now" woke leaves the timer where it was
     pub max_turns_per_hour: Limit,        // 30, counted on the record across Stations
     pub max_events_per_turn: Limit,       // 50
     pub max_waiting_events: Limit,        // 500; past it the oldest are dropped and logged
@@ -3993,12 +3994,14 @@ pub const TURN_WINDOW_SECS: f64 = 3_600.0;
 #[non_exhaustive] pub struct ChargeRecord { pub scope, pub agent, pub station, pub fence: u64, pub lease_expires: f64,
     pub opened_at: f64, pub provider_id: Option<String>, pub handler: Option<String>, pub last_wake: Option<f64>,
     pub turns: Vec<f64>, pub logbook: Vec<ChargeLogEntry>, pub seen: Vec<String>, pub controls: Vec<ChargeControl>,
-    pub failed_turns: u32 }   // turns in a row that failed or took no harness; a good turn or an acknowledgement makes it 0
+    pub failed_turns: u32,   // turns in a row that failed or took no harness; a good turn or an acknowledgement makes it 0
+    pub running_since: Option<f64> }   // when the turn under way began; its Station writes it at the start and a turn's end clears it; trusted only under a live lease
 impl ChargeRecord { pub fn turns_since(&self, since: f64) -> usize; }
 #[non_exhaustive] #[derive(Default)] pub struct ChargeUpdate { pub run: Option<Option<(String, String)>>,
     pub last_wake, pub turn_at, pub log: Vec<ChargeLogEntry>, pub seen: Option<Vec<String>>, pub taken_controls: Vec<String>,
-    pub turn_failed: Option<bool> }
-impl ChargeUpdate { run(handler, id), forget_run(), woke(at, turn: bool), log(entry), seen(keys), took_controls(ids), turn_ended(failed: bool) }
+    pub turn_failed: Option<bool>, pub running_since: Option<f64>, pub idle: bool }
+impl ChargeUpdate { run(handler, id), forget_run(), woke(at, turn: bool), log(entry), seen(keys), took_controls(ids), turn_ended(failed: bool), running(at), idle() }
+#[non_exhaustive] pub enum ChargeWake { Requested(ChargeControl), Pending(ChargeControl), Running { since: f64 } }
 #[non_exhaustive] pub enum ChargeError { NotFound, HeldBy(String), Stale, Io(io::Error) }
 pub trait ChargeStore {
     fn claim_charge(&self, scope, agent, station, ttl: Duration) -> Result<ChargeRecord, ChargeError>;
@@ -4006,6 +4009,7 @@ pub trait ChargeStore {
         // another Agent forgets the Run; HeldBy while another's lease is live
     fn update_charge(&self, scope, station, fence: u64, renew: Option<Duration>, update: ChargeUpdate) -> Result<ChargeRecord, ChargeError>;  // Stale unless holder and fence
     fn request_charge_wake(&self, scope, by, note) -> Result<ChargeControl, ChargeError>;   // no lease; NotFound before a first claim
+    fn wake_charge_now(&self, scope, by) -> Result<ChargeWake, ChargeError>;   // no lease; one change of the record: Running while a turn runs under a live lease, Pending while a note-less control waits, else a note-less control is added; NotFound before a first claim
     fn acknowledge_charge(&self, scope, by) -> Result<ChargeRecord, ChargeError>;   // no lease: failed_turns = 0 and a logbook line naming `by`; NotFound before a first claim
     fn charge(&self, scope: &str) -> io::Result<Option<ChargeRecord>>;
     fn charges(&self) -> io::Result<Vec<ChargeRecord>>;   // by scope
