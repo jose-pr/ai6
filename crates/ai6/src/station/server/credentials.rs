@@ -461,9 +461,10 @@ pub(super) fn read_for_overlay(
         .map_err(|why| format!("secret {name:?}: {why}"))
 }
 
-/// What a Run of `agent` starts from: its roster `env`, with its loadout's `env` over it.
-/// The issue of secrets after this takes only secrets' and pool accounts' variables away, which
-/// a loadout's `env` cannot name, so what is here reaches an exposed Run too.
+/// What a Run of `agent` starts from: its roster `env`, with its loadout's `env` over it, and the
+/// platform variables the Station passes every harness (`[harness] os_env`) where they are not
+/// set. The issue of secrets after this takes only secrets' and pool accounts' variables away,
+/// which a loadout's `env` cannot name, so what is here reaches an exposed Run too.
 pub(super) fn run_environment(
     state: &DaemonState,
     agent: &str,
@@ -485,7 +486,33 @@ pub(super) fn run_environment(
                 .map(|(name, value)| (name.clone(), value.clone())),
         );
     }
+    with_os_variables(
+        &mut environment,
+        &state.station.limits().harness.os_env,
+        &|name| std::env::var(name).ok(),
+    );
     environment
+}
+
+/// Adds each of `names` that `lookup` finds to `environment`, unless it already sets the name
+/// (compared without case on Windows, where variable names have none). A Run's own `env` wins.
+fn with_os_variables(
+    environment: &mut BTreeMap<String, String>,
+    names: &[String],
+    lookup: &dyn Fn(&str) -> Option<String>,
+) {
+    for name in names {
+        let set = environment.keys().any(|held| {
+            if cfg!(windows) {
+                held.eq_ignore_ascii_case(name)
+            } else {
+                held == name
+            }
+        });
+        if !set && let Some(value) = lookup(name) {
+            environment.insert(name.clone(), value);
+        }
+    }
 }
 
 /// Claims a pool account for a Run of `mission` when its Agent draws from a pool, and

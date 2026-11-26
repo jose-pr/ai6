@@ -284,3 +284,34 @@ fn the_built_ins_are_registered_first_and_appear_with_their_schemas() {
     let vault = plugins.config_schema("test-vault").unwrap();
     assert_eq!(vault["properties"]["run"]["x-sensitive"], true, "{vault}");
 }
+
+#[test]
+fn a_harness_gets_the_platform_variables_a_process_needs_unless_its_loadout_sets_them() {
+    let station = |name: &str| match name {
+        "SystemRoot" => Some("C:/Windows".to_owned()),
+        "windir" => Some("C:/Windows".to_owned()),
+        "ComSpec" => Some("C:/Windows/system32/cmd.exe".to_owned()),
+        _ => None,
+    };
+    let names: Vec<String> = ["SystemRoot", "windir", "ComSpec", "PATHEXT"]
+        .map(str::to_owned)
+        .to_vec();
+    let mut environment = std::collections::BTreeMap::from([
+        ("PATH".to_owned(), "/loadout/bin".to_owned()),
+        ("windir".to_owned(), "D:/Own".to_owned()),
+    ]);
+    super::with_os_variables(&mut environment, &names, &station);
+    assert_eq!(environment["SystemRoot"], "C:/Windows");
+    assert_eq!(environment["ComSpec"], "C:/Windows/system32/cmd.exe");
+    assert_eq!(environment["windir"], "D:/Own", "the loadout's value stays");
+    assert_eq!(environment["PATH"], "/loadout/bin");
+    assert!(
+        !environment.contains_key("PATHEXT"),
+        "a variable the Station lacks is not invented"
+    );
+    // The default names what Windows needs to start a process, and a Station may change it.
+    let defaults = crate::station::limits::HarnessLimits::default().os_env;
+    for needed in ["SystemRoot", "windir", "ComSpec", "PATHEXT"] {
+        assert!(defaults.iter().any(|name| name == needed), "{needed}");
+    }
+}

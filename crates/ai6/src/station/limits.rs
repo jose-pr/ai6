@@ -801,6 +801,13 @@ pub struct HarnessLimits {
     #[schema(title = "Compact a conversation at (percent of the route's token cap)")]
     #[map(default = HarnessLimits::default().compact_at_cap_percent)]
     pub compact_at_cap_percent: Limit,
+    /// Variables of the Station's own environment that every harness gets, none of them secret,
+    /// unless its roster or loadout `env` sets the name. A harness is started with that `env`
+    /// alone, and on Windows a process without these cannot start (`SystemRoot` is the one Bun
+    /// refuses to run without). A name the Station lacks is skipped. Empty passes none.
+    #[schema(title = "Platform variables a harness gets")]
+    #[map(default = HarnessLimits::default().os_env)]
+    pub os_env: Vec<String>,
 }
 
 impl Default for HarnessLimits {
@@ -813,6 +820,9 @@ impl Default for HarnessLimits {
             // The next turn adds to what the check measured, and a conversation past its cap
             // is refused every turn, so the margin is a quarter of it.
             compact_at_cap_percent: Limit::at(75),
+            os_env: ["SystemRoot", "windir", "ComSpec", "PATHEXT"]
+                .map(str::to_owned)
+                .to_vec(),
         }
     }
 }

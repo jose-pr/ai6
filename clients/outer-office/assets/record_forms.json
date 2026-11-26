@@ -105,6 +105,14 @@
           "x-section": "checkout",
           "x-advanced": true
         },
+        "private": {
+          "type": "boolean",
+          "title": "Private",
+          "description": "Keep this Operation's work off any route whose source may train on what it is sent. Set it for a project whose text must not reach such a source; unset, its Runs may use those routes.",
+          "x-section": "roster",
+          "x-advanced": true,
+          "default": false
+        },
         "roster": {
           "type": "array",
           "items": {
@@ -2100,6 +2108,13 @@
                 "title": "Token cap",
                 "description": "Tokens one request to this route may hold, when its gateway refuses more; empty when it states none. Long-lived conversations compact before it, and the models listing shows it.",
                 "x-advanced": true
+              },
+              "trains_on_input": {
+                "type": "boolean",
+                "title": "Trains on its input",
+                "description": "Whether the source of this route may train on what it is sent (a free tier's terms often say so). A private Operation, or a Run carrying a private overlay, is never placed on a route marked so; an Operation that is not `private` and no private overlay can use it.",
+                "x-advanced": true,
+                "default": false
               }
             },
             "additionalProperties": false,
@@ -6751,6 +6766,13 @@
           "title": "Secrets",
           "description": "Secrets the overlay may use.",
           "default": []
+        },
+        "private": {
+          "type": "boolean",
+          "title": "Private",
+          "description": "Keep what it issues off routes whose source may train on what it is sent.",
+          "x-advanced": true,
+          "default": false
         }
       },
       "additionalProperties": false
@@ -10238,6 +10260,20 @@
               "title": "Compact a conversation at (percent of the route's token cap)",
               "description": "The same, as a percent of the smallest `token_cap` among its Agent's routes; a route with no cap gives no bound. `none` ignores caps.",
               "default": 75
+            },
+            "os_env": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "title": "Platform variables a harness gets",
+              "description": "Variables of the Station's own environment that every harness gets, none of them secret, unless its roster or loadout `env` sets the name. A harness is started with that `env` alone, and on Windows a process without these cannot start (`SystemRoot` is the one Bun refuses to run without). A name the Station lacks is skipped. Empty passes none.",
+              "default": [
+                "SystemRoot",
+                "windir",
+                "ComSpec",
+                "PATHEXT"
+              ]
             }
           },
           "additionalProperties": false,
@@ -10248,7 +10284,13 @@
             "manifest_bytes": 16777216,
             "manifest_files": 4096,
             "compact_at_tokens": "none",
-            "compact_at_cap_percent": 75
+            "compact_at_cap_percent": 75,
+            "os_env": [
+              "SystemRoot",
+              "windir",
+              "ComSpec",
+              "PATHEXT"
+            ]
           }
         },
         "overlays": {
