@@ -806,16 +806,17 @@ class _AssistantPanelState extends State<AssistantPanel> {
                                         hint: command.argumentHint,
                                       ),
                                   ],
-                                  before: [
+                                  plusItems: [
                                     if (widget.imageInput?.canPick ?? false)
-                                      IconButton(
-                                        tooltip: 'Add an image',
+                                      MenuItemButton(
+                                        leadingIcon: const Icon(
+                                          Icons.add_photo_alternate_outlined,
+                                          size: 18,
+                                        ),
                                         onPressed: controller.connected
                                             ? _pick
                                             : null,
-                                        icon: const Icon(
-                                          Icons.add_photo_alternate_outlined,
-                                        ),
+                                        child: const Text('Add an image'),
                                       ),
                                   ],
                                 ),
