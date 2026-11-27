@@ -61,9 +61,24 @@ fn act(key: &str, text: &str, environment: &BTreeMap<String, String>) {
 /// The charges, by Run name, whose turns the stand-in ends `failed` while they are listed.
 static FAILING: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 
+/// The charges, by Run name, whose next turn the stand-in ends at a full context window, once.
+static WINDOW_ONCE: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+/// The charges whose every turn ends at a full context window while they are listed.
+static WINDOW_ALWAYS: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+
 /// What a turn of the stand-in `key` says before it ends: a line and `completed`, or `failed`.
 fn answer(key: &str, run: &str) -> [AgentEvent; 2] {
-    if FAILING.lock().unwrap().contains(key) {
+    let window =
+        WINDOW_ONCE.lock().unwrap().remove(key) || WINDOW_ALWAYS.lock().unwrap().contains(key);
+    if window {
+        let mut full = event(LIMIT_EVENT, Some("prompt is too long".to_owned()));
+        full.limit = Some(
+            coqui_acp_api::LimitHit::new(0)
+                .kind(coqui_acp_api::LimitKind::ContextWindow)
+                .continuable(false),
+        );
+        [full, event("completed", None)]
+    } else if FAILING.lock().unwrap().contains(key) {
         [
             event("text", Some(format!("noted on {run}"))),
             event("failed", Some("the model refused".to_owned())),
@@ -1026,5 +1041,75 @@ async fn a_charge_whose_conversation_reached_its_setting_starts_a_fresh_run_with
     assert!(said.text.contains("1000 tokens"), "{}", said.text);
     assert_eq!(kept.provider_id.as_deref(), Some(all[2].run.as_str()));
     assert_eq!(kept.context_tokens, Some(0), "the fresh Run starts small");
+    charges::close_all(&state).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_charge_whose_turn_fills_the_context_window_starts_a_fresh_run_and_takes_the_turn_again()
+{
+    let root = tempfile::tempdir().unwrap();
+    let tag = "w10";
+    let state = station(root.path(), tag, "test", "", "");
+    charges::tend(&state, false, true).await;
+    control(&state, tag, "first");
+    tend_until(&state, "the first turn", || turns(&state, tag) == 1).await;
+    let started = record(&state, tag).provider_id.clone().unwrap();
+
+    WINDOW_ONCE.lock().unwrap().insert(key(tag));
+    control(&state, tag, "second");
+    tend_until(&state, "the second turn", || turns(&state, tag) == 2).await;
+    let all = calls(&key(tag));
+    let hows: Vec<&str> = all.iter().map(|call| call.how).collect();
+    assert_eq!(hows, ["start", "message", "start"], "{all:?}");
+    assert_eq!(all[2].text, all[1].text, "the same wake is taken again");
+    assert!(
+        all[2]
+            .context
+            .iter()
+            .any(|line| line.contains("Your logbook")),
+        "{:?}",
+        all[2].context
+    );
+    let kept = record(&state, tag);
+    assert_ne!(kept.provider_id.as_deref(), Some(started.as_str()));
+    assert_eq!(kept.failed_turns, 0);
+    assert!(
+        kept.logbook
+            .iter()
+            .any(|entry| entry.kind == "compacted" && entry.text.contains("context window")),
+        "{:?}",
+        kept.logbook
+    );
+    charges::close_all(&state).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_fresh_run_that_fills_the_window_too_fails_the_turn_once_and_does_not_start_a_third() {
+    let root = tempfile::tempdir().unwrap();
+    let tag = "w11";
+    let state = station(
+        root.path(),
+        tag,
+        "test",
+        "failing_after = \"none\"
+",
+        "",
+    );
+    charges::tend(&state, false, true).await;
+    control(&state, tag, "first");
+    tend_until(&state, "the first turn", || turns(&state, tag) == 1).await;
+
+    WINDOW_ALWAYS.lock().unwrap().insert(key(tag));
+    control(&state, tag, "second");
+    tend_until(&state, "the failed turn", || {
+        record(&state, tag).failed_turns == 1
+    })
+    .await;
+    let starts = calls(&key(tag))
+        .iter()
+        .filter(|call| call.how == "start")
+        .count();
+    assert_eq!(starts, 2, "one fresh Run, not a third");
+    WINDOW_ALWAYS.lock().unwrap().remove(&key(tag));
     charges::close_all(&state).await;
 }

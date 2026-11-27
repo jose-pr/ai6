@@ -70,8 +70,9 @@ pub(super) fn resume_from(
             .is_some_and(|result| {
                 result.state == "failed" || result.reason.as_deref() == Some(SUPERSEDED)
             });
+    let filled = filled_window(earlier);
     let found = earlier
-        .filter(|_| !refused && !failed && grown.is_none())
+        .filter(|_| !refused && !failed && !filled && grown.is_none())
         .filter(|record| {
             record
                 .launch
@@ -92,6 +93,10 @@ pub(super) fn resume_from(
             } else if failed {
                 "the window starts a new Run: the last run failed, so its is not taken up"
                     .to_owned()
+            } else if filled {
+                "the window starts a new Run: the last run's conversation filled its model's \
+                 context window, so it carries on in a fresh session with what it last did"
+                    .to_owned()
             } else if let Some((size, limit)) = grown {
                 format!(
                     "the window starts a new Run: the conversation has taken in {size} tokens, \
@@ -111,6 +116,13 @@ pub(super) fn resume_from(
         let _ = state.intake.record_event(&event);
     }
     found
+}
+
+/// Whether the run before ended because its conversation filled its model's context window.
+pub(super) fn filled_window(earlier: Option<&RunRecord>) -> bool {
+    earlier
+        .and_then(|record| record.result.as_ref())
+        .is_some_and(|result| result.reason.as_deref() == Some(RunResult::WINDOW_FULL))
 }
 
 /// `start` as a resume of the Run `run_id`, the window's brief its message.

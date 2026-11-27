@@ -5827,16 +5827,20 @@ async fn start_mission(
             grown,
         )
     });
-    if let (Some((size, _)), Some(last)) = (grown, earlier.as_ref())
+    let filled = standing::filled_window(earlier.as_ref());
+    if (grown.is_some() || filled)
+        && let Some(last) = earlier.as_ref()
         && resume_from.is_none()
         && !last.recent.is_empty()
     {
         let lines: Vec<String> = last.recent.iter().map(|line| format!("- {line}")).collect();
+        let why = match grown {
+            Some((size, _)) => format!("reached {size} tokens"),
+            None => "filled its model's context window".to_owned(),
+        };
         initial_context.push(format!(
-            "Your earlier session reached {size} tokens and was compacted into this one. What it \n             last did, oldest first:
-{}",
-            lines.join("
-")
+            "Your earlier session {why} and was compacted into this one. What it last did, oldest first:\n{}",
+            lines.join("\n")
         ));
     }
     // The Cables that waited for this Agent while it had no Run, now that it has one that
@@ -7562,7 +7566,11 @@ fn spawn_event_pump_with_monitor(
             }
             match result {
                 Ok((Some(event), run_id)) => {
-                    let event = limit_that_follows_the_work_fails(event);
+                    let event = if fills_the_window(&event) && !can_compact(&state, &mission_id) {
+                        failed_for_the_window(event)
+                    } else {
+                        event
+                    };
                     monitor.record_event(&event);
                     attached.room.publish_event(&event);
                     tape.record(&event);
@@ -7601,6 +7609,10 @@ fn spawn_event_pump_with_monitor(
                     // The writes above take time, in which a resume can replace this Run; what
                     // its harness says from here on would be taken for the Mission's.
                     if !is_current_run(&state, &mission_id, &run) {
+                        break;
+                    }
+                    if fills_the_window(&event) {
+                        handle_full_window(&state, &mission_id, &run, event);
                         break;
                     }
                     if event.kind == LIMIT_EVENT {
@@ -8413,16 +8425,87 @@ fn lifecycle_name(state: MissionState) -> Option<&'static str> {
 const LIMIT_RESET_MESSAGE: &str =
     "The provider usage limit has reset. Continue the task where you left off.";
 
-/// A limit the provider reports as following the work and not the account (a context window) ends
-/// the turn as a failure: waiting for a reset, another account or another Agent meets it again.
-fn limit_that_follows_the_work_fails(event: AgentEvent) -> AgentEvent {
-    if event.kind == LIMIT_EVENT && event.limit.as_ref().is_some_and(|hit| !hit.can_continue()) {
-        AgentEvent {
-            kind: "failed".to_owned(),
-            ..event
+/// Whether `event` is a limit the provider reports as following the work and not the account (a
+/// context window): waiting for a reset, another account or another Agent meets it again, and only
+/// a conversation that starts over, from what was kept of it, can go on.
+pub(super) fn fills_the_window(event: &AgentEvent) -> bool {
+    event.kind == LIMIT_EVENT && event.limit.as_ref().is_some_and(|hit| !hit.can_continue())
+}
+
+/// The turn a full context window ended for good: a failure that says why.
+pub(super) fn failed_for_the_window(event: AgentEvent) -> AgentEvent {
+    let said = event.text.as_deref().unwrap_or_default();
+    AgentEvent {
+        kind: "failed".to_owned(),
+        text: Some(format!(
+            "the conversation does not fit its model's context window, even carried into a fresh session: {said}"
+        )),
+        ..event
+    }
+}
+
+/// Whether a Mission whose Run filled its context window may start over in a fresh Run: it has an
+/// Agent to run, and the Run is not already the fresh one a full window started.
+fn can_compact(state: &DaemonState, mission_id: &str) -> bool {
+    let has_agent = state
+        .missions
+        .lock()
+        .ok()
+        .and_then(|missions| {
+            missions
+                .get(mission_id)
+                .and_then(|mission| mission.agent_id.clone())
+        })
+        .is_some();
+    let started_over = run_hold(state, mission_id)
+        .and_then(|hold| state.intake.run(&hold.id).ok().flatten())
+        .and_then(|record| record.predecessor)
+        .and_then(|id| state.intake.run(&id).ok().flatten())
+        .and_then(|before| before.result)
+        .is_some_and(|result| result.reason.as_deref() == Some(RunResult::WINDOW_FULL));
+    has_agent && !started_over
+}
+
+/// Ends a Run whose conversation filled its model's context window and queues the Mission again
+/// for the same Agent as a fresh Run, which is given the brief and what the old Run last did. The
+/// harness's own compaction, where it has one, has already had its chance. The turn is retried
+/// once: a fresh Run that fills the window too fails ([`can_compact`]).
+fn handle_full_window(
+    state: &DaemonState,
+    mission_id: &str,
+    run: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
+    event: AgentEvent,
+) {
+    let operation = state.runs.lock().ok().and_then(|mut runs| {
+        if runs
+            .get(mission_id)
+            .is_some_and(|operation| Arc::ptr_eq(&operation.run, run))
+        {
+            runs.remove(mission_id)
+                .inspect(|operation| operation.gate.close())
+        } else {
+            None
         }
-    } else {
-        event
+    });
+    let Some(operation) = operation else {
+        return;
+    };
+    if let Ok(run) = operation.run.lock() {
+        let _ = run.interrupt();
+        let _ = run.close();
+    }
+    let agent = state.missions.lock().ok().and_then(|missions| {
+        missions
+            .get(mission_id)
+            .and_then(|mission| mission.agent_id.clone())
+    });
+    if let Some(agent) = agent
+        && hand_off_for(state, mission_id, agent, RunResult::WINDOW_FULL)
+    {
+        eprintln!(
+            "ai6: Mission {mission_id:?} filled its context window; starting a fresh Run with what it last did"
+        );
+        queue_event(state, mission_id, event);
     }
 }
 
@@ -8539,6 +8622,11 @@ fn handle_limit(
 /// Queues an interrupted Mission again for `agent` as a new run and closes the run
 /// it replaces; the next start records the replacement. Whether it was queued.
 fn hand_off(state: &DaemonState, mission_id: &str, agent: String) -> bool {
+    hand_off_for(state, mission_id, agent, RunResult::HANDED_OFF)
+}
+
+/// [`hand_off`], the replaced Run's result naming `reason`.
+fn hand_off_for(state: &DaemonState, mission_id: &str, agent: String, reason: &str) -> bool {
     // Taken before the requeue: once queued, a scheduler pass may record the next run.
     let replaced = run_hold(state, mission_id);
     let handed_off = state
@@ -8552,9 +8640,7 @@ fn hand_off(state: &DaemonState, mission_id: &str, agent: String) -> bool {
             &state.station_id,
             hold.fence,
             RunUpdate::default()
-                .result(
-                    RunResult::new("abandoned").with_reason(Some(RunResult::HANDED_OFF.to_owned())),
-                )
+                .result(RunResult::new("abandoned").with_reason(Some(reason.to_owned())))
                 .status(RunStatus::Ended),
         );
     }
@@ -9408,7 +9494,7 @@ queue = 1
     use std::sync::atomic::AtomicI64;
 
     #[test]
-    fn a_limit_that_follows_the_work_ends_the_turn_as_a_failure_and_any_other_stays_a_limit() {
+    fn only_a_limit_that_follows_the_work_fills_the_window() {
         let limited = |hit: Option<LimitHit>| AgentEvent {
             kind: LIMIT_EVENT.to_owned(),
             text: Some("the limit".to_owned()),
@@ -9420,9 +9506,16 @@ queue = 1
         let window = LimitHit::new(0)
             .kind(LimitKind::ContextWindow)
             .continuable(false);
-        let ended = limit_that_follows_the_work_fails(limited(Some(window)));
+        assert!(fills_the_window(&limited(Some(window.clone()))));
+        let ended = failed_for_the_window(limited(Some(window.clone())));
         assert_eq!(ended.kind, "failed");
-        assert_eq!(ended.text.as_deref(), Some("the limit"));
+        assert!(
+            ended
+                .text
+                .as_deref()
+                .unwrap()
+                .contains("even carried into a fresh session")
+        );
         assert!(ended.limit.is_some(), "the report stays with the event");
 
         // A quota, or a limit that says nothing of its kind, is the account's.
@@ -9430,17 +9523,14 @@ queue = 1
             .kind(LimitKind::UsageQuota)
             .continuable(true);
         for hit in [Some(quota), Some(LimitHit::new(0)), None] {
-            assert_eq!(
-                limit_that_follows_the_work_fails(limited(hit)).kind,
-                LIMIT_EVENT
-            );
+            assert!(!fills_the_window(&limited(hit)));
         }
         // Only a limit is judged.
         let done = AgentEvent {
             kind: "completed".to_owned(),
-            ..limited(Some(LimitHit::new(0).continuable(false)))
+            ..limited(Some(window))
         };
-        assert_eq!(limit_that_follows_the_work_fails(done).kind, "completed");
+        assert!(!fills_the_window(&done));
     }
 
     /// A Registry directory of its own for each test: a shared one carries incidents and
@@ -10126,6 +10216,69 @@ queue = 1
         }
     }
 
+    /// A provider whose Run ends at a full context window: every Run when its Agent sets
+    /// `MOCK_WINDOW=always`, else only the first of its Mission (`MOCK_WINDOW_KEY` names the test),
+    /// and the next Run completes.
+    #[derive(Default, Provider)]
+    #[provider(AgentHandler, id = "mock-window", name = "Mock Window", crate = crate::guatiao)]
+    struct MockWindowHandler;
+
+    impl AgentHandler for MockWindowHandler {
+        fn start(
+            &self,
+            request: AgentStart,
+            _terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
+        ) -> Result<Object<dyn AgentSession>, ProviderError> {
+            static SEEN: std::sync::OnceLock<Mutex<std::collections::BTreeSet<String>>> =
+                std::sync::OnceLock::new();
+            let key = format!(
+                "{}/{}",
+                request
+                    .environment
+                    .get("MOCK_WINDOW_KEY")
+                    .map(String::as_str)
+                    .unwrap_or_default(),
+                request.mission_id
+            );
+            let first = SEEN.get_or_init(Mutex::default).lock().unwrap().insert(key);
+            let always =
+                request.environment.get("MOCK_WINDOW").map(String::as_str) == Some("always");
+            let run_id = RunId::try_new(if first {
+                "provider-id-window-1"
+            } else {
+                "provider-id-window-2"
+            })
+            .map_err(|error| test_provider_error(&error.to_string()))?;
+            if !(first || always) {
+                return Ok(MockRun::new(run_id, "completed").into_object());
+            }
+            Ok(MockRun::with_event(
+                run_id,
+                AgentEvent {
+                    kind: LIMIT_EVENT.to_owned(),
+                    text: Some("prompt is too long".to_owned()),
+                    data: None,
+                    limit: Some(
+                        LimitHit::new(0)
+                            .kind(LimitKind::ContextWindow)
+                            .continuable(false),
+                    ),
+                    tools: Vec::new(),
+                    report: None,
+                },
+            )
+            .into_object())
+        }
+
+        fn resume(
+            &self,
+            request: AgentResume,
+            _terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
+        ) -> Result<Object<dyn AgentSession>, ProviderError> {
+            Ok(MockRun::new(request.run_id, "completed").into_object())
+        }
+    }
+
     /// A provider whose Run reports the cumulative usage listed in its Agent's
     /// `MOCK_USAGE` (`input:output:cost_micro_usd`, comma separated) and then stays quiet.
     #[derive(Default, Provider)]
@@ -10429,6 +10582,7 @@ queue = 1
             super::cable_reach_tests::MockCablesHandler,
             super::cable_wake_tests::MockWakeHandler,
             MockLimitedHandler,
+            MockWindowHandler,
             super::accounts::testing::MockPooledHandler,
             MockSpendHandler,
             MockRecordingHandler,
@@ -11206,6 +11360,112 @@ queue = 1
         )
         .await
         .unwrap_or_else(|error| panic!("transition failed: {:?}", error.1.0.error));
+    }
+
+    #[tokio::test]
+    async fn a_run_that_fills_its_window_is_replaced_by_one_fresh_run_that_goes_on() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, _now) = limited_state(
+            root.path(),
+            "",
+            "[agent.007]\nhandler = \"mock-window\"\n[agent.007.env]\nMOCK_WINDOW_KEY = \"goes-on\"\n",
+            1_000,
+        );
+        start_mission_one(&state).await;
+        tokio::time::timeout(Duration::from_secs(60), async {
+            while state
+                .missions
+                .lock()
+                .unwrap()
+                .get("mission-1")
+                .map(|mission| mission.state)
+                != Some(MissionState::Queued)
+            {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the Mission is queued for a fresh Run, not parked or failed");
+        let first = run_hold(&state, "mission-1").unwrap();
+        tokio::time::timeout(Duration::from_secs(60), async {
+            while state.intake.run(&first.id).unwrap().unwrap().status != RunStatus::Ended {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the full Run is closed");
+        let record = state.intake.run(&first.id).unwrap().unwrap();
+        assert_eq!(
+            record.result.unwrap().reason.as_deref(),
+            Some(RunResult::WINDOW_FULL)
+        );
+        assert!(
+            can_compact(&state, "mission-1"),
+            "the next Run has not started over yet"
+        );
+
+        schedule_queued_once(&state).await;
+        tokio::time::timeout(Duration::from_secs(60), async {
+            while run_hold(&state, "mission-1").is_none_or(|hold| hold.number != 2) {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("a second Run starts");
+        let second = run_hold(&state, "mission-1").unwrap();
+        let record = state.intake.run(&second.id).unwrap().unwrap();
+        assert_eq!(record.predecessor.as_deref(), Some(first.id.as_str()));
+        assert!(
+            !can_compact(&state, "mission-1"),
+            "a second full window would not be given a third Run"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_fresh_run_that_fills_the_window_too_fails_the_turn_with_the_reason() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, _now) = limited_state(
+            root.path(),
+            "",
+            "[agent.007]\nhandler = \"mock-window\"\n[agent.007.env]\nMOCK_WINDOW = \"always\"\nMOCK_WINDOW_KEY = \"twice\"\n",
+            1_000,
+        );
+        start_mission_one(&state).await;
+        tokio::time::timeout(Duration::from_secs(60), async {
+            while state
+                .missions
+                .lock()
+                .unwrap()
+                .get("mission-1")
+                .map(|mission| mission.state)
+                != Some(MissionState::Queued)
+            {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the first full window queues a fresh Run");
+        schedule_queued_once(&state).await;
+        let event = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(event) = pop_event(&state, "mission-1")
+                    && event.kind == "failed"
+                {
+                    return event;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the second full window ends the turn");
+        assert!(
+            event
+                .text
+                .as_deref()
+                .unwrap()
+                .contains("even carried into a fresh session"),
+            "{event:?}"
+        );
     }
 
     #[tokio::test]

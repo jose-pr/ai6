@@ -564,6 +564,11 @@ impl RunResult {
     /// The reason of a run another replaced after a limit: no outcome of its Agent's.
     pub const HANDED_OFF: &'static str = "handed-off";
 
+    /// The reason of a run whose conversation filled its model's context window, and which a fresh
+    /// one replaced. The fresh run carries what the old one last did; one of its own that fills
+    /// the window too fails the Mission's turn.
+    pub const WINDOW_FULL: &'static str = "window-full";
+
     /// The reason of a run a later one replaced after the Mission's outcome was decided.
     pub const SUPERSEDED: &'static str = "superseded";
 
