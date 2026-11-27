@@ -22,7 +22,7 @@ package (the DevTools extension's prebuilt web app, wasm included); the rest of 
 hooks compile guatiao's crates from it. The Flutter SDK's own packages (`flutter`,
 `flutter_test`) come with the SDK and are not here.
 
-Built from `main` with guatiao 0350bae7 for the Dart packages, with Flutter `main` (Dart 3.15 dev).
+Built from `main` with guatiao 0350bae7 for the Dart packages, with the Flutter commit `sdk.lock` names (Dart 3.15 dev).
 
 ## Use it
 
@@ -79,7 +79,7 @@ These are all the outside requests of an Outer Office web build with `cdn = "all
 measured by loading it in a browser with a network log, plus the rest of the engine's
 fallback font table. The app's own Roboto and icons are in the app, not here.
 
-Built for Flutter engine `2541e508405f5d9728286d6ed3307163a5406e08`.
+Built for Flutter engine `c0205700e04b127bbfecdeb6c83d1e0c9c564ed6`.
 
 ### Use it
 

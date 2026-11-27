@@ -86,8 +86,8 @@ RUN set -eu; umask 0; \
     rm -rf /tmp/deps
 
 # Last, so another ref reuses every layer above it. Flutter refuses to run without its .git.
-ARG FLUTTER_GIT_URL=https://github.com/flutter/flutter.git
-ARG FLUTTER_REF=2541e508405f5d9728286d6ed3307163a5406e08
+ARG FLUTTER_GIT_URL=https://github.com/Boriken-Dev/flutter.git
+ARG FLUTTER_REF=33d7f282aaef7665096e5acd368d3c2ee226f6bb
 ENV FLUTTER_GIT_URL=${FLUTTER_GIT_URL}
 LABEL ai6.flutter.git-url="${FLUTTER_GIT_URL}" ai6.flutter.ref="${FLUTTER_REF}"
 RUN set -eu; umask 0; \

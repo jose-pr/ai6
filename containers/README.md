@@ -31,7 +31,7 @@ FLUTTER_GIT_URL=https://github.com/you/flutter.git FLUTTER_REF=your-branch conta
 | Build argument | What | Default |
 | --- | --- | --- |
 | `BASE_IMAGE` | The base layer: any image with a Flutter or a plain Linux, with `apt-get` or `dnf` | an image of [flutter-docker-image](https://github.com/gmeligio/flutter-docker-image), by digest |
-| `FLUTTER_GIT_URL` | The Flutter repository | the upstream one |
+| `FLUTTER_GIT_URL` | The Flutter repository | Boriken Dev's scanner-clean mirror of Flutter |
 | `FLUTTER_REF` | A tag, a branch or a hash | the commit `sdk.lock` names |
 | `DEPS_GIT_URL`, `DEPS_REF` | This branch's repository and commit | this repository, the commit `sdk.lock` names |
 | `RUST_VERSION`, `RUSTUP_VERSION`, `RUSTUP_SHA256_*` | The Rust toolchain and how to verify rustup-init | what `sdk.lock` names |
