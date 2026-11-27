@@ -31,8 +31,8 @@ use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use ai6::micro_usd;
 use ai6::{
     AgentEvent, AgentMessage, AgentSession, Bucket, BucketStatus, DENIED_EVENT, LIMIT_EVENT,
-    LimitHit, LimitKind, Refill, SessionChange, SessionCommand, Spend, UsageReport, UsageSource,
-    UsageSupport, infer_limit,
+    LimitHit, Refill, SessionChange, SessionCommand, Spend, UsageReport, UsageSource, UsageSupport,
+    infer_limit,
 };
 use coqui_acp_claude::harness::event::{Content, Event as ClaudeEvent};
 use coqui_acp_claude::{
@@ -2292,6 +2292,7 @@ fn refuse(status: Status, error: impl std::fmt::Display) -> ProviderError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ai6::LimitKind;
     use ai6::directorates::q::terminal::{
         ExitInfo, READ_TIMED_OUT, STREAM_COLS, Spec, TerminalRun,
     };
