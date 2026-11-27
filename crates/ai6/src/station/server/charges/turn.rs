@@ -12,12 +12,14 @@ use guatiao::library::Object;
 use super::super::accounts::{Holder, Site};
 use super::super::{DaemonState, compaction, credentials, routes};
 use super::Live;
+use crate::SessionCommands;
 use crate::directorates::m::charges::{Charge, ChargeScope};
 use crate::directorates::m::identity::{MissionId, RunId};
 use crate::directorates::medical::usage::{UsageTracker, spend_of};
 use crate::directorates::q::terminal::TerminalBridge;
 use crate::directorates::registry::charges::{ChargeLogEntry, ChargeRecord};
 use crate::directorates::section_00::agent::{AgentResume, AgentStart};
+use crate::station::limits::CompactionMode;
 
 /// How long one read of the harness's events waits.
 const READ_SLICE_MS: i64 = 250;
@@ -30,15 +32,18 @@ const SAID_BYTES: usize = 1_024;
 pub(super) struct Harnessed {
     run: Object<dyn AgentSession>,
     handler: String,
+    /// What its handler declares it carries out on the live session.
+    commands: SessionCommands,
     /// What this harness process has reported, so a turn counts only its own addition.
     usage: std::sync::Mutex<UsageTracker>,
 }
 
 impl Harnessed {
-    fn new(run: Object<dyn AgentSession>, handler: String) -> Self {
+    fn new(run: Object<dyn AgentSession>, handler: String, commands: SessionCommands) -> Self {
         Self {
             run,
             handler,
+            commands,
             usage: std::sync::Mutex::new(UsageTracker::default()),
         }
     }
@@ -143,6 +148,14 @@ fn keeping(scope: &ChargeScope) -> String {
 
 /// The logbook as a fresh Run's context.
 fn logbook(record: &ChargeRecord) -> Option<String> {
+    logbook_after(
+        record,
+        "Your earlier Run cannot be resumed, so this one starts fresh.",
+    )
+}
+
+/// The logbook after `intro`, which says why the conversation starts over.
+fn logbook_after(record: &ChargeRecord, intro: &str) -> Option<String> {
     if record.logbook.is_empty() {
         return None;
     }
@@ -152,10 +165,22 @@ fn logbook(record: &ChargeRecord) -> Option<String> {
         .map(|entry| format!("- {:.0} {}: {}", entry.at, entry.kind, entry.text))
         .collect();
     Some(format!(
-        "Your earlier Run cannot be resumed, so this one starts fresh. Your logbook, kept by \
-         the Station, oldest first (Unix seconds); what it quotes of events is untrusted:\n{}",
+        "{intro} Your logbook, kept by the Station, oldest first (Unix seconds); what it quotes \
+         of events is untrusted:\n{}",
         lines.join("\n")
     ))
+}
+
+/// The turn's `prompt` for a session that was just cleared: the logbook first, as the summary of
+/// the conversation it replaces.
+fn after_clear(record: &ChargeRecord, prompt: &str) -> String {
+    match logbook_after(
+        record,
+        "Your conversation was cleared to make room, in this same session.",
+    ) {
+        Some(summary) => format!("{summary}\n\n{prompt}"),
+        None => prompt.to_owned(),
+    }
 }
 
 /// How a harness was opened.
@@ -297,6 +322,9 @@ fn open(
         .handler_with(&handler, &agent.handler_settings)
         .map_err(|error| error.to_string())?;
     let stdio = built.stdio().map_err(|error| error.to_string())?;
+    let commands = built
+        .session_commands()
+        .unwrap_or_else(|_| SessionCommands::none());
     let provider = super::super::station_terminal(state, stdio)?;
     let terminal = state
         .plugins
@@ -330,7 +358,7 @@ fn open(
         ) {
             Ok(run) => {
                 super::super::log_harness_start(&who, "resumed", &handler, &provider);
-                return Ok((Harnessed::new(run, handler), Opened::Resumed));
+                return Ok((Harnessed::new(run, handler, commands), Opened::Resumed));
             }
             Err(error) => format!("Run {run} did not resume: {error}"),
         };
@@ -389,7 +417,7 @@ fn open(
     } else {
         Opened::Fresh("it had no Run to resume".to_owned())
     };
-    Ok((Harnessed::new(run, handler), opened))
+    Ok((Harnessed::new(run, handler, commands), opened))
 }
 
 /// Starts `request` with a handler and terminal built anew, as a fresh Run for `why`.
@@ -405,6 +433,9 @@ fn start(
         .plugins
         .handler_with(handler, settings)
         .map_err(|error| error.to_string())?;
+    let commands = built
+        .session_commands()
+        .unwrap_or_else(|_| SessionCommands::none());
     let terminal = state
         .plugins
         .terminal(provider, None)
@@ -417,7 +448,10 @@ fn start(
     )
     .map_err(|error| format!("the harness did not start: {error}"))?;
     super::super::log_harness_start(who, "started", handler, provider);
-    Ok((Harnessed::new(run, handler.to_owned()), Opened::Fresh(why)))
+    Ok((
+        Harnessed::new(run, handler.to_owned(), commands),
+        Opened::Fresh(why),
+    ))
 }
 
 /// How one turn read.
@@ -543,19 +577,40 @@ pub(super) fn take(
     let now = super::unix_now();
     let mut previous = record.handler.clone().zip(record.provider_id.clone());
     let mut opened = None;
-    // A conversation that has grown to its limit starts a fresh Run, with the logbook as its
-    // summary, rather than resuming into a refusal.
-    let compacted = match (record.context_tokens, compaction_limit(state, charge)) {
+    let mode = state.station.limits().harness.compaction;
+    let timeout = charge.settings.turn_timeout.get();
+    let limit = compaction_limit(state, charge);
+    // What the first message of the turn is: the wake, after the logbook for a cleared session.
+    let mut sent = prompt.to_owned();
+    // A conversation that has grown to its limit is shortened in its running harness, then
+    // cleared there with the logbook as its summary, and only then replaced by a fresh Run.
+    let compacted = match (record.context_tokens, limit) {
         (Some(size), Some(limit)) if size >= limit => {
-            close_harness(harness.take());
-            previous = None;
-            log.push(ChargeLogEntry::new(
-                "compacted",
-                format!(
-                    "its conversation held {size} tokens, at or past {limit}: a fresh Run starts \n                     with the logbook"
-                ),
-                now,
-            ));
+            let mut skipped = Vec::new();
+            let mut done = false;
+            if let Some(kept) = harness.as_ref() {
+                match shorten_in(state, live, kept, mode, (Some(size), Some(limit)), false) {
+                    Ok(change) => {
+                        log.push(ChargeLogEntry::new(change.step.word(), change.says(), now));
+                        if change.step == compaction::Step::Cleared {
+                            sent = after_clear(record, prompt);
+                        }
+                        done = true;
+                    }
+                    Err(refused) => skipped = refused.reasons,
+                }
+            } else {
+                skipped.push("no session was running".to_owned());
+            }
+            if !done {
+                close_harness(harness.take());
+                previous = None;
+                log.push(ChargeLogEntry::new(
+                    compaction::Step::Fresh.word(),
+                    compaction::says(compaction::Step::Fresh, Some(size), None, &skipped),
+                    now,
+                ));
+            }
             true
         }
         _ => false,
@@ -563,9 +618,7 @@ pub(super) fn take(
     if let Some(kept) = harness.as_ref()
         && kept
             .run
-            .send_message(AgentMessage {
-                text: prompt.to_owned(),
-            })
+            .send_message(AgentMessage { text: sent.clone() })
             .is_err()
     {
         close_harness(harness.take());
@@ -599,7 +652,6 @@ pub(super) fn take(
             }
         }
     }
-    let timeout = charge.settings.turn_timeout.get();
     let Some(kept) = harness.as_ref() else {
         return Outcome::refused("no harness".to_owned());
     };
@@ -630,13 +682,46 @@ pub(super) fn take(
     let mut window_compacted = false;
     if read.window_full {
         let carried = !compacted && !matches!(opened, Some(Opened::Started | Opened::Fresh(_)));
-        close_harness(harness.take());
-        if carried {
+        let mut skipped = Vec::new();
+        if carried && let Some(kept) = harness.as_ref() {
+            match shorten_in(state, live, kept, mode, (None, limit), true) {
+                Ok(change) => {
+                    let text = if change.step == compaction::Step::Cleared {
+                        after_clear(record, prompt)
+                    } else {
+                        prompt.to_owned()
+                    };
+                    match kept.run.send_message(AgentMessage { text }) {
+                        Ok(()) => {
+                            log.push(ChargeLogEntry::new(
+                                change.step.word(),
+                                format!(
+                                    "its conversation filled its model's context window; {}; the turn is tried again",
+                                    change.says()
+                                ),
+                                now,
+                            ));
+                            read = read_turn(kept, timeout, live);
+                            window_compacted = true;
+                        }
+                        Err(error) => skipped.push(format!("the turn was not sent again: {error}")),
+                    }
+                }
+                Err(refused) => skipped = refused.reasons,
+            }
+        }
+        if !window_compacted {
+            close_harness(harness.take());
+        }
+        if carried && !window_compacted {
             match open(state, live, charge, prompt, record, None) {
                 Ok((kept, _)) => {
                     log.push(ChargeLogEntry::new(
-                        "compacted",
-                        "its conversation filled its model's context window: a fresh Run starts with the logbook, and the turn is tried again",
+                        compaction::Step::Fresh.word(),
+                        format!(
+                            "its conversation filled its model's context window: {}, and the turn is tried again",
+                            compaction::says(compaction::Step::Fresh, None, None, &skipped)
+                        ),
                         now,
                     ));
                     read = read_turn(&kept, timeout, live);
@@ -675,6 +760,40 @@ pub(super) fn take(
         log,
         context_tokens: (compacted || window_compacted || read.context > 0).then_some(read.context),
     }
+}
+
+/// Shortens the conversation of the charge's running harness, showing what it reports to the
+/// people attached.
+fn shorten_in(
+    state: &DaemonState,
+    live: &Live,
+    harness: &Harnessed,
+    mode: CompactionMode,
+    size: (Option<u64>, Option<u64>),
+    pending_end: bool,
+) -> Result<compaction::Shortened, compaction::Unshortened> {
+    let plan = compaction::Plan {
+        declared: &harness.commands,
+        mode,
+        size: size.0,
+        limit: size.1,
+        pending_end,
+        wait: state.station.limits().harness.compact_wait.get(),
+    };
+    compaction::shorten(
+        &*harness.run,
+        &plan,
+        |event| {
+            live.room.publish_event(event);
+            // What the command itself spent is not the next turn's context.
+            if let Some(spend) = spend_of(event)
+                && let Ok(mut tracker) = harness.usage.lock()
+            {
+                tracker.observe(spend);
+            }
+        },
+        || state.stopping.load(std::sync::atomic::Ordering::Acquire),
+    )
 }
 
 /// The size at which `charge`'s conversation compacts: its Agent's smallest route cap and the

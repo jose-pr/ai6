@@ -788,6 +788,26 @@ impl Default for ApprovalLimits {
     }
 }
 
+/// How a long conversation is shortened, `[harness] compaction`.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ToValue, FromValue, Schema)]
+pub enum CompactionMode {
+    /// Compact in the running harness; clear it and carry on from a summary if that fails or
+    /// is not enough; start a fresh Run only if the harness can do neither. The default.
+    #[default]
+    #[map(rename = "in_session")]
+    #[schema(label = "Compact in the session")]
+    InSession,
+    /// Clear the running harness and carry on from a summary; a fresh Run if it cannot.
+    #[map(rename = "clear")]
+    #[schema(label = "Clear and reuse the process")]
+    Clear,
+    /// Always start a fresh Run with a summary.
+    #[map(rename = "fresh")]
+    #[schema(label = "Start a fresh Run")]
+    Fresh,
+}
+
 /// `[harness]`.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq, ToValue, FromValue, Schema)]
@@ -816,6 +836,18 @@ pub struct HarnessLimits {
     #[schema(title = "Compact a conversation at (percent of the route's token cap)")]
     #[map(default = HarnessLimits::default().compact_at_cap_percent)]
     pub compact_at_cap_percent: Limit,
+    /// How long a compaction or clear of a running session may go without its report before it
+    /// counts as failed and the next step is taken. `none` waits for as long as the harness runs.
+    #[schema(title = "Wait for a compaction report")]
+    #[map(default = HarnessLimits::default().compact_wait)]
+    pub compact_wait: TimeLimit,
+    /// What a conversation that reached its size, or filled its model's window, does first.
+    /// `in_session` compacts it in the running harness, then clears the harness and carries on
+    /// from a summary, and starts a fresh Run only when neither works; `clear` skips the
+    /// compaction; `fresh` always starts a fresh Run with a summary.
+    #[schema(title = "How a long conversation is shortened")]
+    #[map(default = HarnessLimits::default().compaction)]
+    pub compaction: CompactionMode,
     /// Variables of the Station's own environment that every harness gets, none of them secret,
     /// unless its roster or loadout `env` sets the name. A harness is started with that `env`
     /// alone, and on Windows a process without these cannot start (`SystemRoot` is the one Bun
@@ -835,6 +867,8 @@ impl Default for HarnessLimits {
             // The next turn adds to what the check measured, and a conversation past its cap
             // is refused every turn, so the margin is a quarter of it.
             compact_at_cap_percent: Limit::at(75),
+            compaction: CompactionMode::InSession,
+            compact_wait: TimeLimit::secs(600),
             os_env: ["SystemRoot", "windir", "ComSpec", "PATHEXT"]
                 .map(str::to_owned)
                 .to_vec(),

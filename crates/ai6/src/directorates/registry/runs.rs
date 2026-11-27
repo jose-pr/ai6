@@ -330,6 +330,11 @@ pub struct RunRecord {
     /// such mark of a run that ended done.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comments_through: Option<String>,
+    /// The tokens the conversation held when the Run took its first message, after its session
+    /// was compacted or cleared to make room; a later window counts from here and not from the
+    /// Runs before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compacted_to: Option<u64>,
     /// What a charge held at `desk` clearance advises for a verifying run; it settles
     /// nothing, and a person's decision confirms it or overrides it. The latest stands.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -644,6 +649,7 @@ pub struct NewRun {
     account: Option<AccountRef>,
     window: Option<String>,
     comments_through: Option<String>,
+    compacted_to: Option<u64>,
     start: Option<RunStart>,
 }
 
@@ -669,6 +675,7 @@ impl NewRun {
             account: None,
             window: None,
             comments_through: None,
+            compacted_to: None,
             start: None,
         }
     }
@@ -676,6 +683,13 @@ impl NewRun {
     /// Records how far into its source issue's comments the Run's brief reached.
     pub fn with_comments_through(mut self, cursor: Option<String>) -> Self {
         self.comments_through = cursor;
+        self
+    }
+
+    /// Records the tokens the conversation held once its session was compacted or cleared before
+    /// the Run's first message.
+    pub fn with_compacted_to(mut self, tokens: Option<u64>) -> Self {
+        self.compacted_to = tokens;
         self
     }
 
@@ -1084,6 +1098,7 @@ pub(super) fn opened(new: NewRun, ttl: Duration, now: f64, term: u64) -> RunReco
         evidence: Vec::new(),
         probe_requested: None,
         comments_through: new.comments_through,
+        compacted_to: new.compacted_to,
         recommendation: None,
         starts: new.start.into_iter().collect(),
     }

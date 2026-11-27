@@ -567,6 +567,7 @@ mod tests {
             evidence: Vec::new(),
             probe_requested: None,
             comments_through: None,
+            compacted_to: None,
             recommendation: None,
             starts: Vec::new(),
         }

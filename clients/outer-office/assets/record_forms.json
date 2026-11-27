@@ -10261,6 +10261,44 @@
               "description": "The same, as a percent of the smallest `token_cap` among its Agent's routes; a route with no cap gives no bound. `none` ignores caps.",
               "default": 75
             },
+            "compact_wait": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "format": "seconds"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none"
+                  ],
+                  "x-enum-labels": {
+                    "none": "No limit"
+                  }
+                }
+              ],
+              "format": "seconds",
+              "title": "Wait for a compaction report",
+              "description": "How long a compaction or clear of a running session may go without its report before it counts as failed and the next step is taken. `none` waits for as long as the harness runs.",
+              "default": 600.0
+            },
+            "compaction": {
+              "type": "string",
+              "enum": [
+                "in_session",
+                "clear",
+                "fresh"
+              ],
+              "x-enum-labels": {
+                "in_session": "Compact in the session",
+                "clear": "Clear and reuse the process",
+                "fresh": "Start a fresh Run"
+              },
+              "title": "How a long conversation is shortened",
+              "description": "What a conversation that reached its size, or filled its model's window, does first. `in_session` compacts it in the running harness, then clears the harness and carries on from a summary, and starts a fresh Run only when neither works; `clear` skips the compaction; `fresh` always starts a fresh Run with a summary.",
+              "default": "in_session"
+            },
             "os_env": {
               "type": "array",
               "items": {
@@ -10285,6 +10323,8 @@
             "manifest_files": 4096,
             "compact_at_tokens": "none",
             "compact_at_cap_percent": 75,
+            "compact_wait": 600.0,
+            "compaction": "in_session",
             "os_env": [
               "SystemRoot",
               "windir",

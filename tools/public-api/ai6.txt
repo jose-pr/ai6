@@ -7593,6 +7593,7 @@ pub fn ai6::directorates::registry::runs::NewRun::next_run(self) -> core::option
 pub fn ai6::directorates::registry::runs::NewRun::number(&self) -> u32
 pub fn ai6::directorates::registry::runs::NewRun::with_account(self, ai6::directorates::registry::accounts::AccountRef) -> Self
 pub fn ai6::directorates::registry::runs::NewRun::with_comments_through(self, core::option::Option<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::runs::NewRun::with_compacted_to(self, core::option::Option<u64>) -> Self
 pub fn ai6::directorates::registry::runs::NewRun::with_exposure(self, alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>) -> Self
 pub fn ai6::directorates::registry::runs::NewRun::with_handle(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::runs::NewRun::with_launch(self, ai6::directorates::registry::runs::RunLaunch) -> Self
@@ -7635,6 +7636,7 @@ pub ai6::directorates::registry::runs::RunRecord::checkpoint: core::option::Opti
 pub ai6::directorates::registry::runs::RunRecord::checkpointed_at: core::option::Option<f64>
 pub ai6::directorates::registry::runs::RunRecord::closed_at: core::option::Option<f64>
 pub ai6::directorates::registry::runs::RunRecord::comments_through: core::option::Option<alloc::string::String>
+pub ai6::directorates::registry::runs::RunRecord::compacted_to: core::option::Option<u64>
 pub ai6::directorates::registry::runs::RunRecord::deliverables: alloc::vec::Vec<ai6::directorates::m::deliverables::Deliverable>
 pub ai6::directorates::registry::runs::RunRecord::evidence: alloc::vec::Vec<ai6::directorates::registry::runs::Evidence>
 pub ai6::directorates::registry::runs::RunRecord::exposure: alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>
@@ -9771,6 +9773,10 @@ pub fn ai6::station::identity::server_config(&coqui_peer_tls::identity::Identity
 pub fn ai6::station::identity::sign_sealing_key(&coqui_peer_tls::identity::Identity, &str, &str) -> core::result::Result<ai6::directorates::registry::sealed::StationSealingKey, alloc::string::String>
 pub fn ai6::station::identity::trust_peers(coqui_peer::store::TrustStore) -> coqui_peer_tls::trust::Trust
 pub mod ai6::station::limits
+#[non_exhaustive] pub enum ai6::station::limits::CompactionMode
+pub ai6::station::limits::CompactionMode::Clear
+pub ai6::station::limits::CompactionMode::Fresh
+pub ai6::station::limits::CompactionMode::InSession
 #[non_exhaustive] pub struct ai6::station::limits::AccountLimits
 pub ai6::station::limits::AccountLimits::claim_ttl: ai6::bounds::Seconds
 pub ai6::station::limits::AccountLimits::limit_horizon: ai6::bounds::Seconds
@@ -9840,6 +9846,8 @@ pub fn ai6::station::limits::GreenInkLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::station::limits::HarnessLimits
 pub ai6::station::limits::HarnessLimits::compact_at_cap_percent: ai6::bounds::Limit
 pub ai6::station::limits::HarnessLimits::compact_at_tokens: ai6::bounds::Limit
+pub ai6::station::limits::HarnessLimits::compact_wait: ai6::bounds::TimeLimit
+pub ai6::station::limits::HarnessLimits::compaction: ai6::station::limits::CompactionMode
 pub ai6::station::limits::HarnessLimits::manifest_bytes: ai6::bounds::Limit
 pub ai6::station::limits::HarnessLimits::manifest_file_bytes: ai6::bounds::Limit
 pub ai6::station::limits::HarnessLimits::manifest_files: ai6::bounds::Limit
@@ -13164,6 +13172,7 @@ pub fn ai6::directorates::registry::runs::NewRun::next_run(self) -> core::option
 pub fn ai6::directorates::registry::runs::NewRun::number(&self) -> u32
 pub fn ai6::directorates::registry::runs::NewRun::with_account(self, ai6::directorates::registry::accounts::AccountRef) -> Self
 pub fn ai6::directorates::registry::runs::NewRun::with_comments_through(self, core::option::Option<alloc::string::String>) -> Self
+pub fn ai6::directorates::registry::runs::NewRun::with_compacted_to(self, core::option::Option<u64>) -> Self
 pub fn ai6::directorates::registry::runs::NewRun::with_exposure(self, alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>) -> Self
 pub fn ai6::directorates::registry::runs::NewRun::with_handle(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::runs::NewRun::with_launch(self, ai6::directorates::registry::runs::RunLaunch) -> Self
@@ -13937,6 +13946,7 @@ pub ai6::RunRecord::checkpoint: core::option::Option<ai6::directorates::q::safeh
 pub ai6::RunRecord::checkpointed_at: core::option::Option<f64>
 pub ai6::RunRecord::closed_at: core::option::Option<f64>
 pub ai6::RunRecord::comments_through: core::option::Option<alloc::string::String>
+pub ai6::RunRecord::compacted_to: core::option::Option<u64>
 pub ai6::RunRecord::deliverables: alloc::vec::Vec<ai6::directorates::m::deliverables::Deliverable>
 pub ai6::RunRecord::evidence: alloc::vec::Vec<ai6::directorates::registry::runs::Evidence>
 pub ai6::RunRecord::exposure: alloc::vec::Vec<ai6::directorates::medical::exposure::Exposure>

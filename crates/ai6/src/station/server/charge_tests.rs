@@ -195,6 +195,39 @@ impl AgentHandler for MockChargeHandler {
     }
 }
 
+/// The stand-in that declares compaction and clearing of a live session, and carries each out as
+/// the Agent's `MOCK_CHARGE_COMPACT` and `MOCK_CHARGE_CLEAR` say; [`MockChargeHandler`] declares
+/// neither.
+#[derive(Default, Provider)]
+#[provider(AgentHandler, id = "mock-charge-compact", name = "Mock Charge Compact", crate = crate::guatiao)]
+pub(super) struct MockCompactingChargeHandler;
+
+impl AgentHandler for MockCompactingChargeHandler {
+    fn start(
+        &self,
+        request: AgentStart,
+        terminal: Object<dyn AgentTerminal>,
+    ) -> Result<Object<dyn AgentSession>, ProviderError> {
+        MockChargeHandler.start(request, terminal)
+    }
+
+    fn resume(
+        &self,
+        request: AgentResume,
+        terminal: Object<dyn AgentTerminal>,
+    ) -> Result<Object<dyn AgentSession>, ProviderError> {
+        MockChargeHandler.resume(request, terminal)
+    }
+
+    fn session_commands(&self) -> Result<crate::SessionCommands, ProviderError> {
+        Ok(crate::SessionCommands {
+            compact: true,
+            clear: true,
+            unsupported_because: None,
+        })
+    }
+}
+
 struct ChargeRun {
     key: String,
     run: String,
@@ -224,12 +257,78 @@ impl ChargeRun {
     }
 }
 
+impl ChargeRun {
+    /// A session command, as the Agent's `MOCK_CHARGE_COMPACT` (`ok`, `fail` or `big`: compacts
+    /// to a size still over the setting) and `MOCK_CHARGE_CLEAR` (`ok`) say; unset, the
+    /// command is unsupported.
+    fn command(&self, command: &crate::SessionCommand) -> Result<(), ProviderError> {
+        use crate::{CLEARED_EVENT, COMPACT_FAILED_EVENT, COMPACTED_EVENT, SessionChange};
+        let (how, setting) = match command {
+            crate::SessionCommand::Compact { .. } => ("compact", "MOCK_CHARGE_COMPACT"),
+            crate::SessionCommand::Clear => ("clear", "MOCK_CHARGE_CLEAR"),
+        };
+        let change = |before, after| SessionChange {
+            tokens_before: before,
+            tokens_after: after,
+            ..SessionChange::default()
+        };
+        let reported = match (how, self.environment.get(setting).map(String::as_str)) {
+            ("compact", Some("ok")) => change(Some(1_000), Some(200)).event(COMPACTED_EVENT, None),
+            ("compact", Some("big")) => {
+                change(Some(2_000), Some(1_500)).event(COMPACTED_EVENT, None)
+            }
+            ("compact", Some("fail")) => SessionChange::default().event(
+                COMPACT_FAILED_EVENT,
+                Some("no room to summarise".to_owned()),
+            ),
+            // Declared, and the turn ends with no boundary.
+            ("compact" | "clear", Some("silent")) => event("completed", None),
+            // Declared, and nothing ever comes back.
+            ("compact", Some("hang")) => {
+                CALLS.lock().unwrap().push(Call {
+                    how,
+                    key: self.key.clone(),
+                    run: self.run.clone(),
+                    text: String::new(),
+                    context: Vec::new(),
+                });
+                return Ok(());
+            }
+            ("clear", Some("ok")) => change(None, None).event(CLEARED_EVENT, None),
+            _ => {
+                return Err(ProviderError::new(
+                    guatiao::Status::GUATIAO_ERR_UNSUPPORTED,
+                    "the stand-in does not do that",
+                ));
+            }
+        };
+        CALLS.lock().unwrap().push(Call {
+            how,
+            key: self.key.clone(),
+            run: self.run.clone(),
+            text: String::new(),
+            context: Vec::new(),
+        });
+        // A command that reports nothing is a turn that ends, once.
+        let mut events = self.events.lock().unwrap();
+        let silent = reported.kind == "completed";
+        events.push_back(reported);
+        if !silent {
+            events.push_back(event("completed", None));
+        }
+        Ok(())
+    }
+}
+
 impl AgentSession for ChargeRun {
     fn session_id(&self) -> Result<Option<String>, ProviderError> {
         Ok(Some(self.run.clone()))
     }
 
     fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {
+        if let Some(command) = crate::SessionCommand::parse(&message.text).unwrap() {
+            return self.command(&command);
+        }
         CALLS.lock().unwrap().push(Call {
             how: "message",
             key: self.key.clone(),
@@ -295,6 +394,8 @@ fn station(root: &Path, tag: &str, station: &str, settings: &str, env: &str) -> 
 struct Extra<'a> {
     /// Settings of the charge's Agent itself.
     charge_agent: &'a str,
+    /// The charge Agent's handler; the stand-in that declares no session command by default.
+    handler: &'a str,
     agents: &'a str,
     operation: &'a str,
     operation_cables: bool,
@@ -331,9 +432,15 @@ fn station_with(
         ),
         &format!(
             "[agent.007]\nhandler = \"mock-agent\"\n\
-             [agent.{agent}]\nhandler = \"mock-charge\"\nclearance = \"00\"\n{}\
+             [agent.{agent}]\nhandler = \"{}\"\nclearance = \"00\"\n{}\
              [agent.{agent}.env]\nMOCK_CHARGE = \"1\"\n{env}\n{}",
-            extra.charge_agent, extra.agents
+            if extra.handler.is_empty() {
+                "mock-charge"
+            } else {
+                extra.handler
+            },
+            extra.charge_agent,
+            extra.agents
         ),
     );
     state.station_id = station.to_owned();
@@ -1006,7 +1113,7 @@ async fn a_charge_whose_conversation_reached_its_setting_starts_a_fresh_run_with
         !record(&state, tag)
             .logbook
             .iter()
-            .any(|entry| entry.kind == "compacted")
+            .any(|entry| matches!(entry.kind.as_str(), "compacted" | "cleared" | "renewed"))
     );
 
     // At it, the next wake starts a fresh Run that is given the logbook.
@@ -1036,7 +1143,7 @@ async fn a_charge_whose_conversation_reached_its_setting_starts_a_fresh_run_with
     let said = kept
         .logbook
         .iter()
-        .find(|entry| entry.kind == "compacted")
+        .find(|entry| entry.kind == "renewed")
         .unwrap();
     assert!(said.text.contains("1000 tokens"), "{}", said.text);
     assert_eq!(kept.provider_id.as_deref(), Some(all[2].run.as_str()));
@@ -1076,10 +1183,280 @@ async fn a_charge_whose_turn_fills_the_context_window_starts_a_fresh_run_and_tak
     assert!(
         kept.logbook
             .iter()
-            .any(|entry| entry.kind == "compacted" && entry.text.contains("context window")),
+            .any(|entry| entry.kind == "renewed" && entry.text.contains("context window")),
         "{:?}",
         kept.logbook
     );
+    charges::close_all(&state).await;
+}
+
+/// A Station whose charge compacts at 1,000 tokens, with `mode` for `[harness] compaction`.
+fn compacting_station(
+    root: &Path,
+    tag: &str,
+    env: &str,
+    mode: crate::station::limits::CompactionMode,
+) -> DaemonState {
+    compacting_station_on(root, tag, "mock-charge-compact", env, mode)
+}
+
+/// As [`compacting_station`], with the charge Agent on `handler`.
+fn compacting_station_on(
+    root: &Path,
+    tag: &str,
+    handler: &str,
+    env: &str,
+    mode: crate::station::limits::CompactionMode,
+) -> DaemonState {
+    let extra = Extra {
+        handler,
+        ..Extra::default()
+    };
+    let mut state = station_with(root, tag, "test", "", env, &extra);
+    let mut limits = state.station.limits().clone();
+    limits.harness.compact_at_tokens = crate::Limit::at(1_000);
+    limits.harness.compact_at_cap_percent = crate::Limit::UNBOUNDED;
+    limits.harness.compaction = mode;
+    state.station = state.station.clone().with_limits(limits);
+    state
+}
+
+/// Takes a first turn, then sets the charge's conversation to `tokens` and takes a second.
+async fn grown_to(state: &DaemonState, tag: &str, tokens: u64) -> ChargeRecord {
+    charges::tend(state, false, true).await;
+    control(state, tag, "first");
+    tend_until(state, "the first turn", || turns(state, tag) == 1).await;
+    let first = record(state, tag);
+    let update = ChargeUpdate {
+        context_tokens: Some(tokens),
+        ..Default::default()
+    };
+    state
+        .intake
+        .update_charge(&scope(tag), "test", first.fence, None, update)
+        .unwrap();
+    control(state, tag, "second");
+    tend_until(state, "the second turn", || turns(state, tag) == 2).await;
+    first
+}
+
+fn hows(tag: &str) -> Vec<&'static str> {
+    calls(&key(tag)).iter().map(|call| call.how).collect()
+}
+
+fn logged<'a>(kept: &'a ChargeRecord, kind: &str) -> &'a str {
+    &kept
+        .logbook
+        .iter()
+        .find(|entry| entry.kind == kind)
+        .unwrap_or_else(|| panic!("no {kind} entry in {:?}", kept.logbook))
+        .text
+}
+
+/// The first step: the warm session compacts and takes the wake, with no new Run.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_charge_at_its_setting_compacts_in_its_session_and_starts_no_new_run() {
+    use crate::station::limits::CompactionMode;
+    let root = tempfile::tempdir().unwrap();
+    let tag = "c1";
+    let state = compacting_station(
+        root.path(),
+        tag,
+        "MOCK_CHARGE_COMPACT = \"ok\"\n",
+        CompactionMode::InSession,
+    );
+    let first = grown_to(&state, tag, 1_000).await;
+    assert_eq!(hows(tag), ["start", "compact", "message"]);
+    let kept = record(&state, tag);
+    assert_eq!(kept.provider_id, first.provider_id, "the same Run");
+    let said = logged(&kept, "compacted");
+    assert!(said.contains("1000 tokens before, 200 after"), "{said}");
+    assert!(!kept.logbook.iter().any(|entry| entry.kind == "renewed"));
+    charges::close_all(&state).await;
+}
+
+/// The second step, because compaction fails: the session is cleared and the wake carries the
+/// logbook.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_charge_whose_compaction_fails_is_cleared_and_given_its_logbook() {
+    use crate::station::limits::CompactionMode;
+    let root = tempfile::tempdir().unwrap();
+    let tag = "c2";
+    let state = compacting_station(
+        root.path(),
+        tag,
+        "MOCK_CHARGE_COMPACT = \"fail\"\nMOCK_CHARGE_CLEAR = \"ok\"\n",
+        CompactionMode::InSession,
+    );
+    let first = grown_to(&state, tag, 1_000).await;
+    assert_eq!(hows(tag), ["start", "compact", "clear", "message"]);
+    let all = calls(&key(tag));
+    assert!(all[3].text.contains("Your logbook"), "{}", all[3].text);
+    assert!(
+        all[3].text.contains("second"),
+        "the wake still comes: {}",
+        all[3].text
+    );
+    let kept = record(&state, tag);
+    assert_eq!(kept.provider_id, first.provider_id, "the same Run");
+    let said = logged(&kept, "cleared");
+    assert!(
+        said.contains("compaction failed: no room to summarise"),
+        "{said}"
+    );
+    assert!(said.contains("1000 tokens before, 0 after"), "{said}");
+    charges::close_all(&state).await;
+}
+
+/// The second step, because compaction leaves the conversation over the setting.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_charge_whose_compaction_leaves_it_over_its_setting_is_cleared() {
+    use crate::station::limits::CompactionMode;
+    let root = tempfile::tempdir().unwrap();
+    let tag = "c3";
+    let state = compacting_station(
+        root.path(),
+        tag,
+        "MOCK_CHARGE_COMPACT = \"big\"\nMOCK_CHARGE_CLEAR = \"ok\"\n",
+        CompactionMode::InSession,
+    );
+    grown_to(&state, tag, 1_000).await;
+    assert_eq!(hows(tag), ["start", "compact", "clear", "message"]);
+    let said = logged(&record(&state, tag), "cleared").to_owned();
+    assert!(said.contains("left 1500 tokens, at or past 1000"), "{said}");
+    charges::close_all(&state).await;
+}
+
+/// The third step: a handler that declares neither is sent nothing, even though its session would
+/// have answered, and gets a fresh Run; the logbook says why.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_charge_whose_handler_declares_neither_is_sent_no_command_and_gets_a_fresh_run() {
+    use crate::station::limits::CompactionMode;
+    let root = tempfile::tempdir().unwrap();
+    let tag = "c4";
+    let state = compacting_station_on(
+        root.path(),
+        tag,
+        "mock-charge",
+        "MOCK_CHARGE_COMPACT = \"ok\"\nMOCK_CHARGE_CLEAR = \"ok\"\n",
+        CompactionMode::InSession,
+    );
+    let first = grown_to(&state, tag, 1_000).await;
+    assert_eq!(hows(tag), ["start", "start"], "no command was sent");
+    let kept = record(&state, tag);
+    assert_ne!(kept.provider_id, first.provider_id);
+    let said = logged(&kept, "renewed");
+    assert!(
+        said.contains("declares no compaction") && said.contains("declares no clear"),
+        "{said}"
+    );
+    charges::close_all(&state).await;
+}
+
+/// A handler that declares compaction and ends the turn with no boundary has failed it: the
+/// logbook says so, and the clear step follows.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_declared_compaction_that_ends_with_no_boundary_fails_and_the_session_is_cleared() {
+    use crate::station::limits::CompactionMode;
+    let root = tempfile::tempdir().unwrap();
+    let tag = "c8";
+    let state = compacting_station(
+        root.path(),
+        tag,
+        "MOCK_CHARGE_COMPACT = \"silent\"\nMOCK_CHARGE_CLEAR = \"ok\"\n",
+        CompactionMode::InSession,
+    );
+    let first = grown_to(&state, tag, 1_000).await;
+    assert_eq!(
+        hows(tag),
+        ["start", "compact", "clear", "message"],
+        "{:?}",
+        record(&state, tag).logbook
+    );
+    let kept = record(&state, tag);
+    assert_eq!(kept.provider_id, first.provider_id, "the same Run");
+    let said = logged(&kept, "cleared");
+    assert!(
+        said.contains("compaction failed: the turn ended without a compaction report"),
+        "{said}"
+    );
+    charges::close_all(&state).await;
+}
+
+/// One whose report never comes is cut off at `[harness] compact_wait`, and the clear step
+/// follows.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_declared_compaction_that_never_reports_fails_at_the_wait_and_the_session_is_cleared() {
+    use crate::station::limits::CompactionMode;
+    let root = tempfile::tempdir().unwrap();
+    let tag = "c9";
+    let mut state = compacting_station(
+        root.path(),
+        tag,
+        "MOCK_CHARGE_COMPACT = \"hang\"\nMOCK_CHARGE_CLEAR = \"ok\"\n",
+        CompactionMode::InSession,
+    );
+    let mut limits = state.station.limits().clone();
+    limits.harness.compact_wait = crate::TimeLimit::secs(1);
+    state.station = state.station.clone().with_limits(limits);
+    grown_to(&state, tag, 1_000).await;
+    assert_eq!(hows(tag), ["start", "compact", "clear", "message"]);
+    let said = logged(&record(&state, tag), "cleared").to_owned();
+    assert!(said.contains("no compaction report in 1 s"), "{said}");
+    charges::close_all(&state).await;
+}
+
+/// `clear` skips the compaction; `fresh` touches nothing in the session.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_compaction_setting_chooses_where_the_order_begins() {
+    use crate::station::limits::CompactionMode;
+    let env = "MOCK_CHARGE_COMPACT = \"ok\"\nMOCK_CHARGE_CLEAR = \"ok\"\n";
+    let root = tempfile::tempdir().unwrap();
+    let state = compacting_station(root.path(), "c5", env, CompactionMode::Clear);
+    grown_to(&state, "c5", 1_000).await;
+    assert_eq!(hows("c5"), ["start", "clear", "message"]);
+    charges::close_all(&state).await;
+
+    let root = tempfile::tempdir().unwrap();
+    let state = compacting_station(root.path(), "c6", env, CompactionMode::Fresh);
+    let first = grown_to(&state, "c6", 1_000).await;
+    assert_eq!(hows("c6"), ["start", "start"]);
+    assert_ne!(record(&state, "c6").provider_id, first.provider_id);
+    charges::close_all(&state).await;
+}
+
+/// A context-window limit: the turn is retried once in the session after it compacts.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_charge_whose_turn_fills_the_window_compacts_in_session_and_takes_the_turn_again() {
+    use crate::station::limits::CompactionMode;
+    let root = tempfile::tempdir().unwrap();
+    let tag = "c7";
+    let state = compacting_station(
+        root.path(),
+        tag,
+        "MOCK_CHARGE_COMPACT = \"ok\"\n",
+        CompactionMode::InSession,
+    );
+    charges::tend(&state, false, true).await;
+    control(&state, tag, "first");
+    tend_until(&state, "the first turn", || turns(&state, tag) == 1).await;
+    let started = record(&state, tag).provider_id.clone();
+    WINDOW_ONCE.lock().unwrap().insert(key(tag));
+    control(&state, tag, "second");
+    tend_until(&state, "the second turn", || turns(&state, tag) == 2).await;
+    assert_eq!(
+        hows(tag),
+        ["start", "message", "compact", "message"],
+        "{:?}",
+        record(&state, tag).logbook
+    );
+    let all = calls(&key(tag));
+    assert_eq!(all[3].text, all[1].text, "the same wake is taken again");
+    let kept = record(&state, tag);
+    assert_eq!(kept.provider_id, started, "no new Run");
+    assert_eq!(kept.failed_turns, 0);
+    let said = logged(&kept, "compacted");
+    assert!(said.contains("context window"), "{said}");
     charges::close_all(&state).await;
 }
 
