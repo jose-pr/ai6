@@ -31,7 +31,8 @@ use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use ai6::micro_usd;
 use ai6::{
     AgentEvent, AgentMessage, AgentSession, Bucket, BucketStatus, DENIED_EVENT, LIMIT_EVENT,
-    LimitHit, Refill, Spend, UsageReport, UsageSource, UsageSupport, infer_limit,
+    LimitHit, LimitKind, Refill, Spend, UsageReport, UsageSource, UsageSupport, infer_limit,
+    limit_kind_of,
 };
 use coqui_acp_claude::harness::event::{Content, Event as ClaudeEvent};
 use coqui_acp_claude::{
@@ -1951,6 +1952,20 @@ fn decode_limit(value: &Value) -> Option<(LimitHit, Option<String>)> {
                 .get("rateLimitType")
                 .and_then(Value::as_str)
                 .map(str::to_owned);
+            // The event names its window itself: the plan's windows are quotas, and `overage` is
+            // extra usage bought with money.
+            limit.kind = Some(
+                if limit
+                    .bucket
+                    .as_deref()
+                    .is_some_and(|window| window.contains("overage"))
+                {
+                    LimitKind::Credit
+                } else {
+                    LimitKind::UsageQuota
+                },
+            );
+            limit.continuable = Some(true);
             Some((limit, None))
         }
         "result" if value.get("is_error").and_then(Value::as_bool) == Some(true) => {
@@ -1984,7 +1999,20 @@ fn decode_limit(value: &Value) -> Option<(LimitHit, Option<String>)> {
             let mut limit = LimitHit::new(0);
             limit.resets_at = resets_at;
             limit.bucket = window;
-            limit.retry_after = stated.and_then(|stated| stated.retry_after);
+            limit.retry_after = stated.as_ref().and_then(|stated| stated.retry_after);
+            // Claude Code's own words for a usage limit are a quota; a 429 that names none is the
+            // API's rate limit, unless the words say what else it is.
+            limit.kind = Some(
+                if ["usage limit", "limit reached", "hit your limit"]
+                    .iter()
+                    .any(|phrase| lower.contains(phrase))
+                {
+                    LimitKind::UsageQuota
+                } else {
+                    limit_kind_of(text).unwrap_or(LimitKind::RateLimit)
+                },
+            );
+            limit.continuable = Some(limit.kind != Some(LimitKind::ContextWindow));
             Some((limit, Some(text.to_owned())))
         }
         _ => None,
@@ -3440,6 +3468,45 @@ mod tests {
         let limit = event.limit.expect("a limit");
         assert_eq!(limit.resets_at, Some(1_790_000_000));
         assert_eq!(limit.bucket.as_deref(), Some("five_hour"));
+        assert_eq!(limit.kind, Some(LimitKind::UsageQuota));
+        assert_eq!(limit.continuable, Some(true));
+        assert!(limit.can_continue());
+    }
+
+    #[test]
+    fn a_limit_carries_the_kind_claude_code_names_or_its_words_say() {
+        let overage = json!({
+            "type": "rate_limit_event",
+            "rate_limit_info": { "status": "rejected", "rateLimitType": "overage" }
+        });
+        let limit = decode_event(&overage, b"{}".to_vec())
+            .unwrap()
+            .limit
+            .unwrap();
+        assert_eq!(limit.kind, Some(LimitKind::Credit));
+        assert_eq!(limit.continuable, Some(true));
+
+        let result = |text: &str, status: Option<i64>| {
+            let mut value = json!({ "type": "result", "is_error": true, "result": text });
+            if let Some(status) = status {
+                value["api_error_status"] = json!(status);
+            }
+            decode_event(&value, b"{}".to_vec()).unwrap().limit.unwrap()
+        };
+        let quota = result("Claude AI usage limit reached|1790000000", None);
+        assert_eq!(quota.kind, Some(LimitKind::UsageQuota));
+        assert_eq!(quota.continuable, Some(true));
+        assert_eq!(quota.resets_at, Some(1_790_000_000));
+        let rate = result("API Error: Request rejected (429)", Some(429));
+        assert_eq!(rate.kind, Some(LimitKind::RateLimit));
+        assert!(rate.can_continue());
+        let window = result(
+            "API Error: 429 prompt is too long for the context window",
+            Some(429),
+        );
+        assert_eq!(window.kind, Some(LimitKind::ContextWindow));
+        assert_eq!(window.continuable, Some(false));
+        assert!(!window.can_continue());
     }
 
     #[test]

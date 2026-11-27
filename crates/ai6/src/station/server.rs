@@ -7562,6 +7562,7 @@ fn spawn_event_pump_with_monitor(
             }
             match result {
                 Ok((Some(event), run_id)) => {
+                    let event = limit_that_follows_the_work_fails(event);
                     monitor.record_event(&event);
                     attached.room.publish_event(&event);
                     tape.record(&event);
@@ -8411,6 +8412,19 @@ fn lifecycle_name(state: MissionState) -> Option<&'static str> {
 /// harness otherwise waits for input.
 const LIMIT_RESET_MESSAGE: &str =
     "The provider usage limit has reset. Continue the task where you left off.";
+
+/// A limit the provider reports as following the work and not the account (a context window) ends
+/// the turn as a failure: waiting for a reset, another account or another Agent meets it again.
+fn limit_that_follows_the_work_fails(event: AgentEvent) -> AgentEvent {
+    if event.kind == LIMIT_EVENT && event.limit.as_ref().is_some_and(|hit| !hit.can_continue()) {
+        AgentEvent {
+            kind: "failed".to_owned(),
+            ..event
+        }
+    } else {
+        event
+    }
+}
 
 /// Stops a Run a provider limit ended, then parks the Mission until the quota resets or,
 /// when the Operation asks for it and another qualified Agent is available, hands it to
@@ -9390,8 +9404,44 @@ queue = 1
     use crate::directorates::section_00::agent::{AgentHandler, AgentResume, AgentStart};
     use crate::guatiao::library::{Object, ProviderError, Registry};
     use crate::guatiao::{FromValue, Provider, Status, ToValue, Value};
-    use coqui_acp_api::{LimitHit, Spend, UsageReport};
+    use coqui_acp_api::{LimitHit, LimitKind, Spend, UsageReport};
     use std::sync::atomic::AtomicI64;
+
+    #[test]
+    fn a_limit_that_follows_the_work_ends_the_turn_as_a_failure_and_any_other_stays_a_limit() {
+        let limited = |hit: Option<LimitHit>| AgentEvent {
+            kind: LIMIT_EVENT.to_owned(),
+            text: Some("the limit".to_owned()),
+            data: None,
+            limit: hit,
+            tools: Vec::new(),
+            report: None,
+        };
+        let window = LimitHit::new(0)
+            .kind(LimitKind::ContextWindow)
+            .continuable(false);
+        let ended = limit_that_follows_the_work_fails(limited(Some(window)));
+        assert_eq!(ended.kind, "failed");
+        assert_eq!(ended.text.as_deref(), Some("the limit"));
+        assert!(ended.limit.is_some(), "the report stays with the event");
+
+        // A quota, or a limit that says nothing of its kind, is the account's.
+        let quota = LimitHit::new(0)
+            .kind(LimitKind::UsageQuota)
+            .continuable(true);
+        for hit in [Some(quota), Some(LimitHit::new(0)), None] {
+            assert_eq!(
+                limit_that_follows_the_work_fails(limited(hit)).kind,
+                LIMIT_EVENT
+            );
+        }
+        // Only a limit is judged.
+        let done = AgentEvent {
+            kind: "completed".to_owned(),
+            ..limited(Some(LimitHit::new(0).continuable(false)))
+        };
+        assert_eq!(limit_that_follows_the_work_fails(done).kind, "completed");
+    }
 
     /// A Registry directory of its own for each test: a shared one carries incidents and
     /// quarantines from earlier tests and runs.

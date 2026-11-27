@@ -30,8 +30,8 @@ use ai6::directorates::section_00::records;
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use ai6::{
-    AgentEvent, AgentMessage, AgentSession, Bucket, BucketStatus, LIMIT_EVENT, LimitHit, Refill,
-    Spend, UsageReport, UsageSource, UsageSupport, infer_limit,
+    AgentEvent, AgentMessage, AgentSession, Bucket, BucketStatus, LIMIT_EVENT, LimitHit, LimitKind,
+    Refill, Spend, UsageReport, UsageSource, UsageSupport, infer_limit,
 };
 use coqui_acp_codex::harness::PlainSpawn;
 use coqui_acp_codex::harness::event::{Content, Event as CodexEvent, Outcome, PermissionRequest};
@@ -1412,6 +1412,14 @@ fn decode_limit(message: &Value, hint: Option<&LimitHit>) -> Option<(LimitHit, O
     let mut hit = LimitHit::new(0);
     hit.resets_at = resets_at;
     hit.bucket = hint.and_then(|hint| hint.bucket.clone());
+    // The error names its own kind: the plan's allowance used up, or too many requests too fast.
+    // Either follows the account, so the work can go on with another.
+    hit.kind = Some(if info.contains("ratelimit") {
+        LimitKind::RateLimit
+    } else {
+        LimitKind::UsageQuota
+    });
+    hit.continuable = Some(true);
     // A wait the message states (`try again in 90 seconds`) is the refusal's own.
     hit.retry_after = text
         .as_deref()
@@ -3917,7 +3925,24 @@ mod tests {
         let event = decode_event(&message, None).unwrap();
         assert_eq!(event.kind, LIMIT_EVENT);
         assert_eq!(event.text.as_deref(), Some("You've hit your usage limit."));
-        assert_eq!(event.limit.unwrap().resets_at, Some(1_790_000_000));
+        let limit = event.limit.unwrap();
+        assert_eq!(limit.resets_at, Some(1_790_000_000));
+        assert_eq!(limit.kind, Some(LimitKind::UsageQuota));
+        assert_eq!(limit.continuable, Some(true));
+    }
+
+    #[test]
+    fn a_rate_limit_error_is_a_rate_limit_that_another_account_meets_differently() {
+        let message = json!({
+            "method": "error",
+            "params": { "error": {
+                "message": "too many requests, try again in 90 seconds",
+                "codexErrorInfo": "rate_limit_exceeded"
+            } }
+        });
+        let limit = decode_event(&message, None).unwrap().limit.unwrap();
+        assert_eq!(limit.kind, Some(LimitKind::RateLimit));
+        assert!(limit.can_continue());
     }
 
     #[test]
