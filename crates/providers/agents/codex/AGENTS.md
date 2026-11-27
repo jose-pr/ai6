@@ -358,7 +358,7 @@ skipped while waiting for a reply, and is an event of kind `output` otherwise.
 
 ## Compacting a live thread
 
-`session_commands()` reports `compact` only. A message in `ai6::SessionCommand`'s form is a compaction
+`session_commands()` reports `compact` and `clear`. A message in `ai6::SessionCommand`'s form is a compaction
 as `thread/compact/start` with `{"threadId": THREAD}` (Codex 0.166.0 schema; it takes no focus, so the
 command's focus is dropped), answered `{}` at once, bounded by `request_timeout_ms`. The compaction is
 a turn of its own: `turn/started`, `item/started` and `item/completed` of a `contextCompaction` item,
@@ -370,9 +370,10 @@ the Station asked to compact that ends with no `contextCompaction` is a `compact
 `completed`. A custom provider compacts locally, and Codex keeps the person's recent messages, so a
 thread of long user messages shrinks less than one of long answers.
 
-A clear is refused (`GUATIAO_ERR_UNSUPPORTED`): the app server opens a second thread with
-`thread/start`, but `coqui_acp_codex::CodexSession` holds one thread for its life, so the handler has
-no way to send turns to the new one. Not run: a compaction against a real login.
+A clear is `CodexSession::new_thread` (`thread/start` with the launch's parameters on the same app server,
+whatever the launch resumed): the session then prompts, interrupts and steers the new thread, the Run's
+`session_id()` is the new thread's id, the `cleared` event carries it, and the old thread's token count is
+forgotten. The old thread is left as it is, not closed. Not run: a compaction or a clear against a real login.
 
 ## Listing models
 

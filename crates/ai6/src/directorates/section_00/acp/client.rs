@@ -12,7 +12,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use super::super::session_command::SessionCommand;
+use super::super::session_command::{SessionChange, SessionCommand};
 use super::{
     EVENT_NOTIFICATION, EVENTS_CAPABILITY, PermissionDecider, PermissionDecision,
     PermissionRequest, RESTRICTED_KINDS, RefuseAll, UNBOUNDED_MS,
@@ -21,6 +21,8 @@ use coqui_acp_api::{LimitHit, Spend, UsageReport, infer_limit};
 use coqui_acp_provider::{
     AgentEvent, AgentMessage, AgentSession, CANCELLED_EVENT, LIMIT_EVENT, TURN_CANCELLED,
 };
+
+use super::super::session_command::{CLEARED_EVENT, COMPACTED_EVENT};
 
 /// The `_meta` key of `session/load` that asks a runner to replay what follows a sequence number.
 const AFTER_KEY: &str = "dev.coqui.ai6/after";
@@ -315,6 +317,18 @@ struct State {
     prompt_failed: Option<String>,
     /// The limit the agent stated for the turn it refused, which the failure that follows is.
     stated_limit: Option<LimitHit>,
+    /// The commands the agent advertises, in its latest list.
+    commands: Vec<Advertised>,
+    /// Set while the turn in flight is a compaction this side asked for.
+    compacting: bool,
+}
+
+/// A command the agent advertises, by the name it is typed with.
+struct Advertised {
+    /// Lower case, without a leading slash.
+    name: String,
+    /// Whether the agent gave a hint for text typed after the name, which a focus is.
+    takes_input: bool,
 }
 
 impl State {
@@ -611,7 +625,27 @@ impl AcpRun {
                 };
                 state.push(None, event("permission", Some(text)));
             }
-            Event::Completed { .. } => state.push(None, event("completed", None)),
+            Event::Completed { .. } => {
+                // The agent says nothing a host could read of a compaction beyond its turn ending
+                // well, so that end is the report.
+                if std::mem::take(&mut state.compacting) {
+                    let change = SessionChange {
+                        trigger: Some("manual".to_owned()),
+                        ..SessionChange::default()
+                    };
+                    state.push(None, change.event(COMPACTED_EVENT, None));
+                }
+                state.push(None, event("completed", None));
+            }
+            Event::Commands(list) => {
+                state.commands = list
+                    .into_iter()
+                    .map(|command| Advertised {
+                        name: command.name.trim_start_matches('/').to_lowercase(),
+                        takes_input: command.input_hint.is_some(),
+                    })
+                    .collect();
+            }
             Event::Limited(stated) => match serde_json::from_value::<LimitHit>(stated) {
                 Ok(hit) => state.stated_limit = Some(hit),
                 Err(error) => state.push(
@@ -718,6 +752,60 @@ impl AcpRun {
     }
 }
 
+impl AcpRun {
+    /// The prompt that compacts, once the agent is known to advertise `compact`; the turn it
+    /// starts is reported as a compaction when it ends.
+    fn compaction(&self, focus: Option<String>) -> Result<String, ProviderError> {
+        self.catch_up();
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| provider_error("ACP state lock was poisoned"))?;
+        let Some(advertised) = state.commands.iter().find(|command| command.name == "compact")
+        else {
+            return Err(ProviderError::new(
+                Status::GUATIAO_ERR_UNSUPPORTED,
+                "the agent advertises no compact command",
+            ));
+        };
+        let focus = focus
+            .map(|focus| focus.split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter(|focus| !focus.is_empty() && advertised.takes_input);
+        state.compacting = true;
+        Ok(match focus {
+            Some(focus) => format!("/compact {focus}"),
+            None => "/compact".to_owned(),
+        })
+    }
+
+    /// A clear: a new session on the connection the agent is already running on. It is a turn
+    /// of its own, ended at once.
+    fn clear(&self) -> Result<(), ProviderError> {
+        self.catch_up();
+        let id = self.run.new_session().map_err(|error| {
+            ProviderError::new(
+                Status::GUATIAO_ERR_UNSUPPORTED,
+                format!("the agent opened no new session: {error}"),
+            )
+        })?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| provider_error("ACP state lock was poisoned"))?;
+        state.provider_id = Some(id.clone());
+        state.finished = false;
+        state.cancelling = false;
+        let change = SessionChange {
+            trigger: Some("manual".to_owned()),
+            session_id: Some(id),
+            ..SessionChange::default()
+        };
+        state.push(None, change.event(CLEARED_EVENT, None));
+        state.push(None, event("completed", None));
+        Ok(())
+    }
+}
+
 impl AgentSession for AcpRun {
     fn session_id(&self) -> Result<Option<String>, ProviderError> {
         self.catch_up();
@@ -730,21 +818,25 @@ impl AgentSession for AcpRun {
     }
 
     fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {
-        // A façade is a handler's session, which reads the command itself. Any other agent is
-        // one this client can neither ask for its advertised commands nor open a second
-        // session on, so it has no command to carry out.
+        // A facade is a handler's session, which reads the command itself. Any other agent
+        // carries out what it advertises (`compact`) and what ACP gives every client (a new
+        // session on the same connection).
+        let mut text = message.text;
         if !self.events_capability {
-            SessionCommand::refuse_in(
-                &message.text,
-                "an ACP agent's session takes no AI6 session command",
-            )?;
+            match SessionCommand::parse(&text)
+                .map_err(|why| ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, why))?
+            {
+                Some(SessionCommand::Clear) => return self.clear(),
+                Some(SessionCommand::Compact { focus }) => text = self.compaction(focus)?,
+                None => {}
+            }
         }
         if let Ok(mut state) = self.state.lock() {
             state.finished = false;
             state.cancelling = false;
         }
         self.run
-            .send(message.text)
+            .send(text)
             .map_err(|_| provider_error("the ACP connection is closed"))
     }
 

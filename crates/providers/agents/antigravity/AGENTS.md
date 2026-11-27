@@ -265,6 +265,25 @@ running it does nothing.
 
 `close` kills the terminal, waits up to `close_wait_ms` and removes the Run's directory.
 
+## Compacting and clearing a live Run
+
+`session_commands()` reports `compact` and `clear`. A message in `ai6::SessionCommand`'s form is read by the Run,
+never written to agy as words.
+
+- `compact` writes the user message `/compact` (agy 1.4.12 takes no focus here, so one is dropped). agy runs
+  it as a turn of its own: a `step_update` `user_input`, a `checkpoint` step (`DONE`) and a `result` whose
+  `response` is empty. The checkpoint is the `compacted` event (trigger `manual`; agy's own compaction of a
+  long conversation writes the same step, trigger `auto`). agy reports no tokens before or after, so the
+  `SessionChange` has none. A command turn that ends with no checkpoint is `compact_failed`.
+- `clear` is not agy's: `/clear` in print mode ends the run with an `ERROR` result and exit code 2 ("not
+  available in print mode"). A clear here ends the agy and starts another with the Run's own launch line (its
+  agent file and system prompt) and no `--conversation`, so it is a new process on a new conversation of the
+  same Run. `session_id()` answers the new conversation's id once its `init` is read, and the Station records
+  it. A Run that resumed a conversation refuses `clear` (`GUATIAO_ERR_UNSUPPORTED`): its launch carries no
+  agent file to start another with.
+- Measured on agy 1.4.12 against a loopback Gemini stand-in (`tools/agy_live/stub_gemini.py`), no quota; the
+  recorded lines are `tests/fixtures/agy-1.4.12/turn_compact.jsonl`. Not run: a real login.
+
 ## What an update could break
 
 The tests would notice a change in the lines recorded; a real run is what notices the rest. In order of

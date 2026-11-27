@@ -203,8 +203,7 @@ chain of Runs that shared one provider session. At or past `[harness] compact_at
 `compact_at_cap_percent` of the smallest `token_cap` among its Agent's routes, the window resumes
 the last run's session and compacts it before sending the brief (if its handler declares it;
 a declared compaction with no report within `[harness] compact_wait` has failed); if the handler cannot, or
-compaction fails or leaves it over the size, it clears the session (Claude Code refuses to clear a
-resumed session) and sends the brief after the last run's own account of what it did; and if neither
+compaction fails or leaves it over the size, it clears the session and sends the brief after the last run's own account of what it did; and if neither
 works the window's Run is closed and the next try starts a fresh Run with that account as its
 summary, as for a resume the provider refused. The timeline says which step ran, with the tokens
 before and after, and the Run record keeps the size left, so the next window counts from there

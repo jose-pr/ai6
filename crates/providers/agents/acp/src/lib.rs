@@ -503,6 +503,17 @@ impl AcpHandler {
 }
 
 impl AgentHandler for AcpHandler {
+    /// What an ACP agent carries out is what it advertises (`compact`) and what ACP gives every
+    /// client (`session/new` on the connection), which only a session knows: this says what the
+    /// handler may do, and a session refuses a command its agent cannot carry out.
+    fn session_commands(&self) -> Result<ai6::SessionCommands, ProviderError> {
+        Ok(ai6::SessionCommands {
+            compact: true,
+            clear: true,
+            unsupported_because: None,
+        })
+    }
+
     /// An ACP agent's usage is what its failed turns say: a refusal read as a limit is the only
     /// figure, and nothing reads it between turns.
     fn usage_support(&self) -> Result<ai6::UsageSupport, ProviderError> {

@@ -328,6 +328,7 @@ impl AgentHandler for AntigravityHandler {
         Ok(ai6::SessionCommands {
             compact: true,
             clear: true,
+            unsupported_because: None,
         })
     }
 

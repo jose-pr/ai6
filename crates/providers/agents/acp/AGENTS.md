@@ -76,11 +76,22 @@ pub struct AcpHandler;                           // AgentHandler provider id "ac
 
 ## Session commands
 
-`session_commands()` keeps the default (none). A message in `ai6::SessionCommand`'s form sent to an ACP agent
-is refused with `GUATIAO_ERR_UNSUPPORTED`; it is never prompted as words. `coqui_acp`'s client does not
-surface `available_commands_update` or open a second session (`session/new`) on its connection, so neither a
-compaction by an advertised command nor a clear can be carried out from here. A façade (a handler's session
-reached over ACP) passes the form through to the handler.
+`session_commands()` says `compact` and `clear`: what the handler may do. Which an agent carries out is known
+only to its session, which refuses (`GUATIAO_ERR_UNSUPPORTED`, so the Station goes on to the next step) a
+command the agent cannot. A message in `ai6::SessionCommand`'s form is never prompted as words.
+
+- `compact`: carried out only if the agent advertised a `compact` command (`available_commands_update`;
+  `coqui_acp`'s `Event::Commands`, a leading slash and case ignored). It is sent as the prompt `/compact`,
+  with a focus only when the advertised command has an input hint. The agent reports nothing a host can read
+  of a compaction, so the turn ending well is the `compacted` event (trigger `manual`, no token counts); a
+  turn that fails is that failure.
+- `clear`: `session/new` on the same connection (`coqui_acp`'s `Session::new_session`), so the agent's process
+  stays; the `cleared` event carries the new session id and the Run reports it. An agent that refuses a second
+  session refuses the clear.
+- A facade (a handler's session reached over ACP) passes the form through to the handler.
+- The fake agent (`FAKE_COMMANDS=compact`) advertises commands, answers `/compact` and numbers its sessions;
+  the tests use it. What each real agent (Grok, Pi, Antigravity under `acp`) advertises was not measured with a
+  login: none is claimed.
 
 ## Grok's login kept in the Registry
 

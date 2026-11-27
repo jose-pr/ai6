@@ -468,9 +468,10 @@ stream-json input against a loopback stand-in (no model reached):
 - `/clear` writes `conversation_reset` (`trigger` `clear`, `new_conversation_id`, which is NOT the
   session id), then a `system/init` with a NEW `session_id`, then a `result`. The process id is the same.
   The event is `cleared`, and `session_id()` answers the new id once its `init` is read; the Station
-  records that id for a later resume. A Run that was RESUMED refuses `clear` (`GUATIAO_ERR_UNSUPPORTED`):
-  `coqui-acp-claude`'s session ends a resumed session that reports another id, which is what `/clear` makes
-  (seen in a test; a real resumed `/clear` was not run). `compact` has no such limit.
+  records that id for a later resume. A RESUMED Run clears too: the handler's own check of the session a
+  resume must report stops holding that id once a clear the Station asked for has been answered by its
+  `conversation_reset`, and `coqui-acp-claude`'s session does the same; a different id with no clear asked
+  for is still the wrong Run. A real resumed `/clear` was not run (stand-in lines only).
 - Not run: either command against a real login (it would spend quota).
 
 ## Listing models

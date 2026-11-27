@@ -207,15 +207,13 @@ impl AgentHandler for CodexHandler {
         Ok(ai6::HarnessStdio::Json)
     }
 
-    /// The app server compacts a thread on request (`thread/compact/start`). A new thread in
-    /// the same app server is not offered: the driver's session is bound to one thread.
+    /// The app server compacts a thread on request (`thread/compact/start`) and opens another
+    /// thread on request (`thread/start`), which is a clear that keeps the process.
     fn session_commands(&self) -> Result<ai6::SessionCommands, ProviderError> {
         Ok(ai6::SessionCommands {
             compact: true,
-            clear: false,
-            unsupported_because: Some(
-                "the Codex driver keeps one thread for the life of its app server".to_owned(),
-            ),
+            clear: true,
+            unsupported_because: None,
         })
     }
 
@@ -761,14 +759,14 @@ fn open(opening: Opening<'_>) -> Result<CodexRun, ProviderError> {
         .map_err(started_with)?;
     // The thread was opened with the model; a turn names none of its own.
     session.set_model(None);
-    let thread_id = RunId::try_from(session.thread().to_owned())
+    let thread_id = RunId::try_from(session.thread())
         .map_err(|error| refuse(Status::GUATIAO_ERR_BAD_VALUE, error))?;
     let session = Arc::new(session);
     *lock(&shared.session)? = Arc::downgrade(&session);
     Ok(CodexRun {
         session,
         shared,
-        thread_id,
+        thread_id: Mutex::new(thread_id),
         request_wait: config.millis(config.request_timeout_ms),
     })
 }
@@ -1303,7 +1301,8 @@ impl Shared {
 struct CodexRun {
     session: Arc<AppServer>,
     shared: Arc<Shared>,
-    thread_id: RunId,
+    /// The thread the Run is on: the one it opened with, or the last a clear opened.
+    thread_id: Mutex<RunId>,
     /// How long the app server may take to answer a request of the Station's own.
     request_wait: Duration,
 }
@@ -1602,9 +1601,40 @@ fn decode_event(message: &Value, hint: Option<&LimitHit>) -> Option<AgentEvent> 
     })
 }
 
+impl CodexRun {
+    /// A clear: another thread on the same app server, which the session then prompts. What the
+    /// old thread was counted at does not carry over. The clear is a turn of its own, ended at
+    /// once.
+    fn clear(&self) -> Result<(), ProviderError> {
+        let opened = self
+            .session
+            .new_thread()
+            .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error))?;
+        let thread = RunId::try_from(opened)
+            .map_err(|error| refuse(Status::GUATIAO_ERR_BAD_VALUE, error))?;
+        *lock(&self.shared.context)? = Context::default();
+        *lock(&self.thread_id)? = thread.clone();
+        let change = SessionChange {
+            trigger: Some("manual".to_owned()),
+            session_id: Some(thread.into()),
+            ..SessionChange::default()
+        };
+        self.shared.push(change.event(ai6::CLEARED_EVENT, None));
+        self.shared.push(AgentEvent {
+            kind: "completed".to_owned(),
+            text: None,
+            data: None,
+            limit: None,
+            tools: Vec::new(),
+            report: None,
+        });
+        Ok(())
+    }
+}
+
 impl AgentSession for CodexRun {
     fn session_id(&self) -> Result<Option<String>, ProviderError> {
-        Ok(Some(self.thread_id.clone().into()))
+        Ok(Some(lock(&self.thread_id)?.clone().into()))
     }
 
     fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {
@@ -1624,10 +1654,7 @@ impl AgentSession for CodexRun {
                     .map(drop)
                     .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error))
             }
-            Some(SessionCommand::Clear) => Err(refuse(
-                Status::GUATIAO_ERR_UNSUPPORTED,
-                "the Codex driver keeps one thread for the life of its app server",
-            )),
+            Some(SessionCommand::Clear) => self.clear(),
             None => self
                 .session
                 .prompt(&[Content::Text(message.text)])
@@ -4039,27 +4066,49 @@ mod tests {
         assert!(!kinds.contains(&ai6::COMPACTED_EVENT));
     }
 
-    /// The driver's session is bound to one thread, so a clear is refused, not sent as words.
+    /// A clear is `thread/start` on the same app server: the Run takes the new thread, which the
+    /// next message is a turn of, and the old thread's token count is forgotten.
     #[test]
-    fn a_clear_is_refused_because_the_thread_cannot_change() {
+    fn a_clear_opens_another_thread_on_the_same_app_server() {
         let (run, writes) = resumed_with(
             vec![
                 b"{\"id\":1,\"result\":{}}\n".to_vec(),
                 b"{\"id\":2,\"result\":{\"thread\":{\"id\":\"codex-thread-42\"}}}\n".to_vec(),
+                b"{\"id\":3,\"result\":{\"data\":[]}}\n".to_vec(),
+                b"{\"id\":4,\"result\":{\"thread\":{\"id\":\"codex-thread-43\"}}}\n".to_vec(),
+                b"{\"id\":5,\"result\":{}}\n".to_vec(),
             ],
-            2,
+            5,
         );
-        let refused = run
-            .send_message(AgentMessage {
-                text: SessionCommand::Clear.encode(),
-            })
-            .unwrap_err();
-        assert!(refused.to_string().contains("one thread"), "{refused}");
+        assert_eq!(run.session_id().unwrap().as_deref(), Some("codex-thread-42"));
+        run.send_message(AgentMessage {
+            text: SessionCommand::Clear.encode(),
+        })
+        .unwrap();
+        let events = std::iter::from_fn(|| run.next_event(400).unwrap()).collect::<Vec<_>>();
+        let kinds = events.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>();
+        assert_eq!(kinds, [ai6::CLEARED_EVENT, "completed"], "{events:?}");
+        let change = SessionChange::of(&events[0]).unwrap();
+        assert_eq!(change.session_id.as_deref(), Some("codex-thread-43"));
+        assert_eq!(run.session_id().unwrap().as_deref(), Some("codex-thread-43"));
+        run.send_message(AgentMessage {
+            text: "after the clear".to_owned(),
+        })
+        .unwrap();
         let written = String::from_utf8(writes.lock().unwrap().clone()).unwrap();
-        assert!(!written.contains("turn/start"));
+        let messages = written
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert!(messages.iter().any(|message| message["method"] == "thread/start"));
+        let turn = messages
+            .iter()
+            .find(|message| message["method"] == "turn/start")
+            .expect("the next message is a turn");
+        assert_eq!(turn["params"]["threadId"], "codex-thread-43");
         let handler = CodexHandler::try_from(CodexConfig::default()).unwrap();
         let commands = handler.session_commands().unwrap();
-        assert!(commands.compact && !commands.clear);
+        assert!(commands.compact && commands.clear);
     }
 
     /// The app server's replies as ConPTY renders them on Windows: mode and title sequences

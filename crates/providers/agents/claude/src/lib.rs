@@ -1623,12 +1623,7 @@ fn open(opening: Opening<'_>) -> Result<ClaudeRun, ProviderError> {
             ));
         }
     };
-    let resumed = shared.expected_run_id.is_some();
-    Ok(ClaudeRun {
-        session,
-        shared,
-        resumed,
-    })
+    Ok(ClaudeRun { session, shared })
 }
 
 /// An exit reason in the words of a Run: how the driver words it, with a negative exit code also
@@ -1657,7 +1652,11 @@ struct Shared {
     arrived: Condvar,
     /// The provider ID, once Claude has reported it.
     run_id: Mutex<Option<RunId>>,
-    expected_run_id: Option<RunId>,
+    /// The session a resumed launch must report, until a clear the Station asked for gives the
+    /// Run another.
+    expected_run_id: Mutex<Option<RunId>>,
+    /// Set when the Station asked for a clear, until Claude Code's `conversation_reset` answers it.
+    clear_asked: AtomicBool,
     /// Why the Run ended on a line Claude wrote, for the caller of `next_event` to be told once.
     refused: Mutex<Option<ProviderError>>,
     /// For a restricted (answer-only or assistant) Run, what it may call.
@@ -1676,7 +1675,8 @@ impl Shared {
             events: Mutex::new(VecDeque::new()),
             arrived: Condvar::new(),
             run_id: Mutex::new(None),
-            expected_run_id,
+            expected_run_id: Mutex::new(expected_run_id),
+            clear_asked: AtomicBool::new(false),
             refused: Mutex::new(None),
             restricted,
             tripped: AtomicBool::new(false),
@@ -1743,8 +1743,9 @@ impl Shared {
             };
             let different = self
                 .expected_run_id
-                .as_ref()
-                .is_some_and(|expected| expected != &run_id);
+                .lock()
+                .map(|expected| expected.as_ref().is_some_and(|expected| expected != &run_id))
+                .unwrap_or(false);
             // Kept even when it is the wrong one: `run_id` is how the Station learns that.
             if let Ok(mut known) = self.run_id.lock() {
                 *known = Some(run_id);
@@ -1757,6 +1758,12 @@ impl Shared {
             }
         }
         let kind = value.get("type").and_then(Value::as_str);
+        // The clear the Station asked for makes a new session: the next id is the Run's.
+        if kind == Some("conversation_reset") && self.clear_asked.swap(false, Ordering::AcqRel) {
+            if let Ok(mut expected) = self.expected_run_id.lock() {
+                *expected = None;
+            }
+        }
         if kind == Some("control_response") {
             control_answered(value);
         }
@@ -1831,18 +1838,14 @@ struct ClaudeRun {
     /// `None` for a Claude Code that ended before it was started: its Run only reports that.
     session: Option<Session>,
     shared: Arc<Shared>,
-    /// Whether the launch named the session to resume: the driver ends a session that then
-    /// reports another one, which is what `/clear` makes.
-    resumed: bool,
 }
 
 impl ClaudeRun {
     fn command(&self, command: &SessionCommand) -> Result<(), ProviderError> {
-        if self.resumed && *command == SessionCommand::Clear {
-            return Err(refuse(
-                Status::GUATIAO_ERR_UNSUPPORTED,
-                "a resumed Claude Code session is ended by the driver when /clear gives it a new session id",
-            ));
+        // A resumed Run holds the session it was asked for; a clear gives it another, which is
+        // then the one it holds.
+        if *command == SessionCommand::Clear {
+            self.shared.clear_asked.store(true, Ordering::Release);
         }
         match &self.session {
             Some(session) => session
@@ -3447,18 +3450,46 @@ mod tests {
         );
     }
 
-    /// The driver ends a resumed session that reports another id, so a clear there is refused
-    /// before anything is written.
+    /// A resumed Run clears too: the new session id, which Claude Code reports after the reset the
+    /// Station asked for, is the one the Run holds from then on, and no line of it is refused.
     #[test]
-    fn a_resumed_run_refuses_a_clear() {
-        let (run, writes) = resumed_on("");
-        let refused = run
-            .send_message(AgentMessage {
-                text: SessionCommand::Clear.encode(),
-            })
-            .unwrap_err();
-        assert!(refused.to_string().contains("/clear"), "{refused}");
-        assert!(written_texts_now(&writes).is_empty());
+    fn a_resumed_run_clears_and_takes_the_new_session_id() {
+        let stream = concat!(
+            "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"claude-session-42\"}\n",
+            "{\"type\":\"conversation_reset\",\"new_conversation_id\":\"conv-9\",\"trigger\":\"clear\",\"session_id\":\"claude-session-42\"}\n",
+            "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"claude-session-43\"}\n",
+            "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"num_turns\":0,\"session_id\":\"claude-session-43\"}\n",
+        );
+        let (run, writes) = resumed_on(stream);
+        run.send_message(AgentMessage {
+            text: SessionCommand::Clear.encode(),
+        })
+        .unwrap();
+        assert_eq!(written_texts(&writes), ["/clear".to_owned()]);
+        let events = std::iter::from_fn(|| run.next_event(400).unwrap()).collect::<Vec<_>>();
+        let kinds = events.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>();
+        assert_eq!(kinds, ["system", "cleared", "system", "completed"], "{events:?}");
+        assert_eq!(
+            run.session_id().unwrap().as_deref(),
+            Some("claude-session-43")
+        );
+    }
+
+    /// A session id that differs with no clear asked for is still the wrong Run.
+    #[test]
+    fn another_session_without_a_clear_is_still_refused() {
+        let stream = concat!(
+            "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"claude-session-99\"}\n",
+        );
+        let (run, _writes) = resumed_on(stream);
+        let error = loop {
+            match run.next_event(400) {
+                Err(error) => break error,
+                Ok(Some(_)) => {}
+                Ok(None) => panic!("the wrong Run was not refused"),
+            }
+        };
+        assert!(error.to_string().contains("different Run"), "{error}");
     }
 
     #[test]

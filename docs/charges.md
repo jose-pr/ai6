@@ -111,15 +111,17 @@ Before a wake, a conversation at or past the Station's `[harness]` setting is sh
 this order:
 
 1. **Compact in the warm session.** The charge's running harness is asked to compact its own
-   conversation, and the wake is the next turn in the same Run. Claude Code (`/compact`) and Codex
-   (a thread compaction) declare it. A command is sent only to a handler that declares it; one that
+   conversation, and the wake is the next turn in the same Run. Claude Code (`/compact`), Codex (a
+   thread compaction), the Antigravity CLI (`/compact`) and an ACP agent that advertises a `compact`
+   command declare it. A command is sent only to a handler that declares it; one that
    does not is never sent `/compact` as words. A declared compaction whose turn ends with no
    compaction boundary, or whose report does not come within `[harness] compact_wait` (ten minutes
    by default; `none` waits as long as the harness runs), has failed, and the logbook says so.
 2. **Clear the warm process.** If the handler cannot compact, the compaction fails, or it leaves the
    conversation at or past the setting, the harness is cleared and the same process goes on with a
    new conversation; the wake is sent after the logbook, as its summary. Claude Code clears
-   (`/clear`); Codex keeps one thread for the life of its app server and does not.
+   (`/clear`), Codex opens another thread on the same app server, an ACP agent opens another session
+   on the same connection, and the Antigravity CLI is run again on a new conversation of the same Run.
 3. **A fresh Run.** Only if the process is gone or cannot clear does the Station close the harness
    and start a fresh Run, handing it the logbook as its summary, as for a Run that cannot be
    resumed. A charge whose harness is not running (after a restart) starts there too.
