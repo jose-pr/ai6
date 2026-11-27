@@ -1527,11 +1527,11 @@ fn a_compaction_that_writes_no_checkpoint_is_reported_as_failed() {
 fn a_clear_runs_agy_again_on_a_new_conversation_of_the_same_run() {
     let (_root, wd) = checkout();
     let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
-    fake.0
-        .lock()
-        .unwrap()
-        .ids
-        .push_back("00000000-0000-4000-8000-00000000c0df".to_owned());
+    // The first start takes the first id, the clear the second.
+    fake.0.lock().unwrap().ids.extend([
+        CONV.to_owned(),
+        "00000000-0000-4000-8000-00000000c0df".to_owned(),
+    ]);
     let run = started(&fake, start_request(&wd, "field"), "");
     events_until(&run, &["completed"]);
     let first = fake.launch();
