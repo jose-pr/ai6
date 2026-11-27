@@ -125,6 +125,8 @@ dependencies = [
  "coqui-acp-claude",
  "coqui-acp-codex",
  "coqui-acp-harness",
+ "coqui-acp-history",
+ "coqui-acp-pool",
  "coqui-acp-provider",
  "coqui-agentic-peer",
  "coqui-aos",
@@ -1505,6 +1507,16 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.1",
+]
+
+[[package]]
+name = "coqui-acp-pool"
+version = "0.0.0-alpha.0"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=f8bb07f4376fd3ca74960a64d952272d592cdfff#f8bb07f4376fd3ca74960a64d952272d592cdfff"
+dependencies = [
+ "coqui-acp-api",
+ "coqui-acp-history",
+ "serde_json",
 ]
 
 [[package]]
@@ -5576,7 +5588,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",

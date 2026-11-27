@@ -80,6 +80,7 @@ coqui-transport = { workspace = true, optional = true }
 coqui-transport-web = { workspace = true, optional = true }
 coqui-peer-webcrypto = { workspace = true, optional = true }
 coqui-acp-api.workspace = true
+coqui-acp-pool.workspace = true
 # Claude Code's and Codex's account providers describe their accounts (`directorates::q`) and renew a sealed login (`station::renewer`).
 coqui-acp-claude.workspace = true
 coqui-acp-codex.workspace = true
@@ -143,6 +144,7 @@ libc = "0.2.170"
 rustix = { version = "1.1.5", features = ["process", "termios"], optional = true }
 
 [dev-dependencies]
+coqui-acp-history.workspace = true
 coqui-aos = { workspace = true, features = ["test-support"] }
 rmcp = { workspace = true, features = ["client", "transport-streamable-http-client-reqwest"] }
 tokio.workspace = true

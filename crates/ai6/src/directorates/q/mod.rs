@@ -2,6 +2,7 @@
 
 pub(crate) mod harness_accounts;
 mod mcp;
+pub(crate) mod pool_pick;
 mod pools;
 mod sandbox;
 mod secrets;

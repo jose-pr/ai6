@@ -118,6 +118,10 @@ coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "
 # The usage model (buckets, limits, spend) and the words that read a failed turn as a limit; the same
 # revision as coqui-acp.
 coqui-acp-api = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "f8bb07f4376fd3ca74960a64d952272d592cdfff" }
+# Which account or route takes a Run: the order, the room checks and the tie-break. Same revision as coqui-acp.
+coqui-acp-pool = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "f8bb07f4376fd3ca74960a64d952272d592cdfff" }
+# The exported history a session carries between accounts; the revision of coqui-acp.
+coqui-acp-history = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "f8bb07f4376fd3ca74960a64d952272d592cdfff" }
 # The Antigravity quota reader (`antigravity`) and the usage tracker that merges readings; same revision.
 coqui-acp-harness = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "f8bb07f4376fd3ca74960a64d952272d592cdfff", default-features = false }
 # Codex's app-server driver: the session a Codex Run is, and the read of an account's rate limits with no thread and no turn.

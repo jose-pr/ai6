@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use super::limits::AccountLimits;
 use super::store::{FileRegistry, invalid_data};
 use crate::directorates::medical::usage::utc_day;
-use crate::directorates::q::{AccountPool, PoolStrategy};
+use crate::directorates::q::{AccountPool, PoolStrategy, pool_pick};
 
 /// One account of one pool.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -540,52 +540,37 @@ pub fn choose_account<'a>(
     unknown_use: u16,
     station: &str,
 ) -> Option<&'a AccountCandidate> {
-    let active = |candidate: &AccountCandidate| {
-        states
-            .get(&candidate.account)
-            .map_or(0, |state| state.live_claims(now).count())
-    };
-    let room = |candidate: &&AccountCandidate| {
-        let state = states.get(&candidate.account);
-        !state.is_some_and(|state| state.is_limited(now))
-            && (!candidate.sealed_login
-                || state
-                    .and_then(|state| state.login.as_ref())
-                    .is_some_and(|login| login.usable_by(station)))
-            && candidate
-                .max_concurrent
-                .is_none_or(|limit| active(candidate) < limit)
-    };
-    let open: Vec<&AccountCandidate> = candidates.iter().filter(room).collect();
-    if let Some(preferred) = prefer.and_then(|name| open.iter().find(|c| c.account == name)) {
-        return Some(preferred);
-    }
-    let last_used = |candidate: &AccountCandidate| {
-        states
-            .get(&candidate.account)
-            .and_then(|state| state.last_used)
-            .unwrap_or(f64::NEG_INFINITY)
-    };
-    let use_of = |candidate: &AccountCandidate| {
-        states
-            .get(&candidate.account)
-            .map_or(unknown_use, |state| state.highest_use(now, unknown_use))
-    };
-    open.into_iter().min_by(|left, right| {
-        let by_name = left.account.cmp(&right.account);
-        let by_last_used = last_used(left).total_cmp(&last_used(right));
-        let by_priority = right.priority.cmp(&left.priority);
-        match strategy {
-            PoolStrategy::RoundRobin => by_last_used.then(by_name),
-            PoolStrategy::Priority => by_priority.then(by_name),
-            _ => use_of(left)
-                .cmp(&use_of(right))
-                .then(active(left).cmp(&active(right)))
-                .then(by_last_used)
-                .then(by_priority)
-                .then(by_name),
-        }
-    })
+    // Ties go to the account named first, whatever order the candidates are listed in.
+    let mut listed: Vec<&'a AccountCandidate> = candidates.iter().collect();
+    listed.sort_by(|left, right| left.account.cmp(&right.account));
+    let entries: Vec<pool_pick::Entry> = listed
+        .iter()
+        .map(|candidate| {
+            let state = states.get(&candidate.account);
+            pool_pick::Entry {
+                priority: candidate.priority,
+                max_concurrent: candidate.max_concurrent,
+                active: state.map_or(0, |state| state.live_claims(now).count()),
+                used_permille: Some(
+                    state.map_or(unknown_use, |state| state.highest_use(now, unknown_use)),
+                ),
+                last_used: state.and_then(|state| state.last_used),
+                unavailable: if state.is_some_and(|state| state.is_limited(now)) {
+                    Some("limited")
+                } else if candidate.sealed_login
+                    && !state
+                        .and_then(|state| state.login.as_ref())
+                        .is_some_and(|login| login.usable_by(station))
+                {
+                    Some("its sealed login cannot be opened here")
+                } else {
+                    None
+                },
+            }
+        })
+        .collect();
+    let prefer = prefer.and_then(|name| listed.iter().position(|each| each.account == name));
+    pool_pick::pick(strategy, &entries, prefer, unknown_use).map(|at| listed[at])
 }
 
 /// Applies a claim to the candidates' `states`: drops lapsed claims and any earlier claim of

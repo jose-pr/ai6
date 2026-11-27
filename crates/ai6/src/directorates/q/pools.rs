@@ -12,6 +12,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use super::harness_accounts;
+use super::pool_pick;
 
 /// How a harness reads an account's credential.
 #[non_exhaustive]
@@ -718,28 +719,24 @@ pub struct RouteStanding {
 /// tie: [`PoolStrategy::Headroom`] compares use, then Runs, then who waited longest, then
 /// priority; [`PoolStrategy::RoundRobin`] who waited longest; [`PoolStrategy::Priority`] priority
 /// alone, so routes of equal priority go in the order they are listed. `None` when `open` is empty.
+/// The order is `coqui-acp-pool`'s (through `pool_pick`, which is private).
 pub fn choose_route(
     strategy: PoolStrategy,
     open: &[RouteStanding],
     unknown_use: u16,
 ) -> Option<usize> {
-    let last_used = |route: &RouteStanding| route.last_used.unwrap_or(f64::NEG_INFINITY);
-    let compare = |left: &RouteStanding, right: &RouteStanding| {
-        let by_last_used = last_used(left).total_cmp(&last_used(right));
-        let by_priority = right.priority.cmp(&left.priority);
-        match strategy {
-            PoolStrategy::RoundRobin => by_last_used,
-            PoolStrategy::Priority => by_priority,
-            PoolStrategy::Headroom => left
-                .used_permille
-                .unwrap_or(unknown_use)
-                .cmp(&right.used_permille.unwrap_or(unknown_use))
-                .then(left.active.cmp(&right.active))
-                .then(by_last_used)
-                .then(by_priority),
-        }
-    };
-    (0..open.len()).min_by(|left, right| compare(&open[*left], &open[*right]).then(left.cmp(right)))
+    let entries: Vec<pool_pick::Entry> = open
+        .iter()
+        .map(|route| pool_pick::Entry {
+            priority: route.priority,
+            max_concurrent: None,
+            active: route.active,
+            used_permille: route.used_permille,
+            last_used: route.last_used,
+            unavailable: None,
+        })
+        .collect();
+    pool_pick::pick(strategy, &entries, None, unknown_use)
 }
 
 /// Logs a Codex account in to a `CODEX_HOME`, for the kinds Codex reads only from there.
