@@ -579,6 +579,46 @@ pub(super) fn issue_for_charge(
     issue_for(state, holder, agent, on, None, site, environment).map(drop)
 }
 
+/// Whether the loadout the configuration declares for `agent` is loaded on this Station: a Run
+/// started without it would have no credential and no tool environment and say nothing.
+///
+/// # Errors
+///
+/// Which part is missing (the catalog, the loadout, a secret or an overlay), naming the Agent.
+pub(super) fn loadout_ready(state: &DaemonState, agent: &str) -> Result<(), String> {
+    if !state.config.declares_loadout(agent) {
+        return Ok(());
+    }
+    let Some(declared) = state.config.declared_loadouts() else {
+        return Ok(());
+    };
+    let Ok(declared_loadout) = declared.for_agent(agent) else {
+        return Ok(());
+    };
+    let missing = |what: String| {
+        Err(format!(
+            "the loadout of Agent {agent:?} is not loaded on this Station yet: {what}"
+        ))
+    };
+    let Some(loaded) = state.station.credentials.catalog() else {
+        return missing("catalog".to_owned());
+    };
+    if loaded.for_agent(agent).is_err() {
+        return missing("loadout".to_owned());
+    }
+    for name in declared_loadout.secret_names() {
+        if declared.knows_secret(name) && !loaded.knows_secret(name) {
+            return missing(format!("secret {name}"));
+        }
+    }
+    for name in declared_loadout.overlay_names() {
+        if declared.overlay(name).is_some() && loaded.overlay(name).is_none() {
+            return missing(format!("overlay {name}"));
+        }
+    }
+    Ok(())
+}
+
 fn issue_for(
     state: &DaemonState,
     holder: Holder<'_>,
@@ -595,6 +635,7 @@ fn issue_for(
         super::accounts::claim_implicit(state, pool, holder)?;
     }
     let Some(catalog) = &desk.catalog else {
+        loadout_ready(state, &agent.id)?;
         return Ok(Vec::new());
     };
     let broker = desk.broker(

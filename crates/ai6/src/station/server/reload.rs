@@ -181,6 +181,26 @@ impl LiveConfig {
         self.live.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// The loadouts the configuration provider holds now; `None` when the Station's loadouts
+    /// were set in code or the provider declares none.
+    pub(super) fn declared_loadouts(&self) -> Option<Arc<LoadoutCatalog>> {
+        self.lock().catalog.clone().flatten()
+    }
+
+    /// Whether the configuration the Station follows declares a loadout for `agent`.
+    pub(super) fn declares_loadout(&self, agent: &str) -> bool {
+        self.declared_loadouts()
+            .is_some_and(|catalog| catalog.for_agent(agent).is_ok())
+    }
+
+    /// Declares `catalog` as the provider's loadouts, for tests of a Station whose desk has not
+    /// taken them.
+    #[cfg(test)]
+    pub(super) fn with_declared_loadouts(self, catalog: LoadoutCatalog) -> Self {
+        self.lock().catalog = Some(Some(Arc::new(catalog)));
+        self
+    }
+
     /// The roster the Station runs now, when it reads one.
     pub(super) fn roster(&self) -> Option<Arc<Roster>> {
         self.lock().roster.clone()

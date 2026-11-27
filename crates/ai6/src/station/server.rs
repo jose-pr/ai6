@@ -5251,6 +5251,10 @@ async fn start_mission(
     let issued = if review {
         None
     } else {
+        if let Err(reason) = credentials::loadout_ready(&state, &agent.id) {
+            agents::note_waiting(&state, &mission, Some(reason.clone()));
+            return Err(conflict(&reason));
+        }
         let (worker, worker_agent, worker_operation) = (
             state.clone(),
             agent.id.clone(),
@@ -6609,6 +6613,7 @@ async fn resume_mission(
     let mut resumed_context = None;
     let mut resumed_theater_environment = None;
     if !review && reattach.is_none() {
+        credentials::loadout_ready(&state, &resume_agent.id).map_err(|reason| conflict(&reason))?;
         let (worker, worker_agent, worker_operation) = (
             state.clone(),
             resume_agent.id.clone(),
@@ -15200,6 +15205,60 @@ theater = \"other-box\"
             }
         }
         found
+    }
+
+    /// A Station whose configuration declares an Agent's loadout but whose desk has not loaded it
+    /// must not start the Run bare.
+    #[tokio::test]
+    async fn a_first_launch_whose_loadout_is_not_loaded_fails_naming_it() {
+        let root = tempfile::tempdir().unwrap();
+        let mut state = test_state(
+            root.path(),
+            "",
+            "[agent.007]\nhandler = \"mock-recorder\"\n",
+        );
+        state.config = Arc::new(
+            reload::LiveConfig::default().with_declared_loadouts(
+                "[loadout.007]\nsecrets = [\"forge-token\"]\n"
+                    .parse::<crate::directorates::q::LoadoutCatalog>()
+                    .unwrap(),
+            ),
+        );
+        assert!(!state.station.credentials.has_catalog());
+        let brief: Brief = serde_json::from_value(serde_json::json!({
+            "title": "Look", "id": "bare", "operation": "G", "agent": "007",
+        }))
+        .unwrap();
+        create_intake_mission(
+            &state,
+            &brief,
+            &MissionId::try_new("mission-bare").unwrap(),
+            ("G".to_owned(), "007".to_owned(), None),
+        )
+        .unwrap();
+        let refused = start_mission(
+            State(state.clone()),
+            axum::extract::Path("mission-bare".to_owned()),
+            Json(StartMission {
+                working_directory: None,
+                initial_context: Vec::new(),
+                environment: BTreeMap::new(),
+            }),
+        )
+        .await
+        .expect_err("a Run must not start without its loadout");
+        let message = refused.1.0.error;
+        assert!(message.contains("loadout"), "{message}");
+        assert!(message.contains("\"007\""), "{message}");
+        assert!(
+            RECORDED_STARTS
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|request| request.mission_id.as_str() != "mission-bare"),
+            "no Run was started"
+        );
+        state.stopping.store(true, Ordering::Release);
     }
 
     fn credential_loadouts() -> crate::directorates::q::LoadoutCatalog {
