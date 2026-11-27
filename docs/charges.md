@@ -107,13 +107,31 @@ into the conversation's context (prompt tokens, cached or not; for a turn of sev
 counts the context once per request, an upper bound). The charges list shows it beside the record as
 `context_tokens`, and the app as `Conversation: N tokens`.
 
-Before a wake, a conversation at or past the Station's `[harness]` setting is not resumed. The
-Station closes its harness, starts a fresh Run, and hands it the logbook as its summary, as for a
-Run that cannot be resumed; the logbook says `compacted` and why. The setting is
-`compact_at_tokens` (a size; `none` by default) or `compact_at_cap_percent` (75 by default) of the
-smallest `token_cap` among the Agent's routes, whichever is smaller; with no cap and no size nothing
-compacts. Neither is a floor: `0` compacts at every wake. No handler has a compaction of its own
-that AI6 can rely on, so a fresh session with a summary is the only mechanism.
+Before a wake, a conversation at or past the Station's `[harness]` setting is shortened, in
+this order:
+
+1. **Compact in the warm session.** The charge's running harness is asked to compact its own
+   conversation, and the wake is the next turn in the same Run. Claude Code (`/compact`) and Codex
+   (a thread compaction) declare it. A command is sent only to a handler that declares it; one that
+   does not is never sent `/compact` as words. A declared compaction whose turn ends with no
+   compaction boundary, or whose report does not come within `[harness] compact_wait` (ten minutes
+   by default; `none` waits as long as the harness runs), has failed, and the logbook says so.
+2. **Clear the warm process.** If the handler cannot compact, the compaction fails, or it leaves the
+   conversation at or past the setting, the harness is cleared and the same process goes on with a
+   new conversation; the wake is sent after the logbook, as its summary. Claude Code clears
+   (`/clear`); Codex keeps one thread for the life of its app server and does not.
+3. **A fresh Run.** Only if the process is gone or cannot clear does the Station close the harness
+   and start a fresh Run, handing it the logbook as its summary, as for a Run that cannot be
+   resumed. A charge whose harness is not running (after a restart) starts there too.
+
+The logbook says which step ran (`compacted`, `cleared` or `renewed`), with the tokens before and
+after, and why the steps before it did not do. `[harness] compaction` chooses where the order
+begins: `in_session` (the default), `clear` (skip the compaction) or `fresh` (always start a fresh
+Run, as before). It is a live setting, edited through the gateway like the rest of `[harness]`.
+The thresholds are `compact_at_tokens` (a size; `none` by default) and `compact_at_cap_percent`
+(75 by default) of the smallest `token_cap` among the Agent's routes, whichever is smaller; with no
+cap and no size nothing compacts. Neither is a floor: `0` compacts at every wake. A compaction runs
+a model turn, so it happens only at these thresholds or at a full context window.
 
 A turn the gateway refuses for its cap fails with the gateway's own words and is not retried: the
 claude and codex handlers end the turn at the first refusal their harness would retry.
@@ -121,12 +139,12 @@ claude and codex handlers end the turn at the first refusal their harness would 
 **A full context window compacts at once.** A harness that reports a limit that follows the work and
 not the account (a conversation past its model's context window, `continuable: false` in the
 standard limit report) ends the turn as that, not as a quota. The Station then treats the
-conversation as past the setting without waiting for it: it closes the harness, starts a fresh Run
-with the logbook, and takes the same wake again there. The logbook says `compacted` and why. This is
-the fallback for a harness whose own compaction is off or failed: AI6 leaves Claude Code's
-autocompact and Codex's `model_auto_compact_token_limit` as they are and does not turn them off. A
-fresh Run that fills the window too fails the turn, with the reason, and no third Run starts; such
-a limit never marks an account limited and never moves the charge to another route.
+conversation as past the setting without waiting for it: it takes the three steps above, and takes
+the same wake again once, after whichever step succeeded. The logbook says which. AI6 leaves Claude
+Code's autocompact and Codex's `model_auto_compact_token_limit` as they are and does not turn them
+off. A conversation that fills the window again after that fails the turn, with the reason, and no
+further Run starts; such a limit never marks an account limited and never moves the charge to
+another route.
 
 The harness runs on the Station's host, in a directory of its own under the Station's state
 directory (`charges/charge--<scope>`), with its Agent's environment and its route's pool account.

@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `/clear` as user turns in the same process; Codex compacts a thread with `thread/compact/start`; Codex's clear and ACP
   agents' commands are not offered (refused, never sent as words).
 
+- A long conversation is shortened in its running session before a fresh Run replaces it: compact in the warm
+  session, then (handler cannot, compaction failed or left it over the size) clear the process and carry on from the
+  summary, then a fresh Run. It applies to charges, standing orders' windows, Missions and Moneypenny at a full
+  context window, which retries the turn once after the step that worked; the logbook, timeline or notice names the
+  step with the tokens before and after. `[harness] compaction` is `in_session` (default), `clear` or `fresh`, a live
+  setting; a Run record keeps `compacted_to`, the size a later window counts from.
+
 - A Mission whose Run was taken up again after a Station restart fails instead of finishing done when a core tool
   (`[denials] core_tools`) was refused, and a tracker credential that cannot write (a GitHub classic token without
   `repo`, a GitLab token without `api`, a Jira account without Add Comments) now fails the Station's write check

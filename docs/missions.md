@@ -200,20 +200,30 @@ beyond them is not found) and `filter_bytes` (the longest any one filter). A req
 A standing order whose windows resume the last run's session (`resume = true`) is measured the same
 way: the tokens its resumed Runs have taken in (input, output and cache writes) are summed along the
 chain of Runs that shared one provider session. At or past `[harness] compact_at_tokens`, or
-`compact_at_cap_percent` of the smallest `token_cap` among its Agent's routes, the window starts a
-fresh Run instead, with the last run's own account of what it did as its summary, and the timeline
-says so.
+`compact_at_cap_percent` of the smallest `token_cap` among its Agent's routes, the window resumes
+the last run's session and compacts it before sending the brief (if its handler declares it;
+a declared compaction with no report within `[harness] compact_wait` has failed); if the handler cannot, or
+compaction fails or leaves it over the size, it clears the session (Claude Code refuses to clear a
+resumed session) and sends the brief after the last run's own account of what it did; and if neither
+works the window's Run is closed and the next try starts a fresh Run with that account as its
+summary, as for a resume the provider refused. The timeline says which step ran, with the tokens
+before and after, and the Run record keeps the size left, so the next window counts from there
+instead of compacting again. `[harness] compaction = "fresh"` starts the fresh Run at once, as
+before.
 
-**A full context window starts a fresh Run.** A harness that reports a limit that follows the work
-and not the account (a conversation past its model's context window) ends the Run, and the Mission
-is queued again for the same Agent as a fresh Run. The fresh Run is given the Mission's brief and what
-the old Run last did, oldest first, and the old Run's record says `window-full`. A standing order's
-window does not resume the full Run's session. The harness's own autocompact is left on and has had
-its chance first. The turn is retried once: a fresh Run that fills the window too fails the turn, with
-the reason. Such a limit never parks the Mission, marks an account limited or hands it to a backup
-Agent, since waiting, another account and another Agent meet the same window. Moneypenny's
-conversations do the same: a resumed conversation that fills the window starts afresh with its recap
-and takes the message there.
+**A full context window is shortened in the Run, then replaced.** A harness that reports a limit that
+follows the work and not the account (a conversation past its model's context window) is asked to
+compact in its running session, then to clear, and the Run is told to carry on where it left off
+(after the last run's account and the brief, if it was cleared). Only if the session can do neither
+is the Run closed and the Mission queued again for the same Agent as a fresh Run, given the brief and
+what the old Run last did, oldest first, and the old Run's record says `window-full`. The turn is
+retried once in the Run; a Run that fills the window a second time is replaced by a fresh Run, and a
+fresh Run that fills it too fails the turn, with the reason. Such a limit never parks the Mission,
+marks an account limited or hands it to a backup Agent, since waiting, another account and another
+Agent meet the same window. A standing order's window does not resume a Run that ended full.
+Moneypenny's conversations do the same: her running harness compacts, or clears and is given the
+conversation's recap, and takes the message again; a conversation that cannot be shortened in its
+harness starts afresh with its recap as before.
 
 ## Cancel, retry, resume and interrupt
 

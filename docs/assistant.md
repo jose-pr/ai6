@@ -124,7 +124,10 @@ removed when the harness closes. With [personal repositories](#her-workspace) th
 directory is her workspace. A
 harness that starts afresh is given her instructions and a recap of the conversation; a
 resumed one only her instructions, which Claude Code uses once the prompt it recorded with
-the Run is gone (after compaction). Of its Agent's environment it keeps only what reaches the model, as a
+the Run is gone (after compaction). When a conversation fills her model's context window, her
+running harness is asked to compact it, then to clear it (given the recap with the message), and
+takes the message again; she tells the person which. Only a harness that can do neither starts afresh
+with the recap; `[harness] compaction` chooses where that order begins. Of its Agent's environment it keeps only what reaches the model, as a
 [Chief of Staff review](agents.md#chief-of-staff) does.
 
 Her harness's program (`claude`, `codex`) is found on the `PATH` of that environment, not the
