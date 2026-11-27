@@ -90,8 +90,11 @@ command the agent cannot. A message in `ai6::SessionCommand`'s form is never pro
   session refuses the clear.
 - A facade (a handler's session reached over ACP) passes the form through to the handler.
 - The fake agent (`FAKE_COMMANDS=compact`) advertises commands, answers `/compact` and numbers its sessions;
-  the tests use it. What each real agent (Grok, Pi, Antigravity under `acp`) advertises was not measured with a
-  login: none is claimed.
+  the tests use it.
+- Measured with no model turn (`initialize`, `session/new`, read `available_commands_update`): Grok 1.0 advertises
+  `compact` among some sixty commands, names with no slash, the list sent twice at session start. Pi was not
+  installed here and `agy acp` answered nothing to a plain handshake, so neither is claimed; an agent that
+  does not advertise `compact` is refused it and the Station goes on to a clear.
 
 ## Grok's login kept in the Registry
 
