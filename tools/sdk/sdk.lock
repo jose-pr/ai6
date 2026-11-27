@@ -25,14 +25,17 @@ core rust-target wasm32-unknown-unknown any - -
 # component nor a clang on PATH is found.
 core llvm 22.1.8 windows-arm64 de718c58ebbc5f61d58c17b90457fcf42983bc2c4a4aba3e010d108713bfd7f1 https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/clang+llvm-22.1.8-aarch64-pc-windows-msvc.tar.xz
 
-# Flutter main, with what that commit is expected to report. deps is the deps branch's commit
+# Flutter main as Boriken-Dev/flutter mirrors it (scanner-clean; the same pin as Canoa): the mirror's commit, the
+# flutter/flutter commit it mirrors (the engine revision a web build names, so the CDN files' directory), and what
+# that commit is expected to report. deps is the deps branch's commit
 # holding pub/ and cdn/ for this Flutter and clients/outer-office/pubspec.lock, and crates/ for
 # Cargo.lock.
-app flutter 2541e508405f5d9728286d6ed3307163a5406e08 any - https://github.com/flutter/flutter.git
-app flutter-version 3.50.0-1.0.pre-230 any - -
-app flutter-engine f8edeef41f4a89dc912421fedbd6102252394dab any - -
-app dart 3.15.0-72.0.dev any - -
-app deps 84e36d2ef3f72e9693a6712e69f48f8924315760 any - https://github.com/jose-pr/ai6.git
+app flutter 33d7f282aaef7665096e5acd368d3c2ee226f6bb any - https://github.com/Boriken-Dev/flutter.git
+app flutter-upstream c0205700e04b127bbfecdeb6c83d1e0c9c564ed6 any - -
+app flutter-version 3.51.0-1.0.pre-291 any - -
+app flutter-engine 89573e968cbf3febdf4f07189cc2bef6cbef830b any - -
+app dart 3.15.0-173.0.dev any - -
+app deps f28a36fe4a54a065ae23fdb3781275decf74c615 any - https://github.com/jose-pr/ai6.git
 
 # Public API snapshots.
 api rust nightly-2026-09-21 any - -

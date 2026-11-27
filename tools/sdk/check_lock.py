@@ -180,16 +180,22 @@ class Checker:
             return
         if not HEX40.match(item.version):
             self.error(f"flutter is not a commit: {item.version}", item.line)
+        # A web build names the flutter/flutter commit its framework mirrors, which is where the CDN serves its files.
+        upstream = self.one("app", "flutter-upstream")
+        if not upstream:
+            return
+        if not HEX40.match(upstream.version):
+            self.error(f"flutter-upstream is not a commit: {upstream.version}", upstream.line)
         if not HEX40.match(deps.version):
             self.error(f"deps is not a commit: {deps.version}", deps.line)
         app = ROOT / "clients/outer-office"
         cdn = json.loads((app / "tool/cdn_files.json").read_text(encoding="utf-8"))
         engines = cdn.get("engine_revisions")
-        if not isinstance(engines, list) or item.version not in engines:
+        if not isinstance(engines, list) or upstream.version not in engines:
             self.error(
                 f"tool/cdn_files.json lists Flutter engines {engines}, "
-                f"not the lock's {item.version}",
-                item.line,
+                f"not the lock's {upstream.version}",
+                upstream.line,
             )
         metadata = re.search(r'revision: "([0-9a-f]{40})"', (app / ".metadata").read_text("utf-8"))
         if not metadata or metadata[1] != item.version:
@@ -205,8 +211,8 @@ class Checker:
         named = re.search(r"Built for Flutter engine `([0-9a-f]{40})`", readme)
         if not named:
             self.error(f"the README of deps at {deps.version} names no Flutter engine", deps.line)
-        elif named[1] != item.version:
-            self.error(f"deps at {deps.version} names Flutter {named[1]}, the lock {item.version}", item.line)
+        elif named[1] != upstream.version:
+            self.error(f"deps at {deps.version} names Flutter {named[1]}, the lock {upstream.version}", upstream.line)
         self.check_pub(deps)
 
     def check_pub(self, deps: Item) -> None:

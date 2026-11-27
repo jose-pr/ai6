@@ -69,8 +69,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp"
-      ref: "b81c78a42e8f83fca48c4f0913775d59309c5831"
-      resolved-ref: "b81c78a42e8f83fca48c4f0913775d59309c5831"
+      ref: b81c78a42e8f83fca48c4f0913775d59309c5831
+      resolved-ref: b81c78a42e8f83fca48c4f0913775d59309c5831
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -78,8 +78,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp_chat"
-      ref: "b81c78a42e8f83fca48c4f0913775d59309c5831"
-      resolved-ref: "b81c78a42e8f83fca48c4f0913775d59309c5831"
+      ref: b81c78a42e8f83fca48c4f0913775d59309c5831
+      resolved-ref: b81c78a42e8f83fca48c4f0913775d59309c5831
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -87,8 +87,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp_chat_ui"
-      ref: "b81c78a42e8f83fca48c4f0913775d59309c5831"
-      resolved-ref: "b81c78a42e8f83fca48c4f0913775d59309c5831"
+      ref: b81c78a42e8f83fca48c4f0913775d59309c5831
+      resolved-ref: b81c78a42e8f83fca48c4f0913775d59309c5831
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -685,10 +685,10 @@ packages:
     dependency: transitive
     description:
       name: vector_math
-      sha256: "92b9910f66ed1057fd4da7b040ae7c74cafacf885bdc81be496928d5049b032d"
+      sha256: fa49e1674cb84acb900141714e6c6e1f9ae099827c24d141430ff6819db4e1bc
       url: "https://pub.dev"
     source: hosted
-    version: "2.4.3"
+    version: "2.4.4"
   vm_service:
     dependency: transitive
     description:
@@ -778,5 +778,5 @@ packages:
     source: hosted
     version: "0.0.6"
 sdks:
-  dart: ">=3.15.0-72.0.dev <4.0.0"
-  flutter: ">=3.47.0"
+  dart: ">=3.15.0-173.0.dev <4.0.0"
+  flutter: ">=3.51.0-1.0.pre-291"

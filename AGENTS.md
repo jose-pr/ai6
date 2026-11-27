@@ -40,7 +40,7 @@ structs; that command fails when one differs, and without `--check` it writes th
 
 `sh tools/sdk/bootstrap.sh` (`pwsh -File tools/sdk/bootstrap.ps1` on Windows) installs every SDK
 at the versions `tools/sdk/sdk.lock` names; `tools/sdk/README.md` has the flags. The Flutter app
-needs the Flutter `main` commit named there, because native desktop windowing is not in stable
+needs the Flutter `main` commit named there (from the Boriken-Dev/flutter mirror), because native desktop windowing is not in stable
 Flutter. A change to that commit is one change: refresh the `deps` branch, then update the lock and
 the defaults of the Dockerfiles in `containers/` on `deps`. `python3 tools/sdk/check_lock.py` fails
 when they differ, when the lock disagrees with the workflows, `Cargo.toml` or `tool/cdn_files.json`,

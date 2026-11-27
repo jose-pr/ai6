@@ -4,7 +4,8 @@ publish_to: none
 version: 0.1.0+1
 
 environment:
-  sdk: ^3.15.0-72.0.dev
+  sdk: ">=3.15.0-173.0.dev <4.0.0"
+  flutter: ">=3.51.0-1.0.pre-291"
 
 dependencies:
   flutter:

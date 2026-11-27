@@ -286,6 +286,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The gateway serves a brief, a green ink request, a held brief, a Mission's reviews, a charge's report and a
 ### Changed
 
+- Outer Office builds with the Flutter commit Canoa uses (`3.51.0-1.0.pre-291`, Dart `3.15.0-173.0.dev`), taken from
+  Boriken Dev's scanner-clean mirror of Flutter rather than `flutter/flutter`; `sdk.lock` gains `flutter-upstream`, the
+  `flutter/flutter` commit whose engine the web build names.
+
 - Account kinds are the ids Claude Code's and Codex's account providers give them, and what applying one does is
   those providers' (`coqui_acp_claude::accounts::apply`, `coqui_acp_codex::accounts::apply_with`). `AccountKind::OpenaiApiKey`
   (`openai-api-key`) is `CodexApiKey` (`codex-api-key`); `ai6 config migrate` renames every stored one, once (the
