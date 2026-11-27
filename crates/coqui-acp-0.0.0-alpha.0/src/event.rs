@@ -41,6 +41,12 @@ pub enum Event {
         /// The agent's stop reason.
         stop: String,
     },
+    /// The agent stated the limit that refused the turn, in the standard form: the `LimitHit` (as the JSON object the agent sent,
+    /// which `coqui_acp_api::LimitHit` reads) of the answer's `_meta` under [`LIMIT_META_KEY`](crate::LIMIT_META_KEY), or of the
+    /// `_meta` of a refused request's error data. It comes just before the [`Event::Failed`] (or [`Event::PromptFailed`]) the
+    /// refusal also is, which keeps its text, so a host reads the kind, the reset and whether another account can go on from
+    /// this and never from the words.
+    Limited(Value),
     /// The turn failed, the agent refused, or the connection was lost.
     Failed(String),
     /// The agent ended the turn as cancelled, whether asked to or by itself.

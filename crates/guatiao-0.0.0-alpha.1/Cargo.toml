@@ -1,4 +1,4 @@
-# guatiao/crates/guatiao at e0136dcc9760ddd6dd8dc89fc4d41320eec6306e, with what it inherits written out.
+# guatiao/crates/guatiao at 75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d, with what it inherits written out.
 test = [{ name = "import_search", harness = false, required-features = ["load"] }]
 [package]
 name = "guatiao"

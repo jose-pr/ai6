@@ -90,31 +90,49 @@ pub struct HarnessInfo {
     /// What the harness does with [`StartRequest::cache_lifetime`], in a sentence for people (the
     /// variables it sets, say); absent when it has no such control and ignores the hint.
     pub cache_lifetime: Option<String>,
-    /// The lifetimes beyond [`CacheLifetime::Default`] the harness honours, each with the name it
-    /// gives it; empty when the hint is ignored. A host offers these and no others.
+    /// The lifetimes beyond [`CacheLifetime::Default`] the harness honours; empty when the hint is
+    /// ignored. A host offers these and no others, under names of its own.
     #[map(default)]
-    pub cache_choices: Vec<CacheChoice>,
+    pub cache_choices: Vec<CacheLifetime>,
+    /// The account provider that signs people in to this harness's accounts, when there is one.
+    /// A host reads it where it would otherwise have to guess the provider's id from the harness's.
+    pub accounts: Option<AccountsLink>,
 }
 
-/// A prompt-cache lifetime a harness honours and what it calls it, such as `1 hour`.
+/// How a harness and the provider of `account_provider` that makes its accounts are tied together,
+/// declared by the harness in [`HarnessInfo::accounts`].
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::guatiao)]
 #[non_exhaustive]
-pub struct CacheChoice {
-    /// The lifetime.
-    pub lifetime: CacheLifetime,
-    /// Its name for people, in the harness's own terms.
-    pub label: String,
+pub struct AccountsLink {
+    /// The id the account provider is registered under, such as `claude_accounts`.
+    pub provider: String,
+    /// The keys of the harness's own settings that name what the account provider runs too (the
+    /// program, a Node and a script): a host configures the account provider with these keys' values
+    /// from the harness's configuration, under the same keys, unless the person set them apart.
+    #[map(default)]
+    pub shared_settings: Vec<String>,
 }
 
-impl CacheChoice {
-    /// `lifetime` under `label`.
+impl AccountsLink {
+    /// A link to the account provider `provider` that shares no setting.
     #[must_use]
-    pub fn new(lifetime: CacheLifetime, label: impl Into<String>) -> Self {
+    pub fn new(provider: impl Into<String>) -> Self {
         Self {
-            lifetime,
-            label: label.into(),
+            provider: provider.into(),
+            shared_settings: Vec::new(),
         }
+    }
+
+    /// The same link sharing the settings `keys`.
+    #[must_use]
+    pub fn sharing<I, S>(mut self, keys: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.shared_settings = keys.into_iter().map(Into::into).collect();
+        self
     }
 }
 
@@ -131,6 +149,7 @@ impl HarnessInfo {
             usage: UsageSupport::none(),
             cache_lifetime: None,
             cache_choices: Vec::new(),
+            accounts: None,
         }
     }
 }
@@ -236,29 +255,127 @@ impl StartRequestBuilder {
     }
 }
 
-/// One model a harness says an account may use.
+/// One model an account may use, as its account provider lists it.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::guatiao)]
 #[non_exhaustive]
 pub struct ModelInfo {
-    /// The harness's own identifier or alias for it.
+    /// The program's own identifier or alias for it.
     pub id: String,
-    /// What the harness shows a person, when it has a name apart from the identifier; a provider that knows the version puts it here too.
+    /// What the program shows a person, when it has a name apart from the identifier; a provider that knows the version puts it here too.
     pub name: Option<String>,
-    /// The harness's one-line description, when it gives one.
+    /// The program's one-line description, when it gives one.
     pub description: Option<String>,
-    /// The model an alias or default resolves to, as the harness names it.
+    /// The model an alias or default resolves to, as the program names it.
     pub resolved: Option<String>,
-    /// The model and its version as a person reads them (`Opus 5.5`), when the harness can say it.
+    /// The model and its version as a person reads them (`Opus 5.5`), when the program can say it.
     pub version: Option<String>,
-    /// The efforts this model takes, in the harness's order; empty when the harness lists none for it.
+    /// The efforts this model takes, in the program's order; empty when it lists none for it.
     #[map(default)]
     pub efforts: Vec<String>,
-    /// The effort the model uses when none is named, when the harness says.
+    /// The effort the model uses when none is named, when the program says.
     pub default_effort: Option<String>,
-    /// Whether the harness uses this model when none is named.
+    /// Whether the program uses this model when none is named.
     #[map(default)]
     pub is_default: bool,
+    /// What the model can do, as ids: operations (`chat`, `embed`, `rerank`, `speech_to_text`,
+    /// `text_to_speech`) and traits (`audio_input`, `audio_output`, `image_input`, `tool_use`,
+    /// `reasoning`, `structured_output`). The set is open: a consumer filters by the ids it asks
+    /// for and passes any other through. Empty means NOT REPORTED, never "none".
+    #[map(default)]
+    pub capabilities: Vec<String>,
+    /// Where `capabilities` come from, when the provider says.
+    pub capabilities_from: Option<CapabilitiesSource>,
+    /// The model's limits, when the provider knows any.
+    pub limits: Option<ModelLimits>,
+}
+
+/// Where a model's [`ModelInfo::capabilities`] were read from.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq)]
+#[map(crate = ::guatiao, rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum CapabilitiesSource {
+    /// The service's own listing says them.
+    Listed,
+    /// The provider's library declares them, for a service whose listing carries none.
+    Declared,
+}
+
+/// What a model takes and gives, each only where the provider knows it.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Default, PartialEq, Eq)]
+#[map(crate = ::guatiao)]
+#[non_exhaustive]
+pub struct ModelLimits {
+    /// The tokens a request and its answer may hold together.
+    pub context_tokens: Option<u64>,
+    /// The tokens of one answer at most.
+    pub max_output_tokens: Option<u64>,
+    /// The tokens of one text at most, for a model that embeds.
+    pub max_input_tokens: Option<u64>,
+    /// The length of the vectors of a model that embeds.
+    pub dimensions: Option<u64>,
+    /// Whether the vector length can be asked for a smaller one.
+    #[map(default)]
+    pub dimensions_adjustable: bool,
+    /// The audio formats the model takes in, as file extensions.
+    #[map(default)]
+    pub audio_in_formats: Vec<String>,
+    /// The audio formats the model gives, as file extensions.
+    #[map(default)]
+    pub audio_out_formats: Vec<String>,
+    /// The bytes of one recording at most.
+    pub max_audio_bytes: Option<u64>,
+    /// The voices of a model that speaks.
+    #[map(default)]
+    pub voices: Vec<String>,
+    /// The styles of a model that speaks and takes a style.
+    #[map(default)]
+    pub styles: Vec<String>,
+}
+
+impl ModelLimits {
+    /// No limit known.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The tokens a request and its answer may hold together.
+    #[must_use]
+    pub fn context(mut self, tokens: u64) -> Self {
+        self.context_tokens = Some(tokens);
+        self
+    }
+
+    /// The tokens of one answer at most.
+    #[must_use]
+    pub fn output(mut self, tokens: u64) -> Self {
+        self.max_output_tokens = Some(tokens);
+        self
+    }
+
+    /// A model that embeds: its vector length, whether a shorter one can be asked for, and the tokens of one text at most.
+    #[must_use]
+    pub fn embedding(mut self, dimensions: u64, adjustable: bool, max_input: Option<u64>) -> Self {
+        self.dimensions = Some(dimensions);
+        self.dimensions_adjustable = adjustable;
+        self.max_input_tokens = max_input;
+        self
+    }
+
+    /// A model that speaks: its voices and styles.
+    #[must_use]
+    pub fn speaking<V, S>(mut self, voices: V, styles: S) -> Self
+    where
+        V: IntoIterator,
+        V::Item: Into<String>,
+        S: IntoIterator,
+        S::Item: Into<String>,
+    {
+        self.voices = voices.into_iter().map(Into::into).collect();
+        self.styles = styles.into_iter().map(Into::into).collect();
+        self
+    }
 }
 
 impl ModelInfo {
@@ -274,47 +391,81 @@ impl ModelInfo {
             efforts: Vec::new(),
             default_effort: None,
             is_default: false,
+            capabilities: Vec::new(),
+            capabilities_from: None,
+            limits: None,
         }
+    }
+
+    /// The model able to do `capabilities`, from `source`.
+    #[must_use]
+    pub fn with_capabilities<I, S>(mut self, capabilities: I, source: CapabilitiesSource) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.capabilities = capabilities.into_iter().map(Into::into).collect();
+        self.capabilities_from = Some(source);
+        self
+    }
+
+    /// The model with `limits`.
+    #[must_use]
+    pub fn with_limits(mut self, limits: ModelLimits) -> Self {
+        self.limits = Some(limits);
+        self
+    }
+
+    /// Whether the model reports its capabilities, and so can be filtered by them.
+    #[must_use]
+    pub fn reports_capabilities(&self) -> bool {
+        !self.capabilities.is_empty()
+    }
+
+    /// Whether the model reports `capability`.
+    #[must_use]
+    pub fn can(&self, capability: &str) -> bool {
+        self.capabilities.iter().any(|c| c == capability)
     }
 }
 
-/// Why a harness could not list its models, as a kind a host can act on; the text beside it is for people.
+/// Why an account provider could not list an account's models, as a kind a host can act on; the text beside it is for people.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq)]
 #[map(crate = ::guatiao, rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum UnknownKind {
-    /// The program the harness runs is not on the machine.
+    /// The program the account's models are asked of is not on the machine.
     NotInstalled,
     /// The program is there and could not be asked; the text says what.
     Failed,
 }
 
-/// What a harness can say about the models an account may use, with no model turn. A harness that
-/// cannot list says so; it never guesses.
+/// What an account provider can say about the models an account may use, with no model turn. A
+/// provider that cannot list says so; it never guesses.
 #[derive(ToValue, FromValue, Schema, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::guatiao)]
 #[non_exhaustive]
 pub struct ModelListing {
-    /// Whether the harness listed them; when not, `models` is empty.
+    /// Whether the provider listed them; when not, `models` is empty.
     pub known: bool,
     /// Why it could not, when `known` is false.
     pub unknown_because: Option<String>,
-    /// What kind of reason that is, when the harness could not be started; absent when it simply
+    /// What kind of reason that is, when the program could not be started; absent when it simply
     /// lists its models only once a session has started.
     pub unknown_kind: Option<UnknownKind>,
-    /// Whether the harness, though it listed its models, says nobody is signed in, so a session
+    /// Whether the program, though it listed its models, says nobody is signed in, so a session
     /// on the machine's own login would be refused its first prompt. Says nothing of an account a
     /// host applies.
     #[map(default)]
     pub signed_out: bool,
-    /// The models, in the harness's order.
+    /// The models, in the program's order.
     #[map(default)]
     pub models: Vec<ModelInfo>,
 }
 
 impl ModelListing {
-    /// A listing the harness could not give, with the reason: it lists its models only in a
-    /// session, or has no way to list them.
+    /// A listing the provider could not give, with the reason: the program lists its models only
+    /// in a session, or has no way to list them.
     #[must_use]
     pub fn unknown(reason: impl Into<String>) -> Self {
         Self {
@@ -326,7 +477,7 @@ impl ModelListing {
         }
     }
 
-    /// A listing the harness could not give because of `kind`, with the reason for people.
+    /// A listing the provider could not give because of `kind`, with the reason for people.
     #[must_use]
     pub fn unavailable(kind: UnknownKind, reason: impl Into<String>) -> Self {
         Self {
@@ -335,7 +486,7 @@ impl ModelListing {
         }
     }
 
-    /// The models a harness listed.
+    /// The models a provider listed.
     #[must_use]
     pub fn of(models: Vec<ModelInfo>) -> Self {
         Self {
@@ -689,5 +840,48 @@ impl NonDefault {
             value: value.into(),
             default: default.into(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use guatiao::{FromValue, ToValue};
+
+    use super::*;
+
+    #[test]
+    fn a_model_with_no_capabilities_reports_none_and_is_not_filtered_by_them() {
+        let model = ModelInfo::new("m");
+        assert!(!model.reports_capabilities());
+        assert!(!model.can("chat"));
+    }
+
+    #[test]
+    fn capabilities_and_limits_survive_the_trip_through_a_value() {
+        let limits = ModelLimits {
+            dimensions: Some(1536),
+            dimensions_adjustable: true,
+            voices: vec!["alloy".to_owned()],
+            ..ModelLimits::default()
+        };
+        let model = ModelInfo::new("text-embedding-3-small")
+            .with_capabilities(["embed"], CapabilitiesSource::Declared)
+            .with_limits(limits);
+        assert!(model.can("embed") && !model.can("chat"));
+        let value = model.to_value().expect("a value");
+        assert_eq!(ModelInfo::from_value(&value).expect("read back"), model);
+    }
+
+    #[test]
+    fn an_answer_written_before_the_fields_existed_still_reads() {
+        let old = ModelInfo::new("m");
+        let mut value = old.to_value().expect("a value");
+        let map = <&guatiao::Map>::try_from(&value).expect("a map").clone();
+        let mut kept = guatiao::Map::new();
+        for key in ["id", "efforts", "is_default"] {
+            kept.set(key, map.get(key).expect("a key").clone());
+        }
+        value = guatiao::Value::from(kept);
+        assert_eq!(ModelInfo::from_value(&value).expect("read"), old);
     }
 }

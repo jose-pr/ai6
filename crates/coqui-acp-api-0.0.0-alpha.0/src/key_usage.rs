@@ -22,6 +22,12 @@ pub const SOURCE_HEADERS: &str = "response_headers";
 pub const SOURCE_GATEWAY: &str = "gateway";
 /// The path of a LiteLLM-style gateway's information on the key it is given, under the gateway's root.
 pub const GATEWAY_KEY_INFO_PATH: &str = "/key/info";
+/// The id of the bucket for a gateway key's spend against its budget.
+pub const GATEWAY_BUDGET: &str = "budget";
+/// The id of the bucket for a gateway key's requests a minute.
+pub const GATEWAY_RPM: &str = "rpm";
+/// The id of the bucket for a gateway key's tokens a minute.
+pub const GATEWAY_TPM: &str = "tpm";
 
 /// The headers each limit is named by, in the two dialects the providers use: Anthropic's
 /// `anthropic-ratelimit-<what>-{limit,remaining,reset}` (reset an RFC 3339 time) and OpenAI's, which gateways and other
@@ -225,7 +231,7 @@ pub fn gateway_buckets(document: &Value, now: i64) -> Vec<Bucket> {
     let spend = number("spend");
     let max = number("max_budget");
     if spend.is_some() || max.is_some() {
-        let mut bucket = Bucket::new("budget");
+        let mut bucket = Bucket::new(GATEWAY_BUDGET);
         bucket.label = Some("Gateway budget".to_string());
         bucket.models = Coverage::All;
         bucket.unit = Unit::MicroUsd;
@@ -265,13 +271,13 @@ pub fn gateway_buckets(document: &Value, now: i64) -> Vec<Bucket> {
     }
     for (id, label, unit, name) in [
         (
-            "rpm",
+            GATEWAY_RPM,
             "Gateway requests per minute",
             Unit::Requests,
             "rpm_limit",
         ),
         (
-            "tpm",
+            GATEWAY_TPM,
             "Gateway tokens per minute",
             Unit::Tokens,
             "tpm_limit",
@@ -303,6 +309,12 @@ fn gateway_root(base: &str) -> &str {
     base.strip_suffix("/v1").unwrap_or(base)
 }
 
+/// Where the gateway whose model endpoint is `base` serves the information on the key it is given.
+#[must_use]
+pub fn gateway_key_info_url(base: &str) -> String {
+    format!("{}{GATEWAY_KEY_INFO_PATH}", gateway_root(base))
+}
+
 /// Reads the key information a LiteLLM-style gateway at `base` serves for `token`, the key it was given, and makes
 /// buckets of it.
 ///
@@ -316,7 +328,7 @@ pub fn read_gateway(
     timeout: Duration,
     now: i64,
 ) -> Result<Vec<Bucket>, ReadError> {
-    let url = format!("{}{GATEWAY_KEY_INFO_PATH}", gateway_root(base));
+    let url = gateway_key_info_url(base);
     let bearer = format!("Bearer {token}");
     let exchange = get_exchange(&url, &[("Authorization", bearer.as_str())], timeout)?;
     if exchange.status != 200 {
@@ -553,5 +565,20 @@ mod tests {
     fn a_model_endpoint_with_v1_is_the_gateway_root_without_it() {
         assert_eq!(gateway_root("https://gw.example/v1/"), "https://gw.example");
         assert_eq!(gateway_root("https://gw.example"), "https://gw.example");
+    }
+
+    #[test]
+    fn the_key_information_is_asked_for_at_the_root_whether_or_not_the_endpoint_ends_in_v1() {
+        for base in [
+            "https://gw.example",
+            "https://gw.example/v1",
+            "https://gw.example/v1/",
+        ] {
+            assert_eq!(
+                gateway_key_info_url(base),
+                "https://gw.example/key/info",
+                "{base}"
+            );
+        }
     }
 }

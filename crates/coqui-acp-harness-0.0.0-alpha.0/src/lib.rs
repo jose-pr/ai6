@@ -14,6 +14,9 @@ pub mod acp;
 pub mod antigravity;
 pub mod cli;
 pub mod event;
+#[cfg(feature = "keyring")]
+#[cfg_attr(docsrs, doc(cfg(feature = "keyring")))]
+pub mod keyring;
 pub mod lines;
 #[cfg(feature = "kind")]
 #[cfg_attr(docsrs, doc(cfg(feature = "kind")))]
@@ -23,6 +26,8 @@ pub mod process;
 #[cfg(feature = "kind")]
 #[cfg_attr(docsrs, doc(cfg(feature = "kind")))]
 pub mod provider;
+pub mod settings;
+pub mod signed_in;
 #[cfg(feature = "kind")]
 #[cfg_attr(docsrs, doc(cfg(feature = "kind")))]
 pub mod spawner;
@@ -30,7 +35,18 @@ pub mod spawner;
 #[cfg_attr(docsrs, doc(cfg(feature = "kind")))]
 pub mod stdio;
 pub mod stream;
+#[cfg(feature = "kind")]
+#[cfg_attr(docsrs, doc(cfg(feature = "kind")))]
+pub mod vendors;
 pub mod version;
+
+/// What the macros of this crate name.
+#[cfg(feature = "kind")]
+#[doc(hidden)]
+pub mod __private {
+    pub extern crate alloc;
+    pub use coqui_acp_api as api;
+}
 
 pub use access::{ACCESS_META, Access, Approvals, Part, Sandbox, Target, Translation};
 pub use acp::{
@@ -43,6 +59,7 @@ pub use process::{
     ErrorStream, Exit, Launch, LineWriter, PlainSpawn, Process, Spawn, Spawned, Starter,
     ending_once, exit_text, line_writer, set_program_dirs, set_starter, watch_exit,
 };
+pub use settings::{ConnectionSettings, SessionLimits};
 #[cfg(feature = "kind")]
 pub use spawner::{LocalSpawner, ThroughSpawner};
 pub use stream::{Answer, LineHook, Step, Stream, Waiting};

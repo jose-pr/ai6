@@ -8,12 +8,12 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use coqui_agentic_peer::Error;
-use coqui_agentic_peer::auth::{self, Sealed, Trust};
-use coqui_agentic_peer::forward::{self, Target};
-use coqui_agentic_peer::link::{self, Services};
-use coqui_agentic_peer::mux::{self, Side};
-use coqui_agentic_peer::peers::{NoEvents, PeerRecord, PeerStore};
+use cabuya::Error;
+use cabuya::auth::{self, Sealed, Trust};
+use cabuya::forward::{self, Target};
+use cabuya::link::{self, Services};
+use cabuya::mux::{self, Side};
+use cabuya::peers::{NoEvents, PeerRecord, PeerStore};
 use coqui_peer::TrustStore;
 use coqui_transport::Channel;
 use coqui_transport_web::websocket;

@@ -1,3 +1,4 @@
+use alloc::string::String;
 use core::fmt;
 
 /// Why a secret request could not be read, bound, sealed or opened. No variant holds a value, a key or a signature: only which check
@@ -7,6 +8,14 @@ use core::fmt;
 pub enum Error {
     /// The form's schema is not one a secret form may have; the text says which rule.
     Schema(&'static str),
+    /// The form's schema has a keyword it may not, or a value of one that it may not: `at` is the JSON pointer to it (such as
+    /// `/additionalProperties` or `/properties/api_key/default`) and `why` the rule it breaks.
+    SchemaAt {
+        /// The JSON pointer to the keyword in the schema.
+        at: String,
+        /// The rule it breaks.
+        why: &'static str,
+    },
     /// A message of the extension is not in the shape the extension writes.
     Malformed(&'static str),
     /// A version, binding method or feature this side does not have.
@@ -36,6 +45,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Schema(why) => write!(f, "not a secret form: {why}"),
+            Self::SchemaAt { at, why } => write!(f, "not a secret form: {why} (at {at})"),
             Self::Malformed(what) => write!(f, "a secret message is malformed: {what}"),
             Self::Unsupported(what) => write!(f, "not supported: {what}"),
             Self::Key(why) => write!(f, "unusable key: {why}"),

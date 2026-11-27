@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `Trust::Asked(Arc<dyn Admit>)`, the `Admit` trait and `Trust::asked(closure)`: the host decides whether a proven key is admitted, on either side, once per handshake and never for a key whose proof failed, with `answering` (true on the responder) and the `source` given to `respond`. It records nothing itself, so a host keeps its own accepted list and still queues a proven stranger.
 - **Builders and settings.** `WebCrypto::builder()` and `PairingMethod::builder()` set a method up by the
   setting's name (`identity`, `responders`, `initiators`, `max_message`, `session_limit`, `random`), then `build()`;
   there is no `new`. `WebCryptoSettings { max_message, session_limit }` and `PairingSettings { max_message }` are

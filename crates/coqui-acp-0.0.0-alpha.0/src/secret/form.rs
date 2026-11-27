@@ -3,6 +3,8 @@
 use super::error::Error;
 use super::json::strict;
 use crate::elicit::{self, Elicitation, Field, FieldKind};
+use alloc::borrow::Cow;
+use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use base64::Engine as _;
@@ -128,6 +130,86 @@ pub(crate) fn json_integer(text: &str) -> Option<i64> {
     text.parse::<i64>().ok().filter(|at| at.abs() <= MAX_SAFE)
 }
 
+/// A JSON pointer's reference token: `~` as `~0`, `/` as `~1`.
+fn token(name: &str) -> String {
+    name.replace('~', "~0").replace('/', "~1")
+}
+
+/// The refusal of the keyword at `at` (a JSON pointer into the schema), for the reason `why`.
+fn refuse(at: String, why: &'static str) -> Error {
+    Error::SchemaAt { at, why }
+}
+
+/// The refusal of `keyword` of the question `name`.
+fn refuse_in(name: &str, keyword: &str, why: &'static str) -> Error {
+    refuse(format!("/properties/{}/{keyword}", token(name)), why)
+}
+
+/// A question as the form reads it: a type written `[T, "null"]` (a field that may be left out) is `T`, since an answer never holds
+/// null, and what is not that is left as written.
+fn without_null(property: &Map<String, Value>) -> Cow<'_, Map<String, Value>> {
+    let Some(Value::Array(kinds)) = property.get("type") else {
+        return Cow::Borrowed(property);
+    };
+    let mut named = kinds.iter().map(Value::as_str);
+    let (Some(Some(first)), Some(Some(second)), None) = (named.next(), named.next(), named.next())
+    else {
+        return Cow::Borrowed(property);
+    };
+    let kind = match (first, second) {
+        (kind, "null") | ("null", kind) if kind != "null" => kind,
+        _ => return Cow::Borrowed(property),
+    };
+    let mut plain = property.clone();
+    plain.insert("type".into(), Value::String(kind.into()));
+    Cow::Owned(plain)
+}
+
+/// The whole-number bound `keyword` of a question: none when it is absent or lies outside 2^53 - 1 (the bounds a `u64` or an `i64`
+/// derives limit nothing a form can enter), and a refusal when it is a fraction or no number.
+fn whole_bound(
+    property: &Map<String, Value>,
+    keyword: &str,
+    name: &str,
+) -> Result<Option<i64>, Error> {
+    let Some(held) = property.get(keyword) else {
+        return Ok(None);
+    };
+    let Some(number) = held.as_number() else {
+        return Err(refuse_in(name, keyword, "a bound that is not a number"));
+    };
+    if let Some(whole) = number.as_i64() {
+        return Ok((whole.unsigned_abs() <= MAX_SAFE.unsigned_abs()).then_some(whole));
+    }
+    if number.as_u64().is_some() {
+        return Ok(None);
+    }
+    let real = number
+        .as_f64()
+        .filter(|real| real.is_finite() && real.fract() == 0.0);
+    match real {
+        Some(real) if real.abs() > MAX_SAFE as f64 => Ok(None),
+        Some(real) => Ok(Some(real as i64)),
+        None => Err(refuse_in(
+            name,
+            keyword,
+            "a whole-number bound that is a fraction",
+        )),
+    }
+}
+
+/// Puts the labels of `x-enum-labels` (a map from a choice's value to the text that names it) on the options of a choice.
+fn label(options: &mut [elicit::ChoiceOption], property: &Map<String, Value>) {
+    let Some(Value::Object(labels)) = property.get("x-enum-labels") else {
+        return;
+    };
+    for option in options {
+        if let Some(Value::String(title)) = labels.get(&option.value) {
+            option.title.clone_from(title);
+        }
+    }
+}
+
 /// A number as text in JSON's grammar (an integer part as above, an optional fraction of digits, an optional exponent), finite.
 pub(crate) fn json_number(text: &str) -> Option<f64> {
     let rest = text.strip_prefix('-').unwrap_or(text);
@@ -167,8 +249,13 @@ pub(crate) fn base64_canonical(text: &str) -> bool {
     BASE64.decode(text).is_ok()
 }
 
-/// The only keywords the schema's root may have: a flat object of questions.
+/// The only keywords the schema's root may have: a flat object of questions. Two more are read, each with the one value that
+/// keeps the form flat: `$schema` ([`DIALECT`]) and `additionalProperties` (`false`).
 const ROOT_ALLOWED: [&str; 5] = ["type", "properties", "required", "title", "description"];
+
+/// The one `$schema` a form may name: the dialect its keywords are read in. Another dialect gives the same keyword another meaning
+/// (draft 4's boolean `exclusiveMinimum`), so a form that names one is not read as if it named this.
+const DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
 
 /// The only keywords a secret field may have. Anything else could carry a value, a condition or a hint that makes a frontend draw
 /// or treat the field as something other than a secret.
@@ -227,19 +314,35 @@ impl Form {
         {
             return Err(Error::Schema("the schema is larger than the limit"));
         }
-        if schema
-            .keys()
-            .any(|key| !ROOT_ALLOWED.contains(&key.as_str()))
-        {
-            return Err(Error::Schema(
-                "the schema has a keyword a flat form does not",
-            ));
+        for (key, value) in schema {
+            match key.as_str() {
+                "$schema" if value.as_str() != Some(DIALECT) => {
+                    return Err(refuse(
+                        "/$schema".into(),
+                        "the schema names a dialect other than draft 2020-12",
+                    ));
+                }
+                "additionalProperties" if *value != Value::Bool(false) => {
+                    return Err(refuse(
+                        "/additionalProperties".into(),
+                        "the schema allows questions it does not declare",
+                    ));
+                }
+                "$schema" | "additionalProperties" => {}
+                other if ROOT_ALLOWED.contains(&other) => {}
+                other => {
+                    return Err(refuse(
+                        format!("/{}", token(other)),
+                        "the schema has a keyword a flat form does not",
+                    ));
+                }
+            }
         }
         if schema
             .get("type")
             .is_some_and(|kind| kind.as_str() != Some("object"))
         {
-            return Err(Error::Schema("the schema's type is not object"));
+            return Err(refuse("/type".into(), "the schema's type is not object"));
         }
         let properties = schema
             .get("properties")
@@ -280,45 +383,62 @@ impl Form {
             let property = property
                 .as_object()
                 .ok_or(Error::Schema("a property is not an object"))?;
-            let kind = elicit::kind_of(property);
+            let property = &*without_null(property);
+            let mut kind = elicit::kind_of(property);
+            if let FieldKind::Choice { options, .. } = &mut kind {
+                label(options, property);
+            } else if property.contains_key("enum") {
+                return Err(refuse_in(
+                    name,
+                    "enum",
+                    "a list of values on a question that is not a text choice",
+                ));
+            }
             if let FieldKind::Choice { options, .. } | FieldKind::Choices { options, .. } = &kind
                 && options.len() > limits.options
             {
                 return Err(Error::Schema("a question has more choices than the limit"));
             }
             if matches!(kind, FieldKind::Unsupported { .. }) {
-                return Err(Error::Schema(
+                return Err(refuse_in(
+                    name,
+                    "type",
                     "a property's type is one no control can show",
                 ));
             }
             let secret = flag(property, "writeOnly")? | flag(property, "x-sensitive")?;
             if !secret && property.get("format").and_then(Value::as_str) == Some("password") {
-                return Err(Error::Schema(
+                return Err(refuse_in(
+                    name,
+                    "format",
                     "a password format without writeOnly or x-sensitive",
                 ));
             }
             if let FieldKind::Integer {
                 minimum, maximum, ..
-            } = &kind
-                && minimum
-                    .iter()
-                    .chain(maximum.iter())
-                    .any(|bound| bound.abs() > MAX_SAFE)
+            } = &mut kind
             {
-                return Err(Error::Schema("a whole-number bound beyond 2^53 - 1"));
+                *minimum = whole_bound(property, "minimum", name)?;
+                *maximum = whole_bound(property, "maximum", name)?;
             }
             if secret {
                 if !matches!(
                     kind,
                     FieldKind::Text { .. } | FieldKind::Integer { .. } | FieldKind::Number { .. }
                 ) {
-                    return Err(Error::Schema("a secret field is not text or a number"));
+                    return Err(refuse_in(
+                        name,
+                        "type",
+                        "a secret field is not text or a number",
+                    ));
                 }
-                if property
+                if let Some(key) = property
                     .keys()
-                    .any(|key| !SECRET_ALLOWED.contains(&key.as_str()))
+                    .find(|key| !SECRET_ALLOWED.contains(&key.as_str()))
                 {
-                    return Err(Error::Schema(
+                    return Err(refuse_in(
+                        name,
+                        key,
                         "a secret field has a keyword a secret field may not",
                     ));
                 }
@@ -326,7 +446,11 @@ impl Form {
                     .get("format")
                     .is_some_and(|format| format != "password")
                 {
-                    return Err(Error::Schema("a secret field's format is not password"));
+                    return Err(refuse_in(
+                        name,
+                        "format",
+                        "a secret field's format is not password",
+                    ));
                 }
             }
             fields.push(FormField {

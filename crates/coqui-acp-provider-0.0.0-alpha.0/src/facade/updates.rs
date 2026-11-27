@@ -252,6 +252,13 @@ fn bounded(event: &AgentEvent, limits: Limits) -> AgentEvent {
                 .label
                 .as_deref()
                 .map(|label| title(label, limits.label));
+            bucket.group = bucket
+                .group
+                .as_deref()
+                .map(|group| title(group, limits.label));
+            for name in &mut bucket.model_names {
+                *name = title(name, limits.label);
+            }
             bucket.evidence = bucket
                 .evidence
                 .as_deref()

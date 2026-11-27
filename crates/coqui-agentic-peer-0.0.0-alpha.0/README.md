@@ -1,15 +1,13 @@
 # coqui-agentic-peer
 
-A proven link between two peers, and what runs over it: pair once, then ACP, A2A, MCP or anything else, each as a capability on the same link, with no second pairing. What crosses a stream is that protocol's own messages.
+What an agent needs around a proven link: pair once, then ACP, A2A, MCP or anything else runs as a capability on the same link, with no second pairing. What crosses a stream is that protocol's own messages. The link itself (proof, pairing, streams, grants) is [`cabuya`](https://github.com/Boriken-Dev/cabuya), which this crate builds on and does not re-export.
 
 ## Features
 
-- `mux`: named streams inside one link, each a `coqui_transport::Channel`, with credit per stream, so a reader that stops holds up only itself.
-- `auth`: prove a peer before any byte reaches a program, and seal everything after, by the Noise or the WebCrypto method, chosen per endpoint and never negotiated.
-- `pairing`: pair once with a PIN, over any channel, including through a reverse proxy.
 - `home`: one identity and one trust store per user, shared by every program and capability, with each method's identity in a file of its own.
 - `discovery`: DNS-SD records and per-user descriptors. What is found is a claim, and only the proof tests it.
 - `companion`: native messaging for a browser extension: framing, registering a native host, and a discovery answer.
+- `mcp_offer`: a peer's own MCP tools, offered to a program here through a stdio shim and a loopback port with a token.
 
 ## Installation
 
@@ -22,19 +20,18 @@ cargo add --git https://github.com/Boriken-Dev/coqui-agentic-peer coqui-agentic-
 ## Quick start
 
 ```rust,ignore
-use coqui_agentic_peer::mux::{Limits, Mux, Side};
-use coqui_transport::Channel as _;
+use coqui_agentic_peer::{discovery, home};
+use cabuya::auth::{Proof, Trust};
 
-Mux::run(&sealed_link, Side::Dialed, Limits::default(), None, |mux| {
-    let acp = mux.open("acp/1")?;
-    let mcp = mux.open("mcp")?;
-    acp.send(br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}"#)?;
-    let answer = acp.receive(None)?;
-    Ok::<_, coqui_transport::Failure>(answer)
-})?;
+let identity = home::identity(None, None)?;
+let store = home::store(None)?;
+let proof = Proof::builder(identity).responders(Trust::Store(store)).build()?;
+for candidate in discovery::discover(std::time::Duration::from_secs(2)) {
+    println!("{} at {}", candidate.label, candidate.url);
+}
 ```
 
-The wire is in [`docs/link.md`](https://boriken-dev.github.io/coqui-agentic-peer/link/).
+The agent-specific parts of the wire are in [`docs/link.md`](https://boriken-dev.github.io/coqui-agentic-peer/link/), and the link's own in [`cabuya`](https://github.com/Boriken-Dev/cabuya/blob/main/docs/link.md).
 
 ## License
 

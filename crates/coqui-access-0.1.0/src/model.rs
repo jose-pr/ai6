@@ -40,6 +40,14 @@ pub mod clients {
     pub const API: &str = "api";
 }
 
+/// The names a consumer gives in [`SignInContext::attributes`] that a policy reads.
+pub mod attributes {
+    /// A boolean: the consumer established [`SignInContext::client`](crate::SignInContext::client) itself, from the
+    /// endpoint or listener the request arrived on, and not from anything the client says.
+    /// Without it a policy treats the client kind as a claim that can only add steps.
+    pub const CLIENT_VERIFIED: &str = "client_verified";
+}
+
 /// What an authenticator or a directory says it is.
 #[derive(Debug, Clone, Default, PartialEq, Eq, ToValue, FromValue, Schema)]
 #[map(crate = ::guatiao)]
@@ -381,6 +389,26 @@ pub struct SignInContext {
     /// Anything else the consumer says about the sign-in; a policy reads what it knows.
     #[map(default, skip_serializing_if = BTreeMap::is_empty)]
     pub attributes: BTreeMap<String, Value>,
+}
+
+impl SignInContext {
+    /// Says the [`client`](SignInContext::client) is one the consumer established itself (see
+    /// [`attributes::CLIENT_VERIFIED`]); call it only when that is so.
+    #[must_use]
+    pub fn with_verified_client(mut self) -> Self {
+        self.attributes
+            .insert(attributes::CLIENT_VERIFIED.to_owned(), Value::from(true));
+        self
+    }
+
+    /// Whether the consumer said the client is verified; a missing or non-boolean attribute is
+    /// not.
+    #[must_use]
+    pub fn client_is_verified(&self) -> bool {
+        self.attributes
+            .get(attributes::CLIENT_VERIFIED)
+            .is_some_and(|value| bool::try_from(value).unwrap_or(false))
+    }
 }
 
 impl fmt::Debug for SignInContext {

@@ -16,7 +16,7 @@ use crate::message::{
 use crate::session::Session;
 use crate::settings::WebCryptoSettings;
 use crate::transcript::{Keys, ROLE_ACCEPT, ROLE_CLIENT, ROLE_SERVER, Transcript};
-use crate::trust::{Admit, Trust};
+use crate::trust::{Admission, Trust};
 
 /// The method name: the `<method>` of `coqui-peer-<method>`, under which a trust store keeps the
 /// keys of this method.
@@ -31,8 +31,8 @@ pub fn random() -> Random {
 #[derive(Debug, Clone)]
 pub(crate) struct Config {
     pub(crate) identity: Identity,
-    pub(crate) responders: Option<Admit>,
-    pub(crate) initiators: Option<Admit>,
+    pub(crate) responders: Option<Admission>,
+    pub(crate) initiators: Option<Admission>,
     pub(crate) settings: WebCryptoSettings,
     pub(crate) random: Random,
     pub(crate) random_replaced: bool,
@@ -120,8 +120,8 @@ impl From<WebCryptoParts> for WebCrypto {
     fn from(parts: WebCryptoParts) -> Self {
         Self(Arc::new(Config {
             identity: parts.identity,
-            responders: parts.responders.map(Admit::Trust),
-            initiators: parts.initiators.map(Admit::Trust),
+            responders: parts.responders.map(Admission::Trust),
+            initiators: parts.initiators.map(Admission::Trust),
             settings: parts.settings,
             random_replaced: parts.random.is_some(),
             random: parts.random.unwrap_or_else(crate::random),

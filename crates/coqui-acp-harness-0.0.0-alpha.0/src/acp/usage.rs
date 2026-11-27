@@ -244,6 +244,12 @@ fn merge(old: &Bucket, new: Bucket) -> Bucket {
     if merged.models == Coverage::Unknown {
         merged.models = old.models.clone();
     }
+    if merged.group.is_none() {
+        merged.group.clone_from(&old.group);
+    }
+    if merged.model_names.is_empty() {
+        merged.model_names.clone_from(&old.model_names);
+    }
     merged.used = merged.used.or(old.used);
     merged.limit = merged.limit.or(old.limit);
     merged.remaining = merged.remaining.or(old.remaining);

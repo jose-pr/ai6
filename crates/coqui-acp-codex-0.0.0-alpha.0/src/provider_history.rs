@@ -77,6 +77,7 @@ pub(crate) fn import(
     session: &SessionImport,
     spawner: &Object<dyn ProcessSpawner>,
     seeds: &crate::Seeds,
+    options: &ImportOptions,
 ) -> Result<ImportReport, ProviderError> {
     let (config, cwd) = place(
         spawner,
@@ -112,14 +113,8 @@ pub(crate) fn import(
         };
         error(status, &format!("the history cannot be read: {why}"))
     })?;
-    let imported = import_file(
-        &config,
-        &cwd,
-        &session.session_id,
-        &doc,
-        &ImportOptions::default(),
-    )
-    .map_err(|why| error(Status::GUATIAO_ERR_BAD_VALUE, &why.to_string()))?;
+    let imported = import_file(&config, &cwd, &session.session_id, &doc, options)
+        .map_err(|why| error(Status::GUATIAO_ERR_BAD_VALUE, &why.to_string()))?;
     let mut report = ImportReport::new();
     report.seeded_from = imported.seeded_from.map(|point| {
         let mut seeded = SeedPoint::line(point.line);

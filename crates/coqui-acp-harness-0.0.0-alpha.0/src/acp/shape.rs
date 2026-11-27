@@ -31,6 +31,54 @@ pub(crate) struct Shapes {
     terminals: BTreeMap<String, String>,
     /// The last usage of the running turn, which version 2 gives with its `idle`.
     pub(crate) usage: Option<Usage>,
+    /// What the harness said of the running turn for its answer's `_meta`.
+    pub(crate) meta: Map<String, Value>,
+    /// What the running turn said, to tell which of it is a limit's own words.
+    said: Said,
+}
+
+/// The most message and thought chunks of a turn kept to find a limit's words in; older ones are forgotten, and their positions
+/// stay counted.
+const MAX_SAID_CHUNKS: usize = 1024;
+
+/// The most bytes of one chunk kept for that.
+const MAX_SAID_CHUNK_BYTES: usize = 4096;
+
+/// One message or thought chunk of the running turn.
+#[derive(Debug)]
+struct SaidChunk {
+    /// Its position among the turn's message and thought chunks.
+    index: u32,
+    message: String,
+    text: String,
+}
+
+/// The message and thought chunks of the running turn, and where its last tool call stands among them.
+#[derive(Debug, Default)]
+struct Said {
+    chunks: VecDeque<SaidChunk>,
+    /// How many chunks have been sent, the forgotten included.
+    sent: u32,
+    /// The value of `sent` at the last tool call: only what came after can be a limit's own words.
+    at_tool: u32,
+}
+
+impl Said {
+    fn chunk(&mut self, message: &str, text: &str) {
+        let cut = (0..=MAX_SAID_CHUNK_BYTES.min(text.len()))
+            .rev()
+            .find(|at| text.is_char_boundary(*at))
+            .unwrap_or(0);
+        self.chunks.push_back(SaidChunk {
+            index: self.sent,
+            message: message.to_string(),
+            text: text[..cut].to_string(),
+        });
+        self.sent += 1;
+        while self.chunks.len() > MAX_SAID_CHUNKS {
+            self.chunks.pop_front();
+        }
+    }
 }
 
 impl Shapes {
@@ -58,6 +106,44 @@ impl Shapes {
         }
     }
 
+    /// Which of the ended turn's messages are the limit's own words, as the `messageId`s (version 2) or the positions among the turn's
+    /// message and thought chunks (version 1, whose updates carry no ids): the first message after the last tool call whose text
+    /// holds `limit` or is held by it, and every message after it ("please wait"). Forgets the turn's text.
+    pub(crate) fn limit_text(&mut self, limit: Option<&str>) -> (Vec<String>, Vec<u32>) {
+        let said = core::mem::take(&mut self.said);
+        let wanted = limit.map(str::trim).filter(|text| !text.is_empty());
+        let Some(wanted) = wanted.map(str::to_lowercase) else {
+            return (Vec::new(), Vec::new());
+        };
+        // The messages after the last tool call, in the order they began, each with its chunks' text.
+        let mut tail: Vec<(&str, String)> = Vec::new();
+        for chunk in said
+            .chunks
+            .iter()
+            .filter(|chunk| chunk.index >= said.at_tool)
+        {
+            match tail.iter_mut().find(|(id, _)| *id == chunk.message) {
+                Some((_, text)) => text.push_str(&chunk.text),
+                None => tail.push((&chunk.message, chunk.text.clone())),
+            }
+        }
+        let named = tail.iter().position(|(_, text)| {
+            let text = text.trim().to_lowercase();
+            !text.is_empty() && (text.contains(&wanted) || wanted.contains(&text))
+        });
+        let Some(from) = named else {
+            return (Vec::new(), Vec::new());
+        };
+        let ids: Vec<&str> = tail[from..].iter().map(|(id, _)| *id).collect();
+        let indexes = said
+            .chunks
+            .iter()
+            .filter(|chunk| chunk.index >= said.at_tool && ids.contains(&chunk.message.as_str()))
+            .map(|chunk| chunk.index)
+            .collect();
+        (ids.into_iter().map(str::to_string).collect(), indexes)
+    }
+
     /// The updates `event` becomes; none for what this version has no update for.
     pub(crate) fn updates(&mut self, event: &Event) -> Vec<Value> {
         let v2 = self.version >= 2;
@@ -70,14 +156,19 @@ impl Shapes {
             )],
             Event::UserEnd { message } if v2 => vec![ended("user_message", message)],
             Event::MessageChunk { message, text } => {
+                self.said.chunk(message, text);
                 vec![chunk("agent_message_chunk", message, text_block(text), v2)]
             }
             Event::MessageEnd { message } if v2 => vec![ended("agent_message", message)],
             Event::ThoughtChunk { message, text } => {
+                self.said.chunk(message, text);
                 vec![chunk("agent_thought_chunk", message, text_block(text), v2)]
             }
             Event::ThoughtEnd { message } if v2 => vec![ended("agent_thought", message)],
-            Event::Tool(call) => self.tool(call),
+            Event::Tool(call) => {
+                self.said.at_tool = self.said.sent;
+                self.tool(call)
+            }
             Event::Child(child) => vec![child_update(child)],
             Event::InChild {
                 child,
@@ -109,6 +200,12 @@ impl Shapes {
             Event::Usage(usage) => {
                 self.usage = Some(usage.clone());
                 usage_update(usage).into_iter().collect()
+            }
+            Event::TurnMeta(meta) => {
+                for (key, value) in meta {
+                    self.meta.insert(key.clone(), value.clone());
+                }
+                Vec::new()
             }
             Event::Commands(commands) => vec![available_commands(commands, v2)],
             Event::Options(options) => vec![json!({"sessionUpdate": "config_option_update",
@@ -414,13 +511,33 @@ fn available_commands(commands: &[Command], v2: bool) -> Value {
 
 /// A turn's token counts as version 2 gives them with `idle`.
 pub(crate) fn turn_usage(usage: &Usage) -> Value {
-    json!({
-        "inputTokens": usage.input,
-        "outputTokens": usage.output,
-        "cachedReadTokens": usage.cache_read,
-        "cachedWriteTokens": usage.cache_write,
-        "totalTokens": usage.input.saturating_add(usage.output).saturating_add(usage.cache_read).saturating_add(usage.cache_write),
-    })
+    let (input, output, cache_read, cache_write, reasoning) = match &usage.turn {
+        Some(turn) => (
+            turn.input,
+            turn.output,
+            turn.cache_read,
+            turn.cache_write,
+            turn.reasoning,
+        ),
+        None => (
+            usage.input,
+            usage.output,
+            usage.cache_read,
+            usage.cache_write,
+            None,
+        ),
+    };
+    let mut counts = json!({
+        "inputTokens": input,
+        "outputTokens": output,
+        "cachedReadTokens": cache_read,
+        "cachedWriteTokens": cache_write,
+        "totalTokens": input.saturating_add(output).saturating_add(cache_read).saturating_add(cache_write),
+    });
+    if let Some(reasoning) = reasoning {
+        counts["thoughtTokens"] = json!(reasoning);
+    }
+    counts
 }
 
 /// The update that reports a child agent: a change to the parent's tool call that carries only the child's `_meta`.
@@ -466,6 +583,17 @@ fn child_update(child: &Child) -> Value {
 /// The `_meta` that says a quota refused a turn.
 pub(crate) fn limit_meta(limit: &LimitHit) -> Value {
     json!({ LIMIT_META_KEY: serde_json::to_value(limit).unwrap_or(Value::Null) })
+}
+
+/// A turn answer's `_meta`: what the harness said of the turn, with the limit that refused it when one did.
+pub(crate) fn answer_meta(limit: Option<&LimitHit>, said: &Map<String, Value>) -> Option<Value> {
+    let mut meta = said.clone();
+    if let Some(limit) = limit
+        && let Value::Object(own) = limit_meta(limit)
+    {
+        meta.extend(own);
+    }
+    (!meta.is_empty()).then_some(Value::Object(meta))
 }
 
 /// Options as ACP selects: `id` in version 1, `configId` in version 2.
@@ -730,5 +858,52 @@ mod tests {
             update[0].get("title").is_none(),
             "an update has no title of its own"
         );
+    }
+
+    fn said(shapes: &mut super::Shapes, message: &str, text: &str) {
+        shapes.updates(&Event::MessageChunk {
+            message: message.into(),
+            text: text.into(),
+        });
+    }
+
+    #[test]
+    fn the_messages_after_the_last_tool_call_that_say_the_limit_and_what_follows_are_named() {
+        let mut shapes = super::Shapes::new(2, 8);
+        said(&mut shapes, "m0", "You have hit your usage limit soon");
+        shapes.updates(&Event::Tool(ToolCall::new("t1")));
+        said(&mut shapes, "m1", "Working");
+        said(&mut shapes, "m2", "You've hit your usage ");
+        said(&mut shapes, "m2", "limit. Resets at 15:04.");
+        said(&mut shapes, "m3", "Please wait.");
+        // Words before the last tool call are the agent's own, however alike.
+        let (ids, indexes) = shapes.limit_text(Some("hit your usage limit"));
+        assert_eq!(ids, ["m2", "m3"]);
+        assert_eq!(indexes, [2, 3, 4]);
+        // The turn's text is forgotten once asked.
+        assert_eq!(
+            shapes.limit_text(Some("hit your usage limit")),
+            (vec![], vec![])
+        );
+    }
+
+    #[test]
+    fn a_text_that_no_message_says_names_none_and_no_text_names_none() {
+        let mut shapes = super::Shapes::new(1, 8);
+        said(&mut shapes, "m1", "Working on it");
+        assert_eq!(shapes.limit_text(Some("quota")), (vec![], vec![]));
+        said(&mut shapes, "m1", "quota");
+        assert_eq!(shapes.limit_text(None), (vec![], vec![]));
+    }
+
+    #[test]
+    fn a_message_that_is_part_of_the_limit_text_is_found_too() {
+        // The agent said less than the error's full text.
+        let mut shapes = super::Shapes::new(1, 8);
+        said(&mut shapes, "m1", "Usage limit reached");
+        let (ids, indexes) = shapes.limit_text(Some(
+            "Usage limit reached. Resets at 5pm. See the plan page.",
+        ));
+        assert_eq!((ids, indexes), (vec!["m1".to_owned()], vec![0]));
     }
 }

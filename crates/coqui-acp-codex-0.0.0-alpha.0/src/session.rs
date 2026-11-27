@@ -15,7 +15,7 @@ use std::thread;
 
 use crate::mode::Shown;
 use coqui_acp_api::usage::Bucket;
-use coqui_acp_harness::event::{Content, Event, Severity, context_block};
+use coqui_acp_harness::event::{Command, Content, Event, Severity, context_block};
 use coqui_acp_harness::lines::{self, Tail};
 use coqui_acp_harness::mode::Mode;
 use coqui_acp_harness::stream::Waiting;
@@ -257,6 +257,8 @@ pub struct CodexSession {
     /// The thread's `sandbox_workspace_write` table.
     workspace_write: Map<String, Value>,
     titled: AtomicBool,
+    /// The skills Codex listed, as (name, path): a prompt that opens with /name of one is sent as that skill.
+    skills: Mutex<Vec<(String, String)>>,
     sink: Arc<dyn Fn(Event) -> bool + Send + Sync>,
 }
 
@@ -465,6 +467,7 @@ impl CodexSession {
                 .cloned()
                 .unwrap_or_default(),
             titled: AtomicBool::new(false),
+            skills: Mutex::new(Vec::new()),
             sink,
         })
     }
@@ -563,6 +566,7 @@ impl CodexSession {
             .map(str::to_string);
         locked(&self.mode).0 = crate::mode::of_thread(&opened);
         locked(&self.parser).set_thread(thread);
+        self.list_skills(&launch.cwd);
         if matches!(launch.thread, ThreadStart::Load(_)) {
             let turns = opened
                 .pointer("/thread/turns")
@@ -610,6 +614,63 @@ impl CodexSession {
         )?;
         // The answer was applied where it was read, so an update read after it is kept.
         Ok(locked(&self.parser).rate_limits())
+    }
+
+    /// Asks for the skills of cwd (skills/list) and reports them as commands. Their being unknown stops nothing:
+    /// the session simply lists none.
+    fn list_skills(&self, cwd: &Path) {
+        let Ok(answer) = self.request(
+            "skills/list",
+            json!({"cwds": [cwd.to_string_lossy()]}),
+            self.settings.request_timeout,
+        ) else {
+            return;
+        };
+        let skills = skills_of(&answer);
+        if skills.is_empty() {
+            return;
+        }
+        let commands = skills
+            .iter()
+            .map(|(name, description, _)| Command::new(name.as_str(), description.as_str(), None))
+            .collect();
+        *locked(&self.skills) = skills
+            .into_iter()
+            .map(|(name, _, path)| (name, path))
+            .collect();
+        (self.sink)(Event::Commands(commands));
+    }
+
+    /// input with a leading /name of a listed skill sent as that skill: Codex takes a skill as an input item, and
+    /// reads /name as plain text.
+    fn with_skill(&self, mut input: Vec<Value>) -> Vec<Value> {
+        let named = input
+            .first()
+            .and_then(|item| item.get("text"))
+            .and_then(Value::as_str)
+            .and_then(|text| text.strip_prefix('/'))
+            .map(|rest| {
+                let (name, tail) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+                (name.to_string(), tail.trim().to_string())
+            });
+        let Some((name, tail)) = named else {
+            return input;
+        };
+        let path = locked(&self.skills)
+            .iter()
+            .find(|(skill, _)| *skill == name)
+            .map(|(_, path)| path.clone());
+        let Some(path) = path else {
+            return input;
+        };
+        let said = if tail.is_empty() {
+            format!("${name}")
+        } else {
+            format!("${name} {tail}")
+        };
+        input[0] = json!({"type": "text", "text": said, "text_elements": []});
+        input.insert(1, json!({"type": "skill", "name": name, "path": path}));
+        input
     }
 
     /// Asks for the models. Their being unknown stops nothing: a notice says so.
@@ -755,7 +816,7 @@ impl CodexSession {
     /// [`Error::Refused`] for a resource Codex cannot read; [`Error::Harness`] or [`Error::Timeout`] when Codex did
     /// not take the turn.
     pub fn prompt(&self, content: &[Content]) -> Result<(), Error> {
-        let input = user_input(content)?;
+        let input = self.with_skill(user_input(content)?);
         let (model, effort) = self.choice();
         let mut params = json!({"threadId": self.thread, "input": input});
         if let Some(model) = model {
@@ -764,19 +825,19 @@ impl CodexSession {
         if let Some(effort) = &effort {
             params["effort"] = json!(effort);
         }
+        // The model named for the turn, else the thread's, else the one Codex lists as its own.
+        let named = params["model"]
+            .as_str()
+            .map(str::to_string)
+            .or_else(|| self.thread_model.clone())
+            .or_else(|| {
+                self.models
+                    .as_deref()
+                    .and_then(|models| models.iter().find(|model| model.is_default))
+                    .map(|model| model.id.clone())
+            });
         let (mode, chosen) = locked(&self.mode).clone();
         if let (Some(Shown::Known(mode)), true) = (mode, chosen) {
-            // The model named for the turn, else the thread's, else the one Codex lists as its own.
-            let named = params["model"]
-                .as_str()
-                .map(str::to_string)
-                .or_else(|| self.thread_model.clone())
-                .or_else(|| {
-                    self.models
-                        .as_deref()
-                        .and_then(|models| models.iter().find(|model| model.is_default))
-                        .map(|model| model.id.clone())
-                });
             if mode == Mode::Plan
                 && self.instructions.is_some()
                 && !self.plan_told.swap(true, Ordering::SeqCst)
@@ -803,7 +864,11 @@ impl CodexSession {
                 params[key] = value;
             }
         }
-        locked(&self.parser).prompting();
+        {
+            let mut parser = locked(&self.parser);
+            parser.prompting();
+            parser.set_model(named.as_deref());
+        }
         let number = self.next_request();
         let started = self
             .request_numbered(number, "turn/start", params, self.settings.request_timeout)
@@ -858,7 +923,7 @@ impl CodexSession {
     ///
     /// [`Error::Refused`] for a resource Codex cannot read; [`Error::Harness`] when it could not be written.
     pub fn steer(&self, turn: &str, content: &[Content]) -> Result<(), Error> {
-        let input = user_input(content)?;
+        let input = self.with_skill(user_input(content)?);
         let number = self.requests.fetch_add(1, Ordering::SeqCst) + 1;
         self.write(&json!({"id": number, "method": "turn/steer", "params": {
             "threadId": self.thread, "expectedTurnId": turn, "input": input}}))
@@ -879,6 +944,43 @@ impl Drop for CodexSession {
     }
 }
 
+/// The skills of a `skills/list` answer, as (name, description, path), those Codex has not turned off.
+fn skills_of(answer: &Value) -> Vec<(String, String, String)> {
+    let mut found: Vec<(String, String, String)> = Vec::new();
+    let groups = answer.get("data").and_then(Value::as_array);
+    for group in groups.into_iter().flatten() {
+        for skill in group
+            .get("skills")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let Some(name) = skill.get("name").and_then(Value::as_str) else {
+                continue;
+            };
+            if skill.get("enabled").and_then(Value::as_bool) == Some(false)
+                || found.iter().any(|(known, _, _)| known == name)
+            {
+                continue;
+            }
+            let described = |value: &Value| {
+                ["description", "shortDescription"]
+                    .iter()
+                    .find_map(|key| value.get(key).and_then(Value::as_str))
+                    .map(str::to_string)
+            };
+            let description = described(skill)
+                .or_else(|| skill.get("interface").and_then(described))
+                .unwrap_or_default();
+            let path = skill
+                .get("path")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            found.push((name.to_string(), description, path.to_string()));
+        }
+    }
+    found
+}
 /// A prompt as Codex's turn input: text, an image as a data URL, a link as a mention, and a text resource in a
 /// `<context>` block. A resource's bytes are taken only for an image.
 ///

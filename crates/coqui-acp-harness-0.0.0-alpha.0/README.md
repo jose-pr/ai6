@@ -19,7 +19,11 @@ and [`coqui-acp-codex`](https://github.com/Boriken-Dev/coqui-acp/tree/main/crate
   Unix (with every descendant on Linux), and whose tree ends with the host. Implement `Spawn` to run the harness elsewhere.
 - Feature `kind`: `LocalSpawner`, the `acp_harness` kind's spawner on this machine, and `ThroughSpawner`, `Spawn` through any
   host's spawner.
-- Feature `antigravity`: `antigravity::AgyQuota`, which reads Antigravity's quota from the loopback port `agy acp` serves it on and gives it as `reported` usage buckets, and `loopback_listeners`, the loopback ports a set of processes listens on.
+- Feature `antigravity`: `antigravity::AgyLogin`, which reads Antigravity's account, plan and quota from its stored login and Google's service with no `agy` process; `antigravity::AgyQuota`, which reads Antigravity's quota from the loopback port `agy acp` serves it on and gives it as `reported` usage buckets, and `loopback_listeners`, the loopback ports a set of processes listens on.
+- `signed_in` and, with feature `keyring` (on with `antigravity`), `keyring`: what each account provider's `signed_in` is made of. A
+  variable counts when it is set and not empty, a login file when it holds something, and a keyring or Keychain entry when it is
+  there, asked for with no secret read into the answer and in no longer than the time given; the answer says what was looked at and
+  never a path or a value.
 - `lines`: a harness's output, one JSON value per line, with a limit on a line, and the last lines that were not protocol.
 - `event`: messages and thoughts, tool calls with diffs, locations and terminals, plans, permission requests with a responder, usage
   and context, usage buckets and limits, commands, notices, compaction, and how a turn ended.

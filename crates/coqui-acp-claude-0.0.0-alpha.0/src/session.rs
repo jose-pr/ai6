@@ -247,6 +247,8 @@ pub struct ClaudeSession {
     sink: Arc<dyn Fn(Event) -> bool + Send + Sync>,
     /// The MCP configuration's file, removed with the session.
     mcp_file: Option<PrivateFile>,
+    /// The appended system prompt's file, removed with the session.
+    prompt_file: Option<PrivateFile>,
 }
 
 /// The permission mode Claude Code is in as far as it has said, and who is told when that changes.
@@ -287,11 +289,21 @@ impl ClaudeSession {
         let mcp_file = if launch.mcp_servers.is_empty() || launch.mcp_config_file.is_some() {
             None
         } else {
-            let file =
-                PrivateFile::write(&crate::launch::mcp_config(&launch.mcp_servers).to_string())
-                    .map_err(Error::Spawn)?;
+            let file = PrivateFile::write(
+                "mcp.json",
+                &crate::launch::mcp_config(&launch.mcp_servers).to_string(),
+            )
+            .map_err(Error::Spawn)?;
             launch.mcp_config_file = Some(file.0.clone());
             Some(file)
+        };
+        let prompt_file = match &launch.append_system_prompt {
+            Some(text) if !text.is_empty() && launch.append_system_prompt_file.is_none() => {
+                let file = PrivateFile::write("prompt.txt", text).map_err(Error::Spawn)?;
+                launch.append_system_prompt_file = Some(file.0.clone());
+                Some(file)
+            }
+            _ => None,
         };
         let spawned = spawn.spawn(&launch.launch()).map_err(Error::Spawn)?;
         let writer: Writer = line_writer(
@@ -420,6 +432,7 @@ impl ClaudeSession {
             titled: AtomicBool::new(false),
             sink,
             mcp_file,
+            prompt_file,
         };
         session.answer = match session.control(
             json!({"subtype": "initialize"}),
@@ -628,7 +641,7 @@ impl ClaudeSession {
             let _ = self.process.kill();
             let _ = exit_text(self.process.as_ref(), self.settings.close_wait);
         }
-        if let Some(file) = &self.mcp_file {
+        for file in [&self.mcp_file, &self.prompt_file].into_iter().flatten() {
             let _ = std::fs::remove_file(&file.0);
         }
     }
@@ -683,17 +696,16 @@ pub fn user_blocks(content: &[Content]) -> Result<Vec<Value>, Error> {
     Ok(blocks)
 }
 
-/// A file only this user can read, removed when dropped: the MCP configuration, which may hold credentials. On Unix its
-/// mode says so; on Windows the file takes the access of the temporary directory, by default this user's own.
+/// A file only this user can read, removed when dropped: the MCP configuration, which may hold credentials, and the
+/// appended system prompt, which may hold the person's own instructions. On Unix its mode says so; on Windows the file
+/// takes the access of the temporary directory, by default this user's own.
 #[derive(Debug)]
 struct PrivateFile(std::path::PathBuf);
 
 impl PrivateFile {
-    fn write(text: &str) -> io::Result<Self> {
-        let path = std::env::temp_dir().join(format!(
-            "coqui-acp-claude-mcp-{}.json",
-            uuid::Uuid::new_v4()
-        ));
+    fn write(kind: &str, text: &str) -> io::Result<Self> {
+        let path =
+            std::env::temp_dir().join(format!("coqui-acp-claude-{}-{kind}", uuid::Uuid::new_v4()));
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]

@@ -4,6 +4,7 @@
 
 extern crate alloc;
 
+pub mod access;
 mod account_provider;
 pub mod account_usage;
 pub mod accounts;
@@ -22,7 +23,10 @@ mod provider;
 #[cfg(feature = "history")]
 mod provider_history;
 mod session;
+mod session_settings;
+pub mod signed_in;
 mod signin;
+mod stored_login;
 
 use alloc::string::String;
 use core::fmt;
@@ -35,11 +39,13 @@ pub use coqui_acp_harness::{self as harness, Launch, PlainSpawn, Spawn, Spawned}
 pub use launch::{
     ClientInfo, CodexLaunch, ThreadStart, toml_value, valid_config_key, valid_thread_id,
 };
+pub use limits::limit_of_message;
 pub use parse::{Parser, ParserLimits};
 pub use provider::{CodexProvider, ProviderSettings};
 pub use session::{
     AnswerCheck, CodexSession, CodexSettings, Model, ModelRead, models_of, user_input, version_of,
 };
+pub use session_settings::SessionSettings;
 
 /// The Codex versions this crate was tested with. Another one runs, with a warning.
 pub const TESTED_VERSIONS: &[&str] = &["0.164.0", "0.166.0"];

@@ -1,4 +1,4 @@
-# coqui-access/providers/access/key/plugin at ac96b16ff93fdf63a0d13c2ccdff635d29a437e6, with what it inherits written out.
+# coqui-access/providers/access/key/plugin at 35986e115d0214db7e4885d6a7976e0d771edb9b, with what it inherits written out.
 [package]
 name = "coqui-access-key-plugin"
 description = "coqui-access-key as a library a host loads"
@@ -20,7 +20,7 @@ rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
 features = ["derive"]
 [dependencies.guatiao-builder]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d"
 [dependencies.coqui-access-key]
 path = ".."
 [dependencies.coqui-access-kit]
@@ -37,7 +37,7 @@ version = "1"
 [dev-dependencies]
 [dev-dependencies.guatiao-serde]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d"
 default-features = false
 features = ["json"]
 [dev-dependencies.tempfile]

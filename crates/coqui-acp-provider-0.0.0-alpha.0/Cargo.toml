@@ -1,4 +1,4 @@
-# coqui-acp/crates/coqui-acp-provider at b81c78a42e8f83fca48c4f0913775d59309c5831, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-provider at f58a7baff4c6b549250d246bb54a08739e8ce839, with what it inherits written out.
 example = [{ name = "echo_provider", crate-type = ["cdylib"] }]
 [package]
 name = "coqui-acp-provider"
@@ -29,11 +29,11 @@ path = "../coqui-acp-api"
 version = "0.3"
 [dependencies.guatiao]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d"
 features = ["provider"]
 [dependencies.guatiao-serde]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d"
 default-features = false
 [dependencies.serde]
 version = "1"
@@ -50,7 +50,7 @@ features = ["v4"]
 path = "../coqui-acp"
 [dev-dependencies.guatiao]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d"
 features = ["provider", "load"]
 [lints]
 [lints.rust]

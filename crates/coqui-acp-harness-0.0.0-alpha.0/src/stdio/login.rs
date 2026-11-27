@@ -30,6 +30,12 @@ pub struct Ctx<'a> {
     job: &'a Job,
 }
 
+impl core::fmt::Debug for Ctx<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Ctx").finish_non_exhaustive()
+    }
+}
+
 impl Ctx<'_> {
     /// Refuses once the supervisor has answered.
     ///
@@ -114,6 +120,12 @@ pub struct Child {
     cli: Arc<Cli>,
     out: Vec<u8>,
     err: Vec<u8>,
+}
+
+impl core::fmt::Debug for Child {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Child").finish_non_exhaustive()
+    }
 }
 
 impl Child {

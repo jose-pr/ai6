@@ -79,10 +79,7 @@ pub fn get_exchange(
     headers: &[(&str, &str)],
     timeout: Duration,
 ) -> Result<Exchange, ReadError> {
-    let plain = url.len() > 8
-        && (url.starts_with("https://") || url.starts_with("http://"))
-        && !url.chars().any(|c| c.is_control() || c.is_whitespace());
-    if !plain {
+    if !crate::is_http_url(url) {
         return Err(ReadError::BadAddress);
     }
     let config = ureq::Agent::config_builder()

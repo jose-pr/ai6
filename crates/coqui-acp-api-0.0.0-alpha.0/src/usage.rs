@@ -1,6 +1,6 @@
 //! How much of each usage allowance an account has used, how it refills and when: one model for a
-//! harness's or provider's answer, the ACP extension that carries it, and the `acp_harness` kind's
-//! `usage` method.
+//! harness's or provider's answer, the ACP extension that carries it, and the `account_provider`
+//! kind's `usage` method.
 //!
 //! The model is plain data and the same in every language: counts and money are integers, times are
 //! Unix seconds, lengths are Guatiao's `Duration` (`[seconds, nanoseconds]`). No float appears. It
@@ -14,11 +14,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::time::Duration;
 
-use guatiao::{FromValue, Schema, Secret, ToValue};
+use guatiao::{FromValue, Schema, ToValue};
 use serde::{Deserialize, Serialize};
-
-use crate::account::AccountGrant;
-use crate::environment::Environment;
 
 /// The key of `agentCapabilities._meta` (`capabilities._meta` in ACP version 2) in which an agent
 /// that reports usage says so: `{"version": 1, "sources": ["reported", "inferred"], "spend": true}`,
@@ -163,6 +160,9 @@ pub enum Status {
     Warning,
     /// Nothing is left until the bucket refills.
     Exhausted,
+    /// The bucket does not apply now: another allowance stands in its place (a five-hour window while the weekly one is used
+    /// up). Its figures are not a limit on anything.
+    Disabled,
     /// The harness did not say.
     Unknown,
     /// A status a newer writer named.
@@ -170,7 +170,7 @@ pub enum Status {
     Other(String),
 }
 
-open_names!(Status { Ok => "ok", Warning => "warning", Exhausted => "exhausted", Unknown => "unknown" });
+open_names!(Status { Ok => "ok", Warning => "warning", Exhausted => "exhausted", Disabled => "disabled", Unknown => "unknown" });
 
 /// The models a bucket covers.
 #[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -300,9 +300,18 @@ pub struct Bucket {
     /// What a person sees, when the harness has a name apart from the id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// The group of allowances it belongs to, when the harness sorts them: `Gemini Models`, with a weekly and a five-hour window
+    /// in it. Buckets of one group share it and follow each other in a report.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
     /// The models it covers.
     #[map(with = coverage_codec)]
     pub models: Coverage,
+    /// The names a person reads for the models it covers, when the harness gives them; empty when it names none, or the bucket
+    /// is not model-specific. `models` is what a host matches, this is what an app shows.
+    #[map(default)]
+    #[serde(default)]
+    pub model_names: Vec<String>,
     /// What it counts.
     pub unit: Unit,
     /// How much is used, when the harness said.
@@ -336,7 +345,9 @@ impl Bucket {
         Self {
             id: id.into(),
             label: None,
+            group: None,
             models: Coverage::Unknown,
+            model_names: Vec::new(),
             unit: Unit::Permille,
             used: None,
             limit: None,
@@ -366,7 +377,32 @@ impl Bucket {
     }
 }
 
-/// A refused request: the harness said a limit stopped it.
+/// What kind of limit stopped a turn.
+#[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[map(crate = ::guatiao, rename_all = "snake_case")]
+#[serde(from = "String", into = "String")]
+#[non_exhaustive]
+pub enum LimitKind {
+    /// An allowance of the plan or key used up: a five-hour or weekly window, a monthly quota.
+    UsageQuota,
+    /// Too many requests or tokens in a short time; it lifts in seconds or minutes.
+    RateLimit,
+    /// The conversation does not fit the model's context window. Another account does not help; a model with a larger window might.
+    ContextWindow,
+    /// A prepaid balance or a spending cap used up.
+    Credit,
+    /// A limit that fits none of these.
+    Unclassified,
+    /// A kind a newer writer named.
+    #[map(other)]
+    Other(String),
+}
+
+open_names!(LimitKind { UsageQuota => "usage_quota", RateLimit => "rate_limit", ContextWindow => "context_window", Credit => "credit", Unclassified => "other" });
+
+/// A refused request: the harness said a limit stopped it. This is the standard form a harness reports a limit in, so a host reads
+/// what it says and does not match the words of an error: the answer of a refused turn carries it in `_meta` under
+/// [`LIMIT_META_KEY`].
 #[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::guatiao)]
 #[non_exhaustive]
@@ -388,6 +424,24 @@ pub struct LimitHit {
     pub text: Option<String>,
     /// When it was seen, in Unix seconds.
     pub observed_at: i64,
+    /// What kind of limit it is, when the harness can tell.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<LimitKind>,
+    /// Whether the work can go on with another account, model or agent: `false` for a limit that follows the work (a context
+    /// window), `true` for one that follows the member. Absent: not said, and a host takes it as `true` unless the kind is
+    /// `context_window`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continuable: Option<bool>,
+    /// The `messageId`s of the turn's agent message and thought updates that are the limit's own words, so a host drops them from
+    /// the history it carries on.
+    #[map(default)]
+    #[serde(default)]
+    pub text_ids: Vec<String>,
+    /// For a harness whose updates carry no ids (ACP version 1): the zero-based positions of those updates among the turn's agent
+    /// message and thought chunks, in the order they were sent.
+    #[map(default)]
+    #[serde(default)]
+    pub text_indexes: Vec<u32>,
 }
 
 impl LimitHit {
@@ -401,7 +455,46 @@ impl LimitHit {
             source: Source::Reported,
             text: None,
             observed_at,
+            kind: None,
+            continuable: None,
+            text_ids: Vec::new(),
+            text_indexes: Vec::new(),
         }
+    }
+
+    /// Says what kind of limit it is.
+    #[must_use]
+    pub fn kind(mut self, kind: LimitKind) -> Self {
+        self.kind = Some(kind);
+        self
+    }
+
+    /// Says whether the work can go on with another member.
+    #[must_use]
+    pub const fn continuable(mut self, continuable: bool) -> Self {
+        self.continuable = Some(continuable);
+        self
+    }
+
+    /// Names the messages that are the limit's words, by id.
+    #[must_use]
+    pub fn text_ids(mut self, ids: Vec<String>) -> Self {
+        self.text_ids = ids;
+        self
+    }
+
+    /// Names the messages that are the limit's words, by position among the turn's messages and thoughts.
+    #[must_use]
+    pub fn text_indexes(mut self, indexes: Vec<u32>) -> Self {
+        self.text_indexes = indexes;
+        self
+    }
+
+    /// Whether the work can go on elsewhere: what the harness said, else `true` unless the limit is a context window.
+    #[must_use]
+    pub fn can_continue(&self) -> bool {
+        self.continuable
+            .unwrap_or(self.kind != Some(LimitKind::ContextWindow))
     }
 }
 
@@ -646,43 +739,6 @@ impl UsageSupport {
     }
 }
 
-/// What a host asks [`AcpHarness::usage`](crate::AcpHarness::usage): refuses a key it does not
-/// declare.
-#[derive(ToValue, FromValue, Schema, Debug, Clone, Default, PartialEq)]
-#[map(crate = ::guatiao, deny_unknown_fields)]
-#[non_exhaustive]
-pub struct UsageQuery {
-    /// Variables for what the harness runs to ask, over its configuration's. A provider shows none
-    /// of them in an answer, a refusal, an error or a log.
-    #[map(default)]
-    pub environment: Secret<Environment>,
-    /// The account to report for; its `id` is echoed into the report and never interpreted. The
-    /// provider applies the rest, as `start` does.
-    pub account: Option<AccountGrant>,
-}
-
-impl UsageQuery {
-    /// A query adding nothing to the provider's configuration.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// The variables for what the harness runs.
-    #[must_use]
-    pub fn environment(mut self, environment: Environment) -> Self {
-        self.environment = Secret::new(environment);
-        self
-    }
-
-    /// The account the report is for.
-    #[must_use]
-    pub fn account(mut self, account: AccountGrant) -> Self {
-        self.account = Some(account);
-        self
-    }
-}
-
 /// The words by which [`infer_limit`] reads a failed turn as a quota or rate refusal, when a host
 /// sets none of its own. A host's list replaces these; it does not extend them.
 ///
@@ -741,7 +797,46 @@ pub fn infer_limit(text: &str, phrases: &[&str]) -> Option<LimitHit> {
     hit.text = Some(String::from(truncated(phrase, MAX_EVIDENCE_BYTES)));
     hit.resets_at = stated_time(hay);
     hit.retry_after = stated_length(hay);
+    hit.kind = Some(limit_kind_of(text).unwrap_or(LimitKind::Unclassified));
     Some(hit)
+}
+
+/// The most of a text [`limit_kind_of`] reads, in bytes.
+const MAX_KIND_BYTES: usize = 4096;
+
+/// What kind of limit a refusal's words say, for a harness that gives no structured kind: a context window (`context window`,
+/// `prompt is too long`, `context length`), a balance or spending cap (`credit`, `balance`, `billing`, `spend`), a rate limit
+/// (`rate limit`, `too many requests`, `throttl...`), a usage quota (`usage limit`, `quota`, `exhausted`, `limit reached`,
+/// `hit your limit`) or, with none of those words, a bare `429` (a rate limit), checked in that order. `None` when the words say none of them. A harness that knows its own
+/// limits states the kind itself, and this is the fallback for one that does not.
+#[must_use]
+pub fn limit_kind_of(text: &str) -> Option<LimitKind> {
+    let lower = String::from(truncated(text, MAX_KIND_BYTES)).to_ascii_lowercase();
+    let has = |words: &[&str]| words.iter().any(|word| lower.contains(word));
+    if has(&[
+        "context window",
+        "context length",
+        "prompt is too long",
+        "too many tokens",
+    ]) {
+        Some(LimitKind::ContextWindow)
+    } else if has(&["credit", "balance", "billing", "spend"]) {
+        Some(LimitKind::Credit)
+    } else if has(&["rate limit", "rate_limit", "too many requests", "throttl"]) {
+        Some(LimitKind::RateLimit)
+    } else if has(&[
+        "usage limit",
+        "quota",
+        "exhausted",
+        "limit reached",
+        "hit your limit",
+    ]) {
+        Some(LimitKind::UsageQuota)
+    } else if has(&["429"]) {
+        Some(LimitKind::RateLimit)
+    } else {
+        None
+    }
 }
 
 /// The prefix of `text` that is read, as bytes.

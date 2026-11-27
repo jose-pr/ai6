@@ -5,8 +5,9 @@
 //! It runs no agent: the harness ([`ClaudeProvider`](crate::ClaudeProvider)) applies an account the host hands it.
 
 use alloc::collections::BTreeMap;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::sync::Arc;
+use alloc::vec::Vec;
 use core::time::Duration;
 
 use std::ffi::OsString;
@@ -14,15 +15,23 @@ use std::sync::{Mutex, PoisonError};
 
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
 use coqui_acp_api::guatiao::{FromValue, Provider, Schema, Status, ToValue};
+use coqui_acp_api::standard::CLAUDE_CODE;
 use coqui_acp_api::{
-    AccountKeeper, AccountOffer, AccountProvider, AccountProviderInfo, AccountUsage,
-    AccountUsageQuery, AccountWatch, LoginOutcome, LoginPrompter, LoginRequest, ProcessSpawner,
-    RenewReport, RenewRequest, WatchRequest,
+    AccountGrant, AccountKeeper, AccountModelsQuery, AccountOffer, AccountProvider,
+    AccountProviderInfo, AccountRef, AccountUsage, AccountUsageQuery, AccountWatch, Credentials,
+    HARNESS_LOGIN, LoginOutcome, LoginPrompter, LoginRequest, ModelInfo, ModelListing,
+    ProcessSpawner, RenewReport, RenewRequest, SignedInCheck, SignedInQuery, UnknownKind,
+    WatchRequest,
 };
+use coqui_acp_harness::ThroughSpawner;
 use coqui_acp_harness::account::{Accounts, Files, Watching};
+use coqui_acp_harness::provider::provides_of;
 
 use crate::account_usage::{ReadOptions, read_limits};
-use crate::{accounts, signin};
+use crate::{ClaudeLaunch, ClaudeSession, ClaudeSettings, SessionSettings, accounts, signin};
+
+/// The id the account provider is registered under, which the harness's description names as its link.
+pub(crate) const ACCOUNT_PROVIDER: &str = "claude_accounts";
 
 /// How the Claude Code account provider is configured.
 #[derive(ToValue, FromValue, Schema, Debug, Clone)]
@@ -47,6 +56,13 @@ pub struct AccountSettings {
     /// The longest, in milliseconds, a plan limits read may take in all.
     #[map(default = 10_000)]
     pub usage_timeout_ms: u64,
+    /// The longest, in milliseconds, the macOS Keychain may take to say whether Claude Code's login item is there before the
+    /// answer is unknown; 0 does not wait for it. No other system asks a keyring.
+    #[map(default = 5_000)]
+    pub signed_in_timeout_ms: u64,
+    /// How the session that lists an account's models reads Claude Code's output, waits for it and ends it.
+    #[map(flatten)]
+    pub session: SessionSettings,
 }
 
 impl Default for AccountSettings {
@@ -57,6 +73,8 @@ impl Default for AccountSettings {
             command_timeout_ms: 60_000,
             usage_endpoint: None,
             usage_timeout_ms: 10_000,
+            signed_in_timeout_ms: 5_000,
+            session: SessionSettings::default(),
         }
     }
 }
@@ -126,6 +144,73 @@ impl ClaudeAccounts {
         usage.revision = revision;
         usage
     }
+
+    /// The plan limits of the login Claude Code keeps for itself: the one in its configuration directory
+    /// (`CLAUDE_CONFIG_DIR`, else `.claude` in the home), read as an account of the kind [`LOGIN`] is. A login that
+    /// has expired is renewed by Claude Code (`auth status`, as the host's own renewal does) and read again once.
+    ///
+    /// The directory is on this machine's files, so a spawner that runs elsewhere has none to read. The credential is
+    /// held only for the read and never shown.
+    fn local_usage(
+        &self,
+        query: &AccountUsageQuery,
+        spawner: Object<dyn ProcessSpawner>,
+    ) -> Result<AccountUsage, ProviderError> {
+        let none = |why: &str| {
+            let mut none = AccountUsage::unsupported(why);
+            none.account = Some(query.account.id.clone());
+            Ok(none)
+        };
+        let spawner = Arc::new(spawner);
+        if !spawner.describe()?.local {
+            return none(
+                "Claude Code runs where this machine's files are not, so the login it keeps there cannot be read from here",
+            );
+        }
+        let set: Vec<(String, String)> = query
+            .environment
+            .expose()
+            .iter()
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect();
+        let variables: BTreeMap<OsString, OsString> = set
+            .iter()
+            .map(|(name, value)| (OsString::from(name), OsString::from(value)))
+            .collect();
+        let Some(dir) = crate::config_dir(&variables, false) else {
+            return none("Claude Code's configuration directory is unknown");
+        };
+        let mut options =
+            ReadOptions::new().timeout(Duration::from_millis(self.settings.usage_timeout_ms));
+        if let Some(endpoint) = &self.settings.usage_endpoint {
+            options = options.endpoint(endpoint.clone());
+        }
+        let mut renewed = false;
+        loop {
+            let Some(text) = login_file(&dir.join(accounts::CREDENTIALS_FILE)) else {
+                return none(
+                    "Claude Code keeps no login file in its configuration directory (nobody is signed in, or it keeps the login elsewhere)",
+                );
+            };
+            // The kind needs a directory to be read as an account; reading it opens nothing there.
+            let grant = AccountGrant::new(query.account.id.clone(), accounts::LOGIN)
+                .credentials(
+                    [(accounts::FILE_KEY, text.as_str())]
+                        .into_iter()
+                        .collect::<Credentials>(),
+                )
+                .state_dir(dir.to_string_lossy());
+            match read_limits(&grant, &options) {
+                Ok(report) => return Ok(self.revised(AccountUsage::from_report(report))),
+                Err(error) if error.status == Status::GUATIAO_ERR_GONE && !renewed => {
+                    renewed = true;
+                    let spawn = ThroughSpawner::shared(Arc::clone(&spawner));
+                    signin::status(&spawn, &self.executable(), &set, self.limit(), None)?;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
 }
 
 fn unsupported(why: &str) -> ProviderError {
@@ -141,6 +226,10 @@ impl AccountProvider for ClaudeAccounts {
 
     fn offers(&self) -> Result<AccountOffer, ProviderError> {
         Ok(accounts::offer())
+    }
+
+    fn provides(&self, account: AccountRef) -> Result<Vec<String>, ProviderError> {
+        provides_of(&accounts::offer(), &account, &[CLAUDE_CODE])
     }
 
     fn login(
@@ -211,12 +300,25 @@ impl AccountProvider for ClaudeAccounts {
         ))
     }
 
+    fn signed_in(&self, query: SignedInQuery) -> Result<SignedInCheck, ProviderError> {
+        Ok(crate::signed_in::check(
+            query.environment.expose(),
+            Duration::from_millis(self.settings.signed_in_timeout_ms),
+            crate::signed_in::real_keychain(),
+        ))
+    }
+
     fn usage(
         &self,
         query: AccountUsageQuery,
         spawner: Object<dyn ProcessSpawner>,
         keeper: Object<dyn AccountKeeper>,
     ) -> Result<AccountUsage, ProviderError> {
+        if query.account.kind == HARNESS_LOGIN {
+            drop(keeper);
+            query.account.check_id()?;
+            return self.local_usage(&query, spawner);
+        }
         // Plan limits are read over the network with the credential: no program is started and no file read.
         drop((spawner, keeper));
         accounts::own(&query.account)?;
@@ -228,4 +330,121 @@ impl AccountProvider for ClaudeAccounts {
         let report = read_limits(&query.account, &options)?;
         Ok(self.revised(AccountUsage::from_report(report)))
     }
+
+    fn models(
+        &self,
+        query: AccountModelsQuery,
+        spawner: Object<dyn ProcessSpawner>,
+        keeper: Object<dyn AccountKeeper>,
+    ) -> Result<ModelListing, ProviderError> {
+        let grant = &query.account;
+        let local = grant.kind == HARNESS_LOGIN;
+        if local {
+            grant.check_id()?;
+        } else {
+            accounts::own(grant)?;
+        }
+        let mut launch = ClaudeLaunch::new(".");
+        launch.executable = self.executable();
+        for (name, value) in query.environment.expose().iter() {
+            launch.env.insert(name.into(), value.into());
+        }
+        let spawner = Arc::new(spawner);
+        let files = Files::new(Arc::clone(&spawner));
+        // The login's files are placed for the call and a login the program renews meanwhile is told to the keeper.
+        let hold = if local {
+            drop(keeper);
+            None
+        } else {
+            accounts::apply_as(grant, &mut launch, &files, false)?.hold_keeping(
+                &self.accounts,
+                &files,
+                Some(keeper),
+            )?
+        };
+        drop(files);
+        let listing = listing(
+            &launch,
+            &ThroughSpawner::shared(spawner),
+            self.settings.session.settings(),
+        );
+        if let Some(hold) = hold {
+            hold.finish();
+        }
+        Ok(listing)
+    }
+}
+
+/// The models Claude Code lists once started on `launch`, with no turn.
+fn listing(
+    launch: &ClaudeLaunch,
+    spawn: &ThroughSpawner,
+    settings: ClaudeSettings,
+) -> ModelListing {
+    match ClaudeSession::start(launch, spawn, settings, |_| true) {
+        Ok(session) => {
+            let signed_out = session.signed_out();
+            let listing = session.models().map_or_else(
+                || {
+                    // A Claude Code with nobody signed in can list none; that is the person's next step, not a
+                    // list that waits for a session.
+                    if signed_out {
+                        ModelListing::unknown(
+                            "nobody is signed in to Claude Code, which lists its models once someone is",
+                        )
+                        .signed_out()
+                    } else {
+                        ModelListing::unavailable(UnknownKind::Failed, "Claude Code listed no model")
+                    }
+                },
+                |models| {
+                    ModelListing::of(
+                        models
+                            .into_iter()
+                            .map(|model| {
+                                let mut info = ModelInfo::new(model.id.clone());
+                                info.name = Some(model.label());
+                                info.description = model.description;
+                                info.resolved = model.resolved;
+                                info.version = model.version;
+                                info.efforts = model.efforts;
+                                info.is_default = model.id == "default";
+                                info
+                            })
+                            .collect(),
+                    )
+                },
+            );
+            session.close();
+            if signed_out && listing.known {
+                listing.signed_out()
+            } else {
+                listing
+            }
+        }
+        Err(error) => ModelListing::unavailable(
+            match &error {
+                crate::Error::Spawn(why) if why.kind() == std::io::ErrorKind::NotFound => {
+                    UnknownKind::NotInstalled
+                }
+                _ => UnknownKind::Failed,
+            },
+            format!("Claude Code could not be asked: {error}"),
+        ),
+    }
+}
+
+/// The longest login file read: a real one is a few hundred bytes.
+const LOGIN_FILE_LIMIT: u64 = 1 << 20;
+
+/// The text of the login file at `path`; `None` when it is not there or is not readable text of a sane length.
+fn login_file(path: &std::path::Path) -> Option<String> {
+    use std::io::Read;
+    let mut text = String::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(LOGIN_FILE_LIMIT + 1)
+        .read_to_string(&mut text)
+        .ok()?;
+    (!text.is_empty() && text.len() as u64 <= LOGIN_FILE_LIMIT).then_some(text)
 }

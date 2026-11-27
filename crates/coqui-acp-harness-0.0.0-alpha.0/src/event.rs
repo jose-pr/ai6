@@ -1,6 +1,7 @@
 //! What a harness reports, in no protocol's terms.
 
 use alloc::boxed::Box;
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
@@ -344,6 +345,25 @@ pub struct Usage {
     /// What the session has spent so far, as running totals; the session's id is filled in by the
     /// connection, so a harness leaves it empty.
     pub spend: Option<Spend>,
+    /// What the running turn has used so far in all its requests, as the harness counts it, when it counts a turn apart from
+    /// its latest request: the turn's answer reports this in place of the counts above.
+    pub turn: Option<TurnTokens>,
+}
+
+/// The tokens a turn used in all its requests.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct TurnTokens {
+    /// Input tokens not read from a cache.
+    pub input: u64,
+    /// Output tokens, reasoning ones included.
+    pub output: u64,
+    /// Input tokens read from a cache.
+    pub cache_read: u64,
+    /// Input tokens written to a cache.
+    pub cache_write: u64,
+    /// The part of the output that was reasoning, when the harness says.
+    pub reasoning: Option<u64>,
 }
 
 /// A command the person can give the agent by name.
@@ -746,6 +766,10 @@ pub enum Event {
     Permission(PermissionRequest),
     /// Tokens, cost and context.
     Usage(Usage),
+    /// Facts about the running turn for the `_meta` of its answer, each under the key a host reads it by (`model`, or a
+    /// harness-namespaced key such as `codex:error_info`): a later value of a key replaces an earlier one, and the turn's end
+    /// clears them.
+    TurnMeta(BTreeMap<String, Value>),
     /// The account's allowances, each a bucket named by its id: one replaces the earlier of its id,
     /// and a field it leaves unknown keeps what was known.
     Buckets(Vec<Bucket>),

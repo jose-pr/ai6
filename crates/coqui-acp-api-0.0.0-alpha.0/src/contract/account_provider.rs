@@ -1,4 +1,5 @@
-//! The checks of an `account_provider`: what it offers, signing in, renewing, watching and usage.
+//! The checks of an `account_provider`: what it offers, signing in, renewing, watching, usage and the models of an
+//! account.
 //!
 //! The suite hands a provider a spawner that is virtual (it starts nothing: it records the specs it
 //! is asked to start and hands back idle processes) and serves files in a directory of the suite's,
@@ -15,18 +16,20 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use super::accounts::{
-    BAD_VALUE, GONE, ROTATED, SECOND, SignIn, UNSUPPORTED, distinct, grant_of, inputs_for,
-    kind_rules, login_rules, sign_in, why,
+    BAD_VALUE, GONE, PROMPTLY, ROTATED, SECOND, SignIn, UNSUPPORTED, can_provide, distinct,
+    grant_of, inputs_for, kind_rules, login_rules, provided_by, sign_in, why,
 };
 use super::checks::{CANARY, Outcome, Place, text};
 use super::host::{self, GRACE, PATIENCE, Script, status};
+use super::json::{from_json, to_json};
 use super::{Failure, Failures};
 use crate::guatiao::library::{Object, ProviderError};
 use crate::usage::Refill;
 use crate::{
-    AccountGrant, AccountKindInfo, AccountLoss, AccountOffer, AccountProvider, AccountRenewal,
-    AccountUsageQuery, AccountWatch, Credentials, Environment, LoginMethodInfo, LoginOutcome,
-    LoginRequest, RenewRequest, WatchRequest,
+    AccountGrant, AccountKindInfo, AccountLoss, AccountModelsQuery, AccountOffer, AccountProvider,
+    AccountRenewal, AccountUsageQuery, AccountWatch, Credentials, Environment, HARNESS_LOGIN,
+    LoginMethodInfo, LoginOutcome, LoginRequest, PROVIDES_BY_VALUE, RenewRequest, SignedInCheck,
+    SignedInQuery, SignedInState, WatchRequest,
 };
 
 macro_rules! ensure {
@@ -117,6 +120,18 @@ fn all(contract: &AccountContract, provider: &dyn AccountProvider) -> Vec<(&'sta
             "reports plan usage as it lists",
             usage(contract, provider, &place),
         ),
+        (
+            "lists the models of an account",
+            models(contract, provider, &place),
+        ),
+        (
+            "says what its accounts provide",
+            provides(contract, provider, &place),
+        ),
+        (
+            "says whether the program's own login exists",
+            signed_in(provider),
+        ),
     ];
     place.remove();
     checks
@@ -165,8 +180,8 @@ fn offers(contract: &AccountContract, provider: &dyn AccountProvider) -> Outcome
     kind_rules(&offer.kinds)?;
     for info in &offer.kinds {
         ensure!(
-            !info.provides.is_empty(),
-            "{} provides no standard, so no harness could be given an account of it",
+            can_provide(info),
+            "{} provides no standard, neither itself nor by a setting's value, so no harness could be given an account of it",
             info.id
         );
     }
@@ -174,7 +189,7 @@ fn offers(contract: &AccountContract, provider: &dyn AccountProvider) -> Outcome
     let mut listed = Vec::new();
     for id in &offer.usage {
         ensure!(
-            offer.kind(id).is_some(),
+            offer.takes(id),
             "usage names {id}, which is not a listed kind"
         );
         ensure!(!listed.contains(&id), "usage names {id} twice");
@@ -353,7 +368,7 @@ fn make(
     let mut grant = AccountGrant::new("contract-signed-in", &info.id)
         .settings(outcome.settings.clone())
         .credentials(outcome.credentials.expose().clone())
-        .provides(info.provides.clone())
+        .provides(provided_by(info, &super::json::to_json(&outcome.settings)))
         .revision(1);
     if info.state_dir {
         grant = grant.state_dir(text(&dir));
@@ -794,8 +809,53 @@ fn credential_text(account: &Made) -> String {
         .unwrap_or_default()
 }
 
+/// The automatic `local` account of `usage` and `models`: asked when the provider offers it, and refused as a kind it does
+/// not list when it does not.
+fn local_account() -> AccountGrant {
+    AccountGrant::new(crate::LOCAL_ACCOUNT, HARNESS_LOGIN).revision(1)
+}
+
 fn usage(contract: &AccountContract, provider: &dyn AccountProvider, place: &Place) -> Outcome {
     let offer = offer_of(provider)?;
+    if contract.kind.is_none() {
+        let dir = place.scratch()?;
+        let (watch, spawner, keeper) = host::spawner_in(Some(&dir));
+        let mut environment = Environment::new();
+        environment.insert("COQUI_ACP_CONTRACT_VARIABLE", CANARY);
+        let answer = provider.usage(
+            AccountUsageQuery::new(local_account()).environment(environment),
+            spawner,
+            keeper,
+        );
+        if offer.local {
+            let report = answer.map_err(|e| format!("usage of the local account: {}", why(&e)))?;
+            objects("usage of the local account", &watch)?;
+            ensure!(
+                !format!("{report:?}").contains(CANARY),
+                "the usage of the local account carries a value of the environment"
+            );
+            ensure!(
+                report.supported
+                    || report
+                        .unsupported_because
+                        .as_deref()
+                        .is_some_and(|why| !why.is_empty()),
+                "the local account is not offered usage, and no reason is given"
+            );
+            ensure!(
+                report.supported == offer.reports_usage(HARNESS_LOGIN),
+                "usage of the local account answers `supported: {}`, and the offer says {}",
+                report.supported,
+                offer.reports_usage(HARNESS_LOGIN)
+            );
+        } else {
+            refused_as_bad(
+                "usage of the local account, which it does not offer",
+                &watch,
+                answer.map(|_| ()),
+            )?;
+        }
+    }
     for info in kinds_of(contract, &offer)? {
         let account = make(provider, &offer, &info, place)?;
         let ask = |grant: &AccountGrant| {
@@ -909,5 +969,280 @@ fn usage(contract: &AccountContract, provider: &dyn AccountProvider, place: &Pla
             again.revision
         );
     }
+    Ok(())
+}
+
+/// The models an account lists: every kind the provider offers, and the automatic `local` account when it offers one, each asked with a
+/// secret in the environment that must not come back, and each kind it does not list refused as a bad value.
+fn models(contract: &AccountContract, provider: &dyn AccountProvider, place: &Place) -> Outcome {
+    let offer = offer_of(provider)?;
+    let mut accounts = Vec::new();
+    for info in kinds_of(contract, &offer)? {
+        let account = make(provider, &offer, &info, place)?;
+        accounts.push((info.id, account.grant, account.dir));
+    }
+    if contract.kind.is_none() {
+        let dir = place.scratch()?;
+        if offer.local {
+            accounts.push((String::from(HARNESS_LOGIN), local_account(), dir));
+        } else {
+            let (watch, spawner, keeper) = host::spawner_in(Some(&dir));
+            let answer = provider.models(AccountModelsQuery::new(local_account()), spawner, keeper);
+            refused_as_bad(
+                "models of the local account, which it does not offer",
+                &watch,
+                answer.map(|_| ()),
+            )?;
+        }
+    }
+    for (kind, grant, dir) in accounts {
+        let ask = |grant: &AccountGrant| {
+            let (watch, spawner, keeper) = host::spawner_in(Some(&dir));
+            let mut environment = Environment::new();
+            environment.insert("COQUI_ACP_CONTRACT_VARIABLE", CANARY);
+            let answer = provider.models(
+                AccountModelsQuery::new(grant.clone()).environment(environment),
+                spawner,
+                keeper,
+            );
+            (watch, answer)
+        };
+        for (what, bad) in bad_grants(&grant) {
+            let label = format!("{kind}: models of {what}");
+            let (watch, answer) = ask(&bad);
+            refused_as_bad(&label, &watch, answer.map(|_| ()))?;
+        }
+        let (watch, answer) = ask(&grant);
+        let listing = answer.map_err(|e| format!("{kind}: models: {}", why(&e)))?;
+        objects(&format!("{kind}: models"), &watch)?;
+        ensure!(
+            !format!("{listing:?}").contains(CANARY),
+            "{kind}: the listing carries a value of the environment or a credential"
+        );
+        if listing.known {
+            ensure!(
+                listing.unknown_because.is_none() && listing.unknown_kind.is_none(),
+                "{kind}: it lists models and says why it could not"
+            );
+            let mut ids = Vec::new();
+            for model in &listing.models {
+                ensure!(!model.id.is_empty(), "{kind}: a model has no id");
+                ensure!(
+                    !ids.contains(&&model.id),
+                    "{kind}: the model {:?} is listed twice",
+                    model.id
+                );
+                ids.push(&model.id);
+            }
+        } else {
+            ensure!(
+                listing.models.is_empty()
+                    && listing
+                        .unknown_because
+                        .as_deref()
+                        .is_some_and(|reason| !reason.is_empty()),
+                "{kind}: it could not list, and did not answer with a reason and no model"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// What an account provides: each kind the provider lists, asked for a sample account, must answer what the kind declares
+/// (its `provides`, or what the setting marked [`PROVIDES_BY_VALUE`] picks for the value the account holds), once for each
+/// value such a setting lists. Every id is a standard, none twice; the automatic `local` account answers some, and an
+/// account of a kind it does not list, or with a bad id, is refused as a bad value.
+fn provides(contract: &AccountContract, provider: &dyn AccountProvider, place: &Place) -> Outcome {
+    let offer = offer_of(provider)?;
+    for info in kinds_of(contract, &offer)? {
+        let account = make(provider, &offer, &info, place)?;
+        let kind = &info.id;
+        let reference = |grant: &AccountGrant| {
+            let mut reference = grant.reference();
+            // What the host remembers of an earlier answer is no input to the next.
+            reference.provides.clear();
+            reference
+        };
+        let mut samples = vec![(String::from("its sample account"), account.grant.clone())];
+        for (name, property) in properties_of(&info) {
+            let Some(listed) = property
+                .get(PROVIDES_BY_VALUE)
+                .and_then(serde_json::Value::as_object)
+            else {
+                continue;
+            };
+            for value in listed.keys() {
+                let mut settings = to_json(&account.grant.settings);
+                if !settings.is_object() {
+                    settings = serde_json::json!({});
+                }
+                settings[&name] = serde_json::Value::String(value.clone());
+                let mut grant = account.grant.clone();
+                grant.settings = from_json(&settings)?;
+                samples.push((format!("{name} set to {value}"), grant));
+            }
+        }
+        for (what, grant) in samples {
+            let mut answered = provider
+                .provides(reference(&grant))
+                .map_err(|e| format!("{kind}: provides, for {what}: {}", why(&e)))?;
+            ensure!(
+                answered.iter().all(|id| crate::standard::is_standard(id)),
+                "{kind}: for {what} it provides {answered:?}, which holds a name that is not a standard id"
+            );
+            ensure!(
+                answered
+                    .iter()
+                    .enumerate()
+                    .all(|(at, id)| !answered[..at].contains(id)),
+                "{kind}: for {what} it provides a standard twice: {answered:?}"
+            );
+            let mut expected = provided_by(&info, &to_json(&grant.settings));
+            expected.retain(|id| crate::standard::is_standard(id));
+            answered.sort();
+            expected.sort();
+            expected.dedup();
+            ensure!(
+                answered == expected,
+                "{kind}: for {what} it provides {answered:?}, and its kind says {expected:?}"
+            );
+        }
+        for (what, other) in bad_grants(&account.grant) {
+            let label = format!("{kind}: provides, for {what}");
+            refused_plainly(&label, provider.provides(reference(&other)).map(|_| ()))?;
+        }
+    }
+    if contract.kind.is_none() {
+        let local = local_account().reference();
+        if offer.local {
+            let answered = provider
+                .provides(local)
+                .map_err(|e| format!("provides, for the local account: {}", why(&e)))?;
+            ensure!(
+                !answered.is_empty() && answered.iter().all(|id| crate::standard::is_standard(id)),
+                "provides, for the local account, answered {answered:?}, not the standard of the program itself"
+            );
+            ensure!(
+                answered
+                    .iter()
+                    .enumerate()
+                    .all(|(at, id)| !answered[..at].contains(id)),
+                "provides, for the local account, names a standard twice"
+            );
+        } else {
+            refused_plainly(
+                "provides, for the local account, which it does not offer",
+                provider.provides(local).map(|_| ()),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// The properties of a kind's settings schema, by name.
+fn properties_of(info: &AccountKindInfo) -> Vec<(String, serde_json::Value)> {
+    to_json(&info.settings)
+        .get("properties")
+        .and_then(serde_json::Value::as_object)
+        .map(|properties| {
+            properties
+                .iter()
+                .map(|(name, property)| (name.clone(), property.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Whether the program's own login exists: asked of a provider that offers the automatic `local` account, which answers one
+/// of the three states within the time a host can wait, with a reason when it is not signed in, and never a value of the
+/// environment; asked of one that does not, which refuses it as unsupported.
+fn signed_in(provider: &dyn AccountProvider) -> Outcome {
+    let offer = offer_of(provider)?;
+    let mut environment = Environment::new();
+    environment.insert("COQUI_ACP_CONTRACT_VARIABLE", CANARY);
+    let query = || SignedInQuery::new().environment(environment.clone());
+    if !offer.local {
+        let error = provider
+            .signed_in(query())
+            .err()
+            .ok_or("signed_in, which it does not offer the local account for: it answered")?;
+        ensure!(
+            status(&error) == UNSUPPORTED
+                && !error.message().is_empty()
+                && !error.message().contains(CANARY),
+            "signed_in without a local account was refused with {}, not {UNSUPPORTED} and a reason without a secret",
+            why(&error)
+        );
+        return Ok(());
+    }
+    let begun = Instant::now();
+    let answer = provider
+        .signed_in(query())
+        .map_err(|e| format!("signed_in: {}", why(&e)))?;
+    ensure!(
+        begun.elapsed() < PROMPTLY,
+        "signed_in took {:?}: it is asked to be cheap and bounded in time",
+        begun.elapsed()
+    );
+    ensure!(
+        !format!("{answer:?}").contains(CANARY),
+        "the answer of signed_in carries a value of the environment"
+    );
+    check_signed_in(&answer)?;
+    let bare = provider
+        .signed_in(SignedInQuery::new())
+        .map_err(|e| format!("signed_in with no environment: {}", why(&e)))?;
+    check_signed_in(&bare)?;
+    let again = provider
+        .signed_in(query())
+        .map_err(|e| format!("signed_in, asked twice: {}", why(&e)))?;
+    ensure!(
+        again == answer,
+        "signed_in answered {answer:?}, then {again:?}, for the same query"
+    );
+    Ok(())
+}
+
+/// The rules of one answer of `signed_in`.
+fn check_signed_in(answer: &SignedInCheck) -> Outcome {
+    let said = |text: &Option<String>| text.as_deref().is_some_and(|text| !text.is_empty());
+    match answer.state {
+        SignedInState::SignedIn => ensure!(
+            answer.reason.is_none(),
+            "signed_in answers signed in with a reason, which is for the other two"
+        ),
+        SignedInState::SignedOut | SignedInState::Unknown => {
+            ensure!(
+                said(&answer.reason),
+                "signed_in answers {:?} with no reason",
+                answer.state
+            );
+            ensure!(
+                answer.variable.is_none(),
+                "signed_in names a variable it did not find a login in"
+            );
+        }
+    }
+    if let Some(name) = &answer.variable {
+        ensure!(
+            !name.is_empty() && !name.contains(['=', '\0']) && !name.contains(CANARY),
+            "signed_in names a variable that is no variable name"
+        );
+    }
+    Ok(())
+}
+
+/// A refusal of a question that hands the provider no object: `GUATIAO_ERR_BAD_VALUE` and a reason without a secret.
+fn refused_plainly(label: &str, answer: Result<(), ProviderError>) -> Outcome {
+    let error = answer
+        .err()
+        .ok_or_else(|| format!("{label}: it answered"))?;
+    ensure!(
+        status(&error) == BAD_VALUE
+            && !error.message().is_empty()
+            && !error.message().contains(CANARY),
+        "{label}: it refused with {}, not {BAD_VALUE} and a reason without a secret",
+        why(&error)
+    );
     Ok(())
 }

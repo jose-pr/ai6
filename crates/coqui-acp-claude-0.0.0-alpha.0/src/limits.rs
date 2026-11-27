@@ -7,7 +7,8 @@ use alloc::vec::Vec;
 use core::time::Duration;
 
 use coqui_acp_api::usage::{
-    Bucket, Coverage, LimitHit, ModelSpend, Refill, Source, Spend, Status, Unit, infer_limit,
+    Bucket, Coverage, LimitHit, LimitKind, ModelSpend, Refill, Source, Spend, Status, Unit,
+    infer_limit, limit_kind_of,
 };
 use coqui_acp_harness::event::Usage;
 use serde_json::Value;
@@ -36,6 +37,18 @@ pub(crate) fn limit(value: &Value) -> Option<LimitHit> {
                 return None;
             }
             let mut limit = LimitHit::new(0);
+            let window = info
+                .get("rateLimitType")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            // Claude Code's own event names the window: the plan's windows are quotas, `overage` is the extra usage bought
+            // with money.
+            limit.kind = Some(if window.contains("overage") {
+                LimitKind::Credit
+            } else {
+                LimitKind::UsageQuota
+            });
+            limit.continuable = Some(true);
             limit.resets_at = info
                 .get("resetsAt")
                 .and_then(Value::as_i64)
@@ -68,6 +81,13 @@ pub(crate) fn limit(value: &Value) -> Option<LimitHit> {
             let mut limit = LimitHit::new(0);
             limit.resets_at = resets_at;
             limit.bucket = bucket;
+            // A 429 that names no usage limit is the API's rate limit; the words of a usage limit are Claude Code's own.
+            limit.kind = Some(if infer_limit(text, LIMIT_PHRASES).is_some() {
+                LimitKind::UsageQuota
+            } else {
+                limit_kind_of(text).unwrap_or(LimitKind::RateLimit)
+            });
+            limit.continuable = Some(true);
             limit.source = Source::Inferred;
             limit.text = Some(text.to_string());
             Some(limit)
@@ -76,30 +96,100 @@ pub(crate) fn limit(value: &Value) -> Option<LimitHit> {
     }
 }
 
-/// How long a window named `name` lasts: the five-hour window, and each weekly one (`seven_day`, `seven_day_opus`, ...).
-/// Any other name is no length rather than a guess.
+/// The length of a weekly window, in seconds.
+pub(crate) const WEEK: u64 = 7 * 86_400;
+
+/// One of the windows of a plan, as both the stream's events and the account's plan limits name it.
+pub(crate) struct Window {
+    /// What Claude Code calls it.
+    pub id: &'static str,
+    /// What a person reads it as.
+    pub label: &'static str,
+    /// How long it lasts, in seconds.
+    pub seconds: u64,
+    /// The one model it covers, when it says so by its name.
+    pub model: Option<&'static str>,
+    /// Whether it covers every model, as the account's plan limits say of the two plain windows.
+    pub all_models: bool,
+}
+
+/// The windows Claude Code names, in the order a person reads them.
+pub(crate) const WINDOWS: &[Window] = &[
+    Window {
+        id: "five_hour",
+        label: "Session (5 hours)",
+        seconds: 5 * 3600,
+        model: None,
+        all_models: true,
+    },
+    Window {
+        id: "seven_day",
+        label: "Weekly",
+        seconds: WEEK,
+        model: None,
+        all_models: true,
+    },
+    Window {
+        id: "seven_day_opus",
+        label: "Weekly, Opus",
+        seconds: WEEK,
+        model: Some("opus"),
+        all_models: false,
+    },
+    Window {
+        id: "seven_day_sonnet",
+        label: "Weekly, Sonnet",
+        seconds: WEEK,
+        model: Some("sonnet"),
+        all_models: false,
+    },
+    Window {
+        id: "seven_day_oauth_apps",
+        label: "Weekly, OAuth apps",
+        seconds: WEEK,
+        model: None,
+        all_models: false,
+    },
+];
+
+fn window(name: &str) -> Option<&'static Window> {
+    WINDOWS.iter().find(|window| window.id == name)
+}
+
+/// How long a window named `name` lasts: one of [`WINDOWS`], and any other weekly one (`seven_day_...`). Any other
+/// name is no length rather than a guess.
 fn window_length(name: &str) -> Option<Duration> {
-    if name == "five_hour" {
-        Some(Duration::from_secs(5 * 3600))
-    } else if name == "seven_day" || name.starts_with("seven_day_") {
-        Some(Duration::from_secs(7 * 24 * 3600))
-    } else {
-        None
-    }
+    window(name)
+        .map(|window| window.seconds)
+        .or_else(|| name.starts_with("seven_day_").then_some(WEEK))
+        .map(Duration::from_secs)
 }
 
 /// The models a window named `name` covers: a model-specific weekly window says so by its name, and no other window
 /// says anything.
 fn window_coverage(name: &str) -> Coverage {
-    match name {
-        "seven_day_opus" => Coverage::Only {
-            models: alloc::vec!["opus".to_string()],
+    match window(name).and_then(|window| window.model) {
+        Some(model) => Coverage::Only {
+            models: alloc::vec![model.to_string()],
         },
-        "seven_day_sonnet" => Coverage::Only {
-            models: alloc::vec!["sonnet".to_string()],
-        },
-        _ => Coverage::Unknown,
+        None => Coverage::Unknown,
     }
+}
+
+/// The names a person reads for the models `coverage` lists: each as Claude names it, first letter up (`opus` is `Opus`).
+pub(crate) fn model_names(coverage: &Coverage) -> Vec<String> {
+    let Coverage::Only { models } = coverage else {
+        return Vec::new();
+    };
+    models
+        .iter()
+        .map(|model| {
+            let mut letters = model.chars();
+            letters.next().map_or_else(String::new, |first| {
+                first.to_uppercase().chain(letters).collect()
+            })
+        })
+        .collect()
 }
 
 /// The buckets a `rate_limit_event` reports, whatever its status: each of `unifiedWindows`, or else the one it
@@ -125,6 +215,7 @@ pub(crate) fn buckets(value: &Value) -> Vec<Bucket> {
             bucket.limit = Some(1000);
         }
         bucket.models = window_coverage(name);
+        bucket.model_names = model_names(&bucket.models);
         bucket.refill = Refill::FixedWindow {
             length: window_length(name),
             resets_at: fields
@@ -158,6 +249,39 @@ pub(crate) fn buckets(value: &Value) -> Vec<Bucket> {
     )]
 }
 
+/// The words of a `type: error` line: its `result`, `error.message`, first text block, `message` or `error`.
+pub(crate) fn line_text(value: &Value) -> String {
+    [
+        "/result",
+        "/error/message",
+        "/message/content/0/text",
+        "/message",
+        "/error",
+    ]
+    .iter()
+    .find_map(|pointer| value.pointer(pointer).and_then(Value::as_str))
+    .unwrap_or("Claude Code reported an error")
+    .to_string()
+}
+
+/// The limit a line of Claude Code's `--output-format stream-json` states, as the provider reads it: a `rate_limit_event`
+/// whose status is `rejected`, a `result` that is an error naming a limit (the words `usage limit`, `limit reached` or
+/// `hit your limit`, or `api_error_status` 429), or a `type: error` line whose words do. `kind` says what it is (a
+/// plan's windows are `UsageQuota`, the `overage` window and money `Credit`, a 429 that names no usage limit
+/// `RateLimit`) and `continuable` is true: another account can take the work. A reset comes from `resetsAt` or the
+/// number after a trailing `|` of the words; a clock time is left unset. `None` for any other line.
+///
+/// The provider also joins a rejected event to the error that follows it; a host that wants that keeps the event's hit and
+/// copies its `resets_at`, `kind` and `bucket` over the later one.
+#[must_use]
+pub fn limit_of_line(line: &Value) -> Option<LimitHit> {
+    if line.get("type").and_then(Value::as_str) == Some("error") {
+        limit_of_text(&line_text(line))
+    } else {
+        limit(line)
+    }
+}
+
 /// The limit an `error` line says, by the same words as a result's; a reset time follows a trailing `|`.
 pub(crate) fn limit_of_text(text: &str) -> Option<LimitHit> {
     limit(&serde_json::json!({"type": "result", "is_error": true, "result": text}))
@@ -169,6 +293,7 @@ pub(crate) fn limit_of_text(text: &str) -> Option<LimitHit> {
 pub(crate) fn with_hint(mut limit: LimitHit, hint: Option<LimitHit>) -> LimitHit {
     if let Some(hint) = hint {
         limit.resets_at = hint.resets_at.or(limit.resets_at);
+        limit.kind = hint.kind.or(limit.kind.take());
         limit.bucket = hint.bucket.or(limit.bucket);
         limit.source = hint.source;
     }

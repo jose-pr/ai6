@@ -1,5 +1,5 @@
 //! What a provider of the `acp_harness` kind needs to front a harness that [`serve`] serves: the channel
-//! the host talks over, ended the way the kind says, and the usage a provider keeps for its `usage` method.
+//! the host talks over, ended the way the kind says.
 //!
 //! [`Serving::open`] runs `serve` on a thread of its own over a [`Channel`]: each message the host sends is a line `serve`
 //! reads, each line it writes a message handed to the host's sink. The harness starts its programs through the host's
@@ -9,7 +9,7 @@
 //! provides the kind has to be able to wait for before it is unloaded ([`threads_done`]).
 
 use alloc::boxed::Box;
-use alloc::collections::{BTreeMap, VecDeque};
+use alloc::collections::VecDeque;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -19,13 +19,10 @@ use std::thread::JoinHandle;
 
 use coqui_acp_api::guatiao::Status;
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
-use coqui_acp_api::usage::Bucket;
-use coqui_acp_api::{
-    Channel, ChannelSink, HarnessNotice, ProcessSpawner, UsageReport, UsageSupport,
-};
+use coqui_acp_api::{Channel, ChannelSink, HarnessNotice, ProcessSpawner};
 use serde_json::Value;
 
-use crate::acp::{Harness, Settings, UsageTracker, serve};
+use crate::acp::{Harness, Settings, serve};
 use crate::process::{Launch, Spawn, Spawned};
 use crate::spawner::ThroughSpawner;
 
@@ -469,76 +466,6 @@ fn deliver(mut sink: Object<dyn ChannelSink>, shared: &Shared) {
     sink.closed(status, &reason);
 }
 
-/// What a provider keeps of the usage its connections learned, by account, for the kind's `usage` method: the buckets
-/// and limits each connection's report held, merged as a connection merges them, so a repeat of figures already held
-/// changes nothing and the revision only grows.
-#[derive(Debug, Default)]
-pub struct Reports {
-    accounts: Mutex<BTreeMap<String, UsageTracker>>,
-}
-
-impl Reports {
-    /// Nothing seen.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    fn held(&self) -> MutexGuard<'_, BTreeMap<String, UsageTracker>> {
-        self.accounts.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// Takes the report a connection on `account` has now.
-    pub fn observe(&self, support: &UsageSupport, account: Option<&str>, report: &UsageReport) {
-        let now = unix_now();
-        let mut held = self.held();
-        let tracker = held
-            .entry(account.unwrap_or_default().to_string())
-            .or_insert_with(|| UsageTracker::new(support.clone(), account.map(str::to_string)));
-        tracker.buckets(report.buckets.clone(), now);
-        if let Some(hit) = &report.limit {
-            tracker.limit(hit.clone(), now);
-        }
-    }
-
-    /// Takes buckets a reading of `account` gave, and answers the report with them.
-    pub fn read(
-        &self,
-        support: &UsageSupport,
-        account: Option<&str>,
-        buckets: Vec<Bucket>,
-    ) -> UsageReport {
-        let now = unix_now();
-        let mut held = self.held();
-        let tracker = held
-            .entry(account.unwrap_or_default().to_string())
-            .or_insert_with(|| UsageTracker::new(support.clone(), account.map(str::to_string)));
-        tracker.buckets(buckets, now);
-        tracker.snapshot(None, now)
-    }
-
-    /// The report of `account` as far as it is known: what its connections and readings gave, else an empty one that
-    /// names the sources `support` lists.
-    #[must_use]
-    pub fn report(&self, support: &UsageSupport, account: Option<&str>) -> UsageReport {
-        let now = unix_now();
-        match self.held().get(account.unwrap_or_default()) {
-            Some(tracker) => tracker.snapshot(None, now),
-            None => {
-                UsageTracker::new(support.clone(), account.map(str::to_string)).snapshot(None, now)
-            }
-        }
-    }
-}
-
-fn unix_now() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .and_then(|since| i64::try_from(since.as_secs()).ok())
-        .unwrap_or(0)
-}
-
 /// Boxes a harness for [`Serving::open`].
 #[must_use]
 pub fn shared(harness: impl Harness) -> Arc<dyn Harness> {
@@ -569,12 +496,6 @@ pub fn takes_of(takes: &crate::acp::Takes) -> coqui_acp_api::Takes {
 #[must_use]
 pub fn schema(json: &Value) -> coqui_acp_api::guatiao::Value {
     guatiao_serde::from_serde(json.clone()).expect("a schema is a value")
-}
-
-/// The schema of a setting that is a credential: text, marked `writeOnly` and `x-sensitive`, with no default.
-#[must_use]
-pub fn credential() -> Value {
-    serde_json::json!({"type": "string", "writeOnly": true, "x-sensitive": true})
 }
 
 /// Whether a provider that applies nothing to the harness's environment can take `account`: why not, when it cannot.
@@ -609,6 +530,122 @@ pub fn account_refusal(
 #[must_use]
 pub fn to_json(value: &coqui_acp_api::guatiao::Value) -> Value {
     serde_json::to_value(guatiao_serde::Serializable::from(value)).unwrap_or(Value::Null)
+}
+
+/// The schema `T` derives, as a catalog's `settings` or `inputs` hold it.
+///
+/// # Panics
+///
+/// `T`'s schema cannot be built, which a derived one over plain fields does not.
+#[must_use]
+pub fn schema_of<T: coqui_acp_api::guatiao::Schema>() -> coqui_acp_api::guatiao::Value {
+    T::schema().expect("a derived schema builds")
+}
+
+/// An account's `settings` read as `T`, a type that derives `FromValue`; `deny_unknown_fields` on `T` makes a key the kind
+/// lacks a refusal.
+///
+/// # Errors
+///
+/// `GUATIAO_ERR_BAD_VALUE` when the settings are not a map `T` reads. No message shows a value.
+pub fn settings_as<T: coqui_acp_api::guatiao::FromValue>(
+    settings: &coqui_acp_api::guatiao::Value,
+) -> Result<T, ProviderError> {
+    T::from_value(settings).map_err(|error| {
+        ProviderError::new(
+            Status::GUATIAO_ERR_BAD_VALUE,
+            &alloc::format!("the account's settings are refused: {error}"),
+        )
+    })
+}
+
+/// A plain `http` or `https` address ([`coqui_acp_api::is_http_url`]) of any length, for a setting that is an endpoint.
+///
+/// A field of this type is written `#[map(as_text)]` and reads as text; one that is not an address is refused without its
+/// value being shown.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Address(String);
+
+impl Address {
+    /// The address as text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl core::str::FromStr for Address {
+    type Err = NotAnAddress;
+
+    fn from_str(text: &str) -> Result<Self, NotAnAddress> {
+        if coqui_acp_api::is_http_url(text) {
+            Ok(Self(text.to_string()))
+        } else {
+            Err(NotAnAddress)
+        }
+    }
+}
+
+impl core::fmt::Display for Address {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// Why a text is no [`Address`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NotAnAddress;
+
+impl core::fmt::Display for NotAnAddress {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("an address starting http:// or https://")
+    }
+}
+
+/// Whether an account provider keeps accounts of `grant`'s kind: its id is one, and `offer` lists the kind. Nothing of
+/// another standard is taken: a harness applies those, the provider makes its own.
+///
+/// # Errors
+///
+/// `GUATIAO_ERR_BAD_VALUE` for an id that is not one or a kind `offer` does not list.
+pub fn own_kind(
+    grant: &coqui_acp_api::AccountGrant,
+    offer: &coqui_acp_api::AccountOffer,
+) -> Result<(), ProviderError> {
+    grant.check_id()?;
+    if offer.kind(&grant.kind).is_none() {
+        return Err(ProviderError::new(
+            Status::GUATIAO_ERR_BAD_VALUE,
+            "this provider keeps no account of that kind",
+        ));
+    }
+    Ok(())
+}
+
+/// The standards the account `account` provides, as an account provider answers
+/// [`AccountProvider::provides`](coqui_acp_api::AccountProvider::provides): what its kind lists in `offer`, or what the
+/// setting the kind marks [`PROVIDES_BY_VALUE`](coqui_acp_api::PROVIDES_BY_VALUE) picks for the value the account holds.
+/// The automatic `local` account, when `offer` offers it, provides `local`, the standard of the program itself.
+///
+/// # Errors
+///
+/// `GUATIAO_ERR_BAD_VALUE` for an id that is not one or a kind `offer` does not list.
+pub fn provides_of(
+    offer: &coqui_acp_api::AccountOffer,
+    account: &coqui_acp_api::AccountRef,
+    local: &[&str],
+) -> Result<Vec<String>, ProviderError> {
+    account.check_id()?;
+    if account.kind == coqui_acp_api::HARNESS_LOGIN && offer.local {
+        return Ok(local.iter().map(ToString::to_string).collect());
+    }
+    let info = offer.kind(&account.kind).ok_or_else(|| {
+        ProviderError::new(
+            Status::GUATIAO_ERR_BAD_VALUE,
+            "this provider keeps no account of that kind",
+        )
+    })?;
+    Ok(crate::stdio::accounts::provided(info, &account.settings))
 }
 
 /// The grant to apply for `grant`: itself when its kind is one the catalog lists; else, when it provides a standard the
@@ -667,4 +704,74 @@ pub fn resolve(
     applied.kind.clone_from(&slot.kind);
     applied.settings = schema(&Value::Object(settings));
     Ok(applied)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    use coqui_acp_api::guatiao::{FromValue, Schema, ToValue};
+
+    #[derive(ToValue, FromValue, Schema, Debug)]
+    #[map(crate = ::coqui_acp_api::guatiao, deny_unknown_fields)]
+    struct Endpoint {
+        #[map(as_text)]
+        #[schema(format = "uri")]
+        base_url: Option<Address>,
+    }
+
+    fn base_url(value: &serde_json::Value) -> Result<Option<String>, ProviderError> {
+        settings_as::<Endpoint>(&schema(value)).map(|e| e.base_url.map(|a| a.as_str().to_string()))
+    }
+
+    #[test]
+    fn an_endpoint_setting_is_absent_or_an_address_of_any_length_and_nothing_else() {
+        assert_eq!(base_url(&json!({})).unwrap(), None);
+        assert_eq!(base_url(&json!({"base_url": null})).unwrap(), None);
+        let long = format!("https://gateway.example/{}", "a".repeat(5000));
+        assert_eq!(
+            base_url(&json!({"base_url": long})).unwrap().as_deref(),
+            Some(long.as_str())
+        );
+        for bad in [
+            json!({"base_url": "gateway.example"}),
+            json!({"base_url": 7}),
+            json!({"base_url": "https://a b"}),
+            json!({"base_url": "https://x", "other": "y"}),
+            json!({"other": "https://x"}),
+            json!(["https://x"]),
+        ] {
+            assert!(base_url(&bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_refused_setting_does_not_show_what_it_held() {
+        let said = base_url(&json!({"base_url": "canary-not-an-address"}))
+            .unwrap_err()
+            .message()
+            .to_string();
+        assert!(!said.contains("canary"), "{said}");
+    }
+
+    #[test]
+    fn a_derived_settings_schema_marks_the_address_and_seals_the_object() {
+        let schema = to_json(&schema_of::<Endpoint>());
+        assert_eq!(schema["properties"]["base_url"]["format"], "uri");
+        assert_eq!(schema["additionalProperties"], false);
+    }
+
+    #[test]
+    fn a_secret_form_asks_for_one_required_text_marked_sensitive() {
+        let form = coqui_acp_api::LoginForm::secret("Enter the key", "api_key");
+        assert_eq!(form.title, "Enter the key");
+        let schema = to_json(&form.schema);
+        let property = &schema["properties"]["api_key"];
+        assert_eq!(property["type"], "string");
+        assert_eq!(property["x-sensitive"], true);
+        assert_eq!(property["writeOnly"], true);
+        assert_eq!(schema["required"], json!(["api_key"]));
+        assert_eq!(schema["additionalProperties"], false);
+    }
 }

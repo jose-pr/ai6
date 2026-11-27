@@ -32,6 +32,7 @@ reference implementation, and `vectors/session_history/` holds the cases a reade
   first prompt, and a loss report that says it was replayed and what was cut. The text is delimited and escaped as data, not
   instructions.
 - `LossReport`: what an import could not carry (thinking dropped, tools turned into notes, attachments known only by digest).
+- `TurnRecord`: the record of one served turn (who served it, tokens, cost, outcome, and open `namespace:name` tags) for a host's ledger.
 - Settings as Guatiao values: `Bounds`, `ReaderSettings`, `WriterSettings`, `RedactionSettings`, each with defaults, unknown keys
   refused, and `non_defaults()`.
 - `cli` (feature `cli`): the history commands as library code, a `cli::Command` a host's command line parses and `cli::run`:

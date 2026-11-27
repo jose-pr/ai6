@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `Trust::Asked(Arc<dyn Admit>)`, the `Admit` trait and `Trust::asked(closure)`: the host decides whether a proven key is admitted, on either side, once per handshake and never for a key whose proof failed, with `answering` (true on the responder) and the `source` given to `respond`. It records nothing itself, so a host keeps its own accepted list and still queues a proven stranger.
+- `Identity::from_public_key`, `Identity::holds_private_key`, `NoiseHandshake::pending_static_dh` and `provide_static_dh` (and the same two on `PairingHandshake`): a dialer whose private key cannot leave its holder (a browser's non-extractable WebCrypto key) pauses at the one Diffie-Hellman that uses it, takes the holder's result and finishes the same handshake. The result is refused if it is all zeros.
+- `PairingSession::joiner` and `JoinExchange`: a joiner's pairing exchange a record at a time, for a caller with no blocking
+  transport (a page compiled to WebAssembly). `join` and `PairDial` are this run over a `MessageTransport`.
 - **Builders and settings.** `Noise::builder(identity)` and `PairingMethod::builder(identity)` set a method up by the
   setting's name (`responders`, `initiators`, `key_limit`, `rekey`, `random`, `first_message_timeout`, `settings`), then
   `build()`; there is no `new`. `NoiseSettings { key_limit, rekey }` and `PairingSettings` (those and

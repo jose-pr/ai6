@@ -19,7 +19,7 @@ use crate::names::{
     is_path_variable, is_reserved_variable, is_sensitive_variable, is_variable_name,
     normalize_name, root_variable, state_variable, valid_relative_path,
 };
-use crate::read::{Document, parse_dotenv, read_document};
+use crate::read::{Document, parse_dotenv, read_document, read_env_script_output};
 use crate::subst::substitute_with;
 use crate::validate::validate;
 
@@ -1328,6 +1328,70 @@ pub fn preparation(
     }
 }
 
+/// Why an env script's run gave nothing to apply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum ScriptFailure {
+    /// The process could not be started: no interpreter, no script.
+    NotRun,
+    /// It was stopped at its time limit.
+    Timeout,
+    /// Its output was past the bound.
+    TooLarge,
+    /// It exited with a status other than 0.
+    Exit,
+    /// Its output was not what the specification defines.
+    Output,
+}
+
+impl ScriptFailure {
+    /// The word a report uses.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NotRun => "not-run",
+            Self::Timeout => "timeout",
+            Self::TooLarge => "too-large",
+            Self::Exit => "exit",
+            Self::Output => "output",
+        }
+    }
+}
+
+/// What a consumer's run of one env script came to: its standard output, or why it gave none.
+pub type ScriptResult = Result<Vec<u8>, ScriptFailure>;
+
+/// One env script about to run while an environment is built.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct ScriptCall<'a> {
+    /// The overlay's identity.
+    pub identity: &'a str,
+    /// The script's place among the overlay's env scripts that run, the default one first.
+    pub index: usize,
+    /// What to run.
+    pub script: &'a ScriptRun,
+    /// The environment it runs with: what the base, every overlay's root and state variable, the
+    /// `pre-env` output, every earlier overlay's declarations and scripts, and this overlay's own
+    /// declarations left, and the overlay's `AOS_OVERLAY_*` variables.
+    pub env: Vec<(String, String)>,
+}
+
+/// What became of one env script that ran while an environment was built.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ScriptReport {
+    /// The overlay's identity.
+    pub identity: String,
+    /// The script, a relative path.
+    pub path: String,
+    /// Why it gave nothing, or `None` when its output was applied.
+    pub failure: Option<ScriptFailure>,
+    /// The variables its output named, in the order it gave them, each with whether it set a
+    /// value (`false`: it unset the variable).
+    pub set: Vec<(String, bool)>,
+}
+
 /// What [`composed_environment`] built, and what the `pre-env` hooks reported.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -1338,6 +1402,8 @@ pub struct ComposedEnvironment {
     pub hook_reports: Vec<HookReport>,
     /// `(id, subject)`: the non-default settings of those hooks' output.
     pub hook_non_defaults: Vec<(String, String)>,
+    /// What became of each env script [`composed_environment_running`] ran, in the order they ran.
+    pub script_reports: Vec<ScriptReport>,
 }
 
 /// The environment of every active overlay, in composition order, from `base` and each overlay's
@@ -1346,12 +1412,107 @@ pub struct ComposedEnvironment {
 /// `on_failure`): their output is applied after the root variables and before any
 /// overlay's declarations, so an overlay earlier in the order reads what a later one's hook set.
 ///
+/// No env script runs: [`composed_environment_running`] runs them.
+///
 /// `env` is the first [`Error`] of any overlay, or `hook-refused` naming the overlay whose guard failed.
 pub fn composed_environment(
     active: &[(&Document, Facts)],
     base: Environment,
     pre_env: &BTreeMap<String, HookRun>,
     non_defaults: &mut Vec<NonDefaultSetting>,
+) -> ComposedEnvironment {
+    compose(active, base, pre_env, non_defaults, None)
+}
+
+/// As [`composed_environment`], running each overlay's env scripts as the order of application
+/// puts them: after that overlay's `env_files`, `env` and `paths`, each seeing what the earlier
+/// ones left.
+///
+/// `run` is called for every script that [`effective`] lists for the overlay (the default one
+/// first, then the declared ones; none for an overlay whose digest is not the allowed one) and
+/// gives what the process wrote to standard output, or why it gave none. The core reads that as an
+/// env script's output: a failure of any kind, an output past `Settings::hook_output_bytes` or one
+/// that is not what the specification defines applies nothing, is reported in
+/// [`ComposedEnvironment::script_reports`], and leaves the rest of the stack as it was. What the
+/// output sets is applied as it is, never substituted, and a sensitive variable is reported in
+/// `non_defaults` as `env-sensitive`.
+pub fn composed_environment_running(
+    active: &[(&Document, Facts)],
+    base: Environment,
+    pre_env: &BTreeMap<String, HookRun>,
+    non_defaults: &mut Vec<NonDefaultSetting>,
+    run: &mut dyn FnMut(&ScriptCall<'_>) -> ScriptResult,
+) -> ComposedEnvironment {
+    compose(active, base, pre_env, non_defaults, Some(run))
+}
+
+fn script_environment(env: &Environment, facts: &Facts) -> Vec<(String, String)> {
+    let mut seen = env.clone();
+    seen.set("AOS_OVERLAY_ROOT", facts.root.clone(), false);
+    seen.set("AOS_OVERLAY_NAME", normalize_name(&facts.identity), false);
+    if let Some(state) = &facts.state {
+        seen.set("AOS_OVERLAY_STATE", state.clone(), false);
+    }
+    seen.values().to_vec()
+}
+
+fn run_scripts(
+    env: &mut Environment,
+    facts: &Facts,
+    scripts: &[ScriptRun],
+    non_defaults: &mut Vec<NonDefaultSetting>,
+    run: &mut dyn FnMut(&ScriptCall<'_>) -> ScriptResult,
+    reports: &mut Vec<ScriptReport>,
+) {
+    for (index, script) in scripts.iter().enumerate() {
+        let call = ScriptCall {
+            identity: &facts.identity,
+            index,
+            script,
+            env: script_environment(env, facts),
+        };
+        let read = run(&call).and_then(|out| {
+            if !facts.settings.hook_output_bytes.allows(out.len()) {
+                return Err(ScriptFailure::TooLarge);
+            }
+            read_env_script_output(&out, &facts.settings).map_err(|_| ScriptFailure::Output)
+        });
+        let mut report = ScriptReport {
+            identity: facts.identity.clone(),
+            path: script.path.clone(),
+            failure: None,
+            set: Vec::new(),
+        };
+        match read {
+            Ok(set) => {
+                for (name, value) in set {
+                    report.set.push((name.clone(), value.is_some()));
+                    match value {
+                        Some(value) => {
+                            if is_sensitive_variable(&name) {
+                                non_defaults.push(NonDefaultSetting::new(
+                                    NonDefaultId::EnvSensitive,
+                                    &name,
+                                ));
+                            }
+                            env.set(&name, value, false);
+                        }
+                        None => env.unset(&name),
+                    }
+                }
+            }
+            Err(failure) => report.failure = Some(failure),
+        }
+        reports.push(report);
+    }
+}
+
+fn compose(
+    active: &[(&Document, Facts)],
+    base: Environment,
+    pre_env: &BTreeMap<String, HookRun>,
+    non_defaults: &mut Vec<NonDefaultSetting>,
+    mut run: Option<&mut dyn FnMut(&ScriptCall<'_>) -> ScriptResult>,
 ) -> ComposedEnvironment {
     let mut env = base;
     for (_, facts) in active {
@@ -1364,16 +1525,17 @@ pub fn composed_environment(
         env: Ok(Environment::default()),
         hook_reports: Vec::new(),
         hook_non_defaults: Vec::new(),
+        script_reports: Vec::new(),
     };
     for (_, facts) in active {
-        let Some(run) = pre_env.get(&facts.identity) else {
+        let Some(hook) = pre_env.get(&facts.identity) else {
             continue;
         };
-        let mut run = run.clone();
-        run.source.clone_from(&facts.identity);
+        let mut hook = hook.clone();
+        hook.source.clone_from(&facts.identity);
         let fired = fire_event(
             HookEvent::PreEnv,
-            &[run],
+            &[hook],
             None,
             &facts.settings,
             env.windows,
@@ -1392,10 +1554,23 @@ pub fn composed_environment(
         }
     }
     for (manifest, facts) in active {
-        if let Err(error) = apply_overlay(&mut env, manifest, facts, non_defaults, &mut Vec::new())
+        let scripts = match apply_overlay(&mut env, manifest, facts, non_defaults, &mut Vec::new())
         {
-            composed.env = Err(error);
-            return composed;
+            Ok(scripts) => scripts,
+            Err(error) => {
+                composed.env = Err(error);
+                return composed;
+            }
+        };
+        if let Some(run) = run.as_deref_mut() {
+            run_scripts(
+                &mut env,
+                facts,
+                &scripts,
+                non_defaults,
+                run,
+                &mut composed.script_reports,
+            );
         }
     }
     composed.env = Ok(env);

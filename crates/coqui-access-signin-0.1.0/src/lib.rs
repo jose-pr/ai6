@@ -140,7 +140,8 @@ pub struct RuleDef {
     /// `networks` instead.
     #[map(default)]
     pub networks: Vec<String>,
-    /// Kinds of client, among `browser`, `app` and `api`.
+    /// Kinds of client, among `browser`, `app` and `api`. A kind the consumer did not verify is
+    /// a claim, and the rule can then only add steps.
     #[map(default)]
     pub clients: Vec<String>,
     /// The consumer's own words for the service signed in to.
@@ -203,7 +204,8 @@ impl RuleDef {
         self
     }
 
-    /// This rule applying to these kinds of client only.
+    /// This rule applying to these kinds of client only. A kind the consumer did not verify is
+    /// a claim, and the rule can then only add steps (see [`SignInRules`]).
     #[must_use]
     pub fn clients(mut self, clients: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.clients = clients.into_iter().map(Into::into).collect();
@@ -299,6 +301,10 @@ impl SignInRulesBuilder {
 ///   its chains is within the steps done; otherwise the offer is the methods still missing
 ///   from the chains that hold every step done, and none such is a refusal.
 /// - No rule true: nothing is offered.
+/// - A `client` the consumer did not mark verified
+///   ([`SignInContext::client_is_verified`]) is a claim: while a rule has `clients`, such a
+///   request is decided as claimed and again with no client, and held to both, so `clients`
+///   can add steps and never take any away or open a method.
 /// - Steps done that name different people (`Factor::person`), or a person other than the
 ///   context's, are a refusal whatever the rules say.
 #[derive(Clone, Provider)]
@@ -311,6 +317,8 @@ impl SignInRulesBuilder {
 )]
 pub struct SignInRules {
     rules: Vec<Compiled>,
+    /// Whether any rule has a `clients` condition, the only thing a client claim can change.
+    names_clients: bool,
 }
 
 #[derive(Clone)]
@@ -328,7 +336,10 @@ struct Compiled {
 /// The empty set, which offers nothing.
 impl Default for SignInRules {
     fn default() -> Self {
-        Self { rules: Vec::new() }
+        Self {
+            rules: Vec::new(),
+            names_clients: false,
+        }
     }
 }
 
@@ -417,10 +428,29 @@ impl SignInRules {
         for (index, rule) in config.rule.into_iter().enumerate() {
             rules.push(compile(index, rule, &limits)?);
         }
-        Ok(Self { rules })
+        let names_clients = rules.iter().any(|rule| !rule.clients.is_empty());
+        Ok(Self {
+            rules,
+            names_clients,
+        })
     }
 
     fn decision(&self, context: &SignInContext) -> SignInDecision {
+        // A client kind the consumer did not establish is the caller's claim, and a caller can
+        // claim any kind: it is held to what the same request with no client would be asked
+        // for as well, so a claim can add steps and never take any away.
+        if self.names_clients && context.client.is_some() && !context.client_is_verified() {
+            let claimed = self.decide_once(context);
+            let unclaimed = self.decide_once(&SignInContext {
+                client: None,
+                ..context.clone()
+            });
+            return both(claimed, unclaimed, context.person.is_none());
+        }
+        self.decide_once(context)
+    }
+
+    fn decide_once(&self, context: &SignInContext) -> SignInDecision {
         // Steps that name different people are not one sign-in, whatever each would allow.
         let named = context
             .done
@@ -521,6 +551,71 @@ impl SignInRules {
 impl SignInPolicy for SignInRules {
     fn decide(&self, context: SignInContext) -> Result<SignInDecision, ProviderError> {
         Ok(self.decision(&context))
+    }
+}
+
+/// What a sign-in that both decisions must be satisfied by is told.
+///
+/// Before anyone is named, only a method both offer can finish, so that is the offer. Once
+/// someone is, the sign-in is complete when both are, and otherwise offers what either still
+/// lacks; either one refusing (nothing offered, not complete) is a refusal. A method both ask
+/// for is accepted only from a provider both allow. The rule named is the claimed one's.
+fn both(claimed: SignInDecision, unclaimed: SignInDecision, before_anyone: bool) -> SignInDecision {
+    let rule = claimed.rule.clone();
+    let refuses = |decision: &SignInDecision| !decision.complete && decision.methods.is_empty();
+    let methods = if before_anyone {
+        claimed
+            .methods
+            .iter()
+            .filter_map(|offer| {
+                let other = unclaimed
+                    .methods
+                    .iter()
+                    .find(|o| o.method == offer.method)?;
+                Some(Offer {
+                    method: offer.method.clone(),
+                    providers: common(&offer.providers, &other.providers)?,
+                })
+            })
+            .collect()
+    } else if refuses(&claimed) || refuses(&unclaimed) {
+        Vec::new()
+    } else {
+        let mut merged: Vec<Offer> = Vec::new();
+        for offer in claimed.methods.iter().chain(&unclaimed.methods) {
+            match merged.iter_mut().find(|kept| kept.method == offer.method) {
+                None => merged.push(offer.clone()),
+                Some(kept) => match common(&kept.providers, &offer.providers) {
+                    Some(providers) => kept.providers = providers,
+                    None => merged.retain(|other| other.method != offer.method),
+                },
+            }
+        }
+        merged
+    };
+    let complete = !before_anyone && claimed.complete && unclaimed.complete;
+    SignInDecision {
+        complete,
+        methods: if complete { Vec::new() } else { methods },
+        rule,
+        ..SignInDecision::default()
+    }
+}
+
+/// The providers two offers of one method both allow: an empty list is any provider. `None`
+/// when no provider is allowed by both.
+fn common(left: &[String], right: &[String]) -> Option<Vec<String>> {
+    match (left.is_empty(), right.is_empty()) {
+        (true, _) => Some(right.to_vec()),
+        (_, true) => Some(left.to_vec()),
+        _ => {
+            let shared: Vec<String> = left
+                .iter()
+                .filter(|provider| right.contains(provider))
+                .cloned()
+                .collect();
+            (!shared.is_empty()).then_some(shared)
+        }
     }
 }
 

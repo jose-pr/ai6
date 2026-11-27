@@ -17,7 +17,7 @@ use crate::handshake::{Config, Exchange, Finished, METHOD};
 use crate::identity::Identity;
 use crate::session::Session;
 use crate::settings::{PairingSettings, WebCryptoSettings};
-use crate::trust::{Admit, Trust};
+use crate::trust::{Admission, Trust};
 
 /// The export label [`PairingSession::pair_channel`] binds a pairing to.
 pub const PAIR_EXPORT_LABEL: &str = "EXPORTER-coqui-pair";
@@ -58,8 +58,8 @@ impl From<PairingMethodParts> for PairingMethod {
     fn from(parts: PairingMethodParts) -> Self {
         Self(Arc::new(Config {
             identity: parts.identity,
-            responders: Some(parts.responders.map_or(Admit::Any, Admit::Trust)),
-            initiators: Some(Admit::Any),
+            responders: Some(parts.responders.map_or(Admission::Any, Admission::Trust)),
+            initiators: Some(Admission::Any),
             settings: WebCryptoSettings {
                 max_message: parts.settings.max_message,
                 ..WebCryptoSettings::default()

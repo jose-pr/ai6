@@ -219,6 +219,20 @@ Constants: `DEFAULT_MAX_LINE_BYTES`, `DEFAULT_MAX_LINES`, `DEFAULT_MAX_TOTAL_BYT
 
 `non_defaults<T: ToValue + Schema + Default>(&T) -> Vec<NonDefault { setting, value, default }>` lists, by key path, every setting not at its default, from the settings' schema; values and defaults are JSON text. A field the schema marks sensitive (a redaction's `values`, at any depth of a caller's own settings) is named and shown as `"[not shown]"`. Precedence for the command: its flags over the defaults; the library reads no environment variable and no file.
 
+## Turn record (`TurnRecord`)
+
+```rust
+#[non_exhaustive] pub struct TurnRecord { pub at: i64, session, harness, agent, account, model, effort, role, pool, member, profile, why, moved_from: Option<String>,
+    pub turn: Option<u64>, pub usage_known: Option<bool>, pub tokens: Option<Tokens>, pub cost: Option<Cost>, pub duration_ms: Option<u64>,
+    pub outcome: Option<TurnOutcome>, pub tags: BTreeMap<String, serde_json::Value> }   // Serialize + Deserialize; None is skipped on write
+pub struct Tokens { pub input: Option<u64>, pub output: Option<u64>, pub cached: Option<u64> }   // Tokens::new()
+pub struct Cost { pub micros: u64, pub currency: String }                                         // Cost::new(micros, currency)
+pub struct TurnOutcome { pub stop: Option<String>, pub limit: bool, pub moved_on: bool }
+TurnRecord::new(at);  .tag(key, value) -> Result<(), TagError>;  .tags_of(namespace);  .tag_acp_meta(&meta);   pub const ACP_TAGS: &str /* "acp" */
+```
+
+What a host's ledger keeps for each served turn, so usage can be summed by model, role or effort. A figure not reported is `None`, never zero. A tag key is `namespace:name` (both non-empty, no control character): `acp:` for `_meta` the agent returned, `canoa:`, `ai6:` or any host's own; a reader passes over a namespace it does not know. Storing and querying records is the host's. It is not part of the history file format.
+
 ## Errors
 
 `HistoryError` (`#[non_exhaustive]`, `Display` one lowercase clause quoting nothing from the document): `Io`, `Empty`, `NotUtf8`, `BlankLine`, `LineEnding`, `Truncated`, `Syntax { line, column }`, `DuplicateKey`, `Shape { line, pointer, expected }`, `UnknownField { line, pointer }`, `UnknownFormat`, `UnknownVersion { version }`, `UnknownLine`, `Order { line, rule: OrderRule }`, `TooLong`, `TooManyLines`, `TooLarge`, `TooDeep { line, limit, by_parser }`, `TooManyValues { line, limit }`, `DigestMismatch`, `Pattern { index }`. `TooDeep`'s `limit` is the nesting allowed and `by_parser` says it is the parser's own `PARSER_DEPTH` because `max_depth` was set above it. `code() -> &'static str` is the stable name the vectors use, `line()` and `pointer()` the place.

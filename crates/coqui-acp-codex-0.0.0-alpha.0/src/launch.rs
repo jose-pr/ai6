@@ -7,7 +7,8 @@ use alloc::vec::Vec;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use coqui_acp_harness::{Access, Launch, McpServer, McpTransport, Target};
+use crate::access::TARGET;
+use coqui_acp_harness::{Access, Launch, McpServer, McpTransport};
 use serde_json::{Map, Value, json};
 
 /// Which thread Codex opens.
@@ -162,7 +163,7 @@ impl CodexLaunch {
     /// kept.
     pub fn apply_access(&mut self, access: Access) {
         self.access = Some(access);
-        let words = access.translate(Target::Codex);
+        let words = access.translate(&TARGET);
         if self.sandbox.is_none() {
             self.sandbox = words.sandbox.word.map(str::to_string);
         }

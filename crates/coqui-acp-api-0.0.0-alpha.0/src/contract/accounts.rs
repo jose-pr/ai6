@@ -28,8 +28,8 @@ use super::json::{from_json, to_json};
 use crate::{
     ACCOUNT_ID_MAX, AccountCatalog, AccountGrant, AccountKindInfo, AccountRef, AcpHarness,
     Credentials, HARNESS_LOGIN, LoginMethodInfo, LoginOutcome, LoginPrompter, LoginRequest,
-    ModelsRequest, ProcessSpawner, Requirement, SessionExport, SessionImport, StartRequest,
-    UsageQuery, is_account_id,
+    PROVIDES_BY_VALUE, ProcessSpawner, Requirement, SessionExport, SessionImport, StartRequest,
+    is_account_id,
 };
 
 pub(super) const OK: u32 = 0;
@@ -118,6 +118,17 @@ pub(super) fn required(schema: &Value) -> Vec<String> {
 
 fn write_only(property: &Value) -> bool {
     property.get("writeOnly") == Some(&json!(true))
+}
+
+/// Whether a schema's `type` is text: `string`, or `string` and `null` for a setting that may be absent.
+fn is_text_type(kind: &Value) -> bool {
+    match kind {
+        Value::String(name) => name == "string",
+        Value::Array(names) => {
+            !names.is_empty() && names.iter().all(|name| name == "string" || name == "null")
+        }
+        _ => false,
+    }
 }
 
 fn x_sensitive(property: &Value) -> bool {
@@ -212,12 +223,6 @@ pub(super) fn grant_of(
     Ok(grant)
 }
 
-pub(super) fn is_url(text: &str) -> bool {
-    (text.starts_with("https://") || text.starts_with("http://"))
-        && text.len() > 8
-        && !text.chars().any(|c| c.is_whitespace() || c.is_control())
-}
-
 /// What every kind an account provider or a harness lists is held to.
 pub(super) fn kind_rules(kinds: &[AccountKindInfo]) -> Outcome {
     let mut seen = Vec::new();
@@ -268,7 +273,7 @@ pub(super) fn kind_rules(kinds: &[AccountKindInfo]) -> Outcome {
                 let property = properties(&schema).get(key).cloned();
                 ensure!(
                     property.as_ref().is_some_and(|p| {
-                        !write_only(p) && p.get("type").is_none_or(|t| t == "string")
+                        !write_only(p) && p.get("type").is_none_or(is_text_type)
                     }),
                     "{}'s endpoint names {key}, which is not a plain text setting",
                     info.id
@@ -276,7 +281,7 @@ pub(super) fn kind_rules(kinds: &[AccountKindInfo]) -> Outcome {
             }
             if let Some(default) = &slot.default {
                 ensure!(
-                    is_url(default),
+                    crate::is_http_url(default),
                     "{}'s endpoint default is not a URL",
                     info.id
                 );
@@ -293,6 +298,41 @@ pub(super) fn kind_rules(kinds: &[AccountKindInfo]) -> Outcome {
         }
     }
     Ok(())
+}
+
+/// Whether an account of `info` can provide a standard: the kind lists some, or a setting of its schema picks them by value
+/// ([`PROVIDES_BY_VALUE`]).
+pub(super) fn can_provide(info: &AccountKindInfo) -> bool {
+    !info.provides.is_empty()
+        || properties(&to_json(&info.settings))
+            .values()
+            .any(|property| {
+                property
+                    .get(PROVIDES_BY_VALUE)
+                    .is_some_and(|by| by.as_object().is_some_and(|by| !by.is_empty()))
+            })
+}
+
+/// The standards the account of `info` holding `settings` provides: what the setting marked [`PROVIDES_BY_VALUE`] lists for the
+/// value held, else the kind's own.
+pub(super) fn provided_by(info: &AccountKindInfo, settings: &Value) -> Vec<String> {
+    let held = to_json(&info.settings);
+    for (name, property) in &properties(&held) {
+        let by_value = property.get(PROVIDES_BY_VALUE);
+        let value = settings.get(name).and_then(Value::as_str);
+        if let Some(listed) = by_value
+            .zip(value)
+            .and_then(|(by, value)| by.get(value))
+            .and_then(Value::as_array)
+        {
+            return listed
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect();
+        }
+    }
+    info.provides.clone()
 }
 
 /// What every login method is held to.
@@ -530,31 +570,7 @@ fn applies(contract: &Contract, harness: &dyn AcpHarness, place: &Place) -> Outc
             info.id
         );
 
-        // import, export, models and usage on the account.
-        let (watch, spawner, _) = host::spawner_in(Some(&dir));
-        let listing = harness
-            .models(ModelsRequest::new().account(grant.clone()), spawner)
-            .map_err(|e| format!("{}: models: {}", info.id, why(&e)))?;
-        ensure!(
-            watch.destroyed() && !format!("{listing:?}").contains(CANARY),
-            "{}: models kept an object it was handed, or answered a credential",
-            info.id
-        );
-        let (watch, spawner, _) = host::spawner_in(Some(&dir));
-        let report = harness
-            .usage(UsageQuery::new().account(grant.clone()), spawner)
-            .map_err(|e| format!("{}: usage: {}", info.id, why(&e)))?;
-        ensure!(
-            watch.destroyed() && !format!("{report:?}").contains(CANARY),
-            "{}: usage kept an object it was handed, or answered a credential",
-            info.id
-        );
-        ensure!(
-            report.account.as_deref() == Some(grant.id.as_str()) || !report.supported,
-            "{}: usage reported for {:?}, not the granted account",
-            info.id,
-            report.account
-        );
+        // import and export on the account.
         if contract.imports {
             let session = fresh_uuid();
             let (watch, spawner, _) = host::spawner_in(Some(&dir));
@@ -624,20 +640,6 @@ fn refuses(contract: &Contract, harness: &dyn AcpHarness, place: &Place) -> Outc
         Some(strange.reference()),
     );
     refused("refusal", answer.err())?;
-    let (watch, spawner, _) = host::spawner();
-    let answer = harness.models(ModelsRequest::new().account(strange.clone()), spawner);
-    ensure!(
-        watch.destroyed(),
-        "models refused with an object it was handed alive"
-    );
-    refused("models", answer.err())?;
-    let (watch, spawner, _) = host::spawner();
-    let answer = harness.usage(UsageQuery::new().account(strange.clone()), spawner);
-    ensure!(
-        watch.destroyed(),
-        "usage refused with an object it was handed alive"
-    );
-    refused("usage", answer.err())?;
     // An id that is not an id.
     for id in [
         String::new(),

@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use coqui_agentic_peer::Error;
-use coqui_agentic_peer::auth::{self, Proof, Sealed, Trust};
+use cabuya::Error;
+use cabuya::auth::{self, Proof, Sealed, Trust};
 use coqui_peer::TrustStore;
 use coqui_peer_tls as tls;
 use coqui_transport::{Channel as _, Failure};

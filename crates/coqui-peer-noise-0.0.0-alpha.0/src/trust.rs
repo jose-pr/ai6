@@ -1,7 +1,20 @@
 use alloc::collections::BTreeSet;
+use alloc::sync::Arc;
+use core::fmt;
 use core::net::SocketAddr;
 
 use coqui_peer::{KeyMaterial, PeerId, TrustStore};
+
+/// A decision the host makes about a peer's key once the handshake proved the peer holds it.
+///
+/// It is asked at most once per handshake, never for a key that failed its proof, and records nothing
+/// itself: a host that wants to remember a refused stranger does so in its own `admit`.
+pub trait Admit: Send + Sync {
+    /// Whether the proven `key` is admitted. `answering` is true on the side that accepted the
+    /// connection; `source` is that connection's address when the caller gave one to
+    /// [`Method::respond`](crate::Method::respond), and is `None` on the dialing side.
+    fn admit(&self, key: &KeyMaterial, answering: bool, source: Option<SocketAddr>) -> bool;
+}
 
 /// Whose key a side of the handshake admits, once the peer proved it holds that key.
 ///
@@ -11,7 +24,7 @@ use coqui_peer::{KeyMaterial, PeerId, TrustStore};
 /// ```compile_fail
 /// let _ = coqui_peer_noise::Trust::AnyWithKeyProof;
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 #[non_exhaustive]
 pub enum Trust {
     /// These ids, fixed when the method is built. An empty set admits nobody.
@@ -21,6 +34,19 @@ pub enum Trust {
     /// [`TrustStore::record_waiting`] says, and the proven successor of an accepted key is promoted
     /// as the store's rotation options say.
     Store(TrustStore),
+    /// The host decides, at each handshake and after the proof, with [`Admit::admit`]. Nothing is
+    /// recorded for a refused key unless the host does it.
+    Asked(Arc<dyn Admit>),
+}
+
+impl fmt::Debug for Trust {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Pinned(ids) => f.debug_tuple("Pinned").field(ids).finish(),
+            Self::Store(store) => f.debug_tuple("Store").field(store).finish(),
+            Self::Asked(_) => f.debug_tuple("Asked").field(&"..").finish(),
+        }
+    }
 }
 
 impl Trust {
@@ -29,11 +55,32 @@ impl Trust {
         Self::Pinned(ids.into_iter().collect())
     }
 
+    /// [`Trust::Asked`] from a closure with [`Admit::admit`]'s arguments.
+    pub fn asked(
+        admit: impl Fn(&KeyMaterial, bool, Option<SocketAddr>) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        struct Closure<F>(F);
+        impl<F: Fn(&KeyMaterial, bool, Option<SocketAddr>) -> bool + Send + Sync> Admit for Closure<F> {
+            fn admit(
+                &self,
+                key: &KeyMaterial,
+                answering: bool,
+                source: Option<SocketAddr>,
+            ) -> bool {
+                (self.0)(key, answering, source)
+            }
+        }
+        Self::Asked(Arc::new(Closure(admit)))
+    }
+
     /// Whether the peer's proven `key` is admitted. A responder passes `waiting` with the
     /// connection's source so a proven stranger may be queued; an initiator queues nobody.
     pub(crate) fn admits(&self, key: &KeyMaterial, waiting: Option<Option<SocketAddr>>) -> bool {
         let store = match self {
             Self::Pinned(ids) => return ids.contains(&key.id()),
+            Self::Asked(host) => {
+                return host.admit(key, waiting.is_some(), waiting.flatten());
+            }
             Self::Store(store) => store,
         };
         let id = key.id();
@@ -52,15 +99,15 @@ impl Trust {
     }
 }
 
-/// Whom a role of the handshake admits. Only a pairing method holds [`Admit::Any`], and what it
+/// Whom a role of the handshake admits. Only a pairing method holds [`Admission::Any`], and what it
 /// ends in carries no application message.
 #[derive(Debug, Clone)]
-pub(crate) enum Admit {
+pub(crate) enum Admission {
     Any,
     Trust(Trust),
 }
 
-impl Admit {
+impl Admission {
     pub(crate) fn admits(&self, key: &KeyMaterial, waiting: Option<Option<SocketAddr>>) -> bool {
         match self {
             Self::Any => true,

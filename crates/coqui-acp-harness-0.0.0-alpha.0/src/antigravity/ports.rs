@@ -186,7 +186,9 @@ pub(super) fn parse_tcp_table(table: &[u8], v6: bool, owners: &[u32]) -> Vec<Soc
         ))
     };
     let (size, address, port, owner) = if v6 { (56, 0, 20, 52) } else { (24, 4, 8, 20) };
+    // A table that claims more rows than its bytes hold is read as far as they go, not for as many rows as it claims.
     let rows = word(0).map_or(0, |rows| rows as usize);
+    let rows = rows.min(table.len().saturating_sub(4) / size);
     (0..rows)
         .filter_map(|row| {
             let start = row.checked_mul(size)?.checked_add(4)?;

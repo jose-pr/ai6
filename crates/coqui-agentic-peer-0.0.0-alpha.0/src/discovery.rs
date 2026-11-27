@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use url::{Host, Url};
 
 use crate::Error;
-use crate::auth::Method;
+use cabuya::auth::Method;
 
 /// The DNS-SD service type, provisional until `acp-agent` is registered with IANA.
 pub const SERVICE_TYPE: &str = "_acp-agent._tcp.local.";
@@ -177,7 +177,7 @@ impl Advertisement {
     pub fn with_offers(mut self, offers: &[String]) -> Self {
         self.offers = offers
             .iter()
-            .filter(|offer| crate::mux::valid_protocol(offer))
+            .filter(|offer| cabuya::mux::valid_protocol(offer))
             .take(MAX_OFFERS)
             .cloned()
             .collect();
@@ -285,7 +285,7 @@ fn clean_method(raw: Option<&str>) -> Option<Method> {
 fn clean_offers(raw: Option<&str>) -> Vec<String> {
     raw.unwrap_or("")
         .split(',')
-        .filter(|offer| crate::mux::valid_protocol(offer))
+        .filter(|offer| cabuya::mux::valid_protocol(offer))
         .take(MAX_OFFERS)
         .map(str::to_owned)
         .collect()

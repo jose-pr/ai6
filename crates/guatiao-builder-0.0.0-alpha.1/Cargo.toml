@@ -1,4 +1,4 @@
-# guatiao/crates/guatiao-builder at e0136dcc9760ddd6dd8dc89fc4d41320eec6306e, with what it inherits written out.
+# guatiao/crates/guatiao-builder at 75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d, with what it inherits written out.
 [package]
 name = "guatiao-builder"
 description = "guatiao's side of coqui-builder: a schema, a filled Partial and a checked value made from a description, so any struct built field by field can be shown in a form, held as a guatiao value or read from one"

@@ -6,6 +6,7 @@ extern crate alloc;
 
 mod account;
 mod account_provider;
+mod address;
 pub mod batch;
 #[cfg(feature = "contract")]
 #[cfg_attr(docsrs, doc(cfg(feature = "contract")))]
@@ -34,23 +35,26 @@ pub use guatiao_channel::{Channel, ChannelSink, ChannelSinkVtable, ChannelVtable
 pub use account::{
     ACCOUNT_ID_MAX, ASK, AUTH, Accepted, AcceptedSlot, AccountCatalog, AccountGrant, AccountKeeper,
     AccountKeeperVtable, AccountKindInfo, AccountLoss, AccountRef, AccountRenewal, Credentials,
-    DEFAULT_LOGIN_TIMEOUT_MS, EndpointSlot, HARNESS_LOGIN, LoginAnswer, LoginForm, LoginMethodInfo,
-    LoginOutcome, LoginPrompter, LoginPrompterVtable, LoginRequest, MODEL_API, ModelsRequest,
-    OPEN_URL, OpenUrl, PASTE_CODE, PROXY, RenewReport, RenewRequest, USER_CODE, is_account_id,
+    DEFAULT_LOGIN_TIMEOUT_MS, EndpointSlot, HARNESS_LOGIN, LOCAL_ACCOUNT, LoginAnswer, LoginForm,
+    LoginMethodInfo, LoginOutcome, LoginPrompter, LoginPrompterVtable, LoginRequest, MODEL_API,
+    OPEN_URL, OpenUrl, PASTE_CODE, PROVIDES_BY_VALUE, PROXY, RenewReport, RenewRequest, USER_CODE,
+    is_account_id,
 };
 pub use account_provider::{
-    AccountOffer, AccountProvider, AccountProviderInfo, AccountProviderVtable, AccountUsage,
-    AccountUsageQuery, AccountWatch, AccountWatchVtable, WatchRequest,
+    AccountModelsQuery, AccountOffer, AccountProvider, AccountProviderInfo, AccountProviderVtable,
+    AccountUsage, AccountUsageQuery, AccountWatch, AccountWatchVtable, SignedInCheck,
+    SignedInQuery, SignedInState, WatchRequest,
 };
+pub use address::is_http_url;
 pub use environment::Environment;
 pub mod standard;
 pub use files::PrivateDir;
 pub use kind::{AcpHarness, AcpHarnessVtable};
 pub use models::{
-    CacheChoice, CacheLifetime, DEFAULT_PAGE_BYTES, ExportPage, HarnessInfo, HistoryLoss,
-    ImportReport, LINE_TOO_LARGE, ModelInfo, ModelListing, NonDefault, REPLAYED_AS_PROMPT,
-    SeedPoint, SessionExport, SessionImport, SessionQuery, SessionRecordFile, StartRequest,
-    StartRequestBuilder, Takes, UnknownKind, line_too_large,
+    AccountsLink, CacheLifetime, CapabilitiesSource, DEFAULT_PAGE_BYTES, ExportPage, HarnessInfo,
+    HistoryLoss, ImportReport, LINE_TOO_LARGE, ModelInfo, ModelLimits, ModelListing, NonDefault,
+    REPLAYED_AS_PROMPT, SeedPoint, SessionExport, SessionImport, SessionQuery, SessionRecordFile,
+    StartRequest, StartRequestBuilder, Takes, UnknownKind, line_too_large,
 };
 pub use requirement::{
     ANSWER_ONLY, DENIED_PATHS, FILES_UNDER, NAMES, NETWORK, NO_COMMANDS, NO_PROJECT_MCP,
@@ -64,7 +68,7 @@ pub use spawner::{
     SpawnedProcessVtable, SpawnerInfo, TerminalSize,
 };
 pub use usage::{
-    Bucket, Coverage, DEFAULT_LIMIT_PHRASES, LIMIT_META_KEY, LimitHit, ModelSpend, Refill, Source,
-    Spend, Status, USAGE_CAPABILITY, USAGE_METHOD, USAGE_NOTIFICATION, USAGE_VERSION, Unit,
-    UsageQuery, UsageReport, UsageSupport, infer_limit,
+    Bucket, Coverage, DEFAULT_LIMIT_PHRASES, LIMIT_META_KEY, LimitHit, LimitKind, ModelSpend,
+    Refill, Source, Spend, Status, USAGE_CAPABILITY, USAGE_METHOD, USAGE_NOTIFICATION,
+    USAGE_VERSION, Unit, UsageReport, UsageSupport, infer_limit, limit_kind_of,
 };

@@ -1,0 +1,18 @@
+site_name: cabuya
+site_description: One proven connection between two peers, and any number of named streams over it
+site_url: https://boriken-dev.github.io/cabuya/
+repo_url: https://github.com/Boriken-Dev/cabuya
+repo_name: Boriken-Dev/cabuya
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - The link: link.md

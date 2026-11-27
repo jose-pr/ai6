@@ -19,7 +19,7 @@ use std::time::Instant;
 
 use serde_json::{Value, json};
 
-use super::opencode_history::{host_id_of, native_id_of};
+use super::SessionIds;
 
 /// How many imports may wait to be opened by default, so a host that imports and never opens cannot make the
 /// provider hold histories without limit.
@@ -190,24 +190,24 @@ pub(crate) struct Mapping {
     live: BTreeMap<String, (String, String, Option<Value>)>,
     /// The agent's id to the UUID as the host spells it.
     by_agent: BTreeMap<String, String>,
-    /// The agent keeps an imported session under an id made from its UUID ([`native_id_of`]), so the UUID is the agent's
-    /// id on the way in and that id is the UUID on the way out, with nothing remembered.
-    native: bool,
+    /// The agent keeps an imported session under an id made from its UUID, so that id is the agent's on the way in and the
+    /// UUID is the host's on the way out, with nothing remembered.
+    native: Option<SessionIds>,
 }
 
 /// The id as the agent says it, in the places a session's id is in a message of the agent's, as the UUID the host
-/// spells it ([`host_id_of`]). Whether it changed the message.
-fn host_ids(message: &mut Value) -> bool {
-    fn swap(slot: Option<&mut Value>) -> bool {
+/// spells it (`ids.host`). Whether it changed the message.
+fn host_ids(ids: &SessionIds, message: &mut Value) -> bool {
+    let swap = |slot: Option<&mut Value>| -> bool {
         let Some(slot) = slot else {
             return false;
         };
-        let Some(uuid) = slot.as_str().and_then(host_id_of) else {
+        let Some(uuid) = slot.as_str().and_then(ids.host) else {
             return false;
         };
         *slot = Value::String(uuid);
         true
-    }
+    };
     let mut changed = swap(message.pointer_mut("/params/sessionId"));
     changed |= swap(message.pointer_mut("/result/sessionId"));
     if let Some(Value::Array(sessions)) = message.pointer_mut("/result/sessions") {
@@ -219,11 +219,11 @@ fn host_ids(message: &mut Value) -> bool {
 }
 
 impl Mapping {
-    /// A mapping that also turns the UUIDs of sessions written into OpenCode's store into the ids they have there, and
+    /// A mapping that also turns the UUIDs of sessions written into the agent's store into the ids they have there, and
     /// back.
-    pub(crate) fn native() -> Self {
+    pub(crate) fn keeping(ids: SessionIds) -> Self {
         Self {
-            native: true,
+            native: Some(ids),
             ..Self::default()
         }
     }
@@ -269,8 +269,8 @@ impl Mapping {
         }
         let Some((_, agent, context)) = self.live.get_mut(&normal(&session)) else {
             // An open of a session that is no import by replay: it is live if the agent opens it.
-            if self.native
-                && let Some(agent) = native_id_of(&session)
+            if let Some(ids) = &self.native
+                && let Some(agent) = (ids.native)(&session)
                 && let Some(params) = object.get_mut("params").and_then(Value::as_object_mut)
             {
                 params.insert("sessionId".into(), Value::String(agent));
@@ -327,8 +327,8 @@ impl Mapping {
     /// message.
     pub(crate) fn inbound(&mut self, replays: &Replays, message: &mut Value) -> bool {
         let changed = self.inbound_replay(replays, message);
-        if self.native {
-            host_ids(message) | changed
+        if let Some(ids) = &self.native {
+            host_ids(ids, message) | changed
         } else {
             changed
         }
@@ -645,7 +645,10 @@ mod tests {
         let stored = "ses_7d8c1f4e2b9a4c638f105a6b7c8d9e0f";
         let made_by_opencode = "ses_e11822fdeffeQonF7BHkuhxiss";
         let replays = Replays::default();
-        let mut mapping = Mapping::native();
+        let mut mapping = Mapping::keeping(SessionIds {
+            native: crate::vendors::opencode::history::native_id_of,
+            host: crate::vendors::opencode::history::host_id_of,
+        });
         for (method, session) in [
             ("session/load", uuid),
             ("session/prompt", uuid),

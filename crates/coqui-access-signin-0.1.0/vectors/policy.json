@@ -981,7 +981,7 @@
    }
   },
   {
-   "name": "a client and a service narrow a rule",
+   "name": "a client the consumer verified and a service narrow a rule",
    "config": {
     "rule": [
      {
@@ -1010,7 +1010,10 @@
     "purpose": "sign_in",
     "done": [],
     "client": "api",
-    "service": "unex"
+    "service": "unex",
+    "attributes": {
+     "client_verified": true
+    }
    },
    "expect": {
     "methods": [
@@ -1049,6 +1052,222 @@
    "expect": {
     "methods": [
      "password"
+    ],
+    "complete": false
+   }
+  },
+  {
+   "name": "a client claim that no one verified cannot ask for fewer steps",
+   "config": {
+    "rule": [
+     {
+      "clients": [
+       "app"
+      ],
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "password",
+        "totp"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [
+     {
+      "method": "password"
+     }
+    ],
+    "client": "app",
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    }
+   },
+   "expect": {
+    "methods": [
+     "totp"
+    ],
+    "complete": false
+   }
+  },
+  {
+   "name": "a client the consumer verified may ask for fewer steps",
+   "config": {
+    "rule": [
+     {
+      "clients": [
+       "app"
+      ],
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "password",
+        "totp"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [
+     {
+      "method": "password"
+     }
+    ],
+    "client": "app",
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    },
+    "attributes": {
+     "client_verified": true
+    }
+   },
+   "expect": {
+    "methods": [],
+    "complete": true
+   }
+  },
+  {
+   "name": "a client claim that no one verified cannot open a method the rest of the policy does not offer",
+   "config": {
+    "rule": [
+     {
+      "clients": [
+       "browser"
+      ],
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [],
+    "client": "browser"
+   },
+   "expect": {
+    "methods": [],
+    "complete": false
+   }
+  },
+  {
+   "name": "a client the consumer verified is offered what its rule opens",
+   "config": {
+    "rule": [
+     {
+      "clients": [
+       "browser"
+      ],
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [],
+    "client": "browser",
+    "attributes": {
+     "client_verified": true
+    }
+   },
+   "expect": {
+    "methods": [
+     "password"
+    ],
+    "complete": false
+   }
+  },
+  {
+   "name": "a client claim that no one verified may add steps",
+   "config": {
+    "rule": [
+     {
+      "clients": [
+       "browser"
+      ],
+      "allow": [
+       [
+        "password",
+        "totp"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "password"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [
+     {
+      "method": "password"
+     }
+    ],
+    "client": "browser",
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    }
+   },
+   "expect": {
+    "methods": [
+     "totp"
     ],
     "complete": false
    }

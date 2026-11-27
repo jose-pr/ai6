@@ -29,6 +29,8 @@ pub struct Identity;                       // Clone (one shared copy); Debug sho
 impl Identity {
     pub fn generate() -> Result<Identity, Error>;                 // the OS generator
     pub fn generate_with(random: &Random) -> Result<Identity, Error>;
+    pub fn from_public_key(public: &[u8; 32]) -> Result<Identity, Error>;   // a key held elsewhere: Error::Key unless canonical; can dial only, no PEM
+    pub fn holds_private_key(&self) -> bool;
     pub fn from_pkcs8_der(der: &[u8]) -> Result<Identity, Error>;  // RFC 8410's 48 bytes, exactly
     pub fn from_pkcs8_pem(text: &str) -> Result<Identity, Error>; // -----BEGIN PRIVATE KEY-----
     pub fn to_pkcs8_pem(&self) -> Result<Zeroizing<String>, Error>;
@@ -42,7 +44,7 @@ impl Identity {
 }
 ```
 
-The Noise static key is the identity: there is no signing key. `openssl genpkey -algorithm x25519` writes a key this
+The Noise static key is the identity: there is no signing key. A held-elsewhere identity (`from_public_key`, for a browser's non-extractable WebCrypto key) dials with the id the full key has: after message 2 the handshake pauses (`NoiseHandshake::pending_static_dh() -> Option<[u8; 32]>`, the responder's ephemeral key; `PairingHandshake` has the same), the caller computes X25519 of its private key with that point, and `provide_static_dh(&[u8])` goes on with the result; an all-zero or wrong-length result is `Error::Malformed` and ends the handshake. `respond` with it is `Error::Unsupported`. `openssl genpkey -algorithm x25519` writes a key this
 reads, and `openssl pkey -pubout -outform DER | sha256sum` gives its id. On Windows a written file inherits its
 directory's ACL. Errors: `Error::Key` for what is not such a key, `Error::Io` for the file, `Error::Random`.
 
@@ -50,11 +52,21 @@ directory's ACL. Errors: `Error::Key` for what is not such a key, `Error::Io` fo
 
 ```rust
 #[non_exhaustive]
-pub enum Trust { Pinned(BTreeSet<PeerId>), Store(TrustStore) }
-impl Trust { pub fn pinned(ids: impl IntoIterator<Item = PeerId>) -> Trust; }
+pub enum Trust { Pinned(BTreeSet<PeerId>), Store(TrustStore), Asked(Arc<dyn Admit>) }
+impl Trust {
+    pub fn pinned(ids: impl IntoIterator<Item = PeerId>) -> Trust;
+    pub fn asked(f: impl Fn(&KeyMaterial, bool, Option<SocketAddr>) -> bool + Send + Sync + 'static) -> Trust;
+}
+pub trait Admit: Send + Sync {
+    fn admit(&self, key: &KeyMaterial, answering: bool, source: Option<SocketAddr>) -> bool;
+}
 ```
 
 Decided after the peer proved its key, never before.
+
+`Asked` hands the decision to the host: `admit` is called once per handshake, only for a key whose proof held, with
+`answering` true on the responder and `source` the address given to `respond` (`None` for a dialer). It records nothing
+itself: a host that wants a refused stranger queued does that in `admit`. `Debug` shows `Asked` and nothing of the host's value.
 
 - `Pinned`: fixed at build; an empty set admits nobody; a pin of a digest other than SHA-256 matches
   nothing.
@@ -130,7 +142,7 @@ stream it takes, so a peer sending a byte at a time cannot outlast it; zero is a
 read; a `recv` that timed out keeps what it read of its frame for the next. A timeout set on the stream itself applies
 per read. Three messages, of 32, 96 and 64 bytes, each binary. `initiate` draws the
 ephemeral key and the first `transmit` gives the first message; `Error::Unsupported` without trust for that role.
-`finish` gives `Established { peer, key: Some(key), session }`.
+`finish` gives `Established { peer, key: Some(key), session }`: `key` is the peer's static public key as `KeyMaterial` (its 44-byte `SubjectPublicKeyInfo` in `bytes`, whose last 32 bytes are the X25519 point), on both ends, a dialer with a held-elsewhere key included. No private key is exposed.
 
 **An initiator finishes on sending the third message, and does not yet know it was accepted**: a responder that
 refuses it ends the connection. Records it sends meanwhile go only to the responder it proved.
@@ -191,7 +203,7 @@ is `Error::LimitReached` from `seal` and ends the session.
 inside the session: **a plain message on the same transport comes from whoever carries it**, even after
 a successful handshake.
 
-## Pairing (`coqui_peer_noise::{PairingMethod, PairingSession, PairDial}`, `pair`)
+## Pairing (`coqui_peer_noise::{PairingMethod, PairingSession, PairDial, JoinExchange}`, `pair`)
 
 ```rust
 pub const PAIR_EXPORT_LABEL: &str = "EXPORTER-coqui-pair";
@@ -229,12 +241,21 @@ impl PairingSession {
     pub fn peer_id(&self) -> PeerId;
     pub fn pair_channel(&self) -> Result<pair::Channel, Error>;  // the proved key; no caller names it
     pub fn join<T: MessageTransport>(self, pairing: Pairing, transport: &mut T) -> Result<PairDial<'_, T>, Error>;
+    pub fn joiner(self, pairing: Pairing) -> Result<JoinExchange, Error>;   // join with no transport: the caller moves each record
     pub fn respond<T: MessageTransport + CurrentReadTimeout>(self, store: &TrustStore, desk: &PairingDesk,
         source: Option<SocketAddr>, transport: &mut T) -> Result<Paired, Error>;
 }
 impl<T: MessageTransport> PairDial<'_, T> {
     pub fn shown(&self) -> Option<&Shown>;    // a PIN with its slot, or a device flow's user code
     pub fn finish(self) -> Result<Paired, Error>;
+}
+pub struct JoinExchange;                      // Debug; a joiner's exchange a record at a time (a browser page has no blocking transport)
+impl JoinExchange {
+    pub fn transmit(&mut self) -> Result<Option<Vec<u8>>, Error>;   // the next sealed record to send; call until None
+    pub fn receive(&mut self, record: &[u8]) -> Result<(), Error>;  // after an error, transmit still gives the refusal the responder is told
+    pub fn shown(&self) -> Option<&Shown>;
+    pub fn is_complete(&self) -> bool;
+    pub fn finish(self) -> Result<(Paired, Vec<u8>), Error>;        // the result, and this side's close record to send last
 }
 ```
 

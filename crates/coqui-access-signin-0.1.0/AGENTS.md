@@ -62,6 +62,16 @@ impl From<SignInRulesError> for ProviderError;     // GUATIAO_ERR_BAD_VALUE
   purpose, or `networks` do not contain its `address`, or `clients` or `services` are set and the
   context's is absent or not listed. Otherwise it is **unknown** while `subjects` is set and
   `person` is `None`, and **true** otherwise. A false condition wins over an unknown one.
+- **A client kind is a claim unless the consumer verified it.** When some rule has `clients`, the
+  context's `client` is `Some` and `attributes["client_verified"]` is not `true`
+  (`SignInContext::client_is_verified`), the request is decided twice, as given and with
+  `client = None`, and both must hold: `person` `None` offers the methods both offer (a method's
+  providers are those both list; one that is any takes the other's list, no shared provider drops
+  it); `person` set is `complete` when both are, otherwise offers what either lacks (methods both
+  want keep the shared providers), and either one refusing (nothing offered, not complete) is a
+  refusal. `rule` is the claimed decision's. So a `clients` rule can add steps and can never take
+  any away or open a method the rest does not; a verified client (`with_verified_client()`, for a
+  consumer that fixes the kind by the endpoint it serves) is decided alone.
 - An `address` that is `None`, is not an IP address (a port, a zone, text) or is not in any listed
   network matches no `networks` condition. An IPv4-mapped IPv6 address is the IPv4 address.
 - **`person` is `None`:** walk the rules in order; a false rule is skipped, an unknown one has its

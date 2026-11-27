@@ -11,8 +11,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use coqui_agentic_peer::auth::{self, Identity, Method, Proof, ProofBuilder};
-use coqui_agentic_peer::{Error, home};
+use cabuya::Error;
+use cabuya::auth::{self, Identity, Method, Proof, ProofBuilder};
+use coqui_agentic_peer::home;
 use coqui_net_acl::{Acl, Action, IpNet, Rule};
 use coqui_peer::PeerId;
 use coqui_peer_tls as tls;

@@ -40,6 +40,8 @@ use crate::state::{Step, TEXT_FLUSH, TOOL_KINDS, Turn, kind_name};
 
 const PROTOCOL_VERSION: u64 = 1;
 /// What the bridge's `serve --linger` sends when it dropped output while nobody was connected.
+/// Where an agent puts the `LimitHit` of a turn a limit refused: the key of `_meta`.
+pub const LIMIT_META_KEY: &str = "dev.boriken.coqui.acp/limit";
 const OUTPUT_LOST: &str = "_dev.boriken.coqui.acp/output_lost";
 
 /// An `authenticate` call to make before the first session request.
@@ -597,6 +599,13 @@ impl Shared {
         {
             return;
         }
+        let limit = match &result {
+            Ok(value) => limit_in(value),
+            Err(error) => error.data.as_ref().and_then(limit_in),
+        };
+        if let Some(limit) = limit {
+            self.emit(Event::Limited(limit));
+        }
         if self.extension.load(Ordering::SeqCst) {
             if let Err(error) = result {
                 self.push(Event::PromptFailed(error_text(&error)));
@@ -638,6 +647,15 @@ impl Shared {
 }
 
 /// An error's message with the agent's own reason, which agents put in `data` as text or as an object's `message`.
+/// The limit a refused turn's answer, or its error's data, carries in `_meta`: an object, whatever it holds.
+fn limit_in(value: &Value) -> Option<Value> {
+    value
+        .get("_meta")?
+        .get(LIMIT_META_KEY)
+        .filter(|limit| limit.is_object())
+        .cloned()
+}
+
 fn error_text(error: &RpcError) -> String {
     let detail = match &error.data {
         Some(Value::String(detail)) => Some(detail),

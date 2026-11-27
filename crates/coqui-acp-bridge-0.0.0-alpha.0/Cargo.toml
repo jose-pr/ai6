@@ -1,4 +1,4 @@
-# coqui-acp/crates/coqui-acp-bridge at b81c78a42e8f83fca48c4f0913775d59309c5831, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-bridge at f58a7baff4c6b549250d246bb54a08739e8ce839, with what it inherits written out.
 [package]
 name = "coqui-acp-bridge"
 description = "Put a stdio Agent Client Protocol agent on the network, under a proven peer identity"
@@ -18,15 +18,19 @@ url = "2.5"
 [dependencies.clap]
 version = "4"
 features = ["derive"]
+[dependencies.cabuya]
+git = "https://github.com/Boriken-Dev/cabuya"
+rev = "7089185fbd047b676ba9a74963b7509136f4637a"
+features = ["sealed", "forward"]
 [dependencies.coqui-agentic-peer]
 git = "https://github.com/Boriken-Dev/coqui-agentic-peer"
-rev = "f45938e8cede85a2a2e00afedea1b4944f7c8a67"
+rev = "6def8243a0dd179b5b8cb2e30d49f1377b8935a6"
 [dependencies.coqui-peer]
 git = "https://github.com/Boriken-Dev/coqui-peer"
 rev = "984db3d54b73de10c7892b06fe269a259de2d1c5"
 [dependencies.coqui-peer-webcrypto]
 git = "https://github.com/Boriken-Dev/coqui-peer-webcrypto"
-rev = "9146f55dd9fb9be8d6d96f43e17bc7a057ba0681"
+rev = "7544cf9c026da808dc940bcb56a0b3d5d78bef2f"
 features = ["pin"]
 [dependencies.coqui-peer-tls]
 version = "=0.0.0-alpha.1"

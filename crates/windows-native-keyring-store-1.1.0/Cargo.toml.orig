@@ -1,0 +1,31 @@
+[package]
+authors = ["Daniel Brotsky <dev@brotsky.com>"]
+description = "Windows native credential store for keyring"
+homepage = "https://github.com/open-source-cooperative/keyring-rs/wiki/Keyring"
+keywords = ["windows", "credential-manager", "credential-store", "keyring"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/open-source-cooperative/windows-native-keyring-store.git"
+rust-version = "1.88"
+exclude = [".github/"]
+readme = "README.md"
+name = "windows-native-keyring-store"
+version = "1.1.0"
+edition = "2024"
+
+[features]
+default = ["search"]
+search = ["dep:regex"]
+
+[dependencies]
+keyring-core = { version = "1" }
+byteorder = "1"
+regex = { version = "1", optional = true }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security_Credentials"] }
+zeroize = "1"
+
+[dev-dependencies]
+fastrand = "2"
+sscanf = "0.5"
+
+[package.metadata.docs.rs]
+targets = ["x86_64-pc-windows-msvc"]

@@ -8,15 +8,14 @@ use guatiao::Secret;
 use guatiao::library::{Object, ProviderError};
 use guatiao_channel::{Channel, ChannelSink};
 
-use crate::account::{AccountCatalog, AccountRef, ModelsRequest};
+use crate::account::{AccountCatalog, AccountRef};
 use crate::environment::Environment;
 use crate::models::{
-    ExportPage, HarnessInfo, ImportReport, ModelListing, NonDefault, SessionExport, SessionImport,
-    SessionQuery, SessionRecordFile, StartRequest,
+    ExportPage, HarnessInfo, ImportReport, NonDefault, SessionExport, SessionImport, SessionQuery,
+    SessionRecordFile, StartRequest,
 };
 use crate::requirement::Requirement;
 use crate::spawner::ProcessSpawner;
-use crate::usage::{UsageQuery, UsageReport};
 
 /// Drives an Agent Client Protocol agent, and serves it as one ACP connection over a channel.
 ///
@@ -124,21 +123,6 @@ pub trait AcpHarness: Send + Sync {
         spawner: Object<dyn ProcessSpawner>,
     ) -> Result<ExportPage, ProviderError>;
 
-    /// The models the account behind `request` may use, when the harness can say without a model
-    /// turn. Never carries a value from the request. `spawner` is handed over as
-    /// `import_session`'s is. The default, for a harness with no way to list them: unknown, and
-    /// says so.
-    fn models(
-        &self,
-        request: ModelsRequest,
-        spawner: Object<dyn ProcessSpawner>,
-    ) -> Result<ModelListing, ProviderError> {
-        drop((request, spawner));
-        Ok(ModelListing::unknown(
-            "this harness has no way to list models",
-        ))
-    }
-
     /// Where the harness keeps its own record of the session `query` names (by the session id it
     /// reported, a UUID), when it keeps one and the file is there. The default, for a harness that
     /// keeps none: none.
@@ -148,24 +132,6 @@ pub trait AcpHarness: Send + Sync {
     ) -> Result<Option<SessionRecordFile>, ProviderError> {
         drop(query);
         Ok(None)
-    }
-
-    /// What the account behind `query` has used and has left, with no session and no model turn;
-    /// cheap, so a host may poll it as often as it likes. A harness that learns usage
-    /// only while a turn runs answers the newest report its connections saw for the account, with
-    /// its `observed_at`. Never carries a value from the environment or the credentials. The
-    /// default, for a harness that reports no usage, is a true answer:
-    /// [`UsageReport::unsupported`].
-    ///
-    /// A provider that runs a program to ask (Codex's `account/rateLimits/read`) runs it through
-    /// `spawner`, on the account's directory, and destroys it as `import_session` does.
-    fn usage(
-        &self,
-        query: UsageQuery,
-        spawner: Object<dyn ProcessSpawner>,
-    ) -> Result<UsageReport, ProviderError> {
-        drop((query, spawner));
-        Ok(UsageReport::unsupported("this harness reports no usage"))
     }
 
     /// Each way this configured harness departs from its defaults that its settings' schema cannot

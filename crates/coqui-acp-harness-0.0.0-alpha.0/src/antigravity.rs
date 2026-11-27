@@ -1,4 +1,7 @@
-//! Antigravity's quota as usage buckets.
+//! Antigravity's quota as usage buckets, and its account.
+//!
+//! [`AgyLogin`] reads the account, the plan and the quota from agy's stored login and Google's service, with no `agy` process.
+//! [`AgyQuota`] reads them from a running session's own language server, for when that reading fails while a session is open.
 //!
 //! `agy acp` serves its own language server on two random loopback ports once a session is open, one
 //! plain HTTP and one HTTPS with a self-signed certificate, and answers `GetUserStatus` on both with
@@ -6,7 +9,8 @@
 //! ports among the processes it is told are the agent's, asks, and turns the answer into
 //! `reported` [`Bucket`]s: one for each distinct reset time, in permille.
 //!
-//! The request carries no secret and the answer's account details are never kept, so the only proof
+//! The request carries no secret. The answer's email, name and plan are kept only for [`AgyQuota::account`];
+//! its picture and every other field are not, so the only proof
 //! that a port is agy's is that its owner is one of the agent's own processes, which is checked when
 //! the port is found and again whenever a request to it fails. Plain HTTP is asked first; HTTPS is asked with certificate
 //! verification off, for a literal loopback address only.
@@ -21,10 +25,19 @@ use std::time::Instant;
 
 use coqui_acp_api::usage::Bucket;
 
+mod login;
+mod models;
 mod ports;
 mod status;
 
+pub use login::{
+    AgyLogin, CONSUMER_SERVICE, Cause, ClientSource, GCP_SERVICE, KEYRING_SERVICE, KEYRING_USER,
+    Keyring, KeyringLookup, LoginError, LoginReading, LoginSettings, OAuthClient, SERVICE_VARIABLE,
+    Secret, SignedIn, Step, TOKEN_URL, USER_AGENT, USERINFO_URL, has_stored_login,
+};
+pub use models::{MODELS_ARGS, list_models, parse_models};
 pub use ports::loopback_listeners;
+pub use status::AgyAccount;
 
 /// What every bucket id starts with, so a host replaces this reader's buckets and no other's.
 pub const BUCKET_PREFIX: &str = "agy:";
@@ -174,6 +187,7 @@ pub struct AgyQuota {
     windows: status::Windows,
     unmatched: u64,
     last: Option<(Instant, Vec<Bucket>)>,
+    account: Option<AgyAccount>,
 }
 
 impl AgyQuota {
@@ -186,7 +200,14 @@ impl AgyQuota {
             windows: status::Windows::default(),
             unmatched: 0,
             last: None,
+            account: None,
         }
+    }
+
+    /// Who the account is, from the last reading that gave buckets.
+    #[must_use]
+    pub const fn account(&self) -> Option<&AgyAccount> {
+        self.account.as_ref()
     }
 
     /// How many times a model agy listed matched none of `models` (by id, then by label), so that
@@ -221,14 +242,21 @@ impl AgyQuota {
             return Some(held.clone());
         }
         let deadline = Instant::now().checked_add(self.limits.total);
-        if let Ok(read) = self.fetch(address, scheme, deadline) {
-            return Some(self.keep(&read, models, crate::acp::now()));
+        if let Ok((read, account)) = self.fetch(address, scheme, deadline) {
+            return Some(self.keep(&read, account, models, crate::acp::now()));
         }
         self.endpoint = None;
         None
     }
 
-    fn keep(&mut self, read: &[status::Model], models: &[AcpModel], now: i64) -> Vec<Bucket> {
+    fn keep(
+        &mut self,
+        read: &[status::Model],
+        account: Option<AgyAccount>,
+        models: &[AcpModel],
+        now: i64,
+    ) -> Vec<Bucket> {
+        self.account = account;
         let buckets = status::buckets(read, models, now, &mut self.windows, &mut self.unmatched);
         self.last = Some((Instant::now(), buckets.clone()));
         buckets
@@ -257,9 +285,9 @@ impl AgyQuota {
         let mut failure: Option<ReadError> = None;
         for (address, scheme) in self.attempts(&listeners) {
             match self.fetch(address, scheme, deadline) {
-                Ok(models_read) => {
+                Ok((models_read, account)) => {
                     self.endpoint = Some((address, scheme));
-                    return Ok(self.keep(&models_read, models, now));
+                    return Ok(self.keep(&models_read, account, models, now));
                 }
                 Err(error) => {
                     // The next reading looks at every port again.
@@ -297,7 +325,7 @@ impl AgyQuota {
         address: SocketAddr,
         scheme: Scheme,
         deadline: Option<Instant>,
-    ) -> Result<Vec<status::Model>, ReadError> {
+    ) -> Result<(Vec<status::Model>, Option<AgyAccount>), ReadError> {
         // The request never leaves this machine: the verification switched off below is safe only
         // because of this.
         if !address.ip().to_canonical().is_loopback() {
@@ -340,7 +368,7 @@ impl AgyQuota {
             .limit(self.limits.body as u64)
             .read_to_vec()
             .map_err(from_ureq)?;
-        status::parse(&body)
+        Ok((status::parse(&body)?, status::account(&body)))
     }
 }
 

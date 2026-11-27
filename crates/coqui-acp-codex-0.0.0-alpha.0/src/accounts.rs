@@ -13,19 +13,21 @@ use core::time::Duration;
 use std::ffi::OsString;
 use std::sync::{Mutex, PoisonError};
 
-use coqui_acp_api::guatiao::library::ProviderError;
-use coqui_acp_api::guatiao::{Secret, Status, Wipe};
+use coqui_acp_api::guatiao::library::{Object, ProviderError};
+use coqui_acp_api::guatiao::{FromValue, Schema, Secret, Status, ToValue, Value as GValue, Wipe};
 use coqui_acp_api::standard::{CODEX, OPENAI_API};
 use coqui_acp_api::{
-    ASK, AUTH, Accepted, AcceptedSlot, AccountCatalog, AccountGrant, AccountKindInfo, AccountOffer,
-    AccountRef, Credentials, EndpointSlot, HARNESS_LOGIN, LoginMethodInfo, MODEL_API, OPEN_URL,
+    AUTH, Accepted, AcceptedSlot, AccountCatalog, AccountGrant, AccountKeeper, AccountKindInfo,
+    AccountOffer, AccountRef, Credentials, EndpointSlot, HARNESS_LOGIN, MODEL_API, OPEN_URL,
     PASTE_CODE, USER_CODE,
 };
 use coqui_acp_harness::ThroughSpawner;
 use coqui_acp_harness::account::{
-    Accounts, Files, Hold, Watched, fingerprint, jwt_expiry, same_name,
+    Accounts, Files, Hold, Watched, bad, fingerprint, harness_catalog, jwt_expiry, kind_info,
+    method_info, provide_standards, provider_offer, same_name, sole_credential, takes_no_settings,
+    typed_method,
 };
-use coqui_acp_harness::provider::{credential, resolve, schema, to_json};
+use coqui_acp_harness::provider::{Address, own_kind, resolve, schema_of, settings_as};
 use serde_json::{Value, json};
 
 use crate::{CodexLaunch, signin};
@@ -45,6 +47,11 @@ pub const DEVICE_METHOD: &str = "chatgpt-device";
 pub const API_KEY_METHOD: &str = "api-key";
 /// The login method that takes a token and makes [`ACCESS_TOKEN`].
 pub const ACCESS_TOKEN_METHOD: &str = "access-token";
+
+/// The address Codex sends model requests to when the account names no `openai_base_url`.
+pub(crate) const OPENAI_API_URL: &str = "https://api.openai.com/v1";
+/// Where a ChatGPT login's requests go when the account names no `chatgpt_base_url`.
+const CHATGPT_CODEX: &str = "https://chatgpt.com/backend-api/codex";
 
 /// The file in Codex's home directory that holds a login or a key.
 pub const AUTH_FILE: &str = "auth.json";
@@ -76,30 +83,110 @@ pub(crate) const VARIABLES: &[&str] = &[
 /// Codex keeps its state, which a person sets on purpose and which a start still clears.
 pub(crate) const SECRETS: &[&str] = &["CODEX_API_KEY", "OPENAI_API_KEY", "CODEX_ACCESS_TOKEN"];
 
-fn settings(secret: &str, endpoint: &str) -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            secret: credential(),
-            endpoint: {"type": "string", "format": "uri"},
-        },
-        "required": [secret],
-        "additionalProperties": false,
-    })
+/// Where the requests of a ChatGPT login or an access token go.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Default, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao, deny_unknown_fields)]
+pub struct ChatgptEndpoint {
+    /// The address Codex's ChatGPT requests go to, its `chatgpt_base_url`; ChatGPT's own when absent.
+    #[map(as_text)]
+    #[schema(format = "uri")]
+    pub chatgpt_base_url: Option<Address>,
 }
 
-fn kind(id: &str, title: &str, description: &str, secret: &str, endpoint: &str) -> AccountKindInfo {
-    let mut kind = AccountKindInfo::new(id, title);
-    kind.description = description.to_string();
-    kind.settings = schema(&settings(secret, endpoint));
+/// Where the requests of an API key go.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Default, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao, deny_unknown_fields)]
+pub struct OpenAiEndpoint {
+    /// The address Codex's model requests go to, its `openai_base_url`; OpenAI's own when absent.
+    #[map(as_text)]
+    #[schema(format = "uri")]
+    pub openai_base_url: Option<Address>,
+}
+
+/// A ChatGPT login: the text of `auth.json`, and where requests go.
+#[derive(Schema)]
+#[expect(
+    dead_code,
+    reason = "a form is only its schema: the derive reads the fields"
+)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+struct ChatgptSettings {
+    /// The text of `auth.json`.
+    #[schema(sensitive)]
+    auth_file: String,
+    #[map(flatten)]
+    endpoint: ChatgptEndpoint,
+}
+
+/// An OpenAI API key, and where requests go.
+#[derive(Schema)]
+#[expect(
+    dead_code,
+    reason = "a form is only its schema: the derive reads the fields"
+)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+struct ApiKeySettings {
+    /// The OpenAI API key.
+    #[schema(sensitive)]
+    api_key: String,
+    #[map(flatten)]
+    endpoint: OpenAiEndpoint,
+}
+
+/// An access token, and where requests go.
+#[derive(Schema)]
+#[expect(
+    dead_code,
+    reason = "a form is only its schema: the derive reads the fields"
+)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+struct AccessTokenSettings {
+    /// The access token.
+    #[schema(sensitive)]
+    access_token: String,
+    #[map(flatten)]
+    endpoint: ChatgptEndpoint,
+}
+
+/// The address `settings` name for the requests of a ChatGPT login or an access token: absent, or a plain `http(s)`
+/// address.
+///
+/// # Errors
+///
+/// `BAD_VALUE` when the settings name anything but `chatgpt_base_url` or hold it as anything but an address.
+pub(crate) fn chatgpt_endpoint(settings: &GValue) -> Result<Option<String>, ProviderError> {
+    Ok(settings_as::<ChatgptEndpoint>(settings)?
+        .chatgpt_base_url
+        .map(|address| address.as_str().to_string()))
+}
+
+/// The address `settings` name for the requests of an API key: absent, or a plain `http(s)` address.
+///
+/// # Errors
+///
+/// `BAD_VALUE` when the settings name anything but `openai_base_url` or hold it as anything but an address.
+pub(crate) fn openai_endpoint(settings: &GValue) -> Result<Option<String>, ProviderError> {
+    Ok(settings_as::<OpenAiEndpoint>(settings)?
+        .openai_base_url
+        .map(|address| address.as_str().to_string()))
+}
+
+/// The configuration key that holds the address of the kind, and the address `settings` name for it.
+fn endpoint(
+    kind: &str,
+    settings: &GValue,
+) -> Result<(&'static str, Option<String>), ProviderError> {
+    if kind == API_KEY {
+        Ok(("openai_base_url", openai_endpoint(settings)?))
+    } else {
+        Ok(("chatgpt_base_url", chatgpt_endpoint(settings)?))
+    }
+}
+
+fn kind(id: &str, title: &str, description: &str, settings: GValue) -> AccountKindInfo {
+    let mut kind = kind_info(id, title, description, settings);
     kind.state_dir = true;
     kind
-}
-
-fn method(id: &str, title: &str, description: &str, produces: &str) -> LoginMethodInfo {
-    let mut method = LoginMethodInfo::new(id, title, produces);
-    method.description = description.to_string();
-    method
 }
 
 /// Every kind and sign-in method Codex's accounts have, as the account provider lists them and the harness takes them.
@@ -110,13 +197,12 @@ fn full() -> AccountCatalog {
         CHATGPT,
         "ChatGPT login",
         "A login made by `codex login`, kept in `auth.json` of Codex's home directory.",
-        FILE_KEY,
-        "chatgpt_base_url",
+        schema_of::<ChatgptSettings>(),
     );
     chatgpt.endpoints = vec![
         EndpointSlot::new(MODEL_API)
             .key("chatgpt_base_url")
-            .default_url("https://chatgpt.com/backend-api/codex"),
+            .default_url(CHATGPT_CODEX),
         EndpointSlot::new(AUTH).default_url("https://auth.openai.com"),
     ];
     chatgpt.rotates = true;
@@ -128,13 +214,12 @@ fn full() -> AccountCatalog {
         API_KEY,
         "OpenAI API key",
         "A key saved by `codex login --with-api-key` in `auth.json` of Codex's home directory.",
-        "api_key",
-        "openai_base_url",
+        schema_of::<ApiKeySettings>(),
     );
     key.endpoints = vec![
         EndpointSlot::new(MODEL_API)
             .key("openai_base_url")
-            .default_url("https://api.openai.com/v1"),
+            .default_url(OPENAI_API_URL),
     ];
     key.notices = vec!["the key is kept in a file that what the agent runs can read".to_string()];
 
@@ -142,13 +227,12 @@ fn full() -> AccountCatalog {
         ACCESS_TOKEN,
         "Codex access token",
         "A token Codex checks offline, saved by `codex login --with-access-token` in `auth.json` of its home directory.",
-        "access_token",
-        "chatgpt_base_url",
+        schema_of::<AccessTokenSettings>(),
     );
     token.endpoints = vec![
         EndpointSlot::new(MODEL_API)
             .key("chatgpt_base_url")
-            .default_url("https://chatgpt.com/backend-api/codex"),
+            .default_url(CHATGPT_CODEX),
     ];
     // Codex checks the token's format offline and no refresh credential comes with it, so nothing of it is renewed
     // behind the host's back: the success path was not run, and this is what its failure path shows.
@@ -158,7 +242,7 @@ fn full() -> AccountCatalog {
     ];
 
     catalog.kinds.extend([chatgpt, key, token]);
-    let mut web = method(
+    let mut web = method_info(
         CHATGPT_METHOD,
         "Sign in with ChatGPT",
         "Runs `codex login`: a page to open, whose callback comes back to the machine where Codex runs. From another machine, paste the address the browser ends on.",
@@ -166,7 +250,7 @@ fn full() -> AccountCatalog {
     );
     web.steps = vec![OPEN_URL.to_string(), PASTE_CODE.to_string()];
     web.remote = true;
-    let mut device = method(
+    let mut device = method_info(
         DEVICE_METHOD,
         "Sign in with ChatGPT by a code",
         "Runs `codex login --device-auth`: a page to open and a one-time code to confirm there.",
@@ -174,31 +258,25 @@ fn full() -> AccountCatalog {
     );
     device.steps = vec![OPEN_URL.to_string(), USER_CODE.to_string()];
     device.remote = true;
-    let mut api = method(
+    let api = typed_method(
         API_KEY_METHOD,
         "Use an OpenAI API key",
         "Takes a key and saves it with `codex login --with-api-key`, the key on standard input.",
         API_KEY,
     );
-    api.steps = vec![ASK.to_string()];
-    api.remote = true;
-    let mut access = method(
+    let access = typed_method(
         ACCESS_TOKEN_METHOD,
         "Use an access token",
         "Takes a token and saves it with `codex login --with-access-token`, the token on standard input.",
         ACCESS_TOKEN,
     );
-    access.steps = vec![ASK.to_string()];
-    access.remote = true;
     catalog.logins = vec![web, device, api, access];
-    for kind in &mut catalog.kinds {
-        let standard = if kind.id == API_KEY {
-            OPENAI_API
-        } else {
-            CODEX
-        };
-        kind.provides = vec![standard.to_string()];
-    }
+    provide_standards(
+        &mut catalog,
+        |id| {
+            if id == API_KEY { OPENAI_API } else { CODEX }
+        },
+    );
     catalog.accepts = accepts();
     catalog.credential_variables = VARIABLES.iter().map(|v| (*v).to_string()).collect();
     catalog.secret_variables = SECRETS.iter().map(|v| (*v).to_string()).collect();
@@ -209,41 +287,21 @@ fn full() -> AccountCatalog {
 /// renews nothing: the account provider ([`offer`]) does.
 #[must_use]
 pub fn catalog() -> AccountCatalog {
-    let mut catalog = full();
-    catalog.logins.clear();
-    for kind in &mut catalog.kinds {
-        kind.renews = false;
-    }
-    catalog
+    harness_catalog(full())
 }
 
 /// What the account provider offers: the kinds of account it makes (the harness's own login, which it cannot sign in
-/// to, left out), the ways to sign in, and the kinds whose plan usage it reads.
+/// to, left out of the kinds and offered as the automatic `local` account), the ways to sign in, and the kinds whose
+/// plan usage it reads (the `local` account's too, which Codex reads with no turn).
 #[must_use]
 pub fn offer() -> AccountOffer {
-    let full = full();
-    let mut offer = AccountOffer::new();
-    offer.kinds = full
-        .kinds
-        .into_iter()
-        .filter(|kind| kind.id != HARNESS_LOGIN)
-        .collect();
-    offer.logins = full.logins;
-    offer.usage = [CHATGPT, ACCESS_TOKEN, API_KEY]
-        .iter()
-        .map(|id| (*id).to_string())
-        .collect();
-    offer
+    provider_offer(full(), &[CHATGPT, ACCESS_TOKEN, API_KEY, HARNESS_LOGIN])
 }
 
 /// Why an account is not one the account provider keeps: `BAD_VALUE` for an id that is not one or a kind it does not
 /// list. Nothing of another standard is taken: a harness applies those, the provider makes its own.
 pub(crate) fn own(grant: &AccountGrant) -> Result<(), ProviderError> {
-    grant.check_id()?;
-    if offer().kind(&grant.kind).is_none() {
-        return Err(bad("this provider keeps no account of that kind"));
-    }
-    Ok(())
+    own_kind(grant, &offer())
 }
 
 /// The standards Codex starts on, and how each is applied: a Codex login (`auth.json` in `CODEX_HOME`, or an access token
@@ -274,35 +332,6 @@ fn accepts() -> Vec<Accepted> {
 /// The grant of Codex's own kind that applies `grant`, when `grant` is an account of an accepted standard.
 pub(crate) fn resolved(grant: &AccountGrant) -> Result<AccountGrant, ProviderError> {
     resolve(&catalog(), grant)
-}
-
-fn bad(why: &str) -> ProviderError {
-    ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, why)
-}
-
-/// The endpoint setting `key` of `settings`: absent, or a plain `http(s)` address.
-pub(crate) fn endpoint(
-    settings: &coqui_acp_api::guatiao::Value,
-    key: &str,
-) -> Result<Option<String>, ProviderError> {
-    let settings = to_json(settings);
-    let Some(object) = settings.as_object() else {
-        return Err(bad("the account's settings are not an object"));
-    };
-    if object.keys().any(|name| name != key) {
-        return Err(bad("the account's settings name something the kind lacks"));
-    }
-    match object.get(key) {
-        None | Some(Value::Null) => Ok(None),
-        Some(Value::String(url))
-            if (url.starts_with("https://") || url.starts_with("http://"))
-                && url.len() > 8
-                && !url.chars().any(|c| c.is_control() || c.is_whitespace()) =>
-        {
-            Ok(Some(url.clone()))
-        }
-        Some(_) => Err(bad("the endpoint is not an address")),
-    }
 }
 
 /// The text holds a login or a key: not blank, and when it is Codex's JSON, a token or key in it.
@@ -357,13 +386,6 @@ pub(crate) struct Plan {
     pub login: Option<StdinLogin>,
 }
 
-fn settings_key(kind: &str) -> &'static str {
-    match kind {
-        API_KEY => "openai_base_url",
-        _ => "chatgpt_base_url",
-    }
-}
-
 /// Why a reference to an account is not one the provider takes.
 pub(crate) fn check(account: &AccountRef) -> Result<(), ProviderError> {
     let catalog = catalog();
@@ -373,15 +395,9 @@ pub(crate) fn check(account: &AccountRef) -> Result<(), ProviderError> {
         return Ok(());
     };
     if info.id == HARNESS_LOGIN {
-        if !to_json(&account.settings)
-            .as_object()
-            .is_some_and(serde_json::Map::is_empty)
-        {
-            return Err(bad("that kind takes no settings"));
-        }
-        return Ok(());
+        return takes_no_settings(&account.settings);
     }
-    endpoint(&account.settings, settings_key(&info.id))?;
+    endpoint(&info.id, &account.settings)?;
     if account.state_dir.as_deref().is_none_or(str::is_empty) {
         return Err(bad("that kind needs a directory to run in"));
     }
@@ -431,9 +447,7 @@ fn plan_as(grant: &AccountGrant, in_place: bool) -> Result<Option<Plan>, Provide
         API_KEY => "api_key",
         _ => "access_token",
     };
-    let secret = credentials
-        .get(key)
-        .filter(|value| !value.is_empty() && credentials.keys().all(|k| k == key));
+    let secret = sole_credential(credentials, key);
     let there = in_place && grant.kind == CHATGPT && credentials.is_empty();
     if secret.is_none() && !there {
         return Err(bad("the credential is missing or not the kind's"));
@@ -449,8 +463,8 @@ fn plan_as(grant: &AccountGrant, in_place: bool) -> Result<Option<Plan>, Provide
     applied
         .set
         .push(("CODEX_HOME".to_string(), applied.dir.clone()));
-    let setting = settings_key(&grant.kind);
-    if let Some(url) = endpoint(&grant.settings, setting)? {
+    let (setting, url) = endpoint(&grant.kind, &grant.settings)?;
+    if let Some(url) = url {
         applied.config.push((setting.to_string(), json!(url)));
     }
     match grant.kind.as_str() {
@@ -575,13 +589,28 @@ impl Applied {
         accounts: &Arc<Accounts>,
         files: &Files,
     ) -> Result<Option<Hold>, ProviderError> {
+        self.hold_keeping(accounts, files, None)
+    }
+
+    /// [`hold`](Self::hold) with a keeper that hears of the login's renewal or loss for as long as the hold lasts, and
+    /// is destroyed when the hold ends (at once, for an account that keeps no file).
+    ///
+    /// # Errors
+    ///
+    /// As [`hold`](Self::hold).
+    pub fn hold_keeping(
+        self,
+        accounts: &Arc<Accounts>,
+        files: &Files,
+        keeper: Option<Object<dyn AccountKeeper>>,
+    ) -> Result<Option<Hold>, ProviderError> {
         if self.watched.is_empty() {
             return Ok(None);
         }
         accounts
             .hold(
                 files.clone(),
-                None,
+                keeper,
                 &self.id,
                 &self.dir,
                 self.revision,
@@ -879,5 +908,67 @@ mod tests {
             assert!(check(&grant.reference()).is_err());
         }
         assert!(plan(&foreign(&[OPENAI_API], "access_token")).is_err());
+    }
+}
+
+#[cfg(test)]
+mod schema_tests {
+    use super::*;
+    use coqui_acp_harness::provider::{schema, to_json};
+    use serde_json::json;
+
+    #[test]
+    fn each_kinds_schema_is_derived_with_its_one_credential_sensitive_and_its_own_address_key() {
+        let catalog = catalog();
+        for (kind, secret, address) in [
+            (CHATGPT, FILE_KEY, "chatgpt_base_url"),
+            (API_KEY, "api_key", "openai_base_url"),
+            (ACCESS_TOKEN, "access_token", "chatgpt_base_url"),
+        ] {
+            let schema = to_json(&catalog.kind(kind).expect(kind).settings);
+            assert_eq!(schema["additionalProperties"], false, "{kind}");
+            let properties = schema["properties"].as_object().expect(kind);
+            let mut names: Vec<&str> = properties.keys().map(String::as_str).collect();
+            names.sort_unstable();
+            let mut want = [secret, address];
+            want.sort_unstable();
+            assert_eq!(names, want, "{kind}");
+            assert_eq!(properties[secret]["x-sensitive"], true, "{kind}");
+            assert_eq!(properties[secret]["writeOnly"], true, "{kind}");
+            assert_eq!(properties[address]["format"], "uri", "{kind}");
+            assert!(properties[address].get("x-sensitive").is_none(), "{kind}");
+        }
+    }
+
+    #[test]
+    fn a_kind_reads_only_its_own_address_key() {
+        let given = |value: serde_json::Value| schema(&value);
+        assert_eq!(
+            endpoint(
+                API_KEY,
+                &given(json!({"openai_base_url": "https://g.example"}))
+            )
+            .unwrap(),
+            ("openai_base_url", Some("https://g.example".to_string()))
+        );
+        assert!(
+            endpoint(
+                API_KEY,
+                &given(json!({"chatgpt_base_url": "https://g.example"}))
+            )
+            .is_err()
+        );
+        assert!(
+            endpoint(
+                CHATGPT,
+                &given(json!({"openai_base_url": "https://g.example"}))
+            )
+            .is_err()
+        );
+        assert_eq!(
+            endpoint(ACCESS_TOKEN, &given(json!({}))).unwrap(),
+            ("chatgpt_base_url", None)
+        );
+        assert!(to_json(&given(json!({}))).as_object().is_some());
     }
 }

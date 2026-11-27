@@ -1,6 +1,6 @@
 //! `keygen`: an identity file, and its peer id.
 
-use coqui_agentic_peer::auth::{self, Method};
+use cabuya::auth::{self, Method};
 use std::path::Path;
 
 /// Creates the identity file at `path` for `method` (the default method without it) and returns its peer id. An existing file is

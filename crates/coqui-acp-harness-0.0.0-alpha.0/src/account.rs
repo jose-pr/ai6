@@ -53,6 +53,13 @@ use coqui_acp_api::{
     ProcessSpawner, SecretBytes,
 };
 
+mod catalog;
+
+pub use catalog::{
+    NoSettings, bad, harness_catalog, kind_info, method_info, provide_standards, provider_offer,
+    sole_credential, takes_no_settings, typed_method,
+};
+
 /// The most a credential file may hold, in bytes.
 pub const MAX_FILE_BYTES: u64 = 1 << 20;
 

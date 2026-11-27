@@ -51,8 +51,14 @@ PKCS#8 key (SEC1 `EC PRIVATE KEY` is not), `Error::Io` for the file, `Error::Ran
 
 ```rust
 #[non_exhaustive]
-pub enum Trust { Pinned(BTreeSet<PeerId>), Store(TrustStore) }
-impl Trust { pub fn pinned(ids: impl IntoIterator<Item = PeerId>) -> Trust; }
+pub enum Trust { Pinned(BTreeSet<PeerId>), Store(TrustStore), Asked(Arc<dyn Admit>) }
+impl Trust {
+    pub fn pinned(ids: impl IntoIterator<Item = PeerId>) -> Trust;
+    pub fn asked(f: impl Fn(&KeyMaterial, bool, Option<SocketAddr>) -> bool + Send + Sync + 'static) -> Trust;
+}
+pub trait Admit: Send + Sync {
+    fn admit(&self, key: &KeyMaterial, answering: bool, source: Option<SocketAddr>) -> bool;
+}
 ```
 
 Decided after the peer proved its key, never before.
@@ -65,6 +71,10 @@ Decided after the peer proved its key, never before.
   records nobody. The proved pending successor of an accepted key gets `prove_successor`, then
   `promote_successor` unless `RotationOptions::require_approval`, in which case it is refused until the
   caller promotes it.
+- `Asked`: the host decides. `admit` is called once per handshake, only for a key whose proof held, with `answering`
+  true on the responder and `source` the address given to `respond` (`None` for a dialer). It records nothing
+  itself, so a host that wants a refused stranger queued does that in `admit`; `Debug` shows `Asked` and nothing of
+  the host's value.
 - There is no way to admit anyone here: a stranger's session is a `PairingSession`.
 
 How strangers wait is the store's: a source at `WaitingLimits::per_source` refuses a newcomer and keeps

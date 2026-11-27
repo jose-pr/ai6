@@ -13,7 +13,7 @@ use crate::identity::{Identity, key_material};
 use crate::noise::{DHLEN, TAGLEN, Xx};
 use crate::session::{Limits, Session};
 use crate::settings::NoiseSettings;
-use crate::trust::{Admit, Trust};
+use crate::trust::{Admission, Trust};
 
 /// The method name: the `<method>` of `coqui-peer-<method>`, under which a trust store keeps the
 /// keys of this method.
@@ -57,8 +57,8 @@ pub(crate) fn field(out: &mut Vec<u8>, bytes: &[u8]) {
 struct Config {
     identity: Identity,
     purpose: &'static [u8],
-    responders: Option<Admit>,
-    initiators: Option<Admit>,
+    responders: Option<Admission>,
+    initiators: Option<Admission>,
     settings: NoiseSettings,
     random: Random,
     random_replaced: bool,
@@ -136,8 +136,8 @@ impl From<NoiseParts> for Noise {
             parts.identity,
             PURPOSE_ORDINARY,
             parts.settings,
-            parts.responders.map(Admit::Trust),
-            parts.initiators.map(Admit::Trust),
+            parts.responders.map(Admission::Trust),
+            parts.initiators.map(Admission::Trust),
             parts.random,
         )
     }
@@ -150,8 +150,8 @@ impl Noise {
         identity: Identity,
         purpose: &'static [u8],
         settings: NoiseSettings,
-        responders: Option<Admit>,
-        initiators: Option<Admit>,
+        responders: Option<Admission>,
+        initiators: Option<Admission>,
         random: Option<Random>,
     ) -> Noise {
         let random_replaced = random.is_some();
@@ -168,7 +168,7 @@ impl Noise {
 
     /// Whether an initiator's peer is admitted by a pin or a store, and not as any proved key.
     pub(crate) fn verifies_responders(&self) -> bool {
-        matches!(self.0.responders, Some(Admit::Trust(_)))
+        matches!(self.0.responders, Some(Admission::Trust(_)))
     }
 
     /// This method's identity.
@@ -244,9 +244,10 @@ impl Method for Noise {
     ///
     /// # Errors
     ///
-    /// [`Error::Unsupported`] without [`initiators`](NoiseBuilder::initiators).
+    /// [`Error::Unsupported`] without [`initiators`](NoiseBuilder::initiators), or when the
+    /// identity holds no private key.
     fn respond(&self, source: Option<SocketAddr>) -> Result<NoiseHandshake, Error> {
-        if self.0.initiators.is_none() {
+        if self.0.initiators.is_none() || !self.0.identity.holds_private_key() {
             return Err(Error::Unsupported);
         }
         Ok(NoiseHandshake::new(
@@ -270,6 +271,13 @@ enum State {
     AwaitFirst,
     AwaitSecond(Box<Xx>),
     AwaitThird(Box<Xx>),
+    /// Message 3 waits for the `se` result of a key held elsewhere: the responder's ephemeral key
+    /// it is the Diffie-Hellman with.
+    AwaitStaticDh {
+        xx: Box<Xx>,
+        material: KeyMaterial,
+        ephemeral: [u8; DHLEN],
+    },
     Done,
     Failed,
 }
@@ -335,7 +343,12 @@ impl NoiseHandshake {
 
     /// What every static key read must pass, then whether the peer is admitted. Trust is only ever
     /// asked about a key the handshake just proved.
-    fn admit(&self, xx: &Xx, trust: Option<&Admit>, waiting: bool) -> Result<KeyMaterial, Error> {
+    fn admit(
+        &self,
+        xx: &Xx,
+        trust: Option<&Admission>,
+        waiting: bool,
+    ) -> Result<KeyMaterial, Error> {
         let key = xx.remote_static().ok_or(Error::State)?;
         let trust = trust.ok_or(Error::Unsupported)?;
         let material = key_material(key);
@@ -367,6 +380,15 @@ impl NoiseHandshake {
                 xx.read_message(input)?;
                 refuse_own_key(&xx, identity)?;
                 let material = self.admit(&xx, config.responders.as_ref(), false)?;
+                if !identity.holds_private_key() {
+                    let ephemeral = xx.begin_third()?;
+                    self.state = State::AwaitStaticDh {
+                        xx,
+                        material,
+                        ephemeral,
+                    };
+                    return Ok(());
+                }
                 let third = xx.write_message(&[])?;
                 let session = Session::new(xx.split()?, true, self.limits());
                 self.outbound.push_back(third);
@@ -384,8 +406,50 @@ impl NoiseHandshake {
                 self.result = Some((material, session));
                 self.state = State::Done;
             }
-            State::Start(_) | State::Done | State::Failed => return Err(Error::State),
+            State::Start(_) | State::AwaitStaticDh { .. } | State::Done | State::Failed => {
+                return Err(Error::State);
+            }
         }
+        Ok(())
+    }
+
+    /// While the handshake waits for the `se` Diffie-Hellman of a key held elsewhere (an
+    /// [`Identity::from_public_key`] dialing): the responder's ephemeral public key, which the
+    /// private static key computes X25519 with. Pass the 32-byte result to
+    /// [`provide_static_dh`](NoiseHandshake::provide_static_dh). `None` at any other time.
+    #[must_use]
+    pub fn pending_static_dh(&self) -> Option<[u8; DHLEN]> {
+        match &self.state {
+            State::AwaitStaticDh { ephemeral, .. } => Some(*ephemeral),
+            _ => None,
+        }
+    }
+
+    /// Goes on from [`pending_static_dh`](NoiseHandshake::pending_static_dh) with the X25519 result
+    /// the static key gave: the third message is then ready to [`transmit`](Handshake::transmit)
+    /// and the handshake is complete once it is sent.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::State`] when nothing is pending. [`Error::Malformed`] for a result that is not 32
+    /// bytes or is all zeros (the peer's key was of small order, so the result proves nothing),
+    /// after which the handshake is over.
+    pub fn provide_static_dh(&mut self, shared: &[u8]) -> Result<(), Error> {
+        if !matches!(self.state, State::AwaitStaticDh { .. }) {
+            return Err(Error::State);
+        }
+        let State::AwaitStaticDh {
+            mut xx, material, ..
+        } = core::mem::replace(&mut self.state, State::Failed)
+        else {
+            return Err(Error::State);
+        };
+        let shared = Zeroizing::new(<[u8; DHLEN]>::try_from(shared).map_err(|_| Error::Malformed)?);
+        let third = xx.finish_third(&shared)?;
+        let session = Session::new(xx.split()?, true, self.limits());
+        self.outbound.push_back(third);
+        self.result = Some((material, session));
+        self.state = State::Done;
         Ok(())
     }
 

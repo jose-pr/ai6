@@ -1,0 +1,61 @@
+{
+  "groups": [
+    {
+      "buckets": [
+        {
+          "bucketId": "gemini-weekly",
+          "displayName": "Weekly Limit Remaining",
+          "description": "You have used some of your weekly limit, it will fully refresh in 4 days, 19 hours.",
+          "window": "weekly",
+          "remainingFraction": 0.42,
+          "resetTime": "2030-01-08T12:00:00Z"
+        },
+        {
+          "bucketId": "gemini-5h",
+          "displayName": "Five Hour Limit Remaining",
+          "window": "5h",
+          "remainingFraction": 1,
+          "resetTime": "2030-01-01T17:00:00Z"
+        }
+      ],
+      "displayName": "Gemini Models",
+      "description": "Models within this group: Gemini 4 Neon, Gemini 4 Hydrogen, Gemini 3.8 Flash"
+    },
+    {
+      "buckets": [
+        {
+          "bucketId": "3p-weekly",
+          "displayName": "Weekly Limit Remaining",
+          "description": "You have hit your weekly limit, it refreshes in 5 days, 1 hour.",
+          "window": "weekly",
+          "resetTime": "2030-01-09T00:00:00Z"
+        },
+        {
+          "bucketId": "3p-5h",
+          "displayName": "Five Hour Limit Remaining",
+          "description": "You have hit your weekly limit, the 5-hour limit does not currently apply.",
+          "window": "5h",
+          "disabled": true,
+          "remainingFraction": 1,
+          "resetTime": "2030-01-01T17:00:00Z"
+        }
+      ],
+      "displayName": "Claude and GPT models",
+      "description": "Models within this group: Claude Opus 5.5, Claude Sonnet 5.5, GPT-OSS 120B"
+    },
+    {
+      "buckets": [
+        {
+          "bucketId": "gemini-argon-wtu-weekly",
+          "displayName": "Gemini 4 Argon Weekly Limit",
+          "window": "weekly",
+          "remainingFraction": 0.07,
+          "resetTime": "2030-01-08T06:00:00Z"
+        }
+      ],
+      "displayName": "Gemini 4 Argon",
+      "description": "Argon quota is separate from the larger Gemini quota."
+    }
+  ],
+  "description": "Within each group, models share a weekly limit and a 5-hour limit."
+}

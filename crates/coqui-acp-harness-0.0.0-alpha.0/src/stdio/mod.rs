@@ -1,14 +1,19 @@
-//! A provider of the `acp_harness` kind for coding agents that speak ACP on their own standard input and output: Grok
-//! (`grok agent stdio`), Antigravity (`agy acp`) and OpenCode (`opencode acp`).
+//! A provider of the `acp_harness` kind for coding agents that speak ACP on their own standard input and output.
+//!
+//! The harness is data, a [`StdioDef`]: how its program starts and the kinds of account it takes and how they are applied
+//! ([`HarnessDef`]), its sign-in, and how it keeps its sessions. [`StdioProvider`] runs any one, and
+//! [`stdio_vendor!`](crate::stdio_vendor) makes the two providers a host registers for it, a harness and its accounts,
+//! each under an id of its own. A harness with a table of its own is a `HarnessDef` and one such call; the ones this crate
+//! carries are in [`vendors`](crate::vendors).
 //!
 //! The host's messages go to the program a line each and its lines come back as messages; what the
 //! provider adds is the account: it removes every credential variable of the harness from what it starts, sets the chosen
 //! kind's and places the login file in the account's directory. Signing in, renewing and watching the login are the
-//! account provider's ([`StdioAccounts`]). The kinds of each harness are tables in [`accounts`].
+//! account provider's ([`StdioAccounts`]).
 //!
-//! A session's id must be a UUID, as the kind says: the provider does not translate the program's ids, except
-//! OpenCode's: its own are `ses_` and letters and digits, passed on as they are, and a session the provider wrote into
-//! its store is `ses_` and the UUID's hex digits, which the relay turns into the UUID for the host and back.
+//! A session's id must be a UUID, as the kind says: the provider does not translate the program's ids, except for a
+//! harness whose [`SessionIds`] say how it spells the id of a session written into its store, which
+//! the relay turns into the UUID for the host and back.
 
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
@@ -17,12 +22,11 @@ use alloc::vec::Vec;
 use core::time::Duration;
 
 use coqui_acp_api::guatiao::library::{Object, ProviderError};
-use coqui_acp_api::guatiao::{FromValue, Provider, Schema, Secret, Status, ToValue};
+use coqui_acp_api::guatiao::{FromValue, Schema, Secret, Status, ToValue};
 use coqui_acp_api::{
     AccountCatalog, AccountGrant, AccountRef, AcpHarness, Channel, ChannelSink, Environment,
-    ExportPage, HarnessInfo, HistoryLoss, ImportReport, ModelListing, ModelsRequest, Narrowing,
-    ProcessSpawner, Requirement, SeedPoint, SessionExport, SessionImport, SpawnSpec, StartRequest,
-    UsageQuery, UsageReport, WorkingRoots,
+    ExportPage, HarnessInfo, HistoryLoss, ImportReport, Narrowing, ProcessSpawner, Requirement,
+    SeedPoint, SessionExport, SessionImport, SpawnSpec, StartRequest, WorkingRoots,
 };
 use coqui_acp_history::replay::{Replay, ReplaySettings};
 use coqui_acp_history::{Document, HistoryError, RedactionSettings, Redactor};
@@ -31,50 +35,22 @@ use crate::account::{Accounts, Files, Hold, Watched};
 
 mod account_provider;
 pub mod accounts;
-mod login;
-mod opencode;
-pub mod opencode_history;
-pub mod opencode_import;
+mod def;
+pub mod login;
+mod macros;
 mod relay;
 mod replay;
 
 pub use account_provider::{StdioAccountSettings, StdioAccounts};
-pub use opencode::{OpenCodeAccountSettings, OpenCodeAccounts, OpenCodeProvider, OpenCodeSettings};
+pub use def::{ExportSession, ImportSession, LoginCheck, SessionIds, SignIn, StdioDef, no_logins};
 
 use accounts::{Applied, HarnessDef};
-
-/// The harness a provider fronts. Written as `grok`, `antigravity` and `opencode`.
-#[derive(ToValue, FromValue, Schema, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[map(crate = ::coqui_acp_api::guatiao, rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum StdioHarness {
-    /// Grok, started as `grok agent stdio`.
-    Grok,
-    /// Antigravity, started as `agy acp`.
-    Antigravity,
-    /// OpenCode, started as `opencode acp`.
-    #[map(rename = "opencode")]
-    OpenCode,
-}
-
-impl StdioHarness {
-    fn def(self) -> &'static HarnessDef {
-        match self {
-            Self::Grok => &accounts::grok::DEF,
-            Self::Antigravity => &accounts::antigravity::DEF,
-            Self::OpenCode => &accounts::opencode::DEF,
-        }
-    }
-}
 
 /// How the stdio provider is configured.
 #[derive(ToValue, FromValue, Schema, Debug, Clone)]
 #[map(crate = ::coqui_acp_api::guatiao)]
 pub struct StdioSettings {
-    /// The harness: `grok`, `antigravity` or `opencode`.
-    pub harness: StdioHarness,
-    /// The program: a path, or a name looked up on the `PATH` where the spawner runs it. The harness's own (`grok`, `agy`,
-    /// `opencode`) when absent.
+    /// The program: a path, or a name looked up on the `PATH` where the spawner runs it. The harness's own when absent.
     pub executable: Option<String>,
     /// The highest ACP version the harness is said to answer: 1 or 2.
     #[map(default = 1)]
@@ -114,11 +90,10 @@ pub struct StdioSettings {
 }
 
 impl StdioSettings {
-    /// The settings for `harness`, every other value its default.
+    /// The defaults.
     #[must_use]
-    pub const fn new(harness: StdioHarness) -> Self {
+    pub const fn new() -> Self {
         Self {
-            harness,
             executable: None,
             max_acp_version: 1,
             max_requests: 32,
@@ -133,30 +108,23 @@ impl StdioSettings {
     }
 }
 
-/// Grok, Antigravity or OpenCode, as a provider of `acp_harness` under the id `stdio`.
+impl Default for StdioSettings {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// One harness, described by its [`StdioDef`], as a provider of `acp_harness`.
 ///
-/// Register it beside a host's own providers with `Registry::register_local`, or build it into a library with
-/// `guatiao::providers!`.
-#[derive(Provider, Debug)]
-#[provider(
-    AcpHarness,
-    id = "stdio",
-    config = StdioSettings,
-    new = StdioProvider::unconfigured,
-    crate = ::coqui_acp_api::guatiao
-)]
+/// It is no registered provider itself: a vendor's provider holds one (see [`stdio_vendor!`](crate::stdio_vendor)).
+#[derive(Debug)]
 pub struct StdioProvider {
+    def: &'static StdioDef,
     settings: StdioSettings,
     /// What the provider knows of the files it placed for its accounts.
     accounts: Arc<Accounts>,
     /// Sessions imported by replay, shared by every connection.
     replays: Arc<replay::Replays>,
-}
-
-impl From<StdioSettings> for StdioProvider {
-    fn from(settings: StdioSettings) -> Self {
-        Self::new(settings)
-    }
 }
 
 fn unsupported(why: &str) -> ProviderError {
@@ -182,34 +150,41 @@ fn refuse_requirements(requirements: &[Requirement]) -> Result<Option<String>, P
 }
 
 impl StdioProvider {
-    /// A provider configured as `settings` say.
+    /// A provider of the harness `def` configured as `settings` say.
     #[must_use]
-    pub fn new(settings: StdioSettings) -> Self {
+    pub fn new(def: &'static StdioDef, settings: StdioSettings) -> Self {
         let replays = replay::Replays::limited(
             Duration::from_secs(settings.replay_waiting_secs),
             usize::try_from(settings.replay_remembered_ids).unwrap_or(usize::MAX),
             usize::try_from(settings.replay_waiting_max).unwrap_or(usize::MAX),
         );
         Self {
+            def,
             settings,
             accounts: Arc::new(Accounts::new()),
             replays: Arc::new(replays),
         }
     }
 
-    fn unconfigured() -> Self {
-        Self::new(StdioSettings::new(StdioHarness::Grok))
+    /// The harness this provider runs.
+    #[must_use]
+    pub const fn def(&self) -> &'static StdioDef {
+        self.def
     }
 
-    fn def(&self) -> &'static HarnessDef {
-        self.settings.harness.def()
+    /// The settings it was configured with.
+    #[must_use]
+    pub const fn settings(&self) -> &StdioSettings {
+        &self.settings
     }
 
-    fn program_name(&self) -> String {
+    /// The program it starts: the settings' `executable`, else the harness's own.
+    #[must_use]
+    pub fn program_name(&self) -> String {
         self.settings
             .executable
             .clone()
-            .unwrap_or_else(|| self.def().program.to_string())
+            .unwrap_or_else(|| self.def.accounts.program.to_string())
     }
 
     /// Reads `grant` against the harness, and answers what applies it; `None` for `harness-login`.
@@ -252,14 +227,6 @@ impl StdioProvider {
             .map(Some)
     }
 
-    /// Reads the account of a call that runs nothing, so that a grant the kind refuses is refused as it is everywhere.
-    fn glance(&self, account: Option<&AccountGrant>) -> Result<(), ProviderError> {
-        if let Some(grant) = account {
-            Self::applied(grant, self.def())?;
-        }
-        Ok(())
-    }
-
     /// What the program is started with: the host's environment, less the harness's credential variables when an account
     /// is applied, plus the account's.
     fn spec(
@@ -268,7 +235,7 @@ impl StdioProvider {
         applied: Option<&Applied>,
         args: &[&str],
     ) -> SpawnSpec {
-        let def = self.def();
+        let def = self.def.accounts;
         let mut spec = SpawnSpec::new(self.program_name());
         for arg in args {
             spec = spec.arg(*arg);
@@ -298,11 +265,11 @@ impl AcpHarness for StdioProvider {
             vec![1]
         };
         // The program answers `initialize` itself: nothing is claimed of what it takes beyond the protocol.
-        Ok(HarnessInfo::new(self.def().name, versions))
+        Ok(HarnessInfo::new(self.def.accounts.name, versions))
     }
 
     fn accounts(&self) -> Result<AccountCatalog, ProviderError> {
-        Ok(accounts::catalog(self.def()))
+        Ok(accounts::catalog(self.def.accounts))
     }
 
     fn start(
@@ -315,7 +282,7 @@ impl AcpHarness for StdioProvider {
             return Err(unsupported(&why));
         }
         let applied = match &request.account {
-            Some(grant) => Self::applied(grant, self.def())?,
+            Some(grant) => Self::applied(grant, self.def.accounts)?,
             None => None,
         };
         let spawner = Arc::new(spawner);
@@ -326,7 +293,7 @@ impl AcpHarness for StdioProvider {
         let spec = self.spec(
             request.environment.expose(),
             applied.as_ref(),
-            self.def().args,
+            self.def.accounts.args,
         );
         relay::open(relay::Params {
             spawner,
@@ -338,7 +305,7 @@ impl AcpHarness for StdioProvider {
             roots: WorkingRoots::new(request.working_roots.clone()),
             hold,
             replays: Arc::clone(&self.replays),
-            native_ids: self.settings.harness == StdioHarness::OpenCode,
+            session_ids: self.def.session_ids,
         })
     }
 
@@ -352,7 +319,7 @@ impl AcpHarness for StdioProvider {
             return Ok(Some(why));
         }
         if let Some(account) = account {
-            accounts::known(self.def(), &account)?;
+            accounts::known(self.def.accounts, &account)?;
         }
         Ok(None)
     }
@@ -367,12 +334,11 @@ impl AcpHarness for StdioProvider {
         spawner: Object<dyn ProcessSpawner>,
     ) -> Result<ImportReport, ProviderError> {
         if let Some(grant) = &session.account {
-            accounts::known(self.def(), &grant.reference())?;
+            accounts::known(self.def.accounts, &grant.reference())?;
         }
-        if self.settings.harness == StdioHarness::OpenCode {
-            // OpenCode takes a history into its own store; replaying it as context is what is left when it cannot.
-            let document = self.opencode_history(&session)?;
-            match self.import_opencode(&session, &document, spawner) {
+        if let Some(import) = self.def.import {
+            // A harness that takes a history into its own store; replaying it as context is what is left when it cannot.
+            match import(self, &session, spawner) {
                 Ok(report) => return Ok(report),
                 Err(error)
                     if self.settings.replay_max_bytes > 0
@@ -385,14 +351,7 @@ impl AcpHarness for StdioProvider {
             }
         }
         if self.settings.replay_max_bytes == 0 {
-            return Err(unsupported(match self.settings.harness {
-                StdioHarness::Antigravity => {
-                    "Antigravity keeps a conversation as a database of its own protobuf steps, which it does not document, so it cannot be seeded with a history it did not make; set replay_max_bytes to replay the history as context in the first prompt"
-                }
-                StdioHarness::Grok | StdioHarness::OpenCode => {
-                    "this provider does not seed a session in an agent it does not keep the sessions of; set replay_max_bytes to replay the history as context in the first prompt"
-                }
-            }));
+            return Err(unsupported(self.def.import_unsupported));
         }
         let bad = |why: &str| ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, why);
         if uuid::Uuid::parse_str(&session.session_id).is_err() {
@@ -467,46 +426,15 @@ impl AcpHarness for StdioProvider {
 
     fn export_session(
         &self,
-        export: SessionExport,
+        export_request: SessionExport,
         spawner: Object<dyn ProcessSpawner>,
     ) -> Result<ExportPage, ProviderError> {
-        if let Some(grant) = &export.account {
-            accounts::known(self.def(), &grant.reference())?;
+        if let Some(grant) = &export_request.account {
+            accounts::known(self.def.accounts, &grant.reference())?;
         }
-        if self.settings.harness == StdioHarness::OpenCode {
-            return self.export_opencode(&export, spawner);
+        match self.def.export {
+            Some(export) => export(self, &export_request, spawner),
+            None => Err(unsupported(self.def.export_unsupported)),
         }
-        Err(unsupported(match self.settings.harness {
-            StdioHarness::Antigravity => {
-                "Antigravity keeps each conversation as a SQLite database of protobuf steps in its own program's folder (conversations/<id>.db), a schema it does not publish and changes between releases, so this provider does not read one; a host that records the sessions it serves exports them from its own record"
-            }
-            StdioHarness::Grok | StdioHarness::OpenCode => {
-                "this provider does not read a session out of an agent it does not keep the sessions of"
-            }
-        }))
-    }
-
-    fn models(
-        &self,
-        request: ModelsRequest,
-        spawner: Object<dyn ProcessSpawner>,
-    ) -> Result<ModelListing, ProviderError> {
-        drop(spawner);
-        self.glance(request.account.as_ref())?;
-        Ok(ModelListing::unknown(
-            "the agent lists its models in its session, not before it",
-        ))
-    }
-
-    fn usage(
-        &self,
-        query: UsageQuery,
-        spawner: Object<dyn ProcessSpawner>,
-    ) -> Result<UsageReport, ProviderError> {
-        drop(spawner);
-        self.glance(query.account.as_ref())?;
-        Ok(UsageReport::unsupported(
-            "this harness reports no usage outside a turn",
-        ))
     }
 }

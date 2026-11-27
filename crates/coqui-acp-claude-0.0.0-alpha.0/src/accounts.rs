@@ -12,17 +12,21 @@ use alloc::vec::Vec;
 use crate::ClaudeLaunch;
 use std::ffi::OsString;
 
-use coqui_acp_api::guatiao::library::ProviderError;
-use coqui_acp_api::guatiao::{Secret, Status, Wipe};
+use coqui_acp_api::guatiao::library::{Object, ProviderError};
+use coqui_acp_api::guatiao::{FromValue, Schema, Secret, Status, ToValue, Value as GValue, Wipe};
 use coqui_acp_api::standard::{ANTHROPIC_API, CLAUDE_CODE};
 use coqui_acp_api::{
-    ASK, AUTH, Accepted, AcceptedSlot, AccountCatalog, AccountGrant, AccountKindInfo, AccountOffer,
-    AccountRef, Credentials, EndpointSlot, HARNESS_LOGIN, LoginMethodInfo, MODEL_API, OPEN_URL,
-    PASTE_CODE, PROXY,
+    AUTH, Accepted, AcceptedSlot, AccountCatalog, AccountGrant, AccountKeeper, AccountKindInfo,
+    AccountOffer, AccountRef, Credentials, EndpointSlot, HARNESS_LOGIN, LoginMethodInfo, MODEL_API,
+    OPEN_URL, PASTE_CODE, PROXY,
 };
-use coqui_acp_harness::account::{Accounts, Files, Hold, Watched, rfc3339_ms, same_name};
-use coqui_acp_harness::provider::{credential, resolve, schema, to_json};
-use serde_json::{Value, json};
+use coqui_acp_harness::account::{
+    Accounts, Files, Hold, Watched, bad, harness_catalog, kind_info, method_info,
+    provide_standards, provider_offer, rfc3339_ms, same_name, sole_credential, takes_no_settings,
+    typed_method,
+};
+use coqui_acp_harness::provider::{Address, own_kind, resolve, schema_of, settings_as};
+use serde_json::Value;
 
 /// The kind of a login made by `claude auth login --claudeai`, kept in `.credentials.json`.
 pub const LOGIN: &str = "claude-login";
@@ -52,7 +56,7 @@ pub const CREDENTIALS_FILE: &str = ".credentials.json";
 pub const FILE_KEY: &str = "credentials_file";
 
 /// The model endpoint Claude Code uses without `ANTHROPIC_BASE_URL`.
-const API: &str = "https://api.anthropic.com";
+const API: &str = crate::account_usage::DEFAULT_ENDPOINT;
 
 /// Every variable Claude Code reads for a credential, for where its requests go, or for which provider it signs in to,
 /// so a start on an account removes them all and sets only the kind's.
@@ -112,39 +116,98 @@ pub(crate) const SECRETS: &[&str] = &[
     "AWS_SESSION_TOKEN",
 ];
 
-fn settings(secret: &str) -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            secret: credential(),
-            "base_url": {"type": "string", "format": "uri"},
-        },
-        "required": [secret],
-        "additionalProperties": false,
-    })
+/// What every account of Claude Code's takes beside its credential: where requests go.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Default, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao, deny_unknown_fields)]
+pub struct Endpoint {
+    /// The address Claude Code sends model requests to, `ANTHROPIC_BASE_URL`; Anthropic's own when absent.
+    #[map(as_text)]
+    #[schema(format = "uri")]
+    pub base_url: Option<Address>,
 }
 
-fn login_settings() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            FILE_KEY: credential(),
-            "base_url": {"type": "string", "format": "uri"},
-        },
-        "required": [FILE_KEY],
-        "additionalProperties": false,
-    })
+/// A login kept in `.credentials.json`: its text, and where requests go.
+#[derive(Schema)]
+#[expect(
+    dead_code,
+    reason = "a form is only its schema: the derive reads the fields"
+)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+struct LoginSettings {
+    /// The text of `.credentials.json`.
+    #[schema(sensitive)]
+    credentials_file: String,
+    #[map(flatten)]
+    endpoint: Endpoint,
 }
 
-fn kind(id: &str, title: &str, description: &str, settings: &Value) -> AccountKindInfo {
-    let mut kind = AccountKindInfo::new(id, title);
-    kind.description = description.to_string();
-    kind.settings = schema(settings);
-    kind
+/// A long-lived token for `CLAUDE_CODE_OAUTH_TOKEN`, and where requests go.
+#[derive(Schema)]
+#[expect(
+    dead_code,
+    reason = "a form is only its schema: the derive reads the fields"
+)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+struct TokenSettings {
+    /// The token `claude setup-token` makes.
+    #[schema(sensitive)]
+    token: String,
+    #[map(flatten)]
+    endpoint: Endpoint,
+}
+
+/// A key for `ANTHROPIC_API_KEY`, and where requests go.
+#[derive(Schema)]
+#[expect(
+    dead_code,
+    reason = "a form is only its schema: the derive reads the fields"
+)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+struct ApiKeySettings {
+    /// The Anthropic API key.
+    #[schema(sensitive)]
+    api_key: String,
+    #[map(flatten)]
+    endpoint: Endpoint,
+}
+
+/// A bearer token for `ANTHROPIC_AUTH_TOKEN`, and the gateway it goes to.
+#[derive(Schema)]
+#[expect(
+    dead_code,
+    reason = "a form is only its schema: the derive reads the fields"
+)]
+#[map(crate = ::coqui_acp_api::guatiao)]
+struct AuthTokenSettings {
+    /// The gateway's bearer token.
+    #[schema(sensitive)]
+    auth_token: String,
+    #[map(flatten)]
+    endpoint: Endpoint,
+}
+
+/// What a web sign-in may be told.
+#[derive(ToValue, FromValue, Schema, Debug, Clone, Default, PartialEq, Eq)]
+#[map(crate = ::coqui_acp_api::guatiao, deny_unknown_fields)]
+pub struct WebInputs {
+    /// An address to fill in on the sign-in page.
+    #[schema(format = "email", max_length = 254)]
+    pub email: Option<String>,
+}
+
+/// The address an account's `settings` name for requests: absent, or a plain `http(s)` address.
+///
+/// # Errors
+///
+/// `BAD_VALUE` when the settings name anything but `base_url` or hold it as anything but an address.
+pub(crate) fn endpoint(settings: &GValue) -> Result<Option<String>, ProviderError> {
+    Ok(settings_as::<Endpoint>(settings)?
+        .base_url
+        .map(|address| address.as_str().to_string()))
 }
 
 fn login(id: &str, title: &str, description: &str, auth: &str) -> AccountKindInfo {
-    let mut kind = kind(id, title, description, &login_settings());
+    let mut kind = kind_info(id, title, description, schema_of::<LoginSettings>());
     kind.endpoints = vec![
         EndpointSlot::new(MODEL_API)
             .key("base_url")
@@ -163,10 +226,10 @@ fn environment(
     id: &str,
     title: &str,
     description: &str,
-    secret: &str,
+    settings: GValue,
     purpose: &str,
 ) -> AccountKindInfo {
-    let mut kind = kind(id, title, description, &settings(secret));
+    let mut kind = kind_info(id, title, description, settings);
     let mut slot = EndpointSlot::new(purpose).key("base_url");
     if purpose == MODEL_API {
         slot = slot.default_url(API);
@@ -180,28 +243,11 @@ fn environment(
     kind
 }
 
-fn method(id: &str, title: &str, description: &str, produces: &str) -> LoginMethodInfo {
-    let mut method = LoginMethodInfo::new(id, title, produces);
-    method.description = description.to_string();
-    method
-}
-
 fn web_method(id: &str, title: &str, description: &str, produces: &str) -> LoginMethodInfo {
-    let mut method = method(id, title, description, produces);
-    method.inputs = schema(&json!({
-        "type": "object",
-        "properties": {"email": {"type": "string", "description": "An address to fill in on the sign-in page."}},
-        "additionalProperties": false,
-    }));
+    let mut method = method_info(id, title, description, produces);
+    method.inputs = schema_of::<WebInputs>();
     method.steps = vec![OPEN_URL.to_string(), PASTE_CODE.to_string()];
     // The page shows the code to copy back, so the person's browser need not be on the machine where Claude Code runs.
-    method.remote = true;
-    method
-}
-
-fn typed_method(id: &str, title: &str, description: &str, produces: &str) -> LoginMethodInfo {
-    let mut method = method(id, title, description, produces);
-    method.steps = vec![ASK.to_string()];
     method.remote = true;
     method
 }
@@ -227,21 +273,21 @@ fn full() -> AccountCatalog {
             OAUTH_TOKEN,
             "Claude long-lived token",
             "A token made by `claude setup-token`, read from `CLAUDE_CODE_OAUTH_TOKEN`.",
-            "token",
+            schema_of::<TokenSettings>(),
             MODEL_API,
         ),
         environment(
             API_KEY,
             "Anthropic API key",
             "A key read from `ANTHROPIC_API_KEY`; it takes the place of a subscription login.",
-            "api_key",
+            schema_of::<ApiKeySettings>(),
             MODEL_API,
         ),
         environment(
             AUTH_TOKEN,
             "Anthropic gateway token",
             "A token read from `ANTHROPIC_AUTH_TOKEN` and sent as a bearer token, to the gateway `base_url` names.",
-            "auth_token",
+            schema_of::<AuthTokenSettings>(),
             PROXY,
         ),
     ]);
@@ -271,13 +317,10 @@ fn full() -> AccountCatalog {
             AUTH_TOKEN,
         ),
     ];
-    for kind in &mut catalog.kinds {
-        let standard = match kind.id.as_str() {
-            API_KEY | AUTH_TOKEN => ANTHROPIC_API,
-            _ => CLAUDE_CODE,
-        };
-        kind.provides = vec![standard.to_string()];
-    }
+    provide_standards(&mut catalog, |id| match id {
+        API_KEY | AUTH_TOKEN => ANTHROPIC_API,
+        _ => CLAUDE_CODE,
+    });
     catalog.accepts = accepts();
     catalog.credential_variables = VARIABLES
         .iter()
@@ -291,41 +334,24 @@ fn full() -> AccountCatalog {
 /// renews nothing: the account provider ([`offer`]) does.
 #[must_use]
 pub fn catalog() -> AccountCatalog {
-    let mut catalog = full();
-    catalog.logins.clear();
-    for kind in &mut catalog.kinds {
-        kind.renews = false;
-    }
-    catalog
+    harness_catalog(full())
 }
 
 /// What the account provider offers: the kinds of account it makes (the harness's own login, which it cannot sign in
-/// to, left out), the ways to sign in, and the kinds whose plan usage it reads.
+/// to, left out of the kinds and offered as the automatic `local` account), the ways to sign in, and the kinds whose
+/// plan usage it reads (the `local` account's too, from the login Claude Code keeps in its configuration directory).
 #[must_use]
 pub fn offer() -> AccountOffer {
-    let full = full();
-    let mut offer = AccountOffer::new();
-    offer.kinds = full
-        .kinds
-        .into_iter()
-        .filter(|kind| kind.id != HARNESS_LOGIN)
-        .collect();
-    offer.logins = full.logins;
-    offer.usage = [LOGIN, OAUTH_TOKEN, API_KEY, AUTH_TOKEN]
-        .iter()
-        .map(|id| (*id).to_string())
-        .collect();
-    offer
+    provider_offer(
+        full(),
+        &[LOGIN, OAUTH_TOKEN, API_KEY, AUTH_TOKEN, HARNESS_LOGIN],
+    )
 }
 
 /// Why an account is not one the account provider keeps: `BAD_VALUE` for an id that is not one or a kind it does not
 /// list. Nothing of another standard is taken: a harness applies those, the provider makes its own.
 pub(crate) fn own(grant: &AccountGrant) -> Result<(), ProviderError> {
-    grant.check_id()?;
-    if offer().kind(&grant.kind).is_none() {
-        return Err(bad("this provider keeps no account of that kind"));
-    }
-    Ok(())
+    own_kind(grant, &offer())
 }
 
 /// The standards Claude Code starts on, and how each is applied: a Claude Code login (a configuration directory
@@ -349,38 +375,6 @@ fn accepts() -> Vec<Accepted> {
                 AcceptedSlot::new("auth_token", AUTH_TOKEN).variable("ANTHROPIC_AUTH_TOKEN")
             )),
     ]
-}
-
-fn bad(why: &str) -> ProviderError {
-    ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, why)
-}
-
-/// The text setting `key` of `settings`: absent, or a plain `http(s)` address.
-pub(crate) fn base_url(
-    settings: &coqui_acp_api::guatiao::Value,
-) -> Result<Option<String>, ProviderError> {
-    let settings = guatiao_json(settings);
-    let Some(object) = settings.as_object() else {
-        return Err(bad("the account's settings are not an object"));
-    };
-    if object.keys().any(|key| key != "base_url") {
-        return Err(bad("the account's settings name something the kind lacks"));
-    }
-    match object.get("base_url") {
-        None | Some(Value::Null) => Ok(None),
-        Some(Value::String(url))
-            if (url.starts_with("https://") || url.starts_with("http://"))
-                && url.len() > 8
-                && !url.chars().any(|c| c.is_control() || c.is_whitespace()) =>
-        {
-            Ok(Some(url.clone()))
-        }
-        Some(_) => Err(bad("base_url is not an address")),
-    }
-}
-
-fn guatiao_json(value: &coqui_acp_api::guatiao::Value) -> Value {
-    to_json(value)
 }
 
 /// What applying a grant does.
@@ -443,15 +437,9 @@ pub(crate) fn check(account: &AccountRef) -> Result<(), ProviderError> {
         return Ok(());
     };
     if info.id == HARNESS_LOGIN {
-        if !guatiao_json(&account.settings)
-            .as_object()
-            .is_some_and(serde_json::Map::is_empty)
-        {
-            return Err(bad("that kind takes no settings"));
-        }
-        return Ok(());
+        return takes_no_settings(&account.settings);
     }
-    base_url(&account.settings)?;
+    endpoint(&account.settings)?;
     if info.state_dir && account.state_dir.as_deref().is_none_or(str::is_empty) {
         return Err(bad("that kind needs a directory to run in"));
     }
@@ -475,7 +463,7 @@ pub fn variables(grant: &AccountGrant) -> Vec<(String, String)> {
         set.push(("CLAUDE_CONFIG_DIR".to_string(), dir.to_string()));
     }
     if grant.kind != HARNESS_LOGIN
-        && let Ok(Some(url)) = base_url(&grant.settings)
+        && let Ok(Some(url)) = endpoint(&grant.settings)
     {
         set.push(("ANTHROPIC_BASE_URL".to_string(), url));
     }
@@ -508,7 +496,7 @@ fn plan_as(grant: &AccountGrant, in_place: bool) -> Result<Plan, ProviderError> 
             watched: Vec::new(),
         });
     }
-    let url = base_url(&grant.settings)?;
+    let url = endpoint(&grant.settings)?;
     let mut set = Vec::new();
     let mut applied = Plan {
         set: Vec::new(),
@@ -517,10 +505,8 @@ fn plan_as(grant: &AccountGrant, in_place: bool) -> Result<Plan, ProviderError> 
         watched: Vec::new(),
     };
     if matches!(grant.kind.as_str(), LOGIN | CONSOLE) {
-        let only = credentials.keys().all(|key| key == FILE_KEY);
-        let text = credentials.get(FILE_KEY).filter(|text| !text.is_empty());
         let there = in_place && credentials.is_empty();
-        if !there && (!only || text.is_none()) {
+        if !there && sole_credential(credentials, FILE_KEY).is_none() {
             return Err(bad("the login's credentials are missing or not the kind's"));
         }
         let dir = grant.state_dir.clone().unwrap_or_default();
@@ -540,9 +526,7 @@ fn plan_as(grant: &AccountGrant, in_place: bool) -> Result<Plan, ProviderError> 
             _ => "auth_token",
         };
         let variable = secret_key_variable(&grant.kind);
-        let only = credentials.keys().all(|k| k == key);
-        let value = credentials.get(key).filter(|value| !value.is_empty());
-        let Some(value) = value.filter(|_| only) else {
+        let Some(value) = sole_credential(credentials, key) else {
             return Err(bad("the credential is missing or not the kind's"));
         };
         set.push((variable.to_string(), value.to_string()));
@@ -602,13 +586,28 @@ impl Applied {
         accounts: &Arc<Accounts>,
         files: &Files,
     ) -> Result<Option<Hold>, ProviderError> {
+        self.hold_keeping(accounts, files, None)
+    }
+
+    /// [`hold`](Self::hold) with a keeper that hears of the login's renewal or loss for as long as the hold lasts, and
+    /// is destroyed when the hold ends (at once, for an account that keeps no file).
+    ///
+    /// # Errors
+    ///
+    /// As [`hold`](Self::hold).
+    pub fn hold_keeping(
+        self,
+        accounts: &Arc<Accounts>,
+        files: &Files,
+        keeper: Option<Object<dyn AccountKeeper>>,
+    ) -> Result<Option<Hold>, ProviderError> {
         if self.watched.is_empty() {
             return Ok(None);
         }
         accounts
             .hold(
                 files.clone(),
-                None,
+                keeper,
                 &self.id,
                 self.dir.as_deref().unwrap_or_default(),
                 self.revision,
@@ -729,7 +728,7 @@ impl Drop for Plan {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use coqui_acp_api::guatiao::Value as GValue;
+    use serde_json::json;
 
     const CANARY: &str = "sk-canary-61c0";
 
@@ -842,5 +841,69 @@ mod tests {
         assert!(plan(&foreign(&[CLAUDE_CODE], "api_key")).is_err());
         let loose = foreign(&[ANTHROPIC_API], "api_key").settings(settings(&json!({"proxy": "x"})));
         assert!(plan(&loose).is_err());
+    }
+}
+
+#[cfg(test)]
+mod schema_tests {
+    use super::*;
+    use coqui_acp_harness::provider::{schema, to_json};
+    use serde_json::json;
+
+    /// The properties of a kind's settings schema that are credentials, and the others.
+    fn split(kind: &str) -> (Vec<String>, Vec<String>) {
+        let catalog = catalog();
+        let info = catalog.kind(kind).expect(kind);
+        let schema = to_json(&info.settings);
+        assert_eq!(schema["additionalProperties"], false, "{kind}");
+        let (mut secret, mut plain) = (Vec::new(), Vec::new());
+        for (name, property) in schema["properties"].as_object().expect(kind) {
+            let sensitive = property["x-sensitive"] == true;
+            assert_eq!(sensitive, property["writeOnly"] == true, "{kind} {name}");
+            if sensitive { &mut secret } else { &mut plain }.push(name.clone());
+        }
+        (secret, plain)
+    }
+
+    #[test]
+    fn each_kinds_schema_is_derived_with_its_one_credential_sensitive_and_the_address_plain() {
+        for (kind, key) in [
+            (LOGIN, FILE_KEY),
+            (CONSOLE, FILE_KEY),
+            (OAUTH_TOKEN, "token"),
+            (API_KEY, "api_key"),
+            (AUTH_TOKEN, "auth_token"),
+        ] {
+            let (secret, plain) = split(kind);
+            assert_eq!(secret, [key], "{kind}");
+            assert_eq!(plain, ["base_url"], "{kind}");
+        }
+    }
+
+    #[test]
+    fn the_credential_never_reads_as_a_setting_and_the_address_is_checked() {
+        let read = |value: serde_json::Value| endpoint(&schema(&value));
+        assert_eq!(read(json!({})).unwrap(), None);
+        assert_eq!(
+            read(json!({"base_url": "https://g.example"}))
+                .unwrap()
+                .as_deref(),
+            Some("https://g.example")
+        );
+        assert!(read(json!({"api_key": "sk-canary"})).is_err());
+        assert!(read(json!({"base_url": "g.example"})).is_err());
+    }
+
+    #[test]
+    fn a_sign_in_email_that_would_be_read_as_a_flag_is_refused() {
+        let inputs = |email: &str| schema(&json!({"email": email}));
+        assert_eq!(
+            crate::signin::email_of(&inputs("a@b.example"))
+                .unwrap()
+                .as_deref(),
+            Some("a@b.example")
+        );
+        assert!(crate::signin::email_of(&inputs("--help")).is_err());
+        assert!(crate::signin::email_of(&inputs("a b")).is_err());
     }
 }

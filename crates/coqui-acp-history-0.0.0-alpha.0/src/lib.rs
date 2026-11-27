@@ -52,6 +52,7 @@ mod settings;
 mod shape;
 mod strict;
 pub mod tools;
+mod turn_record;
 mod writer;
 
 pub use agent_client_protocol::schema::v1::StopReason;
@@ -73,4 +74,5 @@ pub use settings::{
     NonDefault, PARSER_DEPTH, ReaderSettings, RedactionSettings, WriterSettings, non_defaults,
 };
 pub use tools::Tool;
+pub use turn_record::{ACP_TAGS, Cost, TagError, Tokens, TurnOutcome, TurnRecord};
 pub use writer::{Writer, WriterBuilder};

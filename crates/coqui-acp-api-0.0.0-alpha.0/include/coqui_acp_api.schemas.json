@@ -635,37 +635,47 @@
       "cache_choices": {
         "type": "array",
         "items": {
-          "type": "object",
-          "properties": {
-            "lifetime": {
-              "type": "string",
-              "enum": [
-                "default",
-                "off",
-                "short",
-                "long"
-              ],
-              "x-enum-labels": {
-                "default": "The harness's own default.",
-                "off": "No prompt cache at all, for a harness that can switch it off (see [`HarnessInfo::cache_choices`]); one that cannot ignores it like any other hint.",
-                "short": "The short cache (about five minutes): for one-shot and background runs and loops that wake more often than that.",
-                "long": "The long cache (about an hour): for an interactive session while someone is active."
-              },
-              "description": "The lifetime."
-            },
-            "label": {
-              "type": "string",
-              "description": "Its name for people, in the harness's own terms."
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "lifetime",
-            "label"
-          ]
+          "type": "string",
+          "enum": [
+            "default",
+            "off",
+            "short",
+            "long"
+          ],
+          "x-enum-labels": {
+            "default": "The harness's own default.",
+            "off": "No prompt cache at all, for a harness that can switch it off (see [`HarnessInfo::cache_choices`]); one that cannot ignores it like any other hint.",
+            "short": "The short cache (about five minutes): for one-shot and background runs and loops that wake more often than that.",
+            "long": "The long cache (about an hour): for an interactive session while someone is active."
+          }
         },
-        "description": "The lifetimes beyond [`CacheLifetime::Default`] the harness honours, each with the name it gives it; empty when the hint is ignored. A host offers these and no others.",
+        "description": "The lifetimes beyond [`CacheLifetime::Default`] the harness honours; empty when the hint is ignored. A host offers these and no others, under names of its own.",
         "default": []
+      },
+      "accounts": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string",
+            "description": "The id the account provider is registered under, such as `claude_accounts`."
+          },
+          "shared_settings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The keys of the harness's own settings that name what the account provider runs too (the program, a Node and a script): a host configures the account provider with these keys' values from the harness's configuration, under the same keys, unless the person set them apart.",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "provider"
+        ],
+        "description": "The account provider that signs people in to this harness's accounts, when there is one. A host reads it where it would otherwise have to guess the provider's id from the harness's."
       }
     },
     "additionalProperties": false,
@@ -732,7 +742,7 @@
     "properties": {
       "known": {
         "type": "boolean",
-        "description": "Whether the harness listed them; when not, `models` is empty."
+        "description": "Whether the provider listed them; when not, `models` is empty."
       },
       "unknown_because": {
         "type": [
@@ -750,7 +760,7 @@
               "failed"
             ],
             "x-enum-labels": {
-              "not_installed": "The program the harness runs is not on the machine.",
+              "not_installed": "The program the account's models are asked of is not on the machine.",
               "failed": "The program is there and could not be asked; the text says what."
             }
           },
@@ -758,11 +768,11 @@
             "type": "null"
           }
         ],
-        "description": "What kind of reason that is, when the harness could not be started; absent when it simply lists its models only once a session has started."
+        "description": "What kind of reason that is, when the program could not be started; absent when it simply lists its models only once a session has started."
       },
       "signed_out": {
         "type": "boolean",
-        "description": "Whether the harness, though it listed its models, says nobody is signed in, so a session on the machine's own login would be refused its first prompt. Says nothing of an account a host applies.",
+        "description": "Whether the program, though it listed its models, says nobody is signed in, so a session on the machine's own login would be refused its first prompt. Says nothing of an account a host applies.",
         "default": false
       },
       "models": {
@@ -772,42 +782,42 @@
           "properties": {
             "id": {
               "type": "string",
-              "description": "The harness's own identifier or alias for it."
+              "description": "The program's own identifier or alias for it."
             },
             "name": {
               "type": [
                 "string",
                 "null"
               ],
-              "description": "What the harness shows a person, when it has a name apart from the identifier; a provider that knows the version puts it here too."
+              "description": "What the program shows a person, when it has a name apart from the identifier; a provider that knows the version puts it here too."
             },
             "description": {
               "type": [
                 "string",
                 "null"
               ],
-              "description": "The harness's one-line description, when it gives one."
+              "description": "The program's one-line description, when it gives one."
             },
             "resolved": {
               "type": [
                 "string",
                 "null"
               ],
-              "description": "The model an alias or default resolves to, as the harness names it."
+              "description": "The model an alias or default resolves to, as the program names it."
             },
             "version": {
               "type": [
                 "string",
                 "null"
               ],
-              "description": "The model and its version as a person reads them (`Opus 5.5`), when the harness can say it."
+              "description": "The model and its version as a person reads them (`Opus 5.5`), when the program can say it."
             },
             "efforts": {
               "type": "array",
               "items": {
                 "type": "string"
               },
-              "description": "The efforts this model takes, in the harness's order; empty when the harness lists none for it.",
+              "description": "The efforts this model takes, in the program's order; empty when it lists none for it.",
               "default": []
             },
             "default_effort": {
@@ -815,12 +825,131 @@
                 "string",
                 "null"
               ],
-              "description": "The effort the model uses when none is named, when the harness says."
+              "description": "The effort the model uses when none is named, when the program says."
             },
             "is_default": {
               "type": "boolean",
-              "description": "Whether the harness uses this model when none is named.",
+              "description": "Whether the program uses this model when none is named.",
               "default": false
+            },
+            "capabilities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "What the model can do, as ids: operations (`chat`, `embed`, `rerank`, `speech_to_text`, `text_to_speech`) and traits (`audio_input`, `audio_output`, `image_input`, `tool_use`, `reasoning`, `structured_output`). The set is open: a consumer filters by the ids it asks for and passes any other through. Empty means NOT REPORTED, never \"none\".",
+              "default": []
+            },
+            "capabilities_from": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "listed",
+                    "declared"
+                  ],
+                  "x-enum-labels": {
+                    "listed": "The service's own listing says them.",
+                    "declared": "The provider's library declares them, for a service whose listing carries none."
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Where `capabilities` come from, when the provider says."
+            },
+            "limits": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "context_tokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 18446744073709551615,
+                  "description": "The tokens a request and its answer may hold together."
+                },
+                "max_output_tokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 18446744073709551615,
+                  "description": "The tokens of one answer at most."
+                },
+                "max_input_tokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 18446744073709551615,
+                  "description": "The tokens of one text at most, for a model that embeds."
+                },
+                "dimensions": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 18446744073709551615,
+                  "description": "The length of the vectors of a model that embeds."
+                },
+                "dimensions_adjustable": {
+                  "type": "boolean",
+                  "description": "Whether the vector length can be asked for a smaller one.",
+                  "default": false
+                },
+                "audio_in_formats": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "The audio formats the model takes in, as file extensions.",
+                  "default": []
+                },
+                "audio_out_formats": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "The audio formats the model gives, as file extensions.",
+                  "default": []
+                },
+                "max_audio_bytes": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 18446744073709551615,
+                  "description": "The bytes of one recording at most."
+                },
+                "voices": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "The voices of a model that speaks.",
+                  "default": []
+                },
+                "styles": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "The styles of a model that speaks and takes a style.",
+                  "default": []
+                }
+              },
+              "additionalProperties": false,
+              "description": "The model's limits, when the provider knows any."
             }
           },
           "additionalProperties": false,
@@ -828,7 +957,7 @@
             "id"
           ]
         },
-        "description": "The models, in the harness's order.",
+        "description": "The models, in the program's order.",
         "default": []
       }
     },
@@ -845,8 +974,21 @@
       "failed"
     ],
     "x-enum-labels": {
-      "not_installed": "The program the harness runs is not on the machine.",
+      "not_installed": "The program the account's models are asked of is not on the machine.",
       "failed": "The program is there and could not be asked; the text says what."
+    },
+    "properties": {}
+  },
+  "CapabilitiesSource": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "string",
+    "enum": [
+      "listed",
+      "declared"
+    ],
+    "x-enum-labels": {
+      "listed": "The service's own listing says them.",
+      "declared": "The provider's library declares them, for a service whose listing carries none."
     },
     "properties": {}
   },
@@ -856,42 +998,42 @@
     "properties": {
       "id": {
         "type": "string",
-        "description": "The harness's own identifier or alias for it."
+        "description": "The program's own identifier or alias for it."
       },
       "name": {
         "type": [
           "string",
           "null"
         ],
-        "description": "What the harness shows a person, when it has a name apart from the identifier; a provider that knows the version puts it here too."
+        "description": "What the program shows a person, when it has a name apart from the identifier; a provider that knows the version puts it here too."
       },
       "description": {
         "type": [
           "string",
           "null"
         ],
-        "description": "The harness's one-line description, when it gives one."
+        "description": "The program's one-line description, when it gives one."
       },
       "resolved": {
         "type": [
           "string",
           "null"
         ],
-        "description": "The model an alias or default resolves to, as the harness names it."
+        "description": "The model an alias or default resolves to, as the program names it."
       },
       "version": {
         "type": [
           "string",
           "null"
         ],
-        "description": "The model and its version as a person reads them (`Opus 5.5`), when the harness can say it."
+        "description": "The model and its version as a person reads them (`Opus 5.5`), when the program can say it."
       },
       "efforts": {
         "type": "array",
         "items": {
           "type": "string"
         },
-        "description": "The efforts this model takes, in the harness's order; empty when the harness lists none for it.",
+        "description": "The efforts this model takes, in the program's order; empty when it lists none for it.",
         "default": []
       },
       "default_effort": {
@@ -899,12 +1041,131 @@
           "string",
           "null"
         ],
-        "description": "The effort the model uses when none is named, when the harness says."
+        "description": "The effort the model uses when none is named, when the program says."
       },
       "is_default": {
         "type": "boolean",
-        "description": "Whether the harness uses this model when none is named.",
+        "description": "Whether the program uses this model when none is named.",
         "default": false
+      },
+      "capabilities": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "What the model can do, as ids: operations (`chat`, `embed`, `rerank`, `speech_to_text`, `text_to_speech`) and traits (`audio_input`, `audio_output`, `image_input`, `tool_use`, `reasoning`, `structured_output`). The set is open: a consumer filters by the ids it asks for and passes any other through. Empty means NOT REPORTED, never \"none\".",
+        "default": []
+      },
+      "capabilities_from": {
+        "anyOf": [
+          {
+            "type": "string",
+            "enum": [
+              "listed",
+              "declared"
+            ],
+            "x-enum-labels": {
+              "listed": "The service's own listing says them.",
+              "declared": "The provider's library declares them, for a service whose listing carries none."
+            }
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Where `capabilities` come from, when the provider says."
+      },
+      "limits": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "context_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "The tokens a request and its answer may hold together."
+          },
+          "max_output_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "The tokens of one answer at most."
+          },
+          "max_input_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "The tokens of one text at most, for a model that embeds."
+          },
+          "dimensions": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "The length of the vectors of a model that embeds."
+          },
+          "dimensions_adjustable": {
+            "type": "boolean",
+            "description": "Whether the vector length can be asked for a smaller one.",
+            "default": false
+          },
+          "audio_in_formats": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The audio formats the model takes in, as file extensions.",
+            "default": []
+          },
+          "audio_out_formats": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The audio formats the model gives, as file extensions.",
+            "default": []
+          },
+          "max_audio_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "The bytes of one recording at most."
+          },
+          "voices": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The voices of a model that speaks.",
+            "default": []
+          },
+          "styles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The styles of a model that speaks and takes a style.",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "description": "The model's limits, when the provider knows any."
       }
     },
     "additionalProperties": false,
@@ -1242,81 +1503,6 @@
       "text"
     ]
   },
-  "UsageQuery": {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "type": "object",
-    "properties": {
-      "environment": {
-        "type": "object",
-        "additionalProperties": {
-          "type": "string"
-        },
-        "writeOnly": true,
-        "x-sensitive": true,
-        "description": "Variables for what the harness runs to ask, over its configuration's. A provider shows none of them in an answer, a refusal, an error or a log.",
-        "default": {}
-      },
-      "account": {
-        "type": [
-          "object",
-          "null"
-        ],
-        "properties": {
-          "id": {
-            "type": "string",
-            "description": "The host's id for the account: text the host assigns, 1 to [`ACCOUNT_ID_MAX`] bytes with no control character, opaque to the provider, echoed (into usage reports) and never interpreted."
-          },
-          "kind": {
-            "type": "string",
-            "description": "One of the catalog's kinds."
-          },
-          "settings": {
-            "description": "The kind's non-secret settings, an object its catalog schema accepts.",
-            "default": {}
-          },
-          "credentials": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            },
-            "writeOnly": true,
-            "x-sensitive": true,
-            "description": "The kind's secrets, by the key path of the sensitive setting each fills.",
-            "default": {}
-          },
-          "state_dir": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "A private directory where the harness runs, made by the host, for a kind whose catalog entry says `state_dir`. The provider writes the account there and starts the harness on it."
-          },
-          "revision": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 18446744073709551615,
-            "description": "Counts the host's stored copies of the credentials, so a renewal says which it renews.",
-            "default": 0
-          },
-          "provides": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "The standards the account provides, from the catalog of whoever made it. A harness reads it only for a `kind` its own catalog does not list: it then applies the account as the first of its `accepts` that this names.",
-            "default": []
-          }
-        },
-        "additionalProperties": false,
-        "required": [
-          "id",
-          "kind"
-        ],
-        "description": "The account to report for; its `id` is echoed into the report and never interpreted. The provider applies the rest, as `start` does."
-      }
-    },
-    "additionalProperties": false
-  },
   "UsageReport": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
@@ -1383,6 +1569,13 @@
               ],
               "description": "What a person sees, when the harness has a name apart from the id."
             },
+            "group": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The group of allowances it belongs to, when the harness sorts them: `Gemini Models`, with a weekly and a five-hour window in it. Buckets of one group share it and follow each other in a report."
+            },
             "models": {
               "type": "object",
               "x-variant-tag": "kind",
@@ -1445,6 +1638,14 @@
                 }
               ],
               "description": "The models it covers."
+            },
+            "model_names": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The names a person reads for the models it covers, when the harness gives them; empty when it names none, or the bucket is not model-specific. `models` is what a host matches, this is what an app shows.",
+              "default": []
             },
             "unit": {
               "type": "string",
@@ -1627,12 +1828,14 @@
                 "ok",
                 "warning",
                 "exhausted",
+                "disabled",
                 "unknown"
               ],
               "x-enum-labels": {
                 "ok": "Room is left.",
                 "warning": "The harness said it is nearly used. Only when the harness said so: a host applies its own thresholds to the bucket's fraction.",
                 "exhausted": "Nothing is left until the bucket refills.",
+                "disabled": "The bucket does not apply now: another allowance stands in its place (a five-hour window while the weekly one is used up). Its figures are not a limit on anything.",
                 "unknown": "The harness did not say."
               },
               "description": "What the harness says of it."
@@ -1745,6 +1948,52 @@
             "minimum": -9223372036854775808,
             "maximum": 9223372036854775807,
             "description": "When it was seen, in Unix seconds."
+          },
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "usage_quota",
+              "rate_limit",
+              "context_window",
+              "credit",
+              "unclassified"
+            ],
+            "x-enum-labels": {
+              "usage_quota": "An allowance of the plan or key used up: a five-hour or weekly window, a monthly quota.",
+              "rate_limit": "Too many requests or tokens in a short time; it lifts in seconds or minutes.",
+              "context_window": "The conversation does not fit the model's context window. Another account does not help; a model with a larger window might.",
+              "credit": "A prepaid balance or a spending cap used up.",
+              "unclassified": "A limit that fits none of these."
+            },
+            "description": "What kind of limit it is, when the harness can tell."
+          },
+          "continuable": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the work can go on with another account, model or agent: `false` for a limit that follows the work (a context window), `true` for one that follows the member. Absent: not said, and a host takes it as `true` unless the kind is `context_window`."
+          },
+          "text_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The `messageId`s of the turn's agent message and thought updates that are the limit's own words, so a host drops them from the history it carries on.",
+            "default": []
+          },
+          "text_indexes": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "description": "For a harness whose updates carry no ids (ACP version 1): the zero-based positions of those updates among the turn's agent message and thought chunks, in the order they were sent.",
+            "default": []
           }
         },
         "additionalProperties": false,
@@ -1895,6 +2144,13 @@
         ],
         "description": "What a person sees, when the harness has a name apart from the id."
       },
+      "group": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The group of allowances it belongs to, when the harness sorts them: `Gemini Models`, with a weekly and a five-hour window in it. Buckets of one group share it and follow each other in a report."
+      },
       "models": {
         "type": "object",
         "x-variant-tag": "kind",
@@ -1957,6 +2213,14 @@
           }
         ],
         "description": "The models it covers."
+      },
+      "model_names": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The names a person reads for the models it covers, when the harness gives them; empty when it names none, or the bucket is not model-specific. `models` is what a host matches, this is what an app shows.",
+        "default": []
       },
       "unit": {
         "type": "string",
@@ -2139,12 +2403,14 @@
           "ok",
           "warning",
           "exhausted",
+          "disabled",
           "unknown"
         ],
         "x-enum-labels": {
           "ok": "Room is left.",
           "warning": "The harness said it is nearly used. Only when the harness said so: a host applies its own thresholds to the bucket's fraction.",
           "exhausted": "Nothing is left until the bucket refills.",
+          "disabled": "The bucket does not apply now: another allowance stands in its place (a five-hour window while the weekly one is used up). Its figures are not a limit on anything.",
           "unknown": "The harness did not say."
         },
         "description": "What the harness says of it."
@@ -2252,6 +2518,52 @@
         "minimum": -9223372036854775808,
         "maximum": 9223372036854775807,
         "description": "When it was seen, in Unix seconds."
+      },
+      "kind": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "examples": [
+          "usage_quota",
+          "rate_limit",
+          "context_window",
+          "credit",
+          "unclassified"
+        ],
+        "x-enum-labels": {
+          "usage_quota": "An allowance of the plan or key used up: a five-hour or weekly window, a monthly quota.",
+          "rate_limit": "Too many requests or tokens in a short time; it lifts in seconds or minutes.",
+          "context_window": "The conversation does not fit the model's context window. Another account does not help; a model with a larger window might.",
+          "credit": "A prepaid balance or a spending cap used up.",
+          "unclassified": "A limit that fits none of these."
+        },
+        "description": "What kind of limit it is, when the harness can tell."
+      },
+      "continuable": {
+        "type": [
+          "boolean",
+          "null"
+        ],
+        "description": "Whether the work can go on with another account, model or agent: `false` for a limit that follows the work (a context window), `true` for one that follows the member. Absent: not said, and a host takes it as `true` unless the kind is `context_window`."
+      },
+      "text_ids": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The `messageId`s of the turn's agent message and thought updates that are the limit's own words, so a host drops them from the history it carries on.",
+        "default": []
+      },
+      "text_indexes": {
+        "type": "array",
+        "items": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "description": "For a harness whose updates carry no ids (ACP version 1): the zero-based positions of those updates among the turn's agent message and thought chunks, in the order they were sent.",
+        "default": []
       }
     },
     "additionalProperties": false,
@@ -2481,35 +2793,26 @@
     },
     "properties": {}
   },
-  "CacheChoice": {
+  "AccountsLink": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "properties": {
-      "lifetime": {
+      "provider": {
         "type": "string",
-        "enum": [
-          "default",
-          "off",
-          "short",
-          "long"
-        ],
-        "x-enum-labels": {
-          "default": "The harness's own default.",
-          "off": "No prompt cache at all, for a harness that can switch it off (see [`HarnessInfo::cache_choices`]); one that cannot ignores it like any other hint.",
-          "short": "The short cache (about five minutes): for one-shot and background runs and loops that wake more often than that.",
-          "long": "The long cache (about an hour): for an interactive session while someone is active."
-        },
-        "description": "The lifetime."
+        "description": "The id the account provider is registered under, such as `claude_accounts`."
       },
-      "label": {
-        "type": "string",
-        "description": "Its name for people, in the harness's own terms."
+      "shared_settings": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The keys of the harness's own settings that name what the account provider runs too (the program, a Node and a script): a host configures the account provider with these keys' values from the harness's configuration, under the same keys, unless the person set them apart.",
+        "default": []
       }
     },
     "additionalProperties": false,
     "required": [
-      "lifetime",
-      "label"
+      "provider"
     ]
   },
   "FileInfo": {
@@ -3387,81 +3690,6 @@
     },
     "additionalProperties": false
   },
-  "ModelsRequest": {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "type": "object",
-    "properties": {
-      "environment": {
-        "type": "object",
-        "additionalProperties": {
-          "type": "string"
-        },
-        "writeOnly": true,
-        "x-sensitive": true,
-        "description": "Variables for what the harness runs to ask, over its configuration's. A provider shows none of them in an answer, a refusal, an error or a log.",
-        "default": {}
-      },
-      "account": {
-        "type": [
-          "object",
-          "null"
-        ],
-        "properties": {
-          "id": {
-            "type": "string",
-            "description": "The host's id for the account: text the host assigns, 1 to [`ACCOUNT_ID_MAX`] bytes with no control character, opaque to the provider, echoed (into usage reports) and never interpreted."
-          },
-          "kind": {
-            "type": "string",
-            "description": "One of the catalog's kinds."
-          },
-          "settings": {
-            "description": "The kind's non-secret settings, an object its catalog schema accepts.",
-            "default": {}
-          },
-          "credentials": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            },
-            "writeOnly": true,
-            "x-sensitive": true,
-            "description": "The kind's secrets, by the key path of the sensitive setting each fills.",
-            "default": {}
-          },
-          "state_dir": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "A private directory where the harness runs, made by the host, for a kind whose catalog entry says `state_dir`. The provider writes the account there and starts the harness on it."
-          },
-          "revision": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 18446744073709551615,
-            "description": "Counts the host's stored copies of the credentials, so a renewal says which it renews.",
-            "default": 0
-          },
-          "provides": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "The standards the account provides, from the catalog of whoever made it. A harness reads it only for a `kind` its own catalog does not list: it then applies the account as the first of its `accepts` that this names.",
-            "default": []
-          }
-        },
-        "additionalProperties": false,
-        "required": [
-          "id",
-          "kind"
-        ],
-        "description": "The account to ask for; absent asks as the configuration stands."
-      }
-    },
-    "additionalProperties": false
-  },
   "AccountRenewal": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
@@ -3780,8 +4008,13 @@
         "items": {
           "type": "string"
         },
-        "description": "The kinds whose accounts report their plan's usage through [`AccountProvider::usage`]: ids listed in `kinds`. A kind not here answers `usage` with \"not offered\".",
+        "description": "The kinds whose accounts report their plan's usage through [`AccountProvider::usage`]: ids listed in `kinds`, or [`HARNESS_LOGIN`](crate::HARNESS_LOGIN) when `local` is true. A kind not here answers `usage` with \"not offered\".",
         "default": []
+      },
+      "local": {
+        "type": "boolean",
+        "description": "Whether the provider's program has a login of its own that the provider offers as an automatic account named [`LOCAL_ACCOUNT`](crate::LOCAL_ACCOUNT), of kind [`HARNESS_LOGIN`](crate::HARNESS_LOGIN): the program run on the configuration as it stands, nothing applied. A host lists it without anyone adding it, and `usage` and `models` answer for a grant of that kind. A provider that offers none refuses such a grant as a kind it does not list.",
+        "default": false
       }
     },
     "additionalProperties": false
@@ -3926,6 +4159,81 @@
       "account"
     ]
   },
+  "AccountModelsQuery": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "account": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The host's id for the account: text the host assigns, 1 to [`ACCOUNT_ID_MAX`] bytes with no control character, opaque to the provider, echoed (into usage reports) and never interpreted."
+          },
+          "kind": {
+            "type": "string",
+            "description": "One of the catalog's kinds."
+          },
+          "settings": {
+            "description": "The kind's non-secret settings, an object its catalog schema accepts.",
+            "default": {}
+          },
+          "credentials": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "writeOnly": true,
+            "x-sensitive": true,
+            "description": "The kind's secrets, by the key path of the sensitive setting each fills.",
+            "default": {}
+          },
+          "state_dir": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A private directory where the harness runs, made by the host, for a kind whose catalog entry says `state_dir`. The provider writes the account there and starts the harness on it."
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "Counts the host's stored copies of the credentials, so a renewal says which it renews.",
+            "default": 0
+          },
+          "provides": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The standards the account provides, from the catalog of whoever made it. A harness reads it only for a `kind` its own catalog does not list: it then applies the account as the first of its `accepts` that this names.",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind"
+        ],
+        "description": "The account to list for: one of the kinds the provider lists, or, when it offers the automatic `local` account, [`HARNESS_LOGIN`](crate::HARNESS_LOGIN), for which nothing is applied."
+      },
+      "environment": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "writeOnly": true,
+        "x-sensitive": true,
+        "description": "Variables for what the provider runs to ask, over its configuration's. A provider shows none of them in an answer, a refusal, an error or a log.",
+        "default": {}
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "account"
+    ]
+  },
   "AccountUsage": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
@@ -3992,6 +4300,13 @@
               ],
               "description": "What a person sees, when the harness has a name apart from the id."
             },
+            "group": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The group of allowances it belongs to, when the harness sorts them: `Gemini Models`, with a weekly and a five-hour window in it. Buckets of one group share it and follow each other in a report."
+            },
             "models": {
               "type": "object",
               "x-variant-tag": "kind",
@@ -4054,6 +4369,14 @@
                 }
               ],
               "description": "The models it covers."
+            },
+            "model_names": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The names a person reads for the models it covers, when the harness gives them; empty when it names none, or the bucket is not model-specific. `models` is what a host matches, this is what an app shows.",
+              "default": []
             },
             "unit": {
               "type": "string",
@@ -4236,12 +4559,14 @@
                 "ok",
                 "warning",
                 "exhausted",
+                "disabled",
                 "unknown"
               ],
               "x-enum-labels": {
                 "ok": "Room is left.",
                 "warning": "The harness said it is nearly used. Only when the harness said so: a host applies its own thresholds to the bucket's fraction.",
                 "exhausted": "Nothing is left until the bucket refills.",
+                "disabled": "The bucket does not apply now: another allowance stands in its place (a five-hour window while the weekly one is used up). Its figures are not a limit on anything.",
                 "unknown": "The harness did not say."
               },
               "description": "What the harness says of it."
@@ -4293,5 +4618,164 @@
       "revision",
       "observed_at"
     ]
+  },
+  "SignedInQuery": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "environment": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "writeOnly": true,
+        "x-sensitive": true,
+        "description": "The variables the program's own login is read with, over this process's: the ones that place its home (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `HOME`) and the ones that sign it in by themselves (an API key). A provider shows none of them in an answer, a refusal, an error or a log.",
+        "default": {}
+      }
+    },
+    "additionalProperties": false
+  },
+  "SignedInState": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "string",
+    "enum": [
+      "signed_in",
+      "signed_out",
+      "unknown"
+    ],
+    "x-enum-labels": {
+      "signed_in": "A login is there: a file with something in it, a keyring entry, or a variable that signs the program in. It may be expired or revoked; only the service knows.",
+      "signed_out": "Every place the program keeps a login was looked at, and none holds one.",
+      "unknown": "The provider could not tell: a place it cannot look at here, or one that did not answer in time. The reason says which."
+    },
+    "properties": {}
+  },
+  "SignedInCheck": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "state": {
+        "type": "string",
+        "enum": [
+          "signed_in",
+          "signed_out",
+          "unknown"
+        ],
+        "x-enum-labels": {
+          "signed_in": "A login is there: a file with something in it, a keyring entry, or a variable that signs the program in. It may be expired or revoked; only the service knows.",
+          "signed_out": "Every place the program keeps a login was looked at, and none holds one.",
+          "unknown": "The provider could not tell: a place it cannot look at here, or one that did not answer in time. The reason says which."
+        },
+        "description": "What was found."
+      },
+      "reason": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Why, for people: what was looked at when `state` is not `signed_in`. Holds no value of the environment and nothing read from a login."
+      },
+      "variable": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The name, never the value, of the environment variable that signs the program in, when that is what was found."
+      }
+    },
+    "additionalProperties": false,
+    "required": [
+      "state"
+    ]
+  },
+  "ModelLimits": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "context_tokens": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "The tokens a request and its answer may hold together."
+      },
+      "max_output_tokens": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "The tokens of one answer at most."
+      },
+      "max_input_tokens": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "The tokens of one text at most, for a model that embeds."
+      },
+      "dimensions": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "The length of the vectors of a model that embeds."
+      },
+      "dimensions_adjustable": {
+        "type": "boolean",
+        "description": "Whether the vector length can be asked for a smaller one.",
+        "default": false
+      },
+      "audio_in_formats": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The audio formats the model takes in, as file extensions.",
+        "default": []
+      },
+      "audio_out_formats": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The audio formats the model gives, as file extensions.",
+        "default": []
+      },
+      "max_audio_bytes": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 0,
+        "maximum": 18446744073709551615,
+        "description": "The bytes of one recording at most."
+      },
+      "voices": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The voices of a model that speaks.",
+        "default": []
+      },
+      "styles": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "The styles of a model that speaks and takes a style.",
+        "default": []
+      }
+    },
+    "additionalProperties": false
   }
 }

@@ -27,7 +27,7 @@ fn hex(text: &str) -> Vec<u8> {
 
 pub(crate) fn kind(error: &Error) -> &'static str {
     match error {
-        Error::Schema(_) => "schema",
+        Error::Schema(_) | Error::SchemaAt { .. } => "schema",
         Error::Malformed(_) => "malformed",
         Error::Unsupported(_) => "unsupported",
         Error::Key(_) => "key",
@@ -366,7 +366,12 @@ fn forms() -> Value {
             {"name": "a secret marked x-sensitive", "schema": flat(json!({"type": "string", "x-sensitive": true})), "secret": ["f"], "plain": []},
             {"name": "a plain choice", "schema": flat(json!({"type": "string", "oneOf": [{"const": "a", "title": "A"}]})), "secret": [], "plain": ["f"]},
             {"name": "writeOnly false is plain", "schema": flat(json!({"type": "string", "writeOnly": false})), "secret": [], "plain": ["f"]},
-            {"name": "a secret with the password format", "schema": flat(json!({"type": "string", "writeOnly": true, "format": "password", "maxLength": 40})), "secret": ["f"], "plain": []}
+            {"name": "a secret with the password format", "schema": flat(json!({"type": "string", "writeOnly": true, "format": "password", "maxLength": 40})), "secret": ["f"], "plain": []},
+            {"name": "a form as guatiao derives it", "schema": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"type\":\"object\",\"properties\":{\"api_key\":{\"type\":\"string\",\"x-sensitive\":true,\"writeOnly\":true}},\"additionalProperties\":false,\"required\":[\"api_key\"]}", "secret": ["api_key"], "plain": []},
+            {"name": "nullable types are the type", "schema": json!({"type": "object", "properties": {"a": {"type": ["string", "null"]}, "b": {"type": ["null", "string"], "writeOnly": true}}}).to_string(), "secret": ["b"], "plain": ["a"]},
+            {"name": "an enum with labels", "schema": flat(json!({"type": "string", "enum": ["a", "b"], "x-enum-labels": {"a": "A"}})), "secret": [], "plain": ["f"]},
+            {"name": "the bounds a u64 derives", "schema": "{\"properties\":{\"f\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":18446744073709551615}}}", "secret": [], "plain": ["f"]},
+            {"name": "the bounds an i64 derives", "schema": "{\"properties\":{\"f\":{\"type\":\"integer\",\"writeOnly\":true,\"minimum\":-9223372036854775808,\"maximum\":9223372036854775807}}}", "secret": ["f"], "plain": []}
         ],
         "refused": [
             {"name": "not JSON", "schema": "{", "kind": "schema"},
@@ -412,7 +417,14 @@ fn forms() -> Value {
             {"name": "a secret with x-placeholder", "schema": flat(json!({"type": "string", "writeOnly": true, "x-placeholder": "hunter2"})), "kind": "schema"},
             {"name": "a secret with readOnly", "schema": flat(json!({"type": "string", "writeOnly": true, "readOnly": true})), "kind": "schema"},
             {"name": "a secret with a format other than password", "schema": flat(json!({"type": "string", "writeOnly": true, "format": "email"})), "kind": "schema"},
-            {"name": "an integer bound past 2^53", "schema": flat(json!({"type": "integer", "maximum": 9007199254740992i64})), "kind": "schema"}
+            {"name": "an integer bound that is a fraction", "schema": flat(json!({"type": "integer", "maximum": 1.5})), "kind": "schema"},
+            {"name": "an integer bound that is text", "schema": flat(json!({"type": "integer", "minimum": "1"})), "kind": "schema"},
+            {"name": "a root additionalProperties that is a schema", "schema": "{\"additionalProperties\":{\"type\":\"string\"},\"properties\":{\"f\":{\"type\":\"string\"}}}", "kind": "schema"},
+            {"name": "a root $schema of another dialect", "schema": "{\"$schema\":\"http://json-schema.org/draft-04/schema#\",\"properties\":{\"f\":{\"type\":\"string\"}}}", "kind": "schema"},
+            {"name": "an unknown root keyword", "schema": "{\"unevaluatedProperties\":false,\"properties\":{\"f\":{\"type\":\"string\"}}}", "kind": "schema"},
+            {"name": "an enum on a number", "schema": flat(json!({"type": "integer", "enum": [1, 2]})), "kind": "schema"},
+            {"name": "a union of types", "schema": flat(json!({"type": ["string", "integer"]})), "kind": "schema"},
+            {"name": "a nullable secret with a default", "schema": flat(json!({"type": ["string", "null"], "writeOnly": true, "default": "x"})), "kind": "schema"}
         ]
     })
 }

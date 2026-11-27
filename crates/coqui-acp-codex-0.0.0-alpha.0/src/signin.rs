@@ -18,12 +18,13 @@ use coqui_acp_api::{
     RenewReport, RenewRequest,
 };
 use coqui_acp_harness::ThroughSpawner;
+use coqui_acp_harness::account::takes_no_settings;
 use coqui_acp_harness::account::{Accounts, Files, SecretText};
 use coqui_acp_harness::cli::{Next, address_in, plain, run};
 use coqui_acp_harness::login::{Job, asked, reason, supervise};
 use coqui_acp_harness::process::Launch;
-use coqui_acp_harness::provider::{credential, schema, to_json, track};
-use serde_json::{Value, json};
+use coqui_acp_harness::provider::track;
+use serde_json::Value;
 
 use crate::accounts::{
     self, ACCESS_TOKEN, ACCESS_TOKEN_METHOD, API_KEY, API_KEY_METHOD, AUTH_FILE, CHATGPT,
@@ -171,15 +172,8 @@ pub(crate) fn login(
             "a sign-in needs a directory to run in",
         ));
     }
-    if !to_json(&request.inputs)
-        .as_object()
-        .is_some_and(serde_json::Map::is_empty)
-    {
-        return Err(failure(
-            Status::GUATIAO_ERR_BAD_VALUE,
-            "the sign-in asks no inputs",
-        ));
-    }
+    takes_no_settings(&request.inputs)
+        .map_err(|_| failure(Status::GUATIAO_ERR_BAD_VALUE, "the sign-in asks no inputs"))?;
     if !Files::new(Arc::clone(&spawner)).available() {
         return Err(failure(
             Status::GUATIAO_ERR_UNSUPPORTED,
@@ -267,14 +261,7 @@ fn ask_address(
 ) -> Receiver<Result<SecretText, ProviderError>> {
     let (sender, receiver) = std::sync::mpsc::channel();
     let prompter = Arc::clone(prompter);
-    let form = LoginForm::new(
-        title,
-        schema(&json!({
-            "type": "object",
-            "properties": {"address": credential()},
-            "required": ["address"],
-        })),
-    );
+    let form = LoginForm::secret(title, "address");
     let spawned = std::thread::Builder::new()
         .name("coqui-acp-login-address".into())
         .spawn(move || {
@@ -415,7 +402,7 @@ fn web(
     }
     job.check()?;
     let exit = cli.wait(Duration::from_secs(5));
-    if !exit.is_some_and(|exit| exit.code == Some(0)) {
+    if exit.is_none_or(|exit| exit.code != Some(0)) {
         return Err(internal(&format!(
             "Codex's sign-in did not finish: {}",
             reason(&printed, &[])
@@ -444,17 +431,13 @@ fn typed(
     key: &'static str,
     flag: &'static str,
 ) -> Result<LoginOutcome, ProviderError> {
-    let form = LoginForm::new(
+    let form = LoginForm::secret(
         if key == "api_key" {
             "Enter the OpenAI API key"
         } else {
             "Enter the access token"
         },
-        schema(&json!({
-            "type": "object",
-            "properties": {key: credential()},
-            "required": [key],
-        })),
+        key,
     );
     let answer = asked(prompter.ask(form))?;
     job.check()?;
@@ -505,6 +488,7 @@ pub(crate) fn renew(
     executable: &OsString,
     request: &RenewRequest,
     spawner: Object<dyn ProcessSpawner>,
+    session: CodexSettings,
 ) -> Result<RenewReport, ProviderError> {
     accounts::own(&request.account)?;
     let grant = &request.account;
@@ -554,7 +538,7 @@ pub(crate) fn renew(
     }
     launch.config_overrides.clone_from(&applied.config);
     let spawn = ThroughSpawner::shared(spawner);
-    let answer = CodexSession::refresh_account(&launch, &spawn, CodexSettings::new())
+    let answer = CodexSession::refresh_account(&launch, &spawn, session)
         .map_err(|_| internal("Codex could not be asked to refresh the login"))?;
     lost(&hold)?;
     if answer.get("account").is_none_or(Value::is_null) {

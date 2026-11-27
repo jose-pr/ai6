@@ -11,14 +11,14 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
-use coqui_agentic_peer::Error;
-use coqui_agentic_peer::auth::{self, Method, Proof, Sealed, Trust};
+use cabuya::Error;
+use cabuya::auth::{self, Method, Proof, Sealed, Trust};
+use cabuya::forward::{self, Target};
+use cabuya::link::{self, Accepted, Prefilled, Services};
+use cabuya::mux::{self, LinkStream, Side};
+use cabuya::peers::{FilePeers, NoEvents, PeerRecord, PeerStore};
 use coqui_agentic_peer::discovery::{self, Advertised, Advertisement};
-use coqui_agentic_peer::forward::{self, Target};
-use coqui_agentic_peer::link::{self, Accepted, Prefilled, Services};
 use coqui_agentic_peer::mcp_offer;
-use coqui_agentic_peer::mux::{self, LinkStream, Side};
-use coqui_agentic_peer::peers::{FilePeers, NoEvents, PeerRecord, PeerStore};
 use coqui_peer::{PeerId, TrustStore};
 use coqui_peer_tls as tls;
 use coqui_transport::{Channel, Failure};
@@ -747,7 +747,7 @@ fn advertise(
     let Some(label) = &args.advertise else {
         return Ok(None);
     };
-    let text = |error: Error| error.to_string();
+    let text = |error: coqui_agentic_peer::Error| error.to_string();
     if !bound.ip().is_loopback() && peer.is_none() {
         return Err(
             "--advertise on the network needs the in-band proof: a client has to be able to check the key a record names"

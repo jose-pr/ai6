@@ -1,0 +1,56 @@
+[package]
+authors = ["Daniel Brotsky <dev@brotsky.com>"]
+description = "Apple-native credential store for keyring"
+homepage = "https://github.com/open-source-cooperative/keyring-rs/wiki/Keyring"
+keywords = ["keyring", "credential", "protected-data", "keychain"]
+license = "MIT OR Apache-2.0"
+name = "apple-native-keyring-store"
+repository = "https://github.com/open-source-cooperative/apple-native-keyring-store.git"
+version = "1.0.3"
+rust-version = "1.85"
+edition = "2024"
+exclude = [".github",".cargo"]
+readme = "README.md"
+
+[features]
+keychain = ["security-framework"]
+protected = ["security-framework/OSX_10_15"]
+
+[[example]]
+name = "operations"
+path = "examples/item_operations.rs"
+crate-type = ["staticlib"]
+required-features = ["protected"]
+
+[[example]]
+name = "test"
+path = "examples/protected_test.rs"
+crate-type = ["staticlib"]
+required-features = ["protected"]
+
+[[example]]
+name = "instantiation"
+
+[dependencies]
+log = "0.4"
+
+[dependencies.keyring-core]
+version = "1.1"
+# path = "../keyring-core"
+
+[dependencies.security-framework]
+version = "3.7"
+optional = true
+# path = "../rust-security-framework/security-framework"
+
+[dev-dependencies]
+fastrand = "2"
+linkme = "0.3"
+sudo = "0.6"
+
+[lints.rust]
+unreachable_pub = "warn"
+
+[package.metadata.docs.rs]
+targets = ["aarch64-apple-darwin", "aarch64-apple-ios"]
+all-features = true

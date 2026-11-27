@@ -4,6 +4,7 @@
 
 extern crate alloc;
 
+pub mod access;
 mod account_provider;
 pub mod account_usage;
 pub mod accounts;
@@ -20,6 +21,7 @@ mod provider;
 mod provider_history;
 mod replay;
 mod session;
+mod session_settings;
 mod signin;
 mod tools;
 
@@ -29,13 +31,16 @@ use core::time::Duration;
 use std::io;
 
 pub use account_provider::{AccountSettings, ClaudeAccounts};
-pub use agent::{ClaudeAgent, DEFAULT, EFFORTS, FreshSessions};
+pub use agent::{ClaudeAgent, DEFAULT, FreshSessions};
 pub use coqui_acp_harness::{self as harness, Launch, PlainSpawn, Spawn, Spawned};
 pub use launch::{ClaudeLaunch, SessionStart, mcp_config, valid_session_id};
+pub use limits::limit_of_line;
 pub use parse::{ModeHook, ModePermit, Parser, ParserLimits};
 pub use provider::{ClaudeProvider, ProviderSettings, SettingSource};
 pub use replay::{config_dir, project_directory, replay, transcript};
 pub use session::{ClaudeSession, ClaudeSettings, Model, models_of, user_blocks, version_of};
+pub use session_settings::SessionSettings;
+pub mod signed_in;
 
 /// The Claude Code versions this crate was tested with. Another one runs, with a warning.
 pub const TESTED_VERSIONS: &[&str] = &["2.1.318"];

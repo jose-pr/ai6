@@ -1,4 +1,4 @@
-# coqui-peer-webcrypto/. at 9146f55dd9fb9be8d6d96f43e17bc7a057ba0681, with what it inherits written out.
+# coqui-peer-webcrypto/. at 7544cf9c026da808dc940bcb56a0b3d5d78bef2f, with what it inherits written out.
 test = [{ name = "pair", required-features = ["pin"] }]
 [package]
 name = "coqui-peer-webcrypto"

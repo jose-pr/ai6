@@ -32,9 +32,9 @@ pub use handshake::{METHOD, Noise, NoiseBuilder, NoiseHandshake, NoiseParts, PRO
 pub use identity::Identity;
 pub use noise::PROTOCOL_NAME;
 pub use pairing::{
-    DEFAULT_FIRST_MESSAGE_TIMEOUT, MAX_PAIRING_RECORD, PAIR_EXPORT_LABEL, PairDial,
+    DEFAULT_FIRST_MESSAGE_TIMEOUT, JoinExchange, MAX_PAIRING_RECORD, PAIR_EXPORT_LABEL, PairDial,
     PairingHandshake, PairingMethod, PairingMethodBuilder, PairingMethodParts, PairingSession,
 };
 pub use session::{DEFAULT_KEY_LIMIT, Opener, Sealer, Session, record_length};
 pub use settings::{NoiseSettings, PairingSettings};
-pub use trust::Trust;
+pub use trust::{Admit, Trust};

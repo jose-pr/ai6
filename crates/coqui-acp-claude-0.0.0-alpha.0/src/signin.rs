@@ -21,12 +21,12 @@ use coqui_acp_harness::account::{Accounts, Files, SecretText, rfc3339_ms};
 use coqui_acp_harness::cli::{Cli, Next, address_in, host_of, run};
 use coqui_acp_harness::login::{Job, asked, gone, reason, supervise};
 use coqui_acp_harness::process::Launch;
-use coqui_acp_harness::provider::{credential, schema, to_json};
-use serde_json::{Value, json};
+use coqui_acp_harness::provider::settings_as;
+use serde_json::Value;
 
 use crate::accounts::{
     self, API_KEY, API_KEY_METHOD, AUTH_TOKEN, AUTH_TOKEN_METHOD, CONSOLE, CONSOLE_METHOD,
-    CREDENTIALS_FILE, FILE_KEY, LOGIN, LONG_LIVED_TOKEN, SUBSCRIPTION, VARIABLES,
+    CREDENTIALS_FILE, FILE_KEY, LOGIN, LONG_LIVED_TOKEN, SUBSCRIPTION, VARIABLES, WebInputs,
 };
 
 /// How close to its end a login must be for `claude auth status` to refresh it, in milliseconds (Claude Code's own
@@ -102,29 +102,20 @@ pub(crate) fn status(
     })
 }
 
-fn email_of(inputs: &coqui_acp_api::guatiao::Value) -> Result<Option<String>, ProviderError> {
-    let inputs = to_json(inputs);
-    let Some(object) = inputs.as_object() else {
-        return Err(failure(
-            Status::GUATIAO_ERR_BAD_VALUE,
-            "the sign-in's inputs are not an object",
-        ));
-    };
-    if object.keys().any(|key| key != "email") {
-        return Err(failure(
-            Status::GUATIAO_ERR_BAD_VALUE,
-            "the sign-in's inputs name something it does not ask",
-        ));
-    }
-    match object.get("email") {
-        None | Some(Value::Null) => Ok(None),
-        Some(Value::String(email))
+pub(crate) fn email_of(
+    inputs: &coqui_acp_api::guatiao::Value,
+) -> Result<Option<String>, ProviderError> {
+    let WebInputs { email } = settings_as(inputs)?;
+    match email {
+        None => Ok(None),
+        // The address is an argument of the command line: one that starts with a dash would be read as a flag.
+        Some(email)
             if !email.is_empty()
                 && email.len() <= 254
                 && !email.starts_with('-')
                 && !email.chars().any(|c| c.is_control() || c.is_whitespace()) =>
         {
-            Ok(Some(email.clone()))
+            Ok(Some(email))
         }
         Some(_) => Err(failure(
             Status::GUATIAO_ERR_BAD_VALUE,
@@ -312,14 +303,7 @@ fn web(
     let url = url.unwrap_or_default();
     asked(prompter.open_url(OpenUrl::new(url)))?;
     job.check()?;
-    let form = LoginForm::new(
-        "Paste the code the page shows",
-        schema(&json!({
-            "type": "object",
-            "properties": {"code": credential()},
-            "required": ["code"],
-        })),
-    );
+    let form = LoginForm::secret("Paste the code the page shows", "code");
     let answer = asked(prompter.ask(form))?;
     job.check()?;
     let code = SecretText::new(
@@ -357,7 +341,7 @@ fn web(
     }
     job.check()?;
     let exit = cli.wait(Duration::from_secs(5));
-    if !exit.is_some_and(|exit| exit.code == Some(0)) {
+    if exit.is_none_or(|exit| exit.code != Some(0)) {
         return Err(failure(
             Status::GUATIAO_ERR_BAD_VALUE,
             &format!("login refused: {}", reason(&printed, &[&*code])),
@@ -402,13 +386,9 @@ fn typed(
     variable: &str,
     dir: &(String, String),
 ) -> Result<LoginOutcome, ProviderError> {
-    let form = LoginForm::new(
+    let form = LoginForm::secret(
         format!("Enter the {}", plan.method.title.to_lowercase()),
-        schema(&json!({
-            "type": "object",
-            "properties": {key: credential()},
-            "required": [key],
-        })),
+        key,
     );
     let answer = asked(prompter.ask(form))?;
     job.check()?;

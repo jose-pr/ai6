@@ -115,6 +115,16 @@ pub struct Parser {
     interrupted: bool,
     /// The latest window the account reported as used up.
     exhausted: Option<LimitHit>,
+    /// The latest spend control the account reported as used up.
+    spent: Option<LimitHit>,
+    /// The `rateLimitReachedType` a snapshot named since the turn began.
+    reached: Option<String>,
+    /// What the running turn has used, from the thread's totals.
+    counted: limits::Counted,
+    /// The model the running turn runs on: the one named for it, or the one Codex moved it to.
+    model: Option<String>,
+    /// What the turn has said of itself for its answer, beyond its end: a reroute of the model.
+    said: BTreeMap<String, Value>,
     /// What the account has said of its allowances, for merging each sparse update into.
     account: limits::Account,
     /// The `account/rateLimits/read` requests not yet answered: their answers are applied where they are read, so
@@ -157,6 +167,11 @@ impl Parser {
             ended: None,
             interrupted: false,
             exhausted: None,
+            spent: None,
+            reached: None,
+            counted: limits::Counted::default(),
+            model: None,
+            said: BTreeMap::new(),
             account: limits::Account::default(),
             reads: BTreeSet::new(),
             error: None,
@@ -202,6 +217,15 @@ impl Parser {
         self.abandon_next = false;
         self.interrupted = false;
         self.error = None;
+        self.reached = None;
+        self.said.clear();
+        self.counted.begin();
+    }
+
+    /// The model the next turn runs on, as Codex was told or told us: the answer's `model` and the turn's tokens are
+    /// attributed to it, unless Codex moves the turn to another.
+    pub fn set_model(&mut self, model: Option<&str>) {
+        self.model = model.map(str::to_string);
     }
 
     fn give_up(&mut self, turn: String, thread: Option<&str>) {
@@ -315,7 +339,7 @@ impl Parser {
             {
                 // Another thread's, such as a sub-agent's: nothing of it is this conversation's, but what it spent is spent.
                 if method == "thread/tokenUsage/updated" {
-                    limits::usage(message)
+                    limits::usage(message, None)
                         .map(|mut usage| {
                             usage.elsewhere = true;
                             usage.spend = None;
@@ -349,6 +373,12 @@ impl Parser {
         if let Some(window) = self.account.exhausted_any() {
             self.exhausted = Some(window);
         }
+        if let Some(spent) = self.account.spent_any() {
+            self.spent = Some(spent);
+        }
+        if let Some(reached) = limits::reached_in_read(answer) {
+            self.reached = Some(reached);
+        }
         buckets
     }
 
@@ -365,6 +395,12 @@ impl Parser {
             buckets = self.account.update(message);
             if let Some(window) = self.account.exhausted(message) {
                 self.exhausted = Some(window);
+            }
+            if let Some(spent) = self.account.spent(message) {
+                self.spent = Some(spent);
+            }
+            if let Some(reached) = limits::reached_in_update(message) {
+                self.reached = Some(reached);
             }
         }
         match method {
@@ -464,9 +500,31 @@ impl Parser {
                     .collect();
                 vec![Event::Plan(entries)]
             }
-            "thread/tokenUsage/updated" => limits::usage(message)
+            "thread/tokenUsage/updated" => limits::usage(message, Some(&mut self.counted))
                 .map(|usage| vec![Event::Usage(usage)])
                 .unwrap_or_default(),
+            "model/rerouted" => {
+                let (from, to) = (text(params, "/fromModel"), text(params, "/toModel"));
+                let Some(to) = to else {
+                    return Vec::new();
+                };
+                self.model = Some(to.to_string());
+                if let Some(from) = from {
+                    self.said
+                        .insert("codex:rerouted_from".into(), Value::String(from.into()));
+                }
+                if let Some(reason) = text(params, "/reason") {
+                    self.said
+                        .insert("codex:reroute_reason".into(), Value::String(reason.into()));
+                }
+                vec![Event::Notice {
+                    severity: Severity::Warning,
+                    title: match from {
+                        Some(from) => format!("Codex moved this turn from {from} to {to}"),
+                        None => format!("Codex moved this turn to {to}"),
+                    },
+                }]
+            }
             "account/rateLimits/updated" if !buckets.is_empty() => vec![Event::Buckets(buckets)],
             "error" => {
                 let of_another_turn = text(params, "/turnId").is_some_and(|turn| {
@@ -497,9 +555,18 @@ impl Parser {
                     self.ended = done;
                     return Vec::new();
                 }
-                let end = self.end(method, message);
+                let (end, mut said) = self.end(method, message);
                 self.ended = self.turn.take().or(done);
-                vec![Event::TurnEnd(end)]
+                if let Some(model) = &self.model {
+                    said.insert("model".into(), Value::String(model.clone()));
+                }
+                said.extend(core::mem::take(&mut self.said));
+                let mut events = Vec::new();
+                if !said.is_empty() {
+                    events.push(Event::TurnMeta(said));
+                }
+                events.push(Event::TurnEnd(end));
+                events
             }
             "thread/compacted" => vec![Event::Compaction {
                 id: text(params, "/turnId").unwrap_or("compaction").to_string(),
@@ -540,16 +607,36 @@ impl Parser {
         }
     }
 
-    fn end(&mut self, method: &str, message: &Value) -> TurnEnd {
+    /// How the turn ended, and what its error said of it for the answer's `_meta`.
+    fn end(&mut self, method: &str, message: &Value) -> (TurnEnd, BTreeMap<String, Value>) {
         let interrupted = core::mem::take(&mut self.interrupted);
         let reported = self.error.take();
         let error = limits::error_of(message).cloned().or(reported);
-        if let Some(limit) = error
+        let hints = limits::Hints {
+            window: self.exhausted.as_ref(),
+            spend: self.spent.as_ref(),
+            reached: self.reached.as_deref(),
+        };
+        let (limit, said) = error
             .as_ref()
-            .and_then(|error| limits::limit(error, self.exhausted.as_ref()))
-        {
-            return TurnEnd::Limited(limit);
+            .map(|error| limits::describe(error, &hints))
+            .unwrap_or_default();
+        if let Some(limit) = limit {
+            return (TurnEnd::Limited(limit), said);
         }
+        (
+            self.ended_with(method, message, interrupted, error.as_ref()),
+            said,
+        )
+    }
+
+    fn ended_with(
+        &self,
+        method: &str,
+        message: &Value,
+        interrupted: bool,
+        error: Option<&Value>,
+    ) -> TurnEnd {
         let status = text(message, "/params/turn/status").unwrap_or(if method == "turn/failed" {
             "failed"
         } else {
@@ -560,7 +647,6 @@ impl Parser {
             "failed" if interrupted => TurnEnd::stopped(Stop::Cancelled),
             "failed" => TurnEnd::Failed(
                 error
-                    .as_ref()
                     .and_then(|error| text(error, "/message"))
                     .unwrap_or("the turn failed")
                     .to_string(),

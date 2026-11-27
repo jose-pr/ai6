@@ -22,9 +22,6 @@ use crate::session::{ClaudeSession, ClaudeSettings, Model};
 use crate::{Error, replay};
 use coqui_acp_harness::mode::{self, Mode};
 
-/// The efforts Claude Code 2.1.318 takes, offered when a model does not list its own.
-pub const EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
-
 /// The value of the model and effort options that leaves Claude Code's own choice.
 pub const DEFAULT: &str = "default";
 
@@ -426,18 +423,13 @@ fn offered_for(launch: &ClaudeLaunch) -> Vec<Mode> {
 }
 
 impl State {
+    /// The efforts Claude Code lists for `model`: none for a model that lists none or that it did not list.
     fn efforts(&self, model: &str) -> Vec<String> {
-        let listed = self
-            .models
+        self.models
             .iter()
             .find(|known| known.id == model)
             .map(|known| known.efforts.clone())
-            .unwrap_or_default();
-        if listed.is_empty() {
-            EFFORTS.iter().map(|effort| (*effort).to_string()).collect()
-        } else {
-            listed
-        }
+            .unwrap_or_default()
     }
 
     /// Takes Claude Code's `permissionMode`; whether that changed what is shown.
@@ -562,4 +554,46 @@ fn vec_default() -> Vec<OptionValue> {
         "Default",
         Some("Claude Code's own choice".to_string())
     )]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn model(id: &str, efforts: &[&str]) -> Model {
+        Model {
+            id: id.into(),
+            name: id.into(),
+            description: None,
+            efforts: efforts.iter().map(|effort| (*effort).to_string()).collect(),
+            resolved: None,
+            version: None,
+        }
+    }
+
+    fn effort_values(state: &State) -> Vec<String> {
+        let options = state.options();
+        let effort = options
+            .iter()
+            .find(|option| option.id == "effort")
+            .expect("an effort option");
+        effort.values.iter().map(|value| value.id.clone()).collect()
+    }
+
+    /// A model that lists no efforts is offered none, and one it was not asked about the same: the five Claude Code
+    /// 2.1.318 lists for its own models are not guessed for another.
+    #[test]
+    fn a_model_that_lists_no_efforts_is_offered_none() {
+        let state = State {
+            models: vec![model("plain", &[]), model("thinker", &["low", "high"])],
+            chosen: Mutex::new(("plain".into(), DEFAULT.into())),
+            mode: Mutex::new(Current::None),
+            offered: Vec::new(),
+        };
+        assert_eq!(effort_values(&state), [DEFAULT]);
+        state.chosen.lock().unwrap().0 = "unlisted".into();
+        assert_eq!(effort_values(&state), [DEFAULT]);
+        state.chosen.lock().unwrap().0 = "thinker".into();
+        assert_eq!(effort_values(&state), [DEFAULT, "low", "high"]);
+    }
 }

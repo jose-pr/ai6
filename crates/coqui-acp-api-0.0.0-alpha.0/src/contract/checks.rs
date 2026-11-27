@@ -15,11 +15,11 @@ use serde_json::{Value, json};
 
 use super::Contract;
 use super::host::{self, Conn, GRACE, PATIENCE, open, status};
-use crate::usage::{LimitHit, Refill, Status, UsageQuery, UsageReport};
+use crate::usage::{LimitHit, Refill, Status, UsageReport};
 use crate::{
     AccountGrant, AcpHarness, Environment, ExportPage, FILES_UNDER, HARNESS_LOGIN, ImportReport,
-    LIMIT_META_KEY, ModelsRequest, NoticeKind, Requirement, SessionExport, SessionImport,
-    SessionQuery, StartRequest, USAGE_CAPABILITY, USAGE_METHOD, USAGE_NOTIFICATION, is_session_id,
+    LIMIT_META_KEY, NoticeKind, Requirement, SessionExport, SessionImport, SessionQuery,
+    StartRequest, USAGE_CAPABILITY, USAGE_METHOD, USAGE_NOTIFICATION, is_session_id,
 };
 
 // `guatiao_status` numbers, as a channel's `close` and `closed` carry them.
@@ -332,40 +332,10 @@ fn describes_itself(contract: &Contract, harness: &dyn AcpHarness) -> Outcome {
         contract.version
     );
     harness.program().map_err(|e| e.message().to_owned())?;
-    let (_, spawner, _) = host::spawner();
-    harness
-        .models(ModelsRequest::new(), spawner)
-        .map_err(|e| e.message().to_owned())?;
     harness
         .session_record(SessionQuery::new(fresh_uuid(), "/"))
         .map_err(|e| e.message().to_owned())?;
     harness.non_defaults().map_err(|e| e.message().to_owned())?;
-    let (watch, spawner, _) = host::spawner();
-    let report = harness
-        .usage(UsageQuery::new(), spawner)
-        .map_err(|e| e.message().to_owned())?;
-    ensure!(
-        watch.destroyed(),
-        "usage answered with the spawner it was handed alive"
-    );
-    ensure!(
-        report.supported == info.usage.reports(),
-        "describe says it reports {} usage, and `usage` answers `supported: {}`",
-        if info.usage.reports() { "some" } else { "no" },
-        report.supported
-    );
-    if !report.supported {
-        ensure!(
-            report
-                .unsupported_because
-                .as_deref()
-                .is_some_and(|why| !why.is_empty())
-                && report.buckets.is_empty()
-                && report.limit.is_none()
-                && report.spend.is_none(),
-            "an unsupported report carries no reason, or carries figures: {report:?}"
-        );
-    }
     Ok(())
 }
 
@@ -464,18 +434,10 @@ fn keeps_secrets(harness: &dyn AcpHarness) -> Outcome {
     let secret = || Secret::new(environment.clone());
     let unknown = vec![Requirement::new("no_such_requirement")];
     let answered = format!(
-        "{:?} {:?} {:?} {:?}",
+        "{:?} {:?}",
         harness.refusal(unknown.clone(), secret(), None),
-        harness.models(
-            ModelsRequest::new().environment(environment.clone()),
-            host::spawner().1
-        ),
         harness
             .session_record(SessionQuery::new(fresh_uuid(), "/").environment(environment.clone())),
-        harness.usage(
-            UsageQuery::new().environment(environment.clone()),
-            host::spawner().1
-        ),
     );
     ensure!(
         !answered.contains(CANARY),
@@ -1244,22 +1206,6 @@ fn same_figures(a: &UsageReport, b: &UsageReport) -> bool {
     plain(a) == plain(b)
 }
 
-/// Whether two reports hold the same buckets and the same limit, whatever their revisions.
-fn same_buckets(a: &UsageReport, b: &UsageReport) -> bool {
-    let plain = |report: &UsageReport| {
-        let mut buckets = report.buckets.clone();
-        for bucket in &mut buckets {
-            bucket.observed_at = 0;
-        }
-        buckets.sort_by(|x, y| x.id.cmp(&y.id));
-        (
-            buckets,
-            report.limit.clone().map(|hit| (hit.bucket, hit.resets_at)),
-        )
-    };
-    plain(a) == plain(b)
-}
-
 /// Asks `_coqui_acp/usage` and reads the report.
 fn usage_report(conn: &mut Conn, id: u64, session: Option<&str>) -> Result<UsageReport, String> {
     let params = session.map_or_else(|| json!({}), |session| json!({"sessionId": session}));
@@ -1273,10 +1219,10 @@ fn usage_report(conn: &mut Conn, id: u64, session: Option<&str>) -> Result<Usage
         .map_err(|e| format!("{USAGE_METHOD} answered no report ({e}): {answer}"))
 }
 
-/// What `usage` says a harness reports is what it does: nothing advertised and `-32601` for one that
+/// What `describe` says a harness reports is what it does: nothing advertised and `-32601` for one that
 /// reports none; for one that does (the contract agent scripts it: `quota P`, `limit`, fixed spend
-/// each turn), the figures, the revisions, the notification only a client that asked gets, the
-/// account, and the kind's answer agreeing with the connection's.
+/// each turn), the figures, the revisions, the notification only a client that asked gets, and the
+/// account.
 fn usage(contract: &Contract, harness: &dyn AcpHarness, place: &Place) -> Outcome {
     let info = harness.describe().map_err(|e| e.message().to_owned())?;
     let optin =
@@ -1488,34 +1434,6 @@ fn usage(contract: &Contract, harness: &dyn AcpHarness, place: &Place) -> Outcom
         "after the refusal the report is {limited:?}"
     );
 
-    // The kind answers what the connection last reported for the account, and an empty report for
-    // one it never saw.
-    let (watch, spawner, _) = host::spawner();
-    let kind = harness
-        .usage(UsageQuery::new().account(grant(account)), spawner)
-        .map_err(|e| e.message().to_owned())?;
-    ensure!(watch.destroyed(), "usage kept the spawner it was handed");
-    // A harness that reads its account itself (no turn needed) answers from that reading, not from a connection's.
-    ensure!(
-        if waits_for_a_turn && scripted {
-            kind == limited
-        } else if waits_for_a_turn {
-            kind.supported && same_buckets(&kind, &limited)
-        } else {
-            kind.supported && kind.account.as_deref() == Some(account) && !kind.buckets.is_empty()
-        },
-        "the kind answers {kind:?}, the connection's last report was {limited:?}"
-    );
-    let (_, spawner, _) = host::spawner();
-    let unseen = harness
-        .usage(UsageQuery::new().account(grant("nobody")), spawner)
-        .map_err(|e| e.message().to_owned())?;
-    ensure!(
-        unseen.supported
-            && (unseen.buckets.is_empty() || !waits_for_a_turn)
-            && unseen.account.as_deref() == Some("nobody"),
-        "an account no connection ran on is {unseen:?}"
-    );
     conn.close_with(OK)?;
 
     // A client that did not ask is told nothing, and the account is the client's when the host named none.

@@ -1,6 +1,6 @@
-# coqui-acp/crates/coqui-acp-harness at b81c78a42e8f83fca48c4f0913775d59309c5831, with what it inherits written out.
-example = [{ name = "spawner_host", required-features = ["kind"] }, { name = "fake_stdio_cli", required-features = ["kind"] }, { name = "stdio_provider", crate-type = ["cdylib"], required-features = ["kind"] }]
-test = [{ name = "spawner", required-features = ["kind"] }, { name = "account", required-features = ["kind"] }, { name = "opencode", required-features = ["kind"] }, { name = "stdio", required-features = ["kind"] }, { name = "replay", required-features = ["kind"] }, { name = "antigravity", required-features = ["antigravity"] }]
+# coqui-acp/crates/coqui-acp-harness at f58a7baff4c6b549250d246bb54a08739e8ce839, with what it inherits written out.
+example = [{ name = "spawner_host", required-features = ["kind"] }, { name = "fake_stdio_cli", required-features = ["kind"] }, { name = "stdio_provider", crate-type = ["cdylib"], required-features = ["kind"] }, { name = "agy_quota", required-features = ["antigravity"] }]
+test = [{ name = "spawner", required-features = ["kind"] }, { name = "account", required-features = ["kind"] }, { name = "opencode", required-features = ["kind"] }, { name = "stdio", required-features = ["kind"] }, { name = "replay", required-features = ["kind"] }, { name = "antigravity", required-features = ["antigravity"] }, { name = "agy_login", required-features = ["antigravity"] }, { name = "login_forms", required-features = ["kind"] }, { name = "signed_in", required-features = ["kind"] }]
 [package]
 name = "coqui-acp-harness"
 description = "Serve a coding agent's own command line as an Agent Client Protocol agent: process trees, bounded lines, neutral events, and ACP v1 and v2 shapes"
@@ -21,7 +21,8 @@ publish = false
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 [features]
-antigravity = ["dep:serde", "dep:time", "dep:ureq", "dep:windows-sys"]
+antigravity = ["dep:serde", "dep:time", "dep:ureq", "dep:windows-sys", "dep:memchr", "keyring"]
+keyring = ["dep:keyring-core", "dep:windows-native-keyring-store", "dep:apple-native-keyring-store", "dep:zbus-secret-service-keyring-store", "dep:security-framework", "dep:sha2", "dep:data-encoding"]
 kind = ["dep:guatiao-serde", "dep:coqui-acp-history"]
 [dependencies]
 [dependencies.coqui-acp-api]
@@ -47,7 +48,7 @@ features = ["rustls"]
 optional = true
 [dependencies.guatiao-serde]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d"
 default-features = false
 optional = true
 [dependencies.coqui-acp-history]
@@ -63,6 +64,21 @@ features = ["std"]
 version = "1"
 default-features = false
 features = ["v4"]
+[dependencies.memchr]
+version = "2"
+optional = true
+[dependencies.keyring-core]
+version = "1"
+optional = true
+[dependencies.sha2]
+version = "0.11"
+default-features = false
+optional = true
+[dependencies.data-encoding]
+version = "2"
+default-features = false
+features = ["alloc"]
+optional = true
 [target]
 [target."cfg(unix)"]
 [target."cfg(unix)".dependencies]
@@ -70,6 +86,21 @@ features = ["v4"]
 version = "1.1"
 default-features = false
 features = ["std", "process"]
+[target."cfg(all(unix, not(any(target_os = \"macos\", target_os = \"ios\", target_os = \"android\"))))"]
+[target."cfg(all(unix, not(any(target_os = \"macos\", target_os = \"ios\", target_os = \"android\"))))".dependencies]
+[target."cfg(all(unix, not(any(target_os = \"macos\", target_os = \"ios\", target_os = \"android\"))))".dependencies.zbus-secret-service-keyring-store]
+version = "1"
+optional = true
+features = ["crypto-rust"]
+[target."cfg(target_os = \"macos\")"]
+[target."cfg(target_os = \"macos\")".dependencies]
+[target."cfg(target_os = \"macos\")".dependencies.apple-native-keyring-store]
+version = "1"
+optional = true
+features = ["keychain"]
+[target."cfg(target_os = \"macos\")".dependencies.security-framework]
+version = "3.7"
+optional = true
 [target."cfg(windows)"]
 [target."cfg(windows)".dependencies]
 [target."cfg(windows)".dependencies.win32job]
@@ -79,19 +110,24 @@ version = "0.61.2"
 optional = true
 default-features = false
 features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock"]
+[target."cfg(windows)".dependencies.windows-native-keyring-store]
+version = "1"
+optional = true
+default-features = false
 [dev-dependencies]
 [dev-dependencies.coqui-acp]
 path = "../coqui-acp"
+features = ["secret"]
 [dev-dependencies.coqui-acp-api]
 path = "../coqui-acp-api"
 features = ["contract"]
 [dev-dependencies.guatiao]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d"
 features = ["provider", "load"]
 [dev-dependencies.guatiao-serde]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e"
+rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d"
 default-features = false
 features = ["json"]
 [dev-dependencies.rcgen]

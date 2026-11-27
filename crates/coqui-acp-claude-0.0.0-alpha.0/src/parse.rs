@@ -283,17 +283,7 @@ impl Parser {
 
     /// A line of `type: error`: the turn has failed, or a quota refused it.
     fn error_line(&mut self, value: &Value) -> Vec<Event> {
-        let text = [
-            "/result",
-            "/error/message",
-            "/message/content/0/text",
-            "/message",
-            "/error",
-        ]
-        .iter()
-        .find_map(|pointer| value.pointer(pointer).and_then(Value::as_str))
-        .unwrap_or("Claude Code reported an error")
-        .to_string();
+        let text = limits::line_text(value);
         let rejected = self.rejected.take();
         let end = match limits::limit_of_text(&text) {
             Some(limit) => TurnEnd::Limited(limits::with_hint(limit, rejected)),

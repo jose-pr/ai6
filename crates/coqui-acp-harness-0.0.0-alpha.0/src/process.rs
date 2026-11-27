@@ -325,7 +325,7 @@ pub trait Spawn: Send + Sync {
 ///
 /// On Windows the process and everything it starts are in a job object of its own, which ends them all when it closes:
 /// at `kill`, and when the host itself ends without one. A process the harness starts in the instant before it joins
-/// its job is outside it.
+/// its job is outside it. A process that has already ended when it would join has nothing to contain, and starts as usual.
 ///
 /// On Unix the process leads a process group, which `kill` sends `SIGKILL`; on Linux and Android `kill` first stops
 /// and then ends every process descended from it too, those that left the group or session included. A watcher in
@@ -388,7 +388,12 @@ fn found_on_own_path(program: &OsStr, env: &BTreeMap<OsString, OsString>) -> OsS
 
 /// The first runnable file called `name` in an absolute folder of `path`, then of `extra`. On Windows a name takes each of
 /// `pathext`'s extensions (the usual four when it is empty) unless it has one.
-fn find_in(path: &OsStr, extra: &[PathBuf], pathext: &str, name: &str) -> Option<PathBuf> {
+pub(crate) fn find_in(
+    path: &OsStr,
+    extra: &[PathBuf],
+    pathext: &str,
+    name: &str,
+) -> Option<PathBuf> {
     let suffixes: Vec<String> = if cfg!(windows) {
         let listed: Vec<String> = pathext
             .split(';')
@@ -526,7 +531,7 @@ pub(crate) fn start(launch: &Launch, errors: ErrorStream) -> io::Result<Spawned>
         let _ = child.wait();
     };
     #[cfg(windows)]
-    let job = match contain(&child) {
+    let job = match contain(&mut child) {
         Ok(job) => job,
         Err(error) => {
             abandon(&mut child);
@@ -562,7 +567,7 @@ pub(crate) fn start(launch: &Launch, errors: ErrorStream) -> io::Result<Spawned>
                 watcher: Some(watcher),
             }),
             #[cfg(windows)]
-            job: Mutex::new(Some(job)),
+            job: Mutex::new(job),
         }),
     })
 }
@@ -778,16 +783,77 @@ mod descendants {
     }
 }
 
-/// Puts a process just started in a job object of its own that ends everything in it when its last handle closes.
+/// Puts a process just started in a job object of its own that ends everything in it when its last handle closes. `None`
+/// when the process had already ended: there is nothing left to contain, and its status is still there to read.
 #[cfg(windows)]
-fn contain(child: &Child) -> io::Result<win32job::Job> {
+fn contain(child: &mut Child) -> io::Result<Option<win32job::Job>> {
     use std::os::windows::io::AsRawHandle;
     let mut limits = win32job::ExtendedLimitInfo::new();
     limits.limit_kill_on_job_close();
-    let job = win32job::Job::create_with_limit_info(&limits).map_err(io::Error::other)?;
-    job.assign_process(child.as_raw_handle() as isize)
-        .map_err(io::Error::other)?;
-    Ok(job)
+    let job = win32job::Job::create_with_limit_info(&limits)
+        .map_err(|error| job_error("make a job object", error))?;
+    let handle = child.as_raw_handle() as isize;
+    let contained = assign(&job, handle, || {
+        child.try_wait().map(|status| status.is_some())
+    })?;
+    Ok(contained.then_some(job))
+}
+
+/// How long a process that refuses to join a job is given to be seen ending: it is refused while it exits, a moment before
+/// it can be waited on.
+#[cfg(windows)]
+const EXIT_GRACE: Duration = Duration::from_millis(250);
+
+/// Puts the process `handle` names in `job`: `true` when it is in, `false` when it had ended, which the system refuses
+/// with "access denied" and which `exited` confirms. Any other refusal is an error that says what the system said.
+#[cfg(windows)]
+fn assign(
+    job: &win32job::Job,
+    handle: isize,
+    mut exited: impl FnMut() -> io::Result<bool>,
+) -> io::Result<bool> {
+    let Err(refusal) = job.assign_process(handle) else {
+        return Ok(true);
+    };
+    let error = system_error(refusal);
+    if error.raw_os_error() == Some(ERROR_ACCESS_DENIED) {
+        let deadline = Instant::now() + EXIT_GRACE;
+        loop {
+            if matches!(exited(), Ok(true)) {
+                return Ok(false);
+            }
+            if Instant::now() >= deadline {
+                break;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+    Err(io::Error::new(
+        error.kind(),
+        format!("the process could not be put in its job object: {error}"),
+    ))
+}
+
+/// `ERROR_ACCESS_DENIED`.
+#[cfg(windows)]
+const ERROR_ACCESS_DENIED: i32 = 5;
+
+/// A job object call's refusal as the system's own error: the crate hands back an HRESULT (`0x8007` and the code), which
+/// names no text, so the code is taken out of it.
+#[cfg(windows)]
+fn system_error(error: win32job::JobError) -> io::Error {
+    let error = io::Error::from(error);
+    match error.raw_os_error() {
+        Some(code) if (code as u32) >> 16 == 0x8007 => io::Error::from_raw_os_error(code & 0xFFFF),
+        _ => error,
+    }
+}
+
+/// A job object call's refusal as an error that carries the system's own text, which the crate's own message leaves out.
+#[cfg(windows)]
+fn job_error(what: &str, error: win32job::JobError) -> io::Error {
+    let error = system_error(error);
+    io::Error::new(error.kind(), format!("could not {what}: {error}"))
 }
 
 #[cfg(test)]
@@ -819,6 +885,47 @@ mod tests {
             Err(io::Error::from_raw_os_error(26))
         });
         assert_eq!((calls, busy.is_err()), (6, true));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn a_process_that_ended_before_it_could_join_its_job_is_nothing_to_contain() {
+        let mut child = Command::new("cmd.exe")
+            .args(["/d", "/c", "exit 3"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .spawn()
+            .expect("cmd.exe starts");
+        let ended = child.wait().expect("it ends");
+        let job = contain(&mut child).expect("an ended process is not an error");
+        assert!(job.is_none());
+        assert_eq!(ended.code(), Some(3), "its status is there to read");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn a_running_process_joins_its_job_and_the_system_s_refusal_is_reported_as_it_said_it() {
+        let mut child = Command::new("cmd.exe")
+            .args(["/d", "/c", "ping -n 30 127.0.0.1 >nul"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .spawn()
+            .expect("cmd.exe starts");
+        let job = contain(&mut child).expect("it joins");
+        assert!(job.is_some(), "it is contained");
+        // A handle that names nothing: the system's refusal, with its code and text.
+        let mut limits = win32job::ExtendedLimitInfo::new();
+        limits.limit_kill_on_job_close();
+        let broken = win32job::Job::create_with_limit_info(&limits).expect("a job");
+        let error = assign(&broken, 0, || Ok(false)).expect_err("no process has handle 0");
+        let text = error.to_string();
+        assert!(text.contains("job object"), "{text}");
+        assert!(
+            text.contains("os error"),
+            "the system's own error is named: {text}"
+        );
+        drop(job);
+        let _ = child.wait();
     }
 
     #[test]

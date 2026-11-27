@@ -40,7 +40,7 @@ pub use limit::Limit;
 pub use model::{
     AccountInfo, AccountPut, Attempt, AuthorizationDecision, AuthorizationRequest, Claims,
     Description, Factor, Lookup, Offer, Person, PutOutcome, SignInContext, SignInDecision, Verdict,
-    Waiting, clients, purposes, takes,
+    Waiting, attributes, clients, purposes, takes,
 };
 pub use subject::{Subject, SubjectError};
 

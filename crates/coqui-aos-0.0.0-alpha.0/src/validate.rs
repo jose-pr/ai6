@@ -917,8 +917,30 @@ impl Check {
                     "context" => self.each(value, &there, Self::rel_path),
                     "skills" => self.boolean(value, &there),
                     "model" | "effort" => self.string(value, &there, |text| !text.is_empty()),
+                    "delegate" => self.delegate(value, &there),
                     _ => {}
                 }
+            }
+        }
+    }
+
+    /// A harness's `delegate` hint: `default`, `sources` and `max_running`, no other key.
+    fn delegate(&mut self, value: &Data, at: &str) {
+        let Some(map) = self.object(value, at, &["default", "sources", "max_running"]) else {
+            return;
+        };
+        for (key, value) in map {
+            let there = join(at, key);
+            match key.as_str() {
+                "default" => self.string(value, &there, |text| !text.is_empty()),
+                "sources" => {
+                    self.each(value, &there, |check, name, at| {
+                        check.string(name, at, |text| !text.is_empty());
+                    });
+                    self.unique(value, &there);
+                }
+                "max_running" => self.integer(value, &there, 0, i64::from(i32::MAX)),
+                _ => {}
             }
         }
     }

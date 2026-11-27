@@ -41,4 +41,4 @@ pub use pairing::{
 };
 pub use session::{DEFAULT_SESSION_LIMIT, Opener, Sealer, Session};
 pub use settings::{PairingSettings, WebCryptoSettings};
-pub use trust::Trust;
+pub use trust::{Admit, Trust};

@@ -313,6 +313,44 @@ pub fn harness_context_of(manifest: &Document, harness: &str, tree: &OverlayTree
     }
 }
 
+/// A harness's delegation hint: suggestions only, which a consumer applies where it allows them.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct DelegateHint {
+    /// The source a task starts on when the session names none.
+    pub default: Option<String>,
+    /// The sources a task may name; `Some` of none suggests none, `None` that the hint says nothing.
+    pub sources: Option<Vec<String>>,
+    /// The most tasks running at once.
+    pub max_running: Option<u32>,
+}
+
+/// One harness's `delegate` hint, from a manifest that passed [`validate`](crate::validate); a
+/// key of the wrong type is left out, and `None` is returned when the harness has no hint.
+pub fn harness_delegate_of(manifest: &Document, harness: &str) -> Option<DelegateHint> {
+    let hint = manifest
+        .get("harness")?
+        .get(harness)?
+        .get("delegate")?
+        .as_object()?;
+    Some(DelegateHint {
+        default: hint
+            .get("default")
+            .and_then(Data::as_str)
+            .map(str::to_owned),
+        sources: hint.get("sources").and_then(Data::as_array).map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| entry.as_str().map(str::to_owned))
+                .collect()
+        }),
+        max_running: hint
+            .get("max_running")
+            .and_then(Data::as_u64)
+            .and_then(|n| u32::try_from(n).ok()),
+    })
+}
+
 fn strings(entries: Vec<Data>) -> Vec<String> {
     entries
         .into_iter()
