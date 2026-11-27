@@ -5,7 +5,7 @@ import 'package:coqui_acp_chat/coqui_acp_chat.dart' show MessageRole;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart'
     show ChatTranscript, Composer, MessageBox;
 // ignore: deprecated_member_use
-import 'package:flutter/material.dart' as flutter show IconButton, TextField;
+import 'package:flutter/material.dart' as flutter show TextField;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
@@ -218,9 +218,9 @@ void main() {
         expect(channel.sent.last, {'type': 'interrupt'});
         expect(
           tester
-              .widget<flutter.IconButton>(
+              .widget<IconButton>(
                 find.widgetWithIcon(
-                  flutter.IconButton,
+                  IconButton,
                   Icons.stop_circle_outlined,
                 ),
               )

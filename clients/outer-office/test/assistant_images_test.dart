@@ -129,7 +129,9 @@ void main() {
   testWidgets('a picked image can be removed before sending', (tester) async {
     final (channel, images) = await showPanel(tester);
     images.picked = [OutgoingImage.sniff(png)!];
-    await tester.tap(find.byTooltip('Add an image'));
+    await tester.tap(find.byKey(const Key('composer-plus')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add an image'));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Remove Image 1'));
     await tester.pumpAndSettle();

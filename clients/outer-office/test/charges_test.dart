@@ -11,7 +11,7 @@ import 'package:outer_office/assistant/chat_talk.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart'
     show ChatTranscript, Composer, MessageBox, PermissionCard, WorkingRow;
 // ignore: deprecated_member_use
-import 'package:flutter/material.dart' as flutter show IconButton, TextField;
+import 'package:flutter/material.dart' as flutter show TextField;
 import 'package:outer_office/assistant/chat_parts.dart';
 import 'package:outer_office/assistant/turns.dart';
 import 'package:outer_office/charges/attach_view.dart';
@@ -446,9 +446,9 @@ void main() {
         await tester.enterText(_field, 'hi');
         expect(
           tester
-              .widget<flutter.IconButton>(
+              .widget<IconButton>(
                 find.widgetWithIcon(
-                  flutter.IconButton,
+                  IconButton,
                   Icons.arrow_upward_rounded,
                 ),
               )
