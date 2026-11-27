@@ -168,7 +168,10 @@ holding exactly its servers, each with `default_tools_approval_mode="approve"` (
 project_doc_max_bytes=0`: no `AGENTS.md` is read, and the mode's `context_file` (at most `context_file_bytes`, 1 MiB by default;
 unreadable or larger refuses the start) is appended to the developer instructions on start,
 after `initial_context`. A mode with skills is refused (`GUATIAO_ERR_UNSUPPORTED`: Codex keeps
-no list of allowed skills), and `assistant_skills` says so, so a Station installs none.
+no list of allowed skills), and `assistant_skills` says so, so a Station installs none. The limit carries its `kind` (`usage_quota`, or `rate_limit` for a rate-limit error) and
+`continuable: true`. A Codex context-window error is not read as a limit here yet; when it is, the
+Station starts the conversation over in a fresh session (`continuable: false`). Codex's own
+`model_auto_compact_token_limit` is left unset, as it is today, and AI6 does not turn it off.
 
 With interpreters the thread runs scripts. Sandboxed (not `unsandboxed`), the command tools
 stay on (`features.shell_tool=false` is left out), `thread/start` and `thread/resume` carry no
