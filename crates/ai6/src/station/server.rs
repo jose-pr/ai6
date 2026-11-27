@@ -5813,6 +5813,11 @@ async fn start_mission(
             );
             (size >= limit).then_some((size, limit))
         });
+    // A grown conversation is compacted in the Run it resumes, unless the Station is set to
+    // start a fresh one.
+    let shorten_first = grown.filter(|_| {
+        state.station.limits().harness.compaction != crate::station::limits::CompactionMode::Fresh
+    });
     let resume_from = window_run.as_ref().and_then(|run| {
         standing::resume_from(
             &state,
@@ -5824,9 +5829,10 @@ async fn start_mission(
                 mission.resume_refused.is_some(),
                 mission.after_failure,
             ),
-            grown,
+            if shorten_first.is_some() { None } else { grown },
         )
     });
+    let shorten_first = shorten_first.filter(|_| resume_from.is_some());
     let filled = standing::filled_window(earlier.as_ref());
     if (grown.is_some() || filled)
         && let Some(last) = earlier.as_ref()
@@ -5896,8 +5902,16 @@ async fn start_mission(
         overlays: issued_overlays,
     };
     let resuming = resume_from.is_some();
+    let window_task = shorten_first.map(|_| start_request.prompt.clone());
     let launch = match resume_from {
-        Some(run_id) => Launch::Resume(standing::resume_request(start_request, run_id)),
+        Some(run_id) => {
+            let mut request = standing::resume_request(start_request, run_id);
+            // Its brief is sent once the conversation has been shortened.
+            if shorten_first.is_some() {
+                request.message = None;
+            }
+            Launch::Resume(request)
+        }
         None => Launch::Start(start_request),
     };
     let attachment = runner_key.clone().map(|key| RunnerAttachment {
@@ -6030,6 +6044,45 @@ async fn start_mission(
             return Err(start_failure(&state, &mission_id, error, area.safe_house.clone()).await);
         }
     };
+    let mut compacted_to = None;
+    let run = match shorten_first.zip(window_task) {
+        Some((grown, task)) => {
+            let notes = earlier
+                .as_ref()
+                .map(|last| last.recent.clone())
+                .unwrap_or_default();
+            let window = window_run.as_ref().map_or("", |run| run.window.as_str());
+            match standing::shorten_resumed(
+                &state,
+                run,
+                (mission.operation_id.as_deref(), mission_id.as_str(), window),
+                grown,
+                compaction::declared(&state, &handler_provider, Some(&handler_settings)),
+                task,
+                notes,
+            )
+            .await
+            {
+                Ok((run, left)) => {
+                    compacted_to = Some(left);
+                    run
+                }
+                Err(reason) => {
+                    standing::resume_refused(&state, &mission_id, &reason);
+                    return Err(start_failure(
+                        &state,
+                        &mission_id,
+                        format!(
+                            "the grown conversation could not be shortened in its session: {reason}"
+                        ),
+                        area.safe_house.clone(),
+                    )
+                    .await);
+                }
+            }
+        }
+        None => run,
+    };
     if runner.is_none() {
         log_harness_start(
             &format!("Mission {mission_id:?}"),
@@ -6114,7 +6167,8 @@ async fn start_mission(
     if let Some(run) = &window_run {
         new_run = new_run
             .with_window(run.window.as_str())
-            .with_comments_through(comments_through);
+            .with_comments_through(comments_through)
+            .with_compacted_to(compacted_to);
     }
     if let Some(account) = accounts::held(&state, &mission_id) {
         new_run = new_run.with_account(account);
@@ -7539,6 +7593,9 @@ fn spawn_event_pump_with_monitor(
         let mut tape = contexts::EventTape::new(state.intake.limits().contexts.context_bytes);
         let mut last_run: Option<RunId> = None;
         let launched = Launched::of(&state, &mission_id);
+        // The first time the conversation fills its model's window it is shortened in this
+        // session and the work goes on; the second time the Mission starts a fresh Run.
+        let mut window_retried = false;
         loop {
             medical::sync_exposure(&state, &mission_id, &exposure, &mut announced);
             if state.stopping.load(Ordering::Acquire) {
@@ -7566,6 +7623,13 @@ fn spawn_event_pump_with_monitor(
             }
             match result {
                 Ok((Some(event), run_id)) => {
+                    if !window_retried
+                        && fills_the_window(&event)
+                        && shorten_for_window(&state, &mission_id, &run, &mut usage_tracker, &notes)
+                    {
+                        window_retried = true;
+                        continue;
+                    }
                     let event = if fills_the_window(&event) && !can_compact(&state, &mission_id) {
                         failed_for_the_window(event)
                     } else {
@@ -8442,6 +8506,123 @@ pub(super) fn failed_for_the_window(event: AgentEvent) -> AgentEvent {
         )),
         ..event
     }
+}
+
+/// A Run whose conversation filled its model's context window, shortened in its running session
+/// (compacted, else cleared) and told to go on, as the first of the steps `[harness] compaction`
+/// allows. `false` when the Station is set to start a fresh Run, or the session can do neither, and
+/// the Run is closed for the Mission's fresh one.
+fn shorten_for_window(
+    state: &DaemonState,
+    mission_id: &str,
+    run: &Arc<Mutex<guatiao::library::Object<dyn AgentSession>>>,
+    tracker: &mut UsageTracker,
+    notes: &recovery::Notes,
+) -> bool {
+    let mode = state.station.limits().harness.compaction;
+    if mode == crate::station::limits::CompactionMode::Fresh {
+        return false;
+    }
+    let Ok(guard) = run.lock() else {
+        return false;
+    };
+    let mission = state
+        .missions
+        .lock()
+        .ok()
+        .and_then(|missions| missions.get(mission_id).cloned());
+    let operation = mission
+        .as_ref()
+        .and_then(|mission| mission.operation_id.clone());
+    let declared = state
+        .runs
+        .lock()
+        .ok()
+        .and_then(|runs| runs.get(mission_id).map(|run| run.handler_provider.clone()))
+        .map_or_else(crate::SessionCommands::none, |handler| {
+            compaction::declared(state, &handler, None)
+        });
+    let plan = compaction::Plan {
+        declared: &declared,
+        mode,
+        size: None,
+        limit: compaction_size(state, mission.as_ref()),
+        pending_end: true,
+        wait: state.station.limits().harness.compact_wait.get(),
+    };
+    let done = compaction::shorten(
+        &**guard,
+        &plan,
+        |event| {
+            if let Some(reported) = crate::directorates::medical::usage::spend_of(event) {
+                medical::record_usage(state, mission_id, tracker, reported);
+            }
+        },
+        || state.stopping.load(Ordering::Acquire),
+    );
+    let (step, says, sent) = match done {
+        Ok(done) => {
+            let text = if done.step == compaction::Step::Cleared {
+                standing::after_clear(
+                    "filled its model's context window",
+                    &notes.lines(),
+                    &mission.as_ref().map(Mission::task).unwrap_or_default(),
+                )
+            } else {
+                "Your conversation was compacted to make room. Continue the task where you left off."
+                    .to_owned()
+            };
+            let sent = guard.send_message(AgentMessage { text });
+            (
+                done.step,
+                done.says(),
+                sent.map_err(|error| error.to_string()),
+            )
+        }
+        Err(refused) => {
+            standing::note_shortened(
+                state,
+                (operation.as_deref(), mission_id),
+                "compaction",
+                compaction::Step::Fresh,
+                compaction::says(compaction::Step::Fresh, None, None, &refused.reasons),
+                None,
+            );
+            return false;
+        }
+    };
+    standing::note_shortened(
+        state,
+        (operation.as_deref(), mission_id),
+        "compaction",
+        step,
+        says,
+        None,
+    );
+    if let Err(error) = sent {
+        eprintln!(
+            "ai6: Mission {mission_id:?}: the work was not resumed after {}: {error}",
+            step.word()
+        );
+        return false;
+    }
+    true
+}
+
+/// The size at which the Mission's Agent's conversation compacts, for a compaction to be held to.
+fn compaction_size(state: &DaemonState, mission: Option<&Mission>) -> Option<u64> {
+    let mission = mission?;
+    let agent = state
+        .roster
+        .agent(
+            mission.operation_id.as_deref(),
+            mission.agent_id.as_deref()?,
+        )
+        .ok()?;
+    compaction::threshold(
+        &state.station.limits().harness,
+        compaction::smallest_cap(&agent),
+    )
 }
 
 /// Whether a Mission whose Run filled its context window may start over in a fresh Run: it has an
@@ -10279,6 +10460,95 @@ queue = 1
         }
     }
 
+    /// A provider whose Run fills its context window once and declares compaction: asked to
+    /// compact it reports a boundary, and any other message completes the turn.
+    #[derive(Default, Provider)]
+    #[provider(AgentHandler, id = "mock-window-compact", name = "Mock Window Compact", crate = crate::guatiao)]
+    struct MockWindowCompactHandler;
+
+    impl AgentHandler for MockWindowCompactHandler {
+        fn start(
+            &self,
+            _request: AgentStart,
+            _terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
+        ) -> Result<Object<dyn AgentSession>, ProviderError> {
+            let run_id = RunId::try_new("provider-id-window-compact")
+                .map_err(|error| test_provider_error(&error.to_string()))?;
+            let mut full = AgentEvent::new(LIMIT_EVENT, Some("prompt is too long".to_owned()));
+            full.limit = Some(
+                LimitHit::new(0)
+                    .kind(LimitKind::ContextWindow)
+                    .continuable(false),
+            );
+            Ok(WindowCompactRun {
+                run: MockRun::with_event(run_id, full),
+            }
+            .into_object())
+        }
+
+        fn resume(
+            &self,
+            request: AgentResume,
+            _terminal: Object<dyn crate::directorates::q::terminal::AgentTerminal>,
+        ) -> Result<Object<dyn AgentSession>, ProviderError> {
+            Ok(MockRun::new(request.run_id, "completed").into_object())
+        }
+
+        fn session_commands(&self) -> Result<crate::SessionCommands, ProviderError> {
+            Ok(crate::SessionCommands {
+                compact: true,
+                clear: false,
+                unsupported_because: None,
+            })
+        }
+    }
+
+    /// A [`MockRun`] that answers a compact command with a boundary.
+    struct WindowCompactRun {
+        run: MockRun,
+    }
+
+    impl AgentSession for WindowCompactRun {
+        fn session_id(&self) -> Result<Option<String>, ProviderError> {
+            self.run.session_id()
+        }
+
+        fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {
+            let mut events = self.run.events.lock().unwrap();
+            if let Some(crate::SessionCommand::Compact { .. }) =
+                crate::SessionCommand::parse(&message.text).unwrap()
+            {
+                events.push_back(
+                    crate::SessionChange {
+                        tokens_before: Some(190_000),
+                        tokens_after: Some(21_000),
+                        ..crate::SessionChange::default()
+                    }
+                    .event(crate::COMPACTED_EVENT, None),
+                );
+            } else {
+                RECORDED_MESSAGES
+                    .lock()
+                    .unwrap()
+                    .push((self.run.run_id.to_string(), message.text));
+            }
+            events.push_back(AgentEvent::new("completed", None));
+            Ok(())
+        }
+
+        fn next_event(&self, timeout_ms: i64) -> Result<Option<AgentEvent>, ProviderError> {
+            self.run.next_event(timeout_ms)
+        }
+
+        fn interrupt(&self) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        fn close(&self) -> Result<(), ProviderError> {
+            Ok(())
+        }
+    }
+
     /// A provider whose Run reports the cumulative usage listed in its Agent's
     /// `MOCK_USAGE` (`input:output:cost_micro_usd`, comma separated) and then stays quiet.
     #[derive(Default, Provider)]
@@ -10583,6 +10853,7 @@ queue = 1
             super::cable_wake_tests::MockWakeHandler,
             MockLimitedHandler,
             MockWindowHandler,
+            MockWindowCompactHandler,
             super::accounts::testing::MockPooledHandler,
             MockSpendHandler,
             MockRecordingHandler,
@@ -10600,7 +10871,8 @@ queue = 1
             super::review::testing::MockReviewerHandler,
             super::placement_tests::MockProgramHandler,
             super::standing::testing::MockStandingHandler,
-            super::charge_tests::MockChargeHandler
+            super::charge_tests::MockChargeHandler,
+            super::charge_tests::MockCompactingChargeHandler
         ]
     );
 
@@ -11421,6 +11693,48 @@ queue = 1
         );
     }
 
+    /// A Run whose handler declares compaction is compacted in its session and told to go on: no
+    /// second Run starts.
+    #[tokio::test]
+    async fn a_run_that_fills_its_window_compacts_in_its_session_and_goes_on() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, _now) = limited_state(
+            root.path(),
+            "",
+            "[agent.007]\nhandler = \"mock-window-compact\"\n",
+            1_000,
+        );
+        start_mission_one(&state).await;
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                let told = RECORDED_MESSAGES.lock().unwrap().iter().any(|(run, text)| {
+                    run == "provider-id-window-compact" && text.contains("compacted to make room")
+                });
+                if told {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the Run is told to go on after its compaction");
+        assert_eq!(
+            run_hold(&state, "mission-1").unwrap().number,
+            1,
+            "the same Run, not a fresh one"
+        );
+        assert_ne!(
+            state
+                .missions
+                .lock()
+                .unwrap()
+                .get("mission-1")
+                .unwrap()
+                .state,
+            MissionState::Queued
+        );
+    }
+
     #[tokio::test]
     async fn a_fresh_run_that_fills_the_window_too_fails_the_turn_with_the_reason() {
         let root = tempfile::tempdir().unwrap();
@@ -11756,6 +12070,7 @@ queue = 1
                 "mock-author",
                 "mock-cables",
                 "mock-charge",
+                "mock-charge-compact",
                 "mock-denied",
                 "mock-drip",
                 "mock-limit",
@@ -11770,6 +12085,7 @@ queue = 1
                 "mock-verdict",
                 "mock-wake",
                 "mock-window",
+                "mock-window-compact",
             ])
         );
 

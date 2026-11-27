@@ -118,6 +118,144 @@ pub(super) fn resume_from(
     found
 }
 
+/// What a conversation that was cleared to make room is told first: what its last run did, and
+/// then `task`.
+pub(super) fn after_clear(why: &str, notes: &[String], task: &str) -> String {
+    if notes.is_empty() {
+        return format!(
+            "Your earlier session {why} and was cleared to make room.
+
+{task}"
+        );
+    }
+    let lines: Vec<String> = notes.iter().map(|line| format!("- {line}")).collect();
+    format!(
+        "Your earlier session {why} and was cleared to make room, in this same session. What it          last did, oldest first:
+{}
+
+{task}",
+        lines.join("
+")
+    )
+}
+
+/// Puts a conversation shortened in its running session on the timeline of `operation`, as the
+/// step that did it.
+pub(super) fn note_shortened(
+    state: &DaemonState,
+    (operation, mission_id): (Option<&str>, &str),
+    kind: &str,
+    step: super::compaction::Step,
+    says: String,
+    window: Option<&str>,
+) {
+    let Some(operation) = operation else {
+        return;
+    };
+    let mut event = TimelineEvent::new(kind, step.word(), operation, state.clock.now() as f64)
+        .mission(mission_id)
+        .detail("detail", says);
+    if let Some(window) = window {
+        event = event.detail("window", window.to_owned());
+    }
+    let _ = state.intake.record_event(&event);
+}
+
+/// A window's resumed `run`, whose conversation `grown` past its size: compacted, or cleared, in
+/// the session, and then sent `task`. The `Run`'s Mission is `at`. The tokens the conversation
+/// held after, for the Run record. When the session can do neither it is closed and the reasons
+/// come back, and the next try starts a fresh Run, as for a resume the provider refused.
+pub(super) async fn shorten_resumed(
+    state: &DaemonState,
+    run: guatiao::library::Object<dyn coqui_acp_provider::AgentSession>,
+    at: (Option<&str>, &str, &str),
+    (size, limit): (u64, u64),
+    declared: crate::SessionCommands,
+    task: String,
+    notes: Vec<String>,
+) -> Result<
+    (
+        guatiao::library::Object<dyn coqui_acp_provider::AgentSession>,
+        u64,
+    ),
+    String,
+> {
+    let mode = state.station.limits().harness.compaction;
+    let wait = state.station.limits().harness.compact_wait.get();
+    let stopping = state.stopping.clone();
+    let (operation, mission_id, window) = at;
+    let worked = tokio::task::spawn_blocking(move || {
+        let plan = super::compaction::Plan {
+            declared: &declared,
+            mode,
+            size: Some(size),
+            limit: Some(limit),
+            pending_end: false,
+            wait,
+        };
+        let done = super::compaction::shorten(
+            &*run,
+            &plan,
+            |_| {},
+            || stopping.load(std::sync::atomic::Ordering::Acquire),
+        );
+        match done {
+            Ok(done) => {
+                let text = if done.step == super::compaction::Step::Cleared {
+                    after_clear(&format!("reached {size} tokens"), &notes, &task)
+                } else {
+                    task
+                };
+                match run.send_message(coqui_acp_provider::AgentMessage { text }) {
+                    Ok(()) => Ok((run, done)),
+                    Err(error) => {
+                        let _ = run.close();
+                        Err(format!(
+                            "the window's brief was not sent after {}: {error}",
+                            done.step.word()
+                        ))
+                    }
+                }
+            }
+            Err(refused) => {
+                let _ = run.close();
+                Err(refused.reasons.join("; "))
+            }
+        }
+    })
+    .await
+    .map_err(|error| format!("the compaction worker failed: {error}"))?;
+    match worked {
+        Ok((run, done)) => {
+            note_shortened(
+                state,
+                (operation, mission_id),
+                "sleeper",
+                done.step,
+                done.says(),
+                Some(window),
+            );
+            Ok((run, done.after.unwrap_or(0)))
+        }
+        Err(reason) => {
+            note_shortened(
+                state,
+                (operation, mission_id),
+                "sleeper",
+                super::compaction::Step::Fresh,
+                super::compaction::says(
+                    super::compaction::Step::Fresh,
+                    Some(size),
+                    None,
+                    std::slice::from_ref(&reason),
+                ),
+                Some(window),
+            );
+            Err(reason)
+        }
+    }
+}
+
 /// Whether the run before ended because its conversation filled its model's context window.
 pub(super) fn filled_window(earlier: Option<&RunRecord>) -> bool {
     earlier

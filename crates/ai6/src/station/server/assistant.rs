@@ -443,6 +443,11 @@ pub(super) trait Harness: Send + Sync {
         let _ = handler;
         Some("this Station's harness takes no image".to_owned())
     }
+    /// What `handler` declares it carries out on a live session; nothing by default.
+    fn session_commands(&self, handler: &str) -> crate::SessionCommands {
+        let _ = handler;
+        crate::SessionCommands::none()
+    }
     /// Where `handler`'s harness keeps its record of the Run `query` names, if it says.
     fn record(
         &self,
@@ -558,6 +563,10 @@ impl Harness for StationHarness {
     ) -> Option<RunRecordFile> {
         let handler = self.0.plugins.handler_with(handler, settings).ok()?;
         handler.run_record(query).ok().flatten()
+    }
+
+    fn session_commands(&self, handler: &str) -> crate::SessionCommands {
+        super::compaction::declared(&self.0, handler, None)
     }
 
     fn images(&self, handler: &str) -> Option<String> {
@@ -1448,6 +1457,7 @@ impl Desk {
             moving: None,
             launched,
             tape: super::contexts::EventTape::new(state.intake.limits().contexts.context_bytes),
+            window_retried: false,
         };
         std::thread::Builder::new()
             .name("ai6-assistant".to_owned())
@@ -2040,6 +2050,9 @@ struct Pump {
     launched: Launched,
     /// The events it reported, the context of a harness that keeps no record of its own.
     tape: super::contexts::EventTape,
+    /// The conversation's full window was already shortened in this harness for the message that
+    /// filled it, so a second time goes to a fresh harness.
+    window_retried: bool,
 }
 
 /// The handler, its settings and the environment a conversation's harness started with.
@@ -2118,6 +2131,19 @@ impl Pump {
             // A conversation that filled its model's context window starts over, from the recap
             // and the message, once; a harness that was started afresh has nothing more to drop.
             let window_full = matches!(&read, Ok(Some(event)) if super::fills_the_window(event));
+            // The harness shortens its own conversation first, and takes the message again.
+            if window_full
+                && !self.window_retried
+                && let Some(notice) = self.shorten_for_window()
+            {
+                self.window_retried = true;
+                heard = Instant::now();
+                self.send(
+                    run_id.as_ref(),
+                    vec![AssistantEvent::new(EVENT_NOTICE, Some(notice))],
+                );
+                continue;
+            }
             if window_full && let Some(fallback) = self.fallback.take() {
                 match self.start_afresh(
                     fallback,
@@ -2412,6 +2438,83 @@ impl Pump {
             usd(self.turn_cost),
             usd(bound)
         ))
+    }
+
+    /// A conversation that filled its model's window, shortened in the running harness (compacted,
+    /// else cleared) and the message of the turn sent again: what the person is told, or `None`
+    /// when the Station is set to start a fresh harness, the harness can do neither, the turn
+    /// joined more than one message, or the message carries images.
+    fn shorten_for_window(&mut self) -> Option<String> {
+        let mode = self.state.station.limits().harness.compaction;
+        let job = self.flags.turn.lock().ok()?.clone()?;
+        if mode == crate::station::limits::CompactionMode::Fresh
+            || !job.images.is_empty()
+            || job.message.starts_with(CONTENT_PREFIX)
+        {
+            return None;
+        }
+        let done = {
+            let run = self.run.read().ok()?;
+            let usage = &mut self.usage;
+            let declared = self
+                .launched
+                .harness
+                .session_commands(&self.launched.handler);
+            let plan = super::compaction::Plan {
+                declared: &declared,
+                mode,
+                size: None,
+                limit: None,
+                pending_end: true,
+                wait: self.state.station.limits().harness.compact_wait.get(),
+            };
+            super::compaction::shorten(
+                &**run,
+                &plan,
+                |event| {
+                    if let Some(spend) = crate::directorates::medical::usage::spend_of(event) {
+                        usage.observe(spend);
+                    }
+                },
+                || self.stopping.load(Ordering::Acquire),
+            )
+        };
+        let done = match done {
+            Ok(done) => done,
+            Err(refused) => {
+                eprintln!(
+                    "ai6: assistant conversation {}: its window filled and the harness could not shorten it: {}",
+                    conversation_digest(&self.conversation_id),
+                    refused.reasons.join("; ")
+                );
+                return None;
+            }
+        };
+        let text = match (done.step, &job.recap) {
+            (super::compaction::Step::Cleared, Some(recap)) => {
+                format!(
+                    "{recap}
+
+{}",
+                    job.message
+                )
+            }
+            _ => job.message.clone(),
+        };
+        let sent = self
+            .run
+            .read()
+            .ok()?
+            .send_message(AgentMessage { text })
+            .is_ok();
+        let says = done.says();
+        eprintln!(
+            "ai6: assistant conversation {}: its window filled; {says}",
+            conversation_digest(&self.conversation_id)
+        );
+        sent.then(|| {
+            format!("Moneypenny's conversation filled her model's context window: {says}. She is answering again.")
+        })
     }
 
     /// Replaces a resumed harness that failed with `failure` by one started afresh (with the
@@ -3288,6 +3391,7 @@ mod tests {
         AssistantChange, AssistantCommit, AssistantWorkspace,
     };
     use crate::guatiao::library::ProviderError;
+    use crate::{CLEARED_EVENT, COMPACTED_EVENT, SessionChange, SessionCommand};
 
     /// Each start and resume, as the harness was asked for it.
     #[derive(Default)]
@@ -3295,6 +3399,8 @@ mod tests {
         starts: Vec<AgentStart>,
         resumes: Vec<AgentResume>,
         messages: Vec<String>,
+        /// The session commands it was sent: `compact` or `clear`.
+        commands: Vec<&'static str>,
         interrupts: usize,
         /// A read of [`Script::ReadsLong`] ran out with no output.
         read_ran_out: bool,
@@ -3317,6 +3423,11 @@ mod tests {
         Dies,
         /// Ends the turn at a full context window, as a conversation grown too long does.
         Fills,
+        /// Fills the window for the first message only, compacts when asked to, and then
+        /// answers the message again.
+        FillsOnce,
+        /// As `FillsOnce`, but a harness that cannot compact: it clears when asked to.
+        FillsClears,
         /// Never writes anything.
         Hangs,
         /// Starts answering and completes only when interrupted, as Claude Code and Codex end
@@ -3476,7 +3587,47 @@ mod tests {
         }
     }
 
+    /// The end of a turn at a full context window.
+    fn full_window() -> AgentEvent {
+        let mut full = event(LIMIT_EVENT, Some("prompt is too long"));
+        full.limit = Some(
+            coqui_acp_api::LimitHit::new(0)
+                .kind(coqui_acp_api::LimitKind::ContextWindow)
+                .continuable(false),
+        );
+        full
+    }
+
     impl ScriptedRun {
+        /// A session command: only the scripts that shorten a conversation carry one out.
+        fn command(&self, command: &SessionCommand) -> Result<(), ProviderError> {
+            let (name, reported) = match (self.script, command) {
+                (Script::FillsOnce, SessionCommand::Compact { .. }) => (
+                    "compact",
+                    SessionChange {
+                        tokens_before: Some(190_000),
+                        tokens_after: Some(21_000),
+                        ..SessionChange::default()
+                    }
+                    .event(COMPACTED_EVENT, None),
+                ),
+                (Script::FillsClears, SessionCommand::Clear) => {
+                    ("clear", SessionChange::default().event(CLEARED_EVENT, None))
+                }
+                _ => {
+                    return Err(ProviderError::new(
+                        guatiao::Status::GUATIAO_ERR_UNSUPPORTED,
+                        "this stand-in does not do that",
+                    ));
+                }
+            };
+            self.asked.lock().unwrap().commands.push(name);
+            let mut events = self.events.lock().unwrap();
+            events.push_back(reported);
+            events.push_back(event("completed", None));
+            Ok(())
+        }
+
         fn answer(&self, message: &str) {
             let mut events = self.events.lock().unwrap();
             match self.script {
@@ -3492,14 +3643,14 @@ mod tests {
                     events.push_back(event(DENIED_EVENT, Some("read_file")));
                     events.push_back(event("completed", Some("")));
                 }
-                Script::Fills => {
-                    let mut full = event(LIMIT_EVENT, Some("prompt is too long"));
-                    full.limit = Some(
-                        coqui_acp_api::LimitHit::new(0)
-                            .kind(coqui_acp_api::LimitKind::ContextWindow)
-                            .continuable(false),
-                    );
-                    events.push_back(full);
+                Script::Fills => events.push_back(full_window()),
+                Script::FillsOnce | Script::FillsClears => {
+                    if self.asked.lock().unwrap().messages.is_empty() {
+                        events.push_back(full_window());
+                    } else {
+                        events.push_back(event(EVENT_TEXT, Some(&format!("answer: {message}"))));
+                        events.push_back(event("completed", Some(&format!("answer: {message}"))));
+                    }
                 }
                 Script::Dies => {
                     events.push_back(event("output", Some("Error: the stored login has expired")));
@@ -3586,6 +3737,9 @@ mod tests {
         }
 
         fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {
+            if let Some(command) = SessionCommand::parse(&message.text).unwrap() {
+                return self.command(&command);
+            }
             self.asked
                 .lock()
                 .unwrap()
@@ -3692,6 +3846,14 @@ mod tests {
 
         fn images(&self, _handler: &str) -> Option<String> {
             self.no_images.lock().unwrap().clone()
+        }
+
+        fn session_commands(&self, _handler: &str) -> crate::SessionCommands {
+            crate::SessionCommands {
+                compact: self.script == Script::FillsOnce,
+                clear: self.script == Script::FillsClears,
+                unsupported_because: None,
+            }
         }
 
         fn record(
@@ -5983,6 +6145,62 @@ event_bytes = 7
                 .initial_context
                 .contains(&"Earlier in this conversation: hello.".to_owned()),
             "started afresh with the recap"
+        );
+        drop(asked);
+        fixture.desk.close_all();
+    }
+
+    /// A conversation that fills its model's window is compacted in the running harness, and the
+    /// message is taken again there: no second harness starts.
+    #[tokio::test]
+    async fn a_conversation_that_fills_the_context_window_compacts_in_its_harness_and_answers() {
+        let fixture = scripted(true, IDLE, Script::FillsOnce, Script::FillsOnce);
+        fixture.desk.handle(job("c-compact", "hello")).await;
+        until(|| kinds(&fixture, "c-compact").contains(&EVENT_COMPLETED.to_owned())).await;
+        let shown = kinds(&fixture, "c-compact");
+        assert!(!shown.contains(&EVENT_FAILED.to_owned()), "{shown:?}");
+        let asked = fixture.asked.lock().unwrap();
+        assert_eq!(
+            (asked.resumes.len(), asked.starts.len()),
+            (0, 1),
+            "no second harness"
+        );
+        assert_eq!(asked.commands, ["compact"]);
+        assert_eq!(asked.messages, ["hello"], "the message is taken again");
+        drop(asked);
+        let notices: Vec<String> = fixture
+            .reports
+            .lock()
+            .unwrap()
+            .iter()
+            .flat_map(|report| report.events.iter())
+            .filter(|event| event.kind == EVENT_NOTICE)
+            .filter_map(|event| event.text.clone())
+            .collect();
+        assert!(
+            notices
+                .iter()
+                .any(|text| text.contains("190000 tokens before, 21000 after")),
+            "the person is told what happened: {notices:?}"
+        );
+        fixture.desk.close_all();
+    }
+
+    /// A harness that cannot compact is cleared, and the message carries the recap.
+    #[tokio::test]
+    async fn a_conversation_whose_harness_cannot_compact_is_cleared_and_given_its_recap() {
+        let fixture = scripted(true, IDLE, Script::FillsClears, Script::FillsClears);
+        fixture.desk.handle(job("c-clear", "hello")).await;
+        until(|| kinds(&fixture, "c-clear").contains(&EVENT_COMPLETED.to_owned())).await;
+        let asked = fixture.asked.lock().unwrap();
+        assert_eq!(asked.starts.len(), 1);
+        assert_eq!(asked.commands, ["clear"]);
+        assert_eq!(asked.messages.len(), 1);
+        assert!(
+            asked.messages[0].starts_with("Earlier in this conversation: hello.")
+                && asked.messages[0].ends_with("hello"),
+            "{:?}",
+            asked.messages
         );
         drop(asked);
         fixture.desk.close_all();

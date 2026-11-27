@@ -790,6 +790,11 @@ impl Notes {
         self.changed = true;
     }
 
+    /// The lines noted, oldest first.
+    pub(super) fn lines(&self) -> Vec<String> {
+        self.lines.iter().cloned().collect()
+    }
+
     /// Writes the notes to the Run record when they changed and the last write is old
     /// enough, so a busy Run costs a Registry write every few seconds at most.
     pub(super) fn write_if_due(&mut self, state: &DaemonState, mission_id: &str) {
