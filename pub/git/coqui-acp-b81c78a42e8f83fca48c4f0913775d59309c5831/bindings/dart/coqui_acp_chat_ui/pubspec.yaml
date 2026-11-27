@@ -1,0 +1,24 @@
+name: coqui_acp_chat_ui
+description: "Flutter widgets for an agent chat: composer, transcript, cards, queue and diff, a renderer registry and ChatLook, over coqui_acp_chat."
+version: 0.0.0-alpha.0
+repository: https://github.com/Boriken-Dev/coqui-acp
+publish_to: none
+
+environment:
+  sdk: ">=3.9.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  coqui_acp:
+    path: ../coqui_acp
+  coqui_acp_chat:
+    path: ../coqui_acp_chat
+  # Agent Markdown is untrusted text: a maintained parser draws it, the package restricts what it may fetch and open.
+  markdown: ^7.3.1
+  flutter_markdown_plus: ^1.0.12
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0

@@ -1,0 +1,16 @@
+name: coqui_acp_chat
+description: "The state of an agent chat built from ACP session updates, with no Flutter: messages, tool calls, plans, permissions, questions, the prompt queue and several attached clients."
+version: 0.0.0-alpha.0
+repository: https://github.com/Boriken-Dev/coqui-acp
+publish_to: none
+
+environment:
+  sdk: ">=3.9.0 <4.0.0"
+
+dependencies:
+  coqui_acp:
+    path: ../coqui_acp
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.0
