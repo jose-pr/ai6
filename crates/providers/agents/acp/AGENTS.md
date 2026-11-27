@@ -74,6 +74,14 @@ pub struct AcpHandler;                           // AgentHandler provider id "ac
 - An interrupted turn the agent answers `cancelled` is `completed`; one it cancels by itself is
   `cancelled` with the text `TURN_CANCELLED` (`coqui_acp_provider`'s).
 
+## Session commands
+
+`session_commands()` keeps the default (none). A message in `ai6::SessionCommand`'s form sent to an ACP agent
+is refused with `GUATIAO_ERR_UNSUPPORTED`; it is never prompted as words. `coqui_acp`'s client does not
+surface `available_commands_update` or open a second session (`session/new`) on its connection, so neither a
+compaction by an advertised command nor a clear can be carried out from here. A façade (a handler's session
+reached over ACP) passes the form through to the handler.
+
 ## Grok's login kept in the Registry
 
 Grok runs under this handler. A `harness-login` pool account with `files = [".grok/auth.json"]`. Measured on

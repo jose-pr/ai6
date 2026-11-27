@@ -353,6 +353,24 @@ The terminal is opened at `STREAM_COLS` (32767) columns and read with
 written and lines it breaks are read as the stream Codex wrote. A line that is not JSON is
 skipped while waiting for a reply, and is an event of kind `output` otherwise.
 
+## Compacting a live thread
+
+`session_commands()` reports `compact` only. A message in `ai6::SessionCommand`'s form is a compaction
+as `thread/compact/start` with `{"threadId": THREAD}` (Codex 0.166.0 schema; it takes no focus, so the
+command's focus is dropped), answered `{}` at once, bounded by `request_timeout_ms`. The compaction is
+a turn of its own: `turn/started`, `item/started` and `item/completed` of a `contextCompaction` item,
+`thread/tokenUsage/updated` notifications, `turn/completed`. The `compacted` event follows the item's
+completion: `tokens_before` is the `last.totalTokens` of the latest usage notification before the item
+started, `tokens_after` the latest one before it completed (28857 to 14185 in a probe against a loopback
+Responses stand-in). A compaction the Station asked for is trigger `manual`, Codex's own `auto`. A turn
+the Station asked to compact that ends with no `contextCompaction` is a `compact_failed` event, before
+`completed`. A custom provider compacts locally, and Codex keeps the person's recent messages, so a
+thread of long user messages shrinks less than one of long answers.
+
+A clear is refused (`GUATIAO_ERR_UNSUPPORTED`): the app server opens a second thread with
+`thread/start`, but `coqui_acp_codex::CodexSession` holds one thread for its life, so the handler has
+no way to send turns to the new one. Not run: a compaction against a real login.
+
 ## Listing models
 
 `CodexHandler::models(environment)` starts `codex app-server` with exactly that environment, answers

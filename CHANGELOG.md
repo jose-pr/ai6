@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A handler compacts and clears a live session: `AgentHandler::session_commands` (a new method of the handler kind: every handler plugin is rebuilt, its floor hash moved) says which, and a
+  `SessionCommand` message (`compact` with an optional focus, `clear`) sent to a Run's session is a turn that reports
+  `compacted` (tokens before and after), `compact_failed` or `cleared` before it completes. Claude Code runs `/compact` and
+  `/clear` as user turns in the same process; Codex compacts a thread with `thread/compact/start`; Codex's clear and ACP
+  agents' commands are not offered (refused, never sent as words).
+
 - A Mission whose Run was taken up again after a Station restart fails instead of finishing done when a core tool
   (`[denials] core_tools`) was refused, and a tracker credential that cannot write (a GitHub classic token without
   `repo`, a GitLab token without `api`, a Jira account without Add Comments) now fails the Station's write check

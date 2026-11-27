@@ -446,6 +446,29 @@ only managed settings besides AI6's. Inferred, not checked against a live Claude
 authenticates under `--restricted`. A Claude Code that does not know a flag refuses to start,
 which ends the review without an answer.
 
+## Compacting and clearing a live Run
+
+`session_commands()` reports `compact` and `clear`. A message in `ai6::SessionCommand`'s form
+(`ai6::SESSION_COMMAND_PREFIX`) is written as the user turn `/compact [FOCUS]` or `/clear`, in the
+process that holds the conversation; FOCUS has its whitespace collapsed to one line. A malformed form is
+refused with `GUATIAO_ERR_BAD_VALUE` and nothing is written. Measured on Claude Code 2.1.326 with
+stream-json input against a loopback stand-in (no model reached):
+
+- `/compact` ends with `system/status` `compacting`, `system/status` with `compact_result` `success`,
+  `system/compact_boundary` whose `compact_metadata` has `trigger`, `pre_tokens` and `post_tokens`
+  (23879 to 2830 in the probe), and a `result` (`num_turns` 0). The boundary is the `compacted` event
+  with `SessionChange` tokens; Claude Code's own autocompaction is the same line with trigger `auto`.
+- A compaction that cannot run (`Not enough messages to compact.`, or the summary request refused) is a
+  `system/status` with `compact_result` `failed` and `compact_error`, then a `result` that is still a
+  success: it is the `compact_failed` event, the only sign the conversation is unchanged.
+- `/clear` writes `conversation_reset` (`trigger` `clear`, `new_conversation_id`, which is NOT the
+  session id), then a `system/init` with a NEW `session_id`, then a `result`. The process id is the same.
+  The event is `cleared`, and `session_id()` answers the new id once its `init` is read; the Station
+  records that id for a later resume. A Run that was RESUMED refuses `clear` (`GUATIAO_ERR_UNSUPPORTED`):
+  `coqui-acp-claude`'s session ends a resumed session that reports another id, which is what `/clear` makes
+  (seen in a test; a real resumed `/clear` was not run). `compact` has no such limit.
+- Not run: either command against a real login (it would spend quota).
+
 ## Listing models
 
 `ClaudeHandler::models(environment)` starts `claude -p --input-format stream-json --output-format

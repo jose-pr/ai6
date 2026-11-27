@@ -5253,6 +5253,26 @@ pub const IMAGE_MEDIA_TYPES: [&str; 4];   // image/png, image/jpeg, image/webp, 
 pub struct MessageContent { pub text: String, pub images: Vec<MessageImage> }
 impl MessageContent { pub fn encode(&self) -> String; pub fn decode(message: &str) -> Option<Self>; }
 pub struct MessageImage { pub media_type: String, pub data: String /* base64 */ }
+// section_00::session_command: a command for a LIVE session, as the text an AgentSession is sent
+// (the same in-band form as the content one, so it crosses the ACP façade and the runner as a prompt):
+pub const SESSION_COMMAND_PREFIX: &str = "\u{0}ai6-session\n";   // then the JSON of SessionCommand
+pub enum SessionCommand { Compact { focus: Option<String> }, Clear }   // serde tag "command", snake_case
+impl SessionCommand {
+    pub fn encode(&self) -> String;
+    pub fn parse(message: &str) -> Result<Option<Self>, String>;  // Ok(None): plain text; Err: the prefix, unreadable
+    pub fn refuse_in(message: &str, why: &str) -> Result<(), ProviderError>;  // a session with no command: UNSUPPORTED
+}
+// A command is a turn: events COMPACTED_EVENT "compacted", COMPACT_FAILED_EVENT "compact_failed" (text says
+// why; the conversation is unchanged) and CLEARED_EVENT "cleared" come before the turn's `completed`, each
+// with a SessionChange as `data`. A harness's own automatic compaction is also `compacted`, trigger "auto".
+pub struct SessionChange { pub trigger: Option<String> /* manual | auto */, pub tokens_before: Option<u64>,
+    pub tokens_after: Option<u64>, pub session_id: Option<String> }
+impl SessionChange { pub fn event(&self, kind: &str, text: Option<String>) -> AgentEvent;
+                     pub fn of(event: &AgentEvent) -> Option<Self>; }
+// AgentHandler::session_commands() -> SessionCommands { compact, clear, unsupported_because }
+//   (default: none; a new method of the handler kind, so its floor hash moved: 313360543, rebuild every handler plugin). A session that is sent a
+//   command it cannot carry out refuses it with GUATIAO_ERR_UNSUPPORTED; it is never given to the model as
+//   words. After a `cleared` event `AgentSession::session_id` may answer a new id (Claude Code's `/clear`).
                                                      // Debug redacts the token
 impl AssistantJob { pub fn validate(&self, limits: &AssistantLimits) -> Result<(), String>; }
 #[derive(Default)] // serde: every key default, unknown keys refused
