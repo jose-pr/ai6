@@ -32,7 +32,7 @@ use ai6::micro_usd;
 use ai6::{
     AgentEvent, AgentMessage, AgentSession, Bucket, BucketStatus, DENIED_EVENT, LIMIT_EVENT,
     LimitHit, LimitKind, Refill, SessionChange, SessionCommand, Spend, UsageReport, UsageSource,
-    UsageSupport, infer_limit, limit_kind_of,
+    UsageSupport, infer_limit,
 };
 use coqui_acp_claude::harness::event::{Content, Event as ClaudeEvent};
 use coqui_acp_claude::{
@@ -2037,93 +2037,24 @@ fn event(kind: &str, text: Option<String>) -> AgentEvent {
     }
 }
 
-/// Recognises Claude Code's refusal to continue until a quota resets.
-///
-/// Two stream shapes carry it: a `rate_limit_event` whose status is `rejected` (with
-/// `resetsAt` in Unix seconds), and an error `result` whose text names the limit, either as
-/// `... usage limit reached|<unix seconds>` or as prose with only a local clock time, which
-/// leaves `resets_at` unset rather than guessing a date.
+/// Recognises Claude Code's refusal to continue until a quota resets: the driver's reading of the line
+/// ([`coqui_acp_claude::limit_of_line`]), with the wait the words state and the one limit that follows the
+/// work and not the account.
 fn decode_limit(value: &Value) -> Option<(LimitHit, Option<String>)> {
-    match value.get("type").and_then(Value::as_str)? {
-        "rate_limit_event" => {
-            let info = value.get("rate_limit_info")?;
-            if info.get("status").and_then(Value::as_str) != Some("rejected") {
-                return None;
-            }
-            let mut limit = LimitHit::new(0);
-            limit.resets_at = info
-                .get("resetsAt")
-                .and_then(Value::as_i64)
-                .map(unix_seconds);
-            limit.bucket = info
-                .get("rateLimitType")
-                .and_then(Value::as_str)
-                .map(str::to_owned);
-            // The event names its window itself: the plan's windows are quotas, and `overage` is
-            // extra usage bought with money.
-            limit.kind = Some(
-                if limit
-                    .bucket
-                    .as_deref()
-                    .is_some_and(|window| window.contains("overage"))
-                {
-                    LimitKind::Credit
-                } else {
-                    LimitKind::UsageQuota
-                },
-            );
-            limit.continuable = Some(true);
-            Some((limit, None))
-        }
-        "result" if value.get("is_error").and_then(Value::as_bool) == Some(true) => {
-            let text = value.get("result").and_then(Value::as_str)?;
-            let lower = text.to_lowercase();
-            // Past its retries Claude Code words a gateway's refusal `API Error: Request rejected
-            // (429)`, and says the status beside it (`api_error_status`, 2.1.316).
-            let limited = value.get("api_error_status").and_then(Value::as_i64) == Some(429)
-                || ["usage limit", "limit reached", "hit your limit"]
-                    .iter()
-                    .any(|phrase| lower.contains(phrase));
-            if !limited {
-                return None;
-            }
-            let resets_at = text
-                .rsplit_once('|')
-                .and_then(|(_, tail)| tail.trim().parse::<i64>().ok())
-                .map(unix_seconds);
-            let window = if lower.contains("5-hour") || lower.contains("five-hour") {
-                Some("five_hour".to_owned())
-            } else if lower.contains("weekly") || lower.contains("7-day") {
-                Some("weekly".to_owned())
-            } else {
-                None
-            };
-            // A wait the words state (`retry after 90 seconds`) is the refusal's own.
-            let stated = infer_limit(
-                text,
+    let mut limit = coqui_acp_claude::limit_of_line(value)?;
+    let text = limit.text.clone();
+    // A wait the words state (`retry after 90 seconds`) is the refusal's own.
+    limit.retry_after = text
+        .as_deref()
+        .and_then(|words| {
+            infer_limit(
+                words,
                 &["429", "usage limit", "limit reached", "hit your limit"],
-            );
-            let mut limit = LimitHit::new(0);
-            limit.resets_at = resets_at;
-            limit.bucket = window;
-            limit.retry_after = stated.as_ref().and_then(|stated| stated.retry_after);
-            // Claude Code's own words for a usage limit are a quota; a 429 that names none is the
-            // API's rate limit, unless the words say what else it is.
-            limit.kind = Some(
-                if ["usage limit", "limit reached", "hit your limit"]
-                    .iter()
-                    .any(|phrase| lower.contains(phrase))
-                {
-                    LimitKind::UsageQuota
-                } else {
-                    limit_kind_of(text).unwrap_or(LimitKind::RateLimit)
-                },
-            );
-            limit.continuable = Some(limit.kind != Some(LimitKind::ContextWindow));
-            Some((limit, Some(text.to_owned())))
-        }
-        _ => None,
-    }
+            )
+        })
+        .and_then(|stated| stated.retry_after);
+    limit.continuable = Some(limit.kind != Some(LimitKind::ContextWindow));
+    Some((limit, text))
 }
 
 /// The quota a `rate_limit_event` reports, whatever its status: the window

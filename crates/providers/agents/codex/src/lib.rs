@@ -30,8 +30,8 @@ use ai6::directorates::section_00::records;
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use ai6::{
-    AgentEvent, AgentMessage, AgentSession, Bucket, BucketStatus, LIMIT_EVENT, LimitHit, LimitKind,
-    Refill, SessionChange, SessionCommand, Spend, UsageReport, UsageSource, UsageSupport, infer_limit,
+    AgentEvent, AgentMessage, AgentSession, Bucket, BucketStatus, LIMIT_EVENT, LimitHit, Refill,
+    SessionChange, SessionCommand, Spend, UsageReport, UsageSource, UsageSupport, infer_limit,
 };
 use coqui_acp_codex::harness::PlainSpawn;
 use coqui_acp_codex::harness::event::{Content, Event as CodexEvent, Outcome, PermissionRequest};
@@ -1488,56 +1488,16 @@ fn exhausted_window(message: &Value) -> Option<LimitHit> {
         .max_by_key(|hit| hit.resets_at)
 }
 
-/// Recognises the usage-limit error Codex reports on a failed turn.
-///
-/// The error object (`params.error`, or `params.turn.error` on `turn/failed` and a failed
-/// `turn/completed`) names the limit in `codexErrorInfo`; its reset time is `resetsAt` in
-/// Unix seconds when present, else the exhausted window last reported by the account.
+/// Recognises the limit Codex reports on a failed turn: the driver's reading of the message
+/// ([`coqui_acp_codex::limit_of_message`]), whose reset falls back on the exhausted window the account
+/// last reported, with the wait the words state.
 fn decode_limit(message: &Value, hint: Option<&LimitHit>) -> Option<(LimitHit, Option<String>)> {
-    let params = message.get("params")?;
-    let error = match message.get("method")?.as_str()? {
-        "error" => params.get("error")?,
-        "turn/failed" => params
-            .get("error")
-            .or_else(|| params.pointer("/turn/error"))?,
-        "turn/completed"
-            if params.pointer("/turn/status").and_then(Value::as_str) == Some("failed") =>
-        {
-            params.pointer("/turn/error")?
-        }
-        _ => return None,
-    };
-    let info = error
-        .get("codexErrorInfo")
-        .and_then(Value::as_str)?
-        .to_lowercase()
-        .replace('_', "");
-    if !(info.contains("usagelimit") || info.contains("ratelimit")) {
-        return None;
-    }
-    let resets_at = error
-        .get("resetsAt")
-        .and_then(Value::as_i64)
-        .or_else(|| hint.and_then(|hint| hint.resets_at));
-    let text = error
-        .get("message")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    let mut hit = LimitHit::new(0);
-    hit.resets_at = resets_at;
-    hit.bucket = hint.and_then(|hint| hint.bucket.clone());
-    // The error names its own kind: the plan's allowance used up, or too many requests too fast.
-    // Either follows the account, so the work can go on with another.
-    hit.kind = Some(if info.contains("ratelimit") {
-        LimitKind::RateLimit
-    } else {
-        LimitKind::UsageQuota
-    });
-    hit.continuable = Some(true);
+    let mut hit = coqui_acp_codex::limit_of_message(message, hint)?;
+    let text = hit.text.clone();
     // A wait the message states (`try again in 90 seconds`) is the refusal's own.
     hit.retry_after = text
         .as_deref()
-        .and_then(|text| infer_limit(text, &["limit"]))
+        .and_then(|words| infer_limit(words, &["limit"]))
         .and_then(|stated| stated.retry_after);
     Some((hit, text))
 }
@@ -2054,6 +2014,7 @@ fn refuse(status: Status, error: impl std::fmt::Display) -> ProviderError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ai6::LimitKind;
     use ai6::directorates::q::terminal::{
         ExitInfo, READ_TIMED_OUT, STREAM_COLS, Spec, TerminalRun,
     };
