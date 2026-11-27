@@ -4129,16 +4129,10 @@ fn registry_lock(root: &Path, wait: TimeLimit) -> io::Result<File> {
 }
 
 fn lock_is_contended(error: &io::Error) -> bool {
-    if matches!(
+    matches!(
         error.kind(),
         io::ErrorKind::WouldBlock | io::ErrorKind::PermissionDenied
-    ) {
-        return true;
-    }
-    #[cfg(windows)]
-    return matches!(error.raw_os_error(), Some(32 | 33));
-    #[cfg(not(windows))]
-    false
+    ) || (cfg!(windows) && matches!(error.raw_os_error(), Some(32 | 33)))
 }
 
 pub(super) fn safe_component(value: &str) -> String {
