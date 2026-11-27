@@ -382,12 +382,7 @@ impl Conversation {
         }
         last.text.push_str(more);
         self.bytes += more.len();
-        self.record(
-            "moneypenny",
-            more,
-            None,
-            true,
-        );
+        self.record("moneypenny", more, None, true);
         let _ = self
             .events
             .send(serde_json::json!({"type": "append", "text": more}));
