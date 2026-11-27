@@ -31,7 +31,8 @@ use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use ai6::micro_usd;
 use ai6::{
     AgentEvent, AgentMessage, AgentSession, Bucket, BucketStatus, DENIED_EVENT, LIMIT_EVENT,
-    LimitHit, Refill, Spend, UsageReport, UsageSource, UsageSupport, infer_limit,
+    LimitHit, Refill, SessionChange, SessionCommand, Spend, UsageReport, UsageSource, UsageSupport,
+    infer_limit,
 };
 use coqui_acp_claude::harness::event::{Content, Event as ClaudeEvent};
 use coqui_acp_claude::{
@@ -233,6 +234,16 @@ impl AgentHandler for ClaudeHandler {
     /// be a terminal: on one it exits at once.
     fn stdio(&self) -> Result<ai6::HarnessStdio, ProviderError> {
         Ok(ai6::HarnessStdio::Json)
+    }
+
+    /// `/compact` and `/clear` are slash commands Claude Code runs as user turns in stream-json
+    /// input, in the process that holds the conversation.
+    fn session_commands(&self) -> Result<ai6::SessionCommands, ProviderError> {
+        Ok(ai6::SessionCommands {
+            compact: true,
+            clear: true,
+            unsupported_because: None,
+        })
     }
 
     fn read_only_refusal(&self) -> Result<Option<String>, ProviderError> {
@@ -1612,7 +1623,12 @@ fn open(opening: Opening<'_>) -> Result<ClaudeRun, ProviderError> {
             ));
         }
     };
-    Ok(ClaudeRun { session, shared })
+    let resumed = shared.expected_run_id.is_some();
+    Ok(ClaudeRun {
+        session,
+        shared,
+        resumed,
+    })
 }
 
 /// An exit reason in the words of a Run: how the driver words it, with a negative exit code also
@@ -1744,6 +1760,10 @@ impl Shared {
         if kind == Some("control_response") {
             control_answered(value);
         }
+        if let Some(changed) = session_event(value) {
+            self.push(changed);
+            return true;
+        }
         if matches!(kind, Some("user" | "control_response")) {
             return true;
         }
@@ -1811,9 +1831,27 @@ struct ClaudeRun {
     /// `None` for a Claude Code that ended before it was started: its Run only reports that.
     session: Option<Session>,
     shared: Arc<Shared>,
+    /// Whether the launch named the session to resume: the driver ends a session that then
+    /// reports another one, which is what `/clear` makes.
+    resumed: bool,
 }
 
 impl ClaudeRun {
+    fn command(&self, command: &SessionCommand) -> Result<(), ProviderError> {
+        if self.resumed && *command == SessionCommand::Clear {
+            return Err(refuse(
+                Status::GUATIAO_ERR_UNSUPPORTED,
+                "a resumed Claude Code session is ended by the driver when /clear gives it a new session id",
+            ));
+        }
+        match &self.session {
+            Some(session) => session
+                .prompt(&[Content::Text(command_text(command))])
+                .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error)),
+            None => Ok(()),
+        }
+    }
+
     fn send(&self, text: &str) -> Result<(), ProviderError> {
         match &self.session {
             Some(session) => session
@@ -1821,6 +1859,71 @@ impl ClaudeRun {
                 .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error)),
             None => Ok(()),
         }
+    }
+}
+
+/// The user message that asks Claude Code for `command`: its own slash command, which stream-json
+/// input runs as a turn of its own (`/compact` ends in a `compact_boundary`, `/clear` in a
+/// `conversation_reset`, each followed by a `result`).
+fn command_text(command: &SessionCommand) -> String {
+    match command {
+        SessionCommand::Compact { focus } => {
+            let focus = focus
+                .as_deref()
+                .map(|focus| focus.split_whitespace().collect::<Vec<_>>().join(" "))
+                .filter(|focus| !focus.is_empty());
+            match focus {
+                Some(focus) => format!("/compact {focus}"),
+                None => "/compact".to_owned(),
+            }
+        }
+        SessionCommand::Clear => "/clear".to_owned(),
+    }
+}
+
+/// What a line of Claude Code's says of a conversation changing, as the event that reports
+/// it: `system/compact_boundary` (with the tokens before and after), a `system/status` that
+/// reports a compaction failed, and `conversation_reset`. Any other line is no change.
+fn session_event(value: &Value) -> Option<AgentEvent> {
+    let kind = value.get("type").and_then(Value::as_str)?;
+    let subtype = value.get("subtype").and_then(Value::as_str);
+    match (kind, subtype) {
+        ("system", Some("compact_boundary")) => {
+            let meta = value.get("compact_metadata");
+            let number = |key: &str| meta.and_then(|meta| meta.get(key)).and_then(Value::as_u64);
+            Some(
+                SessionChange {
+                    trigger: meta
+                        .and_then(|meta| meta.get("trigger"))
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                    tokens_before: number("pre_tokens"),
+                    tokens_after: number("post_tokens"),
+                    session_id: None,
+                }
+                .event(ai6::COMPACTED_EVENT, None),
+            )
+        }
+        ("system", Some("status"))
+            if value.get("compact_result").and_then(Value::as_str) == Some("failed") =>
+        {
+            let why = value
+                .get("compact_error")
+                .and_then(Value::as_str)
+                .unwrap_or("Claude Code did not compact the conversation");
+            Some(SessionChange::default().event(ai6::COMPACT_FAILED_EVENT, Some(why.to_owned())))
+        }
+        ("conversation_reset", _) => Some(
+            SessionChange {
+                trigger: value
+                    .get("trigger")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                ..SessionChange::default()
+            }
+            .event(ai6::CLEARED_EVENT, None),
+        ),
+        _ => None,
     }
 }
 
@@ -1862,7 +1965,12 @@ impl ai6::AgentSession for ClaudeRun {
     }
 
     fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {
-        self.send(&message.text)
+        match SessionCommand::parse(&message.text)
+            .map_err(|why| refuse(Status::GUATIAO_ERR_BAD_VALUE, why))?
+        {
+            Some(command) => self.command(&command),
+            None => self.send(&message.text),
+        }
     }
 
     fn next_event(&self, timeout_ms: i64) -> Result<Option<AgentEvent>, ProviderError> {
@@ -3189,6 +3297,238 @@ mod tests {
                 ("completed".to_owned(), Some("stopped".to_owned())),
             ]
         );
+    }
+
+    /// A resumed Run on a terminal whose Claude Code writes `stream`; the writes are kept.
+    fn resumed_on(stream: &str) -> (Object<dyn ai6::AgentSession>, Arc<Mutex<Vec<u8>>>) {
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let terminal = ResumeTerminal {
+            spec: Arc::new(Mutex::new(None)),
+            input: stream.as_bytes().to_vec(),
+            writes: writes.clone(),
+        };
+        let handler = ClaudeHandler::try_from(ClaudeConfig {
+            executable: "claude-test".to_owned(),
+            ..ClaudeConfig::default()
+        })
+        .unwrap();
+        let run = handler
+            .resume(
+                AgentResume {
+                    clearance: "field".to_owned(),
+                    mission_id: "mission-42".parse().unwrap(),
+                    run_id: RunId::try_new("claude-session-42").unwrap(),
+                    message: None,
+                    working_directory: "C:\\station\\mission-42".to_owned(),
+                    environment: BTreeMap::new(),
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                    project_settings: false,
+                    project_mcp: false,
+                    answer_only: false,
+                    assistant: None,
+                    initial_context: Vec::new(),
+                    overlays: Default::default(),
+                },
+                terminal.into_object(),
+            )
+            .unwrap();
+        (run, writes)
+    }
+
+    /// What the driver wrote as user messages, by text.
+    fn written_texts(writes: &Arc<Mutex<Vec<u8>>>) -> Vec<String> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let written = String::from_utf8(writes.lock().unwrap().clone()).unwrap();
+            let texts = written
+                .lines()
+                .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                .filter(|value| value["type"] == "user")
+                .filter_map(|value| {
+                    value
+                        .pointer("/message/content/0/text")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                })
+                .collect::<Vec<_>>();
+            if !texts.is_empty() || Instant::now() > deadline {
+                return texts;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// `/compact` is a user turn in stream-json input. Claude Code 2.1.326 answers it with
+    /// `status: compacting`, a `compact_boundary` that counts the tokens before and after, and a
+    /// `result`; the lines here are those it wrote, cut to what the handler reads.
+    #[test]
+    fn a_compaction_is_a_slash_command_and_its_boundary_counts_the_tokens() {
+        let stream = concat!(
+            "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"claude-session-42\"}\n",
+            "{\"type\":\"system\",\"subtype\":\"status\",\"status\":\"compacting\",\"session_id\":\"claude-session-42\"}\n",
+            "{\"type\":\"system\",\"subtype\":\"status\",\"status\":null,\"compact_result\":\"success\",\"session_id\":\"claude-session-42\"}\n",
+            "{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"session_id\":\"claude-session-42\",\"compact_metadata\":{\"trigger\":\"manual\",\"pre_tokens\":23879,\"post_tokens\":2830,\"cumulative_dropped_tokens\":21049}}\n",
+            "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"num_turns\":0,\"session_id\":\"claude-session-42\"}\n",
+        );
+        let (run, writes) = resumed_on(stream);
+        run.send_message(AgentMessage {
+            text: SessionCommand::Compact {
+                focus: Some("keep the\nfruit words".to_owned()),
+            }
+            .encode(),
+        })
+        .unwrap();
+        assert_eq!(
+            written_texts(&writes),
+            ["/compact keep the fruit words".to_owned()]
+        );
+        let events = std::iter::from_fn(|| run.next_event(400).unwrap()).collect::<Vec<_>>();
+        let kinds = events.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>();
+        assert_eq!(
+            kinds,
+            ["system", "system", "system", "compacted", "completed"]
+        );
+        let change = SessionChange::of(&events[3]).unwrap();
+        assert_eq!(change.trigger.as_deref(), Some("manual"));
+        assert_eq!(
+            (change.tokens_before, change.tokens_after),
+            (Some(23879), Some(2830))
+        );
+    }
+
+    /// A compaction Claude Code could not make is a `compact_result: failed` status, and its
+    /// `result` is still a success: the event is what tells the Station nothing changed.
+    #[test]
+    fn a_failed_compaction_is_reported_and_the_turn_still_ends() {
+        let stream = concat!(
+            "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"claude-session-42\"}\n",
+            "{\"type\":\"system\",\"subtype\":\"status\",\"status\":null,\"compact_result\":\"failed\",\"compact_error\":\"Not enough messages to compact.\"}\n",
+            "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"num_turns\":0}\n",
+        );
+        let (run, _writes) = resumed_on(stream);
+        run.send_message(AgentMessage {
+            text: SessionCommand::Compact { focus: None }.encode(),
+        })
+        .unwrap();
+        let events = std::iter::from_fn(|| run.next_event(400).unwrap()).collect::<Vec<_>>();
+        let failed = events
+            .iter()
+            .find(|event| event.kind == ai6::COMPACT_FAILED_EVENT)
+            .expect("the failure is an event");
+        assert_eq!(
+            failed.text.as_deref(),
+            Some("Not enough messages to compact.")
+        );
+        assert_eq!(events.last().unwrap().kind, "completed");
+    }
+
+    /// `/clear` keeps the process and gives the conversation a new session id, which `session_id`
+    /// then answers. The line order is Claude Code 2.1.326's.
+    #[test]
+    fn a_clear_keeps_the_run_and_takes_the_new_session_id() {
+        let stream = concat!(
+            "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"claude-session-42\"}\n",
+            "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"claude-session-42\"}\n",
+            "{\"type\":\"conversation_reset\",\"new_conversation_id\":\"conv-9\",\"trigger\":\"clear\",\"session_id\":\"claude-session-42\"}\n",
+            "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"claude-session-43\"}\n",
+            "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"num_turns\":0,\"session_id\":\"claude-session-43\"}\n",
+        );
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let terminal = ResumeTerminal {
+            spec: Arc::new(Mutex::new(None)),
+            input: stream.as_bytes().to_vec(),
+            writes: writes.clone(),
+        };
+        let handler = ClaudeHandler::try_from(ClaudeConfig {
+            executable: "claude-test".to_owned(),
+            ..ClaudeConfig::default()
+        })
+        .unwrap();
+        let run = handler
+            .start(
+                AgentStart {
+                    mission_id: "mission-42".parse().unwrap(),
+                    agent_id: "007".to_owned(),
+                    prompt: "first".to_owned(),
+                    initial_context: Vec::new(),
+                    working_directory: "C:\\station\\mission-42".to_owned(),
+                    clearance: "field".to_owned(),
+                    environment: BTreeMap::new(),
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                    project_settings: false,
+                    project_mcp: false,
+                    answer_only: false,
+                    assistant: None,
+                    overlays: Default::default(),
+                },
+                terminal.into_object(),
+            )
+            .unwrap();
+        run.send_message(AgentMessage {
+            text: SessionCommand::Clear.encode(),
+        })
+        .unwrap();
+        assert!(written_texts(&writes).contains(&"first".to_owned()));
+        let events = std::iter::from_fn(|| run.next_event(400).unwrap()).collect::<Vec<_>>();
+        let kinds = events.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>();
+        assert_eq!(
+            kinds,
+            ["system", "completed", "cleared", "system", "completed"]
+        );
+        assert_eq!(
+            SessionChange::of(&events[2]).unwrap().trigger.as_deref(),
+            Some("clear")
+        );
+        assert_eq!(
+            run.session_id().unwrap().as_deref(),
+            Some("claude-session-43")
+        );
+    }
+
+    /// The driver ends a resumed session that reports another id, so a clear there is refused
+    /// before anything is written.
+    #[test]
+    fn a_resumed_run_refuses_a_clear() {
+        let (run, writes) = resumed_on("");
+        let refused = run
+            .send_message(AgentMessage {
+                text: SessionCommand::Clear.encode(),
+            })
+            .unwrap_err();
+        assert!(refused.to_string().contains("/clear"), "{refused}");
+        assert!(written_texts_now(&writes).is_empty());
+    }
+
+    #[test]
+    fn a_command_form_that_is_not_a_command_is_refused_not_sent() {
+        let (run, writes) = resumed_on("");
+        let refused = run
+            .send_message(AgentMessage {
+                text: format!("{}{{\"command\":\"reboot\"}}", ai6::SESSION_COMMAND_PREFIX),
+            })
+            .unwrap_err();
+        assert!(refused.to_string().contains("session command"), "{refused}");
+        assert!(written_texts_now(&writes).is_empty());
+    }
+
+    fn written_texts_now(writes: &Arc<Mutex<Vec<u8>>>) -> Vec<String> {
+        let written = String::from_utf8(writes.lock().unwrap().clone()).unwrap();
+        written
+            .lines()
+            .filter(|line| line.contains("\"user\""))
+            .map(str::to_owned)
+            .collect()
+    }
+
+    #[test]
+    fn the_handler_says_it_compacts_and_clears() {
+        let handler = ClaudeHandler::try_from(ClaudeConfig::default()).unwrap();
+        let commands = handler.session_commands().unwrap();
+        assert!(commands.compact && commands.clear);
     }
 
     #[test]

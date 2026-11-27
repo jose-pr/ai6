@@ -11,3 +11,4 @@ pub mod hub;
 pub mod listing;
 pub mod programs;
 pub mod records;
+pub mod session_command;

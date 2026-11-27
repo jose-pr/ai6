@@ -12,6 +12,8 @@ use std::collections::BTreeMap;
 use crate::directorates::m::identity::{MissionId, RunId};
 use crate::directorates::q::terminal::{AgentTerminal, HarnessStdio};
 
+use super::session_command::SessionCommands;
+
 /// The first instruction for one agent operation in a Mission.
 #[derive(ToValue, FromValue, Schema, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[map(crate = ::guatiao)]
@@ -520,6 +522,17 @@ pub trait AgentHandler: Send + Sync {
         Ok(Some("this handler gives its harness no image".to_owned()))
     }
 
+    /// Which [`SessionCommand`]s the handler carries out on a live Run, so the Station can ask
+    /// for a compaction or a clear before it starts a fresh Run. The default: none. A handler
+    /// that lists one reads the message [`SessionCommand::encode`] makes, and refuses the form
+    /// it cannot act on; it never gives it to the model as words.
+    ///
+    /// [`SessionCommand`]: super::session_command::SessionCommand
+    /// [`SessionCommand::encode`]: super::session_command::SessionCommand::encode
+    fn session_commands(&self) -> Result<SessionCommands, ProviderError> {
+        Ok(SessionCommands::none())
+    }
+
     /// What the harness can report of its account's usage, known before anything starts. A
     /// handler whose `needs_turn` is set learns its usage only from a turn's events, and the
     /// Station never asks it to [`read`](Self::usage) one; `needs_run` is for one that
@@ -546,7 +559,7 @@ mod tests {
     // shared kind's, whose header names the same value.
     #[test]
     fn floor_hashes_are_pinned() {
-        assert_eq!(AgentHandlerVtable::FLOOR_HASH, 1701761845);
+        assert_eq!(AgentHandlerVtable::FLOOR_HASH, 313360543);
         assert_eq!(
             coqui_acp_provider::AgentSessionVtable::FLOOR_HASH,
             1414216972

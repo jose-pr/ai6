@@ -567,6 +567,10 @@ impl ai6::AgentSession for AntigravityRun {
     /// A message while agy runs goes to it as the next turn, once it has named its conversation.
     /// After an interrupt ended it, it is run again on the same conversation.
     fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {
+        ai6::SessionCommand::refuse_in(
+            &message.text,
+            "an Antigravity conversation takes no AI6 session command",
+        )?;
         if self.ended.load(Ordering::Acquire) && !self.tripped.load(Ordering::Acquire) {
             self.run_again()?;
             return self.hold(message.text);

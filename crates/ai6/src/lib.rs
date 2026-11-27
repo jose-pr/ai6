@@ -274,6 +274,10 @@ pub use directorates::section_00::assistant::{
     page_call_digest,
 };
 pub use directorates::section_00::content::{MessageContent, MessageImage};
+pub use directorates::section_00::session_command::{
+    CLEARED_EVENT, COMPACT_FAILED_EVENT, COMPACTED_EVENT, SESSION_COMMAND_PREFIX, SessionChange,
+    SessionCommand, SessionCommands,
+};
 pub use guatiao;
 pub use guatiao_serde;
 #[cfg(feature = "daemon")]

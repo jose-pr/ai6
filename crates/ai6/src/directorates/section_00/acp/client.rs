@@ -12,6 +12,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use super::super::session_command::SessionCommand;
 use super::{
     EVENT_NOTIFICATION, EVENTS_CAPABILITY, PermissionDecider, PermissionDecision,
     PermissionRequest, RESTRICTED_KINDS, RefuseAll, UNBOUNDED_MS,
@@ -705,6 +706,15 @@ impl AgentSession for AcpRun {
     }
 
     fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {
+        // A façade is a handler's session, which reads the command itself. Any other agent is
+        // one this client can neither ask for its advertised commands nor open a second
+        // session on, so it has no command to carry out.
+        if !self.events_capability {
+            SessionCommand::refuse_in(
+                &message.text,
+                "an ACP agent's session takes no AI6 session command",
+            )?;
+        }
         if let Ok(mut state) = self.state.lock() {
             state.finished = false;
             state.cancelling = false;

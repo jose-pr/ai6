@@ -31,7 +31,7 @@ use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Provider, Schema, Status, ToValue};
 use ai6::{
     AgentEvent, AgentMessage, AgentSession, Bucket, BucketStatus, LIMIT_EVENT, LimitHit, Refill,
-    Spend, UsageReport, UsageSource, UsageSupport, infer_limit,
+    SessionChange, SessionCommand, Spend, UsageReport, UsageSource, UsageSupport, infer_limit,
 };
 use coqui_acp_codex::harness::PlainSpawn;
 use coqui_acp_codex::harness::event::{Content, Event as CodexEvent, Outcome, PermissionRequest};
@@ -205,6 +205,18 @@ impl AgentHandler for CodexHandler {
     /// `codex app-server` speaks JSON-RPC, one message per line, over standard input and output.
     fn stdio(&self) -> Result<ai6::HarnessStdio, ProviderError> {
         Ok(ai6::HarnessStdio::Json)
+    }
+
+    /// The app server compacts a thread on request (`thread/compact/start`). A new thread in
+    /// the same app server is not offered: the driver's session is bound to one thread.
+    fn session_commands(&self) -> Result<ai6::SessionCommands, ProviderError> {
+        Ok(ai6::SessionCommands {
+            compact: true,
+            clear: false,
+            unsupported_because: Some(
+                "the Codex driver keeps one thread for the life of its app server".to_owned(),
+            ),
+        })
     }
 
     fn read_only_refusal(&self) -> Result<Option<String>, ProviderError> {
@@ -757,6 +769,7 @@ fn open(opening: Opening<'_>) -> Result<CodexRun, ProviderError> {
         session,
         shared,
         thread_id,
+        request_wait: config.millis(config.request_timeout_ms),
     })
 }
 
@@ -826,6 +839,24 @@ struct Shared {
     ended_reported: AtomicBool,
     link: Arc<Link>,
     session: Mutex<Weak<AppServer>>,
+    /// The thread's context size as the app server last said it, and what a compaction in
+    /// flight started from.
+    context: Mutex<Context>,
+}
+
+/// What `thread/tokenUsage/updated` says of the thread's context, kept to tell a compaction's
+/// tokens before and after.
+#[derive(Default)]
+struct Context {
+    /// The tokens of the latest request, which is the context it held.
+    latest: Option<u64>,
+    /// Set from `item/started` of a `contextCompaction` to its `item/completed`: the tokens
+    /// held when it began.
+    compacting: Option<Option<u64>>,
+    /// Whether the Station asked for the compaction in flight, or for the next one to come.
+    asked: bool,
+    /// Whether a compaction finished since the Station asked.
+    done: bool,
 }
 
 fn failed(reason: String) -> AgentEvent {
@@ -863,6 +894,73 @@ impl Shared {
             ended_reported: AtomicBool::new(false),
             link,
             session: Mutex::new(Weak::new()),
+            context: Mutex::default(),
+        }
+    }
+
+    /// What a message says of a compaction, as the events that report it, in order. A
+    /// compaction is one `contextCompaction` item in a turn of its own, whether the Station asked
+    /// for it or Codex began it; the tokens after are the thread's last count in the turn.
+    /// A turn the Station asked to compact that ends with no compaction reports why.
+    fn compaction(&self, message: &Value) -> Vec<AgentEvent> {
+        let Ok(mut context) = self.context.lock() else {
+            return Vec::new();
+        };
+        let method = message.get("method").and_then(Value::as_str);
+        let item = message.pointer("/params/item/type").and_then(Value::as_str);
+        match (method, item) {
+            (Some("thread/tokenUsage/updated"), _) => {
+                if let Some(last) = message
+                    .pointer("/params/tokenUsage/last/totalTokens")
+                    .and_then(Value::as_u64)
+                {
+                    context.latest = Some(last);
+                }
+                Vec::new()
+            }
+            (Some("item/started"), Some("contextCompaction")) => {
+                context.compacting = Some(context.latest);
+                Vec::new()
+            }
+            (Some("item/completed"), Some("contextCompaction")) => {
+                let before = context.compacting.take().flatten();
+                let trigger = if context.asked { "manual" } else { "auto" };
+                context.done = true;
+                vec![
+                    SessionChange {
+                        trigger: Some(trigger.to_owned()),
+                        tokens_before: before,
+                        tokens_after: context.latest,
+                        session_id: None,
+                    }
+                    .event(ai6::COMPACTED_EVENT, None),
+                ]
+            }
+            (Some("turn/completed" | "turn/failed"), _) if context.asked => {
+                let compacted = std::mem::take(&mut context.done);
+                context.asked = false;
+                context.compacting = None;
+                if compacted {
+                    return Vec::new();
+                }
+                let why = message
+                    .pointer("/params/turn/error/message")
+                    .or_else(|| message.pointer("/params/error/message"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("Codex ended the turn without compacting the thread");
+                vec![
+                    SessionChange::default().event(ai6::COMPACT_FAILED_EVENT, Some(why.to_owned())),
+                ]
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// Notes that the Station asked for a compaction.
+    fn compaction_asked(&self) {
+        if let Ok(mut context) = self.context.lock() {
+            context.asked = true;
+            context.done = false;
         }
     }
 
@@ -966,8 +1064,21 @@ impl Shared {
             *hint = Some(exhausted);
         }
         let hint = self.exhausted.lock().ok().and_then(|hint| hint.clone());
+        let mut changes = self.compaction(message).into_iter();
+        let turn_ends = matches!(
+            message.get("method").and_then(Value::as_str),
+            Some("turn/completed" | "turn/failed")
+        );
         let Some(mut event) = decode_event(message, hint.as_ref()) else {
+            changes.for_each(|change| self.push(change));
             return true;
+        };
+        // A failed compaction is told before the turn ends, a finished one after its item.
+        let told_after = if turn_ends {
+            changes.by_ref().for_each(|change| self.push(change));
+            Vec::new()
+        } else {
+            changes.collect::<Vec<_>>()
         };
         if self.reports_commands && started_item(message) == Some("commandExecution") {
             event.tools.push(COMMAND_TOOL.to_owned());
@@ -996,6 +1107,7 @@ impl Shared {
         } else {
             self.push(event);
         }
+        told_after.into_iter().for_each(|change| self.push(change));
         true
     }
 
@@ -1192,6 +1304,8 @@ struct CodexRun {
     session: Arc<AppServer>,
     shared: Arc<Shared>,
     thread_id: RunId,
+    /// How long the app server may take to answer a request of the Station's own.
+    request_wait: Duration,
 }
 
 /// The tool name a scripts thread's command executions are reported under.
@@ -1526,9 +1640,31 @@ impl AgentSession for CodexRun {
     }
 
     fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {
-        self.session
-            .prompt(&[Content::Text(message.text)])
-            .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error))
+        match SessionCommand::parse(&message.text)
+            .map_err(|why| refuse(Status::GUATIAO_ERR_BAD_VALUE, why))?
+        {
+            // `thread/compact/start` takes the thread and nothing else, so a focus is not
+            // passed on: Codex writes its own summary.
+            Some(SessionCommand::Compact { .. }) => {
+                self.shared.compaction_asked();
+                self.session
+                    .request(
+                        "thread/compact/start",
+                        json!({"threadId": self.session.thread()}),
+                        self.request_wait,
+                    )
+                    .map(drop)
+                    .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error))
+            }
+            Some(SessionCommand::Clear) => Err(refuse(
+                Status::GUATIAO_ERR_UNSUPPORTED,
+                "the Codex driver keeps one thread for the life of its app server",
+            )),
+            None => self
+                .session
+                .prompt(&[Content::Text(message.text)])
+                .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error)),
+        }
     }
 
     fn next_event(&self, timeout_ms: i64) -> Result<Option<AgentEvent>, ProviderError> {
@@ -3785,6 +3921,165 @@ mod tests {
             "continue the same Run"
         );
         assert!(!killed.load(Ordering::Acquire));
+    }
+
+    /// A resumed Run whose app server answers the requests in order with `answers`.
+    fn resumed_with(
+        answers: Vec<Vec<u8>>,
+        expected: usize,
+    ) -> (Object<dyn AgentSession>, Arc<Mutex<Vec<u8>>>) {
+        let terminal = ScriptedTerminal::new(answers, expected);
+        let writes = terminal.writes.clone();
+        let handler = CodexHandler::try_from(CodexConfig {
+            executable: "codex-test".to_owned(),
+            ..CodexConfig::default()
+        })
+        .unwrap();
+        let run = handler
+            .resume(
+                AgentResume {
+                    clearance: "field".to_owned(),
+                    mission_id: "mission-42".parse().unwrap(),
+                    run_id: RunId::try_new("codex-thread-42").unwrap(),
+                    message: None,
+                    working_directory: "C:\\station\\mission-42".to_owned(),
+                    environment: BTreeMap::new(),
+                    model: None,
+                    effort: None,
+                    max_cost_micro_usd: None,
+                    project_settings: false,
+                    project_mcp: false,
+                    answer_only: false,
+                    assistant: None,
+                    initial_context: Vec::new(),
+                    overlays: Default::default(),
+                },
+                terminal.into_object(),
+            )
+            .unwrap();
+        (run, writes)
+    }
+
+    fn lines_of(messages: &[Value]) -> Vec<u8> {
+        let mut out = Vec::new();
+        for message in messages {
+            out.extend_from_slice(message.to_string().as_bytes());
+            out.push(b'\n');
+        }
+        out
+    }
+
+    fn usage(last: u64) -> Value {
+        json!({"method": "thread/tokenUsage/updated", "params": {
+            "threadId": "codex-thread-42", "turnId": "turn-c",
+            "tokenUsage": {"total": {"totalTokens": 99999, "inputTokens": 99999},
+                "last": {"totalTokens": last, "inputTokens": last, "outputTokens": 0},
+                "modelContextWindow": 190000}}})
+    }
+
+    /// `thread/compact/start` answers `{}` at once and the compaction is a turn of its own with
+    /// one `contextCompaction` item; Codex 0.166.0 counts the thread's context again before the
+    /// item completes (the lines are what it wrote, cut to what the handler reads).
+    #[test]
+    fn a_compaction_asks_the_thread_and_counts_the_tokens_before_and_after() {
+        let answer = [
+            json!({"id": 3, "result": {}}),
+            json!({"method": "turn/started", "params": {"threadId": "codex-thread-42", "turn": {"id": "turn-c"}}}),
+            usage(28857),
+            json!({"method": "item/started", "params": {"item": {"type": "contextCompaction", "id": "c1"}}}),
+            usage(34965),
+            usage(14185),
+            json!({"method": "item/completed", "params": {"item": {"type": "contextCompaction", "id": "c1"}}}),
+            json!({"method": "turn/completed", "params": {"turn": {"id": "turn-c", "status": "completed"}}}),
+        ];
+        let (run, writes) = resumed_with(
+            vec![
+                b"{\"id\":1,\"result\":{}}\n".to_vec(),
+                b"{\"id\":2,\"result\":{\"thread\":{\"id\":\"codex-thread-42\"}}}\n".to_vec(),
+                lines_of(&answer),
+            ],
+            3,
+        );
+        run.send_message(AgentMessage {
+            text: SessionCommand::Compact {
+                focus: Some("ignored: the request takes none".to_owned()),
+            }
+            .encode(),
+        })
+        .unwrap();
+        let written = String::from_utf8(writes.lock().unwrap().clone()).unwrap();
+        let request = written
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .find(|message| message["method"] == "thread/compact/start")
+            .expect("the compaction is asked of the thread");
+        assert_eq!(request["params"], json!({"threadId": "codex-thread-42"}));
+
+        let events = std::iter::from_fn(|| run.next_event(400).unwrap()).collect::<Vec<_>>();
+        let compacted = events
+            .iter()
+            .find(|event| event.kind == ai6::COMPACTED_EVENT)
+            .expect("the compaction is an event");
+        let change = SessionChange::of(compacted).unwrap();
+        assert_eq!(change.trigger.as_deref(), Some("manual"));
+        assert_eq!(
+            (change.tokens_before, change.tokens_after),
+            (Some(28857), Some(14185))
+        );
+        let kinds = events.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>();
+        let at = |kind: &str| kinds.iter().position(|k| *k == kind).unwrap();
+        assert!(at("item/completed") < at(ai6::COMPACTED_EVENT));
+        assert!(at(ai6::COMPACTED_EVENT) < at("completed"));
+    }
+
+    /// A turn the Station asked to compact that ends with no compaction says why, before it ends.
+    #[test]
+    fn a_compaction_turn_that_does_not_compact_is_reported_before_it_ends() {
+        let answer = [
+            json!({"id": 3, "result": {}}),
+            json!({"method": "turn/completed", "params": {"turn": {"id": "turn-c", "status": "failed",
+                "error": {"message": "context compaction failed"}}}}),
+        ];
+        let (run, _writes) = resumed_with(
+            vec![
+                b"{\"id\":1,\"result\":{}}\n".to_vec(),
+                b"{\"id\":2,\"result\":{\"thread\":{\"id\":\"codex-thread-42\"}}}\n".to_vec(),
+                lines_of(&answer),
+            ],
+            3,
+        );
+        run.send_message(AgentMessage {
+            text: SessionCommand::Compact { focus: None }.encode(),
+        })
+        .unwrap();
+        let events = std::iter::from_fn(|| run.next_event(400).unwrap()).collect::<Vec<_>>();
+        let kinds = events.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>();
+        assert_eq!(kinds.first().copied(), Some(ai6::COMPACT_FAILED_EVENT));
+        assert_eq!(events[0].text.as_deref(), Some("context compaction failed"));
+        assert!(!kinds.contains(&ai6::COMPACTED_EVENT));
+    }
+
+    /// The driver's session is bound to one thread, so a clear is refused, not sent as words.
+    #[test]
+    fn a_clear_is_refused_because_the_thread_cannot_change() {
+        let (run, writes) = resumed_with(
+            vec![
+                b"{\"id\":1,\"result\":{}}\n".to_vec(),
+                b"{\"id\":2,\"result\":{\"thread\":{\"id\":\"codex-thread-42\"}}}\n".to_vec(),
+            ],
+            2,
+        );
+        let refused = run
+            .send_message(AgentMessage {
+                text: SessionCommand::Clear.encode(),
+            })
+            .unwrap_err();
+        assert!(refused.to_string().contains("one thread"), "{refused}");
+        let written = String::from_utf8(writes.lock().unwrap().clone()).unwrap();
+        assert!(!written.contains("turn/start"));
+        let handler = CodexHandler::try_from(CodexConfig::default()).unwrap();
+        let commands = handler.session_commands().unwrap();
+        assert!(commands.compact && !commands.clear);
     }
 
     /// The app server's replies as ConPTY renders them on Windows: mode and title sequences
