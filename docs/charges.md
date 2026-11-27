@@ -118,6 +118,16 @@ that AI6 can rely on, so a fresh session with a summary is the only mechanism.
 A turn the gateway refuses for its cap fails with the gateway's own words and is not retried: the
 claude and codex handlers end the turn at the first refusal their harness would retry.
 
+**A full context window compacts at once.** A harness that reports a limit that follows the work and
+not the account (a conversation past its model's context window, `continuable: false` in the
+standard limit report) ends the turn as that, not as a quota. The Station then treats the
+conversation as past the setting without waiting for it: it closes the harness, starts a fresh Run
+with the logbook, and takes the same wake again there. The logbook says `compacted` and why. This is
+the fallback for a harness whose own compaction is off or failed: AI6 leaves Claude Code's
+autocompact and Codex's `model_auto_compact_token_limit` as they are and does not turn them off. A
+fresh Run that fills the window too fails the turn, with the reason, and no third Run starts; such
+a limit never marks an account limited and never moves the charge to another route.
+
 The harness runs on the Station's host, in a directory of its own under the Station's state
 directory (`charges/charge--<scope>`), with its Agent's environment and its route's pool account.
 It is issued no loadout secret: a charge reads untrusted text.

@@ -120,7 +120,11 @@ window from `rateLimitType`), and an error `result` whose text names the limit
 number after a trailing `|` (`... usage limit reached|1790000000`); a limit stated only as a
 local clock time ("resets 3pm") leaves `resets_at` as `None` rather than guessing a date.
 Seconds and milliseconds are both accepted. Other `rate_limit_event` statuses pass through
-unchanged. These shapes come from recorded protocol fixtures, not from a live account.
+unchanged. The limit carries its `kind` (`overage` is a credit, the plan's windows and Claude Code's
+own words a usage quota, a bare 429 a rate limit, words of a context window a context window) and
+`continuable`; a limit that is not continuable (a context window) does not follow the account, and
+the Station starts the conversation over in a fresh session instead of waiting or rotating. Claude
+Code's autocompact is left on. These shapes come from recorded protocol fixtures, not from a live account.
 
 Every `rate_limit_event`, whatever its status, also sets `AgentEvent::report` to one
 `Bucket`: its id from `rateLimitType` (`unknown` when absent), `status` (`allowed`, `allowed_warning`,

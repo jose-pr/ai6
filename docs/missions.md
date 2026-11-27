@@ -204,6 +204,17 @@ chain of Runs that shared one provider session. At or past `[harness] compact_at
 fresh Run instead, with the last run's own account of what it did as its summary, and the timeline
 says so.
 
+**A full context window starts a fresh Run.** A harness that reports a limit that follows the work
+and not the account (a conversation past its model's context window) ends the Run, and the Mission
+is queued again for the same Agent as a fresh Run. The fresh Run is given the Mission's brief and what
+the old Run last did, oldest first, and the old Run's record says `window-full`. A standing order's
+window does not resume the full Run's session. The harness's own autocompact is left on and has had
+its chance first. The turn is retried once: a fresh Run that fills the window too fails the turn, with
+the reason. Such a limit never parks the Mission, marks an account limited or hands it to a backup
+Agent, since waiting, another account and another Agent meet the same window. Moneypenny's
+conversations do the same: a resumed conversation that fills the window starts afresh with its recap
+and takes the message there.
+
 ## Cancel, retry, resume and interrupt
 
 An operator with `mission.control` on the Operation can act on a Mission without reaching
