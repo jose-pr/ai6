@@ -2308,8 +2308,12 @@ fn apply(conversation: &mut Conversation, event: &AssistantEvent, max_entries: B
     };
     match event.kind.as_str() {
         EVENT_TEXT if !text.trim().is_empty() => {
+            // The pieces one answer arrives in are one entry, until a tool or another entry
+            // comes between them.
+            if !(conversation.answered && conversation.append_to_last(&text)) {
+                conversation.push(entry(Role::Moneypenny, text), max_entries);
+            }
             conversation.answered = true;
-            conversation.push(entry(Role::Moneypenny, text), max_entries);
         }
         EVENT_TOOL => {
             let tools = event.tools.join(", ");

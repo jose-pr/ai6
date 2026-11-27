@@ -370,6 +370,30 @@ impl Conversation {
         }
     }
 
+    /// Adds `more` to the end of her last entry when that is her own words and nothing else
+    /// came after it, so the pieces one answer arrives in are one entry; the app is told. Returns
+    /// whether it did.
+    pub(crate) fn append_to_last(&mut self, more: &str) -> bool {
+        let Some(last) = self.entries.back_mut() else {
+            return false;
+        };
+        if last.role != Role::Moneypenny {
+            return false;
+        }
+        last.text.push_str(more);
+        self.bytes += more.len();
+        self.record(
+            "moneypenny",
+            more,
+            None,
+            true,
+        );
+        let _ = self
+            .events
+            .send(serde_json::json!({"type": "append", "text": more}));
+        true
+    }
+
     /// Shows a proposal's new status in its entry and tells the app.
     pub(crate) fn show_proposal(&mut self, proposal: &Proposal) {
         let shown = proposal.shown();

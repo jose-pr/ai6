@@ -6822,3 +6822,23 @@ mod sources;
 mod transcripts;
 mod viewing;
 mod workspace;
+
+#[test]
+fn the_deltas_of_one_answer_are_one_entry_until_a_tool_comes_between() {
+    let bounds = Bounds {
+        entries: usize::MAX,
+        bytes: usize::MAX,
+    };
+    let mut conversation = Conversation::new("c".into(), "p".into(), "t".into(), 1.0, 256);
+    let said = |kind: &str, text: &str| AssistantEvent::new(kind, Some(text.to_owned()));
+    for delta in ["Hel", "lo ", "there"] {
+        apply(&mut conversation, &said(EVENT_TEXT, delta), bounds);
+    }
+    assert_eq!(conversation.entries.len(), 1, "{:?}", conversation.entries);
+    assert_eq!(conversation.entries[0].text, "Hello there");
+
+    apply(&mut conversation, &said(EVENT_TOOL, ""), bounds);
+    apply(&mut conversation, &said(EVENT_TEXT, "Done."), bounds);
+    let roles: Vec<_> = conversation.entries.iter().map(|e| e.role).collect();
+    assert_eq!(roles, [Role::Moneypenny, Role::Tools, Role::Moneypenny]);
+}
