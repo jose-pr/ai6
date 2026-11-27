@@ -1376,7 +1376,9 @@ async fn green_ink_gate(cable_url: Option<String>) -> ExitCode {
     if std::io::stdin().read_to_string(&mut input).is_err() {
         println!(
             "{}",
-            deny("Green ink: the hook input could not be read, so the command is held.")
+            deny(
+                "Green ink: the hook input could not be read, so the command is held. No                  request was filed: the Station was not asked."
+            )
         );
         return ExitCode::SUCCESS;
     }
@@ -1387,7 +1389,7 @@ async fn green_ink_gate(cable_url: Option<String>) -> ExitCode {
     .await
     .unwrap_or_else(|_| {
         Some(deny(
-            "Green ink: the gate failed while deciding, so the command is held.",
+            "Green ink: the gate failed while deciding, so the command is held. No request was              filed: the Station was not asked.",
         ))
     });
     if let Some(decision) = decision {

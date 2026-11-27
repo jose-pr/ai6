@@ -371,6 +371,24 @@ impl Desk {
     /// A message the gate passes on: the Operation, Mission or Agent is unknown here, or the
     /// Registry could not be read.
     pub(super) fn check(&self, checked: Checked) -> Result<Vec<StepAnswer>, String> {
+        let (operation, mission) = (checked.operation.clone(), checked.mission.clone());
+        let (kind, target) = checked
+            .steps
+            .first()
+            .map_or(("-".to_owned(), "-".to_owned()), Clone::clone);
+        self.check_steps(checked).inspect_err(|why| {
+            gate_line(
+                &self.state,
+                &operation,
+                &mission,
+                &kind,
+                &target,
+                &format!("error: {why}"),
+            );
+        })
+    }
+
+    fn check_steps(&self, checked: Checked) -> Result<Vec<StepAnswer>, String> {
         let state = &self.state;
         let now = state.clock.now() as f64;
         let operation = state
@@ -523,11 +541,18 @@ fn gate_line(
     target: &str,
     outcome: &str,
 ) {
-    eprintln!(
+    let line = format!(
         "ai6: green ink at {}: Operation {operation:?}, Mission {mission:?}, {kind} {target:?}: {outcome}",
         state.station_id
     );
+    #[cfg(test)]
+    JOURNAL.lock().unwrap().push(line.clone());
+    eprintln!("{line}");
 }
+
+/// The gate lines journaled so far, for tests.
+#[cfg(test)]
+static JOURNAL: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
 /// As [`answer`], except that an approval a person withdrew, or that has lapsed, is not `approved`.
 fn answer_at(status: &ApprovalStatus, now: f64) -> Answer {
@@ -2116,6 +2141,36 @@ mod tests {
                 .status,
             "pending",
             "a parked step waits whatever the policy lets through"
+        );
+    }
+
+    #[test]
+    fn a_gate_check_that_errors_is_journaled_and_names_why() {
+        let root = tempfile::tempdir().unwrap();
+        let (state, mission_id) = station(root.path(), "errors");
+        let desk = Desk::new(state);
+        let error = desk
+            .check(Checked {
+                operation: "Nowhere".to_owned(),
+                mission: mission_id.clone(),
+                run: None,
+                exposed: false,
+                agent: "007".to_owned(),
+                steps: vec![("push".to_owned(), "origin:refs/heads/errors".to_owned())],
+            })
+            .unwrap_err();
+        assert!(error.contains("not configured"), "{error}");
+        let lines: Vec<String> = JOURNAL
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|line| line.contains("origin:refs/heads/errors"))
+            .cloned()
+            .collect();
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(
+            lines[0].contains("error: the Operation is not configured"),
+            "{lines:?}"
         );
     }
 

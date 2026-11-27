@@ -76,7 +76,12 @@ pub fn decide(
     let steps = match classified {
         Ok(steps) if steps.is_empty() => return GateVerdict::Allow,
         Ok(steps) => steps,
-        Err(reason) => return GateVerdict::Hold(format!("Green ink: {reason}.")),
+        Err(reason) => {
+            return GateVerdict::Hold(format!(
+                "Green ink: {reason}. No request was filed: the command's steps were not named, \
+                 so the Station was not asked."
+            ));
+        }
     };
     let named = steps
         .iter()
@@ -88,13 +93,15 @@ pub fn decide(
         Ok(_) => {
             return GateVerdict::Hold(format!(
                 "Green ink: this command would {named}; it is held because the Station answered \
-                 for other steps than asked."
+                 for other steps than asked. No request was filed: the answer did not match the \
+                 steps."
             ));
         }
         Err(error) => {
             return GateVerdict::Hold(format!(
                 "Green ink: this command would {named}; it is held because green ink could not \
-                 be checked: {error}."
+                 be checked: {error}. No request was filed: the check did not reach the \
+                 Station's answer."
             ));
         }
     };
@@ -562,6 +569,23 @@ mod client {
 
         use super::*;
         use crate::directorates::m::approvals::classify;
+
+        #[test]
+        fn a_hold_that_never_reached_the_station_says_no_request_was_filed() {
+            let step = ActionScope {
+                kind: "push".to_owned(),
+                target: "origin:refs/heads/main".to_owned(),
+            };
+            let classify_error = decide(Err("it cannot be named".to_owned()), |_| Ok(Vec::new()));
+            let check_error = decide(Ok(vec![step]), |_| Err("timed out".to_owned()));
+            let no_client = gate("git push origin HEAD:refs/heads/main", None, None);
+            for verdict in [classify_error, check_error, no_client] {
+                let GateVerdict::Hold(reason) = verdict else {
+                    panic!("held");
+                };
+                assert!(reason.contains("No request was filed"), "{reason}");
+            }
+        }
 
         /// A repository with a tag `v1` and a branch `work`, made with the local git.
         fn repository() -> tempfile::TempDir {
