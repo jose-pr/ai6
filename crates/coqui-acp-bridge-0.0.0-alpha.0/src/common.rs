@@ -11,9 +11,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
+use agentic_peer::home;
 use cabuya::Error;
 use cabuya::auth::{self, Identity, Method, Proof, ProofBuilder};
-use coqui_agentic_peer::home;
 use coqui_net_acl::{Acl, Action, IpNet, Rule};
 use coqui_peer::PeerId;
 use coqui_peer_tls as tls;
@@ -77,7 +77,7 @@ pub(crate) fn proof_identity(
 }
 
 /// This user's identity of `method`, in `dir`: with no method, the one the directory records, else the one it holds, else a new one
-/// of the default method, which it then records. The same as `coqui_agentic_peer::home::identity` for a directory it does not
+/// of the default method, which it then records. The same as `agentic_peer::home::identity` for a directory it does not
 /// resolve.
 fn identity_in(dir: &Path, method: Option<Method>) -> Result<Identity, Error> {
     let recorded = match std::fs::read_to_string(dir.join(home::METHOD_FILE)) {

@@ -20,7 +20,8 @@
    }
   },
   "recovery_code": "valid once for the secret RECOVER-1 when name is the id of the person already named",
-  "counting": "the stand-in consumer counts failed second-factor attempts per person id and, after 3, answers failed without asking the authenticator; a right second factor resets the count"
+  "counting": "the stand-in consumer counts failed second-factor attempts per person id and, after 3, answers failed without asking the authenticator; a right second factor resets the count",
+  "passkey": "valid when name is alice or bob, naming that person; the challenge a consumer keeps and the signed answer are the passkey provider's, a stand-in takes the name"
  },
  "flows": [
   {
@@ -1132,6 +1133,89 @@
       "throttled": false
      },
      "after_seconds": 901
+    }
+   ]
+  },
+  {
+   "name": "a passkey signs in from outside 10/8 and a password from there is refused unasked",
+   "point": 2,
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password"
+       ],
+       [
+        "certificate"
+       ],
+       [
+        "passkey"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ],
+       [
+        "passkey"
+       ]
+      ]
+     }
+    ]
+   },
+   "steps": [
+    {
+     "action": "offer",
+     "address": "203.0.113.7",
+     "expect": {
+      "result": "methods",
+      "methods": [
+       "certificate",
+       "passkey"
+      ],
+      "authenticator_calls": 0,
+      "throttled": false
+     }
+    },
+    {
+     "action": "present",
+     "address": "203.0.113.7",
+     "method": "password",
+     "name": "alice",
+     "secret": "pw",
+     "expect": {
+      "result": "refused_unasked",
+      "authenticator_calls": 0,
+      "throttled": false
+     }
+    },
+    {
+     "action": "present",
+     "address": "203.0.113.7",
+     "method": "passkey",
+     "name": "alice",
+     "expect": {
+      "result": "signed_in",
+      "authenticator_calls": 1,
+      "throttled": false
+     }
+    },
+    {
+     "action": "present",
+     "address": "10.6.20.5",
+     "method": "passkey",
+     "name": "carol",
+     "expect": {
+      "result": "failed",
+      "authenticator_calls": 1,
+      "throttled": true
+     }
     }
    ]
   }

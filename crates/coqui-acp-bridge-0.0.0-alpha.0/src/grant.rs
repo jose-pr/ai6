@@ -1,10 +1,10 @@
 //! `grant`: let a peer this user paired with open a protocol, or no longer.
 #![allow(clippy::std_instead_of_core, clippy::std_instead_of_alloc)]
 
+use agentic_peer::mcp_offer;
 use cabuya::forward::{self, Target};
 use cabuya::mux;
 use cabuya::peers::{FilePeers, PeerRecord, PeerStore};
-use coqui_agentic_peer::mcp_offer;
 
 use std::path::Path;
 

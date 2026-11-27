@@ -130,8 +130,12 @@ pub fn display_name(
     (!parts.is_empty()).then(|| parts.join(" "))
 }
 
-/// Whether connecting to `url` without StartTLS would expose a password.
+/// Whether connecting to `url` without StartTLS would expose a password. An `ldapi://` socket
+/// never leaves the machine.
 pub fn in_the_clear(url: &str, start_tls: bool) -> bool {
+    if url.starts_with("ldapi://") {
+        return false;
+    }
     let Some(rest) = url.strip_prefix("ldap://") else {
         return !url.starts_with("ldaps://");
     };
@@ -202,6 +206,8 @@ mod tests {
         assert!(!in_the_clear("ldap://directory.example.org", true));
         assert!(!in_the_clear("ldaps://directory.example.org", false));
         assert!(!in_the_clear("ldap://[::1]:389", false));
+        assert!(!in_the_clear("ldapi://%2Frun%2Fldapi", false));
+        assert!(in_the_clear("http://directory.example.org", false));
     }
 
     #[test]

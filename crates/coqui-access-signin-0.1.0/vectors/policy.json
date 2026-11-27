@@ -1576,6 +1576,478 @@
     "methods": [],
     "complete": true
    }
+  },
+  {
+   "name": "the office is offered a password, a certificate or a passkey",
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password"
+       ],
+       [
+        "certificate"
+       ],
+       [
+        "passkey"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ],
+       [
+        "passkey"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [],
+    "address": "10.6.20.5"
+   },
+   "expect": {
+    "methods": [
+     "password",
+     "certificate",
+     "passkey"
+    ],
+    "complete": false
+   }
+  },
+  {
+   "name": "an outside IPv4 address is offered the certificate or the passkey",
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password"
+       ],
+       [
+        "certificate"
+       ],
+       [
+        "passkey"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ],
+       [
+        "passkey"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [],
+    "address": "203.0.113.7"
+   },
+   "expect": {
+    "methods": [
+     "certificate",
+     "passkey"
+    ],
+    "complete": false
+   }
+  },
+  {
+   "name": "no address is offered the certificate or the passkey",
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password"
+       ],
+       [
+        "certificate"
+       ],
+       [
+        "passkey"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ],
+       [
+        "passkey"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": []
+   },
+   "expect": {
+    "methods": [
+     "certificate",
+     "passkey"
+    ],
+    "complete": false
+   }
+  },
+  {
+   "name": "a passkey is offered with the password it follows before anyone is named",
+   "config": {
+    "rule": [
+     {
+      "allow": [
+       [
+        "password",
+        "passkey"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [],
+    "address": "10.1.2.3"
+   },
+   "expect": {
+    "methods": [
+     "password",
+     "passkey"
+    ],
+    "complete": false
+   }
+  },
+  {
+   "name": "a passkey after a password is what is still needed",
+   "config": {
+    "rule": [
+     {
+      "allow": [
+       [
+        "password",
+        "passkey"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [
+     {
+      "method": "password",
+      "person": "id-alice"
+     }
+    ],
+    "address": "10.1.2.3",
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    }
+   },
+   "expect": {
+    "methods": [
+     "passkey"
+    ],
+    "complete": false
+   }
+  },
+  {
+   "name": "a password and a passkey together complete the sign-in",
+   "config": {
+    "rule": [
+     {
+      "allow": [
+       [
+        "password",
+        "passkey"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [
+     {
+      "method": "password",
+      "person": "id-alice"
+     },
+     {
+      "method": "passkey",
+      "person": "id-alice"
+     }
+    ],
+    "address": "10.1.2.3",
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    }
+   },
+   "expect": {
+    "methods": [],
+    "complete": true
+   }
+  },
+  {
+   "name": "a passkey alone does not complete a chain that needs the password too",
+   "config": {
+    "rule": [
+     {
+      "allow": [
+       [
+        "password",
+        "passkey"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [
+     {
+      "method": "passkey",
+      "person": "id-alice"
+     }
+    ],
+    "address": "10.1.2.3",
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    }
+   },
+   "expect": {
+    "methods": [
+     "password"
+    ],
+    "complete": false
+   }
+  },
+  {
+   "name": "a passkey alone completes the outside rule",
+   "config": {
+    "rule": [
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password"
+       ],
+       [
+        "certificate"
+       ],
+       [
+        "passkey"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ],
+       [
+        "passkey"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "sign_in",
+    "done": [
+     {
+      "method": "passkey",
+      "person": "id-alice"
+     }
+    ],
+    "address": "203.0.113.7",
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    }
+   },
+   "expect": {
+    "methods": [],
+    "complete": true
+   }
+  },
+  {
+   "name": "a password from the office does not register a passkey that signs in alone outside",
+   "config": {
+    "rule": [
+     {
+      "purposes": [
+       "enrol"
+      ],
+      "allow": [
+       [
+        "certificate"
+       ],
+       [
+        "passkey"
+       ]
+      ]
+     },
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password"
+       ],
+       [
+        "certificate"
+       ],
+       [
+        "passkey"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ],
+       [
+        "passkey"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "enrol",
+    "done": [
+     {
+      "method": "password",
+      "person": "id-alice"
+     }
+    ],
+    "address": "10.6.20.5",
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    }
+   },
+   "expect": {
+    "methods": [],
+    "complete": false
+   }
+  },
+  {
+   "name": "a certificate registers a passkey under the enrolment rule",
+   "config": {
+    "rule": [
+     {
+      "purposes": [
+       "enrol"
+      ],
+      "allow": [
+       [
+        "certificate"
+       ],
+       [
+        "passkey"
+       ]
+      ]
+     },
+     {
+      "networks": [
+       "10.0.0.0/8"
+      ],
+      "allow": [
+       [
+        "password"
+       ],
+       [
+        "certificate"
+       ],
+       [
+        "passkey"
+       ]
+      ]
+     },
+     {
+      "allow": [
+       [
+        "certificate"
+       ],
+       [
+        "passkey"
+       ]
+      ]
+     }
+    ]
+   },
+   "context": {
+    "purpose": "enrol",
+    "done": [
+     {
+      "method": "certificate",
+      "person": "id-alice"
+     }
+    ],
+    "address": "10.6.20.5",
+    "person": {
+     "id": "id-alice",
+     "name": "alice",
+     "groups": [
+      "admins"
+     ],
+     "attributes": {}
+    }
+   },
+   "expect": {
+    "methods": [],
+    "complete": true
+   }
   }
  ]
 }

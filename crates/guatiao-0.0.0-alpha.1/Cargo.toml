@@ -1,4 +1,4 @@
-# guatiao/crates/guatiao at 75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d, with what it inherits written out.
+# guatiao/crates/guatiao at 3163647ab70bc19bf24125d30e1dc1ee49b10f94, with what it inherits written out.
 test = [{ name = "import_search", harness = false, required-features = ["load"] }]
 [package]
 name = "guatiao"
@@ -25,7 +25,9 @@ default = []
 derive = ["dep:guatiao-derive"]
 provider = ["derive", "guatiao-derive/provider"]
 c-header = ["dep:cbindgen"]
-load = ["dep:libloading", "dep:object", "dep:sha2", "dep:winapi-util"]
+load = ["loader", "static-dlopen"]
+loader = ["dep:libloading", "dep:object", "dep:sha2", "dep:winapi-util"]
+static-dlopen = ["loader"]
 regex = ["dep:regex"]
 [dependencies]
 [dependencies.guatiao-derive]
@@ -53,13 +55,13 @@ features = ["read_core", "pe", "elf", "macho", "std"]
 [target."cfg(windows)".dependencies.winapi-util]
 version = "0.1"
 optional = true
-[target."cfg(not(miri))"]
-[target."cfg(not(miri))".dev-dependencies]
-[target."cfg(not(miri))".dev-dependencies.hello_library]
+[target."cfg(not(any(miri, target_env = \"musl\")))"]
+[target."cfg(not(any(miri, target_env = \"musl\")))".dev-dependencies]
+[target."cfg(not(any(miri, target_env = \"musl\")))".dev-dependencies.hello_library]
 path = "../../examples/hello_library"
-[target."cfg(not(miri))".dev-dependencies.derived_greeter]
+[target."cfg(not(any(miri, target_env = \"musl\")))".dev-dependencies.derived_greeter]
 path = "../../examples/derived_greeter"
-[target."cfg(not(miri))".dev-dependencies.source_library]
+[target."cfg(not(any(miri, target_env = \"musl\")))".dev-dependencies.source_library]
 path = "../../examples/source_library"
 [build-dependencies]
 [build-dependencies.cbindgen]
@@ -70,6 +72,10 @@ libloading = "0.8"
 serde_json = "1"
 [dev-dependencies.greeter_kind]
 path = "../../examples/greeter_kind"
+[dev-dependencies.guatiao-channel]
+path = "../guatiao-channel"
+[dev-dependencies.channel_echo_kind]
+path = "../../examples/channel_echo/kind"
 [lints]
 [lints.clippy]
 std_instead_of_core = "warn"

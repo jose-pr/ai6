@@ -300,6 +300,7 @@ mod tests {
             certificate: None,
             certificates: None,
             method: None,
+            challenge: None,
         }
     }
 

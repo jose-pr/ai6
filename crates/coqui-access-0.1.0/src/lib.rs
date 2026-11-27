@@ -12,6 +12,7 @@
 //! | [`Authorizer`] | `coqui_authorizer` | May this [`Person`] do this action on this resource? |
 //! | [`Accounts`] | `coqui_accounts` | Optional: list, put and remove accounts, list unaccepted peers. |
 //! | [`SignInPolicy`] | `coqui_sign_in_policy` | Which methods may this sign-in use, and what does it still need? |
+//! | [`Challenger`] | `coqui_challenger` | Optional: the challenge a method's answer is bound to (a passkey's). |
 //!
 //! Every method is synchronous; a host calls a provider from a blocking thread. Kind names
 //! and their floor hashes are an ABI, pinned by this crate's contract test: a provider built
@@ -34,13 +35,14 @@ mod subject;
 
 pub use kind::{
     Accounts, AccountsVtable, Authenticator, AuthenticatorVtable, Authorizer, AuthorizerVtable,
-    Directory, DirectoryVtable, SignInPolicy, SignInPolicyVtable,
+    Challenger, ChallengerVtable, Directory, DirectoryVtable, SignInPolicy, SignInPolicyVtable,
 };
 pub use limit::Limit;
 pub use model::{
-    AccountInfo, AccountPut, Attempt, AuthorizationDecision, AuthorizationRequest, Claims,
-    Description, Factor, Lookup, Offer, Person, PutOutcome, SignInContext, SignInDecision, Verdict,
-    Waiting, attributes, clients, purposes, takes,
+    AccountInfo, AccountPut, Attempt, AuthorizationDecision, AuthorizationRequest, Challenge,
+    ChallengeRequest, Claims, CredentialInfo, Description, Factor, Lookup, Offer, Person,
+    PutOutcome, SignInContext, SignInDecision, Verdict, Waiting, attributes, clients, purposes,
+    takes,
 };
 pub use subject::{Subject, SubjectError};
 

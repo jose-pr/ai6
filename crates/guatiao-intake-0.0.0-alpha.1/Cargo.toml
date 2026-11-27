@@ -1,4 +1,4 @@
-# guatiao/crates/guatiao-intake at 75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d, with what it inherits written out.
+# guatiao/crates/guatiao-intake at 3163647ab70bc19bf24125d30e1dc1ee49b10f94, with what it inherits written out.
 [package]
 name = "guatiao-intake"
 links = "guatiao-intake"

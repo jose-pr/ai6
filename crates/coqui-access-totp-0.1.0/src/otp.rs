@@ -117,7 +117,7 @@ pub(crate) fn verify(
     let now = step_of(unix, check.period);
     let skew = i64::from(check.skew);
     let mut matched = None;
-    for step in (now - skew)..=(now + skew) {
+    for step in now.saturating_sub(skew)..=now.saturating_add(skew) {
         if step < 0 {
             continue;
         }

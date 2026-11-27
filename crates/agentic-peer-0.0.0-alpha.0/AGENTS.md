@@ -1,12 +1,12 @@
-# `coqui-agentic-peer` — API header
+# `agentic-peer` — API header
 
-Header-file-style reference for the `coqui-agentic-peer` crate, so it can be used without reading the source. It ships inside the package and is self-contained.
+Header-file-style reference for the `agentic-peer` crate, so it can be used without reading the source. It ships inside the package and is self-contained.
 
 No Cargo features. MSRV Rust 1.89. Version `0.0.0-alpha.0`, not published. It depends on `cabuya` (by revision, feature `sealed`), `coqui-transport` (by revision, no default features; its `Channel` and `Failure` are what every stream is generic over), `coqui-peer-webcrypto`, `mdns-sd`, `serde_json` and `url`. No `unsafe` code. Public modules: `companion`, `discovery`, `home`, `mcp_offer`.
 
-The link itself is `cabuya`'s, and this crate re-exports none of it: the proof and its identities (`auth`), pairing by PIN (`pairing`), the streams (`mux`), serving under grants (`link`), the peers' records (`peers`) and TCP forwarding (`forward`, feature `forward`) are `cabuya::{auth, pairing, mux, link, peers, forward}`, documented in that crate's `AGENTS.md`. `Method` and `Identity` below are `cabuya::auth::{Method, Identity}`; `home`'s `Error` is `cabuya::Error`, and `discovery`'s and `companion`'s is `coqui_agentic_peer::Error`.
+The link itself is `cabuya`'s, and this crate re-exports none of it: the proof and its identities (`auth`), pairing by PIN (`pairing`), the streams (`mux`), serving under grants (`link`), the peers' records (`peers`) and TCP forwarding (`forward`, feature `forward`) are `cabuya::{auth, pairing, mux, link, peers, forward}`, documented in that crate's `AGENTS.md`. `Method` and `Identity` below are `cabuya::auth::{Method, Identity}`; `home`'s `Error` is `cabuya::Error`, and `discovery`'s and `companion`'s is `agentic_peer::Error`.
 
-## `coqui_agentic_peer::mcp_offer`
+## `agentic_peer::mcp_offer`
 
 ```rust
 pub const OFFER_PROTOCOL: &str = "mcp-offer/1";
@@ -21,7 +21,7 @@ pub enum ShimError { Setting(&'static str), Io(io::Error) }  // non_exhaustive
 - The shim refuses an address off this machine, so the token goes nowhere else. It returns when either end stops; call it with standard input and output, and exit.
 - The port, the token and its file last as long as the stream. The entry holds no secret, since an agent may pass its environment to a program in arguments another user can read. What it starts has to run as the user who can read that file.
 
-## `coqui_agentic_peer::home`
+## `agentic_peer::home`
 
 ```rust
 pub const HOME_ENV: &str = "COQUI_AGENTIC_PEER_HOME";
@@ -39,7 +39,7 @@ pub fn store(path: Option<&Path>) -> Result<TrustStore, Error>     // this user'
 
 One identity per method and one trust store per user is what makes one pairing serve every program and capability. `identity`: with `path`, the key there, whose type is its method, or a new one of `method` (else `Method::DEFAULT`); without, this user's identity of `method`, which the home then records in `METHOD_FILE`; with no method, the one `METHOD_FILE` records, else the one identity this user has (then recorded), else a new `Method::DEFAULT` one (then recorded), and `Error::Identity` only for a home from before the record that holds both. So the method named last is the one every later program naming none uses. A key of another method than the one named is refused, never replaced. A file that cannot be written says why: the error carries the system's own.
 
-## `coqui_agentic_peer::discovery`
+## `agentic_peer::discovery`
 
 ```rust
 pub const SERVICE_TYPE: &str = "_acp-agent._tcp.local.";
@@ -70,7 +70,7 @@ pub fn candidate_from(record: &Record<'_>) -> Option<Candidate>
 
 A record and a descriptor carry `method`, and `to_json` gives it as `"method"`. One naming no method is WebCrypto's; one naming a method this version cannot run is skipped. `candidate_from` reads an answer anyone on the link can send: it refuses this machine in any spelling, a link-local or multicast address, anything plain, no or a malformed key, and an unknown `txtvers` or `proto`, and cuts the label down, removing control and format characters. A descriptor may name only loopback, and may have no key. `read_descriptors` takes only regular files, spends at most 5 seconds, and reads nothing from a directory others can write to on Unix: it returns no candidates and `DirectoryCheck::SharedWithOthers`, the finding the application shows (a directory nobody meant to loosen). It prints nothing. On Windows it returns `NotChecked` and reads the files.
 
-## `coqui_agentic_peer::companion`
+## `agentic_peer::companion`
 
 ```rust
 pub const MAX_REQUEST: usize = 65_536;
@@ -97,7 +97,7 @@ It answers `{ "op": "discover", "seconds": N }`, at most 10 seconds, and nothing
 
 ## Errors
 
-`coqui_agentic_peer::Error` (`#[non_exhaustive]`): `Discovery(String)`, a peer that could not be advertised or searched for, or a companion that could not be installed. `home` returns `cabuya::Error` (`Identity(String)` for a key, identity file, trust store or directory that could not be used, with `Channel`, `Proof` and `OtherMethod` the link's own). A message never quotes a key file.
+`agentic_peer::Error` (`#[non_exhaustive]`): `Discovery(String)`, a peer that could not be advertised or searched for, or a companion that could not be installed. `home` returns `cabuya::Error` (`Identity(String)` for a key, identity file, trust store or directory that could not be used, with `Channel`, `Proof` and `OtherMethod` the link's own). A message never quotes a key file.
 
 ## Gotchas
 

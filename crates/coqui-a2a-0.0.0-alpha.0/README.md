@@ -28,7 +28,7 @@ cargo add --git https://github.com/Boriken-Dev/coqui-a2a coqui-a2a
 | --- | --- |
 | `tasks` | the `tasks` module: a `TaskStore` for an agent's tasks, their owners, subscribers and limits (no dependency) |
 | `loopback` | the `loopback` module: an HTTP endpoint on a loopback address (`axum`, `hyper`, `tokio`, and `cabuya`'s `forward`) |
-| `cli` | the `coqui-a2a` command (`loopback`, `clap`, `cabuya`'s `sealed`, `coqui-agentic-peer`'s home, the link's identity and TLS pieces) |
+| `cli` | the `coqui-a2a` command (`loopback`, `clap`, `cabuya`'s `sealed`, `agentic-peer`'s home, the link's identity and TLS pieces) |
 
 A default build depends on `cabuya`, `coqui-transport`, `serde`, `serde_json` and `time`. MSRV is Rust 1.89.
 

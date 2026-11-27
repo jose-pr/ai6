@@ -20,6 +20,17 @@ abstract interface class ByteWebChannel implements WebChannel {
   Future<void> sendBytes(Uint8List message);
 }
 
+/// A channel whose longest message, either way, can be changed while it is open, as a host's own limit is learned after the
+/// channel is dialed. The default is [defaultMaxMessage]; there is no floor or ceiling.
+abstract interface class LimitedWebChannel implements ByteWebChannel {
+  /// The longest message this channel sends or takes, in bytes.
+  int get maxMessage;
+
+  /// Sets the longest message either way. It governs the next message read or sent: one already read keeps the judgement it had.
+  /// A value under 1 throws an [ArgumentError].
+  set maxMessage(int bytes);
+}
+
 /// How a channel's datagrams actually travel, which decides what a caller can do with them.
 enum WebDatagramDelivery {
   /// On the network as datagrams: lost, reordered or repeated without notice, and never held up by anything lost before them.
@@ -147,7 +158,8 @@ final class WebEndpoints {
     this.webTransport,
     this.webSocket,
     this.certificatePins = const [],
-    this.allowLocalPlainWebSocket = false,
+    this.allowPlainWebSocket = false,
+    this.requireSameHost = true,
     bool impliedPort = false,
   }) {
     if (webTransport == null && webSocket == null) {
@@ -165,22 +177,22 @@ final class WebEndpoints {
       }
     }
     if (webSocket case final url?) {
-      final loopback = _isLoopback(url.host);
       if ((url.scheme != 'wss' &&
-              !(url.scheme == 'ws' && loopback && allowLocalPlainWebSocket)) ||
+              !(url.scheme == 'ws' && allowPlainWebSocket)) ||
           !_plainUrl(url)) {
         throw ArgumentError.value(
           url,
           'webSocket',
-          'Use WSS, or explicitly allow WS on localhost',
+          'Use WSS, or set allowPlainWebSocket for WS',
         );
       }
     }
-    if (webTransport != null &&
+    if (requireSameHost &&
+        webTransport != null &&
         webSocket != null &&
         webTransport!.host.toLowerCase() != webSocket!.host.toLowerCase()) {
       throw ArgumentError(
-        'WebTransport and fallback WebSocket must share a host',
+        'WebTransport and fallback WebSocket must share a host unless requireSameHost is false',
       );
     }
     if (certificatePins.isNotEmpty && webTransport == null) {
@@ -219,7 +231,14 @@ final class WebEndpoints {
   final Uri? webTransport;
   final Uri? webSocket;
   final List<String> certificatePins;
-  final bool allowLocalPlainWebSocket;
+
+  /// Accepts a `ws://` URL on any host. A plain WebSocket is neither encrypted nor authenticated: anything on the path
+  /// reads and changes it, and the peer proof the application runs is all that vouches for the other end.
+  final bool allowPlainWebSocket;
+
+  /// Whether the WebTransport and WebSocket URLs must name one host (the default). With false a fallback can reach
+  /// another machine, so the peer proof on the fallback channel ties both to one peer.
+  final bool requireSameHost;
 
   static bool _plainUrl(Uri url) =>
       url.hasAuthority &&
@@ -227,8 +246,6 @@ final class WebEndpoints {
       url.userInfo.isEmpty &&
       !url.hasQuery &&
       !url.hasFragment;
-  static bool _isLoopback(String host) =>
-      host == 'localhost' || host == '127.0.0.1' || host == '::1';
 }
 
 /// One message as text; what is not UTF-8 is a protocol failure.
@@ -267,7 +284,9 @@ Uint8List encodeBytesFrame(
 /// bad header come before the failure, and a failed decoder stays failed.
 final class FrameDecoder {
   FrameDecoder({this.maxBytes = defaultMaxMessage});
-  final int maxBytes;
+
+  /// The longest frame this decoder takes; changing it governs the next frame it reads.
+  int maxBytes;
   final List<int> _buffer = [];
   bool _failed = false;
 

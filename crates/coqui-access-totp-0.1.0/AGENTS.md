@@ -21,7 +21,8 @@ pub enum Algorithm { Sha1 /* default */, Sha256, Sha512 }   // coqui_builder::Le
 pub struct TotpRecord { pub name, pub secret: String, pub label: Option<String>, pub algorithm: String,
     pub digits: u32, pub period: u32, pub last_step: Option<i64>, pub codes: Vec<String>,
     pub disabled: bool, pub made_unix: Option<i64>, pub failures: u32,
-    pub locked_until_unix: Option<i64> }                   // non_exhaustive; Keyed by name; Debug redacts
+    pub locked_until_unix: Option<i64>, pub reset: bool /* secret empty */,
+    pub unlocked_unix: Option<i64> }                   // non_exhaustive; Keyed by name; Debug redacts
                                                            // failures/locked_until_unix default, so old files read
 pub struct Lockout { pub after: u32, pub first_seconds: u32, pub longest_seconds: u32 }   // non_exhaustive, Copy
 impl Lockout { pub const DEFAULT: Self /* 5, 30, 3600 */; pub const OFF: Self; pub const fn new(after, first_seconds, longest_seconds) -> Self; }
@@ -34,9 +35,9 @@ impl TotpBuilder {
     pub fn issuer(self, impl Into<String>) -> Self;             // default none
     pub fn algorithm(self, Algorithm) -> Self;                  // default Sha1
     pub fn digits(self, u32) -> Self;                           // 6..=8, default 6
-    pub fn period(self, seconds: u32) -> Self;                  // 1..=3600, default 30
-    pub fn skew(self, steps: u32) -> Self;                      // 0..=10, default 1
-    pub fn recovery_codes(self, count: u32) -> Self;            // 0..=64, default 10
+    pub fn period(self, seconds: u32) -> Self;                  // >= 1, default 30
+    pub fn skew(self, steps: u32) -> Self;                      // any, default 1; each step is one more code computed per attempt
+    pub fn recovery_codes(self, count: u32) -> Self;            // any, default 10
     pub fn enrol_seconds(self, seconds: u32) -> Self;           // >= 1, default 600
     pub fn max_records(self, usize) -> Self;                    // default 10 000, each table
     pub fn record_limits(self, RecordLimits) -> Self;
@@ -105,6 +106,13 @@ impl Accounts for TotpAccounts { /* accounts, put, remove, waiting */ }
 - `remove(name)`: deletes the account and any enrolment waiting (an administrator's reset);
   `GUATIAO_ERR_NOT_FOUND` when neither existed. `accounts()` lists enrolled accounts (`id` = `name`);
   `waiting()` lists unconfirmed enrolments, `shown` being the name.
+- `reset` (an administrator's reset, no `secret`): takes the secret, the recovery codes and any enrolment waiting away in one
+  write and keeps the record with `TotpRecord::reset`, listed as `AccountInfo::reset: Some(true)`; the account answers
+  `Unknown` and needs no `proved_current` to enrol again; confirming a new secret clears the mark. `GUATIAO_ERR_NOT_FOUND` when
+  the account is not enrolled.
+- `unlock` (no `secret`): clears `failures` and `locked_until_unix` and sets `unlocked_unix` (listed as
+  `AccountInfo::unlocked_unix`), under the table's lock. `GUATIAO_ERR_NOT_FOUND` when the account is not enrolled. Either flag
+  with a `secret` is `GUATIAO_ERR_BAD_VALUE`; `disabled` given with them is applied in the same write.
 - Who may call `put` and `remove` (a person under an `enrol` decision, or an administrator) is the
   consumer's.
 

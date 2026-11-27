@@ -326,6 +326,7 @@ impl Accounts for PasswordAccounts {
                         disabled: Some(account.disabled),
                         made_unix: account.made_unix,
                         expires_unix: None,
+                        ..AccountInfo::default()
                     })
                     .collect()
             })
@@ -337,6 +338,11 @@ impl Accounts for PasswordAccounts {
     fn put(&self, account: AccountPut) -> Result<PutOutcome, ProviderError> {
         if !self.limits.allows_field(&account.name) {
             return Err(error::bad_value("an account has a name"));
+        }
+        if account.reset || account.unlock {
+            return Err(error::unsupported(
+                "this provider keeps no reset mark or failure count",
+            ));
         }
         if account.expires_unix.is_some() {
             return Err(error::bad_value("password accounts do not expire"));
@@ -460,6 +466,31 @@ mod tests {
             .build()
             .unwrap();
         (table, accounts)
+    }
+
+    #[test]
+    fn a_reset_or_an_unlock_is_refused_as_unsupported() {
+        let (_, accounts) = with_accounts([AccountRecord::new(
+            "person-a",
+            "alice",
+            hash_of("x").unwrap(),
+        )]);
+        for put in [
+            AccountPut {
+                reset: true,
+                ..named("alice")
+            },
+            AccountPut {
+                unlock: true,
+                ..named("alice")
+            },
+        ] {
+            let refused = accounts.put(put).unwrap_err();
+            assert_eq!(
+                refused.status,
+                coqui_access::guatiao::Status::GUATIAO_ERR_UNSUPPORTED
+            );
+        }
     }
 
     #[test]

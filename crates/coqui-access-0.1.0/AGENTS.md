@@ -47,6 +47,11 @@ pub trait Accounts: Send + Sync {
 pub trait SignInPolicy: Send + Sync {
     fn decide(&self, context: SignInContext) -> Result<SignInDecision, ProviderError>;
 }
+
+#[guatiao::kind(name = "coqui_challenger")]     // floor hash 0x8aa14a59
+pub trait Challenger: Send + Sync {
+    fn challenge(&self, request: ChallengeRequest) -> Result<Challenge, ProviderError>;
+}
 ```
 
 - `authenticate` returns `Err` only when it could not find out; a host treats that as "could
@@ -58,6 +63,10 @@ pub trait SignInPolicy: Send + Sync {
 - `remove` returns `GUATIAO_ERR_NOT_FOUND` when no account has that name.
 - `decide` returns `Err` only when it could not find out; a consumer then offers nothing and
   refuses, never allowing. The contract a consumer follows is the narrative site's sign-in page.
+- `challenge` makes what a method needs before it can be answered (a passkey's challenge): `UNSUPPORTED` for a method it does not
+  challenge, `NOT_FOUND` for a named account it cannot challenge, `error::busy()` when the source holds too many already. The
+  answer goes through `Authenticator::authenticate` with `Attempt::challenge` set to `Challenge::challenge`. A host builds one
+  instance per kind, so a challenge one instance issued must be found by the other: keep it in a table both read, never in memory.
 - A provider offers the kinds it implements: `#[provider(Authenticator, Directory, Accounts,
   crate = ::coqui_access::guatiao)]`.
 - `KIND_PREFIX` is `"coqui_"`: a host scanning libraries keeps those that declare a kind
@@ -70,16 +79,19 @@ fields. Unknown keys are skipped when reading.
 
 | Model | Fields (required first) |
 | --- | --- |
-| `Attempt` | `name?`, `secret?`, `headers: Vec<(String, String)>`, `peer?`, `secure?`, `certificate?`, `certificates?: Vec<Bytes>` (DER, leaf first), `method?` (the `methods` word the credential is presented as; `None` is the provider's default) |
+| `Attempt` | `name?`, `secret?`, `headers: Vec<(String, String)>`, `peer?`, `secure?`, `certificate?`, `certificates?: Vec<Bytes>` (DER, leaf first), `method?` (the `methods` word the credential is presented as; `None` is the provider's default), `challenge?` (what a `Challenger` issued for this sign-in; `Debug` shows presence only) |
 | `Lookup` | `by`, `value`, `claims?` — `by` is `id`, `name`, `email`, `filter` (an LDAP filter) or `claims` (the authenticator names no account; a matcher decides from `claims`); a provider may add more |
 | `Claims` | `values: BTreeMap<String, Vec<String>>` (empty is not written), `certificate?: Bytes` (the leaf as DER); `get(name) -> &[String]`; `Debug` shows counts |
 | `Verdict` | enum tagged by `kind`: `Unknown`, `Invalid`, `Valid(Lookup)` |
 | `Person` | `id`, `name`, `groups`, `attributes: BTreeMap<String, Value>`, `display_name?`, `email?` |
 | `AuthorizationRequest` | `person`, `action`, `resource`, `ancestors: Vec<String>` (the resources `resource` sits under, nearest first; empty by default and then not written) |
 | `AuthorizationDecision` | `allowed`, `limits: BTreeMap<String, Value>` |
-| `Description` | `name?`, `takes?` (one of `takes::PASSWORD`, `KEY`, `REQUEST`, `OTP`) |
-| `AccountInfo` | `id`, `name`, `groups`, `disabled?`, `made_unix?`, `expires_unix?` |
-| `AccountPut` | `name`, `secret?`, `groups?`, `disabled?`, `expires_unix?`, `display_name?` (the label an enrolment shows; providers keeping none ignore it), `proved_current` (bool, default false, not written when false: the caller checked the account's current secret in this request; the one-time code provider refuses a rotation without it, the others ignore it) |
+| `Description` | `name?`, `takes?` (one of `takes::PASSWORD`, `KEY`, `REQUEST`, `OTP`, `PASSKEY`) |
+| `AccountInfo` | `id`, `name`, `groups`, `disabled?`, `made_unix?`, `expires_unix?`, `reset?` (an administrator reset the account; only the one-time code provider keeps it), `unlocked_unix?` (when an administrator last cleared its failure counts), `credentials?: Vec<CredentialInfo>` (an account that holds several, a passkey's) |
+| `AccountPut` | `name`, `secret?`, `groups?`, `disabled?`, `expires_unix?`, `display_name?` (the label an enrolment shows; providers keeping none ignore it), `reset` (bool, default false, not written when false: an administrator's reset, the provider takes the account's factor away and keeps a mark; a provider with none refuses it as unsupported), `unlock` (bool, same: clears the failure count and any delay and notes when; refused as unsupported by a provider that counts no failures), `proved_current` (bool, default false, not written when false: the caller checked the account's current secret in this request; the one-time code provider refuses a rotation without it, the others ignore it) |
+| `ChallengeRequest` | `method?` (`None` is the provider's own), `name?` (the account an earlier step named; `None` asks for any, a usernameless sign-in), `peer?` (so a provider can bound what one source holds); `Debug` shows the method only |
+| `Challenge` | `challenge` (the key the consumer keeps and returns in `Attempt::challenge`; base64url for a passkey), `options` (the method's wire text, for a passkey the JSON for `navigator.credentials.get`, passed on unread), `expires_unix`; `Debug` shows the expiry only |
+| `CredentialInfo` | `id`, `label?`, `made_unix?`, `used_unix?`, `synced?`, `disabled?`; `Debug` hides the id and label |
 | `PutOutcome` | `secret?`, `codes?: Vec<String>` (one-time recovery codes, said once) |
 | `Waiting` | `shown`, `peer?`, `seen_unix?` |
 | `Factor` | `method`, `provider?` (the id that accepted the step), `person?` (the `Person::id` it named; `Debug` hides it) |
@@ -109,12 +121,12 @@ authenticator names the account in `by`/`value` and has no claims.
 ## Words (`methods`, `purposes`, `clients`)
 
 ```rust
-pub mod methods { pub const PASSWORD, CERTIFICATE, PROXY, KEY, TOTP, RECOVERY_CODE: &str;
+pub mod methods { pub const PASSWORD, CERTIFICATE, PROXY, KEY, TOTP, RECOVERY_CODE, PASSKEY: &str;
                   pub const NEEDS_ACCOUNT: &[&str]; }     // [TOTP, RECOVERY_CODE]
 pub mod purposes { pub const SIGN_IN, RESUME, ENROL: &str; }   // "sign_in" | "resume" | "enrol"
 pub mod clients  { pub const BROWSER, APP, API: &str; }         // "browser" | "app" | "api"
 pub mod attributes { pub const CLIENT_VERIFIED: &str; }          // "client_verified"
-pub mod takes    { /* PASSWORD, KEY, REQUEST, */ pub const OTP: &str; }   // "otp"
+pub mod takes    { /* PASSWORD, KEY, REQUEST, */ pub const OTP, PASSKEY: &str; }   // "otp", "passkey"
 ```
 
 - A method in `NEEDS_ACCOUNT` checks a code against an account an earlier step already named, so
@@ -175,7 +187,7 @@ impl From<u32> for Limit; impl From<Option<u32>> for Limit;
 ## Errors (`coqui_access::error`)
 
 `bad_value`, `not_found`, `unsupported`, `internal`: each `fn(&str) -> ProviderError` with the
-matching Guatiao status. Messages never hold credentials. `ambiguous() -> ProviderError` is what a
+matching Guatiao status. Messages never hold credentials. `busy() -> ProviderError` is what a provider answers when it will not take another pending ceremony from a source (`bad_value` with the message `BUSY`; `is_busy(&ProviderError) -> bool`). `ambiguous() -> ProviderError` is what a
 directory answers when one lookup finds more than one account (`bad_value` with the message
 `AMBIGUOUS`); `is_ambiguous(&ProviderError) -> bool` tells it from any other refusal, and a matcher
 refuses the sign-in on it.

@@ -12,6 +12,7 @@ mod apply;
 mod catalog;
 mod codecs;
 mod compose;
+mod context;
 mod defaults;
 mod digest;
 mod error;
@@ -50,6 +51,7 @@ pub use compose::{
     Composition, Cycle, Environments, LeftEnvironment, PackageConflict, PackageEnvironment,
     Resolution, compose, composition_order, environments, resolve,
 };
+pub use context::{ContextFiles, ProjectContext, context_files};
 pub use defaults::{
     DEFAULT_KEYS, DelegateHint, Dependency, INTERPRETERS, OverlayTree, PartialLock, SkillEntry,
     SkillOrigin, bundled_skills, check_requirements, context_ignored, context_of, default_on,

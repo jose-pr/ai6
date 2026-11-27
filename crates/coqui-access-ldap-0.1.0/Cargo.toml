@@ -1,4 +1,4 @@
-# coqui-access/providers/access/ldap at 35986e115d0214db7e4885d6a7976e0d771edb9b, with what it inherits written out.
+# coqui-access/providers/access/ldap at e0b452292306df7d70b3bb64670c16300bb415f3, with what it inherits written out.
 [package]
 name = "coqui-access-ldap"
 description = "Authenticate against LDAP or Active Directory and resolve names and groups from it"
@@ -10,6 +10,13 @@ license = "MPL-2.0"
 repository = "https://github.com/Boriken-Dev/coqui-access"
 publish = false
 exclude = [".*", "*.local.*"]
+[package.metadata]
+[package.metadata.docs]
+[package.metadata.docs.rs]
+all-features = true
+[features]
+gssapi = ["ldap3/gssapi"]
+ntlm = ["ldap3/ntlm", "dep:picky", "dep:picky-krb"]
 [dependencies]
 [dependencies.coqui-access]
 path = "crates/coqui-access"
@@ -19,7 +26,7 @@ rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
 features = ["derive", "zeroize"]
 [dependencies.guatiao-builder]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d"
+rev = "3163647ab70bc19bf24125d30e1dc1ee49b10f94"
 [dependencies.coqui-access-kit]
 path = "crates/coqui-access-kit"
 features = ["cache"]
@@ -30,11 +37,22 @@ rev = "7cbd7ee208595c055d74eed79a4dafcd0175883d"
 version = "0.12"
 default-features = false
 features = ["sync", "tls-rustls-ring"]
+[dependencies.picky]
+version = "=7.0.0-rc.17"
+default-features = false
+optional = true
+[dependencies.picky-krb]
+version = "=0.11.1"
+optional = true
 [dependencies.rustls]
 version = "0.23"
 default-features = false
 features = ["std", "ring"]
 [dev-dependencies]
+[dev-dependencies.data-encoding]
+version = "2.11"
+[dev-dependencies.getrandom]
+version = "0.4"
 [dev-dependencies.rcgen]
 version = "0.14"
 [dev-dependencies.tempfile]

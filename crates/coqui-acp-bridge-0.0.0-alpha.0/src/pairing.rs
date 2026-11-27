@@ -63,7 +63,7 @@ pub struct PairAccept {
     #[arg(long = "deny")]
     pub deny: Vec<String>,
     /// The directory of the identity, trust store and grants, when the program that embeds this keeps them somewhere else than
-    /// `coqui_agentic_peer::home` does. Not a command-line argument.
+    /// `agentic_peer::home` does. Not a command-line argument.
     #[arg(skip)]
     pub home: Option<PathBuf>,
 }
@@ -94,7 +94,7 @@ pub struct PairDial {
     #[command(flatten)]
     pub method: MethodArgs,
     /// The directory of the identity, trust store and grants, when the program that embeds this keeps them somewhere else than
-    /// `coqui_agentic_peer::home` does. Not a command-line argument.
+    /// `agentic_peer::home` does. Not a command-line argument.
     #[arg(skip)]
     pub home: Option<PathBuf>,
 }

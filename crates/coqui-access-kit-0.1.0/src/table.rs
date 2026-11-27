@@ -219,6 +219,30 @@ pub trait Table<T>: Send + Sync {
     {
         self.update(&mut |records| make(records.iter().find(|record| record.key() == key)))
     }
+
+    /// Removes every record `condition` holds for, and answers how many went.
+    ///
+    /// The default loads the records and removes each through [`remove`](Table::remove), a
+    /// write apiece, so a table that rewrites itself on every write overrides it to remove
+    /// them all in one. Nothing matching writes nothing, so a read-only table answers 0.
+    ///
+    /// # Errors
+    ///
+    /// When the table cannot be read or a removal fails ([`SourceError::ReadOnly`] for a
+    /// read-only table holding a matching record).
+    fn remove_where(&self, condition: &mut dyn FnMut(&T) -> bool) -> Result<usize, SourceError>
+    where
+        T: Keyed,
+    {
+        let snapshot = self.load()?;
+        let mut removed = 0;
+        for record in snapshot.records.iter().filter(|record| condition(record)) {
+            if self.remove(&record.key())? {
+                removed += 1;
+            }
+        }
+        Ok(removed)
+    }
 }
 
 /// A table kept in memory, built in code. It is writable and its revision counts the
@@ -331,6 +355,17 @@ impl<T: Keyed + Clone + Send> Table<T> for MemoryTable<T> {
         state.1.retain(|record| record.key() != key);
         let removed = state.1.len() < before;
         if removed {
+            state.0 += 1;
+        }
+        Ok(removed)
+    }
+
+    fn remove_where(&self, condition: &mut dyn FnMut(&T) -> bool) -> Result<usize, SourceError> {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let before = state.1.len();
+        state.1.retain(|record| !condition(record));
+        let removed = before - state.1.len();
+        if removed > 0 {
             state.0 += 1;
         }
         Ok(removed)
@@ -718,6 +753,47 @@ mod tests {
             })
             .unwrap();
         assert_eq!(seen, Some(Some(name("b"))));
+    }
+
+    #[test]
+    fn remove_where_takes_every_match_in_one_change_or_one_remove_apiece() {
+        let table = MemoryTable::from_records([name("a1"), name("b"), name("a2")]);
+        let before = table.load().unwrap().revision;
+        let removed = table
+            .remove_where(&mut |record| record.0.starts_with('a'))
+            .unwrap();
+        assert_eq!(removed, 2);
+        let after = table.load().unwrap();
+        assert_eq!(after.records, [name("b")]);
+        assert_eq!(after.revision.get(), before.get() + 1, "one change");
+        assert_eq!(table.remove_where(&mut |_| false).unwrap(), 0);
+        assert_eq!(table.load().unwrap().revision, after.revision);
+
+        // The default removes through `remove`; with nothing matching it writes nothing.
+        struct Removing(MemoryTable<Name>, AtomicUsize);
+        impl Table<Name> for Removing {
+            fn load(&self) -> Result<Snapshot<Name>, SourceError> {
+                self.0.load()
+            }
+            fn remove(&self, key: &str) -> Result<bool, SourceError> {
+                self.1.fetch_add(1, Ordering::SeqCst);
+                self.0.remove(key)
+            }
+        }
+        let table = Removing(
+            MemoryTable::from_records([name("a1"), name("b"), name("a2")]),
+            AtomicUsize::new(0),
+        );
+        assert_eq!(
+            table.remove_where(&mut |record| record.0 == "c").unwrap(),
+            0
+        );
+        assert_eq!(table.1.load(Ordering::SeqCst), 0);
+        let removed = table
+            .remove_where(&mut |record| record.0.starts_with('a'))
+            .unwrap();
+        assert_eq!((removed, table.1.load(Ordering::SeqCst)), (2, 2));
+        assert_eq!(table.load().unwrap().records, [name("b")]);
     }
 
     #[test]

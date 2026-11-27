@@ -691,6 +691,7 @@ impl Accounts for MtlsAccounts {
                         disabled: Some(peer.disabled),
                         made_unix: peer.made_unix,
                         expires_unix: None,
+                        ..AccountInfo::default()
                     })
                     .collect()
             })
@@ -707,6 +708,11 @@ impl Accounts for MtlsAccounts {
     fn put(&self, account: AccountPut) -> Result<PutOutcome, ProviderError> {
         if !self.limits.allows_field(&account.name) {
             return Err(error::bad_value("a peer has a name"));
+        }
+        if account.reset || account.unlock {
+            return Err(error::unsupported(
+                "this provider keeps no reset mark or failure count",
+            ));
         }
         if account.expires_unix.is_some() {
             return Err(error::bad_value("peers do not expire"));

@@ -1,8 +1,9 @@
 use guatiao::library::ProviderError;
 
 use crate::model::{
-    AccountInfo, AccountPut, Attempt, AuthorizationDecision, AuthorizationRequest, Description,
-    Lookup, Person, PutOutcome, SignInContext, SignInDecision, Verdict, Waiting,
+    AccountInfo, AccountPut, Attempt, AuthorizationDecision, AuthorizationRequest, Challenge,
+    ChallengeRequest, Description, Lookup, Person, PutOutcome, SignInContext, SignInDecision,
+    Verdict, Waiting,
 };
 
 /// Checks credentials and returns only a [`Lookup`] reference.
@@ -77,4 +78,21 @@ pub trait Accounts: Send + Sync {
 pub trait SignInPolicy: Send + Sync {
     /// The methods that may be presented next, or that the sign-in is complete.
     fn decide(&self, context: SignInContext) -> Result<SignInDecision, ProviderError>;
+}
+
+/// Issues what a method needs before it can be answered: for a passkey, a challenge the signed
+/// answer is bound to.
+///
+/// A separate kind because a challenged sign-in is two calls and
+/// [`Authenticator::authenticate`] is one: appending a method to that kind would refuse every
+/// provider already built. The answer goes through `authenticate` with
+/// [`Attempt::challenge`](crate::Attempt::challenge) set to what [`Challenge::challenge`] said.
+/// A consumer builds one instance per kind, so a challenge issued by one instance must be
+/// found by the other: a provider keeps it in a table both read, never in memory.
+#[guatiao::kind(name = "coqui_challenger")]
+pub trait Challenger: Send + Sync {
+    /// Makes a challenge for one sign-in. `GUATIAO_ERR_UNSUPPORTED` for a method the provider
+    /// does not challenge, `GUATIAO_ERR_NOT_FOUND` for a named account it cannot challenge, and
+    /// [`error::busy`](crate::error::busy) when the source holds too many already.
+    fn challenge(&self, request: ChallengeRequest) -> Result<Challenge, ProviderError>;
 }

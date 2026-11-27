@@ -289,6 +289,7 @@ pub trait Table<T>: Send + Sync {
     fn update(&self, make: &mut Update<'_, T>) -> Result<(), SourceError>;   // default: load, make, put
     fn get(&self, key: &str) -> Result<Option<T>, SourceError> where T: Keyed;   // default: load, find; override to read one record
     fn update_one(&self, key: &str, make: &mut UpdateOne<'_, T>) -> Result<(), SourceError> where T: Keyed;   // default: update, find
+    fn remove_where(&self, condition: &mut dyn FnMut(&T) -> bool) -> Result<usize, SourceError> where T: Keyed;   // how many went; default: load, remove each match (a write apiece); MemoryTable and FileTable do it in one write, none when nothing matches
 }
 pub type Update<'a, T> = dyn FnMut(&[T]) -> Result<Option<T>, SourceError> + 'a;   // records read -> the record to put, or None
 pub type UpdateOne<'a, T> = dyn FnMut(Option<&T>) -> Result<Option<T>, SourceError> + 'a;   // the one record read -> the record to put, or None

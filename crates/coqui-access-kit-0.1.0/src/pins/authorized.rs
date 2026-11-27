@@ -439,9 +439,13 @@ fn bounded<T: Send + 'static>(
     let started = std::thread::Builder::new()
         .name("pin-file-read".to_owned())
         .spawn(move || {
-            // Dropped when the thread ends, by finishing or by unwinding.
-            let _place = place;
-            let result = work();
+            // Given back when the work ends, by finishing or by unwinding, and before the
+            // answer is sent: a caller that has its answer may ask for the same account at
+            // once, and must not find the place still taken.
+            let result = {
+                let _place = place;
+                work()
+            };
             // The caller may have given up; nobody is left to tell.
             let _ = sender.send(result);
         });
@@ -624,6 +628,14 @@ mod tests {
         let result = bounded::<()>(&reader, 1000, || panic!("the worker fails"));
         assert!(result.is_err());
         eventually_reads(&reader, 1000);
+    }
+
+    #[test]
+    fn a_read_that_has_answered_has_given_its_place_back() {
+        let reader = quick();
+        for _ in 0..500 {
+            assert_eq!(bounded(&reader, 1, || Ok(1)).unwrap(), 1);
+        }
     }
 
     #[test]

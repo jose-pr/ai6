@@ -87,7 +87,8 @@ pub(crate) fn limit(value: &Value) -> Option<LimitHit> {
             } else {
                 limit_kind_of(text).unwrap_or(LimitKind::RateLimit)
             });
-            limit.continuable = Some(true);
+            // A full context window follows the session to any account: another one cannot take the work.
+            limit.continuable = Some(limit.kind != Some(LimitKind::ContextWindow));
             limit.source = Source::Inferred;
             limit.text = Some(text.to_string());
             Some(limit)
@@ -268,7 +269,8 @@ pub(crate) fn line_text(value: &Value) -> String {
 /// whose status is `rejected`, a `result` that is an error naming a limit (the words `usage limit`, `limit reached` or
 /// `hit your limit`, or `api_error_status` 429), or a `type: error` line whose words do. `kind` says what it is (a
 /// plan's windows are `UsageQuota`, the `overage` window and money `Credit`, a 429 that names no usage limit
-/// `RateLimit`) and `continuable` is true: another account can take the work. A reset comes from `resetsAt` or the
+/// `RateLimit`, a full context window `ContextWindow`) and `continuable` says whether another account can take the work: true,
+/// but for a context window, which the session takes with it. A reset comes from `resetsAt` or the
 /// number after a trailing `|` of the words; a clock time is left unset. `None` for any other line.
 ///
 /// The provider also joins a rejected event to the error that follows it; a host that wants that keeps the event's hit and

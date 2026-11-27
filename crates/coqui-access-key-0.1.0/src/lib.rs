@@ -337,6 +337,7 @@ impl Accounts for Keys {
                         disabled: Some(record.disabled),
                         made_unix: record.made_unix,
                         expires_unix: record.expires_unix,
+                        ..AccountInfo::default()
                     })
                     .collect()
             })
@@ -349,6 +350,11 @@ impl Accounts for Keys {
     fn put(&self, account: AccountPut) -> Result<PutOutcome, ProviderError> {
         if !self.limits.allows_field(&account.name) {
             return Err(error::bad_value("an account has a name"));
+        }
+        if account.reset || account.unlock {
+            return Err(error::unsupported(
+                "this provider keeps no reset mark or failure count",
+            ));
         }
         if account.secret.is_some() {
             return Err(error::bad_value("a key is made here, not given"));
@@ -470,6 +476,27 @@ mod tests {
         assert_eq!(person.id, "robot-1");
         assert_eq!(person.groups, vec!["station"]);
         assert!(!format!("{keys:?}").contains(&secret));
+    }
+
+    #[test]
+    fn a_reset_or_an_unlock_is_refused_as_unsupported() {
+        let keys = Keys::builder().build().unwrap();
+        for put in [
+            AccountPut {
+                reset: true,
+                ..named("relay")
+            },
+            AccountPut {
+                unlock: true,
+                ..named("relay")
+            },
+        ] {
+            let refused = keys.put(put).unwrap_err();
+            assert_eq!(
+                refused.status,
+                coqui_access::guatiao::Status::GUATIAO_ERR_UNSUPPORTED
+            );
+        }
     }
 
     #[test]

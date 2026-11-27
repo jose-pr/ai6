@@ -9,12 +9,12 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+use agentic_peer::home;
 use cabuya::Error;
 use cabuya::auth::{self, Proof, Sealed, Trust};
 use cabuya::mux::{Heartbeat, Limits, Mux, Side};
 use clap::{Parser, Subcommand};
 use coqui_a2a::loopback::{Config, Hub, Loopback};
-use coqui_agentic_peer::home;
 use coqui_peer_tls as tls;
 use coqui_peer_webcrypto::TrustStore;
 use coqui_transport::{Channel as _, Failure};
@@ -33,7 +33,7 @@ const TOKEN_BYTES: usize = 32;
 /// More than any token, so a file named by mistake is refused rather than read.
 const MAX_TOKEN_FILE: u64 = 4096;
 
-/// A2A over a coqui-agentic-peer link.
+/// A2A over an agentic-peer link.
 #[derive(Debug, Parser)]
 #[command(
     name = "coqui-a2a",

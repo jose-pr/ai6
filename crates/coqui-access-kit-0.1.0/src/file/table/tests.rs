@@ -147,6 +147,28 @@ fn a_missing_file_is_empty_and_puts_replace_by_key() {
 }
 
 #[test]
+fn remove_where_rewrites_the_file_once_and_not_at_all_when_nothing_matches() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("items.toml");
+    let items = table(&path, Format::Toml);
+    for name in ["a1", "b", "a2"] {
+        items.put(item(name)).unwrap();
+    }
+    let other = table(&path, Format::Toml);
+    let seen = other.load().unwrap();
+    let removed = items
+        .remove_where(&mut |record| record.name.starts_with('a'))
+        .unwrap();
+    assert_eq!(removed, 2);
+    assert_eq!(items.load().unwrap().records, [item("b")]);
+    // Another table over the file sees one change.
+    let changed = other.changes_since(seen.revision).unwrap().unwrap();
+    assert_eq!(changed.records, [item("b")]);
+    assert_eq!(items.remove_where(&mut |_| false).unwrap(), 0);
+    assert_eq!(other.changes_since(changed.revision), Ok(None));
+}
+
+#[test]
 fn a_change_made_by_another_table_over_the_file_is_a_new_revision() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("items.toml");

@@ -34,6 +34,21 @@ pub fn ambiguous() -> ProviderError {
     ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, AMBIGUOUS)
 }
 
+/// What a provider answers when it will not take another pending ceremony from a source: a
+/// `bad_value` carrying [`BUSY`], so no kind has to change for it. The caller may try again
+/// later.
+pub fn busy() -> ProviderError {
+    ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, BUSY)
+}
+
+/// The message of [`busy`].
+pub const BUSY: &str = "BUSY";
+
+/// Whether `error` is [`busy`].
+pub fn is_busy(error: &ProviderError) -> bool {
+    error.status == Status::GUATIAO_ERR_BAD_VALUE && error.message() == BUSY
+}
+
 /// The message of [`ambiguous`].
 pub const AMBIGUOUS: &str = "the lookup finds more than one account";
 

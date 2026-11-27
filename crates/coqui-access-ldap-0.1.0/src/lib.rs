@@ -4,8 +4,11 @@
 #![warn(missing_debug_implementations)]
 #![warn(missing_docs)]
 
+pub mod bind;
 mod primary;
 pub mod search;
+
+pub use bind::{BindMethod, UserBind};
 
 use std::fmt;
 use std::sync::Arc;
@@ -16,9 +19,38 @@ use coqui_access::guatiao::library::ProviderError;
 use coqui_access::{Attempt, Authenticator, Directory, Lookup, Person, Verdict};
 use coqui_access_kit::{CacheOptions, CacheSetting, Cached};
 use coqui_builder::{Describe, Secret};
-use coqui_peer_tls::{ClientBuilder, NonDefault, Policy, Roots, Trust};
+use coqui_peer_tls::{ClientBuilder, Identity, Policy, Roots, Trust};
 use guatiao_builder::Described;
-use ldap3::{LdapConn, LdapConnSettings, Scope, SearchEntry};
+use ldap3::{LdapConn, LdapConnSettings, LdapResult, Scope, SearchEntry};
+
+/// A setting that admits more than the defaults do. Reported, never refused: the host
+/// decides what to do about it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NonDefault {
+    /// What the `ca_file` TLS configuration allows past coqui-peer-tls's default policy.
+    Tls(coqui_peer_tls::NonDefault),
+    /// `allow_cleartext_password` is on: a password may cross a plain `ldap://` connection, where
+    /// anyone on the path can read and replay it.
+    CleartextPassword,
+    /// NTLM binds on a connection with no TLS: no password crosses, but nothing after the bind
+    /// is signed or sealed, so the session can be altered and read.
+    UnprotectedNtlm,
+}
+
+impl fmt::Display for NonDefault {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Tls(setting) => fmt::Display::fmt(setting, formatter),
+            Self::CleartextPassword => {
+                formatter.write_str("allow_cleartext_password: a password may cross in the clear")
+            }
+            Self::UnprotectedNtlm => {
+                formatter.write_str("ntlm without TLS: the session after the bind is unprotected")
+            }
+        }
+    }
+}
 
 /// The account filter a filter lookup is ANDed with unless the configuration says another:
 /// people who are users, which leaves out Active Directory's computer accounts.
@@ -44,6 +76,33 @@ pub struct LdapAccountsConfig {
     pub bind: Option<String>,
     /// Service-account password; wiped when dropped and never shown.
     pub bind_password: Option<Secret<String>>,
+    /// How the search account binds: `simple` (`bind` and `bind_password`, or neither for an
+    /// anonymous bind), `gssapi` (Kerberos as the process's own credentials; the `gssapi`
+    /// feature), `ntlm` (`bind` as `DOMAIN\user` or `user@domain`, and `bind_password`; the
+    /// `ntlm` feature) or `external` (the TLS client certificate or the `ldapi://` socket's
+    /// peer credentials). With `gssapi` the credentials are the process's: on Unix its
+    /// `KRB5CCNAME`, `KRB5_CLIENT_KTNAME` and `KRB5_CONFIG`, on Windows its own account.
+    #[map(default = String::from("simple"))]
+    pub bind_method: String,
+    /// The name Kerberos knows the directory server by (`ldap/<name>`), for `gssapi`. Default:
+    /// the URL's host, which must then be a name and not an address.
+    pub server_fqdn: Option<String>,
+    /// PEM file with the client certificate (and its intermediates) presented to the
+    /// directory, for `external` or a directory that asks for one. Set together with
+    /// `client_key`; needs `ca_file`.
+    pub client_cert: Option<String>,
+    /// PEM file with the private key of `client_cert`.
+    pub client_key: Option<String>,
+    /// How a person's password is checked: `simple` (a bind as their distinguished name) or
+    /// `ntlm` (the name they typed, `user`, `DOMAIN\user` or `user@domain`; the `ntlm`
+    /// feature). Kerberos for people is not this provider's.
+    #[map(default = String::from("simple"))]
+    pub user_bind: String,
+    /// Whether a password may cross a plain `ldap://` connection to a host that is not the
+    /// local machine. Off by default, which refuses such a URL unless `start_tls` is on or
+    /// no password would cross it. Reported by `non_defaults()` when on.
+    #[map(default = false)]
+    pub allow_cleartext_password: bool,
     /// LDAP filter with `{name}` for the escaped account name.
     #[map(default = String::from("(sAMAccountName={name})"))]
     pub user_filter: String,
@@ -96,6 +155,12 @@ impl fmt::Debug for LdapAccountsConfig {
                 "bind_password",
                 &self.bind_password.as_ref().map(|_| "[REDACTED]"),
             )
+            .field("bind_method", &self.bind_method)
+            .field("server_fqdn", &self.server_fqdn)
+            .field("client_cert", &self.client_cert)
+            .field("client_key", &self.client_key)
+            .field("user_bind", &self.user_bind)
+            .field("allow_cleartext_password", &self.allow_cleartext_password)
             .field("user_filter", &self.user_filter)
             .field("object_filter", &self.object_filter)
             .field("allow_filter_lookups", &self.allow_filter_lookups)
@@ -148,9 +213,10 @@ impl LdapAccounts {
         })
     }
 
-    /// What the TLS configuration for `ca_file` allows beyond coqui-peer-tls's default policy
-    /// (TLS 1.2 and 1.3), as data for the host to act on. Empty without a `ca_file`, where
-    /// ldap3's own rustls defaults apply.
+    /// What these settings admit beyond the defaults, as data for the host to act on: the
+    /// `ca_file` TLS configuration past coqui-peer-tls's default policy (none without a
+    /// `ca_file`, where ldap3's own rustls defaults apply), a clear-text password allowed, and
+    /// NTLM without TLS. Empty with the defaults.
     pub fn non_defaults(&self) -> &[NonDefault] {
         &self.directory.inner().non_defaults
     }
@@ -158,6 +224,16 @@ impl LdapAccounts {
     /// How lookups are kept.
     pub fn cache(&self) -> CacheOptions {
         self.directory.options()
+    }
+
+    /// How the search account binds.
+    pub fn bind_method(&self) -> BindMethod {
+        self.directory.inner().service
+    }
+
+    /// How a person's password is checked.
+    pub fn user_bind(&self) -> UserBind {
+        self.directory.inner().user
     }
 }
 
@@ -178,6 +254,10 @@ struct Ldap {
     config: LdapAccountsConfig,
     trusted: Option<Arc<rustls::ClientConfig>>,
     non_defaults: Vec<NonDefault>,
+    service: BindMethod,
+    user: UserBind,
+    /// The name `ldap/<name>` is asked for, for `gssapi`.
+    server_fqdn: Option<String>,
     primary_groups: primary::GroupCache,
 }
 
@@ -202,12 +282,6 @@ struct Found {
 
 impl Ldap {
     fn new(config: LdapAccountsConfig) -> Result<Self, String> {
-        if search::in_the_clear(&config.url, config.start_tls) {
-            return Err(
-                "a password would cross the network in the clear: use ldaps:// or ldap:// with start_tls=true"
-                    .to_owned(),
-            );
-        }
         if config.base.trim().is_empty() {
             return Err("base must name the account search root".to_owned());
         }
@@ -217,30 +291,131 @@ impl Ldap {
         if !search::one_group(&config.object_filter) {
             return Err("object_filter must be one parenthesised filter".to_owned());
         }
-        if config.bind.is_some() != config.bind_password.is_some() {
-            return Err("bind and bind_password must be configured together".to_owned());
+        let service = BindMethod::parse(&config.bind_method)?;
+        let user = UserBind::parse(&config.user_bind)?;
+        if !service.built() {
+            return Err(format!(
+                "bind_method \"{service}\" needs this crate built with the `{}` feature",
+                service.feature().unwrap_or_default()
+            ));
         }
-        let (trusted, non_defaults) = match config.ca_file.as_deref() {
+        if !user.built() {
+            return Err(
+                "user_bind \"ntlm\" needs this crate built with the `ntlm` feature".to_owned(),
+            );
+        }
+        let half_credential = config.bind.is_some() != config.bind_password.is_some();
+        match service {
+            BindMethod::Simple if half_credential => {
+                return Err("bind and bind_password must be configured together".to_owned());
+            }
+            BindMethod::Ntlm => {
+                let (Some(name), Some(_)) = (&config.bind, &config.bind_password) else {
+                    return Err("bind_method \"ntlm\" needs bind and bind_password".to_owned());
+                };
+                bind::ntlm_name(name).map_err(|reason| format!("bind: {reason}"))?;
+            }
+            BindMethod::Gssapi | BindMethod::External
+                if config.bind.is_some() || config.bind_password.is_some() =>
+            {
+                return Err(format!(
+                    "bind and bind_password are not used by bind_method \"{service}\""
+                ));
+            }
+            _ => {}
+        }
+        let socket = bind::is_socket(&config.url);
+        let tls = config.url.starts_with("ldaps://") || (config.start_tls && !socket);
+        let server_fqdn = match (service, &config.server_fqdn) {
+            (BindMethod::Gssapi, Some(name)) if !name.trim().is_empty() => Some(name.clone()),
+            (BindMethod::Gssapi, _) => match bind::url_host(&config.url) {
+                Some(host) if !bind::is_address(host) => Some(host.to_owned()),
+                _ => {
+                    return Err(
+                        "bind_method \"gssapi\" needs server_fqdn: the URL names an address or no host"
+                            .to_owned(),
+                    );
+                }
+            },
+            _ => None,
+        };
+        if config.client_cert.is_some() != config.client_key.is_some() {
+            return Err("client_cert and client_key must be configured together".to_owned());
+        }
+        if service == BindMethod::External {
+            if config.client_cert.is_some() == socket {
+                return Err(
+                    "bind_method \"external\" needs client_cert and client_key over TLS, or an ldapi:// URL"
+                        .to_owned(),
+                );
+            }
+        } else if socket && service != BindMethod::Simple {
+            return Err("an ldapi:// URL takes bind_method \"simple\" or \"external\"".to_owned());
+        }
+        if config.client_cert.is_some() {
+            if !tls {
+                return Err("client_cert needs ldaps:// or start_tls".to_owned());
+            }
+            if config.ca_file.is_none() {
+                return Err(
+                    "client_cert needs ca_file: the roots the directory chains to".to_owned(),
+                );
+            }
+        }
+        // A password crosses the network when the search account binds simply with one, or a
+        // person's is checked by a simple bind, which GSSAPI's sealed layer carries. NTLM and
+        // GSSAPI send no password of their own.
+        let password_crosses = (user == UserBind::Simple && service != BindMethod::Gssapi)
+            || (service == BindMethod::Simple && config.bind_password.is_some());
+        if search::in_the_clear(&config.url, config.start_tls)
+            && password_crosses
+            && !config.allow_cleartext_password
+        {
+            return Err(
+                "a password would cross the network in the clear: use ldaps:// or ldap:// with start_tls=true, or set allow_cleartext_password"
+                    .to_owned(),
+            );
+        }
+        let mut non_defaults = Vec::new();
+        if config.allow_cleartext_password {
+            non_defaults.push(NonDefault::CleartextPassword);
+        }
+        if (service == BindMethod::Ntlm || user == UserBind::Ntlm) && !tls && !socket {
+            non_defaults.push(NonDefault::UnprotectedNtlm);
+        }
+        let identity = match (&config.client_cert, &config.client_key) {
+            (Some(cert), Some(key)) => Some(read_identity(cert, key)?),
+            _ => None,
+        };
+        let trusted = match config.ca_file.as_deref() {
             Some(file) => {
-                let built = ClientBuilder::new()
+                let mut builder = ClientBuilder::new()
                     .server(Trust::Roots(Roots::bundle_file(file)))
-                    .policy(Policy::default())
+                    .policy(Policy::default());
+                if let Some(identity) = &identity {
+                    builder = builder.identity(identity);
+                }
+                let built = builder
                     .build()
                     .map_err(|reason| format!("ca_file {file}: {reason}"))?;
-                let non_defaults = built.non_defaults();
-                (Some(Arc::new(built.config)), non_defaults)
+                non_defaults.extend(built.non_defaults().into_iter().map(NonDefault::Tls));
+                Some(Arc::new(built.config))
             }
-            None => (None, Vec::new()),
+            None => None,
         };
         Ok(Self {
             primary_groups: primary::GroupCache::new(config.cache.options()),
             config,
             trusted,
             non_defaults,
+            service,
+            user,
+            server_fqdn,
         })
     }
 
-    fn searching(&self) -> Result<LdapConn, ProviderError> {
+    /// A connection to the directory, bound to nobody.
+    fn connect(&self) -> Result<LdapConn, ProviderError> {
         let timeout = self.timeout();
         let mut settings = LdapConnSettings::new()
             .set_conn_timeout(timeout)
@@ -253,17 +428,45 @@ impl Ldap {
                 coqui_access::error::internal(&format!("directory connection failed: {error}"))
             })?;
         connection.with_timeout(timeout);
-        if let (Some(bind), Some(password)) = (&self.config.bind, &self.config.bind_password) {
-            let bound = connection
-                .simple_bind(bind, password.expose())
-                .map_err(|error| {
-                    coqui_access::error::internal(&format!("directory bind failed: {error}"))
-                })?;
-            bound.success().map_err(|_| {
+        Ok(connection)
+    }
+
+    /// A connection bound as the search account, by the configured method.
+    fn searching(&self) -> Result<LdapConn, ProviderError> {
+        let mut connection = self.connect()?;
+        if let Some(result) = self.bind_service(&mut connection)? {
+            result.success().map_err(|_| {
                 coqui_access::error::internal("directory refused its configured search account")
             })?;
         }
         Ok(connection)
+    }
+
+    /// Binds the search account; `None` for an anonymous simple bind, which sends nothing.
+    fn bind_service(&self, connection: &mut LdapConn) -> Result<Option<LdapResult>, ProviderError> {
+        let failed = |error: ldap3::LdapError| {
+            coqui_access::error::internal(&format!("directory bind failed: {error}"))
+        };
+        let result = match self.service {
+            BindMethod::Simple => match (&self.config.bind, &self.config.bind_password) {
+                (Some(bind), Some(password)) => connection
+                    .simple_bind(bind, password.expose())
+                    .map_err(failed)?,
+                _ => return Ok(None),
+            },
+            BindMethod::Gssapi => {
+                gssapi_bind(connection, self.server_fqdn.as_deref().unwrap_or_default())
+                    .map_err(failed)?
+            }
+            BindMethod::Ntlm => match (&self.config.bind, &self.config.bind_password) {
+                (Some(bind), Some(password)) => {
+                    ntlm_bind(connection, bind, password.expose()).map_err(failed)?
+                }
+                _ => return Ok(None),
+            },
+            BindMethod::External => connection.sasl_external_bind().map_err(failed)?,
+        };
+        Ok(Some(result))
     }
 
     fn timeout(&self) -> Duration {
@@ -491,6 +694,49 @@ impl Ldap {
     }
 }
 
+/// SASL GSSAPI as the process's own credentials; blocks on the ticket cache and the KDC.
+#[cfg(feature = "gssapi")]
+fn gssapi_bind(connection: &mut LdapConn, server_fqdn: &str) -> ldap3::result::Result<LdapResult> {
+    connection.sasl_gssapi_bind(server_fqdn)
+}
+
+#[cfg(not(feature = "gssapi"))]
+fn gssapi_bind(_: &mut LdapConn, _: &str) -> ldap3::result::Result<LdapResult> {
+    Err(ldap3::LdapError::AdapterInit(
+        "built without the gssapi feature".to_owned(),
+    ))
+}
+
+/// SASL GSS-SPNEGO with NTLM. The name was checked by [`bind::ntlm_name`]: ldap3 parses it
+/// with `unwrap`.
+#[cfg(feature = "ntlm")]
+fn ntlm_bind(
+    connection: &mut LdapConn,
+    name: &str,
+    password: &str,
+) -> ldap3::result::Result<LdapResult> {
+    connection.sasl_ntlm_bind(name, password)
+}
+
+#[cfg(not(feature = "ntlm"))]
+fn ntlm_bind(_: &mut LdapConn, _: &str, _: &str) -> ldap3::result::Result<LdapResult> {
+    Err(ldap3::LdapError::AdapterInit(
+        "built without the ntlm feature".to_owned(),
+    ))
+}
+
+/// The client certificate chain and key a directory is shown: the two files read as one PEM
+/// text. A failure names the files, never their contents.
+fn read_identity(cert: &str, key: &str) -> Result<Identity, String> {
+    let read = |name: &str, file: &str| {
+        std::fs::read_to_string(file).map_err(|reason| format!("{name} {file}: {reason}"))
+    };
+    let mut text = read("client_cert", cert)?;
+    text.push('\n');
+    text.push_str(&read("client_key", key)?);
+    Identity::from_pem_chain(&text).map_err(|reason| format!("client_cert {cert}: {reason}"))
+}
+
 /// What the account searches need of a directory connection, so a stand-in can answer them.
 trait Entries {
     /// The entries a search finds; none for a base-scope read of a name that is not there.
@@ -561,13 +807,29 @@ impl Authenticator for Ldap {
             let _ = connection.unbind();
             return Ok(Verdict::Invalid);
         }
-        connection.with_timeout(self.timeout());
-        let result = connection
-            .simple_bind(&found.dn, &password)
-            .map_err(|error| {
-                coqui_access::error::internal(&format!("account bind failed: {error}"))
-            })?;
-        let _ = connection.unbind();
+        let result = match self.user {
+            // The search account's own connection, so a sealed GSSAPI layer protects the
+            // password too: ldap3 keeps wrapping after a rebind and Active Directory and
+            // OpenLDAP keep unwrapping.
+            UserBind::Simple => {
+                connection.with_timeout(self.timeout());
+                let result = connection.simple_bind(&found.dn, &password);
+                let _ = connection.unbind();
+                result
+            }
+            UserBind::Ntlm => {
+                let _ = connection.unbind();
+                // A name ldap3 cannot parse is not an account.
+                if bind::ntlm_name(&name).is_err() {
+                    return Ok(Verdict::Invalid);
+                }
+                let mut own = self.connect()?;
+                let result = ntlm_bind(&mut own, &name, &password);
+                let _ = own.unbind();
+                result
+            }
+        }
+        .map_err(|error| coqui_access::error::internal(&format!("account bind failed: {error}")))?;
         match result.rc {
             0 => Ok(Verdict::Valid(Lookup {
                 by: "name".to_owned(),
@@ -669,6 +931,12 @@ mod tests {
             base: "DC=example,DC=org".to_owned(),
             bind: None,
             bind_password: None,
+            bind_method: "simple".to_owned(),
+            server_fqdn: None,
+            client_cert: None,
+            client_key: None,
+            user_bind: "simple".to_owned(),
+            allow_cleartext_password: false,
             user_filter: "(sAMAccountName={name})".to_owned(),
             object_filter: DEFAULT_OBJECT_FILTER.to_owned(),
             allow_filter_lookups: true,
@@ -699,6 +967,206 @@ mod tests {
         let mut bind = config("ldaps://directory.example.org");
         bind.bind = Some("CN=search".to_owned());
         assert!(LdapAccounts::new(bind).unwrap_err().contains("together"));
+    }
+
+    fn with(url: &str, set: impl FnOnce(&mut LdapAccountsConfig)) -> Result<LdapAccounts, String> {
+        let mut config = config(url);
+        set(&mut config);
+        LdapAccounts::new(config)
+    }
+
+    fn password(text: &str) -> Option<Secret<String>> {
+        Some(Secret::new(text.to_owned()))
+    }
+
+    #[test]
+    fn the_defaults_bind_simply_and_weaken_nothing() {
+        let accounts = LdapAccounts::new(config("ldaps://directory.example.org")).unwrap();
+        assert_eq!(accounts.bind_method(), BindMethod::Simple);
+        assert_eq!(accounts.user_bind(), UserBind::Simple);
+        assert!(accounts.non_defaults().is_empty());
+    }
+
+    #[test]
+    fn an_unknown_method_or_a_method_this_build_lacks_is_an_error_that_says_so() {
+        let unknown = with("ldaps://directory.example.org", |c| {
+            c.bind_method = "kerberos".to_owned();
+        });
+        assert!(
+            unknown
+                .unwrap_err()
+                .contains("simple, gssapi, ntlm, external")
+        );
+        let user = with("ldaps://directory.example.org", |c| {
+            c.user_bind = "gssapi".to_owned();
+        });
+        assert!(user.unwrap_err().contains("simple, ntlm"));
+        #[cfg(not(feature = "gssapi"))]
+        assert!(
+            with("ldaps://directory.example.org", |c| {
+                c.bind_method = "gssapi".to_owned();
+            })
+            .unwrap_err()
+            .contains("`gssapi` feature")
+        );
+        #[cfg(not(feature = "ntlm"))]
+        {
+            let service = with("ldaps://directory.example.org", |c| {
+                c.bind_method = "ntlm".to_owned();
+            });
+            assert!(service.unwrap_err().contains("`ntlm` feature"));
+            let user = with("ldaps://directory.example.org", |c| {
+                c.user_bind = "ntlm".to_owned();
+            });
+            assert!(user.unwrap_err().contains("`ntlm` feature"));
+        }
+    }
+
+    #[test]
+    fn credentials_must_fit_the_method() {
+        let url = "ldaps://directory.example.org";
+        let nothing = with(url, |c| c.bind_method = "external".to_owned());
+        assert!(nothing.unwrap_err().contains("client_cert"));
+        let with_bind = with(url, |c| {
+            c.bind_method = "external".to_owned();
+            c.bind = Some("CN=search".to_owned());
+        });
+        assert!(with_bind.unwrap_err().contains("not used"));
+        let half = with(url, |c| c.client_cert = Some("client.pem".to_owned()));
+        assert!(half.unwrap_err().contains("together"));
+        let plain = with("ldap://127.0.0.1", |c| {
+            c.client_cert = Some("client.pem".to_owned());
+            c.client_key = Some("client.key".to_owned());
+        });
+        assert!(plain.unwrap_err().contains("ldaps:// or start_tls"));
+        let no_roots = with(url, |c| {
+            c.client_cert = Some("client.pem".to_owned());
+            c.client_key = Some("client.key".to_owned());
+        });
+        assert!(no_roots.unwrap_err().contains("ca_file"));
+        let socket = with("ldapi://%2Frun%2Fldapi", |c| {
+            c.bind_method = "external".to_owned();
+        });
+        assert!(socket.is_ok());
+        let both = with("ldapi://%2Frun%2Fldapi", |c| {
+            c.bind_method = "external".to_owned();
+            c.client_cert = Some("client.pem".to_owned());
+            c.client_key = Some("client.key".to_owned());
+        });
+        assert!(both.is_err());
+    }
+
+    #[cfg(feature = "gssapi")]
+    #[test]
+    fn gssapi_asks_for_the_urls_host_as_a_name_and_not_an_address() {
+        let named = with("ldaps://dc.example.org", |c| {
+            c.bind_method = "gssapi".to_owned();
+        });
+        assert!(named.is_ok());
+        let address = with("ldaps://10.0.0.1", |c| c.bind_method = "gssapi".to_owned());
+        assert!(address.unwrap_err().contains("server_fqdn"));
+        let given = with("ldaps://10.0.0.1", |c| {
+            c.bind_method = "gssapi".to_owned();
+            c.server_fqdn = Some("dc.example.org".to_owned());
+        });
+        assert!(given.is_ok());
+        let with_bind = with("ldaps://dc.example.org", |c| {
+            c.bind_method = "gssapi".to_owned();
+            c.bind = Some("CN=search".to_owned());
+            c.bind_password = password("secret");
+        });
+        assert!(with_bind.unwrap_err().contains("not used"));
+        let socket = with("ldapi://%2Frun%2Fldapi", |c| {
+            c.bind_method = "gssapi".to_owned();
+        });
+        assert!(socket.is_err());
+    }
+
+    #[cfg(feature = "ntlm")]
+    #[test]
+    fn a_malformed_ntlm_name_is_an_error_and_never_a_panic() {
+        let url = "ldaps://dc.example.org";
+        for bad in ["EXAMPLE\\ana\\b", "a@b\\c@d", "ana@", "", "EXAMPLE\\ana@x"] {
+            let result = with(url, |c| {
+                c.bind_method = "ntlm".to_owned();
+                c.bind = Some(bad.to_owned());
+                c.bind_password = password("secret");
+            });
+            assert!(result.unwrap_err().starts_with("bind: "), "{bad:?}");
+        }
+        let missing = with(url, |c| c.bind_method = "ntlm".to_owned());
+        assert!(
+            missing
+                .unwrap_err()
+                .contains("needs bind and bind_password")
+        );
+        for good in ["EXAMPLE\\ana", "ana@example.org"] {
+            let accounts = with(url, |c| {
+                c.bind_method = "ntlm".to_owned();
+                c.bind = Some(good.to_owned());
+                c.bind_password = password("secret");
+            })
+            .unwrap();
+            assert_eq!(accounts.bind_method(), BindMethod::Ntlm);
+            assert!(accounts.non_defaults().is_empty());
+        }
+    }
+
+    #[test]
+    fn a_password_over_plain_ldap_is_refused_unless_the_operator_allows_it() {
+        let url = "ldap://directory.example.org";
+        // The default keeps the refusal, and says how to lift it.
+        let refused = with(url, |_| {}).unwrap_err();
+        assert!(refused.contains("clear") && refused.contains("allow_cleartext_password"));
+        let service_password = with(url, |c| {
+            c.bind = Some("CN=search".to_owned());
+            c.bind_password = password("secret");
+        });
+        assert!(service_password.is_err());
+        // The opt-out admits it and is listed as a weakening.
+        let allowed = with(url, |c| c.allow_cleartext_password = true).unwrap();
+        assert_eq!(allowed.non_defaults(), [NonDefault::CleartextPassword]);
+        // StartTLS and ldaps need no opt-out; the setting is still reported when on.
+        assert!(with(url, |c| c.start_tls = true).is_ok());
+        let moot = with("ldaps://directory.example.org", |c| {
+            c.allow_cleartext_password = true;
+        });
+        assert_eq!(
+            moot.unwrap().non_defaults(),
+            [NonDefault::CleartextPassword]
+        );
+        // Loopback is not the network.
+        assert!(with("ldap://localhost", |_| {}).is_ok());
+    }
+
+    #[cfg(all(feature = "gssapi", feature = "ntlm"))]
+    #[test]
+    fn a_sealed_gssapi_search_account_over_plain_ldap_needs_no_opt_out() {
+        let url = "ldap://dc.example.org";
+        // The person's password rides the sealed layer, so simple user binds are accepted.
+        let sealed = with(url, |c| c.bind_method = "gssapi".to_owned()).unwrap();
+        assert!(sealed.non_defaults().is_empty());
+        assert_eq!(sealed.bind_method(), BindMethod::Gssapi);
+        // NTLM sends no password but nothing after it is protected: reported.
+        let ntlm = with(url, |c| {
+            c.bind_method = "gssapi".to_owned();
+            c.user_bind = "ntlm".to_owned();
+        })
+        .unwrap();
+        assert_eq!(ntlm.non_defaults(), [NonDefault::UnprotectedNtlm]);
+        let ntlm_over_tls = with("ldaps://dc.example.org", |c| {
+            c.bind_method = "gssapi".to_owned();
+            c.user_bind = "ntlm".to_owned();
+        })
+        .unwrap();
+        assert!(ntlm_over_tls.non_defaults().is_empty());
+        // A simple search-account bind with a password is still clear text.
+        let simple = with(url, |c| {
+            c.bind = Some("CN=search".to_owned());
+            c.bind_password = password("secret");
+            c.user_bind = "ntlm".to_owned();
+        });
+        assert!(simple.unwrap_err().contains("clear"));
     }
 
     #[test]

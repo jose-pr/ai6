@@ -16,6 +16,9 @@ pub const KEY: &str = "key";
 pub const TOTP: &str = "totp";
 /// A one-time recovery code made at enrolment.
 pub const RECOVERY_CODE: &str = "recovery_code";
+/// A passkey (WebAuthn): a signed answer to a challenge the provider issued. It names its own
+/// account, so it is offered before any step has named someone.
+pub const PASSKEY: &str = "passkey";
 
 /// Methods that check a code against an account already named, so nothing is offered of them
 /// until an earlier step has named someone.

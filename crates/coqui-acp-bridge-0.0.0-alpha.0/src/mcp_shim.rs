@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use coqui_agentic_peer::mcp_offer;
+use agentic_peer::mcp_offer;
 
 use crate::helper::Helper;
 use crate::standing;

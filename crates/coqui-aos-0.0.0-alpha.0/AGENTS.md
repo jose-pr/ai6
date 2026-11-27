@@ -180,6 +180,16 @@ pub struct StdFs;                                          // feature `fs`; a re
 
 `tree_digest` checks every entry with `metadata` before it reads or descends, and refuses a listed name that is empty, `.`, `..` or holds `/`, `\` or NUL. `StdFs::read` and `list` open through links, as `std::fs` does: a link swapped in between `metadata` and `read` is followed, so read only trees no one else can write. A name that is not Unicode is refused as `NonUtf8Name`.
 
+## A project's context files (`context_files`)
+
+```rust
+pub struct ProjectContext;   // ProjectContext::new(root: Option<PathBuf>, cwd: PathBuf), then .agents_dir(Option<String>), .agents_context(Option<String>), .separator(char), .native(paths), .delivered(levels)
+pub struct ContextFiles { pub files: Vec<PathBuf>, pub skipped: Vec<PathBuf>, pub ignored: Vec<String>, pub levels: Vec<PathBuf> }   // non_exhaustive
+pub fn context_files<F: FileSystem>(fs: &F, query: &ProjectContext) -> ContextFiles
+```
+
+The specification's *Project context files* section: `AGENTS.md` and `AGENTS.*.md` (names from the value of `AGENTS_CONTEXT`) in each level's directory and in each `AGENTS_DIR` directory inside it (`.agents` by default), from the project root down to `cwd`, local (`*.local.*`) files last, a later file overriding an earlier one. The caller passes the two variables' values, so the core reads no environment; `separator` defaults to `;` on Windows and `:` elsewhere. `native` is the paths a harness loads itself, left out as `skipped`; `delivered` is the levels a session already has, so a change of directory gives only the new ones (`levels`). An invalid entry is in `ignored`. A link to a file counts and a link to a directory does not (`list` follows it).
+
 ## What an overlay's files contribute
 
 ```rust

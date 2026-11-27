@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use coqui_agentic_peer::discovery;
+use agentic_peer::discovery;
 
 /// Prints each candidate found in `seconds` as one line of JSON on standard output.
 ///

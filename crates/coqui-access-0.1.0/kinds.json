@@ -172,6 +172,30 @@
           "doc": "The methods that may be presented next, or that the sign-in is complete."
         }
       ]
+    },
+    {
+      "name": "coqui_challenger",
+      "floor_hash": 2325826137,
+      "object": false,
+      "doc": "Issues what a method needs before it can be answered: for a passkey, a challenge the signed\nanswer is bound to.\n\nA separate kind because a challenged sign-in is two calls and\n[`Authenticator::authenticate`] is one: appending a method to that kind would refuse every\nprovider already built. The answer goes through `authenticate` with\n[`Attempt::challenge`](crate::Attempt::challenge) set to what [`Challenge::challenge`] said.\nA consumer builds one instance per kind, so a challenge issued by one instance must be\nfound by the other: a provider keeps it in a table both read, never in memory.",
+      "slots": [
+        {
+          "name": "challenge",
+          "required": true,
+          "fallible": true,
+          "args": [
+            {
+              "name": "request",
+              "type": "value",
+              "pass": "borrowed"
+            }
+          ],
+          "answer": {
+            "type": "value"
+          },
+          "doc": "Makes a challenge for one sign-in. `GUATIAO_ERR_UNSUPPORTED` for a method the provider\ndoes not challenge, `GUATIAO_ERR_NOT_FOUND` for a named account it cannot challenge, and\n[`error::busy`](crate::error::busy) when the source holds too many already."
+        }
+      ]
     }
   ]
 }

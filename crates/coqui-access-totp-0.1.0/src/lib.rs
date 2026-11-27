@@ -53,8 +53,6 @@ pub const DEFAULT_ENROL_SECONDS: u32 = 600;
 const RECOVERY_DOMAIN: &str = "coqui-access-totp recovery code";
 const RECOVERY_ALPHABET: &[u8; 32] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const RECOVERY_LENGTH: usize = 10;
-const MOST_RECOVERY_CODES: u32 = 64;
-const MOST_SKEW: u32 = 10;
 
 /// An account's secret and what it has used, as a [`Table`] keeps it, keyed by
 /// [`name`](TotpRecord::name).
@@ -94,6 +92,12 @@ pub struct TotpRecord {
     /// Until when the account takes no code, in seconds since the Unix epoch, after too many
     /// wrong ones ([`Lockout`]).
     pub locked_until_unix: Option<i64>,
+    /// An administrator reset the account: its secret and recovery codes are gone (the secret
+    /// is empty) and it takes no code until a new secret is confirmed.
+    #[map(default, skip_serializing_if = core::ops::Not::not)]
+    pub reset: bool,
+    /// When an administrator last cleared the failure count, in seconds since the Unix epoch.
+    pub unlocked_unix: Option<i64>,
 }
 
 fn is_zero(count: &u32) -> bool {
@@ -118,6 +122,7 @@ impl fmt::Debug for TotpRecord {
             .field("codes", &self.codes.len())
             .field("disabled", &self.disabled)
             .field("failures", &self.failures)
+            .field("reset", &self.reset)
             .finish()
     }
 }
@@ -302,22 +307,23 @@ impl TotpBuilder {
         self
     }
 
-    /// Seconds a new secret's code lasts, 1 to 3 600. Default [`DEFAULT_PERIOD`].
+    /// Seconds a new secret's code lasts, at least 1. Default [`DEFAULT_PERIOD`].
     #[must_use]
     pub fn period(mut self, seconds: u32) -> Self {
         self.period = seconds;
         self
     }
 
-    /// Steps either side of the present one a code is accepted in, at most 10. Default
-    /// [`DEFAULT_SKEW`]; 0 accepts the present step only.
+    /// Steps either side of the present one a code is accepted in. Default
+    /// [`DEFAULT_SKEW`]; 0 accepts the present step only. Each step widens the window a
+    /// guess has to land in, and costs one code computed per attempt.
     #[must_use]
     pub fn skew(mut self, steps: u32) -> Self {
         self.skew = steps;
         self
     }
 
-    /// Recovery codes made at enrolment, at most 64. Default [`DEFAULT_RECOVERY_CODES`].
+    /// Recovery codes made at enrolment. Default [`DEFAULT_RECOVERY_CODES`]; 0 makes none.
     #[must_use]
     pub fn recovery_codes(mut self, count: u32) -> Self {
         self.recovery_codes = count;
@@ -366,14 +372,11 @@ impl TotpBuilder {
     ///
     /// # Errors
     ///
-    /// When a setting is out of range (digits outside 6 to 8, a period outside 1 to 3 600, a
-    /// skew over 10, more than 64 recovery codes, no time to enrol), or a table cannot be
-    /// loaded or holds an invalid or duplicated account.
+    /// When a setting means nothing (digits outside 6 to 8, a period of 0 seconds, no time to
+    /// enrol), or a table cannot be loaded or holds an invalid or duplicated account.
     pub fn build(self) -> Result<TotpAccounts, SourceError> {
         if !(6..=8).contains(&self.digits)
-            || !(1..=3_600).contains(&self.period)
-            || self.skew > MOST_SKEW
-            || self.recovery_codes > MOST_RECOVERY_CODES
+            || self.period == 0
             || self.enrol_seconds == 0
             || self
                 .issuer
@@ -496,7 +499,10 @@ impl TotpAccounts {
     /// Decides what presenting `presented` to `record` comes to, and the record it leaves:
     /// `None` when nothing is to be written.
     fn judge(&self, record: &TotpRecord, presented: &str, recovery: bool, now: i64) -> Judged {
-        if record.disabled || record.locked_until_unix.is_some_and(|until| now < until) {
+        if record.disabled
+            || record.reset
+            || record.locked_until_unix.is_some_and(|until| now < until)
+        {
             return Judged {
                 taken: false,
                 next: None,
@@ -592,13 +598,61 @@ impl TotpAccounts {
             .map_err(|reason| reason.writing("one-time code table"))
     }
 
+    /// An administrator's `reset` and `unlock` for an enrolled account, in one write under the
+    /// table's lock. `disabled`, when given with them, is applied in the same write.
+    fn administer(&self, account: &AccountPut) -> Result<PutOutcome, ProviderError> {
+        let now = self.now();
+        let found = self
+            .records
+            .update_one(&account.name, |current| {
+                let Some(current) = current else {
+                    return Ok((None, false));
+                };
+                let mut next = current.clone();
+                if account.reset {
+                    next.reset = true;
+                    next.secret = String::new();
+                    next.codes = Vec::new();
+                    next.last_step = None;
+                }
+                if account.unlock {
+                    next.unlocked_unix = Some(now);
+                }
+                if account.unlock || account.reset {
+                    next.failures = 0;
+                    next.locked_until_unix = None;
+                }
+                if let Some(disabled) = account.disabled {
+                    next.disabled = disabled;
+                }
+                Ok((Some(next), true))
+            })
+            .map_err(|reason| reason.writing("one-time code table"))?;
+        if account.reset {
+            // An enrolment begun before the reset would let the person set the factor up
+            // again without an administrator.
+            self.pending
+                .remove(&account.name)
+                .map_err(|reason| reason.writing("one-time code table"))?;
+        }
+        if found {
+            Ok(PutOutcome::default())
+        } else {
+            Err(error::not_found("there is no such account"))
+        }
+    }
+
     fn begin(&self, account: &AccountPut) -> Result<PutOutcome, ProviderError> {
         // Confirming replaces the factor the person holds, so beginning that replacement is
         // for a caller that has checked the current one.
         if !account.proved_current {
             let enrolled = self
                 .records
-                .read(|records| records.iter().any(|record| record.name == account.name))
+                .read(|records| {
+                    records
+                        .iter()
+                        .any(|record| record.name == account.name && !record.reset)
+                })
                 .map_err(|reason| reason.reading("one-time code table"))?;
             if enrolled {
                 return Err(error::bad_value(
@@ -680,6 +734,8 @@ impl TotpAccounts {
             made_unix: Some(now),
             failures: 0,
             locked_until_unix: None,
+            reset: false,
+            unlocked_unix: None,
         };
         self.records
             .put_with(|_| Ok((record, ())))
@@ -787,6 +843,10 @@ impl Authenticator for TotpAccounts {
         else {
             return Ok(Verdict::Unknown);
         };
+        // A reset account holds no factor: it is not enrolled until a new secret is confirmed.
+        if record.reset {
+            return Ok(Verdict::Unknown);
+        }
         self.present(&record, &presented, recovery)
     }
 
@@ -811,6 +871,9 @@ impl Accounts for TotpAccounts {
                         disabled: Some(record.disabled),
                         made_unix: record.made_unix,
                         expires_unix: None,
+                        reset: record.reset.then_some(true),
+                        unlocked_unix: record.unlocked_unix,
+                        ..AccountInfo::default()
                     })
                     .collect()
             })
@@ -840,6 +903,14 @@ impl Accounts for TotpAccounts {
             return Err(error::bad_value(
                 "one-time code accounts have no groups and do not expire",
             ));
+        }
+        if account.reset || account.unlock {
+            if account.secret.is_some() {
+                return Err(error::bad_value(
+                    "a reset or an unlock does not come with a secret",
+                ));
+            }
+            return self.administer(&account);
         }
         match (&account.secret, account.disabled) {
             (Some(code), _) => self.confirm(&account.name, code),
@@ -910,9 +981,8 @@ fn validate(records: &[TotpRecord], max: usize, limits: &RecordLimits) -> Result
         let valid = limits.allows_field(&record.name)
             && Algorithm::parse_word(&record.algorithm).is_some()
             && (6..=8).contains(&record.digits)
-            && (1..=3_600).contains(&record.period)
-            && unbase32(&record.secret).is_some_and(|key| !key.is_empty())
-            && record.codes.len() <= MOST_RECOVERY_CODES as usize
+            && record.period >= 1
+            && (record.reset || unbase32(&record.secret).is_some_and(|key| !key.is_empty()))
             && record.codes.iter().all(|code| secret::is_hash(code))
             && record
                 .label
@@ -935,9 +1005,8 @@ fn validate_pending(
         let valid = limits.allows_field(&entry.name)
             && Algorithm::parse_word(&entry.algorithm).is_some()
             && (6..=8).contains(&entry.digits)
-            && (1..=3_600).contains(&entry.period)
+            && entry.period >= 1
             && unbase32(&entry.secret).is_some_and(|key| !key.is_empty())
-            && entry.codes.len() <= MOST_RECOVERY_CODES as usize
             && entry.codes.iter().all(|code| secret::is_hash(code));
         if !valid {
             return Err(SourceError::invalid("an enrolment entry is invalid"));

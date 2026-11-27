@@ -79,7 +79,7 @@ pub struct Dial {
     #[arg(last = true, required = true)]
     pub agent: Vec<OsString>,
     /// The directory of the identity, trust store and grants, when the program that embeds this keeps them somewhere else than
-    /// `coqui_agentic_peer::home` does. Not a command-line argument.
+    /// `agentic_peer::home` does. Not a command-line argument.
     #[arg(skip)]
     pub home: Option<PathBuf>,
     /// With `--paired`, the trust store the remote is proved against, in place of this user's own: a host that keeps the keys

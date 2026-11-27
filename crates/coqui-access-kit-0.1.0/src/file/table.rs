@@ -312,6 +312,19 @@ where
         self.write(&mut state, &records)?;
         Ok(true)
     }
+
+    fn remove_where(&self, condition: &mut dyn FnMut(&T) -> bool) -> Result<usize, SourceError> {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let _lock = self.lock()?;
+        let mut records = self.read(&mut state)?;
+        let before = records.len();
+        records.retain(|record| !condition(record));
+        let removed = before - records.len();
+        if removed > 0 {
+            self.write(&mut state, &records)?;
+        }
+        Ok(removed)
+    }
 }
 
 /// The document written: `{ <section>: [record, ..] }`.

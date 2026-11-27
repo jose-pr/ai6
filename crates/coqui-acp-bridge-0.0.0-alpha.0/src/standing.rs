@@ -16,9 +16,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use agentic_peer::home;
 use cabuya::link::{Accepted, Handler};
 use cabuya::mux::{CloseReason, LinkStream, StreamLife};
-use coqui_agentic_peer::home;
 use coqui_transport::Failure;
 use serde_json::{Value, json};
 
