@@ -2115,6 +2115,34 @@ impl Pump {
                     }
                 }
             }
+            // A conversation that filled its model's context window starts over, from the recap
+            // and the message, once; a harness that was started afresh has nothing more to drop.
+            let window_full = matches!(&read, Ok(Some(event)) if super::fills_the_window(event));
+            if window_full && let Some(fallback) = self.fallback.take() {
+                match self.start_afresh(
+                    fallback,
+                    "its conversation filled its model's context window",
+                ) {
+                    Ok(()) => {
+                        heard = Instant::now();
+                        run_id = None;
+                        continue;
+                    }
+                    Err(error) => {
+                        self.send(None, vec![AssistantEvent::new(EVENT_FAILED, Some(error))]);
+                        break Some("the harness failed".to_owned());
+                    }
+                }
+            }
+            let read = read.map(|event| {
+                event.map(|event| {
+                    if super::fills_the_window(&event) {
+                        super::failed_for_the_window(event)
+                    } else {
+                        event
+                    }
+                })
+            });
             match read {
                 Ok(Some(event)) => {
                     heard = Instant::now();
@@ -3287,6 +3315,8 @@ mod tests {
         Refused,
         /// Exits, as its handler reports it.
         Dies,
+        /// Ends the turn at a full context window, as a conversation grown too long does.
+        Fills,
         /// Never writes anything.
         Hangs,
         /// Starts answering and completes only when interrupted, as Claude Code and Codex end
@@ -3461,6 +3491,15 @@ mod tests {
                 Script::Refused => {
                     events.push_back(event(DENIED_EVENT, Some("read_file")));
                     events.push_back(event("completed", Some("")));
+                }
+                Script::Fills => {
+                    let mut full = event(LIMIT_EVENT, Some("prompt is too long"));
+                    full.limit = Some(
+                        coqui_acp_api::LimitHit::new(0)
+                            .kind(coqui_acp_api::LimitKind::ContextWindow)
+                            .continuable(false),
+                    );
+                    events.push_back(full);
                 }
                 Script::Dies => {
                     events.push_back(event("output", Some("Error: the stored login has expired")));
@@ -5921,6 +5960,42 @@ event_bytes = 7
             "started afresh with the recap"
         );
         drop(asked);
+        fixture.desk.close_all();
+    }
+
+    /// A conversation that filled its model's context window starts afresh with its recap, and
+    /// the message is taken there.
+    #[tokio::test]
+    async fn a_resumed_conversation_that_fills_the_context_window_starts_afresh_with_its_recap() {
+        let fixture = scripted(true, IDLE, Script::Answers, Script::Fills);
+        let mut resumed = job("c-full", "hello again");
+        resumed.run_id = Some("long".to_owned());
+        fixture.desk.handle(resumed).await;
+        until(|| kinds(&fixture, "c-full").contains(&EVENT_COMPLETED.to_owned())).await;
+        let shown = kinds(&fixture, "c-full");
+        assert!(!shown.contains(&EVENT_FAILED.to_owned()), "{shown:?}");
+        assert!(!shown.contains(&EVENT_LIMIT.to_owned()), "{shown:?}");
+        let asked = fixture.asked.lock().unwrap();
+        assert_eq!((asked.resumes.len(), asked.starts.len()), (1, 1));
+        assert_eq!(asked.starts[0].prompt, "hello again");
+        assert!(
+            asked.starts[0]
+                .initial_context
+                .contains(&"Earlier in this conversation: hello.".to_owned()),
+            "started afresh with the recap"
+        );
+        drop(asked);
+        fixture.desk.close_all();
+    }
+
+    /// One that was started afresh and fills the window too has nothing more to drop: the
+    /// person is told it failed, and no third harness starts.
+    #[tokio::test]
+    async fn a_fresh_conversation_that_fills_the_context_window_fails_with_the_reason() {
+        let fixture = scripted(true, IDLE, Script::Fills, Script::Answers);
+        fixture.desk.handle(job("c-full-2", "hello")).await;
+        until(|| kinds(&fixture, "c-full-2").contains(&EVENT_FAILED.to_owned())).await;
+        assert_eq!(fixture.asked.lock().unwrap().starts.len(), 1);
         fixture.desk.close_all();
     }
 

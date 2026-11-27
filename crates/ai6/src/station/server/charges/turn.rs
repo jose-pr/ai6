@@ -430,6 +430,8 @@ struct Read {
     lost: bool,
     /// What the turn took into the conversation's context.
     context: u64,
+    /// The turn ended because the conversation filled its model's context window.
+    window_full: bool,
 }
 
 /// Reads `run` until its turn ends, interrupting it past `timeout`.
@@ -445,6 +447,7 @@ fn read_turn(harness: &Harnessed, timeout: Option<Duration>, live: &Live) -> Rea
         answered: false,
         lost: false,
         context: 0,
+        window_full: false,
     };
     loop {
         if let Some(at) = interrupted {
@@ -494,6 +497,7 @@ fn read_turn(harness: &Harnessed, timeout: Option<Duration>, live: &Live) -> Rea
             }
             TOOL_EVENT => read.answered = true,
             COMPLETED_EVENT | BLOCKED_EVENT | CANCELLED_EVENT | LIMIT_EVENT => {
+                read.window_full = interrupted.is_none() && super::super::fills_the_window(&event);
                 read.ended = if interrupted.is_some() {
                     if timed { "timed out" } else { "interrupted" }.to_owned()
                 } else {
@@ -621,6 +625,37 @@ pub(super) fn take(
             }
         }
     }
+    // A conversation that filled its model's context window starts over, from the logbook, and
+    // the turn is retried once. One that was already fresh has nothing more to drop.
+    let mut window_compacted = false;
+    if read.window_full {
+        let carried = !compacted && !matches!(opened, Some(Opened::Started | Opened::Fresh(_)));
+        close_harness(harness.take());
+        if carried {
+            match open(state, live, charge, prompt, record, None) {
+                Ok((kept, _)) => {
+                    log.push(ChargeLogEntry::new(
+                        "compacted",
+                        "its conversation filled its model's context window: a fresh Run starts with the logbook, and the turn is tried again",
+                        now,
+                    ));
+                    read = read_turn(&kept, timeout, live);
+                    *harness = Some(kept);
+                    window_compacted = true;
+                }
+                Err(reason) => {
+                    let mut outcome = Outcome::refused(reason);
+                    outcome.log = log;
+                    return outcome;
+                }
+            }
+        }
+        if read.window_full || !carried {
+            read.ended = "failed: the conversation does not fit its model's context window, even carried into a fresh session".to_owned();
+            read.lost = true;
+            read.window_full = false;
+        }
+    }
     let run = harness.as_ref().and_then(|kept| {
         let id = kept.run.session_id().ok().flatten()?;
         Some((kept.handler.clone(), id))
@@ -638,7 +673,7 @@ pub(super) fn take(
         said: cut(read.said.trim().to_owned(), SAID_BYTES),
         run,
         log,
-        context_tokens: (compacted || read.context > 0).then_some(read.context),
+        context_tokens: (compacted || window_compacted || read.context > 0).then_some(read.context),
     }
 }
 
