@@ -21,6 +21,7 @@ pub use ai6::Directory
 pub use ai6::KIND_PREFIX
 pub use ai6::LIMIT_EVENT
 pub use ai6::LimitHit
+pub use ai6::LimitKind
 pub use ai6::Lookup
 pub use ai6::Person
 pub use ai6::PutOutcome
@@ -42,6 +43,7 @@ pub use ai6::Waiting
 pub use ai6::guatiao
 pub use ai6::guatiao_serde
 pub use ai6::infer_limit
+pub use ai6::limit_kind_of
 pub mod ai6::bootstrap
 pub mod ai6::bootstrap::format
 #[non_exhaustive] pub enum ai6::bootstrap::format::Format
@@ -7670,6 +7672,7 @@ impl ai6::directorates::registry::runs::RunResult
 pub const ai6::directorates::registry::runs::RunResult::HANDED_OFF: &'static str
 pub const ai6::directorates::registry::runs::RunResult::REDISPATCHED: &'static str
 pub const ai6::directorates::registry::runs::RunResult::SUPERSEDED: &'static str
+pub const ai6::directorates::registry::runs::RunResult::WINDOW_FULL: &'static str
 pub fn ai6::directorates::registry::runs::RunResult::new(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::runs::RunResult::with_denied_tools(self, usize) -> Self
 pub fn ai6::directorates::registry::runs::RunResult::with_reason(self, core::option::Option<alloc::string::String>) -> Self
@@ -13982,6 +13985,7 @@ impl ai6::directorates::registry::runs::RunResult
 pub const ai6::directorates::registry::runs::RunResult::HANDED_OFF: &'static str
 pub const ai6::directorates::registry::runs::RunResult::REDISPATCHED: &'static str
 pub const ai6::directorates::registry::runs::RunResult::SUPERSEDED: &'static str
+pub const ai6::directorates::registry::runs::RunResult::WINDOW_FULL: &'static str
 pub fn ai6::directorates::registry::runs::RunResult::new(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::registry::runs::RunResult::with_denied_tools(self, usize) -> Self
 pub fn ai6::directorates::registry::runs::RunResult::with_reason(self, core::option::Option<alloc::string::String>) -> Self
