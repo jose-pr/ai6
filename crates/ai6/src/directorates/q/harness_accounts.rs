@@ -50,8 +50,28 @@ struct Facts {
     secret: Vec<String>,
 }
 
+/// The variables of Claude Code's catalog whose value is itself a credential: a key, a token or a secret.
+/// The catalog lists them with the endpoints a start also clears, and does not say which are which.
+const CLAUDE_SECRETS: &[&str] = &[
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_AWS_API_KEY",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "ANTHROPIC_FOUNDRY_API_KEY",
+    "ANTHROPIC_FOUNDRY_AUTH_TOKEN",
+    "CLAUDE_CODE_CLIENT_KEY",
+    "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+];
+
+/// The same for Codex.
+const CODEX_SECRETS: &[&str] = &["CODEX_API_KEY", "OPENAI_API_KEY", "CODEX_ACCESS_TOKEN"];
+
 impl Facts {
-    fn of(catalog: &AccountCatalog) -> Self {
+    fn of(catalog: &AccountCatalog, secrets: &[&str]) -> Self {
         Self {
             slots: catalog
                 .accepts
@@ -66,13 +86,13 @@ impl Facts {
                 })
                 .collect(),
             cleared: catalog.credential_variables.clone(),
-            secret: catalog.secret_variables.clone(),
+            secret: secrets.iter().map(|name| (*name).to_owned()).collect(),
         }
     }
 }
 
-static CLAUDE: LazyLock<Facts> = LazyLock::new(|| Facts::of(&claude::catalog()));
-static CODEX: LazyLock<Facts> = LazyLock::new(|| Facts::of(&codex::catalog()));
+static CLAUDE: LazyLock<Facts> = LazyLock::new(|| Facts::of(&claude::catalog(), CLAUDE_SECRETS));
+static CODEX: LazyLock<Facts> = LazyLock::new(|| Facts::of(&codex::catalog(), CODEX_SECRETS));
 
 impl Harness {
     /// The harness a pool's `handler` runs, when its account provider is one of these.
@@ -484,6 +504,20 @@ mod tests {
             "build the stand-in first: cargo build -p ai6 --example {name}"
         );
         program.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn every_secret_variable_is_one_the_providers_catalog_clears() {
+        for harness in [Harness::Claude, Harness::Codex] {
+            let facts = harness.facts();
+            assert!(!facts.secret.is_empty());
+            for name in &facts.secret {
+                assert!(
+                    facts.cleared.contains(name),
+                    "{name} is no variable the provider clears: the list is out of date"
+                );
+            }
+        }
     }
 
     #[test]
