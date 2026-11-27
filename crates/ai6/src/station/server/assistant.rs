@@ -5914,7 +5914,6 @@ event_bytes = 7
         fixture.desk.close_all();
     }
 
-    #[cfg(feature = "cables-mcp")]
     /// A desk whose harnesses close after `idle` on a Station where `moneypenny` may send to `008`.
     #[cfg(feature = "cables-mcp")]
     fn cable_fixture(idle: Duration) -> Fixture {

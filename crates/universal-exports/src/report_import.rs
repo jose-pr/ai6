@@ -345,7 +345,7 @@ fn update(
     let mut changed: Vec<&str> = SETTABLE
         .into_iter()
         .filter(|key| {
-            !(matches!(*key, "scope" | "kind") && !fields.contains_key(*key))
+            (!matches!(*key, "scope" | "kind") || fields.contains_key(*key))
                 && !same(fields.get(*key), current.get(*key))
         })
         .collect();
