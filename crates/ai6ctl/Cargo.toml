@@ -27,6 +27,7 @@ futures-util = { workspace = true }
 webpki-root-certs = { workspace = true }
 # `liaison loopback`: the A2A loopback endpoint and the proven link it dials.
 coqui-a2a = { workspace = true, features = ["loopback"] }
+cabuya = { workspace = true }
 coqui-agentic-peer = { workspace = true }
 coqui-peer = { workspace = true }
 coqui-peer-tls = { workspace = true }

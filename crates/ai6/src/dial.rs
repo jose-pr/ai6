@@ -8,11 +8,12 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+use cabuya::Error;
+use cabuya::auth::{self, Method, Proof, Sealed, Trust};
+use cabuya::mux::{Heartbeat, Limits as MuxLimits, Mux, Side};
 use coqui_acp_bridge::agent::Agent;
 use coqui_acp_bridge::relay::{LinkEnd, relay};
-use coqui_agentic_peer::auth::{self, Method, Proof, Sealed, Trust};
-use coqui_agentic_peer::mux::{Heartbeat, Limits as MuxLimits, Mux, Side};
-use coqui_agentic_peer::{Error, home};
+use coqui_agentic_peer::home;
 use coqui_transport::{Channel as _, Failure};
 use coqui_transport_web::websocket::{Dialer, Frames};
 use coqui_transport_web::{Dialer as _, Kind, Limits};
