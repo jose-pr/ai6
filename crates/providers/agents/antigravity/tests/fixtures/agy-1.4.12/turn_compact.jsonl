@@ -1,0 +1,3 @@
+{"event":"step_update","step_update":{"conversation_id":"00000000-0000-4000-8000-00000000c0de","step_index":2,"state":"DONE","step_type":"user_input"}}
+{"event":"step_update","step_update":{"conversation_id":"00000000-0000-4000-8000-00000000c0de","step_index":3,"state":"DONE","step_type":"checkpoint","duration_seconds":0.018606525}}
+{"event":"result","result":{"conversation_id":"00000000-0000-4000-8000-00000000c0de","status":"SUCCESS","response":"","duration_seconds":5.761765016,"num_turns":2,"usage":{"input_tokens":6793,"output_tokens":2,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":6795}}}

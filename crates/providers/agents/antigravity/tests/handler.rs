@@ -105,6 +105,8 @@ struct Shared {
     turns: VecDeque<Turn>,
     received: Vec<String>,
     kills: usize,
+    /// The conversation IDs a start that holds none is given, in order, instead of `CONV`.
+    ids: VecDeque<String>,
 }
 
 #[derive(Clone, Default)]
@@ -190,7 +192,13 @@ impl AgentTerminal for Fake {
                 output.extend(fixture!("resume_unknown_init.jsonl").bytes());
                 output.extend(fixture!("resume_unknown.stderr").bytes());
             }
-            _ => output.extend(fixture!("init.jsonl").bytes()),
+            _ => {
+                let init = fixture!("init.jsonl");
+                match shared.ids.pop_front() {
+                    Some(id) => output.extend(init.replace(CONV, &id).bytes()),
+                    None => output.extend(init.bytes()),
+                }
+            }
         }
         Ok(FakeRun {
             shared: self.0.clone(),
@@ -1461,4 +1469,105 @@ fn a_run_with_no_overlay_has_one_workspace_beside_its_own() {
             .count(),
         1
     );
+}
+
+fn command(run: &Object<dyn AgentSession>, command: ai6::SessionCommand) -> Result<(), ProviderError> {
+    run.send_message(AgentMessage {
+        text: command.encode(),
+    })
+}
+
+#[test]
+fn the_handler_says_it_compacts_and_clears() {
+    let commands = handler("").session_commands().unwrap();
+    assert!(commands.compact && commands.clear);
+}
+
+/// agy runs `/compact` as a user message and writes a `checkpoint` step; the Station hears the
+/// compaction before the turn's end.
+#[test]
+fn a_compaction_is_a_slash_command_whose_checkpoint_is_reported() {
+    let (_root, wd) = checkout();
+    let fake = Fake::with(vec![
+        turn(fixture!("turn_answer.jsonl")),
+        turn(fixture!("turn_compact.jsonl")),
+    ]);
+    let run = started(&fake, start_request(&wd, "field"), "");
+    events_until(&run, &["completed"]);
+    command(&run, ai6::SessionCommand::Compact { focus: None }).unwrap();
+    let events = events_until(&run, &["completed"]);
+    assert_eq!(fake.received(), ["the task", "/compact"]);
+    assert_eq!(kinds(&events), ["compacted", "completed"]);
+    let change = ai6::SessionChange::of(&events[0]).unwrap();
+    assert_eq!(change.trigger.as_deref(), Some("manual"));
+    assert_eq!(fake.kills(), 0, "the process is the same");
+}
+
+/// A turn the Station asked to compact that ends with no checkpoint says so.
+#[test]
+fn a_compaction_that_writes_no_checkpoint_is_reported_as_failed() {
+    let (_root, wd) = checkout();
+    let nothing = fixture!("turn_compact.jsonl")
+        .lines()
+        .filter(|line| !line.contains("checkpoint"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl")), turn(&nothing)]);
+    let run = started(&fake, start_request(&wd, "field"), "");
+    events_until(&run, &["completed"]);
+    command(&run, ai6::SessionCommand::Compact { focus: None }).unwrap();
+    let events = events_until(&run, &["completed"]);
+    assert_eq!(kinds(&events), ["compact_failed", "completed"]);
+}
+
+/// agy refuses `/clear`, so a clear is a new agy that keeps the Run's agent, with no conversation,
+/// and the Run's id becomes the new conversation's.
+#[test]
+fn a_clear_runs_agy_again_on_a_new_conversation_of_the_same_run() {
+    let (_root, wd) = checkout();
+    let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
+    fake.0
+        .lock()
+        .unwrap()
+        .ids
+        .push_back("00000000-0000-4000-8000-00000000c0df".to_owned());
+    let run = started(&fake, start_request(&wd, "field"), "");
+    events_until(&run, &["completed"]);
+    let first = fake.launch();
+    assert_eq!(run.session_id().unwrap().unwrap().as_str(), CONV);
+    command(&run, ai6::SessionCommand::Clear).unwrap();
+    let events = events_until(&run, &["completed"]);
+    assert_eq!(kinds(&events), ["init", "cleared", "completed"]);
+    let change = ai6::SessionChange::of(&events[1]).unwrap();
+    assert_eq!(
+        change.session_id.as_deref(),
+        Some("00000000-0000-4000-8000-00000000c0df")
+    );
+    assert_eq!(
+        run.session_id().unwrap().unwrap().as_str(),
+        "00000000-0000-4000-8000-00000000c0df"
+    );
+    assert_eq!(fake.kills(), 1, "the old agy ended");
+    let second = fake.launch();
+    assert!(!second.has(&format!("--conversation={CONV}")));
+    assert!(!second.spec.argv.iter().any(|a| a.starts_with("--conversation")));
+    assert_eq!(first.agent.is_some(), second.agent.is_some(), "its system prompt stays");
+}
+
+/// A resumed conversation has no system prompt to begin another with.
+#[test]
+fn a_resumed_run_refuses_a_clear() {
+    let (_root, wd) = checkout();
+    let fake = Fake::with(vec![turn(fixture!("turn_answer.jsonl"))]);
+    let run = handler("")
+        .resume(
+            resume_request(&wd, CONV, "field"),
+            fake.clone().into_object(),
+        )
+        .unwrap();
+    events_until(&run, &["completed"]);
+    let refused = command(&run, ai6::SessionCommand::Clear).unwrap_err();
+    assert!(refused.to_string().contains("resumed"), "{refused}");
+    assert_eq!(fake.kills(), 0);
 }

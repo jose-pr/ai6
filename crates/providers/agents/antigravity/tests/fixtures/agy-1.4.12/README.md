@@ -19,9 +19,12 @@ conversation IDs fixed and paths made neutral; the fake CLI in `tests/handler.rs
 | `turn_plain_429.jsonl` | The same with no details, one retry |
 | `turn_error.jsonl` | A turn that cannot start: an agent naming a tool agy does not have |
 | `resume_unknown_init.jsonl`, `.stderr` | `--conversation` with an ID agy does not hold: a new conversation, and a warning on standard error |
+| `turn_compact.jsonl` | `/compact` sent as a user message: a `checkpoint` step and a `result` with an empty response |
 
 Files not marked as real above ran against a scripted loopback Gemini API
 (`modelProvider: "gemini"`, `GOOGLE_GEMINI_BASE_URL`, a fake key, a private `HOME`), so the error
 bodies of the two 429 files are that stand-in's. What a signed-in account's quota says has not been
 seen in a run: agy's binary holds `You have exhausted your quota on this model.` and
 `individual quota reached`.
+
+`/clear` sent as a user message ends agy with exit code 2 and an `ERROR` result, `/clear is not available in print mode`; the `turn_compact.jsonl` run was against the loopback stand-in too.

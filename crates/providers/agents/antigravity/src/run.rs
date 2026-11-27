@@ -12,7 +12,8 @@ use ai6::directorates::q::terminal::{
 use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, Status};
 use ai6::{
-    AgentEvent, AgentMessage, DENIED_EVENT, LIMIT_EVENT, LimitHit, Spend, UsageReport, infer_limit,
+    AgentEvent, AgentMessage, CLEARED_EVENT, COMPACT_FAILED_EVENT, COMPACTED_EVENT, DENIED_EVENT,
+    LIMIT_EVENT, LimitHit, SessionChange, SessionCommand, Spend, UsageReport, infer_limit,
 };
 use serde_json::{Value, json};
 
@@ -72,6 +73,12 @@ pub(crate) struct AntigravityRun {
     interrupting: AtomicBool,
     /// Set when agy's end has been accounted for: nothing more is reported until it runs again.
     ended: AtomicBool,
+    /// Set while a `/compact` the Station asked for is a turn in flight, until its `result`.
+    compacting: AtomicBool,
+    /// Whether a `checkpoint` step, which is what a compaction writes, came in that turn.
+    checkpointed: AtomicBool,
+    /// Set after a clear, until the new conversation's `init` has been read.
+    clearing: AtomicBool,
     eof: AtomicBool,
     /// Set once a restricted Run called a tool it may not, and was ended.
     tripped: AtomicBool,
@@ -122,6 +129,9 @@ impl AntigravityRun {
             turn_running: AtomicBool::new(false),
             interrupting: AtomicBool::new(false),
             ended: AtomicBool::new(false),
+            compacting: AtomicBool::new(false),
+            checkpointed: AtomicBool::new(false),
+            clearing: AtomicBool::new(false),
             eof: AtomicBool::new(false),
             tripped: AtomicBool::new(false),
             tail: Mutex::new(VecDeque::new()),
@@ -160,14 +170,13 @@ impl AntigravityRun {
 
     /// Runs agy again on the conversation an interrupt or a failed turn ended.
     fn run_again(&self) -> Result<(), ProviderError> {
-        let _ = self.current()?.kill();
         let id = lock(&self.run_id)?.clone().ok_or_else(|| {
             refuse(
                 Status::GUATIAO_ERR_UNSUPPORTED,
                 "agy was interrupted before it named its conversation, so it cannot go on",
             )
         })?;
-        let mut argv: Vec<String> = self
+        let argv: Vec<String> = self
             .respawn
             .argv
             .iter()
@@ -175,8 +184,14 @@ impl AntigravityRun {
                 !argument.starts_with("--agent=") && !argument.starts_with("--conversation=")
             })
             .cloned()
+            .chain([format!("--conversation={id}")])
             .collect();
-        argv.push(format!("--conversation={id}"));
+        self.restart(argv, Some(id))
+    }
+
+    /// Ends agy and runs it on `argv`, whose conversation is `expected` or, with none, a new one.
+    fn restart(&self, argv: Vec<String>, expected: Option<RunId>) -> Result<(), ProviderError> {
+        let _ = self.current()?.kill();
         let terminal = spawn(
             &self.respawn.terminal,
             argv,
@@ -186,11 +201,58 @@ impl AntigravityRun {
         *lock(&self.live)? = crate::usage::Live::new(&self.respawn.environment, terminal.pid());
         *lock(&self.terminal)? = Arc::new(terminal);
         *lock(&self.output)? = lines(self.json_line_bytes, self.csi_bytes);
-        *lock(&self.expected_run_id)? = Some(id);
+        *lock(&self.expected_run_id)? = expected;
         self.initialized.store(false, Ordering::Release);
         self.ended.store(false, Ordering::Release);
         self.eof.store(false, Ordering::Release);
         Ok(())
+    }
+
+    /// A session command. agy runs `/compact` as a turn of its own and ends the run with an error
+    /// on `/clear` ("not available in print mode"), so a clear is a new agy on a new conversation:
+    /// what the Run started with, less the conversation. A Run that resumed a conversation has no
+    /// system prompt to start another with, so it refuses.
+    pub(crate) fn command(&self, command: &SessionCommand) -> Result<(), ProviderError> {
+        match command {
+            SessionCommand::Compact { .. } => {
+                self.compacting.store(true, Ordering::Release);
+                self.checkpointed.store(false, Ordering::Release);
+                self.deliver("/compact".to_owned())
+            }
+            SessionCommand::Clear => {
+                if self
+                    .respawn
+                    .argv
+                    .iter()
+                    .any(|argument| argument.starts_with("--conversation="))
+                {
+                    return Err(refuse(
+                        Status::GUATIAO_ERR_UNSUPPORTED,
+                        "a resumed Antigravity conversation has no system prompt to start a new one with",
+                    ));
+                }
+                let argv = self.respawn.argv.clone();
+                lock(&self.held)?.clear();
+                self.restart(argv, None)?;
+                self.turn_running.store(false, Ordering::Release);
+                self.clearing.store(true, Ordering::Release);
+                Ok(())
+            }
+        }
+    }
+
+    /// Sends a message now, or when the conversation is named, running agy again first if a turn
+    /// ended it.
+    pub(crate) fn deliver(&self, text: String) -> Result<(), ProviderError> {
+        if self.ended.load(Ordering::Acquire) && !self.tripped.load(Ordering::Acquire) {
+            self.run_again()?;
+            return self.hold(text);
+        }
+        if self.initialized.load(Ordering::Acquire) {
+            self.send(&text)
+        } else {
+            self.hold(text)
+        }
     }
 
     fn exited(&self, timeout_ms: i64) -> Result<Option<ExitInfo>, ProviderError> {
@@ -363,6 +425,16 @@ impl AntigravityRun {
         for message in &held {
             self.send(message)?;
         }
+        if self.clearing.swap(false, Ordering::AcqRel) {
+            let change = SessionChange {
+                trigger: Some("manual".to_owned()),
+                session_id: lock(&self.run_id)?.clone().map(String::from),
+                ..SessionChange::default()
+            };
+            let mut pending = lock(&self.pending)?;
+            pending.push_back(change.event(CLEARED_EVENT, None));
+            pending.push_back(event("completed", None));
+        }
         let mut init = event("init", None);
         init.data = Some(line);
         Ok(init)
@@ -425,6 +497,16 @@ impl AntigravityRun {
                 Ok(Some(said))
             }
             Some("tool") => self.on_tool_step(step, state, line),
+            // What a compaction writes; agy's own compaction of a long conversation writes one too.
+            Some("checkpoint") if state == "DONE" => {
+                let asked = self.compacting.load(Ordering::Acquire);
+                self.checkpointed.store(true, Ordering::Release);
+                let change = SessionChange {
+                    trigger: Some(if asked { "manual" } else { "auto" }.to_owned()),
+                    ..SessionChange::default()
+                };
+                Ok(Some(change.event(COMPACTED_EVENT, None)))
+            }
             _ => Ok(None),
         }
     }
@@ -551,11 +633,23 @@ impl AntigravityRun {
             closing.kind = "completed".to_owned();
             closing.limit = None;
         }
-        if denied.is_empty() {
-            return Ok(closing);
+        let mut owed = VecDeque::new();
+        if self.compacting.swap(false, Ordering::AcqRel)
+            && !self.checkpointed.swap(false, Ordering::AcqRel)
+            && closing.kind == "completed"
+        {
+            owed.push_back(SessionChange::default().event(
+                COMPACT_FAILED_EVENT,
+                Some("agy ended the turn without compacting the conversation".to_owned()),
+            ));
         }
-        lock(&self.pending)?.push_back(closing);
-        Ok(event(DENIED_EVENT, Some(denied.join(", "))))
+        if !denied.is_empty() {
+            owed.push_back(event(DENIED_EVENT, Some(denied.join(", "))));
+        }
+        owed.push_back(closing);
+        let first = owed.pop_front().unwrap_or_else(|| event("completed", None));
+        lock(&self.pending)?.extend(owed);
+        Ok(first)
     }
 }
 
@@ -567,18 +661,11 @@ impl ai6::AgentSession for AntigravityRun {
     /// A message while agy runs goes to it as the next turn, once it has named its conversation.
     /// After an interrupt ended it, it is run again on the same conversation.
     fn send_message(&self, message: AgentMessage) -> Result<(), ProviderError> {
-        ai6::SessionCommand::refuse_in(
-            &message.text,
-            "an Antigravity conversation takes no AI6 session command",
-        )?;
-        if self.ended.load(Ordering::Acquire) && !self.tripped.load(Ordering::Acquire) {
-            self.run_again()?;
-            return self.hold(message.text);
-        }
-        if self.initialized.load(Ordering::Acquire) {
-            self.send(&message.text)
-        } else {
-            self.hold(message.text)
+        match SessionCommand::parse(&message.text)
+            .map_err(|why| refuse(Status::GUATIAO_ERR_BAD_VALUE, why))?
+        {
+            Some(command) => self.command(&command),
+            None => self.deliver(message.text),
         }
     }
 

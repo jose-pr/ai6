@@ -322,6 +322,15 @@ fn antigravity_record(query: &RunRecordQuery) -> Option<RunRecordFile> {
 }
 
 impl AgentHandler for AntigravityHandler {
+    /// agy runs `/compact` as a turn in the live conversation. It refuses `/clear` in this mode, so
+    /// a clear is a new agy on a new conversation of the same Run.
+    fn session_commands(&self) -> Result<ai6::SessionCommands, ProviderError> {
+        Ok(ai6::SessionCommands {
+            compact: true,
+            clear: true,
+        })
+    }
+
     /// agy with `--input-format stream-json` reads JSON lines from standard input.
     fn stdio(&self) -> Result<HarnessStdio, ProviderError> {
         Ok(HarnessStdio::Json)
