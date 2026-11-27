@@ -313,6 +313,8 @@ struct State {
     cancelling: bool,
     /// A façade's `session/prompt` failed.
     prompt_failed: Option<String>,
+    /// The limit the agent stated for the turn it refused, which the failure that follows is.
+    stated_limit: Option<LimitHit>,
 }
 
 impl State {
@@ -610,12 +612,27 @@ impl AcpRun {
                 state.push(None, event("permission", Some(text)));
             }
             Event::Completed { .. } => state.push(None, event("completed", None)),
+            Event::Limited(stated) => match serde_json::from_value::<LimitHit>(stated) {
+                Ok(hit) => state.stated_limit = Some(hit),
+                Err(error) => state.push(
+                    None,
+                    event(
+                        "notice",
+                        Some(format!(
+                            "the agent's limit report could not be read: {error}"
+                        )),
+                    ),
+                ),
+            },
             Event::Failed(text) => {
-                // A lost connection's failure may quote the agent's last words, which are no
-                // provider's answer: only a turn's own failure counts as a limit.
-                let hit = (!self.events_capability && !self.run.connection_lost())
-                    .then(|| self.inferred_limit(&text))
-                    .flatten();
+                // The agent's own statement of the limit comes first; its words are read only when
+                // it stated none. A lost connection's failure may quote the agent's last words,
+                // which are no provider's answer: only a turn's own failure counts as a limit.
+                let hit = state.stated_limit.take().or_else(|| {
+                    (!self.events_capability && !self.run.connection_lost())
+                        .then(|| self.inferred_limit(&text))
+                        .flatten()
+                });
                 let failed = match hit {
                     Some(hit) => limit_event(text, hit),
                     None => event("failed", Some(text)),
@@ -653,8 +670,15 @@ impl AcpRun {
             ),
             Event::PromptFailed(text) => {
                 state.prompt_failed = Some(text.clone());
+                let stated = state.stated_limit.take();
                 if !state.finished {
-                    state.push(None, event("failed", Some(text)));
+                    state.push(
+                        None,
+                        match stated {
+                            Some(hit) => limit_event(text, hit),
+                            None => event("failed", Some(text)),
+                        },
+                    );
                 }
             }
             Event::Extension { method, params } if method == EVENT_NOTIFICATION => {

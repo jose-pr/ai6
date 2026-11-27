@@ -27,6 +27,9 @@ enum Behaviour {
     /// A plain ACP agent that fails its prompt as the Grok CLI does when its account is out of
     /// credits: an internal error whose reason is in an object.
     OutOfCredits,
+    /// A plain ACP agent that refuses its prompt in words no phrase reads as a limit, and states
+    /// the limit in the standard form beside them.
+    StatesItsLimit,
     /// A plain ACP agent that says a bridge lost some of its output, then ends the turn.
     LosesOutput,
 }
@@ -79,6 +82,7 @@ fn serve(behaviour: Behaviour, seen: Arc<Seen>, transport: Channel) {
                                     Behaviour::CancelsByItself
                                         | Behaviour::PlainLeavesMidTurn
                                         | Behaviour::OutOfCredits
+                                        | Behaviour::StatesItsLimit
                                         | Behaviour::LosesOutput
                                 ) {
                                     json!({})
@@ -161,6 +165,24 @@ fn serve(behaviour: Behaviour, seen: Arc<Seen>, transport: Channel) {
                                                         .data(json!({
                                                             "message": "API error (status 402 Payment Required): personal-team-blocked:spending-limit: You have run out of credits. Add credits to continue.",
                                                             "http_status": 402,
+                                                        })),
+                                                )
+                                                .unwrap();
+                                        }
+                                        Behaviour::StatesItsLimit => {
+                                            responder
+                                                .respond_with_error(
+                                                    agent_client_protocol::Error::internal_error()
+                                                        .data(json!({
+                                                            "message": "the request was refused",
+                                                            "_meta": {coqui_acp::LIMIT_META_KEY: {
+                                                                "kind": "context_window",
+                                                                "continuable": false,
+                                                                "resets_at": 1_790_000_000,
+                                                                "bucket": "window",
+                                                                "source": "reported",
+                                                                "observed_at": 0,
+                                                            }},
                                                         })),
                                                 )
                                                 .unwrap();
@@ -390,6 +412,31 @@ fn a_prompt_error_with_its_reason_in_an_object_is_a_limit_when_its_words_say_so(
         "the reason in the error's object is kept: {text}"
     );
     assert!(last.limit.is_some());
+}
+
+#[test]
+fn a_limit_the_agent_states_is_read_from_the_statement_and_not_from_the_words() {
+    let (run, _) = connect(
+        Behaviour::StatesItsLimit,
+        AcpOptions {
+            limit_phrases: Vec::new(),
+            ..options()
+        },
+    );
+    let events = events_until(&run.unwrap(), |events| !events.is_empty());
+    let last = events.last().unwrap();
+    assert_eq!(last.kind, LIMIT_EVENT, "{events:?}");
+    assert!(
+        last.text
+            .as_deref()
+            .unwrap()
+            .contains("the request was refused")
+    );
+    let hit = last.limit.as_ref().expect("the stated limit");
+    assert_eq!(hit.kind, Some(ai6::LimitKind::ContextWindow));
+    assert!(!hit.can_continue());
+    assert_eq!(hit.resets_at, Some(1_790_000_000));
+    assert_eq!(hit.bucket.as_deref(), Some("window"));
 }
 
 #[test]
