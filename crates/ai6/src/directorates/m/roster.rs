@@ -967,10 +967,10 @@ impl RosterSettings {
     /// Each value looser than its default, worded for a log line.
     pub fn weakenings(&self) -> Vec<String> {
         let mut weakened = Vec::new();
-        if !self
+        if self
             .max_operation_depth
             .get()
-            .is_some_and(|depth| depth <= DEFAULT_MAX_OPERATION_DEPTH as u64)
+            .is_none_or(|depth| depth > DEFAULT_MAX_OPERATION_DEPTH as u64)
         {
             weakened.push(format!(
                 "roster.max_operation_depth {} is looser than the default \
@@ -978,10 +978,10 @@ impl RosterSettings {
                 self.max_operation_depth
             ));
         }
-        if !self
+        if self
             .max_compartment_rules
             .get()
-            .is_some_and(|rules| rules <= DEFAULT_MAX_COMPARTMENT_RULES as u64)
+            .is_none_or(|rules| rules > DEFAULT_MAX_COMPARTMENT_RULES as u64)
         {
             weakened.push(format!(
                 "roster.max_compartment_rules {} is looser than the default \

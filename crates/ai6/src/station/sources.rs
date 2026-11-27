@@ -885,11 +885,11 @@ pub(crate) fn charge_settled(
     station: &str,
     limits: &SourceLimits,
 ) -> usize {
-    if !registry
+    if registry
         .headquarters()
         .ok()
         .flatten()
-        .is_some_and(|lease| lease.station() == station)
+        .is_none_or(|lease| lease.station() != station)
     {
         return 0;
     }

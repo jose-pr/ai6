@@ -835,7 +835,7 @@ impl Report {
             .proposes
             .as_ref()
             .is_some_and(|proposes| proposes.forget);
-        if (!(forgets && self.text.is_empty()) && !text_in_bounds(&self.text))
+        if !(text_in_bounds(&self.text) || forgets && self.text.is_empty())
             || self.text.contains('\0')
         {
             return Err(io::Error::new(

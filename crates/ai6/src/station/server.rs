@@ -4419,7 +4419,7 @@ fn queue_entries(state: &DaemonState) -> Vec<serde_json::Value> {
         .filter_map(|mission| {
             let id = mission.mission_id.to_string();
             let recovering = recovering.contains(&id);
-            if !recovering && !(mission.state == MissionState::Queued && mission.agent_id.is_some())
+            if !(recovering || mission.state == MissionState::Queued && mission.agent_id.is_some())
             {
                 return None;
             }

@@ -148,7 +148,7 @@ pub fn missing_program(
         None => {
             let mut searched = environment.clone();
             searched.insert("PATH".to_owned(), NO_PATH_SEARCH.to_owned());
-            (NO_PATH_SEARCH.is_empty() || find_program(program, &searched).is_none()).then(|| {
+            (cfg!(windows) || find_program(program, &searched).is_none()).then(|| {
                 format!(
                     "Agent {agent:?} has no PATH in its environment (no `[loadout.{agent}] env`), \
                      so its harness {program:?} cannot be found"

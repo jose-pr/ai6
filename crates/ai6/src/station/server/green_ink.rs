@@ -633,7 +633,7 @@ pub(super) fn end_turn_waiting(
                         == crate::directorates::registry::mission_issues::QuestionState::Open
                 })
             });
-    if !(waits(&mission) && pending) && !asked {
+    if !(asked || waits(&mission) && pending) {
         return false;
     }
     let operation = state.runs.lock().ok().and_then(|mut runs| {
