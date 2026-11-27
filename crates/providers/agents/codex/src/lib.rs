@@ -2378,6 +2378,12 @@ mod tests {
                         writeln!(stdout, "{}", json!({"id":id,"result":{}})).unwrap();
                         stdout.flush().unwrap();
                     }
+                    // The driver asks for the skills once the thread is open, and waits for the
+                    // answer; Codex lists none here.
+                    "skills/list" => {
+                        writeln!(stdout, "{}", json!({"id":id,"result":{"data":[]}})).unwrap();
+                        stdout.flush().unwrap();
+                    }
                     "config/read" => {
                         let config = fake_config(&argv);
                         writeln!(stdout, "{}", json!({"id":id,"result":{"config":config}}))
