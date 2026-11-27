@@ -960,7 +960,7 @@ pub(crate) async fn route(
         .router()
         .oneshot(request)
         .await
-        .map_err(|error| error.to_string())?;
+        .unwrap_or_else(|never| match never {});
     let status = response.status();
     let most = super::gateway_limits(gateway).route_bytes.or_max();
     let bytes = axum::body::to_bytes(response.into_body(), most)
