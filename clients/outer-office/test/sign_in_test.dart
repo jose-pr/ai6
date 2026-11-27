@@ -225,7 +225,10 @@ void main() {
     final fields = tester
         .widgetList<TextField>(find.byType(TextField))
         .toList();
-    expect(fields[0].autofillHints, [AutofillHints.username]);
+    expect(fields[0].autofillHints, [
+      AutofillHints.username,
+      AutofillHints.email,
+    ]);
     expect(fields[1].autofillHints, [AutofillHints.password]);
     expect(find.byType(AutofillGroup), findsOneWidget);
     expect(

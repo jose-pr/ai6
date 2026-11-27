@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/services.dart' show TextInput;
 import 'package:material_ui/material_ui.dart';
 
 import '../main.dart';
@@ -87,6 +88,7 @@ class _SignInPageState extends State<SignInPage> {
     final code = _code.text.trim();
     _code.clear();
     await widget.board.loginCode(code, recovery: _recovery);
+    _finishAutofill();
     if (mounted) setState(() => _submitting = false);
   }
 
@@ -154,7 +156,14 @@ class _SignInPageState extends State<SignInPage> {
     final secret = _secret.text;
     _secret.clear();
     await widget.board.login(_name.text.trim(), secret);
+    _finishAutofill();
     if (mounted) setState(() => _submitting = false);
+  }
+
+  /// Tells the browser and password managers the sign-in went through, so they offer to keep the
+  /// account and password; nothing happens while the sign-in is refused or waits for a code.
+  void _finishAutofill() {
+    if (widget.board.accessToken != null) TextInput.finishAutofillContext();
   }
 
   Future<void> _signInViaProxy() async {
@@ -304,9 +313,8 @@ class _SignInPageState extends State<SignInPage> {
       const SizedBox(height: 16),
       TextField(
         controller: _name,
-        autocorrect: false,
-        enableSuggestions: false,
-        autofillHints: const [AutofillHints.username],
+        keyboardType: TextInputType.emailAddress,
+        autofillHints: const [AutofillHints.username, AutofillHints.email],
         textInputAction: TextInputAction.next,
         onChanged: (_) => setState(() {}),
         decoration: field('Account'),
@@ -315,8 +323,6 @@ class _SignInPageState extends State<SignInPage> {
       TextField(
         controller: _secret,
         obscureText: !_reveal,
-        autocorrect: false,
-        enableSuggestions: false,
         autofillHints: const [AutofillHints.password],
         onChanged: (_) => setState(() {}),
         onSubmitted: (_) => _signIn(),
