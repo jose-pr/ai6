@@ -292,6 +292,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The gateway serves a brief, a green ink request, a held brief, a Mission's reviews, a charge's report and a
 ### Changed
 
+- Which account of a pool, or which route of an Agent, takes a Run is decided by `coqui-acp-pool`: AI6 keeps the pool
+  records, the claims and limits in the Registry, the scoping to Operations and the reads of each window, and hands the
+  crate the state of one choice. `headroom`, `round_robin` (the least recently used, from state the Stations share) and
+  `priority` pick the same member for the same state as before, and ties go to the member listed first.
+
 - A limit says its kind (a usage quota, a rate limit, credit, a context window) and whether the work can go on with another
   account, as coqui-acp reports it; one that cannot ends the turn as a failure, and a conversation that fills its model's
   context window starts over in a fresh session. The Claude Code and Codex handlers read a limit through the drivers'
