@@ -11769,6 +11769,7 @@ queue = 1
                 "mock-stream",
                 "mock-verdict",
                 "mock-wake",
+                "mock-window",
             ])
         );
 
