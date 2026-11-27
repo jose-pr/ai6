@@ -655,7 +655,7 @@ pub struct UnexSettings {
     pub liaison: LiaisonSettings,
 }
 
-/// `[unex.liaison]`: Liaison serves A2A 1.0 to agents outside AI6, over proven coqui-agentic-peer
+/// `[unex.liaison]`: Liaison serves A2A 1.0 to agents outside AI6, over proven agentic-peer
 /// links and on the gateway's `/v1/a2a`. A2A is a Cable's wire format there: a peer's message is a
 /// Cable to one AI6 Agent or an Operation's role, through the Cable relay with its grants, quotas
 /// and audit, and never a Mission or a brief; a Cable to `a2a:<peer>` leaves as A2A.

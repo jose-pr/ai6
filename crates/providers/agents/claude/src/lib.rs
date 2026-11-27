@@ -2053,7 +2053,6 @@ fn decode_limit(value: &Value) -> Option<(LimitHit, Option<String>)> {
             )
         })
         .and_then(|stated| stated.retry_after);
-    limit.continuable = Some(limit.kind != Some(LimitKind::ContextWindow));
     Some((limit, text))
 }
 

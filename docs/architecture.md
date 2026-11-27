@@ -176,7 +176,7 @@ for the interoperability motivation.
 
 **Protocol decision: A2A is a Cable's wire format.** [Liaison](liaison.md), in Universal Exports,
 serves A2A 1.0 to agents outside AI6 and calls theirs. A peer proves its key on a
-[coqui-agentic-peer](https://github.com/Boriken-Dev/coqui-agentic-peer) link (the `a2a/1`
+[agentic-peer](https://github.com/Boriken-Dev/agentic-peer) link (the `a2a/1`
 binding of [coqui-a2a](https://github.com/Boriken-Dev/coqui-a2a)), or signs in on the gateway's
 HTTP JSON-RPC binding. Its message becomes a Cable to one AI6 Agent or an Operation's role,
 submitted to the relay as the peer's configured principal: the same records, grants,

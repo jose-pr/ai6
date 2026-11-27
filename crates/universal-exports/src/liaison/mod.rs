@@ -7,7 +7,7 @@
 //! its context the Cable conversation, and its state the Cable's delivery. Nothing is placed or
 //! scheduled. A thread stays with the Run that first took it ([`CableSendRequest::with_affinity`]).
 //!
-//! A peer arrives on a proven coqui-agentic-peer link ([`LinkListener`]) or on the gateway's
+//! A peer arrives on a proven agentic-peer link ([`LinkListener`]) or on the gateway's
 //! HTTP JSON-RPC binding (`/v1/a2a`), signed in as its principal. Cables to `a2a:<peer>` leave as
 //! A2A the other way.
 

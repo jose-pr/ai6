@@ -14,7 +14,7 @@ Development documentation lives with the source at
 | `cli` | The `universal-exports` service command and Guatiao provider loading. | No |
 
 MSRV: Rust 1.89. The default build depends on Axum, Tokio, guatiao,
-`ai6-diptel`, serde and UUID, and, for Liaison, `coqui-a2a`, `coqui-agentic-peer` and
+`ai6-diptel`, serde and UUID, and, for Liaison, `coqui-a2a`, `agentic-peer` and
 `coqui-transport-web` (pinned by git revision), `url`, `time` and `webpki-root-certs`. The `cli`
 feature adds clap and Tokio signal support.
 

@@ -93,7 +93,7 @@ it waits as any Cable does, until its lifetime ends.
 
 Two bindings carry the same exchange.
 
-**A proven link.** `[unex.liaison] listen` serves [coqui-agentic-peer](https://github.com/Boriken-Dev/coqui-agentic-peer)
+**A proven link.** `[unex.liaison] listen` serves [agentic-peer](https://github.com/Boriken-Dev/agentic-peer)
 links, the `a2a/1` binding of [coqui-a2a](https://github.com/Boriken-Dev/coqui-a2a). The gateway
 proves its link key (`identity`, made the first time), and a dialer must prove one of the
 configured `id`s, else nothing of its link is read. A peer with `a2a = false` stays paired and has

@@ -6,7 +6,7 @@ lives at <https://github.com/jose-pr/ai6>.
 
 ## Build
 
-No Cargo features. MSRV: Rust 1.89. Depends on clap, reqwest (rustls), tokio-tungstenite, tokio-rustls, serde and Tokio, and, for `liaison loopback`, `coqui-a2a` and the `coqui-agentic-peer` link crates.
+No Cargo features. MSRV: Rust 1.89. Depends on clap, reqwest (rustls), tokio-tungstenite, tokio-rustls, serde and Tokio, and, for `liaison loopback`, `coqui-a2a` and the `agentic-peer` link crates.
 The crate has no library target.
 
 ## Commands
@@ -311,7 +311,7 @@ control's status route every `--poll-interval` (0.5 s) until the Station reports
   trust as the other commands (public roots and the CA file); `http` gives `ws`.
 - `ai6ctl liaison loopback --url <URL> (--peer <ID>... | --any-paired-peer) [--identity <FILE>] [--listen <ADDR>]
   [--token-file <FILE> | --no-token] [--origin <ORIGIN>...] [--forward-header <NAME>...] [--answer-timeout <SECONDS>]`
-  serves the standard A2A HTTP binding on a loopback address and carries it over a proven coqui-agentic-peer
+  serves the standard A2A HTTP binding on a loopback address and carries it over a proven agentic-peer
   link to Liaison. It reads no Universal Exports origin or token and needs no sign-in. `--url` (env
   `COQUI_A2A_URL`) is the link, `ws://` or `wss://`; `--peer` pins the remote's id, repeatable (the gateway
   prints its id at start), and `--any-paired-peer` instead accepts every peer paired in the user's link trust
