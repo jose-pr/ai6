@@ -524,7 +524,9 @@ pool account, model and tokens. The person's access token and her tool token are
 `[redacted]` wherever they appear. The log is trimmed every `log_prune_every` (1 hour) to
 `log_age` (90 days) and `log_bytes` (1 GiB), and flushed when `serve_loopback` stops. A conversation asked for in a hello that the
 gateway does not hold is rebuilt from the log when it is that person's, with the Station,
-Run and route of its last turn; a proposal that was waiting shows as expired.
+Run and route of its last turn; a proposal that was waiting shows as expired. The log keeps each
+piece of an answer as it arrived (a harness may send one answer as many `text` events); the
+rebuilt conversation joins pieces with no entry between them into one, as the live one does.
 
 The command reads `[assistant.limits]`, `[assistant.gateway]`, `[assistant.views]` and the
 `cables` record at start. Defaults: 20 conversations a person and 2,000 in all (oldest idle one

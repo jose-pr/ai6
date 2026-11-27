@@ -371,17 +371,27 @@ impl Conversation {
     }
 
     /// Adds `more` to the end of her last entry when that is her own words and nothing else
-    /// came after it, so the pieces one answer arrives in are one entry; the app is told. Returns
-    /// whether it did.
-    pub(crate) fn append_to_last(&mut self, more: &str) -> bool {
+    /// came after it: the pieces one answer arrives in are one entry. Returns whether it did.
+    pub(crate) fn extend_last(&mut self, more: &str) -> bool {
         let Some(last) = self.entries.back_mut() else {
             return false;
         };
-        if last.role != Role::Moneypenny {
+        if last.role != Role::Moneypenny || last.data.is_some() {
             return false;
         }
+        let before = entry_bytes(last);
         last.text.push_str(more);
-        self.bytes += more.len();
+        let after = entry_bytes(last);
+        self.bytes = self.bytes.saturating_sub(before) + after;
+        true
+    }
+
+    /// [`Self::extend_last`] for a live answer: the piece is also kept in the durable log and
+    /// the app is told.
+    pub(crate) fn append_to_last(&mut self, more: &str) -> bool {
+        if !self.extend_last(more) {
+            return false;
+        }
         self.record("moneypenny", more, None, true);
         let _ = self
             .events

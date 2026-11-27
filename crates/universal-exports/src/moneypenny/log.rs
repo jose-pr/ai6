@@ -200,6 +200,11 @@ pub(crate) fn rebuild(
         let Ok(role) = serde_json::from_value::<Role>(Value::String(row.kind.clone())) else {
             continue;
         };
+        // The log keeps each piece of an answer as it arrived; the app shows one entry, as it
+        // did live.
+        if role == Role::Moneypenny && row.data.is_none() && conversation.extend_last(&row.text) {
+            continue;
+        }
         conversation.push(
             Entry {
                 role,
@@ -325,5 +330,48 @@ mod tests {
             .collect();
         assert_eq!(statuses, ["confirming", "expired"]);
         assert!(rebuild(&[], "token", bounds, 8).is_none());
+    }
+
+    #[test]
+    fn the_pieces_of_one_answer_are_one_entry_when_the_log_is_read_back() {
+        let rows = vec![
+            row("person", "Hello", 1.0),
+            row("moneypenny", "Hel", 2.0),
+            row(TOOL_CALL, "list_missions", 2.5),
+            row("moneypenny", "lo, ", 3.0),
+            row("moneypenny", "there.", 4.0),
+            row("tools", "list_missions", 5.0),
+            row("moneypenny", "Done.", 6.0),
+            row("person", "Thanks", 7.0),
+            row("moneypenny", "You're ", 8.0),
+            row("moneypenny", "welcome.", 9.0),
+        ];
+        let bounds = Bounds {
+            entries: usize::MAX,
+            bytes: usize::MAX,
+        };
+        let conversation = rebuild(&rows, "token", bounds, 8).unwrap();
+        let shown: Vec<(Role, &str)> = conversation
+            .entries
+            .iter()
+            .map(|entry| (entry.role, entry.text.as_str()))
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                (Role::Person, "Hello"),
+                (Role::Moneypenny, "Hello, there."),
+                (Role::Tools, "list_missions"),
+                (Role::Moneypenny, "Done."),
+                (Role::Person, "Thanks"),
+                (Role::Moneypenny, "You're welcome."),
+            ]
+        );
+        let bytes: usize = conversation
+            .entries
+            .iter()
+            .map(crate::moneypenny::store::entry_bytes)
+            .sum();
+        assert_eq!(conversation.bytes, bytes);
     }
 }
