@@ -8,8 +8,8 @@ use std::sync::{Arc, atomic::AtomicBool, atomic::Ordering};
 use std::thread;
 use std::time::Duration;
 
-use coqui_agentic_peer::auth::{self, Identity, Method, Proof, Sealed, Trust};
-use coqui_agentic_peer::mux::{Limits as MuxLimits, Mux, Side};
+use cabuya::auth::{self, Identity, Method, Proof, Sealed, Trust};
+use cabuya::mux::{Limits as MuxLimits, Mux, Side};
 use coqui_transport::Channel as _;
 use coqui_transport_web::Limits;
 use coqui_transport_web::websocket::{Frames, Listener, ServerTls};

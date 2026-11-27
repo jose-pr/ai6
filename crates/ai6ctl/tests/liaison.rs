@@ -8,13 +8,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use cabuya::auth::{self, Identity, Method, Proof, Sealed, Trust};
+use cabuya::link::{self, Host, Options, Services};
+use cabuya::mux::Side;
+use cabuya::peers::{MemoryPeers, NoEvents, PeerRecord, PeerStore};
 use coqui_a2a::error::A2aError;
 use coqui_a2a::model::{AgentCard, Message, Role, SendMessageRequest, SendMessageResponse};
 use coqui_a2a::{Agent, Caller, PROTOCOL, Server};
-use coqui_agentic_peer::auth::{self, Identity, Method, Proof, Sealed, Trust};
-use coqui_agentic_peer::link::{self, Host, Options, Services};
-use coqui_agentic_peer::mux::Side;
-use coqui_agentic_peer::peers::{MemoryPeers, NoEvents, PeerRecord, PeerStore};
 use coqui_transport_web::websocket::{Frames, Listener, ServerTls};
 use coqui_transport_web::{Channel as _, Limits};
 use serde_json::{Value, json};

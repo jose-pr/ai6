@@ -8,11 +8,11 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use cabuya::auth::{self, Identity, Method, Proof, Sealed, Trust};
+use cabuya::link::{self, Host, Options, Services};
+use cabuya::mux::Side;
+use cabuya::peers::{NoEvents, PeerRecord, PeerStore};
 use coqui_a2a::{PROTOCOL, Server};
-use coqui_agentic_peer::auth::{self, Identity, Method, Proof, Sealed, Trust};
-use coqui_agentic_peer::link::{self, Host, Options, Services};
-use coqui_agentic_peer::mux::Side;
-use coqui_agentic_peer::peers::{NoEvents, PeerRecord, PeerStore};
 use coqui_transport_web::Channel as _;
 use coqui_transport_web::Limits;
 use coqui_transport_web::websocket::{Frames, Listener, ServerTls};
@@ -31,7 +31,7 @@ const ACCEPT_POLL: Duration = Duration::from_millis(100);
 struct ConfiguredPeers(Arc<LiaisonConfig>);
 
 impl PeerStore for ConfiguredPeers {
-    fn get(&self, peer: &str) -> Result<Option<PeerRecord>, coqui_agentic_peer::Error> {
+    fn get(&self, peer: &str) -> Result<Option<PeerRecord>, cabuya::Error> {
         Ok(self
             .0
             .peers
@@ -47,14 +47,14 @@ impl PeerStore for ConfiguredPeers {
             }))
     }
 
-    fn put(&self, _record: &PeerRecord) -> Result<(), coqui_agentic_peer::Error> {
-        Err(coqui_agentic_peer::Error::Identity(
+    fn put(&self, _record: &PeerRecord) -> Result<(), cabuya::Error> {
+        Err(cabuya::Error::Identity(
             "Liaison's peers are configured, not stored".to_owned(),
         ))
     }
 
-    fn remove(&self, _peer: &str) -> Result<(), coqui_agentic_peer::Error> {
-        Err(coqui_agentic_peer::Error::Identity(
+    fn remove(&self, _peer: &str) -> Result<(), cabuya::Error> {
+        Err(cabuya::Error::Identity(
             "Liaison's peers are configured, not stored".to_owned(),
         ))
     }

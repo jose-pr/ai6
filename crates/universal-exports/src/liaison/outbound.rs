@@ -9,10 +9,10 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use ai6::directorates::registry::cables::{CableDelivery, CableEndpoint, liaison_peer};
+use cabuya::auth::{Identity, Proof, Sealed, Trust, prove_out};
+use cabuya::mux::{Limits, LinkState, Mux, Side};
 use coqui_a2a::model::{GetTaskRequest, Message, Role, SendMessageRequest, SendMessageResponse};
 use coqui_a2a::{Client, ClientError, ClientTimeouts};
-use coqui_agentic_peer::auth::{Identity, Proof, Sealed, Trust, prove_out};
-use coqui_agentic_peer::mux::{Limits, LinkState, Mux, Side};
 use coqui_transport_web::websocket::{Dialer, Frames};
 use coqui_transport_web::{Channel, Dialer as _, Kind};
 use serde_json::Value;

@@ -20,16 +20,16 @@ use ai6::{
     Attempt, Authenticator, Directory, Lookup, MemoryProvider, NewRun, Operation, Person, Roster,
     RunStatus, RunUpdate, Verdict, access_from_toml,
 };
+use cabuya::auth::{self, Identity, Method, Proof, Sealed, Trust, prove_out};
+use cabuya::link::{self, Host, Options, Services};
+use cabuya::mux::{Limits, Mux, Side};
+use cabuya::peers::{MemoryPeers, NoEvents, PeerRecord, PeerStore};
 use coqui_a2a::error::{A2aError, ErrorKind};
 use coqui_a2a::model::{
     AgentCard, CancelTaskRequest, GetTaskRequest, ListTasksRequest, Message, Role,
     SendMessageConfiguration, SendMessageRequest, SendMessageResponse, StreamResponse, TaskState,
 };
 use coqui_a2a::{Agent, Caller, Client, ClientError, ClientTimeouts, PROTOCOL, Server};
-use coqui_agentic_peer::auth::{self, Identity, Method, Proof, Sealed, Trust, prove_out};
-use coqui_agentic_peer::link::{self, Host, Options, Services};
-use coqui_agentic_peer::mux::{Limits, Mux, Side};
-use coqui_agentic_peer::peers::{MemoryPeers, NoEvents, PeerRecord, PeerStore};
 use coqui_transport_web::websocket::{Channel as WsChannel, Dialer, Frames, Listener, ServerTls};
 use coqui_transport_web::{Channel as _, Dialer as _, Kind, Limits as TransportLimits};
 use serde_json::{Value, json};

@@ -24,24 +24,24 @@ publish = false
 
 [workspace.dependencies]
 # guatiao main, pinned until a release carries what these crates use.
-guatiao = { git = "https://github.com/Boriken-Dev/guatiao", rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e" }
-guatiao-intake = { git = "https://github.com/Boriken-Dev/guatiao", rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e", features = ["derive"] }
-guatiao-serde = { git = "https://github.com/Boriken-Dev/guatiao", rev = "e0136dcc9760ddd6dd8dc89fc4d41320eec6306e", default-features = false }
+guatiao = { git = "https://github.com/Boriken-Dev/guatiao", rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d" }
+guatiao-intake = { git = "https://github.com/Boriken-Dev/guatiao", rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d", features = ["derive"] }
+guatiao-serde = { git = "https://github.com/Boriken-Dev/guatiao", rev = "75f9ef4a302e28caa16b2231cc11b4c2b9a53c9d", default-features = false }
 # The Agent Overlay Spec: reading, validating, composing and the tree digest of overlays, on the
 # same guatiao revision as above.
-coqui-aos = { git = "https://github.com/Boriken-Dev/coqui-aos", rev = "c4babfd9f15347a7d35d0fc25fa28cbe398ac02f" }
+coqui-aos = { git = "https://github.com/Boriken-Dev/coqui-aos", rev = "b766c775b0600cdec6f5695cdaad8dffe64790e9" }
 # Chooses a configuration document's format and hands it to a codec over guatiao's value.
 anycfg = { git = "https://github.com/jose-pr/anycfg-rs", rev = "bf71f7097a550037972a0651e8bd35747b8dcd11" }
 # Shared access kinds, models, role authorizer and the five access providers, pinned to the
 # same guatiao revision as above so kinds and plugins agree.
-coqui-access = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "ac96b16ff93fdf63a0d13c2ccdff635d29a437e6" }
-coqui-roles = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "ac96b16ff93fdf63a0d13c2ccdff635d29a437e6" }
+coqui-access = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "35986e115d0214db7e4885d6a7976e0d771edb9b" }
+coqui-roles = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "35986e115d0214db7e4885d6a7976e0d771edb9b" }
 # Short-lived caches in front of the Directory and Authorizer a gateway loads.
-coqui-access-kit = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "ac96b16ff93fdf63a0d13c2ccdff635d29a437e6", features = ["cache"] }
+coqui-access-kit = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "35986e115d0214db7e4885d6a7976e0d771edb9b", features = ["cache"] }
 # One-time codes (TOTP) as a second step, with enrolment and recovery codes.
-coqui-access-totp = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "ac96b16ff93fdf63a0d13c2ccdff635d29a437e6" }
+coqui-access-totp = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "35986e115d0214db7e4885d6a7976e0d771edb9b" }
 # The sign-in policy: which methods a sign-in may use, from where, and what it still needs.
-coqui-access-signin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "ac96b16ff93fdf63a0d13c2ccdff635d29a437e6" }
+coqui-access-signin = { git = "https://github.com/Boriken-Dev/coqui-access", rev = "35986e115d0214db7e4885d6a7976e0d771edb9b" }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
 clap = { version = "4", default-features = false, features = ["derive", "help", "std", "usage"] }
 serde = { version = "1", default-features = false, features = ["derive"] }
@@ -111,30 +111,33 @@ agent-client-protocol = { version = "3.6", default-features = false }
 futures = { version = "0.3", default-features = false, features = ["std", "async-await", "executor"] }
 # The ACP client above the SDK: connect, resume and turn state, permission deciding, line transports.
 # Pinned by revision until a release.
-coqui-acp = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "b81c78a42e8f83fca48c4f0913775d59309c5831" }
+coqui-acp = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "f8bb07f4376fd3ca74960a64d952272d592cdfff" }
 # The agent run kind a handler returns and its events, shared with every project hosting agent
 # providers. Same revision as coqui-acp, and on the same Guatiao revision as above.
-coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "b81c78a42e8f83fca48c4f0913775d59309c5831" }
+coqui-acp-provider = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "f8bb07f4376fd3ca74960a64d952272d592cdfff" }
 # The usage model (buckets, limits, spend) and the words that read a failed turn as a limit; the same
 # revision as coqui-acp.
-coqui-acp-api = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "b81c78a42e8f83fca48c4f0913775d59309c5831" }
+coqui-acp-api = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "f8bb07f4376fd3ca74960a64d952272d592cdfff" }
 # The Antigravity quota reader (`antigravity`) and the usage tracker that merges readings; same revision.
-coqui-acp-harness = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "b81c78a42e8f83fca48c4f0913775d59309c5831", default-features = false }
+coqui-acp-harness = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "f8bb07f4376fd3ca74960a64d952272d592cdfff", default-features = false }
 # Codex's app-server driver: the session a Codex Run is, and the read of an account's rate limits with no thread and no turn.
-coqui-acp-codex = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "b81c78a42e8f83fca48c4f0913775d59309c5831" }
+coqui-acp-codex = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "f8bb07f4376fd3ca74960a64d952272d592cdfff" }
 # Claude Code's stream-json driver: the session a Claude Code Run is. Same revision as coqui-acp.
-coqui-acp-claude = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "b81c78a42e8f83fca48c4f0913775d59309c5831" }
+coqui-acp-claude = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "f8bb07f4376fd3ca74960a64d952272d592cdfff" }
 # The relay of `ai6 theater dial`: passes an agent's stdio lines over a proven link, and starts and ends the agent.
 # Same revision as coqui-acp, and on the coqui-agentic-peer revision below.
-coqui-acp-bridge = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "b81c78a42e8f83fca48c4f0913775d59309c5831" }
-# A2A 1.0 over a proven coqui-agentic-peer link, for Liaison. The three move together: coqui-a2a
+coqui-acp-bridge = { git = "https://github.com/Boriken-Dev/coqui-acp", rev = "f8bb07f4376fd3ca74960a64d952272d592cdfff" }
+# A2A 1.0 over a proven cabuya link, for Liaison. The three move together: coqui-a2a
 # names the link crate and its transport crate at these revisions.
-coqui-a2a = { git = "https://github.com/Boriken-Dev/coqui-a2a", rev = "43050fc4d078fc0112e4b4a9e329ff028b91d32d" }
-coqui-agentic-peer = { git = "https://github.com/Boriken-Dev/coqui-agentic-peer", rev = "f45938e8cede85a2a2e00afedea1b4944f7c8a67" }
+coqui-a2a = { git = "https://github.com/Boriken-Dev/coqui-a2a", rev = "99f52af71cf6dc0310fcf56d1be4c049e90b43ca" }
+# The proof, the pairing, the streams, the peers and the service loop of a link: what `coqui-agentic-peer` held until it moved them
+# here. The revision coqui-a2a and coqui-acp-bridge build with, so one copy builds.
+cabuya = { git = "https://github.com/Boriken-Dev/cabuya", rev = "7089185fbd047b676ba9a74963b7509136f4637a", features = ["sealed"] }
+coqui-agentic-peer = { git = "https://github.com/Boriken-Dev/coqui-agentic-peer", rev = "6def8243a0dd179b5b8cb2e30d49f1377b8935a6" }
 coqui-transport-web = { git = "https://github.com/Boriken-Dev/coqui-transport-web", rev = "5b126cd5ac9dfe48194aaf9ceb5ef09e23494e23", features = ["websocket"] }
 # The proof key types and the link transport the loopback command names; the revisions coqui-agentic-peer and
 # coqui-a2a build with, so one copy of each builds.
-coqui-peer-webcrypto = { git = "https://github.com/Boriken-Dev/coqui-peer-webcrypto", rev = "9146f55dd9fb9be8d6d96f43e17bc7a057ba0681" }
+coqui-peer-webcrypto = { git = "https://github.com/Boriken-Dev/coqui-peer-webcrypto", rev = "7544cf9c026da808dc940bcb56a0b3d5d78bef2f" }
 coqui-transport = { git = "https://github.com/Boriken-Dev/coqui-transport", rev = "2601da58de9cac8f635060e4746864e9b238c6c5", default-features = false }
 # Sends Moneypenny's tool calls through Universal Exports' own router; axum already builds it.
 tower = { version = "0.5", default-features = false, features = ["util"] }
