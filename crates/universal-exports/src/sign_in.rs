@@ -375,7 +375,20 @@ impl Gateway {
         } else {
             clients::API
         };
-        SignInContext {
+        // The browser is the gateway's own finding when the request is for its own pages, names
+        // the gateway's public origin (the origin its login routes require), or is a fetch the
+        // browser itself marks same-origin. Any other claim of a client kind can only add steps
+        // to a sign-in.
+        let verified = browser
+            && (service == PAGES
+                || headers
+                    .get(ORIGIN)
+                    .and_then(|origin| origin.to_str().ok())
+                    .is_some_and(|origin| origin == self.public_origin())
+                || headers
+                    .get("sec-fetch-site")
+                    .is_some_and(|site| site == "same-origin"));
+        let context = SignInContext {
             purpose: purpose.to_owned(),
             address: self
                 .login_guard()
@@ -385,6 +398,11 @@ impl Gateway {
             service: Some(service.to_owned()),
             time_unix: unix_timestamp().ok().map(|now| now as i64),
             ..SignInContext::default()
+        };
+        if verified {
+            context.with_verified_client()
+        } else {
+            context
         }
     }
 
