@@ -128,6 +128,15 @@ pub(super) type Answered = tokio::sync::oneshot::Sender<Delivery>;
 /// block for long. A job's answer comes with an [`Answered`].
 pub(super) type Reporter = Arc<dyn Fn(AssistantReport, Option<Answered>) + Send + Sync>;
 
+/// Whether a limit event is its account's: a report that says the work can go on elsewhere, or none
+/// that says otherwise. A context window follows the conversation, so no account is out.
+fn account_is_out(event: &AgentEvent) -> bool {
+    event
+        .limit
+        .as_ref()
+        .is_none_or(coqui_acp_api::LimitHit::can_continue)
+}
+
 /// Whether `report` carries what must reach Universal Exports, so no queue drops it for room:
 /// a job's answer, a Cable held for the person or a Cable sent.
 fn must_deliver(report: &AssistantReport) -> bool {
@@ -2182,6 +2191,7 @@ impl Pump {
                         shown
                     }));
                     if event.kind == LIMIT_EVENT
+                        && account_is_out(&event)
                         && let Some(mut step) = self.plan_move(run_id.as_ref())
                     {
                         // Told only if no route can take the message.
@@ -2330,7 +2340,7 @@ impl Pump {
             accounts::record_usage(&self.state, &self.run_name, delta.tokens());
         }
         let over = self.stop_over_budget();
-        if event.kind != LIMIT_EVENT {
+        if event.kind != LIMIT_EVENT || !account_is_out(event) {
             return over;
         }
         let holder = Holder {

@@ -722,6 +722,12 @@ fn an_agents_rate_limit_stops_the_run_as_limited_when_its_words_are_named() {
     assert_eq!(last.kind, "limit", "a limit, not a failure");
     let limit = last.limit.as_ref().expect("the limit says what it knows");
     assert_eq!(limit.resets_at, None, "Grok says no reset time");
+    assert_eq!(
+        limit.kind,
+        Some(ai6::LimitKind::RateLimit),
+        "the words are classified, since this agent sends no report of its own"
+    );
+    assert!(limit.can_continue());
     assert!(
         last.text
             .as_deref()
