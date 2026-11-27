@@ -59,8 +59,9 @@ sealed class TranscriptItem {
 
 /// One entry, drawn by what it is.
 final class EntryItem extends TranscriptItem {
-  const EntryItem(this.entry);
+  const EntryItem(this.entry, {this.streaming = false});
   final ChatEntryData entry;
+  final bool streaming;
 }
 
 /// Tool calls that finished and went well, one after another, drawn as a single line that opens into their cards.

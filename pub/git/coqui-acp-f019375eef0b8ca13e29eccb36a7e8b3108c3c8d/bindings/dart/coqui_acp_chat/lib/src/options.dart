@@ -8,9 +8,17 @@ const String selectableMetaKey = 'dev.boriken.coqui.acp/selectable';
 
 /// One value an option can take.
 final class Choice {
-  const Choice(this.value, this.label, {this.selectable = true});
+  const Choice(
+    this.value,
+    this.label, {
+    this.selectable = true,
+    this.description,
+  });
   final String value;
   final String label;
+
+  /// What the agent says the value is, when it says: a model's price or what it suits, for a person choosing.
+  final String? description;
 
   /// Whether the agent lets it be chosen: false for a value it lists only because it is in use.
   final bool selectable;
@@ -68,6 +76,7 @@ final class ConfigOption {
         {
           'value': choice.value,
           'name': choice.label,
+          'description': ?choice.description,
           if (!choice.selectable) '_meta': {selectableMetaKey: false},
         },
     ],
@@ -110,6 +119,7 @@ List<ConfigOption>? parseConfigOptions(Object? raw, ChatLimits limits) {
             choice['value'] as String,
             shortText(choice['name'], limits) ?? choice['value'] as String,
             selectable: !_unselectable(choice['_meta']),
+            description: shortText(choice['description'], limits),
           ),
         )
         .toList();
@@ -146,6 +156,7 @@ ConfigOption? parseModes(Object? raw, ChatLimits limits) {
         (mode) => Choice(
           mode['id'] as String,
           shortText(mode['name'], limits) ?? mode['id'] as String,
+          description: shortText(mode['description'], limits),
         ),
       )
       .toList();

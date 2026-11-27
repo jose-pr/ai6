@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'diff.dart';
 import 'look.dart';
 import 'renderers.dart';
+import 'selection.dart';
 
 IconData toolIcon(String? kind) => switch (kind) {
   'read' => Icons.description_outlined,
@@ -67,7 +68,7 @@ class ToolCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(look.radius / 1.5),
       ),
       clipBehavior: Clip.antiAlias,
-      child: !hasDetail
+      child: SelectionBlock(child: !hasDetail
           ? Padding(padding: EdgeInsets.all(look.padding), child: header)
           : Theme(
               data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
@@ -89,7 +90,7 @@ class ToolCard extends StatelessWidget {
                   for (final block in tool.blocks) ToolBlockView(tool: tool, block: block),
                 ],
               ),
-            ),
+            )),
     );
   }
 }
@@ -134,37 +135,35 @@ class DiffView extends StatelessWidget {
     final look = context.chatLook;
     final style = TextStyle(fontFamily: look.codeFont, fontSize: 12, height: 1.35);
     return Container(
-      constraints: const BoxConstraints(maxHeight: 420),
       decoration: BoxDecoration(color: look.code, borderRadius: BorderRadius.circular(look.radius / 2)),
+      // One scroll direction only: a scrollable inside a scrollable under the transcript's selection makes a drag across it fail.
       child: SingleChildScrollView(
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              for (final line in lines)
-                if (line == null)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: Text('⋯', style: style.copyWith(color: look.muted)),
-                  )
-                else
-                  Container(
-                    color: switch (line.kind) {
-                      DiffKind.added => look.added,
-                      DiffKind.removed => look.removed,
-                      DiffKind.same => null,
-                    },
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: Text(
-                      '${switch (line.kind) { DiffKind.added => '+', DiffKind.removed => '-', DiffKind.same => ' ' }} ${line.text}',
-                      style: style,
-                      softWrap: false,
-                    ),
+        scrollDirection: Axis.horizontal,
+        child: SelectionBlock(child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final line in lines)
+              if (line == null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Text('⋯', style: style.copyWith(color: look.muted)),
+                )
+              else
+                Container(
+                  color: switch (line.kind) {
+                    DiffKind.added => look.added,
+                    DiffKind.removed => look.removed,
+                    DiffKind.same => null,
+                  },
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Text(
+                    '${switch (line.kind) { DiffKind.added => '+', DiffKind.removed => '-', DiffKind.same => ' ' }} ${line.text}',
+                    style: style,
+                    softWrap: false,
                   ),
-            ],
-          ),
-        ),
+                ),
+          ],
+        )),
       ),
     );
   }

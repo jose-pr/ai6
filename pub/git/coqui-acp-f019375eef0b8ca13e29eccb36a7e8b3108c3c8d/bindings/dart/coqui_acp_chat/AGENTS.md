@@ -118,7 +118,7 @@ the first answer to a request settles it for everyone.
 `ToolCall` (`id`, `title`, `kind`, `status: ToolStatus` pending/running/done/failed/cancelled/stopped, `blocks`, `locations`,
 `isOpen`, `changedPaths`, `stop()`) with `ToolBlock`: `ToolText`, `ToolDiff(path, oldText?, newText)`, `ToolPatch(text, paths)`,
 `ToolTerminal(terminalId)`. `TerminalView` (`command`, `output` from its end, `exitCode`, `isRunning`); `PlanEntry`/`PlanStatus`;
-`Compaction`; `AgentCommandInfo`; `ConfigOption`/`Choice`/`OptionRole`/`roleOf`/`optionIn`/`modeOptionIn`/`PendingChoice`;
+`Compaction`; `AgentCommandInfo`; `ConfigOption`/`Choice` (`value`, `label`, `selectable`, and `description`: what the agent says the value is, read from ACP's `description` of an option value or a mode, cut like any text shown)/`OptionRole`/`roleOf`/`optionIn`/`modeOptionIn`/`PendingChoice`;
 `SessionUsage`; `UsageReport.parse(json, [limits])` (the `dev.boriken.coqui.acp/usage` extension: buckets, spend, `fractionPermille`,
 `resetsIn`; strings sanitised, lists cut at `usageBuckets`), `UsageSupport.parse`; `reasonOf(error)`, `titleFrom(text, [limits])`,
 `toolRuns(entries)` (consecutive tool calls grouped, for a transcript that folds them), `BoundedText` (appendable bounded text). Identifiers an agent chooses (tool, terminal, compaction, option and choice ids) are used as they came or not at all: empty, longer than `shortText` or holding a control character, they are dropped.

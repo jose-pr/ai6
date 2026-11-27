@@ -62,6 +62,7 @@ final class ChatLook extends ThemeExtension<ChatLook> {
     this.userPrefix,
     this.centred = false,
     this.bubbleBorder,
+    this.showThinking = true,
   }) : _user = user,
        _agent = agent,
        _notice = notice,
@@ -81,6 +82,7 @@ final class ChatLook extends ThemeExtension<ChatLook> {
     double radius = 12,
     double bodySize = 16,
     String codeFont = 'monospace',
+    bool showThinking = true,
   }) => ChatLook(
     bg: scheme.surface,
     surface: scheme.surfaceContainerLow,
@@ -99,6 +101,7 @@ final class ChatLook extends ThemeExtension<ChatLook> {
     radius: radius,
     bodySize: bodySize,
     codeFont: codeFont,
+    showThinking: showThinking,
   );
 
   /// The page, a card on it, and a control raised above the card.
@@ -144,6 +147,9 @@ final class ChatLook extends ThemeExtension<ChatLook> {
   /// The colour of a line round a bubble; none without.
   final Color? bubbleBorder;
 
+  /// Whether streamed agent thinking is shown live while a turn runs.
+  final bool showThinking;
+
   @override
   ChatLook copyWith({
     Color? bg,
@@ -176,6 +182,7 @@ final class ChatLook extends ThemeExtension<ChatLook> {
     String? userPrefix,
     bool? centred,
     Color? bubbleBorder,
+    bool? showThinking,
   }) => ChatLook(
     bg: bg ?? this.bg,
     surface: surface ?? this.surface,
@@ -207,6 +214,7 @@ final class ChatLook extends ThemeExtension<ChatLook> {
     userPrefix: userPrefix ?? this.userPrefix,
     centred: centred ?? this.centred,
     bubbleBorder: bubbleBorder ?? this.bubbleBorder,
+    showThinking: showThinking ?? this.showThinking,
   );
 
   @override
@@ -248,6 +256,7 @@ final class ChatLook extends ThemeExtension<ChatLook> {
       userPrefix: near.userPrefix,
       centred: near.centred,
       bubbleBorder: mixed(bubbleBorder, other.bubbleBorder),
+      showThinking: near.showThinking,
     );
   }
 }

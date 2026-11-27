@@ -8,10 +8,11 @@ import 'fold.dart';
 import 'look.dart';
 
 /// What the agent is doing now, from the newest entry of the running turn: "Starting Claude…", "Thinking…", "Running cargo test…",
-/// "Editing calc.js…", "Responding…". [agent] names who is starting.
-String workingHeadline(List<ChatEntryData> entries, {String? agent}) {
+/// "Editing calc.js…", "Responding…". [agent] names who is starting when [starting] is true; warm turns show "Working…".
+String workingHeadline(List<ChatEntryData> entries, {String? agent, bool starting = true}) {
   final newest = entries.isEmpty ? null : entries.last;
   if (newest == null || newest.role == MessageRole.user || newest.role == MessageRole.notice) {
+    if (!starting) return 'Working…';
     return agent == null ? 'Starting…' : 'Starting $agent…';
   }
   switch (newest.role) {

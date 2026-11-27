@@ -16,7 +16,7 @@ class TranscriptItemView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => switch (item) {
-    EntryItem(:final entry) => TranscriptEntry(entry: entry),
+    EntryItem(:final entry, :final streaming) => TranscriptEntry(entry: entry, streaming: streaming),
     BurstItem(:final tools) => _Placed(child: ToolBurst(tools: tools)),
     WorkItem(:final items, :final duration, :final turn, :final running) => _Placed(
       child: TurnWork(items: items, duration: duration, turn: turn, running: running),

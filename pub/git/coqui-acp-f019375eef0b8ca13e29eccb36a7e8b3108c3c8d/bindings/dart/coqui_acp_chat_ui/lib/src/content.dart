@@ -7,6 +7,7 @@ import 'package:markdown/markdown.dart' as md;
 import 'entry.dart';
 import 'look.dart';
 import 'renderers.dart';
+import 'selection.dart';
 import 'tools.dart';
 
 /// Markdown from an agent, which is untrusted. An image would be fetched as soon as it is drawn, which lets whatever wrote it
@@ -44,8 +45,16 @@ class AgentMarkdown extends StatelessWidget {
     final base = Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: look.bodySize, height: 1.45);
     final code = base?.copyWith(fontFamily: look.codeFont, fontSize: look.bodySize - 1);
     // The conversation's own selection takes this text in, so it is not a selection of its own.
-    return MarkdownBody(
+    // Each block of the Markdown is a line of its own when copied; a list's markers are drawn but not copied.
+    return SelectionBlock(child: MarkdownBody(
       data: text,
+      bulletBuilder: (parameters) => SelectionContainer.disabled(
+        child: Text(
+          parameters.style == BulletStyle.orderedList ? '${parameters.index + 1}.' : '•',
+          textAlign: parameters.style == BulletStyle.orderedList ? TextAlign.right : TextAlign.center,
+          style: base,
+        ),
+      ),
       builders: {'pre': _CodeBlock(look), ...builders},
       inlineSyntaxes: inlineSyntaxes,
       softLineBreak: softLineBreak,
@@ -74,15 +83,16 @@ class AgentMarkdown extends StatelessWidget {
           SnackBar(content: Text('Address copied: $href', maxLines: 2, overflow: TextOverflow.ellipsis)),
         );
       },
-    );
+    ));
   }
 }
 
 /// One entry of a conversation, drawn by its kind and the look in use. A host's [ChatRenderers.entry] renderers see it first.
 class TranscriptEntry extends StatelessWidget {
-  const TranscriptEntry({super.key, required this.entry});
+  const TranscriptEntry({super.key, required this.entry, this.streaming = false});
 
   final ChatEntryData entry;
+  final bool streaming;
 
   @override
   Widget build(BuildContext context) {
@@ -102,7 +112,7 @@ class TranscriptEntry extends StatelessWidget {
     final compaction = entry.compaction;
     return switch (entry.role) {
       MessageRole.tool => tool == null ? const SizedBox.shrink() : ToolEntry(tool: tool),
-      MessageRole.thought => Thought(text: entry.text),
+      MessageRole.thought => Thought(text: entry.text, initiallyExpanded: streaming),
       MessageRole.compaction => compaction == null ? const SizedBox.shrink() : CompactionView(compaction: compaction),
       MessageRole.agent => MessageBox(
         color: look.agent,
@@ -213,11 +223,12 @@ class _CodeBlock extends MarkdownElementBuilder {
   }
 }
 
-/// An agent's thinking, kept out of the way until asked for.
+/// An agent's thinking, kept out of the way until asked for, or open while streaming.
 class Thought extends StatelessWidget {
-  const Thought({super.key, required this.text});
+  const Thought({super.key, required this.text, this.initiallyExpanded = false});
 
   final String text;
+  final bool initiallyExpanded;
 
   @override
   Widget build(BuildContext context) {
@@ -225,6 +236,7 @@ class Thought extends StatelessWidget {
     return Theme(
       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
       child: ExpansionTile(
+        initiallyExpanded: initiallyExpanded,
         dense: true,
         tilePadding: EdgeInsets.zero,
         leading: Icon(Icons.psychology_outlined, size: 18, color: look.muted),

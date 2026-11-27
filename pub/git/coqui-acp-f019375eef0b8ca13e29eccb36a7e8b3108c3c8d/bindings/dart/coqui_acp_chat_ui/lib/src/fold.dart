@@ -26,9 +26,15 @@ List<TranscriptItem> foldTranscript(
   List<ChatEntryData> entries, {
   required ChatDensity density,
   bool working = false,
+  bool showThinking = true,
   List<TurnSpan> turns = const [],
 }) {
-  if (density == ChatDensity.verbose) return [for (final entry in entries) EntryItem(entry)];
+  if (density == ChatDensity.verbose) {
+    return [
+      for (var i = 0; i < entries.length; i++)
+        EntryItem(entries[i], streaming: working && showThinking && i == entries.length - 1 && entries[i].role == MessageRole.thought),
+    ];
+  }
   final items = <TranscriptItem>[];
   var start = 0;
   while (start < entries.length) {
@@ -39,7 +45,7 @@ List<TranscriptItem> foldTranscript(
     }
     final turn = entries.sublist(start, end);
     final last = end >= entries.length;
-    items.addAll(_foldTurn(turn, density, finished: !(last && working), turns: turns));
+    items.addAll(_foldTurn(turn, density, finished: !(last && working), showThinking: showThinking, turns: turns));
     start = end;
   }
   return items;
@@ -58,48 +64,58 @@ int? _turnIdOf(List<ChatEntryData> turn) {
   return null;
 }
 
-List<TranscriptItem> _foldTurn(List<ChatEntryData> turn, ChatDensity density, {required bool finished, required List<TurnSpan> turns}) {
+List<TranscriptItem> _foldTurn(
+  List<ChatEntryData> turn,
+  ChatDensity density, {
+  required bool finished,
+  required bool showThinking,
+  required List<TurnSpan> turns,
+}) {
   final normal = density == ChatDensity.normal;
   final hasHead = turn.first.role == MessageRole.user;
   final head = hasHead ? turn.first : null;
   final rest = hasHead ? turn.sublist(1) : turn;
   final out = <TranscriptItem>[?head == null ? null : EntryItem(head)];
-  final first = rest.indexWhere(_isWork);
-  final lastAt = rest.lastIndexWhere(_isWork);
+  final streamingThought = !finished && showThinking && rest.isNotEmpty && rest.last.role == MessageRole.thought ? rest.last : null;
+  final activeRest = streamingThought == null ? rest : rest.sublist(0, rest.length - 1);
+  final first = activeRest.indexWhere(_isWork);
+  final lastAt = activeRest.lastIndexWhere(_isWork);
   final id = _turnIdOf(turn);
   final span = id == null ? null : turns.where((t) => t.id == id).firstOrNull;
   if (normal && finished && first >= 0) {
-    final range = rest.sublist(first, lastAt + 1);
+    final range = activeRest.sublist(first, lastAt + 1);
     final calls = [for (final entry in range) ?entry.tool];
     if (calls.every(_foldable)) {
       final ended = span?.endedAt;
       final duration = ended == null ? _span(head?.at ?? range.first.at, range.last.at) : _span(span!.startedAt, ended);
       out
-        ..addAll(_foldRun(rest.sublist(0, first), hideThoughts: true))
+        ..addAll(_foldRun(activeRest.sublist(0, first), hideThoughts: true))
         ..add(WorkItem(_foldRun(range, hideThoughts: false), duration, turn: id))
-        ..addAll(_foldRun(rest.sublist(lastAt + 1), hideThoughts: true));
+        ..addAll(_foldRun(activeRest.sublist(lastAt + 1), hideThoughts: true));
       return out;
     }
   }
   if (normal && !finished && first >= 0) {
     // Up to the first call that is not done with; what comes after it is drawn as it is.
     var stop = first;
-    while (stop < rest.length) {
-      final tool = rest[stop].tool;
-      if (rest[stop].role == MessageRole.tool && tool != null && !_foldable(tool)) break;
+    while (stop < activeRest.length) {
+      final tool = activeRest[stop].tool;
+      if (activeRest[stop].role == MessageRole.tool && tool != null && !_foldable(tool)) break;
       stop++;
     }
-    final range = rest.sublist(first, stop).takeWhileEnd(_isWork);
+    final range = activeRest.sublist(first, stop).takeWhileEnd(_isWork);
     final end = first + range.length;
     if (range.isNotEmpty) {
       out
-        ..addAll(_foldRun(rest.sublist(0, first), hideThoughts: true))
+        ..addAll(_foldRun(activeRest.sublist(0, first), hideThoughts: true))
         ..add(WorkItem(_foldRun(range, hideThoughts: false), Duration.zero, turn: id, running: true))
-        ..addAll(_foldRun(rest.sublist(end), hideThoughts: true));
+        ..addAll(_foldRun(activeRest.sublist(end), hideThoughts: true));
+      if (streamingThought != null) out.add(EntryItem(streamingThought, streaming: true));
       return out;
     }
   }
-  out.addAll(_foldRun(rest, hideThoughts: normal));
+  out.addAll(_foldRun(activeRest, hideThoughts: normal));
+  if (streamingThought != null) out.add(EntryItem(streamingThought, streaming: true));
   return out;
 }
 
