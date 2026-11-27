@@ -7,7 +7,10 @@
 //! `FAKE_NO_HTTP=1` leaves out HTTP MCP support, `FAKE_INIT_DELAY_MS=N` delays `initialize`,
 //! `FAKE_RESUME=1` advertises `session/resume`, `FAKE_DIE=1` exits mid-turn after writing
 //! `FAKE_LAST_WORDS` (or its own) to standard error, and `FAKE_OPTIONS=1` says what a Run
-//! can start with before any Run: a model option of two values.
+//! can start with before any Run: a model option of two values. `FAKE_COMMANDS=NAME,...`
+//! advertises those slash commands (`available_commands_update`) when a session opens; a prompt
+//! that is `/compact` or begins `/compact ` is then answered with `compacted:BEFORE->AFTER` and a
+//! context-size update, and every `session/new` gives the next session id (`fake-1`, `fake-2`).
 //!
 //! `FAKE_CABLES=JSON` has it use the `ai6-cables` MCP server its Run was given: it lists
 //! the tools, then makes each call of the array (`{"tool", "args"}`), repeating one that has
@@ -16,6 +19,7 @@
 //! TEXT. Its reply says `tools:NAME,...` and then `TOOL=>ANSWERS` for each call, on lines of their
 //! own.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::{
@@ -29,6 +33,13 @@ use serde_json::{Value, json};
 /// The answer to a prompt `FAKE_HOLD` keeps until `session/cancel`, as a real agent's model turn,
 /// and whether that has arrived already.
 type Held = Arc<Mutex<(Option<Responder<Value>>, bool)>>;
+
+/// How many sessions this process has opened; the current one is `fake-N`.
+static SESSIONS: AtomicUsize = AtomicUsize::new(0);
+
+fn session_id() -> String {
+    format!("fake-{}", SESSIONS.load(Ordering::SeqCst).max(1))
+}
 
 fn var(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|value| !value.is_empty())
@@ -224,7 +235,7 @@ fn cable_read(lines: &[String], text: &str) -> Option<String> {
 fn update(cx: &ConnectionTo<Client>, update: Value) {
     if let Ok(message) = UntypedMessage::new(
         "session/update",
-        json!({"sessionId": "fake-1", "update": update}),
+        json!({"sessionId": session_id(), "update": update}),
     ) {
         let _ = cx.send_notification(message);
     }
@@ -263,7 +274,23 @@ fn handle(
         "session/new" | "session/resume" => {
             *cwd.lock().unwrap() = params["cwd"].as_str().unwrap_or_default().to_owned();
             *servers.lock().unwrap() = params["mcpServers"].clone();
-            let _ = responder.respond(json!({"sessionId": "fake-1"}));
+            let opened = if message.method() == "session/new" {
+                SESSIONS.fetch_add(1, Ordering::SeqCst) + 1
+            } else {
+                SESSIONS.load(Ordering::SeqCst).max(1)
+            };
+            let _ = responder.respond(json!({"sessionId": format!("fake-{opened}")}));
+            if let Some(names) = var("FAKE_COMMANDS") {
+                let commands: Vec<Value> = names
+                    .split(',')
+                    .map(|name| json!({"name": name, "description": format!("the fake {name}")}))
+                    .collect();
+                update(
+                    &cx,
+                    json!({"sessionUpdate": "available_commands_update",
+                           "availableCommands": commands}),
+                );
+            }
         }
         "session/close" => {
             let _ = responder.respond(json!({}));
@@ -322,6 +349,21 @@ fn handle(
                     );
                     std::process::exit(3);
                 }
+                if (prompt == "/compact" || prompt.starts_with("/compact "))
+                    && var("FAKE_COMMANDS").is_some()
+                {
+                    update(
+                        &cx,
+                        json!({"sessionUpdate": "agent_message_chunk",
+                               "content": {"type": "text", "text": "compacted:1200->300"}}),
+                    );
+                    update(
+                        &cx,
+                        json!({"sessionUpdate": "usage_update", "used": 300, "size": 100000}),
+                    );
+                    let _ = responder.respond(json!({"stopReason": "end_turn"}));
+                    return;
+                }
                 let mut reply = format!("cwd:{cwd} prompt:{prompt}");
                 if let Some(name) = var("FAKE_ECHO_ENV") {
                     reply.push_str(&format!(
@@ -344,7 +386,7 @@ fn handle(
                     let asked = UntypedMessage::new(
                         "session/request_permission",
                         json!({
-                            "sessionId": "fake-1",
+                            "sessionId": session_id(),
                             "toolCall": {"toolCallId": "t1", "title": "Use a tool", "kind": kind,
                                          "status": "pending", "rawInput": var("FAKE_ASK_INPUT")
                                              .and_then(|input| serde_json::from_str::<Value>(&input).ok())

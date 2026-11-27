@@ -532,3 +532,67 @@ fn an_overlays_skill_reaches_the_agent_as_a_routing_line() {
         "{said}"
     );
 }
+
+fn send_command(run: &Object<dyn AgentSession>, command: ai6::SessionCommand) -> Result<(), String> {
+    run.send_message(ai6::AgentMessage {
+        text: command.encode(),
+    })
+    .map_err(|error| error.to_string())
+}
+
+/// What an ACP agent carries out is what it advertises, which only a session knows, so the
+/// handler declares what it may do and a session refuses the rest.
+#[test]
+fn the_handler_declares_what_an_agent_may_advertise() {
+    let commands = handler("").session_commands().unwrap();
+    assert!(commands.compact && commands.clear);
+}
+
+/// An agent that advertises no `compact` is refused it, and a clear needs no advertisement
+/// but is refused too where the agent will not open a second session.
+#[test]
+fn an_agent_that_advertises_nothing_is_refused_a_compaction() {
+    let (run, _) = run(&[], "");
+    let refused = send_command(&run, ai6::SessionCommand::Compact { focus: None }).unwrap_err();
+    assert!(refused.contains("compact"), "{refused}");
+}
+
+/// An advertised `compact` is a prompt turn, and the turn's end is the compaction.
+#[test]
+fn an_advertised_compact_is_sent_as_a_prompt_and_reported() {
+    let (run, _) = run(&[("FAKE_COMMANDS", "review,compact")], "");
+    send_command(
+        &run,
+        ai6::SessionCommand::Compact {
+            focus: Some("the leak".to_owned()),
+        },
+    )
+    .unwrap();
+    let events = until(&run, &["completed", "failed"]);
+    let kinds: Vec<_> = events.iter().map(|event| event.kind.as_str()).collect();
+    assert_eq!(kinds, ["text", "compacted", "completed"], "{events:?}");
+    assert_eq!(text(&events), "compacted:1200->300");
+    let change = ai6::SessionChange::of(&events[1]).unwrap();
+    assert_eq!(change.trigger.as_deref(), Some("manual"));
+}
+
+/// A clear is `session/new` on the same connection: the agent's process goes on, and the Run
+/// takes the new session's id.
+#[test]
+fn a_clear_opens_a_new_session_on_the_same_connection() {
+    let (run, _) = run(&[("FAKE_COMMANDS", "compact")], "");
+    let before = run.session_id().unwrap();
+    send_command(&run, ai6::SessionCommand::Clear).unwrap();
+    let events = until(&run, &["completed", "failed"]);
+    let kinds: Vec<_> = events.iter().map(|event| event.kind.as_str()).collect();
+    assert_eq!(kinds, ["cleared", "completed"], "{events:?}");
+    let change = ai6::SessionChange::of(&events[0]).unwrap();
+    assert_eq!(change.session_id.as_deref(), Some("fake-2"));
+    assert_ne!(run.session_id().unwrap(), before);
+    run.send_message(ai6::AgentMessage {
+        text: "after".to_owned(),
+    })
+    .unwrap();
+    let said = text(&until(&run, &["completed", "failed"]));
+    assert!(said.contains("prompt:after"), "{said}");
+}
