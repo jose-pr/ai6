@@ -9280,6 +9280,7 @@ pub fn ai6::directorates::section_00::agent::AgentHandler::program(&self) -> cor
 pub fn ai6::directorates::section_00::agent::AgentHandler::read_only_refusal(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::run_record(&self, ai6::directorates::section_00::agent::RunRecordQuery) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::RunRecordFile>, guatiao::library::kind::ProviderError>
+pub fn ai6::directorates::section_00::agent::AgentHandler::session_commands(&self) -> core::result::Result<ai6::directorates::section_00::session_command::SessionCommands, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 pub fn ai6::directorates::section_00::agent::AgentHandler::usage(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<coqui_acp_api::usage::UsageReport, guatiao::library::kind::ProviderError>
@@ -9295,6 +9296,7 @@ pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::read_only_refusal(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::run_record(&self, ai6::directorates::section_00::agent::RunRecordQuery) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::RunRecordFile>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::session_commands(&self) -> core::result::Result<ai6::directorates::section_00::session_command::SessionCommands, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::usage(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<coqui_acp_api::usage::UsageReport, guatiao::library::kind::ProviderError>
@@ -9310,6 +9312,7 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::read_only_refusal(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::run_record(&self, ai6::directorates::section_00::agent::RunRecordQuery) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::RunRecordFile>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::session_commands(&self) -> core::result::Result<ai6::directorates::section_00::session_command::SessionCommands, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::usage(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<coqui_acp_api::usage::UsageReport, guatiao::library::kind::ProviderError>
@@ -9647,6 +9650,33 @@ pub fn ai6::directorates::section_00::records::configured_dir(&alloc::collection
 pub fn ai6::directorates::section_00::records::file_safe(&str) -> bool
 pub fn ai6::directorates::section_00::records::find_file(&std::path::Path, usize, &dyn core::ops::function::Fn(&str) -> bool) -> core::option::Option<std::path::PathBuf>
 pub fn ai6::directorates::section_00::records::home(&alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::option::Option<std::path::PathBuf>
+pub mod ai6::directorates::section_00::session_command
+pub enum ai6::directorates::section_00::session_command::SessionCommand
+pub ai6::directorates::section_00::session_command::SessionCommand::Clear
+pub ai6::directorates::section_00::session_command::SessionCommand::Compact
+pub ai6::directorates::section_00::session_command::SessionCommand::Compact::focus: core::option::Option<alloc::string::String>
+impl ai6::directorates::section_00::session_command::SessionCommand
+pub fn ai6::directorates::section_00::session_command::SessionCommand::encode(&self) -> alloc::string::String
+pub fn ai6::directorates::section_00::session_command::SessionCommand::parse(&str) -> core::result::Result<core::option::Option<Self>, alloc::string::String>
+pub fn ai6::directorates::section_00::session_command::SessionCommand::refuse_in(&str, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
+pub struct ai6::directorates::section_00::session_command::SessionChange
+pub ai6::directorates::section_00::session_command::SessionChange::session_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::section_00::session_command::SessionChange::tokens_after: core::option::Option<u64>
+pub ai6::directorates::section_00::session_command::SessionChange::tokens_before: core::option::Option<u64>
+pub ai6::directorates::section_00::session_command::SessionChange::trigger: core::option::Option<alloc::string::String>
+impl ai6::directorates::section_00::session_command::SessionChange
+pub fn ai6::directorates::section_00::session_command::SessionChange::event(&self, &str, core::option::Option<alloc::string::String>) -> coqui_acp_provider::kind::AgentEvent
+pub fn ai6::directorates::section_00::session_command::SessionChange::of(&coqui_acp_provider::kind::AgentEvent) -> core::option::Option<Self>
+pub struct ai6::directorates::section_00::session_command::SessionCommands
+pub ai6::directorates::section_00::session_command::SessionCommands::clear: bool
+pub ai6::directorates::section_00::session_command::SessionCommands::compact: bool
+pub ai6::directorates::section_00::session_command::SessionCommands::unsupported_because: core::option::Option<alloc::string::String>
+impl ai6::directorates::section_00::session_command::SessionCommands
+pub fn ai6::directorates::section_00::session_command::SessionCommands::none() -> Self
+pub const ai6::directorates::section_00::session_command::CLEARED_EVENT: &str
+pub const ai6::directorates::section_00::session_command::COMPACTED_EVENT: &str
+pub const ai6::directorates::section_00::session_command::COMPACT_FAILED_EVENT: &str
+pub const ai6::directorates::section_00::session_command::SESSION_COMMAND_PREFIX: &str
 pub mod ai6::provider_settings
 pub const ai6::provider_settings::AGENT_SECTION: &str
 pub fn ai6::provider_settings::check_agent_settings(&str, &serde_json::value::Value, &serde_json::map::Map<alloc::string::String, serde_json::value::Value>) -> core::result::Result<(), alloc::string::String>
@@ -10845,6 +10875,14 @@ pub ai6::SecretError::InvalidTtl
 impl core::error::Error for ai6::SecretError
 impl core::fmt::Display for ai6::SecretError
 pub fn ai6::SecretError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub enum ai6::SessionCommand
+pub ai6::SessionCommand::Clear
+pub ai6::SessionCommand::Compact
+pub ai6::SessionCommand::Compact::focus: core::option::Option<alloc::string::String>
+impl ai6::directorates::section_00::session_command::SessionCommand
+pub fn ai6::directorates::section_00::session_command::SessionCommand::encode(&self) -> alloc::string::String
+pub fn ai6::directorates::section_00::session_command::SessionCommand::parse(&str) -> core::result::Result<core::option::Option<Self>, alloc::string::String>
+pub fn ai6::directorates::section_00::session_command::SessionCommand::refuse_in(&str, &str) -> core::result::Result<(), guatiao::library::kind::ProviderError>
 #[non_exhaustive] pub enum ai6::Severity
 pub ai6::Severity::Critical
 pub ai6::Severity::Info
@@ -14179,6 +14217,20 @@ pub fn ai6::station::server::ServeConfig::with_secrets_dir(self, impl core::conv
 pub fn ai6::station::server::ServeConfig::with_station_config(self, ai6::station::server::StationConfig) -> Self
 pub fn ai6::station::server::ServeConfig::with_station_id(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::station::server::ServeConfig::with_watchdog(self, ai6::directorates::medical::watchdog::WatchdogConfig) -> Self
+pub struct ai6::SessionChange
+pub ai6::SessionChange::session_id: core::option::Option<alloc::string::String>
+pub ai6::SessionChange::tokens_after: core::option::Option<u64>
+pub ai6::SessionChange::tokens_before: core::option::Option<u64>
+pub ai6::SessionChange::trigger: core::option::Option<alloc::string::String>
+impl ai6::directorates::section_00::session_command::SessionChange
+pub fn ai6::directorates::section_00::session_command::SessionChange::event(&self, &str, core::option::Option<alloc::string::String>) -> coqui_acp_provider::kind::AgentEvent
+pub fn ai6::directorates::section_00::session_command::SessionChange::of(&coqui_acp_provider::kind::AgentEvent) -> core::option::Option<Self>
+pub struct ai6::SessionCommands
+pub ai6::SessionCommands::clear: bool
+pub ai6::SessionCommands::compact: bool
+pub ai6::SessionCommands::unsupported_because: core::option::Option<alloc::string::String>
+impl ai6::directorates::section_00::session_command::SessionCommands
+pub fn ai6::directorates::section_00::session_command::SessionCommands::none() -> Self
 #[non_exhaustive] pub struct ai6::Settings
 pub ai6::Settings::access: core::option::Option<serde_json::value::Value>
 pub ai6::Settings::cables: ai6::CableConfig
@@ -15264,7 +15316,10 @@ pub const ai6::CHIEF_OF_STAFF_ROLE: &str
 pub const ai6::CHIEF_ROLE: &str
 pub const ai6::CLAUDE_LOGIN_FILE: &str
 pub const ai6::CLEARANCE_KIND: &str
+pub const ai6::CLEARED_EVENT: &str
 pub const ai6::CODEX_LOGIN_FILE: &str
+pub const ai6::COMPACTED_EVENT: &str
+pub const ai6::COMPACT_FAILED_EVENT: &str
 pub const ai6::CONFIG_ACCESS: &str
 pub const ai6::CONFIG_ACCOUNTS: &str
 pub const ai6::CONTEXT_EVENTS_FORMAT: &str
@@ -15346,6 +15401,7 @@ pub const ai6::REVIEW_SOURCE: &str
 pub const ai6::SAFE_HOUSE_DELETE: &str
 pub const ai6::SCOPE_KINDS: [&str; 5]
 pub const ai6::SCRIPT_ENVIRONMENT: [&str; 14]
+pub const ai6::SESSION_COMMAND_PREFIX: &str
 pub const ai6::SLEEPER_BRIEF_SOURCE: &str
 pub const ai6::SOURCE_BRIEF_PREFIX: &str
 pub const ai6::STATION_ACTIONS: &[&str]
@@ -15427,6 +15483,7 @@ pub fn ai6::AgentHandler::program(&self) -> core::result::Result<core::option::O
 pub fn ai6::AgentHandler::read_only_refusal(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::run_record(&self, ai6::directorates::section_00::agent::RunRecordQuery) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::RunRecordFile>, guatiao::library::kind::ProviderError>
+pub fn ai6::AgentHandler::session_commands(&self) -> core::result::Result<ai6::directorates::section_00::session_command::SessionCommands, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 pub fn ai6::AgentHandler::usage(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<coqui_acp_api::usage::UsageReport, guatiao::library::kind::ProviderError>
@@ -15442,6 +15499,7 @@ pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::read_only_refusal(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::run_record(&self, ai6::directorates::section_00::agent::RunRecordQuery) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::RunRecordFile>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::session_commands(&self) -> core::result::Result<ai6::directorates::section_00::session_command::SessionCommands, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Instance<dyn ai6::directorates::section_00::agent::AgentHandler>::usage(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<coqui_acp_api::usage::UsageReport, guatiao::library::kind::ProviderError>
@@ -15457,6 +15515,7 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::read_only_refusal(&self) -> core::result::Result<core::option::Option<alloc::string::String>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::resume(&self, ai6::directorates::section_00::agent::AgentResume, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::run_record(&self, ai6::directorates::section_00::agent::RunRecordQuery) -> core::result::Result<core::option::Option<ai6::directorates::section_00::agent::RunRecordFile>, guatiao::library::kind::ProviderError>
+pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::session_commands(&self) -> core::result::Result<ai6::directorates::section_00::session_command::SessionCommands, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::start(&self, ai6::directorates::section_00::agent::AgentStart, guatiao::library::kind::object::Object<dyn ai6::directorates::q::terminal::AgentTerminal>) -> core::result::Result<guatiao::library::kind::object::Object<dyn coqui_acp_provider::kind::AgentSession>, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::stdio(&self) -> core::result::Result<ai6::directorates::q::terminal::HarnessStdio, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::section_00::agent::AgentHandler>::usage(&self, alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>) -> core::result::Result<coqui_acp_api::usage::UsageReport, guatiao::library::kind::ProviderError>
