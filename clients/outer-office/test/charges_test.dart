@@ -597,7 +597,7 @@ void main() {
     second.frame(3, 'ready', {'busy': false});
     second.frame(4, 'event', {'kind': 'text', 'text': 'three'});
     await _flush(tester);
-    expect(find.text('one'), findsOneWidget);
+    expect(find.text('onetwo'), findsOneWidget);
     expect(find.text('three'), findsOneWidget);
     expect(find.byKey(const ValueKey('attach-reconnect')), findsNothing);
   });

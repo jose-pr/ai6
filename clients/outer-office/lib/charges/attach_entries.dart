@@ -6,6 +6,7 @@ import 'attachment.dart';
 /// - a `prompt` is a `person` entry, its `from` in the data (`mine` for the reader's own);
 /// - an `event` that names tools is a `tools` entry, so a turn's calls fold into one row;
 ///   its words are an `agent` entry, or a `notice` when the event only reports an outcome;
+///   `text` events that follow one another with no other frame between are one `agent` entry;
 /// - a `permission` is a `permission` entry that carries its answer once one came;
 /// - `attached`, `detached`, `interrupted` and `closed` are `notice` entries and `error` an
 ///   `error` one.
@@ -17,7 +18,11 @@ List<AssistantEntry> attachEntries(
   Set<String> me = const {},
 }) {
   final entries = <AssistantEntry>[];
+  // Whether the frame before this one was a `text` event.
+  var lastText = false;
   for (final frame in attachment.frames) {
+    final continuing = lastText;
+    lastText = false;
     AssistantEntry entry(
       String role,
       String text, [
@@ -45,7 +50,28 @@ List<AssistantEntry> attachEntries(
           if (text.isNotEmpty) entries.add(entry('tools', text));
         } else if (text.isNotEmpty) {
           final said = kind == 'text' || kind == 'plan' || kind.isEmpty;
-          entries.add(entry(said ? 'agent' : 'notice', text));
+          if (kind == 'text') {
+            // A harness may send one answer in pieces, one `text` event each; with no other
+            // frame between them they are one entry, as in Moneypenny's chat.
+            if (continuing &&
+                entries.isNotEmpty &&
+                entries.last.role == 'agent') {
+              final first = entries.removeLast();
+              entries.add(
+                AssistantEntry(
+                  role: 'agent',
+                  text: first.text + text,
+                  at: first.at,
+                  data: first.data,
+                ),
+              );
+            } else {
+              entries.add(entry('agent', text));
+            }
+            lastText = true;
+          } else {
+            entries.add(entry(said ? 'agent' : 'notice', text));
+          }
         }
       case 'permission':
         final request = frame.text('request');
