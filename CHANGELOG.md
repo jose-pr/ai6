@@ -292,6 +292,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The gateway serves a brief, a green ink request, a held brief, a Mission's reviews, a charge's report and a
 ### Changed
 
+- A limit says its kind (a usage quota, a rate limit, credit, a context window) and whether the work can go on with another
+  account, as coqui-acp reports it; one that cannot ends the turn as a failure, and a conversation that fills its model's
+  context window starts over in a fresh session. The Claude Code and Codex handlers read a limit through the drivers'
+  `limit_of_line` and `limit_of_message`, and the `acp` handler takes the limit an agent states in its refusal's `_meta`
+  before it reads the words. The gateway tells the sign-in policy which browsers it found itself (its own pages, the public
+  origin, a same-origin fetch), since coqui-access now treats any other claim of a client kind as one that can only add steps.
+
 - Outer Office builds with the Flutter commit Canoa uses (`3.51.0-1.0.pre-291`, Dart `3.15.0-173.0.dev`), taken from
   Boriken Dev's scanner-clean mirror of Flutter rather than `flutter/flutter`; `sdk.lock` gains `flutter-upstream`, the
   `flutter/flutter` commit whose engine the web build names.
