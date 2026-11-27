@@ -8,6 +8,7 @@
 //! same action asks the Station to probe what it was to deliver (`probe`) and decides it (`verify`:
 //! done, redispatch as the next run, or failed), each with its reason.
 
+use ai6::directorates::registry::backend::RegistryBackend;
 use ai6::directorates::registry::decisions::{self, VerifyingDecision};
 use ai6::{AuditRecord, MissionVerdict, OutcomeVerdict, RunError, RunRecord, TimelineEvent};
 use ai6_diptel::OperationId;
@@ -49,6 +50,21 @@ pub struct GivenVerdict {
     pub verdict: MissionVerdict,
 }
 
+/// As [`refused_by`], except that a Registry that cannot be read or written is unavailable, with
+/// the reason, not a bare 500.
+fn refused_unavailable(error: RunError) -> Refused {
+    match error {
+        RunError::Io(error) if error.kind() != std::io::ErrorKind::InvalidInput => {
+            eprintln!("ai6: the Registry could not take the request: {error}");
+            refused::refused(
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("the Registry could not take the request: {error}"),
+            )
+        }
+        other => refused_by(other),
+    }
+}
+
 fn refused_by(error: RunError) -> Refused {
     match error {
         RunError::NotFound => ApiError::not_found().into(),
@@ -58,6 +74,40 @@ fn refused_by(error: RunError) -> Refused {
         }
         _ => ApiError::internal().into(),
     }
+}
+
+/// Files the brief of a Mission whose closed Run just took a verdict when its claim is still
+/// held by a Station that does not answer, so a dark Station does not strand it. A Station that
+/// answers settles its own claim.
+fn settle_dark_claim(
+    registry: &dyn RegistryBackend,
+    operation: &str,
+    key: &str,
+    verdict: &MissionVerdict,
+    record: &RunRecord,
+) -> std::io::Result<()> {
+    let Some(filed) = registry.filed_brief(key)? else {
+        return Ok(());
+    };
+    if filed.state != "claimed" || filed.brief.operation.as_deref() != Some(operation) {
+        return Ok(());
+    }
+    let Some(lease) = registry.lease(key)? else {
+        return Ok(());
+    };
+    if crate::orders::station_answers(registry, &lease)? {
+        return Ok(());
+    }
+    let done = verdict.verdict == OutcomeVerdict::Confirmed;
+    let outcome = serde_json::json!({
+        "state": if done { "done" } else { "failed" },
+        "run_id": record.provider_id,
+        "mission_id": key,
+        "verdict": verdict,
+        "station": lease.station(),
+    });
+    crate::orders::finish_claimed(registry, &lease, done, &outcome)?;
+    Ok(())
 }
 
 /// `POST /v1/user/operations/{operation_id}/missions/{mission_id}/verdict` with
@@ -100,7 +150,13 @@ pub(crate) async fn give(
         // Audited first: a verdict that cannot be audited is not given.
         check_settled(&store.latest_run(&uid)?, &key)?;
         store.record_audit(&audit)?;
-        store.record_verdict(&key, &uid, &recorded)
+        let record = store.record_verdict(&key, &uid, &recorded)?;
+        if record.status.is_closed()
+            && let Err(error) = settle_dark_claim(store.as_ref(), &key, &uid, &recorded, &record)
+        {
+            eprintln!("ai6: Mission {uid:?}: its claim was not settled with the verdict: {error}");
+        }
+        Ok::<_, RunError>(record)
     })
     .await
     .map_err(|_| ApiError::internal())?
@@ -254,7 +310,7 @@ pub(crate) async fn probe(
     })
     .await
     .map_err(|_| ApiError::internal())?
-    .map_err(refused_by)?;
+    .map_err(refused_unavailable)?;
     Ok(Json(ProbeRequested {
         operation_id: operation.to_string(),
         mission_id: record.mission_id,
@@ -679,6 +735,75 @@ mod tests {
         };
         assert_eq!(probe("R").await, 200);
         assert_eq!(probe("N").await, 404);
+    }
+
+    #[tokio::test]
+    async fn a_verdict_on_a_run_whose_station_is_dark_settles_its_claimed_brief() {
+        let served = served_with(ROLES).await;
+        let brief: ai6::Brief = serde_json::from_value(serde_json::json!({
+            "title": "Crash on save", "body": "words", "id": "org/repo#9",
+            "source": "source:github", "operation": "G",
+        }))
+        .unwrap();
+        served.registry.submit_brief(&brief).unwrap();
+        let key = brief.key();
+        served
+            .registry
+            .claim_with_lease(
+                Some(&key),
+                "gone-station",
+                Duration::from_secs(60),
+                Default::default(),
+            )
+            .unwrap()
+            .unwrap();
+        let opened = served
+            .registry
+            .open_run(
+                NewRun::new(format!("{key}-1"), key.as_str(), "gone-station").with_operation("G"),
+                Duration::from_secs(60),
+            )
+            .unwrap();
+        served
+            .registry
+            .update_run(
+                &opened.id,
+                "gone-station",
+                opened.fence,
+                RunUpdate::default()
+                    .result(RunResult::new("done"))
+                    .status(ai6::RunStatus::Ended),
+            )
+            .unwrap();
+        let given = act(
+            &served,
+            &served.operator,
+            &key,
+            "verdict",
+            Some(serde_json::json!({"verdict": "confirmed"})),
+        )
+        .await;
+        assert_eq!(given.status(), 200, "{:?}", given.text().await);
+        let filed = served.registry.filed_brief(&key).unwrap().unwrap();
+        assert_eq!(filed.state, "done", "the dark Station's claim is settled");
+    }
+
+    #[tokio::test]
+    async fn a_probe_the_registry_cannot_record_is_unavailable_not_a_500() {
+        let served = served_with(ROLES).await;
+        ended(&served, "m-verifying", "verifying");
+        std::fs::write(
+            served.directory.path().join("runs").join("broken.json"),
+            "{",
+        )
+        .unwrap();
+        let asked = act(&served, &served.operator, "m-verifying", "probe", None).await;
+        assert_eq!(asked.status(), 503);
+        let body: serde_json::Value = asked.json().await.unwrap();
+        assert!(
+            body["error"].as_str().unwrap().contains("Registry"),
+            "{body}"
+        );
     }
 
     #[tokio::test]

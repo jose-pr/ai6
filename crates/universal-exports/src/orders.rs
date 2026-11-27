@@ -210,25 +210,11 @@ fn settle_claim(
     };
     // A Station that answers is asked with `mission cancel`, unless its own check-in says it holds
     // this claim with nothing running or queued for it.
-    let live = registry
-        .stations(registry.limits().stations.gone_dark_after.0)?
-        .into_iter()
-        .any(|record| {
-            record.station() == lease.station()
-                && !record
-                    .info()
-                    .get("orphaned")
-                    .and_then(serde_json::Value::as_array)
-                    .is_some_and(|keys| keys.iter().any(|orphan| orphan.as_str() == Some(key)))
-        });
-    if live {
+    if station_answers(registry, &lease)? {
         return Ok(Err(refused(
             "its Station still answers: use `mission cancel`",
         )));
     }
-    let Some(brief) = registry.read_claimed(key)? else {
-        return Ok(Err(refused("the Mission has no claim")));
-    };
     let run = registry
         .latest_run(key)?
         .and_then(|record| record.provider_id);
@@ -240,13 +226,50 @@ fn settle_claim(
         "station": lease.station(),
         "settled_by": by,
     });
-    registry.finish(&brief, &outcome, false, None, Some(lease.station()))?;
+    if !finish_claimed(registry, &lease, false, &outcome)? {
+        return Ok(Err(refused("the Mission has no claim")));
+    }
     Ok(Ok(SettledMission {
         operation_id: operation.to_owned(),
         mission_id: key.to_owned(),
         station_id: lease.station().to_owned(),
         state: "failed",
     }))
+}
+
+/// Whether the Station holding `lease` still answers for it: it checked in lately and does not
+/// list the claim as orphaned.
+pub(crate) fn station_answers(
+    registry: &dyn RegistryBackend,
+    lease: &ai6::Lease,
+) -> std::io::Result<bool> {
+    let key = lease.key();
+    Ok(registry
+        .stations(registry.limits().stations.gone_dark_after.0)?
+        .into_iter()
+        .any(|record| {
+            record.station() == lease.station()
+                && !record
+                    .info()
+                    .get("orphaned")
+                    .and_then(serde_json::Value::as_array)
+                    .is_some_and(|keys| keys.iter().any(|orphan| orphan.as_str() == Some(key)))
+        }))
+}
+
+/// Files the claim `lease` holds with `outcome`, done when `ok`; `false` when no brief is
+/// claimed under it any more.
+pub(crate) fn finish_claimed(
+    registry: &dyn RegistryBackend,
+    lease: &ai6::Lease,
+    ok: bool,
+    outcome: &serde_json::Value,
+) -> std::io::Result<bool> {
+    let Some(brief) = registry.read_claimed(lease.key())? else {
+        return Ok(false);
+    };
+    registry.finish(&brief, outcome, ok, None, Some(lease.station()))?;
+    Ok(true)
 }
 
 #[cfg(test)]

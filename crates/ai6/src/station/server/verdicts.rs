@@ -142,6 +142,32 @@ pub(super) fn settle_held(state: &DaemonState) {
     }
 }
 
+/// Files the brief of each Mission that ended in this Station's book while the Registry still
+/// shows its claim held by this Station.
+pub(super) fn settle_ended_claims(state: &DaemonState) {
+    let claims = match state.intake.leases() {
+        Ok(leases) => leases,
+        Err(error) => {
+            eprintln!("ai6: the Registry's claims could not be listed: {error}");
+            return;
+        }
+    };
+    for lease in claims
+        .into_iter()
+        .filter(|lease| lease.station() == state.station_id)
+    {
+        let ended = state
+            .missions
+            .lock()
+            .ok()
+            .and_then(|missions| missions.get(lease.key()).map(|mission| mission.state))
+            .is_some_and(super::is_terminal_state);
+        if ended {
+            file_settled(state, lease.key());
+        }
+    }
+}
+
 fn settle(state: &DaemonState, mission_id: &str, verdict: &MissionVerdict) {
     let spoken = format!("{} by {}", verdict.verdict.as_str(), verdict.by);
     let kind = if verdict.verdict == OutcomeVerdict::Confirmed {
@@ -461,6 +487,48 @@ mod tests {
         assert_eq!(standing.count(Judgment::Done), 1);
         assert_eq!(standing.count(Judgment::Disputed), 1);
         assert_eq!(standing.failure_rate, Some(0.5));
+        stop(&state);
+    }
+
+    /// A Mission that ended here while its brief stayed claimed, as one whose verdict came after
+    /// it ended leaves it, is filed by the next intake pass.
+    #[tokio::test]
+    async fn a_verdict_on_an_ended_mission_settles_its_still_claimed_brief() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(root.path(), "", AGENTS);
+        let brief: crate::Brief = serde_json::from_value(serde_json::json!({
+            "title": "Look", "id": "ended", "operation": "G", "agent": "007",
+        }))
+        .unwrap();
+        state.intake.submit_brief(&brief).unwrap();
+        let key = brief.key();
+        state
+            .intake
+            .claim_with_lease(
+                Some(&key),
+                &state.station_id,
+                state.mission_lease(),
+                Default::default(),
+            )
+            .unwrap()
+            .unwrap();
+        super::super::create_intake_mission(
+            &state,
+            &brief,
+            &MissionId::try_new(&key).unwrap(),
+            ("G".to_owned(), "007".to_owned(), None),
+        )
+        .unwrap();
+        state
+            .missions
+            .lock()
+            .unwrap()
+            .fail_for(&key, "ended before its verdict")
+            .unwrap();
+        let filed = |state: &DaemonState| state.intake.filed_brief(&key).unwrap().unwrap().state;
+        assert_eq!(filed(&state), "claimed");
+        settle_ended_claims(&state);
+        assert_eq!(filed(&state), "failed");
         stop(&state);
     }
 

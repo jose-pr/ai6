@@ -1878,6 +1878,7 @@ async fn scheduler_loop(base: DaemonState) {
             }
             medical::enforce_quarantines(&tick);
             verdicts::settle_held(&tick);
+            verdicts::settle_ended_claims(&tick);
             assessing::settle(&tick);
             verification::answer_probe_requests(&tick);
         })
@@ -4222,6 +4223,18 @@ fn file_settled_brief(state: &DaemonState, mission_id: &str) -> std::io::Result<
                 state.mission_lease(),
                 meta,
             )?
+            else {
+                return Ok(false);
+            };
+            Ok(finish_intake_claim(state, &lease, &outcome, done).is_some())
+        }
+        // The Mission ended here and its claim is still held: a verdict that came after the end
+        // (or a restart in between) left it, and nothing else would file it.
+        "claimed" => {
+            let Some(lease) = state
+                .intake
+                .lease(mission_id)?
+                .filter(|lease| lease.station() == state.station_id)
             else {
                 return Ok(false);
             };

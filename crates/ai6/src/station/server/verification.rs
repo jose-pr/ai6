@@ -14,7 +14,7 @@ use coqui_acp_provider::AgentEvent;
 
 use super::{DaemonState, agents, observations, publish_lifecycle, run_hold, vetting};
 use crate::directorates::m::deliverables::{self, Deliverable, DeliverableKind};
-use crate::directorates::m::mission::{Mission, MissionState};
+use crate::directorates::m::mission::{Mission, MissionState, RunHold};
 use crate::directorates::m::theaters::{LOCAL_THEATER, TheaterAccess};
 use crate::directorates::registry::logbook::Severity;
 use crate::directorates::registry::reports::ReportFiler;
@@ -308,21 +308,51 @@ fn comment(
 }
 
 /// Probes every deliverable of the run `mission_id` is on and keeps what was found as its
-/// evidence, answering the request for it.
+/// evidence, answering the request for it. A probe that fails is kept as `failed` evidence and
+/// journaled, so the request never stays open and the Mission says why.
 pub(super) fn probe_and_record(state: &DaemonState, mission_id: &str) -> Result<usize, String> {
+    probe_and_record_with(state, mission_id, &|state, mission, deliverables| {
+        Ok(probe_all(state, mission, deliverables))
+    })
+}
+
+type Probe<'a> =
+    &'a dyn Fn(&DaemonState, &Mission, &[Deliverable]) -> Result<Vec<Evidence>, String>;
+
+fn probe_and_record_with(
+    state: &DaemonState,
+    mission_id: &str,
+    probe: Probe<'_>,
+) -> Result<usize, String> {
+    let hold = run_hold(state, mission_id).ok_or("the Mission has no Run record")?;
+    match probe_run(state, mission_id, &hold, probe) {
+        Ok(found) => Ok(found),
+        Err(error) => {
+            eprintln!("ai6: Mission {mission_id:?}: probing its deliverables failed: {error}");
+            record_failed_probe(state, mission_id, &hold, &error);
+            Err(error)
+        }
+    }
+}
+
+fn probe_run(
+    state: &DaemonState,
+    mission_id: &str,
+    hold: &RunHold,
+    probe: Probe<'_>,
+) -> Result<usize, String> {
     let mission = state
         .missions
         .lock()
         .ok()
         .and_then(|missions| missions.get(mission_id).cloned())
         .ok_or("the Mission is not in this Station's book")?;
-    let hold = run_hold(state, mission_id).ok_or("the Mission has no Run record")?;
     let record = state
         .intake
         .run(&hold.id)
         .map_err(|error| error.to_string())?
         .ok_or("the Run record is gone")?;
-    let evidence = probe_all(state, &mission, &record.deliverables);
+    let evidence = probe(state, &mission, &record.deliverables)?;
     let found = evidence.len();
     let readback = evidence.clone();
     let update = RunUpdate::default().evidence(evidence).probed();
@@ -332,6 +362,34 @@ pub(super) fn probe_and_record(state: &DaemonState, mission_id: &str) -> Result<
         .map_err(|error| error.to_string())?;
     report_readback(state, &mission, &hold.id, &readback);
     Ok(found)
+}
+
+/// Keeps a probe's failure on the Run as evidence of the first deliverable it was to read and
+/// answers the request, so the Mission shows why and verification can still be decided.
+fn record_failed_probe(state: &DaemonState, mission_id: &str, hold: &RunHold, why: &str) {
+    let deliverable = state
+        .intake
+        .run(&hold.id)
+        .ok()
+        .flatten()
+        .and_then(|record| record.deliverables.first().cloned())
+        .or_else(|| Deliverable::parse("branch").ok());
+    let Some(deliverable) = deliverable else {
+        return;
+    };
+    let failed = Evidence::new(
+        deliverable,
+        ProbeResult::Failed,
+        why.to_owned(),
+        state.clock.now() as f64,
+    );
+    let update = RunUpdate::default().evidence(vec![failed]).probed();
+    if let Err(error) = state
+        .intake
+        .update_run(&hold.id, &state.station_id, hold.fence, update)
+    {
+        eprintln!("ai6: Mission {mission_id:?}: the failed probe could not be recorded: {error}");
+    }
 }
 
 /// Files what the probes found as a Report of the Mission's Operation, linked to the Mission.
@@ -609,6 +667,44 @@ mod tests {
         };
         assert_eq!(declared(&owing), ["branch:never-pushed", "file:out.txt"]);
         assert!(declared(&owing_nothing).is_empty());
+        stop(&state);
+    }
+
+    #[tokio::test]
+    async fn a_probe_of_a_mission_with_no_deliverables_answers_and_clears_the_request() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(root.path(), "", AGENTS);
+        let mission_id = mission_for(&state, "nothing-owed", "plain");
+        start_mission_by_id(&state, &mission_id).await;
+        wait_for_verifying(&state, &mission_id).await;
+        let now = state.clock.now() as f64;
+        state.intake.request_probe("G", &mission_id, now).unwrap();
+        assert!(latest(&state, &mission_id).probe_requested.is_some());
+        assert_eq!(probe_and_record(&state, &mission_id), Ok(0));
+        let record = latest(&state, &mission_id);
+        assert_eq!(record.probe_requested, None, "the request is answered");
+        assert!(record.evidence.is_empty());
+        stop(&state);
+    }
+
+    #[tokio::test]
+    async fn a_probe_that_fails_is_recorded_as_failed_evidence_and_clears_the_request() {
+        let root = tempfile::tempdir().unwrap();
+        let state = test_state(root.path(), "", AGENTS);
+        let mission_id = mission_for(&state, "failing", "plain");
+        start_mission_by_id(&state, &mission_id).await;
+        wait_for_verifying(&state, &mission_id).await;
+        let now = state.clock.now() as f64;
+        state.intake.request_probe("G", &mission_id, now).unwrap();
+        let failed = probe_and_record_with(&state, &mission_id, &|_, _, _| {
+            Err("the remote hung up".to_owned())
+        });
+        assert_eq!(failed, Err("the remote hung up".to_owned()));
+        let record = latest(&state, &mission_id);
+        assert_eq!(record.probe_requested, None, "the request is answered");
+        assert_eq!(record.evidence.len(), 1);
+        assert_eq!(record.evidence[0].result, ProbeResult::Failed);
+        assert!(record.evidence[0].detail.contains("hung up"));
         stop(&state);
     }
 
