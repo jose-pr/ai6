@@ -3752,15 +3752,16 @@ mod tests {
         gate: Option<Gate>,
         restriction: Option<Restriction>,
     ) -> (CodexRun, Arc<Mutex<Vec<u8>>>) {
-        let mut turn = b"{\"id\":3,\"result\":{\"turn\":{\"id\":\"u\"}}}\n".to_vec();
+        let mut turn = b"{\"id\":4,\"result\":{\"turn\":{\"id\":\"u\"}}}\n".to_vec();
         turn.extend_from_slice(stream);
         let terminal = ScriptedTerminal::new(
             vec![
                 b"{\"id\":1,\"result\":{}}\n".to_vec(),
                 b"{\"id\":2,\"result\":{\"thread\":{\"id\":\"t\"}}}\n".to_vec(),
+                b"{\"id\":3,\"result\":{\"data\":[]}}\n".to_vec(),
                 turn,
             ],
-            3,
+            4,
         );
         let writes = terminal.writes.clone();
         let config = CodexConfig::default();
@@ -3861,9 +3862,10 @@ mod tests {
             vec![
                 b"{\"id\":1,\"result\":{}}\n".to_vec(),
                 b"{\"id\":2,\"result\":{\"thread\":{\"id\":\"codex-thread-42\"}}}\n".to_vec(),
-                b"{\"id\":3,\"result\":{\"turn\":{\"id\":\"turn-1\"}}}\n".to_vec(),
+                b"{\"id\":3,\"result\":{\"data\":[]}}\n".to_vec(),
+                b"{\"id\":4,\"result\":{\"turn\":{\"id\":\"turn-1\"}}}\n".to_vec(),
             ],
-            3,
+            4,
         );
         let (spec, writes, killed) = (
             terminal.spec.clone(),
@@ -3927,11 +3929,12 @@ mod tests {
         assert_eq!(messages[2]["params"]["excludeTurns"], true);
         assert_eq!(messages[2]["params"]["model"], "gpt-5");
         assert_eq!(messages[2]["params"]["cwd"], "C:\\station\\mission-42");
-        assert_eq!(messages[3]["method"], "turn/start");
-        assert_eq!(messages[3]["params"]["threadId"], "codex-thread-42");
-        assert_eq!(messages[3]["params"]["effort"], "high");
+        assert_eq!(messages[3]["method"], "skills/list");
+        assert_eq!(messages[4]["method"], "turn/start");
+        assert_eq!(messages[4]["params"]["threadId"], "codex-thread-42");
+        assert_eq!(messages[4]["params"]["effort"], "high");
         assert_eq!(
-            messages[3]["params"]["input"][0]["text"],
+            messages[4]["params"]["input"][0]["text"],
             "continue the same Run"
         );
         assert!(!killed.load(Ordering::Acquire));
@@ -3997,7 +4000,7 @@ mod tests {
     #[test]
     fn a_compaction_asks_the_thread_and_counts_the_tokens_before_and_after() {
         let answer = [
-            json!({"id": 3, "result": {}}),
+            json!({"id": 4, "result": {}}),
             json!({"method": "turn/started", "params": {"threadId": "codex-thread-42", "turn": {"id": "turn-c"}}}),
             usage(28857),
             json!({"method": "item/started", "params": {"item": {"type": "contextCompaction", "id": "c1"}}}),
@@ -4010,9 +4013,10 @@ mod tests {
             vec![
                 b"{\"id\":1,\"result\":{}}\n".to_vec(),
                 b"{\"id\":2,\"result\":{\"thread\":{\"id\":\"codex-thread-42\"}}}\n".to_vec(),
+                b"{\"id\":3,\"result\":{\"data\":[]}}\n".to_vec(),
                 lines_of(&answer),
             ],
-            3,
+            4,
         );
         run.send_message(AgentMessage {
             text: SessionCommand::Compact {
@@ -4050,7 +4054,7 @@ mod tests {
     #[test]
     fn a_compaction_turn_that_does_not_compact_is_reported_before_it_ends() {
         let answer = [
-            json!({"id": 3, "result": {}}),
+            json!({"id": 4, "result": {}}),
             json!({"method": "turn/completed", "params": {"turn": {"id": "turn-c", "status": "failed",
                 "error": {"message": "context compaction failed"}}}}),
         ];
@@ -4058,9 +4062,10 @@ mod tests {
             vec![
                 b"{\"id\":1,\"result\":{}}\n".to_vec(),
                 b"{\"id\":2,\"result\":{\"thread\":{\"id\":\"codex-thread-42\"}}}\n".to_vec(),
+                b"{\"id\":3,\"result\":{\"data\":[]}}\n".to_vec(),
                 lines_of(&answer),
             ],
-            3,
+            4,
         );
         run.send_message(AgentMessage {
             text: SessionCommand::Compact { focus: None }.encode(),
