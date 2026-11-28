@@ -865,10 +865,20 @@ Three are built in, so they work before anything loads:
 | `env` | an environment variable of the Station | none | a weakening: every process the Station starts inherits it |
 | `inline` | none | none | the value is the field `value`; a weakening: it sits in the configuration |
 
-A fourth, `registry`, keeps a value in the Registry, sealed separately to each Station named: `key`
-is the value's name, and a new value is sealed to the field `stations` (default the Station storing
-it). A Station makes it itself, so it needs a Registry and a sealing key and no bootstrap file can
-read from it. See [Logins kept in the Registry](#logins-kept-in-the-registry).
+A fourth, `registry`, keeps a value in the Registry, encrypted under a **scope key**: `key` is the
+value's name, and a new value goes under the field `scope` (`global`, `operation:<id>` or
+`compartment:<id>`; default `global`). The scope's key is made on the first write and wrapped once for
+each Station in the field `stations` (default the Station storing it); every value of the scope is
+encrypted under that one key (ChaCha20-Poly1305, bound to the value's name, scope, key ID and
+revision), so one write reaches every Station holding a wrap and a ciphertext moved to another name,
+scope or revision does not open. A Station is granted by wrapping the key for it, and revoked by
+dropping its wrap, replacing the key and encrypting the scope's values again for the Stations that
+remain; the revoked Station keeps only what it already opened, so the secret itself should be
+replaced at its source. A Station without a wrap is refused, and the last Station of a scope cannot
+be removed. A Station makes the provider itself, so it needs a Registry and a sealing key and no
+bootstrap file can read from it. A value an earlier build sealed separately to each Station is still
+read and replaced as it was. The Registry holds only ciphertext and wraps. See
+[Logins kept in the Registry](#logins-kept-in-the-registry) for the Station's sealing key.
 
 Others load from `[station.plugins]` like any provider, under the same checks. A provider may lease
 (a vault whose leases expire): the Station then asks for a lease of the lease's time and revokes it

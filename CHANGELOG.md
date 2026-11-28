@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - The exposure preset `strict-except-secrets` applies every restriction but `secrets`: an Operation whose exposed Runs still need tracker writes through leased secrets names it, with no hand-built `restrict` list. `strict` stays the default.
 
+- Fleet secrets use envelope encryption: the `registry` secret provider encrypts a value under a scope key (`global`, `operation:<id>` or `compartment:<id>`, field `scope`), and the key is wrapped once for each Station that may use it, so one write reaches every Station holding a wrap. The `Vault` gains `put_scope_key`, `grant_station`, `revoke_station` (drops the wrap, replaces the key and encrypts the scope's values again), `rotate_scope_key`, `write_value` and `read_value`. Values sealed separately to each Station before are still read.
+
 - `ai6ctl issue-proposals show ID --operation G` prints one issue proposal whole (each spec's tracker, title, labels and body, the exposure, findings and outcome) from the new `GET /v1/user/operations/{operation_id}/issue-proposals/{id}` (`mission.read`; another Operation's proposal answers 404), so an approver reads what they approve.
 
 - A handler compacts and clears a live session: `AgentHandler::session_commands` (a new method of the handler kind: every handler plugin is rebuilt, its floor hash moved) says which, and a
