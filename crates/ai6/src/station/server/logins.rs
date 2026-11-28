@@ -69,9 +69,20 @@ pub(crate) fn open_vault(
     let key = Arc::new(SealingKey::open_or_create(&dir.join(SEALING_KEY_FILE))?);
     registry.publish_sealing_key(&published(dir, station, &key))?;
     let marks = Arc::new(Marks::open(&dir.join(MARKS_FILE))?);
-    Ok(Arc::new(
-        Vault::new(registry.clone(), station, key).with_marks(marks),
-    ))
+    let vault = Vault::new(registry.clone(), station, key).with_marks(marks);
+    // Values an earlier build sealed to each Station separately move under the `global` scope
+    // key; a value this Station cannot open stays for one that can.
+    match vault.migrate_legacy(unix_seconds()) {
+        Ok(moved) if !moved.is_empty() => {
+            eprintln!(
+                "ai6: {} secret(s) moved under the global scope key",
+                moved.len()
+            );
+        }
+        Ok(_) => {}
+        Err(error) => eprintln!("ai6: sealed secrets were not moved under a scope key: {error}"),
+    }
+    Ok(Arc::new(vault))
 }
 
 #[cfg(feature = "station-tls")]
@@ -186,6 +197,31 @@ pub(super) fn hand_over(
         environment.insert("USERPROFILE".to_owned(), home);
     }
     Ok(())
+}
+
+fn unix_seconds() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |elapsed| elapsed.as_secs_f64())
+}
+
+/// Takes up the secret requests addressed to this Station: a person's `secret put`, `rotate`,
+/// `grant` or `revoke` through the gateway, which holds no key to do it itself. Blocks on the
+/// Registry.
+pub(super) fn serve_secret_requests(state: &DaemonState) {
+    let Some(vault) = state.station.credentials.accounts.logins.vault() else {
+        return;
+    };
+    match vault.serve_requests(unix_seconds()) {
+        Ok(answered) if !answered.is_empty() => {
+            eprintln!("ai6: answered {} secret request(s)", answered.len());
+            for id in answered {
+                audit_target(state, "secret.request", format!("request {id}"));
+            }
+        }
+        Ok(_) => {}
+        Err(error) => eprintln!("ai6: secret requests were not served: {error}"),
+    }
 }
 
 /// One look at every home this Station keeps: what a harness renewed goes back under the revision
@@ -425,6 +461,10 @@ pub(super) fn tell(state: &DaemonState, notice: &LoginNotice) {
 }
 
 fn audit(state: &DaemonState, action: &str, account: &AccountRef) {
+    audit_target(state, action, account.to_string());
+}
+
+fn audit_target(state: &DaemonState, action: &str, target: String) {
     let record = AuditRecord {
         id: format!(
             "{}-{}",
@@ -435,7 +475,7 @@ fn audit(state: &DaemonState, action: &str, account: &AccountRef) {
         action: action.to_owned(),
         operation: String::new(),
         resource: Some(format!("station:{}", state.station_id)),
-        target: account.to_string(),
+        target,
         at: state.clock.now() as f64,
     };
     if let Err(error) = state.intake.record_audit(&record) {

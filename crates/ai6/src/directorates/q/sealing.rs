@@ -16,9 +16,11 @@ use std::sync::Arc;
 
 mod envelope;
 mod marks;
+mod requests;
 
-pub use envelope::{OpenedValue, Scope, ScopeKeyInfo, ValueInfo};
+pub use envelope::{OpenedValue, Scope, ScopeKeyInfo, ValueInfo, list_scopes, list_values};
 pub use marks::{MARKS_FILE, Marks};
+pub use requests::{RequestStatus, SecretOutcome, SecretRequest, ask, status};
 
 use base64::Engine as _;
 use crypto_box::aead::OsRng;
@@ -505,15 +507,7 @@ impl Vault {
     }
 
     fn published_key(&self, recipient: &Recipient) -> Result<SealingPublicKey, VaultError> {
-        let station = &recipient.station;
-        let record = self
-            .registry
-            .sealing_key(station)?
-            .ok_or_else(|| VaultError::NoKey(station.clone()))?;
-        check_published(&record, recipient.fingerprint.as_deref())
-            .map_err(|()| VaultError::Unverified(station.clone()))?;
-        SealingPublicKey::parse(&record.public_key)
-            .ok_or_else(|| VaultError::NoKey(station.clone()))
+        published_key_of(self.registry.as_ref(), recipient)
     }
 
     fn write(
@@ -545,6 +539,20 @@ impl Vault {
             .registry
             .store_sealed(name, &copies, &self.station, expect, now)?)
     }
+}
+
+/// The sealing key `recipient` published, checked against its pin when it has one.
+fn published_key_of(
+    registry: &dyn RegistryBackend,
+    recipient: &Recipient,
+) -> Result<SealingPublicKey, VaultError> {
+    let station = &recipient.station;
+    let record = registry
+        .sealing_key(station)?
+        .ok_or_else(|| VaultError::NoKey(station.clone()))?;
+    check_published(&record, recipient.fingerprint.as_deref())
+        .map_err(|()| VaultError::Unverified(station.clone()))?;
+    SealingPublicKey::parse(&record.public_key).ok_or_else(|| VaultError::NoKey(station.clone()))
 }
 
 /// Whether a published key is what a seal may trust: signed by the identity `fingerprint` names
@@ -619,13 +627,6 @@ impl RegistrySecrets {
             );
             return vault.write_value(key, &held.scope, value, expect, now);
         }
-        match vault.open(key) {
-            Ok(current) => {
-                return vault.replace(key, value, expect.unwrap_or(current.revision), now);
-            }
-            Err(VaultError::NotFound) => {}
-            Err(error) => return Err(error),
-        }
         if expect.is_some() {
             return Err(VaultError::Conflict { held: None });
         }
@@ -674,24 +675,27 @@ fn bad_value(message: &str) -> ProviderError {
 impl SecretProvider for RegistrySecrets {
     fn read(&self, ask: &Value) -> Result<Value, ProviderError> {
         let ask = SecretAsk::from_value(ask).map_err(|error| bad_value(&error.to_string()))?;
-        let (value, revision) = match self.vault.read_value(&ask.key) {
-            Ok(opened) => (
-                Secret::new(opened.value.as_str().to_owned()),
-                opened.revision,
-            ),
-            // Nothing under a scope key: a value an earlier build sealed to each Station.
-            Err(VaultError::NotFound) => {
-                let opened = self
-                    .vault
-                    .open(&ask.key)
-                    .map_err(|error| provider_error(&error))?;
-                (
-                    Secret::new(opened.value.as_str().to_owned()),
-                    opened.revision,
-                )
-            }
-            Err(error) => return Err(provider_error(&error)),
+        let fields = RegistrySecretFields::from_value(&Value::from(
+            ask.fields
+                .clone_in(Alloc::wiping())
+                .map_err(|_| bad_value("the fields could not be read"))?,
+        ))
+        .map_err(|error| bad_value(&error.to_string()))?;
+        // A secret reads from the scope it names, `global` when it names none: a value another
+        // scope holds under the same name is not what was asked for. `any` takes whichever.
+        let expected = match fields.scope.as_deref() {
+            None => Some(Scope::global()),
+            Some("any") => None,
+            Some(text) => Some(Scope::parse(text).map_err(|error| provider_error(&error))?),
         };
+        let opened = self
+            .vault
+            .read_value_in(&ask.key, expected.as_ref())
+            .map_err(|error| provider_error(&error))?;
+        let (value, revision) = (
+            Secret::new(opened.value.as_str().to_owned()),
+            opened.revision,
+        );
         SecretRead {
             value,
             revision: Some(revision.to_string()),
@@ -917,7 +921,7 @@ mod tests {
     }
 
     #[test]
-    fn the_provider_stores_under_a_scope_key_and_still_reads_a_value_sealed_per_station() {
+    fn the_provider_stores_under_a_scope_key_and_reads_only_the_scope_it_is_told() {
         let dir = tempfile::tempdir().unwrap();
         let registry = registry(dir.path());
         let a = Arc::new(station(&registry, "a"));
@@ -931,8 +935,24 @@ mod tests {
         );
         keeper.store("forge", &fields, PLANTED, None).unwrap();
         assert_eq!(b.read_value("forge").unwrap().value.as_str(), PLANTED);
-        let read = keeper.read("forge", &SecretFields::default()).unwrap();
+        let scoped = |text: &str| {
+            SecretFields::new(
+                serde_json::json!({ "scope": text })
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            )
+        };
+        let read = keeper.read("forge", &scoped("operation:alpha")).unwrap();
         assert_eq!(read.value.expose(), PLANTED);
+        // A secret that names no scope means `global`: another scope's value is refused, unless
+        // the operator says `any`.
+        assert!(keeper.read("forge", &SecretFields::default()).is_err());
+        assert!(keeper.read("forge", &scoped("operation:other")).is_err());
+        assert_eq!(
+            keeper.read("forge", &scoped("any")).unwrap().value.expose(),
+            PLANTED
+        );
         // A rewrite stays in the scope it was made in, whatever the fields say now.
         let other = SecretFields::new(
             serde_json::json!({"scope": "global"})
@@ -949,21 +969,6 @@ mod tests {
             keeper.store("forge", &SecretFields::default(), "x", Some("1")),
             Err(SecretStoreError::Conflict)
         ));
-        // A value an earlier build sealed to each Station reads and replaces as it did.
-        a.seal_to("old", "legacy", &named(&["a"]), SealedExpect::Absent, NOW)
-            .unwrap();
-        assert_eq!(
-            keeper
-                .read("old", &SecretFields::default())
-                .unwrap()
-                .value
-                .expose(),
-            "legacy"
-        );
-        keeper
-            .store("old", &SecretFields::default(), "newer", None)
-            .unwrap();
-        assert_eq!(a.open("old").unwrap().value.as_str(), "newer");
         let bad = SecretFields::new(
             serde_json::json!({"scope": "team:x"})
                 .as_object()

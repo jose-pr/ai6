@@ -24,6 +24,7 @@ use ring::rand::{SecureRandom, SystemRandom};
 use zeroize::Zeroizing;
 
 use super::{Recipient, SealingPublicKey, Vault, VaultError, base64_text, from_base64};
+use crate::directorates::registry::backend::RegistryBackend;
 use crate::directorates::registry::sealed::{SealedCopy, SealedExpect, SealedRecord};
 
 const WRAP_TAG: &[u8] = b"ai6-scope-key-v1";
@@ -912,6 +913,21 @@ impl Vault {
     /// [`VaultError::Rollback`] for a record older than one accepted,
     /// [`VaultError::Unreadable`] when anything fails to open, the Registry's.
     pub fn read_value(&self, name: &str) -> Result<OpenedValue, VaultError> {
+        self.read_value_in(name, None)
+    }
+
+    /// [`read_value`](Self::read_value) of a value that must be in `expected`, when one is
+    /// named: a value another scope holds under the name is [`VaultError::WrongScope`], and
+    /// nothing of it is opened. A reader says which scope it means; the record does not.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`read_value`](Self::read_value), and [`VaultError::WrongScope`].
+    pub fn read_value_in(
+        &self,
+        name: &str,
+        expected: Option<&Scope>,
+    ) -> Result<OpenedValue, VaultError> {
         let label = value_name(name);
         let record = self
             .registry
@@ -923,6 +939,9 @@ impl Vault {
             return Err(VaultError::NotFound);
         }
         let stored = StoredValue::parse(&record)?;
+        if expected.is_some_and(|expected| *expected != stored.scope) {
+            return Err(VaultError::WrongScope);
+        }
         let keys = match self.load_key(&stored.scope) {
             Ok(keys) => keys,
             Err(VaultError::NoScopeKey(_)) => return Err(VaultError::Unreadable),
@@ -991,13 +1010,15 @@ impl Vault {
         Ok(infos)
     }
 
-    /// Removes the value `name`, leaving a tombstone so the name's revisions go on from here;
-    /// whether there was a value.
+    /// Removes the value `name` of scope `expected`, leaving a tombstone so the name's revisions
+    /// go on from here; whether there was a value. A value another scope holds is
+    /// [`VaultError::WrongScope`] and stays.
     ///
     /// # Errors
     ///
-    /// [`VaultError::Rollback`] for a record older than one accepted; the Registry's.
-    pub fn remove_value(&self, name: &str) -> Result<bool, VaultError> {
+    /// [`VaultError::WrongScope`], [`VaultError::Rollback`] for a record older than one
+    /// accepted; the Registry's.
+    pub fn remove_value_in(&self, name: &str, expected: &Scope) -> Result<bool, VaultError> {
         let label = value_name(name);
         let Some(record) = self.registry.sealed_value(&label)? else {
             return Ok(false);
@@ -1007,9 +1028,112 @@ impl Vault {
         if is_gone(&record) {
             return Ok(false);
         }
+        if StoredValue::parse(&record)?.scope != *expected {
+            return Err(VaultError::WrongScope);
+        }
         self.tombstone(name, record.revision, unix_now())?;
         Ok(true)
     }
+
+    /// Moves each value an earlier build sealed to each Station separately (a sealed record that
+    /// is no login and no record of this module's) under the `global` scope key, wrapped for the
+    /// Stations it was sealed to, and removes the old record. A value this Station cannot open
+    /// stays for a Station that can, as does one this Station cannot wrap the `global` key for.
+    /// The old record's name is the new value's. Safe to run again.
+    ///
+    /// # Errors
+    ///
+    /// The Registry's, or a Station's published key being unusable; nothing is removed until its
+    /// new value is stored.
+    pub fn migrate_legacy(&self, now: f64) -> Result<Vec<String>, VaultError> {
+        let mut moved = Vec::new();
+        for name in self.registry.sealed_revisions()?.into_keys() {
+            let reserved = ["login/", KEY_PREFIX, VALUE_PREFIX, "secret-"];
+            if reserved.iter().any(|prefix| name.starts_with(prefix)) {
+                continue;
+            }
+            let opened = match self.open(&name) {
+                Ok(opened) => opened,
+                Err(VaultError::NotNamed | VaultError::Unreadable | VaultError::NotFound) => {
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            let global = Scope::global();
+            match self.scope_key_info(&global)? {
+                None => {
+                    let stations: Vec<Recipient> = opened
+                        .stations
+                        .iter()
+                        .map(|station| Recipient::named(station.clone()))
+                        .collect();
+                    self.put_scope_key(&global, &stations, now)?;
+                }
+                // A Station outside the global scope cannot wrap its key: the value stays as it was.
+                Some(info) if !info.stations.contains(&self.station) => continue,
+                Some(info) => {
+                    for station in opened.stations.difference(&info.stations) {
+                        self.grant_station(&global, &Recipient::named(station.clone()), now)?;
+                    }
+                }
+            }
+            match self.write_value(&name, &global, &opened.value, SealedExpect::Absent, now) {
+                Ok(_) | Err(VaultError::Conflict { .. }) => {}
+                Err(error) => return Err(error),
+            }
+            self.registry.remove_sealed(&name)?;
+            moved.push(name);
+        }
+        Ok(moved)
+    }
+}
+
+/// The values `registry` holds, by name, with their scope and key. Opens none.
+///
+/// # Errors
+///
+/// The Registry's, or [`VaultError::Unreadable`].
+pub fn list_values(registry: &dyn RegistryBackend) -> Result<Vec<ValueInfo>, VaultError> {
+    let mut infos = Vec::new();
+    for stored_name in registry.sealed_revisions()?.into_keys() {
+        let Some(name) = stored_name.strip_prefix(VALUE_PREFIX) else {
+            continue;
+        };
+        let Some(record) = registry.sealed_value(&stored_name)? else {
+            continue;
+        };
+        if is_gone(&record) {
+            continue;
+        }
+        let stored = StoredValue::parse(&record)?;
+        infos.push(ValueInfo {
+            name: name.to_owned(),
+            scope: stored.scope,
+            key_id: stored.key_id,
+            revision: stored.revision,
+        });
+    }
+    Ok(infos)
+}
+
+/// The scope keys `registry` holds, with who they are wrapped for. Opens none.
+///
+/// # Errors
+///
+/// The Registry's, or [`VaultError::Unreadable`].
+pub fn list_scopes(registry: &dyn RegistryBackend) -> Result<Vec<ScopeKeyInfo>, VaultError> {
+    let mut infos = Vec::new();
+    for stored_name in registry.sealed_revisions()?.into_keys() {
+        let Some(text) = stored_name.strip_prefix(KEY_PREFIX) else {
+            continue;
+        };
+        let Some(record) = registry.sealed_value(&stored_name)? else {
+            continue;
+        };
+        let scope = Scope::parse(text).map_err(|_| VaultError::Unreadable)?;
+        infos.push(StoredKey::parse(&record)?.info(&scope));
+    }
+    Ok(infos)
 }
 
 /// Now, as Unix seconds.

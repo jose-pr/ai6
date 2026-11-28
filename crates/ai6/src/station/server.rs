@@ -2628,6 +2628,7 @@ fn check_in_round(state: &DaemonState) {
     }
     publish_station_check_in(state);
     accounts::tend(state);
+    logins::serve_secret_requests(state);
     recovery::checkpoint_due(state);
     ephemeral::sweep(state);
     agents::enforce_clearances(state);
