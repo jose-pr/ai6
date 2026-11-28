@@ -132,6 +132,7 @@ fn plan(
         SecretRequest::Put {
             name,
             scope,
+            operation,
             stations,
             pins,
             ..
@@ -144,6 +145,7 @@ fn plan(
                         .find(|held| &held.name == name)
                         .map(|held| held.scope.to_string())
                 })
+                .or_else(|| operation.as_ref().map(|id| format!("operation:{id}")))
                 .unwrap_or_else(|| "global".to_owned());
             Scope::parse(&scope).map_err(|error| error.to_string())?;
             let target = format!("put {scope} {name}");

@@ -11,9 +11,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::directorates::m::compartments::FieldPrincipal;
 use crate::directorates::m::mission::Mission;
 use crate::directorates::m::roster::Agent;
 use crate::directorates::medical::exposure::{ExposureGate, Restriction};
+use crate::directorates::q::sealing::{ReadGuard, Scope};
 use crate::directorates::q::secret_kind::{
     BUILT_IN, REGISTRY_PROVIDER, SecretFields, SecretKeeper,
 };
@@ -245,6 +247,7 @@ impl CredentialDesk {
             secrets_dir: self.secrets_dir.clone(),
             built: self.built.clone(),
             vault: self.accounts.logins.vault().cloned(),
+            guard: None,
         }
     }
 
@@ -255,8 +258,10 @@ impl CredentialDesk {
         plugins: &Arc<Plugins>,
         catalog: &Arc<LoadoutCatalog>,
         max_ttl: crate::bounds::TimeLimit,
+        guard: Option<ReadGuard>,
     ) -> SecretBroker {
-        let finder = self.finder(plugins.clone(), catalog.clone());
+        let mut finder = self.finder(plugins.clone(), catalog.clone());
+        finder.guard = guard;
         SecretBroker::new(catalog.clone(), move |name| {
             finder.keeper(name, &mut Vec::new())
         })
@@ -271,6 +276,8 @@ struct Finder {
     secrets_dir: Option<std::path::PathBuf>,
     built: Arc<Mutex<BTreeMap<String, Built>>>,
     vault: Option<Arc<crate::directorates::q::sealing::Vault>>,
+    /// Who the secrets are read for; without one the Registry yields its `global` values only.
+    guard: Option<ReadGuard>,
 }
 
 impl Finder {
@@ -284,9 +291,11 @@ impl Finder {
                 .vault
                 .clone()
                 .ok_or("this Station has no sealing key")?;
-            return Ok(Arc::new(SecretKeeper::new(Box::new(
-                crate::directorates::q::sealing::RegistrySecrets::new(vault),
-            ))?));
+            let mut provider = crate::directorates::q::sealing::RegistrySecrets::new(vault);
+            if let Some(guard) = &self.guard {
+                provider = provider.with_guard(guard.clone());
+            }
+            return Ok(Arc::new(SecretKeeper::new(Box::new(provider))?));
         }
         let instance = self.catalog.secret_providers().get(name);
         let (provider, settings) = match instance {
@@ -642,6 +651,7 @@ fn issue_for(
         &state.plugins,
         catalog,
         state.station.limits().secrets.max_lease_ttl,
+        Some(registry_guard(state, &agent.id, holder)),
     );
     // A pooled Agent's loadout may not set a provider credential variable.
     let reserved = super::accounts::credential_variables(state, catalog, holder.operation, agent);
@@ -684,6 +694,61 @@ fn issue_for(
     Ok(withheld)
 }
 
+/// What a Run may read of the values the Registry keeps: `global` ones, its own Operation's, and a
+/// compartment's only when the Run is read into that compartment now and its audit record is
+/// written first. Asked at each read, with nothing remembered.
+pub(super) fn registry_guard(state: &DaemonState, agent: &str, holder: Holder<'_>) -> ReadGuard {
+    let state = state.clone();
+    let agent = agent.to_owned();
+    let operation = holder.operation.map(str::to_owned);
+    let mission = holder.id.to_owned();
+    Arc::new(move |scope: &Scope| match scope.owner() {
+        None => Ok(()),
+        Some(("operation", id)) if operation.as_deref() == Some(id) => Ok(()),
+        Some(("operation", id)) => Err(format!("Operation {id:?}'s secrets are for its own Runs")),
+        Some(("compartment", id)) => {
+            let Some(operation) = operation.as_deref() else {
+                return Err("this read belongs to no Operation".to_owned());
+            };
+            let state = state.current();
+            let compiled = state
+                .config
+                .compartments()
+                .map_err(|_| "compartments are unavailable".to_owned())?;
+            let clearance = super::agents::effective(&state, Some(operation), &agent)
+                .map_err(|_| "compartments are unavailable".to_owned())?
+                .clearance;
+            let principal =
+                FieldPrincipal::new(&agent, operation, Some(mission.clone()), clearance);
+            if !compiled.field_read_in(id, &principal) {
+                return Err(format!("this Run is not read into compartment {id:?}"));
+            }
+            audit_secret_read(&state, (&agent, operation), id)
+                .map_err(|error| format!("the read could not be audited: {error}"))
+        }
+        Some(_) => Err("no reader is named for this scope".to_owned()),
+    })
+}
+
+/// Writes a compartment's secret read to the audit log before the value is opened.
+fn audit_secret_read(
+    state: &DaemonState,
+    (agent, operation): (&str, &str),
+    compartment: &str,
+) -> std::io::Result<()> {
+    state
+        .intake
+        .record_audit(&crate::directorates::registry::store::AuditRecord {
+            id: format!("compartment-{}", uuid::Uuid::new_v4().simple()),
+            actor: format!("agent:{agent}"),
+            action: "compartment.secret".to_owned(),
+            operation: operation.to_owned(),
+            resource: Some(format!("compartment:{compartment}")),
+            target: "secret".to_owned(),
+            at: state.clock.now() as f64,
+        })
+}
+
 /// The catalog and a broker over it, for a look at the models accounts and routes may use.
 pub(super) fn listing_broker(state: &DaemonState) -> Option<(&LoadoutCatalog, SecretBroker)> {
     let desk = &state.station.credentials;
@@ -694,6 +759,7 @@ pub(super) fn listing_broker(state: &DaemonState) -> Option<(&LoadoutCatalog, Se
             &state.plugins,
             catalog,
             state.station.limits().secrets.max_lease_ttl,
+            None,
         ),
     ))
 }

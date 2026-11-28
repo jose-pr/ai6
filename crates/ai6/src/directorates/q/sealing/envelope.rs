@@ -1006,6 +1006,21 @@ impl Vault {
         name: &str,
         expected: Option<&Scope>,
     ) -> Result<OpenedValue, VaultError> {
+        self.read_value_guarded(name, expected, &|_| Ok(()))
+    }
+
+    /// [`read_value_in`](Self::read_value_in) that asks `guard` about the scope the value is in
+    /// before it opens the scope key, so a reader that may not read that scope gets nothing of it.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`read_value_in`](Self::read_value_in), and what `guard` refuses with.
+    pub fn read_value_guarded(
+        &self,
+        name: &str,
+        expected: Option<&Scope>,
+        guard: &dyn Fn(&Scope) -> Result<(), VaultError>,
+    ) -> Result<OpenedValue, VaultError> {
         let label = value_name(name);
         let record = self
             .registry
@@ -1020,6 +1035,7 @@ impl Vault {
         if expected.is_some_and(|expected| *expected != stored.scope) {
             return Err(VaultError::WrongScope);
         }
+        guard(&stored.scope)?;
         let keys = match self.load_key(&stored.scope) {
             Ok(keys) => keys,
             Err(VaultError::NoScopeKey(_)) => return Err(VaultError::Unreadable),
@@ -1090,12 +1106,13 @@ impl Vault {
 
     /// Removes the value `name` of scope `expected`, leaving a tombstone so the name's revisions
     /// go on from here; whether there was a value. A value another scope holds is
-    /// [`VaultError::WrongScope`] and stays.
+    /// [`VaultError::WrongScope`] and stays, and a Station that holds no wrap of the scope's key
+    /// cannot remove what is encrypted under it.
     ///
     /// # Errors
     ///
-    /// [`VaultError::WrongScope`], [`VaultError::Rollback`] for a record older than one
-    /// accepted; the Registry's.
+    /// [`VaultError::WrongScope`], [`VaultError::NotNamed`], [`VaultError::Rollback`] for a record
+    /// older than one accepted; the Registry's.
     pub fn remove_value_in(&self, name: &str, expected: &Scope) -> Result<bool, VaultError> {
         let label = value_name(name);
         let Some(record) = self.registry.sealed_value(&label)? else {
@@ -1109,6 +1126,8 @@ impl Vault {
         if StoredValue::parse(&record)?.scope != *expected {
             return Err(VaultError::WrongScope);
         }
+        let keys = self.load_key(expected)?;
+        self.current_key(expected, &keys)?;
         self.tombstone(name, record.revision, unix_now())?;
         Ok(true)
     }

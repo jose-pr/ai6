@@ -35,6 +35,9 @@ pub(crate) enum SecretCommand {
         /// `global`, `operation:ID` or `compartment:ID`; the value's own when it exists, else global.
         #[arg(long)]
         scope: Option<String>,
+        /// The Operation a new value belongs to: with no --scope, its scope is `operation:ID`.
+        #[arg(long)]
+        operation: Option<String>,
         /// The Stations a new scope's key is wrapped for, comma separated.
         #[arg(long, value_delimiter = ',')]
         stations: Vec<String>,
@@ -189,6 +192,7 @@ pub(crate) async fn run(
         SecretCommand::Put {
             name,
             scope,
+            operation,
             stations,
             pins: pin_args,
             expect,
@@ -196,7 +200,7 @@ pub(crate) async fn run(
         } => (
             json!({
                 "verb": "put", "name": name, "scope": scope, "value": value_from_stdin()?,
-                "expect": expect, "stations": stations, "pins": pins(&pin_args)?,
+                "operation": operation, "expect": expect, "stations": stations, "pins": pins(&pin_args)?,
             }),
             wait,
         ),

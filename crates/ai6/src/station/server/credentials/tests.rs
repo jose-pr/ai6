@@ -166,7 +166,12 @@ fn a_provider_from_a_library_is_built_once_with_its_credential_and_leases() {
     let desk = desk.in_secrets_dir(dir.path());
     let plugins = plugins();
     assert_eq!(desk.check_providers(&plugins), Vec::<String>::new());
-    let broker = desk.broker(&plugins, &catalog, crate::bounds::TimeLimit::UNBOUNDED);
+    let broker = desk.broker(
+        &plugins,
+        &catalog,
+        crate::bounds::TimeLimit::UNBOUNDED,
+        None,
+    );
     let loadout = catalog.for_agent("007").unwrap();
     let lease = broker
         .lease_names(loadout, &["db".to_owned(), "api".to_owned()], request())
@@ -255,7 +260,12 @@ fn a_reserved_field_a_cycle_a_taken_name_and_an_unknown_field_are_refused() {
             .any(|line| line.contains("\"odd\"") && line.contains("`shelf`")),
         "{refused:?}"
     );
-    let broker = desk.broker(&plugins, &catalog, crate::bounds::TimeLimit::UNBOUNDED);
+    let broker = desk.broker(
+        &plugins,
+        &catalog,
+        crate::bounds::TimeLimit::UNBOUNDED,
+        None,
+    );
     assert_eq!(
         broker
             .lease_names(

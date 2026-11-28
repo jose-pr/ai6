@@ -210,6 +210,8 @@ pub enum VaultError {
     Rollback(String),
     /// A rotation of the scope's key is unfinished and this Station cannot finish it.
     Rotating(String),
+    /// The reader may not read the scope the value is in, with the words it was told.
+    Refused(String),
     /// A record or request carries no signature, and this Station accepts none unsigned.
     Unsigned(String),
     /// A record or request is signed, and the signature or the key behind it is not trusted.
@@ -253,6 +255,7 @@ impl fmt::Display for VaultError {
                 f,
                 "a rotation of scope {scope:?} is unfinished and this Station cannot finish it"
             ),
+            Self::Refused(why) => write!(f, "the value may not be read: {why}"),
             Self::Unsigned(label) => write!(
                 f,
                 "{label:?} is not signed, and this Station accepts nothing unsigned"
@@ -660,22 +663,47 @@ pub struct RegistrySecretFields {
     /// `compartment:<id>`. A value that exists stays in its scope.
     #[schema(title = "Scope of a new value")]
     pub scope: Option<String>,
+    /// The Operation a new value belongs to: with no `scope` named, its scope is that Operation's,
+    /// `operation:<id>`, and not `global`.
+    #[schema(title = "Operation a new value belongs to")]
+    pub operation: Option<String>,
     /// The certificate fingerprint each Station's sealing key must be signed by, by Station, for a
     /// scope key made now. It is kept in the key record and checked at every rotation.
     #[schema(title = "Fingerprints Stations' sealing keys must be signed by")]
     pub pins: Option<std::collections::BTreeMap<String, String>>,
 }
 
+/// Decides whether the reader a provider was built for may read a value in a scope; the words
+/// it refuses with go to the reader's error, so they name no value.
+pub type ReadGuard = Arc<dyn Fn(&Scope) -> Result<(), String> + Send + Sync>;
+
 /// `registry`: values sealed in the Registry to named Stations.
-#[derive(Debug)]
 pub struct RegistrySecrets {
     vault: Arc<Vault>,
+    guard: Option<ReadGuard>,
+}
+
+impl fmt::Debug for RegistrySecrets {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RegistrySecrets")
+            .field("vault", &self.vault)
+            .field("guarded", &self.guard.is_some())
+            .finish()
+    }
 }
 
 impl RegistrySecrets {
-    /// The provider over `vault`.
+    /// The provider over `vault`, which reads `global` values and no others until it is given a
+    /// guard.
     pub fn new(vault: Arc<Vault>) -> Self {
-        Self { vault }
+        Self { vault, guard: None }
+    }
+
+    /// Asks `guard` before a value is opened, in whatever scope it is.
+    #[must_use]
+    pub fn with_guard(mut self, guard: ReadGuard) -> Self {
+        self.guard = Some(guard);
+        self
     }
 
     /// Writes `value` as `key`. A value under a scope key stays there; one an earlier build
@@ -700,9 +728,10 @@ impl RegistrySecrets {
         if expect.is_some() {
             return Err(VaultError::Conflict { held: None });
         }
-        let scope = match &fields.scope {
-            Some(text) => Scope::parse(text)?,
-            None => Scope::global(),
+        let scope = match (&fields.scope, &fields.operation) {
+            (Some(text), _) => Scope::parse(text)?,
+            (None, Some(operation)) => Scope::operation(operation)?,
+            (None, None) => Scope::global(),
         };
         if vault.scope_key_info(&scope)?.is_none() {
             let stations: Vec<Recipient> = fields
@@ -758,9 +787,16 @@ impl SecretProvider for RegistrySecrets {
             Some("any") => None,
             Some(text) => Some(Scope::parse(text).map_err(|error| provider_error(&error))?),
         };
+        let guard = |scope: &Scope| match &self.guard {
+            Some(guard) => guard(scope).map_err(VaultError::Refused),
+            None if *scope == Scope::global() => Ok(()),
+            None => Err(VaultError::Refused(format!(
+                "no reader is named for scope {scope}"
+            ))),
+        };
         let opened = self
             .vault
-            .read_value_in(&ask.key, expected.as_ref())
+            .read_value_guarded(&ask.key, expected.as_ref(), &guard)
             .map_err(|error| provider_error(&error))?;
         let (value, revision) = (
             Secret::new(opened.value.as_str().to_owned()),
@@ -991,12 +1027,85 @@ mod tests {
     }
 
     #[test]
+    fn a_value_is_opened_only_for_a_reader_its_scope_names_and_a_new_one_defaults_to_its_operation()
+    {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = registry(dir.path());
+        let a = Arc::new(station(&registry, "a"));
+        let writer = SecretKeeper::new(Box::new(RegistrySecrets::new(a.clone()))).unwrap();
+        let fields = |text: serde_json::Value| SecretFields::new(text.as_object().unwrap().clone());
+        // No scope named, an Operation named: the value is the Operation's, not global.
+        writer
+            .store(
+                "forge",
+                &fields(serde_json::json!({"operation": "alpha"})),
+                PLANTED,
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            a.read_value("forge").unwrap().scope.as_str(),
+            "operation:alpha"
+        );
+        writer
+            .store("open", &SecretFields::default(), "for everyone", None)
+            .unwrap();
+        assert_eq!(a.read_value("open").unwrap().scope, Scope::global());
+        let asking = fields(serde_json::json!({"scope": "operation:alpha"}));
+        // With no guard only global values open, even when the secret names the scope.
+        assert!(writer.read("forge", &asking).is_err());
+        assert_eq!(
+            writer
+                .read("open", &SecretFields::default())
+                .unwrap()
+                .value
+                .expose(),
+            "for everyone"
+        );
+        // A guard is asked about the scope the value is really in, and says no or yes.
+        let asked = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = asked.clone();
+        let reader_of = |allowed: &'static str| {
+            let log = log.clone();
+            SecretKeeper::new(Box::new(RegistrySecrets::new(a.clone()).with_guard(
+                Arc::new(move |scope: &Scope| {
+                    log.lock().unwrap().push(scope.to_string());
+                    if scope.as_str() == allowed {
+                        Ok(())
+                    } else {
+                        Err("not for this Run".to_owned())
+                    }
+                }),
+            )))
+            .unwrap()
+        };
+        // `any` takes whichever scope the value is in, so only the guard stands in the way.
+        let any = fields(serde_json::json!({"scope": "any"}));
+        assert!(reader_of("operation:other").read("forge", &any).is_err());
+        assert_eq!(
+            reader_of("operation:alpha")
+                .read("forge", &any)
+                .unwrap()
+                .value
+                .expose(),
+            PLANTED
+        );
+        assert_eq!(
+            *asked.lock().unwrap(),
+            ["operation:alpha".to_owned(), "operation:alpha".to_owned()]
+        );
+    }
+
+    #[test]
     fn the_provider_stores_under_a_scope_key_and_reads_only_the_scope_it_is_told() {
         let dir = tempfile::tempdir().unwrap();
         let registry = registry(dir.path());
         let a = Arc::new(station(&registry, "a"));
         let b = station(&registry, "b");
-        let keeper = SecretKeeper::new(Box::new(RegistrySecrets::new(a.clone()))).unwrap();
+        let keeper = SecretKeeper::new(Box::new(
+            RegistrySecrets::new(a.clone()).with_guard(Arc::new(|_| Ok(()))),
+        ))
+        .unwrap();
         let fields = SecretFields::new(
             serde_json::json!({"stations": ["a", "b"], "scope": "operation:alpha"})
                 .as_object()

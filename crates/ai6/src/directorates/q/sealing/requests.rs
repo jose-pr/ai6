@@ -46,6 +46,10 @@ pub enum SecretRequest {
         value: String,
         /// The revision it replaces; any when none.
         expect: Option<u64>,
+        /// The Operation a new value belongs to: with no `scope` and no value of the name, its
+        /// scope is `operation:<id>`, and not `global`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        operation: Option<String>,
         /// The Stations a new scope key is wrapped for.
         #[serde(default)]
         stations: Vec<String>,
@@ -379,14 +383,15 @@ impl Vault {
                 scope,
                 value,
                 expect,
+                operation,
                 stations,
                 pins,
             } => {
-                let scope = match scope {
-                    Some(text) => Scope::parse(text)?,
-                    None => self
-                        .value_info(name)?
-                        .map_or_else(Scope::global, |held| held.scope),
+                let scope = match (scope, self.value_info(name)?, operation) {
+                    (Some(text), ..) => Scope::parse(text)?,
+                    (None, Some(held), _) => held.scope,
+                    (None, None, Some(operation)) => Scope::operation(operation)?,
+                    (None, None, None) => Scope::global(),
                 };
                 let info = match self.scope_key_info(&scope)? {
                     Some(info) => info,

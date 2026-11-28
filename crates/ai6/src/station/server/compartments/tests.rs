@@ -945,3 +945,59 @@ mod over_mcp {
             .unwrap_or_else(|error| panic!("finalize failed: {:?}", error.1.0.error));
     }
 }
+
+fn secret_guard(state: &DaemonState, agent: &str) -> crate::directorates::q::sealing::ReadGuard {
+    super::super::credentials::registry_guard(
+        state,
+        agent,
+        super::super::accounts::Holder {
+            id: "G-1",
+            operation: Some("G"),
+        },
+    )
+}
+
+#[test]
+fn a_run_reads_a_global_value_and_its_own_operation_s_and_no_other_operation_s() {
+    use crate::directorates::q::sealing::Scope;
+    let root = tempfile::tempdir().unwrap();
+    let state = station(root.path());
+    let guard = secret_guard(&state, "007");
+    assert!(guard(&Scope::global()).is_ok());
+    assert!(guard(&Scope::operation("G").unwrap()).is_ok());
+    assert!(guard(&Scope::operation("B").unwrap()).is_err());
+    assert!(audits(&state).is_empty());
+}
+
+#[test]
+fn a_compartment_s_value_opens_for_a_run_read_in_now_and_the_crossing_is_written_first() {
+    use crate::directorates::q::sealing::Scope;
+    let root = tempfile::tempdir().unwrap();
+    let state = station(root.path());
+    let kestrel = Scope::compartment("KESTREL").unwrap();
+    // No compartment yet: nobody is read in.
+    assert!(secret_guard(&state, "007")(&kestrel).is_err());
+    grant(
+        root.path(),
+        "KESTREL",
+        &["mission.read"],
+        "operation = \"B\"",
+        "agent:007",
+    );
+    assert!(secret_guard(&state, "007")(&kestrel).is_ok());
+    let records = audits(&state);
+    assert_eq!(records.len(), 1);
+    assert_eq!(
+        (records[0].actor.as_str(), records[0].action.as_str()),
+        ("agent:007", "compartment.secret")
+    );
+    assert_eq!(records[0].resource.as_deref(), Some("compartment:KESTREL"));
+    // Another Agent of the Operation is not read in, and nothing is written for its refusal.
+    assert!(secret_guard(&state, "licensed")(&kestrel).is_err());
+    assert_eq!(audits(&state).len(), 1);
+    // Read out, it holds from the next read; with the log broken, the read is refused.
+    break_the_audit_log(root.path());
+    assert!(secret_guard(&state, "007")(&kestrel).is_err());
+    read_out(root.path());
+    assert!(secret_guard(&state, "007")(&kestrel).is_err());
+}

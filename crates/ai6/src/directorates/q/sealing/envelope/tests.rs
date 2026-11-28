@@ -929,6 +929,7 @@ fn put(name: &str, scope: &str, value: &str, stations: &[&str]) -> SecretRequest
         scope: Some(scope.to_owned()),
         value: value.to_owned(),
         expect: None,
+        operation: None,
         stations: stations
             .iter()
             .map(|station| (*station).to_owned())
@@ -1136,6 +1137,7 @@ fn a_request_is_answered_and_a_value_moves_off_its_per_station_seal_on_every_bac
             scope: Some("operation:alpha".to_owned()),
             value: PLANTED.to_owned(),
             expect: None,
+            operation: None,
             stations: Vec::new(),
             pins: BTreeMap::new(),
         },
@@ -1169,4 +1171,53 @@ fn a_request_is_answered_and_a_value_moves_off_its_per_station_seal_on_every_bac
     .unwrap();
     assert_eq!(a.migrate_legacy(NOW).unwrap(), ["legacy"]);
     assert_eq!(b.read_value("legacy").unwrap().value.as_str(), "old");
+}
+
+#[test]
+fn a_station_outside_the_scope_cannot_remove_a_value_of_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_registry, a, _b, c) = fleet(dir.path());
+    a.write_value("forge", &op(), PLANTED, SealedExpect::Absent, NOW)
+        .unwrap();
+    // c holds no wrap of the scope key: it cannot clear the name and write its own under it.
+    assert!(matches!(
+        c.remove_value_in("forge", &op()),
+        Err(VaultError::NotNamed)
+    ));
+    assert_eq!(a.read_value("forge").unwrap().value.as_str(), PLANTED);
+    assert!(a.remove_value_in("forge", &op()).unwrap());
+}
+
+#[test]
+fn a_put_that_names_an_operation_and_no_scope_lands_in_the_operation_s_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    let registry = registry(dir.path());
+    let a = station(&registry, "a");
+    let request = |id: &str, name: &str, scope: Option<&str>, operation: Option<&str>| {
+        ask(
+            registry.as_ref(),
+            id,
+            &SecretRequest::Put {
+                name: name.to_owned(),
+                scope: scope.map(str::to_owned),
+                value: PLANTED.to_owned(),
+                expect: None,
+                operation: operation.map(str::to_owned),
+                stations: Vec::new(),
+                pins: BTreeMap::new(),
+            },
+            &named(&["a"]),
+            None,
+            NOW,
+        )
+        .unwrap();
+    };
+    request("r1", "from-op", None, Some("alpha"));
+    request("r2", "named", Some("global"), Some("alpha"));
+    request("r3", "neither", None, None);
+    a.serve_requests(NOW).unwrap();
+    let scope_of = |name: &str| a.value_info(name).unwrap().unwrap().scope;
+    assert_eq!(scope_of("from-op"), op());
+    assert_eq!(scope_of("named"), Scope::global());
+    assert_eq!(scope_of("neither"), Scope::global());
 }
