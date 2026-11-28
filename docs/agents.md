@@ -876,8 +876,23 @@ dropping its wrap, replacing the key and encrypting the scope's values again for
 remain; the revoked Station keeps only what it already opened, so the secret itself should be
 replaced at its source. A Station without a wrap is refused, and the last Station of a scope cannot
 be removed. A Station makes the provider itself, so it needs a Registry and a sealing key and no
-bootstrap file can read from it. A value an earlier build sealed separately to each Station is still
-read and replaced as it was. The Registry holds only ciphertext and wraps.
+bootstrap file can read from it. A secret reads from the scope it names, `global` when its `scope`
+names none, and a value another scope holds under that name is refused (`scope = "any"` takes
+whichever, which is the weakening it says). A Station moves a value an earlier build sealed
+separately to each Station under the `global` scope key at start, wrapped for the Stations it was
+sealed to; one it cannot open or wrap stays for another Station. The Registry holds only ciphertext
+and wraps.
+
+**Writing through the gateway.** The gateway holds no sealing key, so it cannot encrypt. `ai6ctl
+secret put NAME --scope S --stations a,b` (the value on standard input, never an argument), `rotate NAME`,
+`rotate-key SCOPE`, `grant SCOPE STATION`, `revoke SCOPE STATION` and `remove NAME --scope S` each send a
+request (`POST /v1/user/secrets/requests`, `config.manage` on `config:secrets`) that the gateway seals to
+the Stations holding the scope's key and leaves in the Registry; the first to take it does it with its own key
+and answers (`GET /v1/user/secrets/requests/ID`; `ai6ctl` waits `--wait` seconds, 30 by default).
+`ai6ctl secret list` shows names, scopes, revisions, key IDs and Stations, never a value. When no listed
+Station has published a sealing key the request is refused, naming that. `revoke` says what the Station keeps
+and that its Registry credentials must be revoked too until scope key records are signed. Requests are
+not authenticated beyond the Registry's own access, as the scope key records are not.
 
 Every Station writes the Registry, so its records are not themselves authenticated, and a Station keeps
 its own check: `sealing.marks`, beside its sealing key, holds the newest revision it accepted of each
