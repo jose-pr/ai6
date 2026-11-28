@@ -312,6 +312,13 @@ park = ["merge PR 7"]                    # KIND PATTERN: always waits for a pers
 | `deny` | none | Steps refused outright, each `KIND PATTERN` (a glob on the target; a pushed or released ref is matched by its full name). No request is filed for one |
 | `park` | none | Steps that always wait for a person, whatever the clearance, `unattended` list or class authorisation says |
 
+A request is refused when it is filed if its target names nothing a person can decide on, so no
+one signs blind: a `merge` target is `PR N`, `PR OWNER/REPO#N` or the URL of a pull or merge
+request; a `release`, `push` or `delete` target is a ref or tag name with no whitespace (not just
+`tag`); an `issue-close`, `issue-assign` or `issue-comment` target is `TRACKER:ITEM`. The check is
+of the shape only: whether the pull request exists is not asked of the tracker. `[approvals]
+validate_targets = false` on the Station lifts it, and a Station then logs the weakening.
+
 A signer's `--note` (and a rejection's `--reason`) is bounded twice. The gateway allows up to
 `[unex.text] green_ink_note_chars` characters (1,024 by default; raise or lift it there), and the
 Registry stores at most `[registry.limits.approvals] note_bytes` bytes (1 KiB by default), so a note of many

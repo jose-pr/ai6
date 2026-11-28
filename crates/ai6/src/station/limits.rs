@@ -775,6 +775,13 @@ pub struct ApprovalLimits {
     #[schema(title = "Steps checked at once")]
     #[map(default = ApprovalLimits::default().checked_steps)]
     pub checked_steps: Limit,
+    /// Whether a step's target must name what a person can decide on (a pull request as `PR N`,
+    /// a tag or ref name, an issue as `TRACKER:ITEM`), so a request that echoes garbage is
+    /// refused when it is filed rather than signed blind. Off, any target without control
+    /// characters is filed. A weakening.
+    #[schema(title = "Refuse step targets that name no decidable object")]
+    #[map(default = ApprovalLimits::default().validate_targets)]
+    pub validate_targets: bool,
 }
 
 impl Default for ApprovalLimits {
@@ -784,7 +791,23 @@ impl Default for ApprovalLimits {
             target_bytes: Limit::at(256),
             classify_nesting: 4,
             checked_steps: Limit::at(64),
+            validate_targets: true,
         }
+    }
+}
+
+impl ApprovalLimits {
+    /// One line per setting looser than its default.
+    pub fn weakenings(&self) -> Vec<String> {
+        let mut lines = Vec::new();
+        if !self.validate_targets {
+            lines.push(
+                "station.approvals.validate_targets = false: a green ink request is filed for \
+                 any target, even one that names no pull request, ref or issue"
+                    .to_owned(),
+            );
+        }
+        lines
     }
 }
 

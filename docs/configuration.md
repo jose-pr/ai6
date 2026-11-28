@@ -1410,6 +1410,7 @@ provider applied before it was a key; the provider's API header lists them with 
 | `target_bytes` | 256 | **Longest green ink step target.** Bytes of the target of a step an Agent asks about. |
 | `classify_nesting` | 4 | **Nesting followed when classifying a command.** How deep nested shells (`sh -c "sh -c ..."`) and git aliases are followed when a command is read; the harness gate gets it in `AI6_GREEN_INK_NESTING`. |
 | `checked_steps` | 64 | **Steps checked at once.** Steps one `check_approval` call may ask about. |
+| `validate_targets` | `true` | **Refuse step targets that name no decidable object.** Whether a step's target must name what a person can decide on (a pull request as `PR N`, a tag or ref name, an issue as `TRACKER:ITEM`), so a request that echoes garbage is refused when it is filed rather than signed blind. Off, any target without control characters is filed. A weakening. |
 <!-- schema:record.station.approvals:end -->
 
 `[harness]`: a working directory's harness configuration under `harness.project_settings =

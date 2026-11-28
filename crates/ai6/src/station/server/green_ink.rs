@@ -126,11 +126,7 @@ impl Desk {
             .map_err(|_| "the Agent is not configured for this Operation".to_owned())?
             .clearance;
         let scope = ActionScope::try_new(&asked.kind, &asked.target)
-            .and_then(|scope| {
-                scope
-                    .check_size(&state.station.limits().approvals)
-                    .map(|()| scope)
-            })
+            .and_then(|scope| checked_scope(scope, &state.station.limits().approvals))
             .map_err(|e| e.to_string())?;
         let policy = &operation.green_ink;
         let parked = match policy.rule(&scope) {
@@ -402,11 +398,7 @@ impl Desk {
         let mut answers = Vec::new();
         for (kind, target) in checked.steps {
             let scope = ActionScope::try_new(&kind, &target)
-                .and_then(|scope| {
-                    scope
-                        .check_size(&state.station.limits().approvals)
-                        .map(|()| scope)
-                })
+                .and_then(|scope| checked_scope(scope, &state.station.limits().approvals))
                 .map_err(|e| e.to_string())?;
             let rule = policy.rule(&scope);
             let (mut status, mut request_id, mut message) =
@@ -1114,6 +1106,19 @@ fn record_event(state: &DaemonState, request: &ApprovalRequest, action: &str, ac
     if let Err(error) = state.intake.record_event(&event) {
         eprintln!("ai6: green ink timeline event was not recorded: {error}");
     }
+}
+
+/// `scope` when it is within the Station's bounds and, unless the operator turned that off,
+/// names something a person can decide on.
+fn checked_scope(
+    scope: ActionScope,
+    limits: &crate::station::limits::ApprovalLimits,
+) -> std::io::Result<ActionScope> {
+    scope.check_size(limits)?;
+    if limits.validate_targets {
+        scope.check_target()?;
+    }
+    Ok(scope)
 }
 
 /// Lists, for the operator, the green ink settings each Operation loosens.
@@ -2245,6 +2250,53 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn a_malformed_merge_or_release_target_is_refused_at_filing_unless_the_operator_weakens_it() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut state, mission_id) = station(root.path(), "targets");
+        let desk = Desk::new(state.clone());
+        let pending = |state: &DaemonState| {
+            state
+                .intake
+                .pending_approvals("G", now(state))
+                .unwrap()
+                .len()
+        };
+        for (kind, target) in [("merge", "PR banana"), ("release", "tag ")] {
+            let refused = desk
+                .request(asked(&mission_id, "007", kind, target))
+                .unwrap_err();
+            assert!(refused.contains(kind), "{refused}");
+            let checked = desk
+                .check(Checked {
+                    operation: "G".to_owned(),
+                    mission: mission_id.clone(),
+                    run: Some("provider-id-direct".to_owned()),
+                    exposed: false,
+                    agent: "007".to_owned(),
+                    steps: vec![(kind.to_owned(), target.to_owned())],
+                })
+                .unwrap_err();
+            assert!(checked.contains(kind), "{checked}");
+        }
+        assert_eq!(pending(&state), 0, "nothing was filed");
+        let filed = desk
+            .request(asked(&mission_id, "007", "merge", "PR 12"))
+            .unwrap();
+        assert_eq!(filed.status, "pending");
+
+        // The operator may weaken it: the same garbage is then filed.
+        let mut limits = state.station.limits().clone();
+        limits.approvals.validate_targets = false;
+        assert_eq!(limits.approvals.weakenings().len(), 1);
+        state.station = state.station.clone().with_limits(limits);
+        let loose = Desk::new(state.clone())
+            .request(asked(&mission_id, "007", "merge", "PR banana"))
+            .unwrap();
+        assert_eq!(loose.status, "pending");
+        assert_eq!(pending(&state), 2);
     }
 
     #[test]

@@ -1048,6 +1048,9 @@ where
     }
     #[cfg(feature = "cables-mcp")]
     green_ink::log_weakenings(&roster);
+    for weakened in config.station.limits.approvals.weakenings() {
+        eprintln!("ai6: {weakened}");
+    }
     harness::log_weakenings(&roster);
     agents::log_handler_weakenings(&plugins, &roster);
     for weakened in snapshot_compartments

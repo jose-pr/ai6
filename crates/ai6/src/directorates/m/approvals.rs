@@ -142,6 +142,82 @@ impl ActionScope {
         Ok(())
     }
 
+    /// Checks that the target names something a person can decide on, from its shape alone (no
+    /// tracker or remote is asked): `merge` a pull or merge request (`PR N`, `PR OWNER/REPO#N`, or
+    /// the URL of one); `release`, `push` and `delete` a ref or tag name with no whitespace in it,
+    /// not just the word `tag`; `issue-close`, `issue-assign` and `issue-comment` an issue as
+    /// `TRACKER:ITEM`. Other kinds, including `clearance`, [`SAFE_HOUSE_DELETE`] and any kind an
+    /// Operation adds, are not looked at.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` naming the kind and the shapes it accepts.
+    pub fn check_target(&self) -> io::Result<()> {
+        let refused = |shapes: &str| {
+            Err(invalid(&format!(
+                "a {} step names {shapes}, and {:?} is not one",
+                self.kind, self.target
+            )))
+        };
+        let target = self.target.trim();
+        match self.kind.as_str() {
+            "merge" => {
+                let number =
+                    |text: &str| !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit());
+                let is_url = target.starts_with("https://") || target.starts_with("http://");
+                let shaped = if is_url {
+                    let mut tail = target.trim_end_matches('/').rsplit('/');
+                    let (id, word) = (tail.next().unwrap_or_default(), tail.next());
+                    number(id) && matches!(word, Some("pull" | "merge_requests"))
+                } else {
+                    let rest = target
+                        .strip_prefix("PR ")
+                        .or_else(|| target.strip_prefix("pr "))
+                        .map(str::trim);
+                    rest.is_some_and(|rest| match rest.rsplit_once('#') {
+                        Some((repository, id)) => {
+                            number(id) && !repository.chars().any(char::is_whitespace)
+                        }
+                        None => number(rest),
+                    })
+                };
+                if !shaped {
+                    return refused(
+                        "a pull or merge request as `PR N`, `PR OWNER/REPO#N` or its URL",
+                    );
+                }
+            }
+            "release" | "push" | "delete" => {
+                let named = target
+                    .rsplit_once(':')
+                    .map_or(target, |(_, named)| named)
+                    .trim();
+                let named = if self.kind == "release" {
+                    named
+                        .strip_prefix("tag ")
+                        .or_else(|| named.strip_prefix("release "))
+                        .unwrap_or(named)
+                        .trim()
+                } else {
+                    named
+                };
+                let bare_word = self.kind == "release" && matches!(named, "tag" | "release");
+                if named.is_empty() || bare_word || named.chars().any(char::is_whitespace) {
+                    return refused("a ref or tag name, with no whitespace in it");
+                }
+            }
+            ISSUE_CLOSE | ISSUE_ASSIGN | ISSUE_COMMENT
+                if !target.split_once(':').is_some_and(|(tracker, item)| {
+                    !tracker.is_empty() && !item.trim().is_empty()
+                }) =>
+            {
+                return refused("an issue as `TRACKER:ITEM`");
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     /// The ref a `push` target names: the part after `REMOTE:`, with a bare branch name
     /// expanded to `refs/heads/NAME`.
     pub fn pushed_ref(&self) -> String {
@@ -633,6 +709,56 @@ mod tests {
 
     fn scope(kind: &str, target: &str) -> ActionScope {
         ActionScope::try_new(kind, target).unwrap()
+    }
+
+    #[test]
+    fn a_target_that_names_no_decidable_object_is_refused_per_kind() {
+        let accepted = [
+            ("merge", "PR 42"),
+            ("merge", "PR other/repo#42"),
+            ("merge", "PR #7"),
+            ("merge", "https://github.com/o/r/pull/9"),
+            ("merge", "https://gitlab.example/g/p/-/merge_requests/3"),
+            ("release", "tag v1.2.0"),
+            ("release", "origin:refs/tags/v1.2.0"),
+            ("release", "v1.2.0"),
+            ("push", "origin:refs/heads/main"),
+            ("push", "origin:refs/heads/*"),
+            ("push", "main"),
+            ("delete", "origin:refs/heads/old"),
+            ("issue-close", "gh:o/r#4"),
+            ("issue-comment", "jira:OPS-12"),
+            ("clearance", "anything at all"),
+            (SAFE_HOUSE_DELETE, "a safe house"),
+            ("deploy", "production now"),
+        ];
+        for (kind, target) in accepted {
+            scope(kind, target)
+                .check_target()
+                .unwrap_or_else(|error| panic!("{kind} {target:?}: {error}"));
+        }
+        let refused = [
+            ("merge", "PR banana"),
+            ("merge", "PR"),
+            ("merge", "42"),
+            ("merge", "PR 4 2"),
+            ("merge", "https://github.com/o/r/issues/9"),
+            ("release", "tag "),
+            ("release", "tag v1 v2"),
+            ("release", "release"),
+            ("push", "origin:two words"),
+            ("delete", "origin: "),
+            ("issue-close", "no-colon"),
+            ("issue-assign", ":item"),
+            ("issue-comment", "gh: "),
+        ];
+        for (kind, target) in refused {
+            let error = scope(kind, target)
+                .check_target()
+                .expect_err(&format!("{kind} {target:?} names no decidable object"));
+            assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+            assert!(error.to_string().contains(kind), "{error}");
+        }
     }
 
     #[test]

@@ -10144,6 +10144,12 @@
               "title": "Steps checked at once",
               "description": "Steps one `check_approval` call may ask about.",
               "default": 64
+            },
+            "validate_targets": {
+              "type": "boolean",
+              "title": "Refuse step targets that name no decidable object",
+              "description": "Whether a step's target must name what a person can decide on (a pull request as `PR N`, a tag or ref name, an issue as `TRACKER:ITEM`), so a request that echoes garbage is refused when it is filed rather than signed blind. Off, any target without control characters is filed. A weakening.",
+              "default": true
             }
           },
           "additionalProperties": false,
@@ -10153,7 +10159,8 @@
             "kind_bytes": 32,
             "target_bytes": 256,
             "classify_nesting": 4,
-            "checked_steps": 64
+            "checked_steps": 64,
+            "validate_targets": true
           }
         },
         "harness": {
