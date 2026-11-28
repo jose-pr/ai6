@@ -897,6 +897,13 @@ sets how many seconds a request stays valid, 3600 by default). A Station refuses
 expired, altered after it was signed or signed by another key, and answers why; a gateway without a key leaves
 them unsigned, which only a Station set to accept that acts on.
 
+Outer Office does the same on the Roster page, under the Secrets kind: a "Secret values" section lists
+names, scopes and revisions, and a person with `config.manage` on `config:secrets` writes a value
+(`put`, `rotate`), grants or revokes a Station, or rotates a scope key. The value goes in a masked box that
+is emptied when the request is sent, is never shown back and is kept nowhere; the page then reads the
+request and shows what was done, or why it failed. A new secret's scope defaults to the chosen Operation's
+(`operation:ID`), a value's existing scope when the name exists, else `global`, and can be typed over.
+
 Every Station writes the Registry, so its records are not themselves authenticated, and a Station keeps
 its own check: `sealing.marks`, beside its sealing key, holds the newest revision it accepted of each
 scope key record and each value, and the key IDs a scope has retired. A record older than that, or a key
