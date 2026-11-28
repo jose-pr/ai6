@@ -1471,7 +1471,10 @@ fn a_run_with_no_overlay_has_one_workspace_beside_its_own() {
     );
 }
 
-fn command(run: &Object<dyn AgentSession>, command: ai6::SessionCommand) -> Result<(), ProviderError> {
+fn command(
+    run: &Object<dyn AgentSession>,
+    command: ai6::SessionCommand,
+) -> Result<(), ProviderError> {
     run.send_message(AgentMessage {
         text: command.encode(),
     })
@@ -1551,8 +1554,18 @@ fn a_clear_runs_agy_again_on_a_new_conversation_of_the_same_run() {
     assert_eq!(fake.kills(), 1, "the old agy ended");
     let second = fake.launch();
     assert!(!second.has(&format!("--conversation={CONV}")));
-    assert!(!second.spec.argv.iter().any(|a| a.starts_with("--conversation")));
-    assert_eq!(first.agent.is_some(), second.agent.is_some(), "its system prompt stays");
+    assert!(
+        !second
+            .spec
+            .argv
+            .iter()
+            .any(|a| a.starts_with("--conversation"))
+    );
+    assert_eq!(
+        first.agent.is_some(),
+        second.agent.is_some(),
+        "its system prompt stays"
+    );
 }
 
 /// A resumed conversation has no system prompt to begin another with.

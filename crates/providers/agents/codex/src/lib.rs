@@ -4080,7 +4080,10 @@ mod tests {
             ],
             5,
         );
-        assert_eq!(run.session_id().unwrap().as_deref(), Some("codex-thread-42"));
+        assert_eq!(
+            run.session_id().unwrap().as_deref(),
+            Some("codex-thread-42")
+        );
         run.send_message(AgentMessage {
             text: SessionCommand::Clear.encode(),
         })
@@ -4090,7 +4093,10 @@ mod tests {
         assert_eq!(kinds, [ai6::CLEARED_EVENT, "completed"], "{events:?}");
         let change = SessionChange::of(&events[0]).unwrap();
         assert_eq!(change.session_id.as_deref(), Some("codex-thread-43"));
-        assert_eq!(run.session_id().unwrap().as_deref(), Some("codex-thread-43"));
+        assert_eq!(
+            run.session_id().unwrap().as_deref(),
+            Some("codex-thread-43")
+        );
         run.send_message(AgentMessage {
             text: "after the clear".to_owned(),
         })
@@ -4100,7 +4106,11 @@ mod tests {
             .lines()
             .map(|line| serde_json::from_str::<Value>(line).unwrap())
             .collect::<Vec<_>>();
-        assert!(messages.iter().any(|message| message["method"] == "thread/start"));
+        assert!(
+            messages
+                .iter()
+                .any(|message| message["method"] == "thread/start")
+        );
         let turn = messages
             .iter()
             .find(|message| message["method"] == "turn/start")

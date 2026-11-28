@@ -533,7 +533,10 @@ fn an_overlays_skill_reaches_the_agent_as_a_routing_line() {
     );
 }
 
-fn send_command(run: &Object<dyn AgentSession>, command: ai6::SessionCommand) -> Result<(), String> {
+fn send_command(
+    run: &Object<dyn AgentSession>,
+    command: ai6::SessionCommand,
+) -> Result<(), String> {
     run.send_message(ai6::AgentMessage {
         text: command.encode(),
     })
@@ -603,7 +606,10 @@ fn a_clear_opens_a_new_session_on_the_same_connection() {
 fn a_clear_ends_a_turn_still_running() {
     let run = handler("")
         .start(
-            start(environment(&[("FAKE_HOLD", "1"), ("FAKE_COMMANDS", "compact")])),
+            start(environment(&[
+                ("FAKE_HOLD", "1"),
+                ("FAKE_COMMANDS", "compact"),
+            ])),
             terminal(),
         )
         .expect("the agent starts");

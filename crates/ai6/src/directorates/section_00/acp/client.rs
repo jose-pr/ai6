@@ -768,7 +768,10 @@ impl AcpRun {
             .state
             .lock()
             .map_err(|_| provider_error("ACP state lock was poisoned"))?;
-        let Some(advertised) = state.commands.iter().find(|command| command.name == "compact")
+        let Some(advertised) = state
+            .commands
+            .iter()
+            .find(|command| command.name == "compact")
         else {
             return Err(ProviderError::new(
                 Status::GUATIAO_ERR_UNSUPPORTED,
@@ -788,7 +791,12 @@ impl AcpRun {
     /// Interrupts a turn still running and waits for it to end: a new session does not cancel the
     /// old one's turn. What the interrupted turn reports is dropped, since the clear ends it.
     fn end_turn(&self) -> Result<(), ProviderError> {
-        let open = |run: &Self| run.state.lock().map(|state| state.turn_open).unwrap_or(false);
+        let open = |run: &Self| {
+            run.state
+                .lock()
+                .map(|state| state.turn_open)
+                .unwrap_or(false)
+        };
         if !open(self) {
             return Ok(());
         }

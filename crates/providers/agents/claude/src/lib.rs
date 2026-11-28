@@ -1744,7 +1744,11 @@ impl Shared {
             let different = self
                 .expected_run_id
                 .lock()
-                .map(|expected| expected.as_ref().is_some_and(|expected| expected != &run_id))
+                .map(|expected| {
+                    expected
+                        .as_ref()
+                        .is_some_and(|expected| expected != &run_id)
+                })
                 .unwrap_or(false);
             // Kept even when it is the wrong one: `run_id` is how the Station learns that.
             if let Ok(mut known) = self.run_id.lock() {
@@ -3468,7 +3472,11 @@ mod tests {
         assert_eq!(written_texts(&writes), ["/clear".to_owned()]);
         let events = std::iter::from_fn(|| run.next_event(400).unwrap()).collect::<Vec<_>>();
         let kinds = events.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>();
-        assert_eq!(kinds, ["system", "cleared", "system", "completed"], "{events:?}");
+        assert_eq!(
+            kinds,
+            ["system", "cleared", "system", "completed"],
+            "{events:?}"
+        );
         assert_eq!(
             run.session_id().unwrap().as_deref(),
             Some("claude-session-43")
