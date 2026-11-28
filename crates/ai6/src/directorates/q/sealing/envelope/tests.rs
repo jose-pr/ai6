@@ -468,6 +468,7 @@ use crate::directorates::registry::suite::{Store, backend_tests};
 backend_tests!(
     a_scope_key_serves_every_station_and_a_revoke_shuts_one_out,
     a_rotation_re_encrypts_every_value_of_the_scope,
+    a_request_is_answered_and_a_value_moves_off_its_per_station_seal_on_every_backend,
 );
 
 /// A fleet of `a`, `b` and `c` on `store`'s Registry, each its own handle.
@@ -1114,4 +1115,51 @@ fn a_request_a_station_cannot_do_is_answered_with_why_and_writes_nothing() {
     ));
     let debug = format!("{:?}", put("v", "global", PLANTED, &[]));
     assert!(!debug.contains(PLANTED), "{debug}");
+}
+
+fn a_request_is_answered_and_a_value_moves_off_its_per_station_seal_on_every_backend(
+    store: &dyn Store,
+) {
+    let (a, b, _c) = fleet_on(store);
+    let registry: Arc<dyn RegistryBackend> = store.handle();
+    ask(
+        registry.as_ref(),
+        "req-1",
+        &SecretRequest::Put {
+            name: "forge".to_owned(),
+            scope: Some("operation:alpha".to_owned()),
+            value: PLANTED.to_owned(),
+            expect: None,
+            stations: Vec::new(),
+            pins: BTreeMap::new(),
+        },
+        &named(&["a"]),
+        NOW,
+    )
+    .unwrap();
+    assert_eq!(a.serve_requests(NOW).unwrap(), ["req-1"]);
+    assert!(matches!(
+        status(registry.as_ref(), "req-1").unwrap(),
+        RequestStatus::Done(_)
+    ));
+    assert!(
+        registry
+            .sealed_value("secret-request/req-1")
+            .unwrap()
+            .is_none()
+    );
+    // Only a, which made the key, holds it; b is granted and then reads.
+    assert!(matches!(b.read_value("forge"), Err(VaultError::NotNamed)));
+    a.grant_station(&op(), &Recipient::named("b"), NOW).unwrap();
+    assert_eq!(b.read_value("forge").unwrap().value.as_str(), PLANTED);
+    a.seal_to(
+        "legacy",
+        "old",
+        &named(&["a", "b"]),
+        SealedExpect::Absent,
+        NOW,
+    )
+    .unwrap();
+    assert_eq!(a.migrate_legacy(NOW).unwrap(), ["legacy"]);
+    assert_eq!(b.read_value("legacy").unwrap().value.as_str(), "old");
 }
