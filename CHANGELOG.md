@@ -292,6 +292,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - A brief still claimed by a Mission that ended on this Station is filed by the intake pass, and a verdict on a closed
   Run whose claiming Station is dark files the claim.
 
+- A request made with an API key to a route that needs the person's own sign-in (`/v1/user/keys`, Moneypenny) is refused with 403 and the reason, "an API key cannot do this; sign in with a password or a sign-in token", where it was a bare "request is not authorized".
+
 - A Claude Code Run held to reading until its plan passes reads only under its working directory (`Read(/**)`); an
   answer-only Claude Run loads no `CLAUDE.md`, the user's own included, and an answer-only Codex thread reads no
   `AGENTS.md` of the checkout; a Codex thread held to `desk` is told it has no tool that reads a file. A login a Run

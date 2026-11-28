@@ -4716,7 +4716,10 @@ async fn resolve_user_unnoted(gateway: &Gateway, token: &str) -> Result<Person, 
 async fn resolve_signed_in(gateway: &Gateway, token: &str) -> Result<Person, ApiError> {
     let person = resolve_user(gateway, token).await?;
     if ai6::is_key_narrowed(&person) || ai6::key_id(&person).is_some() {
-        return Err(ApiError::forbidden());
+        return Err(ApiError::refused(
+            StatusCode::FORBIDDEN,
+            "an API key cannot do this; sign in with a password or a sign-in token".to_owned(),
+        ));
     }
     Ok(person)
 }

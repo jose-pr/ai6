@@ -34,6 +34,13 @@ async fn stand_in(
             ),
         )
             .into_response(),
+        ("DELETE", "/v1/user/keys/as-key") => (
+            StatusCode::FORBIDDEN,
+            axum::Json(json!({
+                "error": "an API key cannot do this; sign in with a password or a sign-in token"
+            })),
+        )
+            .into_response(),
         ("POST", "/v1/user/keys") => (
             StatusCode::CREATED,
             axum::Json(json!({"key": {"id": "key-1", "name": json["name"]}, "secret": VALUE})),
@@ -250,4 +257,14 @@ async fn revoke_deletes_the_key_by_id() {
     );
     let (ok, _, err) = ai6ctl(&server, &["keys", "revoke", "nope"]).await;
     assert!(!ok && err.contains("404"), "{err}");
+}
+
+#[tokio::test]
+async fn a_key_refused_as_caller_prints_the_rule() {
+    let (server, _) = serve().await;
+    let (ok, _, err) = ai6ctl(&server, &["keys", "revoke", "as-key"]).await;
+    assert!(
+        !ok && err.contains("an API key cannot do this; sign in with a password"),
+        "{err}"
+    );
 }

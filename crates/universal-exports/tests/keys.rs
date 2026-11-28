@@ -524,7 +524,7 @@ async fn a_personal_key_does_what_its_scope_names_and_no_more_than_its_person_ma
         "not in its scope"
     );
     // A key does not make keys, nor read the list of them.
-    let (status, _) = call(
+    let (status, body) = call(
         &h,
         &key,
         Method::POST,
@@ -533,9 +533,16 @@ async fn a_personal_key_does_what_its_scope_names_and_no_more_than_its_person_ma
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    assert_eq!(
-        call(&h, &key, Method::GET, "/v1/user/keys", None).await.0,
-        StatusCode::FORBIDDEN
+    assert!(
+        body.to_string().contains("sign in"),
+        "the refusal names the rule: {body}"
+    );
+    let (status, body) = call(&h, &key, Method::GET, "/v1/user/keys", None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(body.to_string().contains("sign in"), "{body}");
+    assert!(
+        !body.to_string().contains(&key),
+        "the key's value is in no refusal: {body}"
     );
 
     // What the person does not hold, or does not name, makes no key.

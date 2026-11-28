@@ -106,7 +106,7 @@ What a personal key may do is the person's own grants **and** its scopes, each `
 person does not hold now is refused when the key is made, a key needs at least one scope, and
 the check is made again at every use: a grant the person loses the key loses too, and a person
 removed from the directory takes their keys with them. A key never changes the access policy or
-acts as a chief, and it cannot make keys or drive Moneypenny. A compartment adds nothing to it.
+acts as a chief, and it cannot make keys or drive Moneypenny: a key that tries answers 403, "an API key cannot do this; sign in with a password or a sign-in token". A compartment adds nothing to it.
 
 A key lasts `key_ttl` seconds unless its maker says otherwise (`--expires`): the default is 90
 days, `never` (or `key_ttl = 0`, reported as a weakening) lasts until revoked. The listing shows
