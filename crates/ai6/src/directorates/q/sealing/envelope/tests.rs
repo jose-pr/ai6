@@ -1,0 +1,464 @@
+use std::path::Path;
+use std::sync::Arc;
+
+use super::*;
+use crate::directorates::q::sealing::SealingKey;
+use crate::directorates::registry::backend::RegistryBackend;
+use crate::directorates::registry::sealed::StationSealingKey;
+use crate::directorates::registry::store::FileRegistry;
+
+const NOW: f64 = 1_790_000_000.0;
+const PLANTED: &str = "planted-secret-0451";
+
+fn registry(dir: &Path) -> Arc<dyn RegistryBackend> {
+    Arc::new(FileRegistry::open(dir))
+}
+
+/// A Station with its sealing key published in `registry`.
+fn station(registry: &Arc<dyn RegistryBackend>, name: &str) -> Vault {
+    let key = Arc::new(SealingKey::generate());
+    registry
+        .publish_sealing_key(&StationSealingKey::new(name, key.public_key().to_text()))
+        .unwrap();
+    Vault::new(registry.clone(), name, key)
+}
+
+fn named(stations: &[&str]) -> Vec<Recipient> {
+    stations
+        .iter()
+        .map(|name| Recipient::named(*name))
+        .collect()
+}
+
+fn op() -> Scope {
+    Scope::operation("alpha").unwrap()
+}
+
+/// Two Stations in one scope, `a` and `b`, and `c` outside it.
+fn fleet(dir: &Path) -> (Arc<dyn RegistryBackend>, Vault, Vault, Vault) {
+    let registry = registry(dir);
+    let (a, b, c) = (
+        station(&registry, "a"),
+        station(&registry, "b"),
+        station(&registry, "c"),
+    );
+    a.put_scope_key(&op(), &named(&["a", "b"]), NOW).unwrap();
+    (registry, a, b, c)
+}
+
+#[test]
+fn one_write_is_read_by_every_station_the_key_is_wrapped_for() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_registry, a, b, _c) = fleet(dir.path());
+    let revision = a
+        .write_value("forge", &op(), PLANTED, SealedExpect::Absent, NOW)
+        .unwrap();
+    assert_eq!(revision, 1);
+    for vault in [&a, &b] {
+        let opened = vault.read_value("forge").unwrap();
+        assert_eq!(opened.value.as_str(), PLANTED);
+        assert_eq!(opened.revision, 1);
+        assert_eq!(opened.scope, op());
+    }
+    // One more write, from the other Station, reaches the first with no copy made.
+    b.write_value("forge", &op(), "second", SealedExpect::Revision(1), NOW)
+        .unwrap();
+    assert_eq!(a.read_value("forge").unwrap().value.as_str(), "second");
+    assert!(matches!(a.read_value("nothing"), Err(VaultError::NotFound)));
+}
+
+#[test]
+fn a_station_without_a_wrap_is_refused_to_read_and_to_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_registry, a, _b, c) = fleet(dir.path());
+    a.write_value("forge", &op(), PLANTED, SealedExpect::Absent, NOW)
+        .unwrap();
+    assert!(matches!(c.read_value("forge"), Err(VaultError::NotNamed)));
+    assert!(matches!(
+        c.write_value("forge", &op(), "x", SealedExpect::Any, NOW),
+        Err(VaultError::NotNamed)
+    ));
+    assert!(matches!(
+        c.grant_station(&op(), &Recipient::named("c"), NOW),
+        Err(VaultError::NotNamed)
+    ));
+    assert!(matches!(
+        c.revoke_station(&op(), "a", NOW),
+        Err(VaultError::NotNamed)
+    ));
+}
+
+#[test]
+fn a_wrap_written_into_the_record_by_hand_opens_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let (registry, a, _b, c) = fleet(dir.path());
+    a.write_value("forge", &op(), PLANTED, SealedExpect::Absent, NOW)
+        .unwrap();
+    // Copy another Station's wrap under c's name: it was sealed to a different key.
+    let mut record = registry.sealed_value(&key_name(&op())).unwrap().unwrap();
+    let wrap = record.copies["w:a"].clone();
+    record.copies.insert("w:c".to_owned(), wrap);
+    registry
+        .store_sealed(
+            &key_name(&op()),
+            &record.copies,
+            "a",
+            SealedExpect::Any,
+            NOW,
+        )
+        .unwrap();
+    assert!(matches!(c.read_value("forge"), Err(VaultError::Unreadable)));
+}
+
+#[test]
+fn a_granted_station_reads_what_was_written_before_it_was_granted() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_registry, a, _b, c) = fleet(dir.path());
+    a.write_value("forge", &op(), PLANTED, SealedExpect::Absent, NOW)
+        .unwrap();
+    let info = a.grant_station(&op(), &Recipient::named("c"), NOW).unwrap();
+    assert!(info.stations.contains("c"));
+    assert!(!info.rotating);
+    assert_eq!(c.read_value("forge").unwrap().value.as_str(), PLANTED);
+    // A grant leaves the value and its key alone.
+    assert_eq!(c.read_value("forge").unwrap().revision, 1);
+    assert!(matches!(
+        a.grant_station(&op(), &Recipient::named("nobody"), NOW),
+        Err(VaultError::NoKey(_))
+    ));
+}
+
+#[test]
+fn a_revoked_station_cannot_read_the_new_revision_nor_use_its_old_wrap() {
+    let dir = tempfile::tempdir().unwrap();
+    let (registry, a, b, _c) = fleet(dir.path());
+    a.write_value("forge", &op(), "before", SealedExpect::Absent, NOW)
+        .unwrap();
+    let before = registry.sealed_value(&key_name(&op())).unwrap().unwrap();
+    let info = a.revoke_station(&op(), "b", NOW).unwrap();
+    assert_eq!(info.stations, BTreeSet::from(["a".to_owned()]));
+    assert!(!info.rotating);
+    a.write_value("forge", &op(), PLANTED, SealedExpect::Any, NOW)
+        .unwrap();
+    assert_eq!(a.read_value("forge").unwrap().value.as_str(), PLANTED);
+    assert!(matches!(b.read_value("forge"), Err(VaultError::NotNamed)));
+    // Even with the Registry's old key record put back, the old wrap opens the old key, and that
+    // key no longer opens what is written now.
+    let old_key = b.open_wrap(&op(), &before.copies["w:b"]).unwrap();
+    let now = registry
+        .sealed_value(&value_name("forge"))
+        .unwrap()
+        .unwrap();
+    let stored = StoredValue::parse(&now).unwrap();
+    assert!(decrypt(&old_key, "forge", &stored).is_err());
+}
+
+#[test]
+fn rotating_the_key_leaves_every_value_readable_by_the_stations_that_remain() {
+    let dir = tempfile::tempdir().unwrap();
+    let (registry, a, b, _c) = fleet(dir.path());
+    for (name, value) in [("one", "1"), ("two", "2"), ("three", "3")] {
+        a.write_value(name, &op(), value, SealedExpect::Absent, NOW)
+            .unwrap();
+    }
+    let other = Scope::global();
+    a.put_scope_key(&other, &named(&["a"]), NOW).unwrap();
+    a.write_value("elsewhere", &other, "g", SealedExpect::Absent, NOW)
+        .unwrap();
+    let before = a.scope_key_info(&op()).unwrap().unwrap();
+    let after = a.rotate_scope_key(&op(), NOW).unwrap();
+    assert_ne!(before.key_id, after.key_id);
+    assert!(after.revision > before.revision);
+    for vault in [&a, &b] {
+        for (name, value) in [("one", "1"), ("two", "2"), ("three", "3")] {
+            let opened = vault.read_value(name).unwrap();
+            assert_eq!(opened.value.as_str(), value);
+            assert_eq!(opened.key_id, after.key_id);
+            assert_eq!(opened.revision, 2, "a re-encryption is a new revision");
+        }
+    }
+    // Another scope is untouched.
+    let untouched = registry
+        .sealed_value(&value_name("elsewhere"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(untouched.revision, 1);
+}
+
+#[test]
+fn a_rotation_a_crash_left_open_is_readable_and_finished_by_a_remaining_station() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_registry, a, b, _c) = fleet(dir.path());
+    a.write_value("forge", &op(), PLANTED, SealedExpect::Absent, NOW)
+        .unwrap();
+    // Only step one: the new key is current, no value moved.
+    let (next, _old, _new) = a.begin_rotation(&op(), Some("a"), NOW).unwrap();
+    assert!(next.rotating());
+    let info = a.scope_key_info(&op()).unwrap().unwrap();
+    assert!(info.rotating);
+    assert_eq!(info.stations, BTreeSet::from(["b".to_owned()]));
+    // The Station that was dropped is shut out at once; the one that remains still reads.
+    assert!(matches!(a.read_value("forge"), Err(VaultError::NotNamed)));
+    assert_eq!(b.read_value("forge").unwrap().value.as_str(), PLANTED);
+    b.finish_rotation(&op(), NOW).unwrap();
+    let info = b.scope_key_info(&op()).unwrap().unwrap();
+    assert!(!info.rotating);
+    let opened = b.read_value("forge").unwrap();
+    assert_eq!(opened.value.as_str(), PLANTED);
+    assert_eq!(opened.key_id, info.key_id);
+}
+
+#[test]
+fn the_last_station_of_a_scope_cannot_be_removed() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_registry, a, _b, _c) = fleet(dir.path());
+    a.revoke_station(&op(), "b", NOW).unwrap();
+    assert!(matches!(
+        a.revoke_station(&op(), "a", NOW),
+        Err(VaultError::LastStation)
+    ));
+    assert!(matches!(
+        a.revoke_station(&op(), "ghost", NOW),
+        Err(VaultError::NotNamed)
+    ));
+}
+
+#[test]
+fn a_tampered_ciphertext_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let (registry, a, b, _c) = fleet(dir.path());
+    a.write_value("forge", &op(), PLANTED, SealedExpect::Absent, NOW)
+        .unwrap();
+    let record = registry
+        .sealed_value(&value_name("forge"))
+        .unwrap()
+        .unwrap();
+    // One flipped bit.
+    let mut copies = record.copies.clone();
+    let copy = copies.get_mut("operation:alpha").unwrap();
+    let mut bytes = from_base64(&copy.sealed).unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 1;
+    copy.sealed = base64_text(&bytes);
+    registry
+        .store_sealed(
+            &value_name("forge"),
+            &copies,
+            "x",
+            SealedExpect::Revision(1),
+            NOW,
+        )
+        .unwrap();
+    assert!(matches!(b.read_value("forge"), Err(VaultError::Unreadable)));
+}
+
+#[test]
+fn a_ciphertext_moved_to_another_name_scope_or_revision_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let (registry, a, b, _c) = fleet(dir.path());
+    let global = Scope::global();
+    a.put_scope_key(&global, &named(&["a", "b"]), NOW).unwrap();
+    a.write_value("one", &op(), "first", SealedExpect::Absent, NOW)
+        .unwrap();
+    a.write_value("two", &op(), "second", SealedExpect::Absent, NOW)
+        .unwrap();
+    let one = registry.sealed_value(&value_name("one")).unwrap().unwrap();
+
+    // Another name.
+    registry
+        .store_sealed(&value_name("two"), &one.copies, "x", SealedExpect::Any, NOW)
+        .unwrap();
+    assert!(matches!(b.read_value("two"), Err(VaultError::Unreadable)));
+
+    // Another scope, naming that scope's key ID so only the binding stops it.
+    let global_id = a.scope_key_info(&global).unwrap().unwrap().key_id;
+    let mut copies = BTreeMap::new();
+    copies.insert(
+        global.to_string(),
+        SealedCopy {
+            key: global_id,
+            sealed: one.copies["operation:alpha"].sealed.clone(),
+        },
+    );
+    registry
+        .store_sealed(&value_name("one"), &copies, "x", SealedExpect::Any, NOW)
+        .unwrap();
+    assert!(matches!(b.read_value("one"), Err(VaultError::Unreadable)));
+
+    // An older revision's ciphertext put back after a newer write.
+    a.write_value("three", &op(), "v1", SealedExpect::Absent, NOW)
+        .unwrap();
+    let v1 = registry
+        .sealed_value(&value_name("three"))
+        .unwrap()
+        .unwrap();
+    a.write_value("three", &op(), "v2", SealedExpect::Revision(1), NOW)
+        .unwrap();
+    registry
+        .store_sealed(
+            &value_name("three"),
+            &v1.copies,
+            "x",
+            SealedExpect::Any,
+            NOW,
+        )
+        .unwrap();
+    assert!(matches!(b.read_value("three"), Err(VaultError::Unreadable)));
+}
+
+#[test]
+fn a_wrap_moved_to_another_scope_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let (registry, a, _b, _c) = fleet(dir.path());
+    let global = Scope::global();
+    a.put_scope_key(&global, &named(&["a"]), NOW).unwrap();
+    a.write_value("forge", &global, PLANTED, SealedExpect::Absent, NOW)
+        .unwrap();
+    // The operation's wrap for a, under the global scope's record.
+    let operation = registry.sealed_value(&key_name(&op())).unwrap().unwrap();
+    let mut forged = registry
+        .sealed_value(&key_name(&global))
+        .unwrap()
+        .unwrap()
+        .copies;
+    forged.insert("w:a".to_owned(), operation.copies["w:a"].clone());
+    registry
+        .store_sealed(&key_name(&global), &forged, "x", SealedExpect::Any, NOW)
+        .unwrap();
+    assert!(matches!(a.read_value("forge"), Err(VaultError::Unreadable)));
+}
+
+#[test]
+fn a_value_stays_in_its_scope_and_a_stale_expectation_conflicts() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_registry, a, _b, _c) = fleet(dir.path());
+    let global = Scope::global();
+    a.put_scope_key(&global, &named(&["a"]), NOW).unwrap();
+    a.write_value("forge", &op(), "one", SealedExpect::Absent, NOW)
+        .unwrap();
+    assert!(matches!(
+        a.write_value("forge", &global, "two", SealedExpect::Any, NOW),
+        Err(VaultError::WrongScope)
+    ));
+    assert!(matches!(
+        a.write_value("forge", &op(), "two", SealedExpect::Absent, NOW),
+        Err(VaultError::Conflict { held: Some(1) })
+    ));
+    assert!(matches!(
+        a.write_value("forge", &op(), "two", SealedExpect::Revision(7), NOW),
+        Err(VaultError::Conflict { held: Some(1) })
+    ));
+    assert!(matches!(
+        a.write_value(
+            "new",
+            &Scope::compartment("c1").unwrap(),
+            "x",
+            SealedExpect::Any,
+            NOW
+        ),
+        Err(VaultError::NoScopeKey(_))
+    ));
+    assert!(matches!(
+        a.put_scope_key(&op(), &named(&["a"]), NOW),
+        Err(VaultError::Conflict { .. })
+    ));
+}
+
+#[test]
+fn scopes_are_global_operation_or_compartment_and_nothing_else() {
+    assert_eq!(Scope::parse("global").unwrap(), Scope::global());
+    assert_eq!(
+        Scope::parse("operation:x").unwrap().owner(),
+        Some(("operation", "x"))
+    );
+    for bad in [
+        "",
+        "operation:",
+        "team:x",
+        "global:x",
+        "operation:a\nb",
+        "Global",
+    ] {
+        assert!(
+            matches!(Scope::parse(bad), Err(VaultError::BadScope(_))),
+            "{bad:?}"
+        );
+    }
+}
+
+fn walk(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(dir).unwrap().flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            files.extend(walk(&path));
+        } else {
+            files.push(path);
+        }
+    }
+    files
+}
+
+#[test]
+fn a_planted_value_and_key_appear_in_no_record_debug_or_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let (registry, a, b, c) = fleet(dir.path());
+    a.write_value("forge", &op(), PLANTED, SealedExpect::Absent, NOW)
+        .unwrap();
+    let mut seen = String::new();
+    for entry in walk(dir.path()) {
+        seen.push_str(&String::from_utf8_lossy(&std::fs::read(entry).unwrap()));
+    }
+    for name in [key_name(&op()), value_name("forge")] {
+        let record = registry.sealed_value(&name).unwrap().unwrap();
+        seen.push_str(&format!("{record:?}"));
+        seen.push_str(&serde_json::to_string(&record).unwrap());
+    }
+    let opened = a.read_value("forge").unwrap();
+    seen.push_str(&format!("{opened:?} {a:?}"));
+    seen.push_str(&format!("{:?}", a.scope_key_info(&op()).unwrap()));
+    seen.push_str(&format!("{:?}", a.value_infos().unwrap()));
+    for error in [
+        c.read_value("forge").unwrap_err(),
+        a.read_value("none").unwrap_err(),
+        b.write_value("x", &Scope::global(), PLANTED, SealedExpect::Any, NOW)
+            .unwrap_err(),
+    ] {
+        seen.push_str(&error.to_string());
+        seen.push_str(&format!("{error:?}"));
+    }
+    // The key itself: its raw bytes in any spelling.
+    let stored = a.load_key(&op()).unwrap();
+    let key = a.current_key(&op(), &stored).unwrap();
+    seen.push_str(&format!("{key:?}"));
+    for spelling in [
+        base64_text(key.key.as_ref()),
+        hex(key.key.as_ref()),
+        String::from_utf8_lossy(key.key.as_ref()).into_owned(),
+    ] {
+        assert!(!seen.contains(&spelling), "the key leaked");
+    }
+    assert_eq!(opened.value.as_str(), PLANTED, "it was there to be found");
+    assert!(!seen.contains(PLANTED), "{seen}");
+    assert!(!seen.contains(&base64_text(PLANTED.as_bytes())), "{seen}");
+}
+
+#[test]
+fn values_are_listed_without_being_opened() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_registry, a, _b, _c) = fleet(dir.path());
+    a.write_value("one", &op(), "1", SealedExpect::Absent, NOW)
+        .unwrap();
+    a.write_value("two", &op(), "2", SealedExpect::Absent, NOW)
+        .unwrap();
+    let infos = a.value_infos().unwrap();
+    assert_eq!(
+        infos
+            .iter()
+            .map(|info| info.name.as_str())
+            .collect::<Vec<_>>(),
+        ["one", "two"]
+    );
+    assert!(a.remove_value("one").unwrap());
+    assert!(a.value_info("one").unwrap().is_none());
+}
