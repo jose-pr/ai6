@@ -228,10 +228,12 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// A running Codex app server with one thread open. Its events go to the sink given to [`CodexSession::start`], from
-/// a thread of its own; every method may be called from any thread.
+/// A running Codex app server with one thread open at a time. Its events go to the sink given to
+/// [`CodexSession::start`], from a thread of its own; every method may be called from any thread.
 pub struct CodexSession {
-    thread: String,
+    thread: Mutex<String>,
+    /// `thread/start`'s parameters as the launch gave them, for [`CodexSession::new_thread`].
+    new_thread_params: Value,
     writer: Writer,
     process: Arc<dyn Process>,
     parser: Arc<Mutex<Parser>>,
@@ -265,7 +267,7 @@ pub struct CodexSession {
 impl fmt::Debug for CodexSession {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CodexSession")
-            .field("thread", &self.thread)
+            .field("thread", &self.thread())
             .finish_non_exhaustive()
     }
 }
@@ -443,7 +445,8 @@ impl CodexSession {
                 .map_err(ended_with)?;
         }
         Ok(Self {
-            thread: String::new(),
+            thread: Mutex::new(String::new()),
+            new_thread_params: Value::Null,
             writer,
             process,
             parser,
@@ -555,7 +558,12 @@ impl CodexSession {
         if let Some(check) = self.settings.check_thread.clone() {
             check(&opened).map_err(Error::Refused)?;
         }
-        self.thread = thread.to_string();
+        *locked(&self.thread) = thread.to_string();
+        self.new_thread_params = CodexLaunch {
+            thread: ThreadStart::New,
+            ..launch.clone()
+        }
+        .thread_params();
         self.thread_model = opened
             .get("model")
             .and_then(Value::as_str)
@@ -763,10 +771,46 @@ impl CodexSession {
         }
     }
 
-    /// The thread's id.
+    /// The id of the thread the session is on: the one it opened with, or the last [`CodexSession::new_thread`] made.
     #[must_use]
-    pub fn thread(&self) -> &str {
-        &self.thread
+    pub fn thread(&self) -> String {
+        locked(&self.thread).clone()
+    }
+
+    /// Opens another thread on the same app server (`thread/start` with the launch's parameters, a new thread whatever the
+    /// launch resumed) and moves the session to it: [`prompt`](Self::prompt), [`interrupt`](Self::interrupt) and
+    /// [`steer`](Self::steer) name the new thread, and what the app server says of the old one is no longer this session's.
+    /// The model and effort chosen with [`set_model`](Self::set_model) and [`set_effort`](Self::set_effort) and a mode chosen
+    /// with [`set_mode`](Self::set_mode) stay; the old thread is left as it is, not closed. Returns the new thread's id.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Harness`] or [`Error::Timeout`] when Codex named no thread or did not answer, [`Error::Refused`] when
+    /// `check_thread` refuses the answer; the session stays on its thread.
+    pub fn new_thread(&self) -> Result<String, Error> {
+        let opened = self.request(
+            "thread/start",
+            self.new_thread_params.clone(),
+            self.settings.request_timeout,
+        )?;
+        let thread = opened
+            .pointer("/thread/id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| Error::Harness("Codex named no thread".into()))?
+            .to_string();
+        if let Some(check) = self.settings.check_thread.clone() {
+            check(&opened).map_err(Error::Refused)?;
+        }
+        *locked(&self.thread) = thread.clone();
+        {
+            let mut mode = locked(&self.mode);
+            if !mode.1 {
+                mode.0 = crate::mode::of_thread(&opened);
+            }
+        }
+        locked(&self.parser).set_thread(&thread);
+        self.titled.store(false, Ordering::SeqCst);
+        Ok(thread)
     }
 
     /// Codex's version, from its answer to `initialize`.
@@ -818,7 +862,7 @@ impl CodexSession {
     pub fn prompt(&self, content: &[Content]) -> Result<(), Error> {
         let input = self.with_skill(user_input(content)?);
         let (model, effort) = self.choice();
-        let mut params = json!({"threadId": self.thread, "input": input});
+        let mut params = json!({"threadId": self.thread(), "input": input});
         if let Some(model) = model {
             params["model"] = json!(model);
         }
@@ -913,7 +957,7 @@ impl CodexSession {
             turn
         };
         let number = self.requests.fetch_add(1, Ordering::SeqCst) + 1;
-        self.write(&json!({"id": number, "method": "turn/interrupt", "params": {"threadId": self.thread, "turnId": turn}}))
+        self.write(&json!({"id": number, "method": "turn/interrupt", "params": {"threadId": self.thread(), "turnId": turn}}))
     }
 
     /// Adds to a running turn (`turn/steer`), as after a refusal that should not end it: `turn` is the turn it is meant
@@ -926,7 +970,7 @@ impl CodexSession {
         let input = self.with_skill(user_input(content)?);
         let number = self.requests.fetch_add(1, Ordering::SeqCst) + 1;
         self.write(&json!({"id": number, "method": "turn/steer", "params": {
-            "threadId": self.thread, "expectedTurnId": turn, "input": input}}))
+            "threadId": self.thread(), "expectedTurnId": turn, "input": input}}))
     }
 
     /// Ends the app server and everything it started, and waits up to `close_wait` for it to have gone.

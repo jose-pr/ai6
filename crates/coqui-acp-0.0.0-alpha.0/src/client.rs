@@ -35,7 +35,7 @@ use crate::describe::{
 };
 use crate::elicit::{self, ElicitationAnswer, Elicitor};
 use crate::error::Error;
-use crate::event::Event;
+use crate::event::{AdvertisedCommand, Event};
 use crate::state::{Step, TEXT_FLUSH, TOOL_KINDS, Turn, kind_name};
 
 const PROTOCOL_VERSION: u64 = 1;
@@ -380,6 +380,7 @@ impl Builder {
             extension: AtomicBool::new(false),
             suppress: AtomicBool::new(false),
             session: Mutex::new(None),
+            commands_known: Mutex::new(Vec::new()),
             turn: Mutex::new(
                 Turn::new(self.refuse_kinds.clone())
                     .text_flush(self.text_flush)
@@ -468,6 +469,7 @@ impl Builder {
 }
 
 enum Command {
+    NewSession(mpsc::Sender<Result<String, Error>>),
     Prompt(String),
     Notify(String, Value),
     Cancel,
@@ -492,6 +494,7 @@ struct Shared {
     extension: AtomicBool,
     suppress: AtomicBool,
     session: Mutex<Option<String>>,
+    commands_known: Mutex<Vec<AdvertisedCommand>>,
     turn: Mutex<Turn>,
 }
 
@@ -514,6 +517,12 @@ impl Shared {
     }
 
     fn emit(&self, event: Event) {
+        if let Event::Commands(commands) = &event {
+            *self
+                .commands_known
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = commands.clone();
+        }
         let flushed = {
             let mut turn = self.turn();
             turn.note(&event);
@@ -1243,7 +1252,19 @@ async fn open(
         .session
         .lock()
         .unwrap_or_else(PoisonError::into_inner) = Some(session.clone());
-    if !extension {
+    apply_options(cx, options, shared, &session, &config).await;
+    Ok(session)
+}
+
+/// Sets the model and effort the builder asked for, on a session just opened, through the options `config` lists.
+async fn apply_options(
+    cx: &ConnectionTo<Agent>,
+    options: &Builder,
+    shared: &Arc<Shared>,
+    session: &str,
+    config: &[SessionConfigOption],
+) {
+    if !shared.extension.load(Ordering::SeqCst) {
         if let Some(model) = &options.model {
             let request = OptionRequest {
                 what: "model",
@@ -1255,8 +1276,8 @@ async fn open(
             set_option(
                 cx,
                 shared,
-                &session,
-                &config,
+                session,
+                config,
                 request,
                 options.request_timeout,
             )
@@ -1273,14 +1294,51 @@ async fn open(
             set_option(
                 cx,
                 shared,
-                &session,
-                &config,
+                session,
+                config,
                 request,
                 options.request_timeout,
             )
             .await;
         }
     }
+}
+
+/// `session/new` on the open connection, with what the builder asked for. From the moment the agent answers, the new session is
+/// the one the shared state names, so what the old one still says is dropped, and its commands are forgotten.
+async fn new_session(
+    cx: &ConnectionTo<Agent>,
+    options: &Builder,
+    shared: &Arc<Shared>,
+) -> Result<String, Error> {
+    let answer = call(
+        cx,
+        "session/new",
+        session_params(options, None),
+        options.request_timeout,
+    )
+    .await?;
+    let new: NewSessionResponse = serde_json::from_value(answer)
+        .map_err(|_| Error::Refused("session/new: unreadable answer".to_owned()))?;
+    let session = new.session_id.0.to_string();
+    shared.flush();
+    shared
+        .commands_known
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clear();
+    *shared
+        .session
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = Some(session.clone());
+    apply_options(
+        cx,
+        options,
+        shared,
+        &session,
+        &new.config_options.unwrap_or_default(),
+    )
+    .await;
     Ok(session)
 }
 
@@ -1310,7 +1368,7 @@ async fn main_task(
     mut commands: async_mpsc::UnboundedReceiver<Command>,
     ready: mpsc::Sender<Result<(), Error>>,
 ) -> Result<(), RpcError> {
-    let session = match open(&cx, &options, &shared).await {
+    let mut session = match open(&cx, &options, &shared).await {
         Ok(session) => session,
         Err(error) => {
             let _ = ready.send(Err(error));
@@ -1337,6 +1395,13 @@ async fn main_task(
         };
         let cancel = || UntypedMessage::new("session/cancel", json!({"sessionId": session}));
         match command {
+            Some(Command::NewSession(reply)) => {
+                let opened = new_session(&cx, &options, &shared).await;
+                if let Ok(id) = &opened {
+                    session.clone_from(id);
+                }
+                let _ = reply.send(opened);
+            }
             Some(Command::Prompt(text)) => {
                 if let Err(error) = send_prompt(&cx, &shared, &session, text) {
                     shared.emit(Event::Failed(error_text(&error)));
@@ -1409,6 +1474,34 @@ impl Session {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
+    }
+
+    /// The commands the agent last advertised, empty when it advertised none or the session is new.
+    #[must_use]
+    pub fn commands(&self) -> Vec<AdvertisedCommand> {
+        self.shared
+            .commands_known
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Opens another session on the same connection with `session/new`, as the builder opened the first: the same working
+    /// directory, MCP servers, `_meta`, model and effort. Afterwards [`id`](Self::id), [`send`](Self::send),
+    /// [`cancel`](Self::cancel) and the events are the new session's; the old one is dropped, not closed, and the agent process
+    /// is not restarted, which is how ACP clears a conversation and how a warm process serves a new chat. What the old session
+    /// still says is ignored from the moment the agent answers; a turn still running there is not cancelled. The commands are
+    /// forgotten until the agent advertises them for the new session.
+    ///
+    /// # Errors
+    ///
+    /// The agent's refusal or silence ([`Error::Refused`], [`Error::Timeout`]), or [`Error::Closed`].
+    pub fn new_session(&self) -> Result<String, Error> {
+        let (reply, answer) = mpsc::channel();
+        self.commands
+            .unbounded_send(Command::NewSession(reply))
+            .map_err(|_| Error::Closed)?;
+        answer.recv().unwrap_or(Err(Error::Closed))
     }
 
     /// Whether the agent took over turn endings: see [`Builder::turn_end_by`].

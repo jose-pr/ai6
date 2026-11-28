@@ -25,7 +25,7 @@ pub use describe::{
 };
 pub use elicit::{ChoiceOption, Elicitation, ElicitationAnswer, Elicitor, Field, FieldKind};
 pub use error::Error;
-pub use event::Event;
+pub use event::{AdvertisedCommand, Event};
 
 /// An in-memory pair of connected transports, for an agent in the same process.
 #[must_use]

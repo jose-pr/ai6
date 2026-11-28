@@ -364,7 +364,10 @@ impl ClaudeSession {
             let reading = Arc::clone(&parser);
             let ending = Arc::clone(&parser);
             let watching = Arc::clone(&modes);
-            let expected = launch.session_id().map(str::to_string);
+            let mut expected = launch.session_id().map(str::to_string);
+            // Set by a `/clear` (`conversation_reset`), which gives the same process a new session id: the next id reported is
+            // the session's, and any other change of id is still another session's.
+            let mut cleared = false;
             stream
                 .read(
                     spawned.stdout,
@@ -380,15 +383,24 @@ impl ClaudeSession {
                             line.0 = false;
                             core::mem::take(&mut line.1)
                         };
+                        if value.get("type").and_then(Value::as_str) == Some("conversation_reset")
+                            && value.get("trigger").and_then(Value::as_str) == Some("clear")
+                        {
+                            cleared = true;
+                        }
                         let mut told = Vec::with_capacity(events.len());
                         for event in events {
                             let wrong = match (&event, &expected) {
-                                (Event::SessionId(reported), Some(expected))
-                                    if reported != expected =>
-                                {
-                                    Some(format!(
-                                        "Claude Code reported session {reported}, not the one requested"
-                                    ))
+                                (Event::SessionId(reported), Some(known)) if reported != known => {
+                                    if cleared {
+                                        cleared = false;
+                                        expected = Some(reported.clone());
+                                        None
+                                    } else {
+                                        Some(format!(
+                                            "Claude Code reported session {reported}, not the one requested"
+                                        ))
+                                    }
                                 }
                                 _ => None,
                             };
@@ -458,12 +470,13 @@ impl ClaudeSession {
         Ok(session)
     }
 
-    /// The session's id: the one asked for, or the one Claude Code chose, once it has said it.
+    /// The session's id: the one Claude Code last reported (a `/clear` gives the process a new one), else the one asked for.
     #[must_use]
     pub fn id(&self) -> Option<String> {
-        self.id
-            .clone()
-            .or_else(|| locked(&self.parser).session().map(str::to_string))
+        locked(&self.parser)
+            .session()
+            .map(str::to_string)
+            .or_else(|| self.id.clone())
     }
 
     /// Claude Code's version, from its answer to `initialize`.

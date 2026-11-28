@@ -1,6 +1,37 @@
 use alloc::string::String;
 use serde_json::Value;
 
+/// A command the agent advertises with `available_commands_update`, such as a slash command.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct AdvertisedCommand {
+    /// The command's name, without a leading slash.
+    pub name: String,
+    /// What the command does, in the agent's words.
+    pub description: String,
+    /// The hint the agent gives for the text typed after the name, when the command takes any.
+    pub input_hint: Option<String>,
+}
+
+impl AdvertisedCommand {
+    /// A command with no input hint.
+    #[must_use]
+    pub fn new(name: impl Into<String>, description: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            description: description.into(),
+            input_hint: None,
+        }
+    }
+
+    /// Sets the hint for the text typed after the name.
+    #[must_use]
+    pub fn input_hint(mut self, hint: impl Into<String>) -> Self {
+        self.input_hint = Some(hint.into());
+        self
+    }
+}
+
 /// What happened on a session, whichever protocol version carried it.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
@@ -25,6 +56,8 @@ pub enum Event {
         /// The ISO 4217 code the agent gave.
         currency: String,
     },
+    /// The agent's list of commands, in full: each `available_commands_update` replaces the one before.
+    Commands(Vec<AdvertisedCommand>),
     /// Something worth telling a person that ends nothing.
     Notice(String),
     /// A permission request was answered.

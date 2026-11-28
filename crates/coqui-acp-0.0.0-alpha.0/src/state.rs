@@ -6,11 +6,12 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use agent_client_protocol::schema::v1::{
-    ContentBlock, SessionNotification, SessionUpdate, ToolCallStatus, ToolKind,
+    AvailableCommandInput, ContentBlock, SessionNotification, SessionUpdate, ToolCallStatus,
+    ToolKind,
 };
 use serde_json::Value;
 
-use crate::event::Event;
+use crate::event::{AdvertisedCommand, Event};
 
 /// The default size, in UTF-8 bytes, at which text is flushed even mid-message, so it cannot grow without limit.
 pub(crate) const TEXT_FLUSH: usize = 64 * 1024;
@@ -227,6 +228,24 @@ impl Turn {
                 if let (Some(kind), Some(status)) = (known, update.fields.status) {
                     self.check_running(&kind, status, &mut step);
                 }
+            }
+            SessionUpdate::AvailableCommandsUpdate(update) => {
+                step.events.push(Event::Commands(
+                    update
+                        .available_commands
+                        .into_iter()
+                        .map(|command| {
+                            let hint = command.input.and_then(|input| match input {
+                                AvailableCommandInput::Unstructured(input) => Some(input.hint),
+                                _ => None,
+                            });
+                            let mut advertised =
+                                AdvertisedCommand::new(command.name, command.description);
+                            advertised.input_hint = hint;
+                            advertised
+                        })
+                        .collect(),
+                ));
             }
             SessionUpdate::UsageUpdate(usage) => {
                 if let Some(cost) = usage.cost {

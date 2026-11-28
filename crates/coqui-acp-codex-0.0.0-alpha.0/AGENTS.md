@@ -56,7 +56,8 @@ The command line holds only `app-server` and the overrides, each one argument `-
 ```rust
 pub fn CodexSession::start(launch: &CodexLaunch, spawn: &dyn Spawn, settings: CodexSettings,
     sink: impl Fn(Event) -> bool + Send + Sync + 'static) -> Result<CodexSession, Error>
-pub fn thread(&self) -> &str
+pub fn thread(&self) -> String                                 // the thread the session is on: the opened one, or the last `new_thread` made
+pub fn new_thread(&self) -> Result<String, Error>               // `thread/start` with the launch's parameters on the same app server (a new thread though the launch resumed one); prompt, interrupt and steer then name it and the parser follows it; model, effort and a chosen mode stay; the old thread is left, not closed
 pub fn version(&self) -> Option<&str>
 pub fn models(&self) -> Option<&[Model]>                        // None: not listed or could not be
 pub fn choice(&self) -> (Option<String>, Option<String>)        // model and effort the next turn names
