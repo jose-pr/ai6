@@ -413,11 +413,13 @@
                   "type": "string",
                   "enum": [
                     "strict",
-                    "observe"
+                    "observe",
+                    "strict-except-secrets"
                   ],
                   "x-enum-labels": {
                     "strict": "Strict: every restriction applies",
-                    "observe": "Observe: only record it"
+                    "observe": "Observe: only record it",
+                    "strict-except-secrets": "Strict except secrets: every restriction but the secrets one"
                   }
                 },
                 {
