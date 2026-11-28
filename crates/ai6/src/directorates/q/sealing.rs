@@ -995,7 +995,7 @@ mod tests {
         let a = Arc::new(station(&registry, "a"));
         let b = station(&registry, "b");
         let keeper = SecretKeeper::new(Box::new(RegistrySecrets::new(a))).unwrap();
-        assert_eq!(keeper.fields(), ["stations", "scope", "pins"]);
+        assert_eq!(keeper.fields(), ["stations", "scope", "operation", "pins"]);
         let fields = SecretFields::new(
             serde_json::json!({"stations": ["a", "b"]})
                 .as_object()
