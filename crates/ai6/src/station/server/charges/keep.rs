@@ -256,7 +256,13 @@ impl AreaDesk {
             }));
         }
         let mut board = json!({ "scope": self.scope.to_string(), "missions_by_state": by_state });
-        if let Some(charge) = self.state.roster.charges().get(&self.scope.to_string()) {
+        if let Some(charge) = self
+            .state
+            .current()
+            .roster
+            .charges()
+            .get(&self.scope.to_string())
+        {
             let mut first_seen = self
                 .state
                 .charges
@@ -835,7 +841,7 @@ impl AreaDesk {
         let note = note.map(str::trim).filter(|note| !note.is_empty());
         let target: ChargeScope = target.parse()?;
         let name = target.to_string();
-        if !self.state.roster.charges().contains_key(&name) {
+        if !self.state.current().roster.charges().contains_key(&name) {
             return Err(format!("{name} is not a charge on the roster"));
         }
         let allowed = match &self.scope {

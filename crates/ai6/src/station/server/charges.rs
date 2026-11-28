@@ -341,6 +341,7 @@ fn has_handler(state: &DaemonState, charge: &Charge) -> bool {
 /// One pass over this Station's charges: on a check-in, claims, renews and stops them and looks
 /// at their areas; every round, takes their Cables and wakes those with something waiting.
 pub(super) async fn tend(state: &DaemonState, headquarters: bool, check_in: bool) {
+    let state = &state.current();
     if check_in {
         let wanted: Vec<Charge> = state
             .roster
@@ -905,6 +906,7 @@ fn scan(state: &DaemonState, live: &Live, record: &ChargeRecord) -> Vec<ChargeEv
 /// Takes the Cables waiting for `live`, adds a timer wake when one is due, and starts a turn when
 /// something waits and the hour has room.
 async fn wake(state: &DaemonState, live: &Arc<Live>) {
+    let state = &state.current();
     if live.busy.load(Ordering::Acquire) || live.closing.load(Ordering::Acquire) {
         return;
     }
@@ -1140,6 +1142,7 @@ fn render(scope: &ChargeScope, events: &[ChargeEvent]) -> String {
 
 /// One turn of `live` with `events`, begun at `now`, and what it leaves on the charge's record.
 async fn run_turn(state: &DaemonState, live: &Arc<Live>, events: Vec<ChargeEvent>, now: f64) {
+    let state = &state.current();
     let scope = live.scope.to_string();
     let intake = state.intake.clone();
     let record = tokio::task::spawn_blocking(move || intake.charge(&scope))

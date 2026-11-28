@@ -407,7 +407,7 @@ fn charges_stuck(state: &DaemonState, charge: &Charge, now: f64) -> Vec<Stuck> {
     let Ok(records) = state.intake.charges() else {
         return Vec::new();
     };
-    let wanted: Vec<String> = state.roster.charges().keys().cloned().collect();
+    let wanted: Vec<String> = state.current().roster.charges().keys().cloned().collect();
     records
         .into_iter()
         .filter(|record| record.scope != own && wanted.contains(&record.scope))

@@ -227,6 +227,16 @@ fn open(
         .handler
         .clone()
         .ok_or_else(|| format!("Agent {} names no handler", agent.id))?;
+    eprintln!(
+        "ai6: charge {scope} spawns Agent {:?} on roster revision {}",
+        agent.id,
+        state
+            .config
+            .status()
+            .revision
+            .as_deref()
+            .unwrap_or("unversioned")
+    );
     let resume = previous.filter(|(ran_on, _)| *ran_on == handler);
     let mut environment = credentials::run_environment(state, &agent.id, &agent.env);
     if let Some(on) = &on {

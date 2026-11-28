@@ -617,3 +617,73 @@ async fn a_station_claims_an_operations_charge_when_one_of_its_theaters_meets_th
     charges::tend(&state, false, true).await;
     assert!(!state.charges.is_live(&scope("c4")));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_charge_turn_after_a_roster_apply_spawns_on_the_new_roster() {
+    use crate::directorates::m::config::{ConfigProvider, FileProvider};
+    use crate::station::server::reload::LiveConfig;
+
+    let root = tempfile::tempdir().unwrap();
+    let tag = "rv";
+    let mut state = station_with(
+        root.path(),
+        tag,
+        "stn-rv",
+        "",
+        "MARK = \"old\"",
+        &Extra::default(),
+    );
+    let source: Arc<dyn ConfigProvider> = Arc::new(FileProvider::new(root.path()));
+    let snapshot = source.load(&state.station_id).unwrap();
+    state.roster = Arc::new(snapshot.roster.clone());
+    state.config = Arc::new(LiveConfig::new(
+        source,
+        &state.station_id,
+        snapshot,
+        state.roster.clone(),
+        None,
+    ));
+    let before = state.config.status().revision;
+    assert!(before.is_some());
+
+    let marks = Arc::new(Mutex::new(Vec::<String>::new()));
+    let seen = marks.clone();
+    TURNS.lock().unwrap().insert(
+        key(tag),
+        Arc::new(move |_: &str, environment: &BTreeMap<String, String>| {
+            seen.lock()
+                .unwrap()
+                .push(environment.get("MARK").cloned().unwrap_or_default());
+        }),
+    );
+    let scope = scope(tag);
+    charges::tend(&state, false, true).await;
+    assert!(state.charges.is_live(&scope));
+    wake(&state, &scope, "first");
+    headquarters_until(&state, "the first turn", || turns_of(&state, &scope) == 1).await;
+
+    let agents = root.path().join("agents.toml");
+    let text = std::fs::read_to_string(&agents).unwrap();
+    std::fs::write(&agents, text.replace("MARK = \"old\"", "MARK = \"new\"")).unwrap();
+    assert!(
+        crate::station::server::reload::poll(&state),
+        "a revision applied"
+    );
+    let after = state.config.status().revision;
+    assert_ne!(before, after, "the revision moved with the apply");
+
+    // The warm session keeps the environment it started with; the next spawn is what the
+    // revision changes.
+    charges::close_all(&state).await;
+    assert!(!state.charges.is_live(&scope));
+    charges::tend(&state, false, true).await;
+    wake(&state, &scope, "second");
+    headquarters_until(&state, "the second turn", || turns_of(&state, &scope) == 2).await;
+    assert_eq!(
+        *marks.lock().unwrap(),
+        ["old", "new"],
+        "the revision {after:?} is the one spawned on"
+    );
+    TURNS.lock().unwrap().remove(&key(tag));
+    charges::close_all(&state).await;
+}
