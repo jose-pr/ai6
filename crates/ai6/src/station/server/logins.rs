@@ -12,7 +12,9 @@ use crate::directorates::q::logins::{
     LoginNotice, NoticeKind, RunLogin, Synced, assign_renewals, login_accounts, run_leases,
     sealed_name,
 };
-use crate::directorates::q::sealing::{MARKS_FILE, Marks, SEALING_KEY_FILE, SealingKey, Vault};
+use crate::directorates::q::sealing::{
+    MARKS_FILE, Marks, SEALING_KEY_FILE, SealingKey, Signer, TRUST_FILE, TrustFile, Vault,
+};
 use crate::directorates::q::{Account, AccountPool};
 use crate::directorates::registry::accounts::AccountRef;
 use crate::directorates::registry::backend::RegistryBackend;
@@ -69,7 +71,38 @@ pub(crate) fn open_vault(
     let key = Arc::new(SealingKey::open_or_create(&dir.join(SEALING_KEY_FILE))?);
     registry.publish_sealing_key(&published(dir, station, &key))?;
     let marks = Arc::new(Marks::open(&dir.join(MARKS_FILE))?);
-    let vault = Vault::new(registry.clone(), station, key).with_marks(marks);
+    let trust_file = TrustFile::open(&dir.join(TRUST_FILE))?;
+    let trust = trust_file.trust()?;
+    if let Some(weakening) = trust.weakening() {
+        eprintln!("ai6: {weakening}");
+    }
+    let signs = !trust.accepts_unsigned();
+    let mut vault = Vault::new(registry.clone(), station, key)
+        .with_marks(marks)
+        .with_trust(trust);
+    if signs {
+        // M signs in the Headquarters term the Registry's live lease names, and in none without one.
+        let lease_registry = registry.clone();
+        let term = move || {
+            let lease = lease_registry.headquarters().ok().flatten()?;
+            (lease.expires() > unix_seconds()).then(|| lease.term())
+        };
+        let signer = match &trust_file.signer_file {
+            Some(path) => Some(Signer::from_file(Path::new(path))?.with_term(term)),
+            None => {
+                let opened = vault.open_m_signer(term).map_err(std::io::Error::other)?;
+                if opened.is_some() {
+                    eprintln!(
+                        "ai6: M's signing key is held in the Registry, sealed to the Headquarters-eligible \n                         Stations: any of them can sign, and a vault or HSM would not have that weakness"
+                    );
+                }
+                opened
+            }
+        };
+        if let Some(signer) = signer {
+            vault = vault.with_signer(signer);
+        }
+    }
     // Values an earlier build sealed to each Station separately move under the `global` scope
     // key; a value this Station cannot open stays for one that can.
     match vault.migrate_legacy(unix_seconds()) {

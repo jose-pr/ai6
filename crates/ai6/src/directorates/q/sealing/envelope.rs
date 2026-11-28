@@ -23,7 +23,9 @@ use ring::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 use ring::rand::{SecureRandom, SystemRandom};
 use zeroize::Zeroizing;
 
-use super::{Recipient, SealingPublicKey, Vault, VaultError, base64_text, from_base64};
+use super::{
+    Certificate, Recipient, SealingPublicKey, Vault, VaultError, base64_text, from_base64,
+};
 use crate::directorates::registry::backend::RegistryBackend;
 use crate::directorates::registry::sealed::{SealedCopy, SealedExpect, SealedRecord};
 
@@ -36,8 +38,8 @@ const KEY_PREFIX: &str = "scope-key/";
 const VALUE_PREFIX: &str = "value/";
 /// How many times a re-encryption retries a value another writer replaced meanwhile.
 const REENCRYPT_ATTEMPTS: usize = 8;
-/// The election term a record carries while records are unsigned.
-const UNSIGNED_TERM: u64 = 0;
+/// The term a value record carries: values are not signed, their key is what protects them.
+const VALUE_TERM: u64 = 0;
 
 /// Who a secret's key belongs to.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -211,7 +213,7 @@ impl ScopeKey {
 }
 
 /// `bytes` with its length in front, so two fields never run together.
-fn put(out: &mut Vec<u8>, bytes: &[u8]) {
+pub(super) fn put(out: &mut Vec<u8>, bytes: &[u8]) {
     out.extend_from_slice(&u32::try_from(bytes.len()).unwrap_or(u32::MAX).to_be_bytes());
     out.extend_from_slice(bytes);
 }
@@ -222,8 +224,18 @@ fn take(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
     (rest.len() >= len).then(|| rest.split_at(len))
 }
 
-fn hex(bytes: &[u8]) -> String {
+pub(super) fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+pub(super) fn unhex(text: &str) -> Option<Vec<u8>> {
+    if text.len() % 2 == 1 || !text.is_ascii() {
+        return None;
+    }
+    (0..text.len())
+        .step_by(2)
+        .map(|at| u8::from_str_radix(&text[at..at + 2], 16).ok())
+        .collect()
 }
 
 /// What a value's ciphertext is bound to.
@@ -345,6 +357,7 @@ impl StoredKey {
                 }
                 Some(("i:", id)) => parsed.id = id.to_owned(),
                 Some(("j:", id)) => parsed.previous_id = Some(id.to_owned()),
+                Some(("s:", _)) => {}
                 _ => return Err(VaultError::Unreadable),
             }
         }
@@ -419,18 +432,71 @@ fn value_name(name: &str) -> String {
 
 impl Vault {
     fn load_key(&self, scope: &Scope) -> Result<StoredKey, VaultError> {
+        let label = key_name(scope);
         let record = self
             .registry
-            .sealed_value(&key_name(scope))?
+            .sealed_value(&label)?
             .ok_or_else(|| VaultError::NoScopeKey(scope.to_string()))?;
+        let term = self.verify_key_record(&label, scope, &record)?;
         let stored = StoredKey::parse(&record)?;
-        self.marks.accept(
-            &key_name(scope),
-            UNSIGNED_TERM,
-            stored.revision,
-            Some(&stored.id),
-        )?;
+        self.marks
+            .accept(&label, term, stored.revision, Some(&stored.id))?;
         Ok(stored)
+    }
+
+    /// The election term `record` was signed in, once M's signature on it holds; 0 for a Station
+    /// that accepts records unsigned.
+    fn verify_key_record(
+        &self,
+        label: &str,
+        scope: &Scope,
+        record: &SealedRecord,
+    ) -> Result<u64, VaultError> {
+        if self.trust.accepts_unsigned() {
+            return Ok(0);
+        }
+        let verified = self.trust.verify_record(
+            label,
+            scope.as_str(),
+            record.revision,
+            &record.copies,
+            self.trust_time(),
+        )?;
+        self.accept_certificate(&verified.certificate)?;
+        Ok(verified.term)
+    }
+
+    /// Remembers the newest certificate of its subject: a lower serial is a key the root has since
+    /// replaced, and its signatures are refused from then on.
+    pub(super) fn accept_certificate(&self, certificate: &Certificate) -> Result<(), VaultError> {
+        self.marks.accept(
+            &format!("certificate/{}", certificate.subject),
+            0,
+            certificate.serial,
+            Some(&certificate.key),
+        )
+    }
+
+    /// Signs every scope key record again with this Station's signer, as it must after the root
+    /// certifies M's next key. Every record is read before any is written, since a Station that
+    /// has accepted the new certificate refuses the ones the old key signed.
+    ///
+    /// # Errors
+    ///
+    /// [`VaultError::NoSigner`], and the Registry's.
+    pub fn resign_scope_keys(&self, now: f64) -> Result<usize, VaultError> {
+        let mut held = Vec::new();
+        for stored_name in self.registry.sealed_revisions()?.into_keys() {
+            let Some(text) = stored_name.strip_prefix(KEY_PREFIX) else {
+                continue;
+            };
+            let scope = Scope::parse(text).map_err(|_| VaultError::Unreadable)?;
+            held.push((self.load_key(&scope)?, scope));
+        }
+        for (stored, scope) in &held {
+            self.store_key(scope, stored, SealedExpect::Revision(stored.revision), now)?;
+        }
+        Ok(held.len())
     }
 
     fn open_wrap(&self, scope: &Scope, copy: &SealedCopy) -> Result<ScopeKey, VaultError> {
@@ -475,15 +541,27 @@ impl Vault {
         expect: SealedExpect,
         now: f64,
     ) -> Result<u64, VaultError> {
-        let revision = self.registry.store_sealed(
-            &key_name(scope),
-            &stored.copies(),
-            &self.station,
-            expect,
-            now,
-        )?;
+        let label = key_name(scope);
+        let mut copies = stored.copies();
+        let mut term = 0;
+        if !self.trust.accepts_unsigned() {
+            let signer = self.signer.as_ref().ok_or(VaultError::NoSigner)?;
+            // Registry revisions go up by one, so the revision this write gets is known now.
+            let revision = match expect {
+                SealedExpect::Revision(held) => held + 1,
+                _ => 1,
+            };
+            term = signer.term()?;
+            // A signer in an older term than this Station accepted is refused before it writes.
+            self.marks.check(&label, term, revision, Some(&stored.id))?;
+            let signature = signer.sign_record(scope.as_str(), term, revision, &copies);
+            copies.extend(signature);
+        }
+        let revision = self
+            .registry
+            .store_sealed(&label, &copies, &self.station, expect, now)?;
         self.marks
-            .accept(&key_name(scope), UNSIGNED_TERM, revision, Some(&stored.id))?;
+            .accept(&label, term, revision, Some(&stored.id))?;
         Ok(revision)
     }
 
@@ -722,7 +800,7 @@ impl Vault {
                     break;
                 };
                 self.marks
-                    .accept(&stored_name, UNSIGNED_TERM, record.revision, None)?;
+                    .accept(&stored_name, VALUE_TERM, record.revision, None)?;
                 if is_gone(&record) {
                     break;
                 }
@@ -741,7 +819,7 @@ impl Vault {
                 ) {
                     Ok(revision) => {
                         self.marks
-                            .accept(&stored_name, UNSIGNED_TERM, revision, None)?;
+                            .accept(&stored_name, VALUE_TERM, revision, None)?;
                         break;
                     }
                     Err(VaultError::Conflict { .. }) => {}
@@ -790,7 +868,7 @@ impl Vault {
             SealedExpect::Revision(revision),
             now,
         )?;
-        self.marks.accept(&label, UNSIGNED_TERM, next, None)
+        self.marks.accept(&label, VALUE_TERM, next, None)
     }
 
     /// Encrypts `value` under the scope's key and writes it as `name`, when the value is at
@@ -832,7 +910,7 @@ impl Vault {
         let (held_revision, live) = match &held {
             Some(record) => {
                 self.marks
-                    .accept(&label, UNSIGNED_TERM, record.revision, None)?;
+                    .accept(&label, VALUE_TERM, record.revision, None)?;
                 let live = !is_gone(record);
                 if live && StoredValue::parse(record)?.scope != *scope {
                     return Err(VaultError::WrongScope);
@@ -857,7 +935,7 @@ impl Vault {
         between();
         let mut revision =
             self.store_encrypted(&key, name, scope, value.as_bytes(), expect, now)?;
-        self.marks.accept(&label, UNSIGNED_TERM, revision, None)?;
+        self.marks.accept(&label, VALUE_TERM, revision, None)?;
         for _ in 0..REENCRYPT_ATTEMPTS {
             let after = self.load_key(scope)?;
             if after.id == hex(&key.id) {
@@ -893,7 +971,7 @@ impl Vault {
                 now,
             ) {
                 Ok(next) => {
-                    self.marks.accept(&label, UNSIGNED_TERM, next, None)?;
+                    self.marks.accept(&label, VALUE_TERM, next, None)?;
                     revision = next;
                 }
                 Err(VaultError::Conflict { .. }) => {}
@@ -934,7 +1012,7 @@ impl Vault {
             .sealed_value(&label)?
             .ok_or(VaultError::NotFound)?;
         self.marks
-            .accept(&label, UNSIGNED_TERM, record.revision, None)?;
+            .accept(&label, VALUE_TERM, record.revision, None)?;
         if is_gone(&record) {
             return Err(VaultError::NotFound);
         }
@@ -1024,7 +1102,7 @@ impl Vault {
             return Ok(false);
         };
         self.marks
-            .accept(&label, UNSIGNED_TERM, record.revision, None)?;
+            .accept(&label, VALUE_TERM, record.revision, None)?;
         if is_gone(&record) {
             return Ok(false);
         }
@@ -1137,7 +1215,7 @@ pub fn list_scopes(registry: &dyn RegistryBackend) -> Result<Vec<ScopeKeyInfo>, 
 }
 
 /// Now, as Unix seconds.
-fn unix_now() -> f64 {
+pub(super) fn unix_now() -> f64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0.0, |elapsed| elapsed.as_secs_f64())

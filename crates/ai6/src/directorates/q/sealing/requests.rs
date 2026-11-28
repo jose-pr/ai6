@@ -9,8 +9,9 @@
 //!
 //! A request is `secret-request/<id>` (one sealed copy for each Station asked), the Station that
 //! takes it first claims `secret-claim/<id>`, and the answer is `secret-result/<id>`, read by
-//! [`status`]. Nothing here authenticates who made a request beyond the Registry's own access: a
-//! writer of the Registry can make one, as it can put a scope key record back.
+//! [`status`]. A request is signed by a key a root certified for requests (M's, or the gateway's),
+//! and a Station refuses one that is unsigned, expired, altered or signed by another key before it
+//! acts, unless it was told to accept them unsigned.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -19,9 +20,11 @@ use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 
 use super::envelope::{Scope, ScopeKeyInfo};
-use super::{Recipient, Vault, VaultError, base64_text, from_base64, published_key_of};
+use super::{Recipient, Signer, Vault, VaultError, base64_text, from_base64, published_key_of};
 use crate::directorates::registry::backend::RegistryBackend;
-use crate::directorates::registry::sealed::{SealedCopy, SealedExpect, SealedWriteError};
+use crate::directorates::registry::sealed::{
+    SealedCopy, SealedExpect, SealedRecord, SealedWriteError,
+};
 
 const REQUEST_PREFIX: &str = "secret-request/";
 const CLAIM_PREFIX: &str = "secret-claim/";
@@ -87,6 +90,28 @@ pub enum SecretRequest {
         /// The scope it must be in.
         scope: String,
     },
+}
+
+impl SecretRequest {
+    /// Whether doing this writes a scope key record, which only a Station holding M's key can.
+    fn changes_key_record(&self, vault: &Vault) -> bool {
+        match self {
+            Self::Put { name, scope, .. } => {
+                let scope = match scope {
+                    Some(text) => Scope::parse(text).ok(),
+                    None => vault
+                        .value_info(name)
+                        .ok()
+                        .flatten()
+                        .map(|held| held.scope)
+                        .or_else(|| Some(Scope::global())),
+                };
+                scope.is_none_or(|scope| !matches!(vault.scope_key_info(&scope), Ok(Some(_))))
+            }
+            Self::Rotate { .. } | Self::Remove { .. } => false,
+            Self::RotateKey { .. } | Self::Grant { .. } | Self::Revoke { .. } => true,
+        }
+    }
 }
 
 impl Drop for SecretRequest {
@@ -158,8 +183,9 @@ fn valid_id(id: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
-/// Seals `request` to each of `stations`, each checked against its pin, and leaves it in the
-/// Registry as `id` for the first of them that takes it. The gateway holds no key and needs none.
+/// Seals `request` to each of `stations`, each checked against its pin, signs it with `signer`
+/// (valid for `lifetime` seconds from `now`; unsigned when none), and leaves it in the Registry as
+/// `id` for the first of them that takes it. The gateway holds no sealing key and needs none.
 ///
 /// # Errors
 ///
@@ -170,6 +196,7 @@ pub fn ask(
     id: &str,
     request: &SecretRequest,
     stations: &[Recipient],
+    signer: Option<(&Signer, f64)>,
     now: f64,
 ) -> Result<(), VaultError> {
     if stations.is_empty() || !valid_id(id) {
@@ -186,6 +213,10 @@ pub fn ask(
                 sealed: base64_text(&public.seal(&plain)?),
             },
         );
+    }
+    if let Some((signer, lifetime)) = signer {
+        let names: Vec<String> = copies.keys().cloned().collect();
+        copies.extend(signer.sign_request(id, (now, now + lifetime), &plain, &names));
     }
     registry.store_sealed(
         &format!("{REQUEST_PREFIX}{id}"),
@@ -277,6 +308,14 @@ impl Vault {
             if self.registry.sealed_value(&result)?.is_some() {
                 continue;
             }
+            let opened = self.open_request(id, &record, copy, now);
+            // A change to a scope key record needs M's key: leave it for a Station that holds it.
+            if let Ok(request) = &opened
+                && !self.can_sign()
+                && request.changes_key_record(self)
+            {
+                continue;
+            }
             match self.registry.store_sealed(
                 &claim,
                 &plain_copy(&self.station, b""),
@@ -288,7 +327,7 @@ impl Vault {
                 Err(SealedWriteError::Conflict { .. }) => continue,
                 Err(error) => return Err(error.into()),
             }
-            let answer = match self.run_request(copy, now) {
+            let answer = match opened.and_then(|request| self.run_request(&request, now)) {
                 Ok(done) => (
                     "ok",
                     serde_json::to_vec(&done).map_err(|_| VaultError::Sealing)?,
@@ -309,12 +348,32 @@ impl Vault {
         Ok(answered)
     }
 
-    fn run_request(&self, copy: &SealedCopy, now: f64) -> Result<SecretOutcome, VaultError> {
+    /// Opens this Station's copy of request `id` and checks its signature before anything of it is
+    /// read.
+    fn open_request(
+        &self,
+        id: &str,
+        record: &SealedRecord,
+        copy: &SealedCopy,
+        now: f64,
+    ) -> Result<SecretRequest, VaultError> {
         let sealed = from_base64(&copy.sealed).ok_or(VaultError::Unreadable)?;
         let plain = self.key.open(&sealed).ok_or(VaultError::Unreadable)?;
-        let request: SecretRequest =
-            serde_json::from_slice(&plain).map_err(|_| VaultError::Unreadable)?;
-        match &request {
+        if !self.trust.accepts_unsigned() {
+            let verified = self.trust.verify_request(
+                &format!("{REQUEST_PREFIX}{id}"),
+                id,
+                &record.copies,
+                &plain,
+                now,
+            )?;
+            self.accept_certificate(&verified.certificate)?;
+        }
+        serde_json::from_slice(&plain).map_err(|_| VaultError::Unreadable)
+    }
+
+    fn run_request(&self, request: &SecretRequest, now: f64) -> Result<SecretOutcome, VaultError> {
+        match request {
             SecretRequest::Put {
                 name,
                 scope,
@@ -396,17 +455,10 @@ impl Vault {
             SecretRequest::Revoke { scope, station } => {
                 let info = self.revoke_station(&Scope::parse(scope)?, station, now)?;
                 let mut done = outcome("revoke", None, &info);
-                done.notes = vec![
-                    format!(
-                        "{station} keeps every value of the scope it could open before: replace \
-                         the secrets themselves at their source"
-                    ),
-                    format!(
-                        "until scope key records are signed, also revoke {station}'s Registry \
-                         credentials: a Station that can write the Registry can still put an \
-                         older key record back"
-                    ),
-                ];
+                done.notes = vec![format!(
+                    "{station} keeps every value of the scope it could open before: replace \
+                     the secrets themselves at their source"
+                )];
                 Ok(done)
             }
             SecretRequest::Remove { name, scope } => {

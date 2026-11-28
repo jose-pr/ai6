@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use super::*;
-use crate::directorates::q::sealing::{MARKS_FILE, Marks, SealingKey};
+use crate::directorates::q::sealing::{MARKS_FILE, Marks, SealingKey, Trust};
 use crate::directorates::registry::backend::RegistryBackend;
 use crate::directorates::registry::sealed::StationSealingKey;
 use crate::directorates::registry::store::FileRegistry;
@@ -20,7 +20,7 @@ fn station(registry: &Arc<dyn RegistryBackend>, name: &str) -> Vault {
     registry
         .publish_sealing_key(&StationSealingKey::new(name, key.public_key().to_text()))
         .unwrap();
-    Vault::new(registry.clone(), name, key)
+    Vault::new(registry.clone(), name, key).with_trust(Trust::unsigned())
 }
 
 fn named(stations: &[&str]) -> Vec<Recipient> {
@@ -722,7 +722,7 @@ fn a_rotation_wraps_only_to_a_key_that_verifies_against_the_recorded_pin() {
     let new_key = Arc::new(SealingKey::generate());
     publish_b(&new_key);
     a.rotate_scope_key(&op(), NOW).unwrap();
-    let b = Vault::new(registry.clone(), "b", new_key);
+    let b = Vault::new(registry.clone(), "b", new_key).with_trust(Trust::unsigned());
     assert_eq!(b.read_value("forge").unwrap().value.as_str(), PLANTED);
     assert!(c.read_value("forge").is_err());
 }
@@ -811,6 +811,7 @@ fn marks_are_kept_in_the_state_directory_and_a_restarted_station_still_refuses()
         .unwrap();
     let vault = || {
         Vault::new(registry.clone(), "a", key.clone())
+            .with_trust(Trust::unsigned())
             .with_marks(Arc::new(Marks::open(&path).unwrap()))
     };
     let a = vault();
@@ -961,6 +962,7 @@ fn one_put_through_a_request_is_read_by_two_stations_and_no_record_holds_the_val
         "req-1",
         &put("forge", "operation:alpha", PLANTED, &["a", "b"]),
         &named(&["a", "b"]),
+        None,
         NOW,
     )
     .unwrap();
@@ -1009,7 +1011,7 @@ fn a_revoke_through_a_request_shuts_the_station_out_of_the_next_revision_and_say
     let registry = registry(dir.path());
     let (a, b) = (station(&registry, "a"), station(&registry, "b"));
     let send = |id: &str, request: &SecretRequest, to: &[&str]| {
-        ask(registry.as_ref(), id, request, &named(to), NOW).unwrap();
+        ask(registry.as_ref(), id, request, &named(to), None, NOW).unwrap();
         a.serve_requests(NOW).unwrap();
         status(registry.as_ref(), id).unwrap()
     };
@@ -1033,7 +1035,7 @@ fn a_revoke_through_a_request_shuts_the_station_out_of_the_next_revision_and_say
     assert_eq!(revoked.stations, ["a"]);
     let notes = revoked.notes.join(" ");
     assert!(notes.contains("keeps every value"), "{notes}");
-    assert!(notes.contains("Registry credentials"), "{notes}");
+    assert!(!notes.contains("Registry credentials"), "{notes}");
     send("r3", &put("forge", "operation:alpha", PLANTED, &[]), &["a"]);
     assert_eq!(a.read_value("forge").unwrap().value.as_str(), PLANTED);
     assert!(matches!(b.read_value("forge"), Err(VaultError::NotNamed)));
@@ -1055,6 +1057,7 @@ fn a_key_rotation_through_a_request_leaves_every_value_readable_by_the_stations_
             scope: "operation:alpha".to_owned(),
         },
         &named(&["b"]),
+        None,
         NOW,
     )
     .unwrap();
@@ -1078,6 +1081,7 @@ fn a_request_a_station_cannot_do_is_answered_with_why_and_writes_nothing() {
         "no-wrap",
         &put("forge", "operation:alpha", PLANTED, &[]),
         &named(&["c"]),
+        None,
         NOW,
     )
     .unwrap();
@@ -1095,6 +1099,7 @@ fn a_request_a_station_cannot_do_is_answered_with_why_and_writes_nothing() {
             "x",
             &put("v", "global", "1", &[]),
             &[],
+            None,
             NOW
         )
         .is_err()
@@ -1105,6 +1110,7 @@ fn a_request_a_station_cannot_do_is_answered_with_why_and_writes_nothing() {
             "../x",
             &put("v", "global", "1", &[]),
             &named(&["a"]),
+            None,
             NOW
         )
         .is_err()
@@ -1134,6 +1140,7 @@ fn a_request_is_answered_and_a_value_moves_off_its_per_station_seal_on_every_bac
             pins: BTreeMap::new(),
         },
         &named(&["a"]),
+        None,
         NOW,
     )
     .unwrap();

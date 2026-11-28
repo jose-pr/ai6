@@ -74,6 +74,32 @@ impl Marks {
         })
     }
 
+    /// Whether `accept` would take the record, changing nothing: a signer checks before it writes.
+    ///
+    /// # Errors
+    ///
+    /// [`VaultError::Rollback`].
+    pub(super) fn check(
+        &self,
+        label: &str,
+        term: u64,
+        revision: u64,
+        key_id: Option<&str>,
+    ) -> Result<(), VaultError> {
+        let held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(mark) = held.get(label) else {
+            return Ok(());
+        };
+        let known = (mark.term, mark.revision);
+        let older = (term, revision) < known;
+        let retired = key_id.is_some_and(|id| mark.retired.contains(id));
+        let other = (term, revision) == known && mark.key_id.as_deref() != key_id;
+        if older || retired || other {
+            return Err(VaultError::Rollback(label.to_owned()));
+        }
+        Ok(())
+    }
+
     /// Accepts the record `label` at `(term, revision)` with `key_id`, or refuses it as older than
     /// one already accepted, or as another key at the same place.
     ///

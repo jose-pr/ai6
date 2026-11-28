@@ -17,10 +17,15 @@ use std::sync::Arc;
 mod envelope;
 mod marks;
 mod requests;
+mod signing;
 
 pub use envelope::{OpenedValue, Scope, ScopeKeyInfo, ValueInfo, list_scopes, list_values};
 pub use marks::{MARKS_FILE, Marks};
 pub use requests::{RequestStatus, SecretOutcome, SecretRequest, ask, status};
+pub use signing::{
+    Certificate, DEFAULT_REQUEST_LIFETIME, PublicKey, Purpose, Signer, SigningKey, TRUST_FILE,
+    Trust, TrustFile,
+};
 
 use base64::Engine as _;
 use crypto_box::aead::OsRng;
@@ -205,6 +210,14 @@ pub enum VaultError {
     Rollback(String),
     /// A rotation of the scope's key is unfinished and this Station cannot finish it.
     Rotating(String),
+    /// A record or request carries no signature, and this Station accepts none unsigned.
+    Unsigned(String),
+    /// A record or request is signed, and the signature or the key behind it is not trusted.
+    Untrusted(String, String),
+    /// This Station holds no key it may sign scope-key records with.
+    NoSigner,
+    /// There is no live Headquarters election term to sign in.
+    NoTerm,
 }
 
 impl fmt::Display for VaultError {
@@ -240,6 +253,17 @@ impl fmt::Display for VaultError {
                 f,
                 "a rotation of scope {scope:?} is unfinished and this Station cannot finish it"
             ),
+            Self::Unsigned(label) => write!(
+                f,
+                "{label:?} is not signed, and this Station accepts nothing unsigned"
+            ),
+            Self::Untrusted(label, why) => write!(f, "{label:?} is refused: {why}"),
+            Self::NoSigner => f.write_str(
+                "this Station holds no key M signs scope-key records with, so it cannot change one",
+            ),
+            Self::NoTerm => {
+                f.write_str("no Station holds the Headquarters lease, so nothing is signed")
+            }
         }
     }
 }
@@ -331,6 +355,9 @@ pub struct Vault {
     station: String,
     key: Arc<SealingKey>,
     marks: Arc<Marks>,
+    trust: Arc<Trust>,
+    signer: Option<Signer>,
+    clock: Option<Arc<dyn Fn() -> f64 + Send + Sync>>,
 }
 
 impl fmt::Debug for Vault {
@@ -353,7 +380,50 @@ impl Vault {
             station: station.into(),
             key,
             marks: Arc::new(Marks::in_memory()),
+            trust: Arc::new(Trust::default()),
+            signer: None,
+            clock: None,
         }
+    }
+
+    /// Reads the time certificates are checked at from `clock` (Unix seconds) instead of the
+    /// system's.
+    #[must_use]
+    pub fn with_clock(mut self, clock: impl Fn() -> f64 + Send + Sync + 'static) -> Self {
+        self.clock = Some(Arc::new(clock));
+        self
+    }
+
+    fn trust_time(&self) -> f64 {
+        self.clock
+            .as_ref()
+            .map_or_else(envelope::unix_now, |clock| clock())
+    }
+
+    /// Trusts what `trust` says: by default strict with no root, which refuses every scope-key
+    /// record.
+    #[must_use]
+    pub fn with_trust(mut self, trust: Trust) -> Self {
+        self.trust = Arc::new(trust);
+        self
+    }
+
+    /// Lets this Station sign scope-key records and secret requests as M, with `signer`.
+    #[must_use]
+    pub fn with_signer(mut self, signer: Signer) -> Self {
+        self.signer = Some(signer);
+        self
+    }
+
+    /// What this Station trusts.
+    pub fn trust(&self) -> &Trust {
+        &self.trust
+    }
+
+    /// Whether this Station can change a scope-key record: it holds M's key, or accepts them
+    /// unsigned.
+    pub fn can_sign(&self) -> bool {
+        self.signer.is_some() || self.trust.accepts_unsigned()
     }
 
     /// Keeps what this Station accepts of the Registry's secret records in `marks`, so a record
@@ -757,7 +827,7 @@ mod tests {
         registry
             .publish_sealing_key(&StationSealingKey::new(name, key.public_key().to_text()))
             .unwrap();
-        Vault::new(registry.clone(), name, key)
+        Vault::new(registry.clone(), name, key).with_trust(Trust::unsigned())
     }
 
     fn registry(dir: &Path) -> Arc<dyn RegistryBackend> {
