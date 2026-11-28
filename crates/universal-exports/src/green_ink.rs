@@ -89,7 +89,7 @@ fn registry_error(error: std::io::Error) -> ApiError {
     match error.kind() {
         std::io::ErrorKind::NotFound => ApiError::not_found(),
         std::io::ErrorKind::AlreadyExists => ApiError::from(GatewayError::Conflict),
-        std::io::ErrorKind::InvalidInput => ApiError::bad_request(),
+        std::io::ErrorKind::InvalidInput => ApiError::invalid(error.to_string()),
         _ => ApiError::internal(),
     }
 }
@@ -123,7 +123,9 @@ fn note(text: Option<String>, chars: ai6::Limit) -> Result<Option<String>, ApiEr
             .chars()
             .any(|character| character.is_control() && character != '\n')
     {
-        return Err(ApiError::bad_request());
+        return Err(ApiError::invalid(format!(
+            "the note must be 1 to {chars} characters, with no control characters other than newlines"
+        )));
     }
     Ok(Some(text))
 }
@@ -785,6 +787,36 @@ pub(crate) async fn revoke_class(
 #[cfg(test)]
 mod tests {
     use ai6::directorates::registry::backend::*;
+
+    #[test]
+    fn a_note_over_the_bound_is_refused_naming_the_bound() {
+        let refused = super::note(Some("x".repeat(11)), ai6::Limit::at(10)).unwrap_err();
+        assert_eq!(refused.status, axum::http::StatusCode::BAD_REQUEST);
+        assert!(
+            refused.message.contains("1 to 10 characters"),
+            "{}",
+            refused.message
+        );
+        assert!(super::note(Some("x".repeat(10)), ai6::Limit::at(10)).is_ok());
+        let control = super::note(Some("a\u{7}b".to_owned()), ai6::Limit::at(10)).unwrap_err();
+        assert!(control.message.contains("control characters"));
+    }
+
+    #[test]
+    fn a_stores_invalid_input_reaches_the_caller_with_its_text() {
+        let store = std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "the note must be 1 to 1024 bytes without control characters other than newlines",
+        );
+        let refused = super::registry_error(store);
+        assert_eq!(refused.status, axum::http::StatusCode::BAD_REQUEST);
+        assert!(
+            refused.message.contains("1024 bytes"),
+            "{}",
+            refused.message
+        );
+    }
+
     use ai6::{ActionScope, ApprovalStatus, MissionId, RunId};
 
     use crate::controls::tests::{Served, served_with};

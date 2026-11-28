@@ -1102,6 +1102,45 @@ fn lines(output: &std::process::Output) -> Vec<String> {
 }
 
 #[tokio::test]
+async fn a_green_ink_note_over_the_bound_prints_the_gateways_reason() {
+    let (server, shutdown, token, directory) = start_gateway().await;
+    let registry = FileRegistry::open(directory.path());
+    let main = asked(&registry, "origin:refs/heads/main", "push-main");
+    let long = "x".repeat(1_025);
+    let args = [
+        "green-ink",
+        "approve",
+        main.id.as_str(),
+        "--operation",
+        "operation-01",
+        "--note",
+        long.as_str(),
+    ];
+    let refused = ai6ctl(server.clone(), Some(token.clone()), &args).await;
+    assert_eq!(refused.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(
+        stderr.contains("the note must be 1 to 1024 characters"),
+        "the bound is named: {stderr}"
+    );
+    assert!(!stderr.contains("out of bounds"), "{stderr}");
+    let still_waiting = lines(
+        &ai6ctl(
+            server,
+            Some(token),
+            &["green-ink", "list", "--operation", "operation-01"],
+        )
+        .await,
+    );
+    assert_eq!(
+        still_waiting.len(),
+        2,
+        "nothing was decided: {still_waiting:?}"
+    );
+    let _ = shutdown.send(());
+}
+
+#[tokio::test]
 async fn green_ink_is_listed_signed_refused_and_revoked_and_class_authorisations_revoked() {
     let (server, shutdown, token, directory) = start_gateway().await;
     let registry = FileRegistry::open(directory.path());

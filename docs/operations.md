@@ -312,6 +312,12 @@ park = ["merge PR 7"]                    # KIND PATTERN: always waits for a pers
 | `deny` | none | Steps refused outright, each `KIND PATTERN` (a glob on the target; a pushed or released ref is matched by its full name). No request is filed for one |
 | `park` | none | Steps that always wait for a person, whatever the clearance, `unattended` list or class authorisation says |
 
+A signer's `--note` (and a rejection's `--reason`) is bounded twice. The gateway allows up to
+`[unex.text] green_ink_note_chars` characters (1,024 by default; raise or lift it there), and the
+Registry stores at most `[registry.limits.approvals] note_bytes` bytes (1 KiB by default), so a note of many
+multi-byte characters can pass the first and fail the second. Control characters other than
+newlines are refused. A refused note answers 400 with the bound that failed, and `ai6ctl` prints it.
+
 An invalid value fails the load with an error naming the key. A Station prints each setting
 looser than `strict` when it starts.
 
