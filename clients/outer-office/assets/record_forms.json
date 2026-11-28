@@ -11164,13 +11164,20 @@
               "title": "Refused request body read",
               "description": "Bytes of a refused request's body the Station's own API reads before it answers.",
               "default": 65536
+            },
+            "audit_reads": {
+              "type": "boolean",
+              "title": "Audit reads of Mission data on the Station API",
+              "description": "Whether a read of a Mission's data through the Station's own API (the Mission, and its Cable inbox and held list) is written to the audit log before it is answered. Off, such a read leaves no record. A weakening.",
+              "default": true
             }
           },
           "additionalProperties": false,
           "title": "The Station's own API",
           "description": "`[api]`: the Station's own HTTP API.",
           "default": {
-            "refused_body_drain_bytes": 65536
+            "refused_body_drain_bytes": 65536,
+            "audit_reads": true
           }
         },
         "audit": {

@@ -9928,7 +9928,10 @@ pub ai6::station::limits::AccountLimits::unknown_use_permille: u16
 impl core::default::Default for ai6::station::limits::AccountLimits
 pub fn ai6::station::limits::AccountLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::station::limits::ApiLimits
+pub ai6::station::limits::ApiLimits::audit_reads: bool
 pub ai6::station::limits::ApiLimits::refused_body_drain_bytes: ai6::bounds::Limit
+impl ai6::station::limits::ApiLimits
+pub fn ai6::station::limits::ApiLimits::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::station::limits::ApiLimits
 pub fn ai6::station::limits::ApiLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::station::limits::ApprovalLimits

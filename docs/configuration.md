@@ -1535,6 +1535,7 @@ a Run. `unpinned = true` is a weakening, named each time such an overlay is issu
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `refused_body_drain_bytes` | 64 KiB | **Refused request body read.** Bytes of a refused request's body the Station's own API reads before it answers. |
+| `audit_reads` | `true` | **Audit reads of Mission data on the Station API.** Whether a read of a Mission's data through the Station's own API (the Mission, and its Cable inbox and held list) is written to the audit log before it is answered. Off, such a read leaves no record. A weakening. |
 <!-- schema:record.station.api:end -->
 
 `[audit]`
