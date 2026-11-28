@@ -487,6 +487,71 @@ fn pending_proposal(served: &Served, operation: &str) -> String {
 }
 
 #[tokio::test]
+async fn a_proposal_is_shown_whole_to_a_reader_and_another_operations_answers_not_found() {
+    let served = served_with(ROLES).await;
+    let own = served
+        .registry
+        .propose_issues(&IssueProposal {
+            id: String::new(),
+            operation: "G".to_owned(),
+            mission_id: MISSION.to_owned(),
+            proposer: "agent:007".to_owned(),
+            specs: vec![ProposedIssue {
+                tracker: "gh".to_owned(),
+                title: "Split".to_owned(),
+                body: "The whole body of the spec".to_owned(),
+                labels: vec!["bug".to_owned()],
+                ..ProposedIssue::default()
+            }],
+            exposure: Vec::new(),
+            findings: Vec::new(),
+            dropped: Vec::new(),
+            state: ProposalState::Pending,
+            decided_by: None,
+            mark_ready: false,
+            created: Vec::new(),
+            failed: Vec::new(),
+            retry_key: None,
+            told: false,
+            at: 1.0,
+        })
+        .unwrap()
+        .id;
+    let foreign = pending_proposal(&served, "L");
+    let shown = call(
+        &served,
+        &served.viewer,
+        Method::GET,
+        &format!("G/issue-proposals/{own}"),
+        None,
+    )
+    .await;
+    assert_eq!(shown.status(), 200);
+    let shown: Value = shown.json().await.unwrap();
+    assert_eq!(shown["id"], own.as_str());
+    assert_eq!(shown["specs"][0]["body"], "The whole body of the spec");
+    assert_eq!(shown["specs"][0]["labels"][0], "bug");
+    let elsewhere = call(
+        &served,
+        &served.viewer,
+        Method::GET,
+        &format!("G/issue-proposals/{foreign}"),
+        None,
+    )
+    .await;
+    assert_eq!(elsewhere.status(), 404, "another Operation's proposal");
+    let missing = call(
+        &served,
+        &served.viewer,
+        Method::GET,
+        "G/issue-proposals/nope",
+        None,
+    )
+    .await;
+    assert_eq!(missing.status(), 404);
+}
+
+#[tokio::test]
 async fn a_proposal_is_listed_decided_once_and_mark_ready_needs_mission_create() {
     let served = served_with(ROLES).await;
     let first = pending_proposal(&served, "G");

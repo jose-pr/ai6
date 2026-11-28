@@ -476,7 +476,7 @@ enum GreenInkCommand {
         /// Seconds the approval lasts; one hour when omitted.
         #[arg(long)]
         expires_in: Option<u64>,
-        /// What to tell the Agent.
+        /// What to tell the Agent; up to the Operation's note limit (1,024 characters by default).
         #[arg(long)]
         note: Option<String>,
     },
@@ -498,7 +498,7 @@ enum GreenInkCommand {
         /// AI6 Operation ID.
         #[arg(long)]
         operation: String,
-        /// Why, for the record.
+        /// Why, for the record; up to the Operation's note limit (1,024 characters by default).
         #[arg(long)]
         reason: Option<String>,
     },
@@ -513,7 +513,7 @@ enum GreenInkCommand {
         /// Seconds it waits; as long as it first waited when omitted.
         #[arg(long)]
         expires_in: Option<u64>,
-        /// Why, for the record.
+        /// Why, for the record; up to the Operation's note limit (1,024 characters by default).
         #[arg(long)]
         note: Option<String>,
     },
@@ -616,11 +616,42 @@ struct IssueProposalRow {
     state: String,
     proposer: String,
     mission_id: String,
-    specs: Vec<serde_json::Value>,
+    specs: Vec<IssueSpecRow>,
+    #[serde(default)]
+    exposure: Vec<String>,
     #[serde(default)]
     findings: Vec<String>,
     #[serde(default)]
     dropped: Vec<String>,
+    #[serde(default)]
+    decided_by: Option<String>,
+    #[serde(default)]
+    mark_ready: bool,
+    #[serde(default)]
+    created: Vec<String>,
+    #[serde(default)]
+    failed: Vec<String>,
+}
+
+/// One issue a proposal asks to create; every string is the Agent's own.
+#[derive(Debug, Default, Deserialize)]
+struct IssueSpecRow {
+    #[serde(default)]
+    tracker: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    body: String,
+    #[serde(default)]
+    labels: Vec<String>,
+    #[serde(default)]
+    issue_type: Option<String>,
+    #[serde(default)]
+    priority: Option<String>,
+    #[serde(default)]
+    parent: Option<String>,
+    #[serde(default)]
+    mirror_of: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -744,6 +775,13 @@ enum IssuesCommand {
 enum IssueProposalsCommand {
     /// What Agents asked to create and how it came out.
     List {
+        #[arg(long)]
+        operation: String,
+    },
+    /// Show one proposal whole: each issue's tracker, title, labels and body, to read before
+    /// approving.
+    Show {
+        id: String,
         #[arg(long)]
         operation: String,
     },
@@ -3517,6 +3555,23 @@ async fn issue_proposals_command(
             print_issue_proposals(&listed);
             return Ok(());
         }
+        IssueProposalsCommand::Show { id, operation } => {
+            let request = operation_request(
+                client,
+                server,
+                token,
+                Method::GET,
+                &[&operation, "issue-proposals", &id],
+            )?;
+            let shown: IssueProposalRow = send(
+                request,
+                "this needs mission.read on the Operation",
+                "issue proposal",
+            )
+            .await?;
+            print_issue_proposal(&shown);
+            return Ok(());
+        }
         IssueProposalsCommand::Approve {
             id,
             operation,
@@ -3550,6 +3605,50 @@ async fn issue_proposals_command(
     let decided: IssueProposalRow = send(request, PERMISSION, "issue proposal decision").await?;
     println!("{}\t{}", plain(&decided.id), plain(&decided.state));
     Ok(())
+}
+
+fn print_issue_proposal(proposal: &IssueProposalRow) {
+    let none = |items: &[String]| {
+        if items.is_empty() {
+            "-".to_owned()
+        } else {
+            plain(&items.join(","))
+        }
+    };
+    println!("id\t{}", plain(&proposal.id));
+    println!("state\t{}", plain(&proposal.state));
+    println!("proposer\t{}", plain(&proposal.proposer));
+    println!("mission\t{}", plain(&proposal.mission_id));
+    println!("exposure\t{}", none(&proposal.exposure));
+    println!("findings\t{}", none(&proposal.findings));
+    println!("dropped\t{}", none(&proposal.dropped));
+    if let Some(by) = &proposal.decided_by {
+        println!("decided by\t{}", plain(by));
+        println!("mark ready\t{}", proposal.mark_ready);
+    }
+    if !proposal.created.is_empty() {
+        println!("created\t{}", none(&proposal.created));
+    }
+    for failed in &proposal.failed {
+        println!("failed\t{}", plain(failed));
+    }
+    for (number, spec) in proposal.specs.iter().enumerate() {
+        println!("\nissue {}", number + 1);
+        println!("tracker\t{}", plain(&spec.tracker));
+        println!("title\t{}", plain(&spec.title));
+        println!("labels\t{}", none(&spec.labels));
+        for (name, value) in [
+            ("type", &spec.issue_type),
+            ("priority", &spec.priority),
+            ("parent", &spec.parent),
+            ("mirror of", &spec.mirror_of),
+        ] {
+            if let Some(value) = value {
+                println!("{name}\t{}", plain(value));
+            }
+        }
+        println!("\n{}", plain_text(&spec.body));
+    }
 }
 
 fn print_issue_proposals(listed: &[IssueProposalRow]) {
@@ -3717,6 +3816,23 @@ async fn send<T: DeserializeOwned>(
         .map_err(|_| "could not contact Universal Exports".to_owned())?;
     let status = response.status();
     if !status.is_success() {
+        // A 400 carries the gateway's own reason (a bound it names); an empty body keeps the
+        // generic text.
+        let reason = if status == StatusCode::BAD_REQUEST {
+            let body = response.text().await.unwrap_or_default();
+            serde_json::from_str::<serde_json::Value>(&body)
+                .ok()
+                .and_then(|value| value["error"].as_str().map(str::to_owned))
+                .unwrap_or(body)
+        } else {
+            String::new()
+        };
+        let reason = plain(reason.trim());
+        if !reason.is_empty() {
+            return Err(format!(
+                "Universal Exports returned HTTP {status}: {reason}"
+            ));
+        }
         let detail = match status {
             StatusCode::FORBIDDEN => format!(" ({permission} on the Operation is required)"),
             StatusCode::NOT_FOUND => " (no such request or class authorisation)".to_owned(),
@@ -4959,6 +5075,21 @@ fn plain(value: &str) -> String {
         .chars()
         .map(|character| {
             if character.is_control() {
+                '\u{fffd}'
+            } else {
+                character
+            }
+        })
+        .collect()
+}
+
+/// [`plain`] for a multi-line text: line breaks and tabs stay, every other control character
+/// is replaced.
+fn plain_text(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| {
+            if character.is_control() && !matches!(character, '\n' | '\t') {
                 '\u{fffd}'
             } else {
                 character

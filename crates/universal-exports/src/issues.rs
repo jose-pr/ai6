@@ -1030,6 +1030,18 @@ pub(crate) async fn proposals(
     ))
 }
 
+/// `GET /v1/user/operations/{operation_id}/issue-proposals/{id}`: one proposal whole, so an
+/// approver reads each spec's body before deciding. Another Operation's answers `404`.
+pub(crate) async fn proposal(
+    State(gateway): State<Gateway>,
+    headers: HeaderMap,
+    Path((operation_id, id)): Path<(String, String)>,
+) -> Result<Json<IssueProposal>, ApiError> {
+    let (_, operation, registry) =
+        authorized(&gateway, &headers, operation_id, "mission.read").await?;
+    Ok(Json(proposal_of(&registry, &operation, &id).await?))
+}
+
 /// The proposal `id` of this Operation; another Operation's answers `404`.
 async fn proposal_of(
     registry: &Arc<dyn RegistryBackend>,

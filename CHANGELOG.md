@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `ai6ctl issue-proposals show ID --operation G` prints one issue proposal whole (each spec's tracker, title, labels and body, the exposure, findings and outcome) from the new `GET /v1/user/operations/{operation_id}/issue-proposals/{id}` (`mission.read`; another Operation's proposal answers 404), so an approver reads what they approve.
+
 - A handler compacts and clears a live session: `AgentHandler::session_commands` (a new method of the handler kind: every handler plugin is rebuilt, its floor hash moved) says which, and a
   `SessionCommand` message (`compact` with an optional focus, `clear`) sent to a Run's session is a turn that reports
   `compacted` (tokens before and after), `compact_failed` or `cleared` before it completes. Claude Code runs `/compact` and
@@ -291,6 +293,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - A brief still claimed by a Mission that ended on this Station is filed by the intake pass, and a verdict on a closed
   Run whose claiming Station is dark files the claim.
+
+- A green ink note or reason that is too long (or holds a control character) is refused with the bound it broke ("the note must be 1 to 1024 characters ...", or the store's byte bound) instead of a bare 400, and `ai6ctl` prints a 400's reason where it said "a value is out of bounds"; `--note` help and `docs/operations.md` state both bounds.
 
 - `ai6ctl held-briefs` says in its help, and a refused list says in its error, that listing needs `mission.create` on the Operation and `mission.read` is not enough.
 

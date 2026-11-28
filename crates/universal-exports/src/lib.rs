@@ -2060,6 +2060,10 @@ impl Gateway {
                 get(issues::proposals),
             )
             .route(
+                "/v1/user/operations/{operation_id}/issue-proposals/{id}",
+                get(issues::proposal),
+            )
+            .route(
                 "/v1/user/operations/{operation_id}/issue-proposals/{id}/approve",
                 post(issues::approve),
             )

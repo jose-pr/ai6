@@ -1280,6 +1280,7 @@ ai6ctl mission issues m-12 --operation G
 ai6ctl issues comment github:jose-pr/ai6#12 --mission m-12 --operation G --body "Use the release branch."
 ai6ctl issues link jira:GUA-7 --mission m-12 --operation G --relation related
 ai6ctl issue-proposals list --operation G
+ai6ctl issue-proposals show ip-1 --operation G
 ai6ctl issue-proposals approve ip-1 --operation G --mark-ready
 ```
 

@@ -46,6 +46,17 @@ async fn stand_in(
             "findings": ["duplicate"], "dropped": ["assignees"], "state": "pending",
         }]))
         .into_response(),
+        ("GET", "/v1/user/operations/G/issue-proposals/ip-1") => axum::Json(json!({
+            "id": "ip-1", "operation": "G", "mission_id": "m1", "proposer": "agent:007",
+            "specs": [{
+                "tracker": "gh", "title": "Split the loader", "labels": ["bug", "loader"],
+                "body": "First line\nSecond line\u{1b}[31m red", "priority": "high",
+                "mirror_of": "gh:o/r#9",
+            }],
+            "exposure": ["source_gh"], "findings": ["duplicate"], "dropped": ["assignees"],
+            "state": "pending",
+        }))
+        .into_response(),
         ("POST", "/v1/user/operations/G/issue-proposals/ip-1/approve")
         | ("POST", "/v1/user/operations/G/issue-proposals/ip-1/reject") => axum::Json(json!({
             "id": "ip-1", "operation": "G", "mission_id": "m1", "proposer": "agent:007",
@@ -232,4 +243,33 @@ async fn issue_proposals_are_listed_without_their_text_and_decided() {
     let seen = seen.lock().unwrap();
     assert_eq!(seen[1].2["mark_ready"], true);
     assert_eq!(seen[2].2["reason"], "no");
+}
+
+#[tokio::test]
+async fn issue_proposals_show_prints_each_spec_with_its_body() {
+    let (server, seen) = serve().await;
+    let (ok, out, err) = ai6ctl(
+        &server,
+        &["issue-proposals", "show", "ip-1", "--operation", "G"],
+    )
+    .await;
+    assert!(ok, "{err}");
+    assert!(out.contains("state\tpending"), "{out}");
+    assert!(out.contains("exposure\tsource_gh"), "{out}");
+    assert!(out.contains("title\tSplit the loader"), "{out}");
+    assert!(out.contains("labels\tbug,loader"), "{out}");
+    assert!(out.contains("priority\thigh"), "{out}");
+    assert!(
+        out.contains("First line\nSecond line"),
+        "the body keeps its lines: {out}"
+    );
+    assert!(
+        !out.contains('\u{1b}'),
+        "the Agent's text hides no control character: {out}"
+    );
+    let seen = seen.lock().unwrap();
+    assert_eq!(
+        seen.last().unwrap().1,
+        "/v1/user/operations/G/issue-proposals/ip-1"
+    );
 }
