@@ -27,6 +27,28 @@ const CA_FILE_ENV: &str = "UNEX_CA_FILE";
 const ACCESS_TOKEN_ENV: &str = "UNEX_ACCESS_TOKEN";
 const DEFAULT_CONTROL_WAIT_SECS: u64 = 10;
 
+/// The `--timeout` in force and when the command started, for naming a timeout in an error.
+static REQUEST_LIMIT: std::sync::OnceLock<(f64, std::time::Instant)> = std::sync::OnceLock::new();
+
+/// What a request that got no answer says: a timeout names the wait and the setting (the request
+/// may still have been stored, so the person is told how to look), anything else says the gateway
+/// could not be reached.
+fn contact_failure(error: &reqwest::Error) -> String {
+    contact_failure_after(error.is_timeout(), REQUEST_LIMIT.get().copied())
+}
+
+fn contact_failure_after(timed_out: bool, limit: Option<(f64, std::time::Instant)>) -> String {
+    match (timed_out, limit) {
+        (true, Some((seconds, started))) => format!(
+            "Universal Exports did not answer within {:.1} s (--timeout {seconds}, waited {:.1} s);              a write may still have been stored: look before sending it again, or raise --timeout",
+            seconds,
+            started.elapsed().as_secs_f64()
+        ),
+        (true, None) => "Universal Exports did not answer in time".to_owned(),
+        (false, _) => "could not contact Universal Exports".to_owned(),
+    }
+}
+
 /// A number of seconds, whole or fractional, finite and not negative.
 fn seconds(text: &str) -> Result<f64, String> {
     match text.parse::<f64>() {
@@ -1670,6 +1692,7 @@ async fn run() -> Result<(), String> {
     for certificate in ca_certificates(cli.ca_file.as_deref(), cli.config.as_deref())? {
         builder = builder.add_root_certificate(certificate);
     }
+    let _ = REQUEST_LIMIT.set((cli.timeout, std::time::Instant::now()));
     if cli.timeout > 0.0 {
         builder =
             builder.timeout(Duration::try_from_secs_f64(cli.timeout).unwrap_or(Duration::MAX));
@@ -1684,7 +1707,7 @@ async fn run() -> Result<(), String> {
                 .get(endpoint(&server, "/health"))
                 .send()
                 .await
-                .map_err(|_| "could not contact Universal Exports".to_owned())?;
+                .map_err(|error| crate::contact_failure(&error))?;
             if !response.status().is_success() {
                 return Err(format!(
                     "Universal Exports returned HTTP {}",
@@ -2858,7 +2881,7 @@ async fn board(client: &Client, server: &Url, access_token: &str) -> Result<Vec<
     let response = board_request(client, server, access_token)
         .send()
         .await
-        .map_err(|_| "could not contact Universal Exports".to_owned())?;
+        .map_err(|error| crate::contact_failure(&error))?;
     let status = response.status();
     if !status.is_success() {
         return Err(format!("Universal Exports returned HTTP {status}"));
@@ -2878,7 +2901,7 @@ async fn missions(
     let response = missions_request(client, server, access_token, filter)
         .send()
         .await
-        .map_err(|_| "could not contact Universal Exports".to_owned())?;
+        .map_err(|error| crate::contact_failure(&error))?;
     let status = response.status();
     if !status.is_success() {
         return Err(format!("Universal Exports returned HTTP {status}"));
@@ -3047,7 +3070,7 @@ async fn stations(
     let response = stations_request(client, server, access_token)
         .send()
         .await
-        .map_err(|_| "could not contact Universal Exports".to_owned())?;
+        .map_err(|error| crate::contact_failure(&error))?;
     let status = response.status();
     if !status.is_success() {
         return Err(format!("Universal Exports returned HTTP {status}"));
@@ -3106,7 +3129,7 @@ async fn pages(
         .bearer_auth(token)
         .send()
         .await
-        .map_err(|_| "could not contact Universal Exports".to_owned())?;
+        .map_err(|error| crate::contact_failure(&error))?;
     let status = response.status();
     if !status.is_success() {
         let reason = response
@@ -3176,7 +3199,7 @@ async fn agent_roles(
     let response = agent_roles_request(client, server, access_token, operation)?
         .send()
         .await
-        .map_err(|_| "could not contact Universal Exports".to_owned())?;
+        .map_err(|error| crate::contact_failure(&error))?;
     let status = response.status();
     if !status.is_success() {
         return Err(format!("Universal Exports returned HTTP {status}"));
@@ -3833,7 +3856,7 @@ async fn send<T: DeserializeOwned>(
     let response = request
         .send()
         .await
-        .map_err(|_| "could not contact Universal Exports".to_owned())?;
+        .map_err(|error| crate::contact_failure(&error))?;
     let status = response.status();
     if !status.is_success() {
         // A 400 carries the gateway's own reason (a bound it names); an empty body keeps the
@@ -3889,7 +3912,7 @@ async fn post_to_charge(
         .bearer_auth(access_token)
         .send()
         .await
-        .map_err(|_| "could not contact Universal Exports".to_owned())?;
+        .map_err(|error| crate::contact_failure(&error))?;
     let status = response.status();
     if !status.is_success() {
         let detail = match status {
@@ -3918,7 +3941,7 @@ async fn withdraw_mission(request: reqwest::RequestBuilder) -> Result<WithdrawnM
     let response = request
         .send()
         .await
-        .map_err(|_| "could not contact Universal Exports".to_owned())?;
+        .map_err(|error| crate::contact_failure(&error))?;
     let status = response.status();
     if !status.is_success() {
         let detail = match status {
@@ -4373,7 +4396,7 @@ async fn pool_change(request: reqwest::RequestBuilder, done: &str) -> Result<(),
     let response = request
         .send()
         .await
-        .map_err(|_| "could not contact Universal Exports".to_owned())?;
+        .map_err(|error| crate::contact_failure(&error))?;
     match response.status() {
         status if status.is_success() => {
             println!("{done}");
@@ -4639,7 +4662,7 @@ async fn control(
         .json(&body)
         .send()
         .await
-        .map_err(|_| "could not contact Universal Exports".to_owned())?;
+        .map_err(|error| crate::contact_failure(&error))?;
     let mut status = control_response(response).await?;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(options.wait);
     while matches!(status.status.as_str(), "queued" | "delivered")
@@ -4652,7 +4675,7 @@ async fn control(
         let response = control_status_request(client, server, access_token, &status)?
             .send()
             .await
-            .map_err(|_| "could not contact Universal Exports".to_owned())?;
+            .map_err(|error| crate::contact_failure(&error))?;
         status = control_response(response).await?;
     }
     Ok(status)
@@ -5122,6 +5145,19 @@ fn plain_text(value: &str) -> String {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn a_timeout_is_named_with_the_wait_and_the_setting() {
+        let started = std::time::Instant::now();
+        let said = contact_failure_after(true, Some((2.5, started)));
+        assert!(said.contains("did not answer within 2.5 s"), "{said}");
+        assert!(said.contains("--timeout 2.5"), "{said}");
+        assert!(said.contains("may still have been stored"), "{said}");
+        assert_eq!(
+            contact_failure_after(false, Some((2.5, started))),
+            "could not contact Universal Exports"
+        );
+    }
 
     #[test]
     fn the_models_listing_shows_a_routes_cap_and_a_dash_for_none() {

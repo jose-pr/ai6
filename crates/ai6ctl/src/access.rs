@@ -279,7 +279,7 @@ pub(crate) async fn exchange(
     let response = request
         .send()
         .await
-        .map_err(|_| "could not contact Universal Exports".to_owned())?;
+        .map_err(|error| crate::contact_failure(&error))?;
     let status = response.status();
     let value: Value = response.json().await.unwrap_or(Value::Null);
     if status.is_success() {

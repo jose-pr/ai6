@@ -328,7 +328,7 @@ async fn fetch_document(
         .header("accept", "text/markdown")
         .send()
         .await
-        .map_err(|_| "could not contact Universal Exports".to_owned())?;
+        .map_err(|error| crate::contact_failure(&error))?;
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
     Ok((status, body))
@@ -397,7 +397,7 @@ pub(crate) async fn import_documents(
             .body(document)
             .send()
             .await
-            .map_err(|_| "could not contact Universal Exports".to_owned())?;
+            .map_err(|error| crate::contact_failure(&error))?;
         let status = response.status();
         let answer: Value = response.json().await.unwrap_or(Value::Null);
         if !status.is_success() {

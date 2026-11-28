@@ -238,7 +238,7 @@ impl<'a> Gateway<'a> {
         let response = request
             .send()
             .await
-            .map_err(|_| "could not contact Universal Exports".to_owned())?;
+            .map_err(|error| crate::contact_failure(&error))?;
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
         let value: Value = serde_json::from_str(&body).unwrap_or(Value::Null);

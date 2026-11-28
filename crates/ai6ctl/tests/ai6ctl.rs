@@ -2388,3 +2388,24 @@ async fn a_charge_is_woken_now_from_the_command_line_and_a_running_turn_is_repor
     assert_eq!(wake!("operation:nowhere").status.code(), Some(1));
     let _ = shutdown.send(());
 }
+
+#[tokio::test]
+async fn a_gateway_that_does_not_answer_is_reported_as_a_timeout_with_the_setting() {
+    // Accepts the connection and never replies.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let server = format!("http://{}", listener.local_addr().unwrap());
+    let output = tokio::task::spawn_blocking(move || {
+        let _held = std::thread::spawn(move || listener.accept().map(|(stream, _)| stream));
+        Command::new(env!("CARGO_BIN_EXE_ai6ctl"))
+            .args(["--timeout", "0.5", "--server", &server, "health"])
+            .env_remove("UNEX_ACCESS_TOKEN")
+            .output()
+            .unwrap()
+    })
+    .await
+    .unwrap();
+    assert!(!output.status.success());
+    let said = String::from_utf8_lossy(&output.stderr);
+    assert!(said.contains("did not answer within 0.5 s"), "{said}");
+    assert!(said.contains("--timeout 0.5"), "{said}");
+}
