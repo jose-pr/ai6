@@ -292,6 +292,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - A brief still claimed by a Mission that ended on this Station is filed by the intake pass, and a verdict on a closed
   Run whose claiming Station is dark files the claim.
 
+- `ai6ctl held-briefs` says in its help, and a refused list says in its error, that listing needs `mission.create` on the Operation and `mission.read` is not enough.
+
 - A request made with an API key to a route that needs the person's own sign-in (`/v1/user/keys`, Moneypenny) is refused with 403 and the reason, "an API key cannot do this; sign in with a password or a sign-in token", where it was a bare "request is not authorized".
 
 - A Claude Code Run held to reading until its plan passes reads only under its working directory (`Read(/**)`); an

@@ -1010,7 +1010,9 @@ hold. The Operation's timeline records each decision as an `intake` event (`pass
 brief's text.
 
 An operator with `mission.create` on the Operation reviews held briefs in Outer Office
-(Briefings → Held briefs), with `ai6ctl held-briefs`, or through the API:
+(Briefings → Held briefs), with `ai6ctl held-briefs`, or through the API. Listing needs
+`mission.create` as well, not `mission.read`: the list carries each brief's text on the wire, and a
+refused `ai6ctl` says so:
 
 ```bash
 ai6ctl held-briefs list --operation G

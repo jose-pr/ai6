@@ -296,6 +296,8 @@ enum Command {
         #[command(subcommand)]
         command: IssueProposalsCommand,
     },
+    /// Briefs vetting held back; the verbs need mission.create on the Operation (mission.read is
+    /// not enough: the list carries each brief's text on the wire).
     HeldBriefs {
         #[command(subcommand)]
         command: HeldCommand,
@@ -539,7 +541,9 @@ enum ClassCommand {
 /// Briefs vetting held for an operator.
 #[derive(Debug, Subcommand)]
 enum HeldCommand {
-    /// List the held briefs, oldest first, with what vetting found; never their text.
+    /// List the held briefs, oldest first, with what vetting found; never their text. Needs
+    /// mission.create on the Operation (the list carries each brief's text on the wire;
+    /// mission.read is not enough).
     List {
         /// AI6 Operation ID.
         #[arg(long)]
@@ -3278,7 +3282,8 @@ async fn held_briefs(
     token: &str,
     command: HeldCommand,
 ) -> Result<(), String> {
-    const PERMISSION: &str = "mission.create";
+    const PERMISSION: &str =
+        "mission.create (the list carries each brief's text; mission.read is not enough)";
     let (operation, key, action, body) = match command {
         HeldCommand::List { operation } => {
             let request = operation_request(
