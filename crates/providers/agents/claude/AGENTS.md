@@ -40,14 +40,14 @@ with `GUATIAO_ERR_BAD_VALUE`.
 `ClaudeHandler` and `ClaudeConfig` implement the `ai6::directorates::section_00::agent::AgentHandler` Guatiao
 kind. `ClaudeConfig` selects the executable and the handler's bounds; `ClaudeHandler` launches Claude Code through
 the terminal instance supplied by AI6. Initial context becomes appended system
-instructions (`--append-system-prompt`) before the task prompt is written to the stream.
-It, the model and the effort are each passed as one `--flag=VALUE` argument, so a value that
+instructions (`--append-system-prompt-file`, a file in a directory of the Run's own, owner-only and removed when the Run is dropped, since a charge's logbook can pass the 32,767 characters a Windows command line holds) before the task prompt is written to the stream.
+The model and the effort are each passed as one `--flag=VALUE` argument, so a value that
 starts with `-` is never read as another option.
 Claude's provider ID is returned from `run_id()` after the provider emits it
 and is supplied unchanged to `resume`. Claude Code 2.1.310 records the system prompt with
 the Run (`--system-prompt-snapshot`, on by default) and reuses it on resume until the
 Run is compacted; after that it builds the prompt from the resuming launch, so resume
-passes `AgentResume::initial_context` as `--append-system-prompt` too when it is not empty.
+passes `AgentResume::initial_context` the same way too when it is not empty.
 A restricted Run (`answer_only`, or `assistant`) whose `assistant` message calls a tool
 not named `mcp__<server>__<tool>` for one of its servers (nor, for an assistant, one of the
 built-in tools its mode offers: the file tools, `Bash`, `WebFetch`, `WebSearch`) is killed,
@@ -292,7 +292,7 @@ refused Read outside the working directory. With the dot-path rules, Write and E
 `notes/.hidden` and `scratch/.x` were refused on Windows, and so were writes through 8.3
 short names (`GIT~1\config`, `GITATT~1`) even after reading them. Under `--restricted` the working directory's
 `CLAUDE.md` does not load, with or without `--setting-sources user,project`, so a mode's
-`context_file` goes in with `--append-system-prompt-file`, which reached the request's
+`context_file` is joined to the standing context in that one file, which reached the request's
 system prompt. Every assistant Run also has `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`.
 
 An assistant's scripts and network (code.claude.com/docs/en/sandboxing, /permissions and

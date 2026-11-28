@@ -305,6 +305,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Claude Code is started with a Run's standing context in a file, not on the command line: a charge's logbook can hold 200 KB, and on Windows a command line over 32,767 characters is refused, so the Station's own charge failed every turn with "The filename or extension is too long (os error 206)". The file, `--append-system-prompt-file`, is in a directory of the Run's own that only its owner may read and that goes with the Run.
+
 - The attention summary and `GET /v1/user/reports/unassessed` list only the open Reports the person may assess (reads the scope, holds `mission.control` on the Operation or `station.configure` on a Station or M, and reads the content), so no item says "You are not read in to its content" and sits there for good.
 
 - The Report an approval that lapsed unspent raises names when it was approved and when it was valid until.

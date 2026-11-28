@@ -358,11 +358,15 @@ impl AgentHandler for ClaudeHandler {
         terminal: Object<dyn AgentTerminal>,
     ) -> Result<Object<dyn ai6::AgentSession>, ProviderError> {
         let mut argv = Vec::new();
-        add_launch_options(
+        let private = add_context(
             &mut argv,
             &request
                 .overlays
                 .with_routing(&request.initial_context, true),
+            request.assistant.as_ref(),
+        )?;
+        add_launch_options(
+            &mut argv,
             request.model.as_deref(),
             request.effort.as_deref(),
         );
@@ -396,6 +400,7 @@ impl AgentHandler for ClaudeHandler {
             session: SessionStart::Chosen,
             expected_run_id: None,
             restricted: restriction(request.answer_only, request.assistant.as_ref()),
+            private,
         })?;
         operation.send(&request.prompt)?;
         Ok(operation.into_object())
@@ -411,11 +416,15 @@ impl AgentHandler for ClaudeHandler {
         // Claude Code 2.1.310 reuses the system prompt it recorded with the Run
         // (`--system-prompt-snapshot`, on by default) until the Run is compacted; after
         // that, or with the snapshot off, it builds the prompt from this launch's flags.
-        add_launch_options(
+        let private = add_context(
             &mut argv,
             &request
                 .overlays
                 .with_routing(&request.initial_context, true),
+            request.assistant.as_ref(),
+        )?;
+        add_launch_options(
+            &mut argv,
             request.model.as_deref(),
             request.effort.as_deref(),
         );
@@ -451,6 +460,7 @@ impl AgentHandler for ClaudeHandler {
             session: SessionStart::Resume(request.run_id.to_string()),
             expected_run_id: Some(expected_run_id),
             restricted: restriction(request.answer_only, request.assistant.as_ref()),
+            private,
         })?;
         if let Some(message) = request.message
             && let Err(error) = operation.send(&message)
@@ -462,17 +472,79 @@ impl AgentHandler for ClaudeHandler {
     }
 }
 
-/// Adds the standing context, model and effort, each as one `--flag=VALUE` argument: a value
-/// that starts with `-` is then never read as another option.
-fn add_launch_options(
+/// Gives Claude Code the Run's standing context: `parts`, then the assistant mode's context file
+/// when it has one, as one `--append-system-prompt-file`. A command line holds 32,767 characters
+/// on Windows and a charge's logbook alone can pass that, so the text goes through a file in a
+/// directory of its own (owner-only), which the returned guard removes when the Run ends.
+/// `None` when there is no context.
+fn add_context(
     argv: &mut Vec<String>,
-    context: &[String],
-    model: Option<&str>,
-    effort: Option<&str>,
-) {
-    if !context.is_empty() {
-        argv.push(format!("--append-system-prompt={}", context.join("\n\n")));
+    parts: &[String],
+    assistant: Option<&AssistantMode>,
+) -> Result<Option<tempfile::TempDir>, ProviderError> {
+    let mut text = parts.join("\n\n");
+    if let Some(path) = assistant.and_then(|mode| mode.context_file.as_ref()) {
+        let file = std::fs::read(path).map_err(|error| {
+            refuse(
+                Status::GUATIAO_ERR_INTERNAL,
+                format!("the assistant's context file: {error}"),
+            )
+        })?;
+        if !text.is_empty() {
+            text.push_str("\n\n");
+        }
+        text.push_str(&String::from_utf8_lossy(&file));
     }
+    if text.is_empty() {
+        return Ok(None);
+    }
+    let directory = tempfile::Builder::new()
+        .prefix("ai6-claude-")
+        .tempdir()
+        .map_err(|error| {
+            refuse(
+                Status::GUATIAO_ERR_INTERNAL,
+                format!("the Run's private directory: {error}"),
+            )
+        })?;
+    #[cfg(unix)]
+    std::fs::set_permissions(
+        directory.path(),
+        std::os::unix::fs::PermissionsExt::from_mode(0o700),
+    )
+    .map_err(|error| {
+        refuse(
+            Status::GUATIAO_ERR_INTERNAL,
+            format!("the Run's private directory: {error}"),
+        )
+    })?;
+    let path = directory.path().join("context.md");
+    write_private(&path, text.as_bytes()).map_err(|error| {
+        refuse(
+            Status::GUATIAO_ERR_INTERNAL,
+            format!("the Run's context file: {error}"),
+        )
+    })?;
+    argv.extend([
+        "--append-system-prompt-file".to_owned(),
+        path.to_string_lossy().into_owned(),
+    ]);
+    Ok(Some(directory))
+}
+
+/// Writes `bytes` to a new file only its owner may read.
+fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    options.open(path)?.write_all(bytes)
+}
+
+/// Adds the model and effort, each as one `--flag=VALUE` argument: a value that starts with `-`
+/// is then never read as another option.
+fn add_launch_options(argv: &mut Vec<String>, model: Option<&str>, effort: Option<&str>) {
     if let Some(model) = model {
         argv.push(format!("--model={model}"));
     }
@@ -806,8 +878,8 @@ fn add_mission_settings(
 ///   does not keep another skill out. Without `skill_commands`, `disableSkillShellExecution`
 ///   keeps a skill's injected commands from running.
 ///
-/// Every setting the parts call for goes in one `--settings` value. A `context_file` is passed
-/// with `--append-system-prompt-file`.
+/// Every setting the parts call for goes in one `--settings` value. A `context_file` is joined
+/// to the standing context by [`add_context`].
 fn add_assistant(
     argv: &mut Vec<String>,
     environment: &BTreeMap<String, String>,
@@ -928,9 +1000,6 @@ fn add_assistant(
     }
     if !settings.is_empty() {
         argv.extend(["--settings".to_owned(), Value::Object(settings).to_string()]);
-    }
-    if let Some(file) = &mode.context_file {
-        argv.extend(["--append-system-prompt-file".to_owned(), file.clone()]);
     }
     Ok(())
 }
@@ -1559,6 +1628,8 @@ struct Opening<'a> {
     expected_run_id: Option<RunId>,
     /// For a restricted (answer-only or assistant) Run, what it may call.
     restricted: Option<Allowed>,
+    /// The directory of the context file in `flags`, removed when the Run is dropped.
+    private: Option<tempfile::TempDir>,
 }
 
 /// Starts Claude Code on the Station's terminal through `coqui-acp-claude`, and waits for it to
@@ -1573,6 +1644,7 @@ fn open(opening: Opening<'_>) -> Result<ClaudeRun, ProviderError> {
         session,
         expected_run_id,
         restricted,
+        private,
     } = opening;
     let mut launch = ClaudeLaunch::new(cwd);
     launch.executable = config.executable.clone().into();
@@ -1623,7 +1695,11 @@ fn open(opening: Opening<'_>) -> Result<ClaudeRun, ProviderError> {
             ));
         }
     };
-    Ok(ClaudeRun { session, shared })
+    Ok(ClaudeRun {
+        session,
+        shared,
+        _private: private,
+    })
 }
 
 /// An exit reason in the words of a Run: how the driver words it, with a negative exit code also
@@ -1843,6 +1919,8 @@ struct ClaudeRun {
     /// `None` for a Claude Code that ended before it was started: its Run only reports that.
     session: Option<Session>,
     shared: Arc<Shared>,
+    /// Holds the Run's private directory until the Run is dropped.
+    _private: Option<tempfile::TempDir>,
 }
 
 impl ClaudeRun {
@@ -2443,6 +2521,9 @@ mod tests {
     #[derive(Clone)]
     struct ProcessTerminal {
         specs: Arc<Mutex<Vec<Spec>>>,
+        /// The text of the `--append-system-prompt-file` each spawn named, read as it spawned:
+        /// the Run removes the file when it ends.
+        contexts: Arc<Mutex<Vec<Option<String>>>>,
         /// Keeps the output open after the child exits, as ConPTY does.
         keep_open: bool,
     }
@@ -2451,6 +2532,7 @@ mod tests {
         fn new() -> Self {
             Self {
                 specs: Arc::new(Mutex::new(Vec::new())),
+                contexts: Arc::new(Mutex::new(Vec::new())),
                 keep_open: false,
             }
         }
@@ -2481,6 +2563,12 @@ mod tests {
         ) -> Result<Object<dyn TerminalRun>, ProviderError> {
             let spec = Spec::from_value(value).map_err(internal)?;
             self.specs.lock().unwrap().push(spec.clone());
+            let file = spec
+                .argv
+                .iter()
+                .position(|argument| argument == "--append-system-prompt-file")
+                .map(|at| std::fs::read_to_string(&spec.argv[at + 1]).unwrap());
+            self.contexts.lock().unwrap().push(file);
 
             let mut child = Command::new(std::env::current_exe().map_err(internal)?)
                 .args(["--exact", "tests::fake_claude_child", "--nocapture"])
@@ -2777,7 +2865,12 @@ mod tests {
             specs[0]
                 .argv
                 .iter()
-                .any(|arg| arg == "--append-system-prompt=context before the prompt")
+                .all(|arg| !arg.starts_with("--append-system-prompt=")),
+            "the context goes through a file"
+        );
+        assert_eq!(
+            terminal.contexts.lock().unwrap()[0].as_deref(),
+            Some("context before the prompt")
         );
         assert!(
             specs[1]
@@ -2793,18 +2886,83 @@ mod tests {
         let mut argv = Vec::new();
         add_launch_options(
             &mut argv,
-            &["- a bullet".to_owned()],
             Some("--dangerously-skip-permissions"),
             Some("-p"),
         );
         assert_eq!(
             argv,
-            [
-                "--append-system-prompt=- a bullet",
-                "--model=--dangerously-skip-permissions",
-                "--effort=-p",
-            ]
+            ["--model=--dangerously-skip-permissions", "--effort=-p"]
         );
+    }
+
+    /// A standing context of 40 KB, as a charge's logbook makes one, stays out of the command
+    /// line (Windows refuses one over 32,767 characters, os error 206): the argument names a file
+    /// that holds all of it, nobody but the owner may read it, and it is gone with the Run.
+    #[test]
+    fn a_large_context_reaches_claude_through_a_private_file_not_the_command_line() {
+        let big = "- 1700000000 failed: the turn did not end\n".repeat(1000);
+        assert!(big.len() > 40_000);
+        let mut argv = Vec::new();
+        let private = add_context(&mut argv, &["standing".to_owned(), big.clone()], None)
+            .unwrap()
+            .expect("a context makes a file");
+        let length: usize = argv.iter().map(|argument| argument.len() + 1).sum();
+        assert!(length < 1024, "{length} characters: {argv:?}");
+        assert_eq!(argv[0], "--append-system-prompt-file");
+        let path = std::path::PathBuf::from(&argv[1]);
+        assert!(path.starts_with(private.path()));
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            format!("standing\n\n{big}")
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = |path: &std::path::Path| {
+                std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+            };
+            assert_eq!(mode(&path), 0o600);
+            assert_eq!(mode(private.path()), 0o700);
+        }
+        drop(private);
+        assert!(!path.exists(), "removed with the Run");
+        let mut none = Vec::new();
+        assert!(add_context(&mut none, &[], None).unwrap().is_none());
+        assert!(none.is_empty());
+    }
+
+    /// The Run's file holds the context and the assistant mode's file, in that order, and the
+    /// command line names one file only.
+    #[test]
+    fn the_assistants_context_file_joins_the_standing_context_in_one_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let theirs = directory.path().join("assistant.md");
+        std::fs::write(&theirs, "her notes").unwrap();
+        let mode = AssistantMode {
+            context_file: Some(theirs.to_string_lossy().into_owned()),
+            ..AssistantMode::moneypenny()
+        };
+        let mut argv = Vec::new();
+        let private = add_context(&mut argv, &["standing".to_owned()], Some(&mode))
+            .unwrap()
+            .unwrap();
+        assert_eq!(argv.len(), 2, "{argv:?}");
+        assert_eq!(
+            std::fs::read_to_string(&argv[1]).unwrap(),
+            "standing\n\nher notes"
+        );
+        drop(private);
+        let missing = AssistantMode {
+            context_file: Some(
+                directory
+                    .path()
+                    .join("gone.md")
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+            ..AssistantMode::moneypenny()
+        };
+        assert!(add_context(&mut Vec::new(), &[], Some(&missing)).is_err());
     }
 
     /// A terminal whose Claude Code answers `initialize` as the real one does, with no message
@@ -3002,6 +3160,7 @@ mod tests {
             session: SessionStart::Chosen,
             expected_run_id: None,
             restricted: allowed,
+            private: None,
         })
         .unwrap()
     }
@@ -5257,6 +5416,13 @@ denied_tools = [\"Bash(rm *)\"]
             .unwrap();
         read_to_completion(&resumed);
         resumed.close().unwrap();
+        assert_eq!(
+            *terminal.contexts.lock().unwrap(),
+            [
+                Some("You are Moneypenny.".to_owned()),
+                Some("You are Moneypenny.".to_owned())
+            ]
+        );
         let specs = terminal.specs.lock().unwrap();
         assert_eq!(specs.len(), 2);
         for spec in specs.iter() {
@@ -5292,7 +5458,6 @@ denied_tools = [\"Bash(rm *)\"]
                 "no auto memory beside hers"
             );
             assert!(!argv.iter().any(|a| a == "--permission-mode"), "{argv:?}");
-            assert!(!argv.iter().any(|a| a == "--append-system-prompt-file"));
             assert_eq!(after("--allowedTools"), "mcp__moneypenny");
             let servers: Value = serde_json::from_str(&after("--mcp-config")).unwrap();
             assert_eq!(
@@ -5312,8 +5477,8 @@ denied_tools = [\"Bash(rm *)\"]
             assert!(!argv.iter().any(|a| a == "--settings"), "no gate to pass");
             assert!(
                 argv.iter()
-                    .any(|a| a == "--append-system-prompt=You are Moneypenny."),
-                "the instructions on start and on resume"
+                    .all(|a| !a.starts_with("--append-system-prompt=")),
+                "the instructions go through a file"
             );
             assert!(
                 !argv.iter().any(|a| a.contains("conversation-token")),
@@ -5339,10 +5504,10 @@ denied_tools = [\"Bash(rm *)\"]
             .unwrap()
             .to_string_lossy()
             .into_owned();
-        let context = std::env::temp_dir()
-            .join("assistant-context.md")
-            .to_string_lossy()
-            .into_owned();
+        let context_directory = tempfile::tempdir().unwrap();
+        let context_path = context_directory.path().join("assistant-context.md");
+        std::fs::write(&context_path, "her notes").unwrap();
+        let context = context_path.to_string_lossy().into_owned();
         let mode = AssistantMode {
             files: vec!["personal".to_owned(), "scratch".to_owned()],
             context_file: Some(context.clone()),
@@ -5396,6 +5561,10 @@ denied_tools = [\"Bash(rm *)\"]
             .unwrap();
         read_to_completion(&resumed);
         resumed.close().unwrap();
+        assert_eq!(
+            *terminal.contexts.lock().unwrap(),
+            [Some("her notes".to_owned()), Some("her notes".to_owned())]
+        );
         let specs = terminal.specs.lock().unwrap();
         assert_eq!(specs.len(), 2);
         for spec in specs.iter() {
@@ -5431,7 +5600,13 @@ denied_tools = [\"Bash(rm *)\"]
                 "mcp__moneypenny,Read,Glob,Grep,Edit(/personal/**),Edit(/scratch/**)"
             );
             assert_eq!(after("--setting-sources"), "user");
-            assert_eq!(after("--append-system-prompt-file"), context);
+            assert_eq!(
+                argv.iter()
+                    .filter(|a| *a == "--append-system-prompt-file")
+                    .count(),
+                1,
+                "{argv:?}"
+            );
             assert_eq!(
                 spec.env
                     .as_ref()

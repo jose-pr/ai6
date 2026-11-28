@@ -335,7 +335,7 @@ pub struct AgentResume {
     /// The standing part of [`AgentStart::initial_context`] (the Agent's context, its role's
     /// purpose and policy, an assistant's instructions; never a recap of the conversation the
     /// Run already holds), for a harness that may not keep its start-up context in the
-    /// Run it resumes. Claude Code gets it again as `--append-system-prompt`, which it
+    /// Run it resumes. Claude Code gets it again as `--append-system-prompt-file`, which it
     /// uses once the recorded prompt is gone (a compacted Run); Codex keeps a thread's
     /// instructions and ignores it.
     #[serde(default)]

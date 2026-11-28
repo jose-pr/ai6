@@ -347,7 +347,7 @@ start-up context again (the Agent's `context`, its role's purpose and policy; fo
 her instructions, never the recap of the conversation the Run holds). Claude Code 2.1.310
 records the system prompt with the Run (`--system-prompt-snapshot`, on by default) and
 reuses it until the Run is compacted; after that it builds the prompt from the resuming
-launch, which carries it as `--append-system-prompt`. Codex keeps a thread's instructions.
+launch, which carries it as `--append-system-prompt-file`. Codex keeps a thread's instructions.
 
 A restricted Run (answer-only, or Moneypenny's assistant mode) that uses a tool outside
 its MCP servers anyway is killed and ends with a `failed` event naming the tool, and nothing
