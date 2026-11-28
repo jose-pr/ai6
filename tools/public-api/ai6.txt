@@ -3642,6 +3642,38 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseRun>::info_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseRun>::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseRun> where Self: core::marker::Sized + core::marker::Send + 'static
 pub mod ai6::directorates::q::sealing
+pub enum ai6::directorates::q::sealing::RequestStatus
+pub ai6::directorates::q::sealing::RequestStatus::Done(ai6::directorates::q::sealing::SecretOutcome)
+pub ai6::directorates::q::sealing::RequestStatus::Failed(alloc::string::String)
+pub ai6::directorates::q::sealing::RequestStatus::Pending
+pub enum ai6::directorates::q::sealing::SecretRequest
+pub ai6::directorates::q::sealing::SecretRequest::Grant
+pub ai6::directorates::q::sealing::SecretRequest::Grant::pin: core::option::Option<alloc::string::String>
+pub ai6::directorates::q::sealing::SecretRequest::Grant::scope: alloc::string::String
+pub ai6::directorates::q::sealing::SecretRequest::Grant::station: alloc::string::String
+pub ai6::directorates::q::sealing::SecretRequest::Put
+pub ai6::directorates::q::sealing::SecretRequest::Put::expect: core::option::Option<u64>
+pub ai6::directorates::q::sealing::SecretRequest::Put::name: alloc::string::String
+pub ai6::directorates::q::sealing::SecretRequest::Put::pins: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+pub ai6::directorates::q::sealing::SecretRequest::Put::scope: core::option::Option<alloc::string::String>
+pub ai6::directorates::q::sealing::SecretRequest::Put::stations: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::q::sealing::SecretRequest::Put::value: alloc::string::String
+pub ai6::directorates::q::sealing::SecretRequest::Remove
+pub ai6::directorates::q::sealing::SecretRequest::Remove::name: alloc::string::String
+pub ai6::directorates::q::sealing::SecretRequest::Remove::scope: alloc::string::String
+pub ai6::directorates::q::sealing::SecretRequest::Revoke
+pub ai6::directorates::q::sealing::SecretRequest::Revoke::scope: alloc::string::String
+pub ai6::directorates::q::sealing::SecretRequest::Revoke::station: alloc::string::String
+pub ai6::directorates::q::sealing::SecretRequest::Rotate
+pub ai6::directorates::q::sealing::SecretRequest::Rotate::expect: core::option::Option<u64>
+pub ai6::directorates::q::sealing::SecretRequest::Rotate::name: alloc::string::String
+pub ai6::directorates::q::sealing::SecretRequest::Rotate::value: alloc::string::String
+pub ai6::directorates::q::sealing::SecretRequest::RotateKey
+pub ai6::directorates::q::sealing::SecretRequest::RotateKey::scope: alloc::string::String
+impl core::fmt::Debug for ai6::directorates::q::sealing::SecretRequest
+pub fn ai6::directorates::q::sealing::SecretRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::ops::drop::Drop for ai6::directorates::q::sealing::SecretRequest
+pub fn ai6::directorates::q::sealing::SecretRequest::drop(&mut self)
 #[non_exhaustive] pub enum ai6::directorates::q::sealing::VaultError
 pub ai6::directorates::q::sealing::VaultError::BadScope(alloc::string::String)
 pub ai6::directorates::q::sealing::VaultError::Conflict
@@ -3740,6 +3772,14 @@ pub fn ai6::directorates::q::sealing::SealingPublicKey::parse(&str) -> core::opt
 pub fn ai6::directorates::q::sealing::SealingPublicKey::to_text(&self) -> alloc::string::String
 impl core::fmt::Debug for ai6::directorates::q::sealing::SealingPublicKey
 pub fn ai6::directorates::q::sealing::SealingPublicKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::q::sealing::SecretOutcome
+pub ai6::directorates::q::sealing::SecretOutcome::key_id: core::option::Option<alloc::string::String>
+pub ai6::directorates::q::sealing::SecretOutcome::name: core::option::Option<alloc::string::String>
+pub ai6::directorates::q::sealing::SecretOutcome::notes: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::q::sealing::SecretOutcome::revision: core::option::Option<u64>
+pub ai6::directorates::q::sealing::SecretOutcome::scope: core::option::Option<alloc::string::String>
+pub ai6::directorates::q::sealing::SecretOutcome::stations: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::q::sealing::SecretOutcome::verb: alloc::string::String
 pub struct ai6::directorates::q::sealing::ValueInfo
 pub ai6::directorates::q::sealing::ValueInfo::key_id: alloc::string::String
 pub ai6::directorates::q::sealing::ValueInfo::name: alloc::string::String
@@ -3759,20 +3799,28 @@ pub fn ai6::directorates::q::sealing::Vault::with_marks(self, alloc::sync::Arc<a
 impl ai6::directorates::q::sealing::Vault
 pub fn ai6::directorates::q::sealing::Vault::finish_rotation(&self, &ai6::directorates::q::sealing::Scope, f64) -> core::result::Result<(), ai6::directorates::q::sealing::VaultError>
 pub fn ai6::directorates::q::sealing::Vault::grant_station(&self, &ai6::directorates::q::sealing::Scope, &ai6::directorates::q::sealing::Recipient, f64) -> core::result::Result<ai6::directorates::q::sealing::ScopeKeyInfo, ai6::directorates::q::sealing::VaultError>
+pub fn ai6::directorates::q::sealing::Vault::migrate_legacy(&self, f64) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, ai6::directorates::q::sealing::VaultError>
 pub fn ai6::directorates::q::sealing::Vault::put_scope_key(&self, &ai6::directorates::q::sealing::Scope, &[ai6::directorates::q::sealing::Recipient], f64) -> core::result::Result<ai6::directorates::q::sealing::ScopeKeyInfo, ai6::directorates::q::sealing::VaultError>
 pub fn ai6::directorates::q::sealing::Vault::read_value(&self, &str) -> core::result::Result<ai6::directorates::q::sealing::OpenedValue, ai6::directorates::q::sealing::VaultError>
-pub fn ai6::directorates::q::sealing::Vault::remove_value(&self, &str) -> core::result::Result<bool, ai6::directorates::q::sealing::VaultError>
+pub fn ai6::directorates::q::sealing::Vault::read_value_in(&self, &str, core::option::Option<&ai6::directorates::q::sealing::Scope>) -> core::result::Result<ai6::directorates::q::sealing::OpenedValue, ai6::directorates::q::sealing::VaultError>
+pub fn ai6::directorates::q::sealing::Vault::remove_value_in(&self, &str, &ai6::directorates::q::sealing::Scope) -> core::result::Result<bool, ai6::directorates::q::sealing::VaultError>
 pub fn ai6::directorates::q::sealing::Vault::revoke_station(&self, &ai6::directorates::q::sealing::Scope, &str, f64) -> core::result::Result<ai6::directorates::q::sealing::ScopeKeyInfo, ai6::directorates::q::sealing::VaultError>
 pub fn ai6::directorates::q::sealing::Vault::rotate_scope_key(&self, &ai6::directorates::q::sealing::Scope, f64) -> core::result::Result<ai6::directorates::q::sealing::ScopeKeyInfo, ai6::directorates::q::sealing::VaultError>
 pub fn ai6::directorates::q::sealing::Vault::scope_key_info(&self, &ai6::directorates::q::sealing::Scope) -> core::result::Result<core::option::Option<ai6::directorates::q::sealing::ScopeKeyInfo>, ai6::directorates::q::sealing::VaultError>
 pub fn ai6::directorates::q::sealing::Vault::value_info(&self, &str) -> core::result::Result<core::option::Option<ai6::directorates::q::sealing::ValueInfo>, ai6::directorates::q::sealing::VaultError>
 pub fn ai6::directorates::q::sealing::Vault::value_infos(&self) -> core::result::Result<alloc::vec::Vec<ai6::directorates::q::sealing::ValueInfo>, ai6::directorates::q::sealing::VaultError>
 pub fn ai6::directorates::q::sealing::Vault::write_value(&self, &str, &ai6::directorates::q::sealing::Scope, &str, ai6::directorates::registry::sealed::SealedExpect, f64) -> core::result::Result<u64, ai6::directorates::q::sealing::VaultError>
+impl ai6::directorates::q::sealing::Vault
+pub fn ai6::directorates::q::sealing::Vault::serve_requests(&self, f64) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, ai6::directorates::q::sealing::VaultError>
 impl core::fmt::Debug for ai6::directorates::q::sealing::Vault
 pub fn ai6::directorates::q::sealing::Vault::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub const ai6::directorates::q::sealing::MARKS_FILE: &str
 pub const ai6::directorates::q::sealing::REGISTRY_PROVIDER: &str
 pub const ai6::directorates::q::sealing::SEALING_KEY_FILE: &str
+pub fn ai6::directorates::q::sealing::ask(&dyn ai6::directorates::registry::backend::RegistryBackend, &str, &ai6::directorates::q::sealing::SecretRequest, &[ai6::directorates::q::sealing::Recipient], f64) -> core::result::Result<(), ai6::directorates::q::sealing::VaultError>
+pub fn ai6::directorates::q::sealing::list_scopes(&dyn ai6::directorates::registry::backend::RegistryBackend) -> core::result::Result<alloc::vec::Vec<ai6::directorates::q::sealing::ScopeKeyInfo>, ai6::directorates::q::sealing::VaultError>
+pub fn ai6::directorates::q::sealing::list_values(&dyn ai6::directorates::registry::backend::RegistryBackend) -> core::result::Result<alloc::vec::Vec<ai6::directorates::q::sealing::ValueInfo>, ai6::directorates::q::sealing::VaultError>
+pub fn ai6::directorates::q::sealing::status(&dyn ai6::directorates::registry::backend::RegistryBackend, &str) -> core::result::Result<ai6::directorates::q::sealing::RequestStatus, ai6::directorates::q::sealing::VaultError>
 pub mod ai6::directorates::q::secret_kind
 pub mod ai6::directorates::q::secret_kind::builtin
 pub struct ai6::directorates::q::secret_kind::builtin::EnvSecrets
