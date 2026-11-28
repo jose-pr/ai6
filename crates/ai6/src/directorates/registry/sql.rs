@@ -915,6 +915,21 @@ mod tests {
     }
 
     #[test]
+    fn a_database_copied_with_old_run_payloads_is_readable() {
+        on_each_database(|location| {
+            let registry = SqlRegistry::open(location).unwrap();
+            let old = r#"{"session_id":"run-9","mission_id":"m","provider_session_id":"p-1","station":"station-a","theater":null,"attempt":2,"predecessor":null,"status":"active","parked_until":null,"lease_expires":1900000000.0,"fence":1,"exposure":[]}"#;
+            alter(
+                &registry,
+                &format!("INSERT INTO ai6_runs VALUES ('run-9', 'm', '{old}', 1)"),
+            );
+            let runs = registry.runs().unwrap();
+            let run = runs.iter().find(|run| run.id == "run-9").unwrap();
+            assert_eq!((run.number, run.provider_id.as_deref()), (2, Some("p-1")));
+        });
+    }
+
+    #[test]
     fn rows_in_the_tables_a_release_renamed_move_to_the_new_ones_and_the_old_go() {
         on_each_database(|location| {
             let old = SqlRegistry::open(location).unwrap();

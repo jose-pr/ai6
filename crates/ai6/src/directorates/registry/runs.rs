@@ -24,7 +24,9 @@ use super::backend::RegistryBackend;
 use super::limits::RunLimits;
 use super::mission_ids::{new_uid, run_handle};
 use super::products::CUT_MARKER;
-use super::store::{AuditRecord, FileRegistry, invalid_data, read_headquarters, unix_time};
+use super::store::{
+    AuditRecord, FileRegistry, invalid_data, migrate_renamed_fields, read_headquarters, unix_time,
+};
 use crate::bounds::Limit;
 
 /// Where a Run stands, as far as the Registry knows.
@@ -1866,12 +1868,22 @@ fn read_run(path: &std::path::Path, limits: &RunLimits) -> io::Result<Option<Run
     }
 }
 
-/// Reads a stored Run record, refusing one out of bounds.
+/// The keys a Run record was stored under before the Session-to-Run rename, and what they are now.
+const RENAMED_FIELDS: &[(&str, &str)] = &[
+    ("session_id", "id"),
+    ("attempt", "number"),
+    ("provider_session_id", "provider_id"),
+];
+
+/// Reads a stored Run record, migrating the old key names and refusing one out of bounds.
 pub(super) fn parse_run(bytes: &[u8], limits: &RunLimits) -> io::Result<RunRecord> {
     if !limits.record_bytes.allows(bytes.len()) {
         return Err(invalid_data("Run record exceeds the size limit"));
     }
-    let record: RunRecord = serde_json::from_slice(bytes)
+    let mut value: serde_json::Value = serde_json::from_slice(bytes)
+        .map_err(|error| invalid_data(format!("invalid Run record: {error}")))?;
+    migrate_renamed_fields(&mut value, RENAMED_FIELDS);
+    let record: RunRecord = serde_json::from_value(value)
         .map_err(|error| invalid_data(format!("invalid Run record: {error}")))?;
     if !record.lease_expires.is_finite() || record.number == 0 {
         return Err(invalid_data("invalid Run record"));
@@ -2680,6 +2692,46 @@ mod tests {
         fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
         let record = registry.run("s-1").unwrap().unwrap();
         assert_eq!((record.launch, record.recent.len()), (None, 0));
+    }
+
+    #[test]
+    fn a_run_record_with_the_old_field_names_is_read_as_the_new_ones() {
+        let root = tempfile::tempdir().unwrap();
+        let registry = FileRegistry::open(root.path());
+        registry.open_run_at(new_run(), TTL, NOW).unwrap();
+        let path = registry.run_path("s-1");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        let id = object.remove("id").unwrap();
+        object.insert("session_id".into(), id);
+        let number = object.remove("number").unwrap();
+        object.insert("attempt".into(), number);
+        object.insert("provider_session_id".into(), "provider-7".into());
+        object.insert("provider_id".into(), "newer".into());
+        fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+        let record = registry.run("s-1").unwrap().unwrap();
+        assert_eq!(
+            (
+                record.id.as_str(),
+                record.number,
+                record.provider_id.as_deref()
+            ),
+            ("s-1", 1, Some("newer")),
+            "the new name wins when both are stored"
+        );
+        object_with_unknown_key_still_refuses(&registry, &path);
+    }
+
+    fn object_with_unknown_key_still_refuses(registry: &FileRegistry, path: &std::path::Path) {
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .insert("never_a_field".into(), 1.into());
+        fs::write(path, serde_json::to_vec(&value).unwrap()).unwrap();
+        assert!(registry.run("s-1").is_err());
     }
 
     fn unsafe_ids_are_rejected_before_touching_the_filesystem(store: &dyn Store) {

@@ -181,6 +181,19 @@ impl Brief {
     }
 }
 
+/// Renames the top-level keys of a stored payload that an earlier release wrote under another
+/// name. When both names are present the new one wins and the old one is dropped.
+pub(super) fn migrate_renamed_fields(value: &mut serde_json::Value, renames: &[(&str, &str)]) {
+    let Some(object) = value.as_object_mut() else {
+        return;
+    };
+    for (old, new) in renames {
+        if let Some(moved) = object.remove(*old) {
+            object.entry(*new).or_insert(moved);
+        }
+    }
+}
+
 /// `text` on one line for a person to read: control characters become spaces, characters that
 /// show nothing or reorder what is shown go, and it is cut to `bytes` at a character.
 pub(super) fn one_line_within(text: &str, bytes: usize) -> String {

@@ -88,7 +88,8 @@ pub(super) const STEPS: &[Step] = &[
     // The Session-to-Run rename moved four populated columns. Each is added, filled from the
     // column it replaces and then that column is dropped, since a legacy NOT NULL column with
     // no default refuses every insert. A database someone altered by hand has the new column
-    // already and only has the old one retired.
+    // already and only has the old one retired. The `record` payloads keep their old key names;
+    // they are renamed each time one is read (`runs::parse_run`), not here.
     Step {
         name: "briefs.claims",
         table: "ai6_briefs",
