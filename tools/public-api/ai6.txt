@@ -588,6 +588,7 @@ pub ai6::directorates::m::approvals::ActionScope::kind: alloc::string::String
 pub ai6::directorates::m::approvals::ActionScope::target: alloc::string::String
 impl ai6::directorates::m::approvals::ActionScope
 pub fn ai6::directorates::m::approvals::ActionScope::check_size(&self, &ai6::station::limits::ApprovalLimits) -> core::io::error::Result<()>
+pub fn ai6::directorates::m::approvals::ActionScope::check_target(&self) -> core::io::error::Result<()>
 pub fn ai6::directorates::m::approvals::ActionScope::covers(&self, &ai6::directorates::m::approvals::ActionScope) -> bool
 pub fn ai6::directorates::m::approvals::ActionScope::pushed_ref(&self) -> alloc::string::String
 pub fn ai6::directorates::m::approvals::ActionScope::remote(&self) -> core::option::Option<&str>
@@ -9926,6 +9927,9 @@ pub ai6::station::limits::ApprovalLimits::checked_steps: ai6::bounds::Limit
 pub ai6::station::limits::ApprovalLimits::classify_nesting: usize
 pub ai6::station::limits::ApprovalLimits::kind_bytes: ai6::bounds::Limit
 pub ai6::station::limits::ApprovalLimits::target_bytes: ai6::bounds::Limit
+pub ai6::station::limits::ApprovalLimits::validate_targets: bool
+impl ai6::station::limits::ApprovalLimits
+pub fn ai6::station::limits::ApprovalLimits::weakenings(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::default::Default for ai6::station::limits::ApprovalLimits
 pub fn ai6::station::limits::ApprovalLimits::default() -> Self
 #[non_exhaustive] pub struct ai6::station::limits::AttachLimits
@@ -10355,6 +10359,7 @@ pub const ai6::station::runner::CONNECT_NOT_RUNNING: u8
 pub const ai6::station::runner::SETTINGS_FILE: &str
 pub fn ai6::station::runner::connect_stdio(&std::path::Path, &ai6::station::limits::RunnerLimits) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::station::runner::default_state_dir() -> core::io::error::Result<std::path::PathBuf>
+pub fn ai6::station::runner::rotate_token_at(&std::path::Path) -> core::io::error::Result<()>
 pub async fn ai6::station::runner::serve<F>(ai6::station::runner::RunnerConfig, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
 pub fn ai6::station::runner::spawn_detached(&std::path::Path, &[std::ffi::os_str::OsString], &std::path::Path, &ai6::station::limits::RunnerLimits) -> core::io::error::Result<ai6::station::runner::RunnerInfo>
 pub mod ai6::station::safehouse
@@ -11252,6 +11257,7 @@ pub ai6::ActionScope::kind: alloc::string::String
 pub ai6::ActionScope::target: alloc::string::String
 impl ai6::directorates::m::approvals::ActionScope
 pub fn ai6::directorates::m::approvals::ActionScope::check_size(&self, &ai6::station::limits::ApprovalLimits) -> core::io::error::Result<()>
+pub fn ai6::directorates::m::approvals::ActionScope::check_target(&self) -> core::io::error::Result<()>
 pub fn ai6::directorates::m::approvals::ActionScope::covers(&self, &ai6::directorates::m::approvals::ActionScope) -> bool
 pub fn ai6::directorates::m::approvals::ActionScope::pushed_ref(&self) -> alloc::string::String
 pub fn ai6::directorates::m::approvals::ActionScope::remote(&self) -> core::option::Option<&str>
