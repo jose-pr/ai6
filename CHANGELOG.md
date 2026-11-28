@@ -280,6 +280,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A Mission whose Agent declares a loadout that this Station has not loaded waits, naming the Agent and the missing
+  part (catalog, loadout, secret or overlay), instead of starting a Run with no credential and no tool environment.
+
+- A denial the green-ink hook forms itself (a command it cannot name, a Station it cannot reach, no Station to ask)
+  says that no request was filed, and a gate check the Station cannot answer is journaled.
+
+- A deliverable probe that fails is kept on the Run as failed evidence and clears the probe request, and the probe
+  route answers a Registry failure as unavailable, not a bare 500.
+
+- A brief still claimed by a Mission that ended on this Station is filed by the intake pass, and a verdict on a closed
+  Run whose claiming Station is dark files the claim.
+
 - A Claude Code Run held to reading until its plan passes reads only under its working directory (`Read(/**)`); an
   answer-only Claude Run loads no `CLAUDE.md`, the user's own included, and an answer-only Codex thread reads no
   `AGENTS.md` of the checkout; a Codex thread held to `desk` is told it has no tool that reads a file. A login a Run
