@@ -961,6 +961,10 @@ something asks ([Reading usage again](agents.md#reading-usage-again)).
 - **Exposure.** A Run that read a Source item, called a web tool or read a Cable from an
   exposed Run is marked on the board (`exposure`, shown as an `EXPOSED` chip in Outer Office)
   and, under the default `strict` policy, restricted. See [Exposure](medical.md#exposure).
+  What the Mission's brief counts as exposing is read again when each Run launches, so a
+  change to it reaches a standing Mission at its next Run; the value the Mission was made
+  with stays recorded (`minted_exposure`), and a launch whose value differs from it is logged
+  with both values. Sources a Run read itself are kept.
 - **Quarantine.** A Mission whose Agent is [quarantined](medical.md#quarantine) is
   `quarantined`: its safe house is kept, it is not resumed, and releasing the Agent returns it
   to the queue with the next qualified Agent. `quarantined` is a Run state in the board,

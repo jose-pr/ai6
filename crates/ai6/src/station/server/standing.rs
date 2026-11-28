@@ -1334,6 +1334,54 @@ mod tests {
         stop(&state);
     }
 
+    /// The standing Mission after its first window, made with `brief:source` as its mint-time
+    /// exposure although its brief no longer carries one, and a source a Run read itself.
+    async fn minted_exposed(state: &DaemonState) -> crate::directorates::m::mission::Mission {
+        let mut warned = BTreeSet::new();
+        let id = run_window(state, FIRST, &mut warned).await;
+        let mut missions = state.missions.lock().unwrap();
+        let sources = ["brief:source".to_owned()];
+        missions.expose(&id, &sources).unwrap();
+        missions.mint_exposure(&id, &sources).unwrap();
+        missions.expose(&id, &["tool:WebFetch".to_owned()]).unwrap();
+        missions.get(&id).unwrap().clone()
+    }
+
+    #[tokio::test]
+    async fn a_standing_mission_takes_a_changed_exposure_at_its_next_run() {
+        let root = tempfile::tempdir().unwrap();
+        let state = standing_state(root.path(), false);
+        let mission = minted_exposed(&state).await;
+        let gate = crate::station::server::medical::open_gate(&state, &mission);
+        let sources: Vec<String> = gate.exposures().into_iter().map(|e| e.source).collect();
+        assert!(
+            !sources.iter().any(|source| source == "brief:source"),
+            "the brief no longer exposes the Mission: {sources:?}"
+        );
+        assert!(
+            gate.is_exposed(),
+            "a source a Run read itself stays: {sources:?}"
+        );
+        stop(&state);
+    }
+
+    #[tokio::test]
+    async fn a_launch_exposure_that_differs_from_mint_is_logged() {
+        let root = tempfile::tempdir().unwrap();
+        let state = standing_state(root.path(), false);
+        let mission = minted_exposed(&state).await;
+        let drift = crate::station::server::medical::exposure_drift(&mission, &[])
+            .expect("an empty launch value differs from the minted one");
+        assert!(drift.contains(mission.mission_id.as_str()), "{drift}");
+        assert!(drift.contains("brief:source"), "{drift}");
+        assert!(drift.contains("[]"), "{drift}");
+        assert!(
+            crate::station::server::medical::exposure_drift(&mission, &["brief:source".to_owned()])
+                .is_none()
+        );
+        stop(&state);
+    }
+
     /// A restart leaves the Mission blocked and waiting to re-attach. While a re-attach has not
     /// failed it may still come back; a harness that cannot be re-attached wedges the order until
     /// the next window.

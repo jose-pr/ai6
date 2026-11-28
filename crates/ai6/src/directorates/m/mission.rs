@@ -186,6 +186,11 @@ pub struct Mission {
     /// Run that proposed it); every Run of the Mission starts exposed by it.
     #[serde(default)]
     pub exposure: Vec<String>,
+    /// What the brief's exposure was when the Mission was made, kept as recorded. Each Run
+    /// re-reads the brief's exposure at launch; sources named here and no longer there are
+    /// dropped from the Run's starting exposure.
+    #[serde(default)]
+    pub minted_exposure: Vec<String>,
     /// Where the Mission's brief came from, as AI6 recorded it where the brief entered;
     /// `None` for a Mission started directly on the Station rather than from the queue.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -374,6 +379,7 @@ impl MissionStore {
             plan: None,
             denials: Vec::new(),
             exposure: Vec::new(),
+            minted_exposure: Vec::new(),
             provenance: None,
             waiting: None,
             brief_digest: None,
@@ -552,6 +558,23 @@ impl MissionStore {
         if mission.exposure.len() == before {
             return Ok(());
         }
+        mission.revision += 1;
+        self.commit(next)
+    }
+
+    /// Records the exposure of the brief the Mission was made from, once; later calls change
+    /// nothing.
+    pub fn mint_exposure(
+        &mut self,
+        mission_id: &str,
+        sources: &[String],
+    ) -> Result<(), MissionError> {
+        let mut next = self.missions.clone();
+        let mission = next.get_mut(mission_id).ok_or(MissionError::NotFound)?;
+        if sources.is_empty() || !mission.minted_exposure.is_empty() {
+            return Ok(());
+        }
+        mission.minted_exposure = sources.to_vec();
         mission.revision += 1;
         self.commit(next)
     }

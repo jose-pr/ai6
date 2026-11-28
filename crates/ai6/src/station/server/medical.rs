@@ -212,6 +212,20 @@ pub(super) fn open_gate(state: &DaemonState, mission: &Mission) -> ExposureGate 
         .map(|operation| operation.exposure.clone())
         .unwrap_or_default();
     let now = state.clock.now() as f64;
+    // What the brief counts as exposing is read again at each launch: a source the Mission was
+    // made with and the brief no longer carries is not inherited. Sources a Run read itself were
+    // never minted and stay.
+    let launch = launch_exposure(state, mission);
+    if let Some(drift) = exposure_drift(mission, &launch) {
+        eprintln!("{drift}");
+    }
+    let lapsed = |source: &str| {
+        mission
+            .minted_exposure
+            .iter()
+            .any(|minted| minted == source)
+            && !launch.iter().any(|now| now == source)
+    };
     let mut inherited = state
         .intake
         .mission_exposure(mission.mission_id.as_str())
@@ -222,7 +236,13 @@ pub(super) fn open_gate(state: &DaemonState, mission: &Mission) -> ExposureGate 
             );
             Vec::new()
         });
-    for source in &mission.exposure {
+    inherited.retain(|known| !lapsed(&known.source));
+    for source in mission
+        .exposure
+        .iter()
+        .filter(|source| !lapsed(source))
+        .chain(&launch)
+    {
         if !inherited.iter().any(|known| &known.source == source) {
             inherited.push(Exposure {
                 source: source.clone(),
@@ -231,6 +251,26 @@ pub(super) fn open_gate(state: &DaemonState, mission: &Mission) -> ExposureGate 
         }
     }
     ExposureGate::new(policy, inherited, &state.intake.limits().runs)
+}
+
+/// The log line for a launch whose exposure is not the one the Mission was made with.
+pub(super) fn exposure_drift(mission: &Mission, launch: &[String]) -> Option<String> {
+    (launch != mission.minted_exposure).then(|| {
+        format!(
+            "ai6: Mission {:?} exposure at launch {launch:?} differs from its mint-time {:?}",
+            mission.mission_id.as_str(),
+            mission.minted_exposure
+        )
+    })
+}
+
+/// The exposure of the brief `mission` was made from, as it reads now; the Mission's own mint-time
+/// record when it has no filed brief.
+fn launch_exposure(state: &DaemonState, mission: &Mission) -> Vec<String> {
+    match state.intake.filed_brief(mission.mission_id.as_str()) {
+        Ok(Some(filed)) => brief_exposure(&filed.brief, &state.intake.limits().runs),
+        _ => mission.minted_exposure.clone(),
+    }
 }
 
 /// What a Mission made from `brief` has already read: the Source item's text, or the

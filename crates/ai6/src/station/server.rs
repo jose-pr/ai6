@@ -4038,11 +4038,12 @@ fn create_intake_mission(
             .record_handle(mission_id.as_str(), handle.clone())
             .map_err(|error| format!("could not record the Mission's handle: {error:?}"))?;
     }
+    let minted = medical::brief_exposure(brief, &state.intake.limits().runs);
     missions
-        .expose(
-            mission_id.as_str(),
-            &medical::brief_exposure(brief, &state.intake.limits().runs),
-        )
+        .expose(mission_id.as_str(), &minted)
+        .map_err(|error| format!("could not record the Mission's exposure: {error:?}"))?;
+    missions
+        .mint_exposure(mission_id.as_str(), &minted)
         .map_err(|error| format!("could not record the Mission's exposure: {error:?}"))?;
     let named = naming.is_some();
     if let Some(naming) = naming {
