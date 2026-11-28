@@ -910,6 +910,14 @@ cannot be finished (this Station holds no wrap of the previous key) is an error,
 ring keeps its own copy of the scope key for the length of one call and offers no way to wipe it. See
 [Logins kept in the Registry](#logins-kept-in-the-registry) for the Station's sealing key.
 
+**Who may read a value.** A Run opens a value kept in the Registry only where its scope allows: a `global` value for any
+Run, an Operation's for a Run of that Operation, and a compartment's only for a Run read into that compartment now (asked at
+each read, with nothing remembered, and refused when the compartments cannot be read); the crossing is written to the audit
+log (`compartment.secret`) before the value is opened, and a failed write refuses the read. A reader that is not a Run (a
+listing) opens `global` values only. A new secret that names an Operation (`ai6ctl secret put NAME --operation ID`, the
+provider's `operation` field) and no scope is that Operation's. Removing a value needs a wrap of its scope's key, so a Station
+outside the scope cannot clear a name to write its own under another scope.
+
 **Who may write a scope key record.** M signs each one (and each rotation step) with Ed25519: the signature covers the
 scope, the Headquarters election term, the Registry revision, the key ID and every wrap, and a Station refuses a record
 that is unsigned, expired, below the newest (term, revision) it accepted, signed for another revision, or signed by a key

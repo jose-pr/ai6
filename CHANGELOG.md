@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A Run opens a value kept in the Registry only in `global`, its own Operation's scope or a compartment it is read into now (audited before the value opens); a new secret that names an Operation and no scope is that Operation's (`ai6ctl secret put --operation`); removing a value needs the scope's key.
+
 - M signs scope-key records, and secret requests are signed: a Station pins a root (`sealing.trust`, `ai6 secret-trust`), refuses a record that is unsigned, expired, below its newest (term, revision), signed for another revision or signed by a key no root certified, and a revoked or outside Station can no longer forge or roll back a scope key. A request is signed by a certified key (the gateway's, `AI6_EXPORTS_SECRET_REQUESTER`) and a Station checks it before it opens it.
 
 - Secrets are written through the gateway: `ai6ctl secret put|rotate|rotate-key|grant|revoke|remove|list|status` (`POST /v1/user/secrets/requests`, `GET /v1/user/secrets`, `GET /v1/user/secrets/requests/{id}`, `config.manage` or `config.read` on `config:secrets`). The gateway holds no key: it seals each request to the Stations holding the scope's key, and one of them makes the change and answers; a value is read from standard input and appears in no answer, listing or audit record. A secret of the `registry` provider reads from the scope it names (`global` by default, `any` to weaken it), and a Station moves values sealed separately to each Station under the `global` scope key at start.

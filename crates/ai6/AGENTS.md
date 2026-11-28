@@ -4556,7 +4556,8 @@ impl Vault { pub fn with_trust(self, Trust) -> Self; pub fn with_signer(self, Si
     pub fn seal_m_key(&self, &SigningKey, &Certificate, eligible: &[Recipient], now) -> Result<(), VaultError>;   // the registry fallback: sealed to the Headquarters-eligible Stations
     pub fn open_m_signer(&self, term: impl Fn() -> Option<u64>) -> Result<Option<Signer>, VaultError>;
     pub fn resign_scope_keys(&self, now) -> Result<usize, VaultError>; }   // after the root certifies M's next key
-// VaultError also: Rollback(label), Rotating(scope), Unsigned(label), Untrusted(label, why), NoSigner, NoTerm
+// VaultError also: Rollback(label), Rotating(scope), Refused(why), Unsigned(label), Untrusted(label, why), NoSigner, NoTerm
+// RegistrySecrets::with_guard(ReadGuard = Arc<dyn Fn(&Scope) -> Result<(), String>>): asked before a value opens, in the scope it is in; with none only `global` opens. Vault::read_value_guarded(name, expected, guard).
 // sealing::ask(registry, id, &SecretRequest, stations, signer: Option<(&Signer, lifetime_seconds)>, now); DEFAULT_REQUEST_LIFETIME
 // directorates::q::logins (feature `daemon`): harness logins kept sealed. Only files decide: a copy that
 // lost its tokens or ends sooner is never kept, and exit status proves nothing (Grok exits 0 when refused).
