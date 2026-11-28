@@ -3643,6 +3643,9 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseRun>::info_in(&self, guatiao::value::alloc::Alloc) -> core::result::Result<guatiao::value::value::Value, guatiao::library::kind::ProviderError>
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::q::safehouse::SafeHouseRun>::into_object(self) -> guatiao::library::kind::object::Object<dyn ai6::directorates::q::safehouse::SafeHouseRun> where Self: core::marker::Sized + core::marker::Send + 'static
 pub mod ai6::directorates::q::sealing
+pub enum ai6::directorates::q::sealing::Purpose
+pub ai6::directorates::q::sealing::Purpose::ScopeKeyRecords
+pub ai6::directorates::q::sealing::Purpose::SecretRequests
 pub enum ai6::directorates::q::sealing::RequestStatus
 pub ai6::directorates::q::sealing::RequestStatus::Done(ai6::directorates::q::sealing::SecretOutcome)
 pub ai6::directorates::q::sealing::RequestStatus::Failed(alloc::string::String)
@@ -3682,6 +3685,8 @@ pub ai6::directorates::q::sealing::VaultError::Conflict::held: core::option::Opt
 pub ai6::directorates::q::sealing::VaultError::LastStation
 pub ai6::directorates::q::sealing::VaultError::NoKey(alloc::string::String)
 pub ai6::directorates::q::sealing::VaultError::NoScopeKey(alloc::string::String)
+pub ai6::directorates::q::sealing::VaultError::NoSigner
+pub ai6::directorates::q::sealing::VaultError::NoTerm
 pub ai6::directorates::q::sealing::VaultError::NotFound
 pub ai6::directorates::q::sealing::VaultError::NotNamed
 pub ai6::directorates::q::sealing::VaultError::Registry(core::io::error::Error)
@@ -3690,6 +3695,8 @@ pub ai6::directorates::q::sealing::VaultError::Rotating(alloc::string::String)
 pub ai6::directorates::q::sealing::VaultError::Sealing
 pub ai6::directorates::q::sealing::VaultError::Stale
 pub ai6::directorates::q::sealing::VaultError::Unreadable
+pub ai6::directorates::q::sealing::VaultError::Unsigned(alloc::string::String)
+pub ai6::directorates::q::sealing::VaultError::Untrusted(alloc::string::String, alloc::string::String)
 pub ai6::directorates::q::sealing::VaultError::Unverified(alloc::string::String)
 pub ai6::directorates::q::sealing::VaultError::WrongScope
 impl core::convert::From<ai6::directorates::q::sealing::VaultError> for ai6::directorates::q::login_admin::AdminError
@@ -3703,6 +3710,19 @@ pub fn ai6::directorates::q::sealing::VaultError::from(core::io::error::Error) -
 impl core::error::Error for ai6::directorates::q::sealing::VaultError
 impl core::fmt::Display for ai6::directorates::q::sealing::VaultError
 pub fn ai6::directorates::q::sealing::VaultError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::q::sealing::Certificate
+pub ai6::directorates::q::sealing::Certificate::issuer: alloc::string::String
+pub ai6::directorates::q::sealing::Certificate::key: alloc::string::String
+pub ai6::directorates::q::sealing::Certificate::not_after: f64
+pub ai6::directorates::q::sealing::Certificate::not_before: f64
+pub ai6::directorates::q::sealing::Certificate::purposes: alloc::collections::btree::set::BTreeSet<ai6::directorates::q::sealing::Purpose>
+pub ai6::directorates::q::sealing::Certificate::serial: u64
+pub ai6::directorates::q::sealing::Certificate::signature: alloc::string::String
+pub ai6::directorates::q::sealing::Certificate::subject: alloc::string::String
+impl ai6::directorates::q::sealing::Certificate
+pub fn ai6::directorates::q::sealing::Certificate::from_json(&str) -> core::option::Option<Self>
+pub fn ai6::directorates::q::sealing::Certificate::issue(&ai6::directorates::q::sealing::SigningKey, &str, &ai6::directorates::q::sealing::PublicKey, alloc::collections::btree::set::BTreeSet<ai6::directorates::q::sealing::Purpose>, u64, (f64, f64)) -> Self
+pub fn ai6::directorates::q::sealing::Certificate::to_json(&self) -> alloc::string::String
 pub struct ai6::directorates::q::sealing::Marks
 impl ai6::directorates::q::sealing::Marks
 pub fn ai6::directorates::q::sealing::Marks::in_memory() -> Self
@@ -3720,6 +3740,12 @@ pub ai6::directorates::q::sealing::OpenedValue::scope: ai6::directorates::q::sea
 pub ai6::directorates::q::sealing::OpenedValue::value: zeroize::Zeroizing<alloc::string::String>
 impl core::fmt::Debug for ai6::directorates::q::sealing::OpenedValue
 pub fn ai6::directorates::q::sealing::OpenedValue::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::q::sealing::PublicKey(_)
+impl ai6::directorates::q::sealing::PublicKey
+pub fn ai6::directorates::q::sealing::PublicKey::parse(&str) -> core::option::Option<Self>
+pub fn ai6::directorates::q::sealing::PublicKey::to_text(&self) -> alloc::string::String
+impl core::fmt::Debug for ai6::directorates::q::sealing::PublicKey
+pub fn ai6::directorates::q::sealing::PublicKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct ai6::directorates::q::sealing::Recipient
 impl ai6::directorates::q::sealing::Recipient
 pub fn ai6::directorates::q::sealing::Recipient::named(impl core::convert::Into<alloc::string::String>) -> Self
@@ -3781,6 +3807,37 @@ pub ai6::directorates::q::sealing::SecretOutcome::revision: core::option::Option
 pub ai6::directorates::q::sealing::SecretOutcome::scope: core::option::Option<alloc::string::String>
 pub ai6::directorates::q::sealing::SecretOutcome::stations: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::q::sealing::SecretOutcome::verb: alloc::string::String
+pub struct ai6::directorates::q::sealing::Signer
+impl ai6::directorates::q::sealing::Signer
+pub fn ai6::directorates::q::sealing::Signer::from_file(&std::path::Path) -> core::io::error::Result<Self>
+impl ai6::directorates::q::sealing::Signer
+pub fn ai6::directorates::q::sealing::Signer::new(alloc::sync::Arc<ai6::directorates::q::sealing::SigningKey>, ai6::directorates::q::sealing::Certificate) -> Self
+pub fn ai6::directorates::q::sealing::Signer::with_term(self, impl core::ops::function::Fn() -> core::option::Option<u64> + core::marker::Send + core::marker::Sync + 'static) -> Self
+impl core::fmt::Debug for ai6::directorates::q::sealing::Signer
+pub fn ai6::directorates::q::sealing::Signer::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::q::sealing::SigningKey
+impl ai6::directorates::q::sealing::SigningKey
+pub fn ai6::directorates::q::sealing::SigningKey::from_pkcs8(&[u8]) -> core::option::Option<Self>
+pub fn ai6::directorates::q::sealing::SigningKey::from_text(&str) -> core::option::Option<Self>
+pub fn ai6::directorates::q::sealing::SigningKey::generate() -> Self
+pub fn ai6::directorates::q::sealing::SigningKey::public_key(&self) -> ai6::directorates::q::sealing::PublicKey
+pub fn ai6::directorates::q::sealing::SigningKey::to_text(&self) -> zeroize::Zeroizing<alloc::string::String>
+impl core::fmt::Debug for ai6::directorates::q::sealing::SigningKey
+pub fn ai6::directorates::q::sealing::SigningKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::q::sealing::Trust
+impl ai6::directorates::q::sealing::Trust
+pub fn ai6::directorates::q::sealing::Trust::accepts_unsigned(&self) -> bool
+pub fn ai6::directorates::q::sealing::Trust::strict(alloc::vec::Vec<ai6::directorates::q::sealing::PublicKey>) -> Self
+pub fn ai6::directorates::q::sealing::Trust::unsigned() -> Self
+pub fn ai6::directorates::q::sealing::Trust::weakening(&self) -> core::option::Option<alloc::string::String>
+pub struct ai6::directorates::q::sealing::TrustFile
+pub ai6::directorates::q::sealing::TrustFile::roots: alloc::vec::Vec<alloc::string::String>
+pub ai6::directorates::q::sealing::TrustFile::signer_file: core::option::Option<alloc::string::String>
+pub ai6::directorates::q::sealing::TrustFile::unsigned: bool
+impl ai6::directorates::q::sealing::TrustFile
+pub fn ai6::directorates::q::sealing::TrustFile::open(&std::path::Path) -> core::io::error::Result<Self>
+pub fn ai6::directorates::q::sealing::TrustFile::save(&self, &std::path::Path) -> core::io::error::Result<()>
+pub fn ai6::directorates::q::sealing::TrustFile::trust(&self) -> core::io::error::Result<ai6::directorates::q::sealing::Trust>
 pub struct ai6::directorates::q::sealing::ValueInfo
 pub ai6::directorates::q::sealing::ValueInfo::key_id: alloc::string::String
 pub ai6::directorates::q::sealing::ValueInfo::name: alloc::string::String
@@ -3789,6 +3846,7 @@ pub ai6::directorates::q::sealing::ValueInfo::scope: ai6::directorates::q::seali
 pub struct ai6::directorates::q::sealing::Vault
 impl ai6::directorates::q::sealing::Vault
 pub fn ai6::directorates::q::sealing::Vault::add_station(&self, &str, &ai6::directorates::q::sealing::Recipient, f64) -> core::result::Result<u64, ai6::directorates::q::sealing::VaultError>
+pub fn ai6::directorates::q::sealing::Vault::can_sign(&self) -> bool
 pub fn ai6::directorates::q::sealing::Vault::new(alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>, impl core::convert::Into<alloc::string::String>, alloc::sync::Arc<ai6::directorates::q::sealing::SealingKey>) -> Self
 pub fn ai6::directorates::q::sealing::Vault::open(&self, &str) -> core::result::Result<ai6::directorates::q::sealing::Opened, ai6::directorates::q::sealing::VaultError>
 pub fn ai6::directorates::q::sealing::Vault::registry(&self) -> &dyn ai6::directorates::registry::backend::RegistryBackend
@@ -3796,7 +3854,11 @@ pub fn ai6::directorates::q::sealing::Vault::remove_station(&self, &str, &str, f
 pub fn ai6::directorates::q::sealing::Vault::replace(&self, &str, &str, u64, f64) -> core::result::Result<u64, ai6::directorates::q::sealing::VaultError>
 pub fn ai6::directorates::q::sealing::Vault::seal_to(&self, &str, &str, &[ai6::directorates::q::sealing::Recipient], ai6::directorates::registry::sealed::SealedExpect, f64) -> core::result::Result<u64, ai6::directorates::q::sealing::VaultError>
 pub fn ai6::directorates::q::sealing::Vault::station(&self) -> &str
+pub fn ai6::directorates::q::sealing::Vault::trust(&self) -> &ai6::directorates::q::sealing::Trust
+pub fn ai6::directorates::q::sealing::Vault::with_clock(self, impl core::ops::function::Fn() -> f64 + core::marker::Send + core::marker::Sync + 'static) -> Self
 pub fn ai6::directorates::q::sealing::Vault::with_marks(self, alloc::sync::Arc<ai6::directorates::q::sealing::Marks>) -> Self
+pub fn ai6::directorates::q::sealing::Vault::with_signer(self, ai6::directorates::q::sealing::Signer) -> Self
+pub fn ai6::directorates::q::sealing::Vault::with_trust(self, ai6::directorates::q::sealing::Trust) -> Self
 impl ai6::directorates::q::sealing::Vault
 pub fn ai6::directorates::q::sealing::Vault::finish_rotation(&self, &ai6::directorates::q::sealing::Scope, f64) -> core::result::Result<(), ai6::directorates::q::sealing::VaultError>
 pub fn ai6::directorates::q::sealing::Vault::grant_station(&self, &ai6::directorates::q::sealing::Scope, &ai6::directorates::q::sealing::Recipient, f64) -> core::result::Result<ai6::directorates::q::sealing::ScopeKeyInfo, ai6::directorates::q::sealing::VaultError>
@@ -3805,6 +3867,7 @@ pub fn ai6::directorates::q::sealing::Vault::put_scope_key(&self, &ai6::director
 pub fn ai6::directorates::q::sealing::Vault::read_value(&self, &str) -> core::result::Result<ai6::directorates::q::sealing::OpenedValue, ai6::directorates::q::sealing::VaultError>
 pub fn ai6::directorates::q::sealing::Vault::read_value_in(&self, &str, core::option::Option<&ai6::directorates::q::sealing::Scope>) -> core::result::Result<ai6::directorates::q::sealing::OpenedValue, ai6::directorates::q::sealing::VaultError>
 pub fn ai6::directorates::q::sealing::Vault::remove_value_in(&self, &str, &ai6::directorates::q::sealing::Scope) -> core::result::Result<bool, ai6::directorates::q::sealing::VaultError>
+pub fn ai6::directorates::q::sealing::Vault::resign_scope_keys(&self, f64) -> core::result::Result<usize, ai6::directorates::q::sealing::VaultError>
 pub fn ai6::directorates::q::sealing::Vault::revoke_station(&self, &ai6::directorates::q::sealing::Scope, &str, f64) -> core::result::Result<ai6::directorates::q::sealing::ScopeKeyInfo, ai6::directorates::q::sealing::VaultError>
 pub fn ai6::directorates::q::sealing::Vault::rotate_scope_key(&self, &ai6::directorates::q::sealing::Scope, f64) -> core::result::Result<ai6::directorates::q::sealing::ScopeKeyInfo, ai6::directorates::q::sealing::VaultError>
 pub fn ai6::directorates::q::sealing::Vault::scope_key_info(&self, &ai6::directorates::q::sealing::Scope) -> core::result::Result<core::option::Option<ai6::directorates::q::sealing::ScopeKeyInfo>, ai6::directorates::q::sealing::VaultError>
@@ -3812,13 +3875,18 @@ pub fn ai6::directorates::q::sealing::Vault::value_info(&self, &str) -> core::re
 pub fn ai6::directorates::q::sealing::Vault::value_infos(&self) -> core::result::Result<alloc::vec::Vec<ai6::directorates::q::sealing::ValueInfo>, ai6::directorates::q::sealing::VaultError>
 pub fn ai6::directorates::q::sealing::Vault::write_value(&self, &str, &ai6::directorates::q::sealing::Scope, &str, ai6::directorates::registry::sealed::SealedExpect, f64) -> core::result::Result<u64, ai6::directorates::q::sealing::VaultError>
 impl ai6::directorates::q::sealing::Vault
+pub fn ai6::directorates::q::sealing::Vault::open_m_signer(&self, impl core::ops::function::Fn() -> core::option::Option<u64> + core::marker::Send + core::marker::Sync + 'static) -> core::result::Result<core::option::Option<ai6::directorates::q::sealing::Signer>, ai6::directorates::q::sealing::VaultError>
+pub fn ai6::directorates::q::sealing::Vault::seal_m_key(&self, &ai6::directorates::q::sealing::SigningKey, &ai6::directorates::q::sealing::Certificate, &[ai6::directorates::q::sealing::Recipient], f64) -> core::result::Result<(), ai6::directorates::q::sealing::VaultError>
+impl ai6::directorates::q::sealing::Vault
 pub fn ai6::directorates::q::sealing::Vault::serve_requests(&self, f64) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, ai6::directorates::q::sealing::VaultError>
 impl core::fmt::Debug for ai6::directorates::q::sealing::Vault
 pub fn ai6::directorates::q::sealing::Vault::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub const ai6::directorates::q::sealing::DEFAULT_REQUEST_LIFETIME: f64
 pub const ai6::directorates::q::sealing::MARKS_FILE: &str
 pub const ai6::directorates::q::sealing::REGISTRY_PROVIDER: &str
 pub const ai6::directorates::q::sealing::SEALING_KEY_FILE: &str
-pub fn ai6::directorates::q::sealing::ask(&dyn ai6::directorates::registry::backend::RegistryBackend, &str, &ai6::directorates::q::sealing::SecretRequest, &[ai6::directorates::q::sealing::Recipient], f64) -> core::result::Result<(), ai6::directorates::q::sealing::VaultError>
+pub const ai6::directorates::q::sealing::TRUST_FILE: &str
+pub fn ai6::directorates::q::sealing::ask(&dyn ai6::directorates::registry::backend::RegistryBackend, &str, &ai6::directorates::q::sealing::SecretRequest, &[ai6::directorates::q::sealing::Recipient], core::option::Option<(&ai6::directorates::q::sealing::Signer, f64)>, f64) -> core::result::Result<(), ai6::directorates::q::sealing::VaultError>
 pub fn ai6::directorates::q::sealing::list_scopes(&dyn ai6::directorates::registry::backend::RegistryBackend) -> core::result::Result<alloc::vec::Vec<ai6::directorates::q::sealing::ScopeKeyInfo>, ai6::directorates::q::sealing::VaultError>
 pub fn ai6::directorates::q::sealing::list_values(&dyn ai6::directorates::registry::backend::RegistryBackend) -> core::result::Result<alloc::vec::Vec<ai6::directorates::q::sealing::ValueInfo>, ai6::directorates::q::sealing::VaultError>
 pub fn ai6::directorates::q::sealing::status(&dyn ai6::directorates::registry::backend::RegistryBackend, &str) -> core::result::Result<ai6::directorates::q::sealing::RequestStatus, ai6::directorates::q::sealing::VaultError>

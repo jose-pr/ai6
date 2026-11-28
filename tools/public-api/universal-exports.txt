@@ -373,6 +373,7 @@ pub fn universal_exports::Gateway::with_own_providers(self, alloc::vec::Vec<ai6:
 pub fn universal_exports::Gateway::with_pages(self, universal_exports::PagesConfig) -> core::result::Result<Self, universal_exports::GatewayError>
 pub fn universal_exports::Gateway::with_registry(universal_exports::GatewayConfig, alloc::sync::Arc<dyn ai6::directorates::registry::backend::RegistryBackend>) -> Self
 pub fn universal_exports::Gateway::with_roster(self, alloc::sync::Arc<dyn ai6::directorates::m::config::ConfigProvider>) -> Self
+pub fn universal_exports::Gateway::with_secret_requester(self, ai6::directorates::q::sealing::signing::Signer, f64) -> Self
 impl universal_exports::Gateway
 pub async fn universal_exports::Gateway::serve_tls<F>(self, tokio::net::tcp::listener::TcpListener, alloc::sync::Arc<rustls::server::server_conn::ServerConfig>, F) -> core::io::error::Result<()> where F: core::future::future::Future<Output = ()> + core::marker::Send + 'static
 impl core::fmt::Debug for universal_exports::Gateway
