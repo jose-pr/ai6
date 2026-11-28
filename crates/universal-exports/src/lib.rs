@@ -5662,6 +5662,12 @@ async fn user_audit(
         .transpose()?;
     let limit = audit_page(query.limit, &gateway.config.unex().timeline)
         .ok_or_else(ApiError::bad_request)?;
+    let action_filter = match query.action {
+        Some(prefix) if prefix.is_empty() || prefix.chars().any(char::is_control) => {
+            return Err(ApiError::bad_request());
+        }
+        other => other,
+    };
     let registry = gateway.registry.clone().ok_or_else(ApiError::unavailable)?;
     let authorizer = gateway.authorizer()?;
     let tree = operation_tree(&gateway).await?;
@@ -5702,6 +5708,13 @@ async fn user_audit(
         let records = registry.list_audit(500).map_err(|_| ApiError::internal())?;
         let mut visible = Vec::new();
         for record in records {
+            // Matching is done before the page is cut, so a page holds what was asked for.
+            if action_filter
+                .as_deref()
+                .is_some_and(|prefix| !record.action.starts_with(prefix))
+            {
+                continue;
+            }
             // A crossing belongs to both sides: the reader's Operation and what it read.
             let crossed = record
                 .resource
@@ -5996,6 +6009,8 @@ struct RenamedMission {
 struct UserAuditQuery {
     operation_id: Option<String>,
     station_id: Option<String>,
+    /// Only the records whose action starts with this (`run.context`, `internal.read`).
+    action: Option<String>,
     limit: Option<usize>,
 }
 

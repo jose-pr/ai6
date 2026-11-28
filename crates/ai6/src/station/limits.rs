@@ -1332,13 +1332,35 @@ pub struct ApiLimits {
     #[schema(title = "Refused request body read", format = "bytes")]
     #[map(default = ApiLimits::default().refused_body_drain_bytes)]
     pub refused_body_drain_bytes: Limit,
+    /// Whether a read of a Mission's data through the Station's own API (the Mission, and its
+    /// Cable inbox and held list) is written to the audit log before it is answered. Off, such a
+    /// read leaves no record. A weakening.
+    #[schema(title = "Audit reads of Mission data on the Station API")]
+    #[map(default = ApiLimits::default().audit_reads)]
+    pub audit_reads: bool,
 }
 
 impl Default for ApiLimits {
     fn default() -> Self {
         Self {
             refused_body_drain_bytes: Limit::at(64 * KIB),
+            audit_reads: true,
         }
+    }
+}
+
+impl ApiLimits {
+    /// One line per setting looser than its default.
+    pub fn weakenings(&self) -> Vec<String> {
+        let mut lines = Vec::new();
+        if !self.audit_reads {
+            lines.push(
+                "station.api.audit_reads = false: reads of Mission data through the Station API \
+                 are not written to the audit log"
+                    .to_owned(),
+            );
+        }
+        lines
     }
 }
 

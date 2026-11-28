@@ -124,7 +124,7 @@ use crate::directorates::registry::runs::{
     RunUpdate,
 };
 use crate::directorates::registry::store::{
-    Brief, DEFAULT_LEASE, Lease, LeaseRecovery, StationRecord,
+    AuditRecord, Brief, DEFAULT_LEASE, Lease, LeaseRecovery, StationRecord,
 };
 use crate::directorates::registry::timeline::TimelineEvent;
 use crate::directorates::section_00::acp::{AcpRun, HandlerSpec};
@@ -1048,7 +1048,14 @@ where
     }
     #[cfg(feature = "cables-mcp")]
     green_ink::log_weakenings(&roster);
-    for weakened in config.station.limits.approvals.weakenings() {
+    for weakened in config
+        .station
+        .limits
+        .approvals
+        .weakenings()
+        .into_iter()
+        .chain(config.station.limits.api.weakenings())
+    {
         eprintln!("ai6: {weakened}");
     }
     harness::log_weakenings(&roster);
@@ -1181,7 +1188,6 @@ fn api(state: DaemonState, token: String, token_file: Option<&std::path::Path>) 
             "/internal/missions",
             get(list_missions).post(create_mission),
         )
-        .route("/internal/missions/{mission_id}", get(get_mission))
         .route(
             "/internal/missions/{mission_id}/state",
             axum::routing::post(transition_mission),
@@ -1211,14 +1217,6 @@ fn api(state: DaemonState, token: String, token_file: Option<&std::path::Path>) 
             get(discover_cables).post(send_cable),
         )
         .route(
-            "/internal/missions/{mission_id}/cables/inbox",
-            get(cable_inbox),
-        )
-        .route(
-            "/internal/missions/{mission_id}/cables/held",
-            get(held_cables),
-        )
-        .route(
             "/internal/missions/{mission_id}/cables/{cable_id}/release",
             axum::routing::post(release_cable),
         )
@@ -1234,6 +1232,30 @@ fn api(state: DaemonState, token: String, token_file: Option<&std::path::Path>) 
             "/internal/missions/{mission_id}/events/next",
             get(next_event),
         );
+    // What reads a Mission's data is audited before it answers: the actor is the API, whose bearer
+    // token is shared, so the person-level trail is the gateway's.
+    let audited = |template: &'static str| {
+        axum::middleware::from_fn_with_state(
+            (reload::Served(state.clone()), template),
+            audit_internal_read,
+        )
+    };
+    let reads = Router::new()
+        .route(
+            "/internal/missions/{mission_id}",
+            get(get_mission).route_layer(audited("GET /internal/missions/{mission_id}")),
+        )
+        .route(
+            "/internal/missions/{mission_id}/cables/inbox",
+            get(cable_inbox)
+                .route_layer(audited("GET /internal/missions/{mission_id}/cables/inbox")),
+        )
+        .route(
+            "/internal/missions/{mission_id}/cables/held",
+            get(held_cables)
+                .route_layer(audited("GET /internal/missions/{mission_id}/cables/held")),
+        );
+    let app = app.merge(reads);
     #[cfg(feature = "publisher")]
     let app = app.route("/internal/publisher", get(publisher_health));
     let mut bearer = crate::station::runner::Bearer::new(token, &state.station.limits().api);
@@ -1247,6 +1269,51 @@ fn api(state: DaemonState, token: String, token_file: Option<&std::path::Path>) 
     ))
     .route("/healthz", get(|| async { "ok" }))
     .with_state(reload::Served(state))
+}
+
+/// Writes an `internal.read` audit record for a read of a Mission's data through the Station API
+/// before the read is answered, and refuses the read when the record cannot be written (unless
+/// `[api] audit_reads` is off). The record names the Mission's Operation, this Station and the
+/// route's template, never a query or body.
+async fn audit_internal_read(
+    State((served, template)): State<(reload::Served, &'static str)>,
+    axum::extract::Path(params): axum::extract::Path<std::collections::HashMap<String, String>>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse as _;
+    let state = served.0.current();
+    if state.config.limits().api.audit_reads {
+        let operation = params.get("mission_id").and_then(|mission_id| {
+            state.missions.lock().ok().and_then(|missions| {
+                missions
+                    .get(mission_id)
+                    .and_then(|m| m.operation_id.clone())
+            })
+        });
+        // A Mission this Station does not know is answered as missing by the route itself:
+        // nothing is read.
+        if let Some(operation) = operation {
+            let recorded = state.intake.record_audit(&AuditRecord {
+                id: format!("internal-read-{}", uuid::Uuid::new_v4().simple()),
+                actor: "station-api".to_owned(),
+                action: "internal.read".to_owned(),
+                operation,
+                resource: Some(format!("station:{}", state.station_id)),
+                target: template.to_owned(),
+                at: state.clock.now() as f64,
+            });
+            if let Err(error) = recorded {
+                eprintln!("ai6: a read through the Station API was not audited: {error}");
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(serde_json::json!({"error": "the read could not be audited"})),
+                )
+                    .into_response();
+            }
+        }
+    }
+    next.run(request).await
 }
 
 async fn list_agent_handlers(State(state): State<DaemonState>) -> Json<Vec<plugins::ProviderInfo>> {

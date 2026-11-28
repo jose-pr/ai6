@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - `ai6 api-token rotate` replaces the token of the Station's `/internal` API: a new 256-bit value is renamed over the `api-token` file, the old token is refused from the next request, and a running Station follows the file with no restart. It prints the file's path, never the token.
 
+- `ai6ctl audit list [--operation ID | --station ID] [--action PREFIX] [--limit N]` reads the audit log through the gateway, and `GET /v1/user/audit` takes `?action=PREFIX`, applied before the page is cut. A read of a Mission's data through the Station's `/internal` API (the Mission, its Cable inbox and held list) writes an `internal.read` record, actor `station-api`, before it answers; `[api] audit_reads = false` turns that off and is logged as a weakening.
+
 - `ai6ctl issue-proposals show ID --operation G` prints one issue proposal whole (each spec's tracker, title, labels and body, the exposure, findings and outcome) from the new `GET /v1/user/operations/{operation_id}/issue-proposals/{id}` (`mission.read`; another Operation's proposal answers 404), so an approver reads what they approve.
 
 - A handler compacts and clears a live session: `AgentHandler::session_commands` (a new method of the handler kind: every handler plugin is rebuilt, its floor hash moved) says which, and a

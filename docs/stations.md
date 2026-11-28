@@ -384,6 +384,18 @@ nothing restarts. It prints the file's path and never the token. Every client of
 harness gate, the Cable tunnel, a script of yours) must read the file again; the file is the only
 copy. The gateway's own credential for a Station is a separate matter and is not rotated here.
 
+## Auditing reads of Mission data
+
+A read of a Mission through the Station's own `/internal` API (`GET /internal/missions/{id}` and the
+Mission's Cable `inbox` and `held` lists) writes an `internal.read` record to the audit log before it
+is answered, and is refused with 503 when the record cannot be written. The record names the
+Mission's Operation, this Station (`station:ID`) and the route's template, never a query, a body or
+the Mission's ID. Its actor is `station-api`: the API's bearer token is shared by everything that
+reads it, so this is an access review of the API, not of a person; the person-level trail is the
+gateway's (`ai6ctl audit list --action run.context`). Polling (`events/next`), the provider listings
+and `/healthz` are not read from a Mission and write nothing. `[api] audit_reads = false` turns it off
+and the Station logs the weakening.
+
 ## Station identity
 
 Stations do not connect to each other: they coordinate through the Registry, and each publishes to

@@ -1495,6 +1495,103 @@ queue = 3
         );
     }
 
+    /// A Mission's data read through the Station API is on the audit log before the answer, and
+    /// not once the operator turns that off.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_internal_mission_read_is_audited_before_it_answers_and_not_when_the_operator_turns_it_off()
+     {
+        let root = tempfile::tempdir().unwrap();
+        let mut state = test_state(root.path(), "", AGENTS);
+        live(
+            &mut state,
+            root.path(),
+            Arc::new(FileProvider::new(root.path())),
+            false,
+        );
+        let token = "t".repeat(64);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let app = super::super::api(state.clone(), token.clone(), None);
+        let served = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let get = move |path: String| {
+            let token = token.clone();
+            tokio::task::spawn_blocking(move || {
+                let agent: ureq::Agent = ureq::Agent::config_builder()
+                    .http_status_as_error(false)
+                    .build()
+                    .into();
+                agent
+                    .get(format!("http://{address}{path}"))
+                    .header("Authorization", format!("Bearer {token}"))
+                    .call()
+                    .unwrap()
+                    .status()
+                    .as_u16()
+            })
+        };
+        let reads = |state: &DaemonState| -> Vec<AuditRecord> {
+            state
+                .intake
+                .list_audit(100)
+                .unwrap()
+                .into_iter()
+                .filter(|record| record.action == "internal.read")
+                .collect()
+        };
+
+        assert_eq!(
+            get("/internal/missions/mission-1".into()).await.unwrap(),
+            200
+        );
+        let first = reads(&state);
+        assert_eq!(first.len(), 1, "{first:?}");
+        assert_eq!(first[0].actor, "station-api");
+        assert_eq!(first[0].operation, "G");
+        assert_eq!(first[0].resource.as_deref(), Some("station:test"));
+        assert_eq!(first[0].target, "GET /internal/missions/{mission_id}");
+
+        // The Cable lists are Mission data too; a Mission the Station lacks, a poll of events and
+        // the provider listing are not read from it.
+        for path in [
+            "/internal/missions/mission-1/cables/inbox",
+            "/internal/missions/mission-2/cables/held",
+        ] {
+            get(path.into()).await.unwrap();
+        }
+        assert_eq!(get("/internal/missions/nope".into()).await.unwrap(), 404);
+        get("/internal/terminals".into()).await.unwrap();
+        let after = reads(&state);
+        assert_eq!(after.len(), 3, "{after:?}");
+        assert!(
+            after
+                .iter()
+                .any(|record| record.target == "GET /internal/missions/{mission_id}/cables/held"),
+            "{after:?}"
+        );
+        assert!(
+            after
+                .iter()
+                .all(|record| !record.target.contains("mission-")),
+            "the target is the template, never the Mission or a query"
+        );
+
+        // Off, a read leaves no record, and the Station says what it gave up.
+        fs::write(
+            root.path().join("station.toml"),
+            "[api]\naudit_reads = false\n",
+        )
+        .unwrap();
+        poll(&state);
+        assert!(!state.config.limits().api.audit_reads);
+        assert_eq!(state.config.limits().api.weakenings().len(), 1);
+        assert_eq!(
+            get("/internal/missions/mission-1".into()).await.unwrap(),
+            200
+        );
+        assert_eq!(reads(&state).len(), 3, "the operator turned it off");
+        served.abort();
+    }
+
     #[test]
     fn a_changed_cables_record_changes_a_running_relay_at_the_next_poll() {
         let root = tempfile::tempdir().unwrap();

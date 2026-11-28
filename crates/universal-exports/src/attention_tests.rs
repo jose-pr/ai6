@@ -554,6 +554,85 @@ async fn reports_a_person_may_not_read_are_named_not_listed_and_m_is_not_mention
 }
 
 #[tokio::test]
+async fn user_audit_filters_by_action_prefix() {
+    let fixture = fixture().await;
+    for (index, action) in [
+        "internal.read",
+        "run.context.read",
+        "internal.read",
+        "config.refused",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        fixture
+            .served
+            .registry
+            .record_audit(&AuditRecord {
+                id: format!("audit-{index}"),
+                actor: "station-api".to_owned(),
+                action: action.to_owned(),
+                operation: "G".to_owned(),
+                resource: Some("operation:G".to_owned()),
+                target: format!("GET /internal/missions/{{mission_id}} {index}"),
+                at: now() - 10.0 + index as f64,
+            })
+            .unwrap();
+    }
+    let operator = fixture.served.operator.clone();
+    let (status, all) = fixture
+        .get(&operator, "/v1/user/audit?operation_id=G")
+        .await;
+    assert_eq!(status, StatusCode::OK, "{all}");
+    assert_eq!(all.as_array().unwrap().len(), 4, "{all}");
+
+    let (status, reads) = fixture
+        .get(&operator, "/v1/user/audit?operation_id=G&action=internal.")
+        .await;
+    assert_eq!(status, StatusCode::OK, "{reads}");
+    let actions: Vec<&str> = reads
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|record| record["action"].as_str().unwrap())
+        .collect();
+    assert_eq!(actions, ["internal.read", "internal.read"], "{reads}");
+
+    // The prefix is applied before the page is cut: one record of what was asked for, though
+    // newer records of other actions exist.
+    let (_, one) = fixture
+        .get(
+            &operator,
+            "/v1/user/audit?operation_id=G&action=internal.&limit=1",
+        )
+        .await;
+    assert_eq!(one.as_array().unwrap().len(), 1, "{one}");
+    assert_eq!(one[0]["action"], "internal.read");
+
+    let (none, empty) = fixture
+        .get(
+            &operator,
+            "/v1/user/audit?operation_id=G&action=nothing.like.it",
+        )
+        .await;
+    assert_eq!(none, StatusCode::OK);
+    assert!(empty.as_array().unwrap().is_empty(), "{empty}");
+    let (bad, _) = fixture
+        .get(&operator, "/v1/user/audit?operation_id=G&action=")
+        .await;
+    assert_eq!(bad, StatusCode::BAD_REQUEST, "an empty prefix is no prefix");
+
+    // The viewer holds no audit.read: the filter shows nothing it would not, and it is refused.
+    let (refused, _) = fixture
+        .get(
+            &fixture.served.viewer,
+            "/v1/user/audit?operation_id=G&action=internal.",
+        )
+        .await;
+    assert_eq!(refused, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn a_lapsed_unspent_approval_report_is_an_attention_item_for_one_who_may_assess_it() {
     let fixture = fixture().await;
     fixture.report(json!({"revision": "79"}));

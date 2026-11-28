@@ -127,6 +127,14 @@ said of each person who signs in (the account name, the name to show and the gro
 under `principals`, and names them where it shows an ID:
 
 - `GET /v1/user/audit` carries `actor_name` beside `actor` for a person it has seen sign in.
+  `?action=PREFIX` keeps only the records whose action starts with it (`run.context` for what was
+  read of a Run's transcript, `internal.read` for what was read through a Station's API), before
+  the page is cut; it searches the newest records the log keeps for one page. `ai6ctl audit list
+  [--operation ID | --station ID] [--action PREFIX] [--limit N]` prints it. The reads it shows are
+  the gateway's, by person (`run.context.read`, `assistant.log.read`, `assistant.context.read`, and
+  a Run's attach and detach), and a Station API's, by the API (`internal.read`): the API's bearer
+  token is shared, so the actor of an `internal.read` is `station-api`, not a person, and the
+  person-level trail is the gateway's.
 - `POST /v1/user/principals` with `{"ids": [...]}` answers the people among the IDs it has seen. A
   person is always named to themself; to name others it needs `access.read`, or `audit.read` on an
   Operation.

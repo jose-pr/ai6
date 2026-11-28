@@ -559,6 +559,7 @@ pub(crate) async fn read(
                 Query(UserAuditQuery {
                     operation_id: None,
                     station_id: Some(station.station_id.clone()),
+                    action: None,
                     limit: Some(limits.max_audit_page.or_max()),
                 }),
             )

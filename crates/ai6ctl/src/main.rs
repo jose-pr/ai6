@@ -6,6 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 mod access;
 mod attach;
+mod audit;
 mod compartments;
 mod keys;
 mod liaison;
@@ -284,8 +285,6 @@ enum Command {
         #[command(subcommand)]
         command: ClassCommand,
     },
-    /// List the briefs vetting held, and release or refuse them (needs mission.create on the
-    /// Operation).
     /// Link, comment on, change and create the issues Missions work from.
     Issues {
         #[command(subcommand)]
@@ -322,6 +321,12 @@ enum Command {
     Factors {
         #[command(subcommand)]
         command: login::FactorsCommand,
+    },
+    /// The audit log: who did what, and which reads of Mission data were made (needs audit.read
+    /// on what each record is about).
+    Audit {
+        #[command(subcommand)]
+        command: audit::AuditCommand,
     },
     /// Your own API keys: make one narrowed to some of what you may do, list yours, revoke
     /// one. A key is for automation that should act as you for one purpose.
@@ -2231,6 +2236,10 @@ async fn run() -> Result<(), String> {
         Command::Keys { command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             keys::run(&client, &server, &token, command).await?;
+        }
+        Command::Audit { command } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            audit::run(&client, &server, &token, command).await?;
         }
         Command::Operations { command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
