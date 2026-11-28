@@ -241,8 +241,7 @@ fn update(cx: &ConnectionTo<Client>, update: Value) {
     }
 }
 
-/// Sends `FAKE_COMMANDS` as the agent's command list. Grok sends its list at session start and again
-/// with the first prompt, and the fake does the same.
+/// Sends `FAKE_COMMANDS` as the agent's command list, right after `session/new` answers, as Grok does.
 fn advertise(cx: &ConnectionTo<Client>) {
     if let Some(names) = var("FAKE_COMMANDS") {
         let commands: Vec<Value> = names
@@ -322,7 +321,6 @@ fn handle(
             let servers = servers.lock().unwrap().clone();
             std::thread::spawn(move || {
                 let prompt = params["prompt"][0]["text"].as_str().unwrap_or_default();
-                advertise(&cx);
                 if let Some(data) = var("FAKE_ERROR_DATA")
                     .and_then(|data| serde_json::from_str::<Value>(&data).ok())
                 {
