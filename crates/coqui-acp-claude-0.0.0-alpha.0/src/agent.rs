@@ -122,7 +122,28 @@ impl ClaudeAgent {
         self
     }
 
-    /// Claude Code's version, from `claude --version`, asked once; `None` when it does not answer within
+    /// Starts Claude Code processes for a new session in `cwd`, with this agent's defaults, until
+    /// [`ClaudeSettings::warm`] says how many are ready or starting, so that a `session/new` for `cwd` that asks for nothing
+    /// more takes one at once. The processes are shared by every agent of the process that would start the same one (same
+    /// program, arguments, directory and environment), and are stopped when they have waited past the policy's idle time or
+    /// by [`harness::drop_all`](coqui_acp_harness::drop_all). Does nothing while the policy keeps none ahead. A `session/new`
+    /// that finds none ready starts its own and warms its replacement, so a host that never calls this still warms the second.
+    pub fn prewarm(&self, cwd: impl Into<PathBuf>) {
+        if let Ok(launch) = self.launch_for(&OpenRequest::new(cwd)) {
+            crate::warm::fill(&launch, &self.spawn, &self.settings);
+        }
+    }
+
+    /// How many started processes wait for a new session in `cwd`: those [`prewarm`](Self::prewarm) and earlier sessions
+    /// started, not counting those still starting and those that have exited.
+    #[must_use]
+    pub fn warm_ready(&self, cwd: impl Into<PathBuf>) -> usize {
+        self.launch_for(&OpenRequest::new(cwd))
+            .map_or(0, |launch| crate::warm::ready(&launch, &self.settings))
+    }
+
+    /// Claude Code's version, from `claude --version`, asked once for each version of the program in this process, not for
+    /// each agent ([`harness::version::cached`](coqui_acp_harness::version::cached)); `None` when it does not answer within
     /// [`ClaudeSettings::version_wait`].
     #[must_use]
     pub fn cli_version(&self) -> Option<String> {
@@ -131,27 +152,36 @@ impl ClaudeAgent {
                 if self.settings.version_wait.is_zero() {
                     return None;
                 }
-                let mut launch = Launch::new(self.defaults.executable.clone())
-                    .arg("--version")
-                    .clear_env(self.defaults.clear_env);
-                launch.env.clone_from(&self.defaults.env);
-                launch.remove_env.clone_from(&self.defaults.remove_env);
-                let spawned = self.spawn.spawn(&launch).ok()?;
-                let (sender, received) = std::sync::mpsc::channel();
-                let mut stdout = spawned.stdout;
-                let limit = self.settings.version_bytes;
-                let _ = std::thread::Builder::new()
-                    .name("coqui-acp-claude-version".into())
-                    .spawn(move || {
-                        let mut text = String::new();
-                        let _ = stdout.by_ref().take(limit).read_to_string(&mut text);
-                        let _ = sender.send(text);
-                    });
-                let text = received.recv_timeout(self.settings.version_wait).ok();
-                let _ = spawned.process.kill();
-                text?.split_whitespace().next().map(str::to_string)
+                coqui_acp_harness::version::cached(
+                    &self.settings.warm.scope,
+                    &self.defaults.executable,
+                    || self.probe_version(),
+                )
             })
             .clone()
+    }
+
+    /// Runs `claude --version`.
+    fn probe_version(&self) -> Option<String> {
+        let mut launch = Launch::new(self.defaults.executable.clone())
+            .arg("--version")
+            .clear_env(self.defaults.clear_env);
+        launch.env.clone_from(&self.defaults.env);
+        launch.remove_env.clone_from(&self.defaults.remove_env);
+        let spawned = self.spawn.spawn(&launch).ok()?;
+        let (sender, received) = std::sync::mpsc::channel();
+        let mut stdout = spawned.stdout;
+        let limit = self.settings.version_bytes;
+        let _ = std::thread::Builder::new()
+            .name("coqui-acp-claude-version".into())
+            .spawn(move || {
+                let mut text = String::new();
+                let _ = stdout.by_ref().take(limit).read_to_string(&mut text);
+                let _ = sender.send(text);
+            });
+        let text = received.recv_timeout(self.settings.version_wait).ok();
+        let _ = spawned.process.kill();
+        text?.split_whitespace().next().map(str::to_string)
     }
 
     fn launch_for(&self, request: &OpenRequest) -> Result<ClaudeLaunch, HarnessError> {
@@ -306,13 +336,23 @@ impl Harness for ClaudeAgent {
             .map_err(HarnessError::from)?;
         }
         let sink = events.clone();
-        let session = ClaudeSession::start(
-            &launch,
-            self.spawn.as_ref(),
-            self.settings.clone(),
-            move |event| sink.send(event),
-        )
-        .map_err(HarnessError::from)?;
+        let deliver = move |event| sink.send(event);
+        // A new conversation takes a process started ahead when the host asked for some and one matches.
+        let warm = if matches!(request.open, Open::New) {
+            crate::warm::take(&launch, &self.settings)
+        } else {
+            None
+        };
+        let session = match warm {
+            Some(warm) => warm.adopt(deliver),
+            None => {
+                ClaudeSession::start(&launch, self.spawn.as_ref(), self.settings.clone(), deliver)
+                    .map_err(HarnessError::from)?
+            }
+        };
+        if matches!(request.open, Open::New) {
+            crate::warm::fill(&launch, &self.spawn, &self.settings);
+        }
         let model = launch.model.clone().unwrap_or_else(|| DEFAULT.to_string());
         let effort = launch.effort.clone().unwrap_or_else(|| DEFAULT.to_string());
         let state = Arc::new(State {

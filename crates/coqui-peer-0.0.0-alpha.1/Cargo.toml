@@ -1,4 +1,4 @@
-# coqui-peer/. at 984db3d54b73de10c7892b06fe269a259de2d1c5, with what it inherits written out.
+# coqui-peer/. at be72492c89a5a657deb8027aee3c6db27ac14b2f, with what it inherits written out.
 [package]
 name = "coqui-peer"
 version = "0.0.0-alpha.1"

@@ -32,6 +32,7 @@ cargo add cabuya --git https://github.com/Boriken-Dev/cabuya
 | --- | --- | --- |
 | `sealed` | `auth` and `pairing`, with `coqui-peer`, `coqui-peer-noise` and `coqui-peer-webcrypto` | no |
 | `forward` | `forward`, with `socket2` and `coqui-net-acl` | no |
+| `cli` | the `cabuya` program (`sealed`, `forward` and `clap`) | no |
 
 Without a feature the crate needs only `coqui-transport` and `serde_json`: a streams-only user carries no cryptography.
 
@@ -74,6 +75,16 @@ std::thread::scope(|scope| {
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
+## The `cabuya` program
+
+With the `cli` feature the crate builds `cabuya`: `pair` by PIN, `serve` a link under a grants file, `connect` one stream to standard input and output (an `ssh` `ProxyCommand`), and `forward` local ports to targets the host reaches. See [the program](https://boriken-dev.github.io/cabuya/cli/).
+
+```sh
+cabuya serve --pair --grant tcp/1:127.0.0.1:22      # on the machine to reach: prints a PIN
+cabuya pair --join HOST:7711 --name box --pin PIN   # on this one
+# in ~/.ssh/config: ProxyCommand cabuya connect box 127.0.0.1:22
+```
+
 ## API overview
 
 | Module | Purpose |
@@ -97,7 +108,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
 (cd bindings/js && npm test)
 ```
 
-`tests/interop.rs` and `tests/vectors.rs` run against `coqui-agentic-peer`, which speaks the same wire.
+`tests/interop.rs` and `tests/vectors.rs` run against `agentic-peer`, which speaks the same wire.
 
 ## License
 

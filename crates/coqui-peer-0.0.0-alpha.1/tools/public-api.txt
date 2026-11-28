@@ -180,11 +180,12 @@ pub fn coqui_peer::pair::PairingResponder::deadline(&self) -> core::option::Opti
 pub fn coqui_peer::pair::PairingResponder::finish(self) -> core::result::Result<coqui_peer::pair::Paired, coqui_peer::pair::PairingError>
 pub fn coqui_peer::pair::PairingResponder::is_complete(&self) -> bool
 pub fn coqui_peer::pair::PairingResponder::joiner(&self) -> core::option::Option<&coqui_peer::KeyMaterial>
-pub fn coqui_peer::pair::PairingResponder::new(coqui_peer::pair::Channel, &coqui_peer::TrustStore, &coqui_peer::pair::PairingDesk, core::option::Option<core::net::socket_addr::SocketAddr>) -> Self
+pub fn coqui_peer::pair::PairingResponder::new<S: coqui_peer::pair::PairingStore + core::clone::Clone + 'static>(coqui_peer::pair::Channel, &S, &coqui_peer::pair::PairingDesk, core::option::Option<core::net::socket_addr::SocketAddr>) -> Self
 pub fn coqui_peer::pair::PairingResponder::receive(&mut self, &[u8]) -> core::result::Result<(), coqui_peer::pair::PairingError>
 pub fn coqui_peer::pair::PairingResponder::resume(&mut self, coqui_peer::pair::Decision) -> core::result::Result<(), coqui_peer::pair::PairingError>
 pub fn coqui_peer::pair::PairingResponder::time_left(&self) -> core::option::Option<core::time::Duration>
 pub fn coqui_peer::pair::PairingResponder::transmit(&mut self) -> core::option::Option<alloc::vec::Vec<u8>>
+pub fn coqui_peer::pair::PairingResponder::with_store(coqui_peer::pair::Channel, alloc::sync::Arc<dyn coqui_peer::pair::PairingStore>, &coqui_peer::pair::PairingDesk, core::option::Option<core::net::socket_addr::SocketAddr>) -> Self
 impl core::fmt::Debug for coqui_peer::pair::PairingResponder
 pub fn coqui_peer::pair::PairingResponder::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct coqui_peer::pair::PendingDevice
@@ -245,6 +246,18 @@ pub fn coqui_peer::pair::PairingOptionsSetters::pin_attempts(self, u32) -> Self
 pub fn coqui_peer::pair::PairingOptionsSetters::pin_shown(self, bool) -> Self
 pub fn coqui_peer::pair::PairingOptionsSetters::pin_ttl(self, impl core::convert::Into<core::option::Option<core::time::Duration>>) -> Self
 pub fn coqui_peer::pair::PairingOptionsSetters::user_code_alphabet(self, impl core::convert::Into<coqui_peer::pair::CodeAlphabet>) -> Self
+pub trait coqui_peer::pair::PairingStore: core::marker::Send + core::marker::Sync
+pub fn coqui_peer::pair::PairingStore::accept_key(&self, &coqui_peer::KeyMaterial) -> core::result::Result<coqui_peer::PeerId, coqui_peer::Error>
+pub fn coqui_peer::pair::PairingStore::accepted_key(&self, &coqui_peer::PeerId) -> core::option::Option<coqui_peer::KeyMaterial>
+pub fn coqui_peer::pair::PairingStore::redeem(&self, &[u8; 32]) -> core::result::Result<coqui_peer::Invitation, coqui_peer::Error>
+impl coqui_peer::pair::PairingStore for coqui_peer::TrustStore
+pub fn coqui_peer::TrustStore::accept_key(&self, &coqui_peer::KeyMaterial) -> core::result::Result<coqui_peer::PeerId, coqui_peer::Error>
+pub fn coqui_peer::TrustStore::accepted_key(&self, &coqui_peer::PeerId) -> core::option::Option<coqui_peer::KeyMaterial>
+pub fn coqui_peer::TrustStore::redeem(&self, &[u8; 32]) -> core::result::Result<coqui_peer::Invitation, coqui_peer::Error>
+impl<S: coqui_peer::pair::PairingStore + ?core::marker::Sized> coqui_peer::pair::PairingStore for alloc::sync::Arc<S>
+pub fn alloc::sync::Arc<S>::accept_key(&self, &coqui_peer::KeyMaterial) -> core::result::Result<coqui_peer::PeerId, coqui_peer::Error>
+pub fn alloc::sync::Arc<S>::accepted_key(&self, &coqui_peer::PeerId) -> core::option::Option<coqui_peer::KeyMaterial>
+pub fn alloc::sync::Arc<S>::redeem(&self, &[u8; 32]) -> core::result::Result<coqui_peer::Invitation, coqui_peer::Error>
 pub mod coqui_peer::pem
 #[non_exhaustive] pub struct coqui_peer::pem::Block<'a>
 pub coqui_peer::pem::Block::bytes: alloc::vec::Vec<u8>
@@ -509,6 +522,10 @@ pub fn coqui_peer::TrustStore::waiting_key(&self, &coqui_peer::PeerId) -> core::
 pub fn coqui_peer::TrustStore::waiting_queue(self, coqui_peer::WaitingSettings) -> Self
 impl coqui_peer::TrustStore
 pub fn coqui_peer::TrustStore::builder() -> coqui_peer::TrustStoreBuilder
+impl coqui_peer::pair::PairingStore for coqui_peer::TrustStore
+pub fn coqui_peer::TrustStore::accept_key(&self, &coqui_peer::KeyMaterial) -> core::result::Result<coqui_peer::PeerId, coqui_peer::Error>
+pub fn coqui_peer::TrustStore::accepted_key(&self, &coqui_peer::PeerId) -> core::option::Option<coqui_peer::KeyMaterial>
+pub fn coqui_peer::TrustStore::redeem(&self, &[u8; 32]) -> core::result::Result<coqui_peer::Invitation, coqui_peer::Error>
 impl core::convert::TryFrom<coqui_peer::TrustStoreParts> for coqui_peer::TrustStore
 pub type coqui_peer::TrustStore::Error = coqui_peer::Error
 pub fn coqui_peer::TrustStore::try_from(coqui_peer::TrustStoreParts) -> core::result::Result<Self, coqui_peer::Error>

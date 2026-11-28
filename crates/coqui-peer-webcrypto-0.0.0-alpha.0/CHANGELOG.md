@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `PairResponder`, from `PairingSession::responder(&store, &desk, source)` (or `responder_with_store(Arc<dyn PairingStore>, ..)`): the pairing responder as a sans-IO step driver over the session, so a host that owns its transport and timers does not touch the session. `transmit` gives sealed records, `receive` opens one, and `awaiting`, `resume`, `deadline`, `time_left`, `check_deadline`, `is_complete`, `close` (the sealed close record) and `finish` are the responder's. After an error `transmit` still gives the records that tell the joiner why. `PairingSession::respond` is now this driver in a loop, and takes any `PairingStore + Clone` (a `&TrustStore` still works).
+
 ### Changed
 
 - **Breaking: the builders and settings are derived by `coqui-builder`.** `WebCrypto::builder()` and
@@ -20,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `prelude`.
 - **Breaking: `NonDefault` is `coqui_builder::NonDefault`**, re-exported at the root. Its `value` and `default` are
   shown as `Type(text)`: `usize(4096)`, `u64(1000)`, and `Random(caller's)` against `Random(operating system's)`.
-- `coqui-peer` is pinned at `984db3d`, and `guatiao` and `guatiao-serde` are no longer dependencies.
+- `coqui-peer` is pinned at `be72492` (`984db3d` before it; the revision adds `pair::PairingStore`), and `guatiao` and `guatiao-serde` are no longer dependencies.
 - **Breaking: a weakened setting is a non-default setting.** `WebCrypto::non_defaults` and `PairingMethod::non_defaults` return coqui-peer's `NonDefault { setting, value, default }`,
   one for every setting that differs from its default, named by key path (`max_message`, `session_limit`), and
   `random` when it is replaced.

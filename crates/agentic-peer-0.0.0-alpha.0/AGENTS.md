@@ -12,7 +12,8 @@ The link itself is `cabuya`'s, and this crate re-exports none of it: the proof a
 pub const OFFER_PROTOCOL: &str = "mcp-offer/1";
 pub const ADDRESS_VARIABLE: &str = "COQUI_MCP_OFFER_ADDRESS";
 pub const TOKEN_FILE_VARIABLE: &str = "COQUI_MCP_OFFER_TOKEN_FILE";
-pub fn handler(command: PathBuf, args: Vec<String>, tokens: PathBuf) -> cabuya::link::Handler      // what cabuya::link::Services::with takes; command is absolute and starts shim; tokens is made private and holds one file per offer
+pub fn handler(command: PathBuf, args: Vec<String>, tokens: PathBuf) -> cabuya::link::Handler      // what cabuya::link::Services::with takes; command is absolute (a relative one is refused) and starts shim; tokens is made private and holds one file per offer; the agent may start its server again on the same offer
+pub fn handler_once(command: PathBuf, args: Vec<String>, tokens: PathBuf) -> cabuya::link::Handler  // the same for exactly one shim connection: when it ends the stream closes in order and the port and file go, so a second start needs a new offer
 pub fn shim(input: impl Read + Send + 'static, output: impl Write) -> Result<(), ShimError>   // the stdio server, from its environment
 pub enum ShimError { Setting(&'static str), Io(io::Error) }  // non_exhaustive
 ```

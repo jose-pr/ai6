@@ -50,6 +50,7 @@ impl SessionSettings {
         SessionLimits::count(limits.title_bytes, &mut settings.title_bytes);
         SessionLimits::millis(limits.version_wait_ms, &mut settings.version_wait);
         SessionLimits::bytes(limits.version_bytes, &mut settings.version_bytes);
+        settings.warm = limits.warm();
         SessionLimits::count(self.max_model_pages, &mut settings.max_model_pages);
         SessionLimits::count(self.max_history_turns, &mut settings.max_history_turns);
         if let Some(list) = self.list_models {
@@ -88,7 +89,12 @@ mod tests {
         given.max_history_turns = Some(9);
         given.list_models = Some(false);
         given.max_told_bytes = Some(10);
+        given.limits.warm_ahead = Some(2);
+        given.limits.warm_idle_ms = Some(11);
         let settings = given.settings();
+        assert_eq!(settings.warm.ahead, 2);
+        assert_eq!(settings.warm.idle, Duration::from_millis(11));
+        assert_eq!(none.warm.ahead, 0, "warming is off until the host asks");
         assert_eq!(settings.initialize_timeout, Duration::from_millis(7));
         assert_eq!(settings.request_timeout, Duration::from_millis(8));
         assert_eq!(settings.max_history_turns, 9);

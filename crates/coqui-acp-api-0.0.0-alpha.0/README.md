@@ -7,7 +7,7 @@
 
 ## Features
 
-- `AcpHarness`: `describe`, `accounts`, `start`, `refusal`, `program`, `import_session` and `export_session`, which every harness answers; `session_record` and `non_defaults`, whose defaults are true answers for a harness with nothing to say. The models an account may use and its plan usage are its `AccountProvider`'s.
+- `AcpHarness`: `describe`, `accounts`, `start`, `refusal`, `program`, `import_session` and `export_session`, which every harness answers; `session_record`, `prewarm` and `non_defaults`, whose defaults are true answers for a harness with nothing to say. The models an account may use and its plan usage are its `AccountProvider`'s.
 - Accounts: several accounts of one harness, chosen per call. A harness publishes the kinds it takes (settings schemas whose credentials are marked sensitive, typed endpoints, whether a kind rotates or renews); `AccountGrant` carries the chosen account and its `Secret<Credentials>`. Signing in, renewing and watching a login are an `AccountProvider`'s: its `login` relays a sign-in's steps through a `LoginPrompter`, and its `watch` tells the host of a login renewed or lost through an `AccountKeeper`.
 - `usage`: how much of each usage allowance the account has used, how it refills and when (`UsageReport`, its `Bucket`s with their coverage, unit and refill, a refused request's `LimitHit`, a session's `Spend`), answerable with no session and no turn, and the same model on the ACP extension `_coqui_acp/usage`.
 - `ProcessSpawner` and `SpawnedProcess`: the host's spawner, here, over SSH or in a container: pipes or a terminal, reads that survive a dropped link, a kill that ends the whole tree, and files in a private directory the host grants.

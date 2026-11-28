@@ -21,10 +21,10 @@ use coqui_acp_api::{
     Environment, ExportPage, HarnessInfo, ImportReport, Narrowing, ProcessSpawner, Requirement,
     SessionExport, SessionImport, StartRequest,
 };
-use coqui_acp_harness::ConnectionSettings;
 use coqui_acp_harness::account::{Accounts, Files, Hold};
 use coqui_acp_harness::acp::Harness;
 use coqui_acp_harness::provider::{Serving, shared, takes_of};
+use coqui_acp_harness::{ConnectionSettings, PlainSpawn, Spawn, ThroughSpawner};
 
 use crate::account_provider::ACCOUNT_PROVIDER;
 use crate::accounts;
@@ -202,6 +202,30 @@ struct Applying {
 }
 
 impl CodexProvider {
+    /// The agent a connection started with `environment` and nothing else would run, over `spawn`: the one whose app
+    /// servers [`AcpHarness::prewarm`] starts and [`warm_ready`](Self::warm_ready) counts.
+    fn warming(
+        &self,
+        environment: &Environment,
+        spawn: Arc<dyn Spawn>,
+    ) -> Result<CodexAgent, ProviderError> {
+        let (launch, _) = self.launch(environment, &[])?;
+        Ok(CodexAgent::new()
+            .settings(self.settings.session.settings())
+            .client_access(self.settings.connection.allow_client_access)
+            .seeded_sessions(Arc::clone(&self.seeds))
+            .defaults(launch)
+            .spawn(spawn))
+    }
+
+    /// How many started `codex app-server` processes wait in this process for a connection started with `environment`
+    /// and nothing else: those [`AcpHarness::prewarm`] and earlier sessions started, not the starting nor the exited.
+    #[must_use]
+    pub fn warm_ready(&self, environment: &Environment) -> usize {
+        self.warming(environment, Arc::new(PlainSpawn))
+            .map_or(0, |agent| agent.warm_ready())
+    }
+
     fn command_limit(&self) -> Duration {
         Duration::from_millis(self.settings.command_timeout_ms)
     }
@@ -358,5 +382,17 @@ impl AcpHarness for CodexProvider {
                 "this provider does not export a Codex thread yet",
             ))
         }
+    }
+
+    fn prewarm(
+        &self,
+        _cwd: &str,
+        environment: Secret<Environment>,
+        spawner: Object<dyn ProcessSpawner>,
+    ) -> Result<(), ProviderError> {
+        // An app server serves a thread in any directory, so `cwd` is no part of what is started.
+        let spawn: Arc<dyn Spawn> = Arc::new(ThroughSpawner::new(spawner));
+        self.warming(environment.expose(), spawn)?.prewarm();
+        Ok(())
     }
 }

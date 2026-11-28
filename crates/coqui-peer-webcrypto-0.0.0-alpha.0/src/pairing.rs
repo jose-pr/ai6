@@ -1,15 +1,18 @@
 use alloc::sync::Arc;
 use core::fmt;
 use core::net::SocketAddr;
+use core::time::Duration;
 use std::io;
+use std::time::SystemTime;
 
 use coqui_builder::NonDefault;
 use coqui_peer::pair::{
-    Channel, Paired, Pairing, PairingDesk, PairingJoiner, PairingResponder, Shown,
+    Channel, Decision, Paired, Pairing, PairingDesk, PairingJoiner, PairingResponder, PairingStore,
+    Shown, Ticket,
 };
 use coqui_peer::{
     Established, Framing, Handshake, KeyMaterial, MessageTransport, Method, PeerId, Random,
-    ReadTimeout, TrustStore,
+    ReadTimeout,
 };
 
 use crate::error::Error;
@@ -270,6 +273,40 @@ impl PairingSession {
         Ok(dial)
     }
 
+    /// The responder as a step driver, each record sealed: the caller feeds it records and sends what it gives, and decides when
+    /// to wait for the operator, for a read, or for the deadline. `store` is a [`TrustStore`](coqui_peer::TrustStore) or a host's own [`PairingStore`];
+    /// `source` is what the desk throttles by.
+    ///
+    /// # Errors
+    ///
+    /// None in practice: see [`pair_channel`](PairingSession::pair_channel).
+    pub fn responder<S: PairingStore + Clone + 'static>(
+        self,
+        store: &S,
+        desk: &PairingDesk,
+        source: Option<SocketAddr>,
+    ) -> Result<PairResponder, Error> {
+        self.responder_with_store(Arc::new(store.clone()), desk, source)
+    }
+
+    /// As [`responder`](PairingSession::responder), over a store that is already shared, or that cannot be cloned.
+    ///
+    /// # Errors
+    ///
+    /// As [`responder`](PairingSession::responder).
+    pub fn responder_with_store(
+        self,
+        store: Arc<dyn PairingStore>,
+        desk: &PairingDesk,
+        source: Option<SocketAddr>,
+    ) -> Result<PairResponder, Error> {
+        let responder = PairingResponder::with_store(self.pair_channel()?, store, desk, source);
+        Ok(PairResponder {
+            session: self.session,
+            responder,
+        })
+    }
+
     /// Runs the responder until the end, each message sealed: redeeming an invitation, taking the
     /// shown PIN, or blocking in [`PairingDesk::wait`] for the operator. On success the joiner's key
     /// is accepted in `store`. `source` is what the desk throttles by; behind a reverse proxy, pass
@@ -277,22 +314,22 @@ impl PairingSession {
     ///
     /// Each read waits at most until the exchange's deadline, through `ReadTimeout`, and a read
     /// that times out ends the exchange then; before the first message the transport's own timeout
-    /// applies.
+    /// applies. A host that drives the exchange itself uses [`responder`](PairingSession::responder).
     ///
     /// # Errors
     ///
     /// As [`join`](PairingSession::join).
-    pub fn respond<T: MessageTransport + ReadTimeout>(
-        mut self,
-        store: &TrustStore,
+    pub fn respond<S: PairingStore + Clone + 'static, T: MessageTransport + ReadTimeout>(
+        self,
+        store: &S,
         desk: &PairingDesk,
         source: Option<SocketAddr>,
         transport: &mut T,
     ) -> Result<Paired, Error> {
-        let mut responder = PairingResponder::new(self.pair_channel()?, store, desk, source);
+        let mut responder = self.responder(store, desk, source)?;
         loop {
-            while let Some(message) = responder.transmit() {
-                transport.send(&self.session.seal(&message)?)?;
+            while let Some(record) = responder.transmit()? {
+                transport.send(&record)?;
             }
             if responder.is_complete() {
                 break;
@@ -302,10 +339,7 @@ impl PairingSession {
                 None => {
                     transport.set_read_timeout(responder.time_left())?;
                     match transport.recv() {
-                        Ok(record) => {
-                            let message = self.session.open(&record)?.ok_or(Error::Truncated)?;
-                            responder.receive(&message)
-                        }
+                        Ok(record) => responder.receive(&record),
                         Err(error) if timed_out(&error) => {
                             responder.check_deadline()?;
                             return Err(error.into());
@@ -316,16 +350,129 @@ impl PairingSession {
             };
             if let Err(error) = step {
                 // The joiner is told why, as far as the transport still takes it.
-                while let Some(message) = responder.transmit() {
-                    let record = self.session.seal(&message)?;
+                while let Ok(Some(record)) = responder.transmit() {
                     let _ = transport.send(&record);
                 }
-                return Err(error.into());
+                return Err(error);
             }
         }
-        let close = self.session.close()?;
+        let close = responder.close()?;
         let _ = transport.send(&close);
-        Ok(responder.finish()?)
+        responder.finish()
+    }
+}
+
+/// The responder of a pairing exchange over a [`PairingSession`], driven a step at a time: it does no I/O, waits for nothing and
+/// seals every record it gives and opens every record it takes. It wraps [`PairingResponder`], whose steps these are; a host that
+/// owns its transport and its timers calls them in this order:
+///
+/// 1. [`transmit`](PairResponder::transmit) until it gives `None`, and send each record;
+/// 2. if [`is_complete`](PairResponder::is_complete), [`close`](PairResponder::close), send the record, and
+///    [`finish`](PairResponder::finish);
+/// 3. else if [`awaiting`](PairResponder::awaiting) is a ticket, wait for the operator on [`PairingDesk::wait`] or
+///    [`PairingDesk::decided`] and give the decision to [`resume`](PairResponder::resume);
+/// 4. else read one record, bounded by [`time_left`](PairResponder::time_left), and give it to
+///    [`receive`](PairResponder::receive); on a read that timed out, [`check_deadline`](PairResponder::check_deadline).
+///
+/// After an error from `receive`, `resume` or `check_deadline` the exchange is over, and `transmit` still gives the records that tell
+/// the joiner why.
+pub struct PairResponder {
+    session: Session,
+    responder: PairingResponder,
+}
+
+impl fmt::Debug for PairResponder {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PairResponder")
+            .field("responder", &self.responder)
+            .finish_non_exhaustive()
+    }
+}
+
+impl PairResponder {
+    /// The next sealed record to send, or `None`. Call until `None`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::LimitReached`] or [`Error::Closed`] from the session.
+    pub fn transmit(&mut self) -> Result<Option<Vec<u8>>, Error> {
+        self.responder
+            .transmit()
+            .map(|message| self.session.seal(&message))
+            .transpose()
+    }
+
+    /// Takes one record from the joiner.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Record`] for a bad record, [`Error::Truncated`] for the joiner's close before the end, [`Error::Pairing`] when
+    /// this side refuses or the joiner did.
+    pub fn receive(&mut self, record: &[u8]) -> Result<(), Error> {
+        let message = self.session.open(record)?.ok_or(Error::Truncated)?;
+        Ok(self.responder.receive(&message)?)
+    }
+
+    /// The decision this responder waits for, when it waits: hand it to [`PairingDesk::wait`] or [`PairingDesk::decided`], then
+    /// to [`resume`](PairResponder::resume).
+    #[must_use]
+    pub fn awaiting(&self) -> Option<Ticket> {
+        self.responder.awaiting()
+    }
+
+    /// Continues with the operator's decision.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Pairing`] when the decision is a refusal or the deadline passed.
+    pub fn resume(&mut self, decision: Decision) -> Result<(), Error> {
+        Ok(self.responder.resume(decision)?)
+    }
+
+    /// When the exchange ends if nothing finishes it, as [`PairingResponder::deadline`].
+    #[must_use]
+    pub fn deadline(&self) -> Option<SystemTime> {
+        self.responder.deadline()
+    }
+
+    /// How long until the [`deadline`](PairResponder::deadline), as [`PairingResponder::time_left`]: a read's timeout.
+    #[must_use]
+    pub fn time_left(&self) -> Option<Duration> {
+        self.responder.time_left()
+    }
+
+    /// Ends the exchange once its deadline passed, telling the joiner.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Pairing`] with `Expired` when it passed.
+    pub fn check_deadline(&mut self) -> Result<(), Error> {
+        Ok(self.responder.check_deadline()?)
+    }
+
+    /// Whether the exchange succeeded, and what is left is the close record and [`finish`](PairResponder::finish).
+    #[must_use]
+    pub fn is_complete(&self) -> bool {
+        self.responder.is_complete()
+    }
+
+    /// The sealed record that ends this side's direction: the last one to send.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Closed`] when it was already given.
+    pub fn close(&mut self) -> Result<Vec<u8>, Error> {
+        self.session.close()
+    }
+
+    /// The paired joiner, already accepted in the store.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Pairing`] before completion.
+    pub fn finish(self) -> Result<Paired, Error> {
+        Ok(self.responder.finish()?)
     }
 }
 

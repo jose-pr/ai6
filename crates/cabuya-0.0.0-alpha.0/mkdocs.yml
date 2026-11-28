@@ -16,3 +16,4 @@ theme:
 nav:
   - Home: index.md
   - The link: link.md
+  - The program: cli.md

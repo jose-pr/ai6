@@ -23,4 +23,4 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
 ```
 
 A change in how a peer behaves on the wire changes `vectors/mux.json`, which every language runs, and must stay compatible with
-`coqui-agentic-peer`. `AGENTS.md` is the API header and ships in the package; keep it current in the same commit. Files are LF.
+`agentic-peer`. `AGENTS.md` is the API header and ships in the package; keep it current in the same commit. Files are LF.

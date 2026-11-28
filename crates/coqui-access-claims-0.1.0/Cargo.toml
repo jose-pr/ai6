@@ -1,4 +1,4 @@
-# coqui-access/crates/coqui-access-claims at e0b452292306df7d70b3bb64670c16300bb415f3, with what it inherits written out.
+# coqui-access/crates/coqui-access-claims at 89e4356e8123b8e4d597094e752344bc476f5084, with what it inherits written out.
 [package]
 name = "coqui-access-claims"
 description = "The claims a client certificate carries, for providers that read one and a matcher that reads them"
@@ -15,7 +15,7 @@ exclude = [".*", "*.local.*"]
 path = "crates/coqui-access"
 [dependencies.coqui-peer-tls]
 git = "https://github.com/Boriken-Dev/coqui-peer-tls"
-rev = "7cbd7ee208595c055d74eed79a4dafcd0175883d"
+rev = "124f700c3d5ce8c335e838aacd2d1d1b42947214"
 features = ["fields"]
 [dependencies.data-encoding]
 version = "2.11"

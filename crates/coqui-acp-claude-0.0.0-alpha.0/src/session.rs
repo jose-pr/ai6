@@ -15,7 +15,9 @@ use std::thread;
 use coqui_acp_harness::event::{Content, Event, Severity, context_block};
 use coqui_acp_harness::lines::{self, Tail};
 use coqui_acp_harness::stream::Waiting;
-use coqui_acp_harness::{LineHook, Process, Spawn, Step, Stream, exit_text, line_writer, version};
+use coqui_acp_harness::{
+    LineHook, Process, Spawn, Step, Stream, WarmPolicy, exit_text, line_writer, version,
+};
 use serde_json::{Value, json};
 
 use crate::launch::ClaudeLaunch;
@@ -59,6 +61,9 @@ pub struct ClaudeSettings {
     pub version_bytes: u64,
     /// The host's check of each line Claude Code writes, before anything reads it; `false` ends Claude Code.
     pub on_line: Option<LineHook>,
+    /// How many Claude Code processes to keep started ahead of `session/new`, and for how long. Default none. A process
+    /// taken from those keeps the settings and the spawner of the agent that started it.
+    pub warm: WarmPolicy,
 }
 
 impl fmt::Debug for ClaudeSettings {
@@ -80,6 +85,7 @@ impl fmt::Debug for ClaudeSettings {
             .field("version_wait", &self.version_wait)
             .field("version_bytes", &self.version_bytes)
             .field("on_line", &self.on_line.is_some())
+            .field("warm", &self.warm)
             .finish()
     }
 }
@@ -105,6 +111,7 @@ impl ClaudeSettings {
             version_wait: Duration::from_secs(10),
             version_bytes: 4096,
             on_line: None,
+            warm: WarmPolicy::new(0, Duration::from_secs(300)),
         }
     }
 }
@@ -477,6 +484,13 @@ impl ClaudeSession {
             .session()
             .map(str::to_string)
             .or_else(|| self.id.clone())
+    }
+
+    /// Whether Claude Code is still running and the session not closed: a warm process that is not is never handed out.
+    pub(crate) fn alive(&self) -> bool {
+        !self.closed.load(Ordering::SeqCst)
+            && self.ended.get().is_none()
+            && self.process.try_wait().is_ok_and(|exit| exit.is_none())
     }
 
     /// Claude Code's version, from its answer to `initialize`.

@@ -17,10 +17,10 @@ use coqui_acp_api::{
     ChannelSink, Environment, ExportPage, HarnessInfo, ImportReport, Narrowing, ProcessSpawner,
     Requirement, SessionExport, SessionImport, StartRequest,
 };
-use coqui_acp_harness::ConnectionSettings;
 use coqui_acp_harness::account::{Accounts, Files, Hold};
 use coqui_acp_harness::acp::Harness;
 use coqui_acp_harness::provider::{Serving, shared, takes_of};
+use coqui_acp_harness::{ConnectionSettings, PlainSpawn, Spawn, ThroughSpawner};
 
 use crate::account_provider::ACCOUNT_PROVIDER;
 use crate::accounts;
@@ -157,6 +157,33 @@ impl ClaudeProvider {
 
     fn unconfigured() -> Self {
         Self::new(ProviderSettings::default())
+    }
+
+    /// The agent a connection started with `environment` and nothing else would run, over `spawn`: the one whose
+    /// processes [`AcpHarness::prewarm`] starts and [`warm_ready`](Self::warm_ready) counts.
+    fn warming(
+        &self,
+        environment: &Environment,
+        spawn: Arc<dyn Spawn>,
+    ) -> Result<ClaudeAgent, ProviderError> {
+        let (launch, _) = self.launch(environment, CacheLifetime::Default, &[])?;
+        Ok(ClaudeAgent::new()
+            .fresh_sessions(Arc::clone(&self.fresh))
+            .defaults(launch)
+            .spawn(spawn)
+            .settings(self.settings.session.settings())
+            .client_plugins(self.settings.allow_client_plugins)
+            .client_access(self.settings.connection.allow_client_access))
+    }
+
+    /// How many started Claude Code processes wait in this process for a connection started with `environment` and
+    /// nothing else, whose session works in `cwd` (empty for the provider's own directory): those
+    /// [`AcpHarness::prewarm`] and earlier sessions started, not the starting nor the exited.
+    #[must_use]
+    pub fn warm_ready(&self, cwd: &str, environment: &Environment) -> usize {
+        let cwd = if cwd.is_empty() { "." } else { cwd };
+        self.warming(environment, Arc::new(PlainSpawn))
+            .map_or(0, |agent| agent.warm_ready(cwd))
     }
 
     /// What a session starts with: the settings, the host's environment, the cache hint and the requirements.
@@ -404,5 +431,17 @@ impl AcpHarness for ClaudeProvider {
                 "this provider does not export a Claude Code session yet",
             ))
         }
+    }
+
+    fn prewarm(
+        &self,
+        cwd: &str,
+        environment: Secret<Environment>,
+        spawner: Object<dyn ProcessSpawner>,
+    ) -> Result<(), ProviderError> {
+        let spawn: Arc<dyn Spawn> = Arc::new(ThroughSpawner::new(spawner));
+        let cwd = if cwd.is_empty() { "." } else { cwd };
+        self.warming(environment.expose(), spawn)?.prewarm(cwd);
+        Ok(())
     }
 }

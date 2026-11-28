@@ -26,6 +26,8 @@ whichever the client asks for. A driver with no ACP in it is public too. Documen
   always allow an MCP tool, reject; a question nobody answered is `cancel`. Any other request of the app server is refused.
 - `CodexAgent`: the ACP agent: `initialize`, `session/new`, `session/load`, `session/resume` (version 2's with replay),
   `session/prompt`, `session/cancel`, `session/close`, `request_permission`, model and effort as config options.
+- Warm app servers: `CodexSettings::warm` (a `WarmPolicy`, off by default) keeps `codex app-server` processes started and initialised ahead of
+  `session/new`, shared by every `CodexAgent` of the process, and `CodexAgent::prewarm` starts them. `coqui_acp_harness::drop_all` stops them.
 - `coqui-acp-codex`, a command that serves it on standard input and output.
 - A Codex version it was not tested with runs, with a warning.
 

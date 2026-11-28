@@ -1,4 +1,4 @@
-# coqui-access/crates/coqui-access at e0b452292306df7d70b3bb64670c16300bb415f3, with what it inherits written out.
+# coqui-access/crates/coqui-access at 89e4356e8123b8e4d597094e752344bc476f5084, with what it inherits written out.
 [package]
 name = "coqui-access"
 description = "Authentication, directory, authorization and account-management kinds, and the models that cross them"
@@ -17,15 +17,15 @@ rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
 features = ["derive"]
 [dependencies.guatiao]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "3163647ab70bc19bf24125d30e1dc1ee49b10f94"
+rev = "1cf0f67f0354d18fbc5684a9a36177afbb20a0fa"
 features = ["provider"]
 [dev-dependencies]
 [dev-dependencies.guatiao]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "3163647ab70bc19bf24125d30e1dc1ee49b10f94"
+rev = "1cf0f67f0354d18fbc5684a9a36177afbb20a0fa"
 features = ["provider", "load"]
 [dev-dependencies.guatiao-serde]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "3163647ab70bc19bf24125d30e1dc1ee49b10f94"
+rev = "1cf0f67f0354d18fbc5684a9a36177afbb20a0fa"
 default-features = false
 features = ["json"]

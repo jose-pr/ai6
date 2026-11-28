@@ -4,6 +4,7 @@
 //! reads its program's output, waits for it and ends it. Every number is a setting with a default and any value is
 //! taken: a value left out keeps the default, and a limit is never a ceiling the person cannot move.
 
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::time::Duration;
 
@@ -12,6 +13,7 @@ use coqui_acp_api::guatiao::{FromValue, Schema, ToValue};
 use crate::access::Access;
 use crate::acp::Settings;
 use crate::mode::Mode;
+use crate::warm::WarmPolicy;
 
 /// What one ACP connection to a harness provider holds to and offers.
 ///
@@ -180,9 +182,29 @@ pub struct SessionLimits {
     pub version_wait_ms: Option<u64>,
     /// How much of its answer is read, in bytes. Default 4096.
     pub version_bytes: Option<u64>,
+    /// How many processes to keep started ahead of `session/new` for each kind of session, so that one starts at once;
+    /// each is a program running, and holds no session. Default 0: none, every session starts its own.
+    pub warm_ahead: Option<u64>,
+    /// How long a process kept ahead may wait unused before it is stopped, in milliseconds. Default 300 000.
+    pub warm_idle_ms: Option<u64>,
+    /// Where the program runs, for a host that starts it through more than one spawner: processes kept ahead are shared only
+    /// by connections of the same scope. Default empty.
+    pub warm_scope: Option<String>,
 }
 
 impl SessionLimits {
+    /// The policy for processes kept ahead: [`WarmPolicy::default`]'s, with the values given here over it.
+    #[must_use]
+    pub fn warm(&self) -> WarmPolicy {
+        let mut policy = WarmPolicy::default();
+        Self::count(self.warm_ahead, &mut policy.ahead);
+        Self::millis(self.warm_idle_ms, &mut policy.idle);
+        if let Some(scope) = &self.warm_scope {
+            policy.scope.clone_from(scope);
+        }
+        policy
+    }
+
     /// `slot` as `value` milliseconds, when one is given.
     pub fn millis(value: Option<u64>, slot: &mut Duration) {
         if let Some(ms) = value {
@@ -243,5 +265,20 @@ mod tests {
         let mut count = 8;
         SessionLimits::count(Some(0), &mut count);
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn warming_is_off_until_a_host_says_how_many() {
+        assert_eq!(SessionLimits::default().warm().ahead, 0);
+        let given = SessionLimits {
+            warm_ahead: Some(2),
+            warm_idle_ms: Some(1500),
+            warm_scope: Some("far".into()),
+            ..SessionLimits::default()
+        };
+        let policy = given.warm();
+        assert_eq!(policy.ahead, 2);
+        assert_eq!(policy.idle, Duration::from_millis(1500));
+        assert_eq!(policy.scope, "far");
     }
 }

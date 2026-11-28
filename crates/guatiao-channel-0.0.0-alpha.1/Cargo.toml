@@ -1,4 +1,4 @@
-# guatiao/crates/guatiao-channel at 3163647ab70bc19bf24125d30e1dc1ee49b10f94, with what it inherits written out.
+# guatiao/crates/guatiao-channel at 1cf0f67f0354d18fbc5684a9a36177afbb20a0fa, with what it inherits written out.
 [package]
 name = "guatiao-channel"
 description = "A two-way stream of bytes between a host and a provider, as two guatiao object kinds with stated rules: back-pressure, ordering and closing"

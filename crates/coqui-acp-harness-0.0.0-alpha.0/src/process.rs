@@ -386,6 +386,22 @@ fn found_on_own_path(program: &OsStr, env: &BTreeMap<OsString, OsString>) -> OsS
         .map_or_else(|| program.to_owned(), PathBuf::into_os_string)
 }
 
+/// Where this process finds `program`: as given when it names a directory, else the first runnable file of that name on its
+/// own `PATH` and in the folders [`set_program_dirs`] names; `None` when it finds none.
+pub(crate) fn locate(program: &OsStr) -> Option<PathBuf> {
+    let name = program.to_string_lossy();
+    if name.contains(['/', '\\']) {
+        return Some(PathBuf::from(program));
+    }
+    let extra = PROGRAM_DIRS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .map_or_else(Vec::new, |dirs| dirs());
+    let own = std::env::var_os("PATH").unwrap_or_default();
+    let pathext = std::env::var("PATHEXT").unwrap_or_default();
+    find_in(&own, &extra, &pathext, &name)
+}
+
 /// The first runnable file called `name` in an absolute folder of `path`, then of `extra`. On Windows a name takes each of
 /// `pathext`'s extensions (the usual four when it is empty) unless it has one.
 pub(crate) fn find_in(

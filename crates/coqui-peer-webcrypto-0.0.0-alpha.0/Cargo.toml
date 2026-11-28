@@ -1,4 +1,4 @@
-# coqui-peer-webcrypto/. at 7544cf9c026da808dc940bcb56a0b3d5d78bef2f, with what it inherits written out.
+# coqui-peer-webcrypto/. at d5e8cc4792f7d6e69921822da59ee6e10324cb9a, with what it inherits written out.
 test = [{ name = "pair", required-features = ["pin"] }]
 [package]
 name = "coqui-peer-webcrypto"
@@ -24,7 +24,7 @@ pin = ["coqui-peer/pin"]
 [dependencies]
 [dependencies.coqui-peer]
 git = "https://github.com/Boriken-Dev/coqui-peer"
-rev = "984db3d54b73de10c7892b06fe269a259de2d1c5"
+rev = "be72492c89a5a657deb8027aee3c6db27ac14b2f"
 [dependencies.p256]
 version = "0.14"
 default-features = false

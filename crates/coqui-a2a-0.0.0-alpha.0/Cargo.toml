@@ -1,4 +1,4 @@
-# coqui-a2a/crates/coqui-a2a at c951d778f95a5c5118406e371af835c73c10273c, with what it inherits written out.
+# coqui-a2a/crates/coqui-a2a at 0019bcb300783f33d9261ba9e9842c4e9acf2b3e, with what it inherits written out.
 bin = [{ name = "coqui-a2a", path = "src/main.rs", required-features = ["cli"] }]
 [package]
 name = "coqui-a2a"
@@ -27,7 +27,7 @@ cli = ["loopback", "cabuya/sealed", "dep:agentic-peer", "dep:clap", "dep:coqui-p
 serde_json = "1"
 [dependencies.cabuya]
 git = "https://github.com/Boriken-Dev/cabuya"
-rev = "7089185fbd047b676ba9a74963b7509136f4637a"
+rev = "5fb2a34cb2b3fb5b289b6958c145a5f124ff5879"
 [dependencies.coqui-transport]
 git = "https://github.com/Boriken-Dev/coqui-transport"
 rev = "2601da58de9cac8f635060e4746864e9b238c6c5"
@@ -73,15 +73,15 @@ features = ["derive", "env"]
 optional = true
 [dependencies.agentic-peer]
 git = "https://github.com/Boriken-Dev/agentic-peer"
-rev = "89a89b7fce9818476aaeea020d2a518188957a70"
+rev = "19414c27507dfd35d10552159463b5b7cea11c39"
 optional = true
 [dependencies.coqui-peer-webcrypto]
 git = "https://github.com/Boriken-Dev/coqui-peer-webcrypto"
-rev = "7544cf9c026da808dc940bcb56a0b3d5d78bef2f"
+rev = "d5e8cc4792f7d6e69921822da59ee6e10324cb9a"
 optional = true
 [dependencies.coqui-transport-web]
 git = "https://github.com/Boriken-Dev/coqui-transport-web"
-rev = "c24a35d19df3867e222cb458bce2ad782d98c1eb"
+rev = "51ec0f127dbba5100ea709d36724e49c4829c351"
 features = ["websocket"]
 optional = true
 [dependencies.coqui-peer]
@@ -103,18 +103,18 @@ proptest = "1"
 url = "2.5"
 [dev-dependencies.cabuya]
 git = "https://github.com/Boriken-Dev/cabuya"
-rev = "7089185fbd047b676ba9a74963b7509136f4637a"
+rev = "5fb2a34cb2b3fb5b289b6958c145a5f124ff5879"
 features = ["sealed", "forward"]
 [dev-dependencies.coqui-acp]
 git = "https://github.com/Boriken-Dev/coqui-acp"
-rev = "40196b12573f062cda1d6d3995d6afb905fe7ea9"
+rev = "171e08ec92af4044377bcae77e9fb6aa391ca499"
 [dev-dependencies.coqui-peer-webcrypto]
 git = "https://github.com/Boriken-Dev/coqui-peer-webcrypto"
-rev = "7544cf9c026da808dc940bcb56a0b3d5d78bef2f"
+rev = "d5e8cc4792f7d6e69921822da59ee6e10324cb9a"
 features = ["pin"]
 [dev-dependencies.coqui-transport-web]
 git = "https://github.com/Boriken-Dev/coqui-transport-web"
-rev = "c24a35d19df3867e222cb458bce2ad782d98c1eb"
+rev = "51ec0f127dbba5100ea709d36724e49c4829c351"
 features = ["websocket"]
 [lints]
 [lints.rust]

@@ -39,6 +39,7 @@ pub mod stream;
 #[cfg_attr(docsrs, doc(cfg(feature = "kind")))]
 pub mod vendors;
 pub mod version;
+pub mod warm;
 
 /// What the macros of this crate name.
 #[cfg(feature = "kind")]
@@ -63,3 +64,4 @@ pub use settings::{ConnectionSettings, SessionLimits};
 #[cfg(feature = "kind")]
 pub use spawner::{LocalSpawner, ThroughSpawner};
 pub use stream::{Answer, LineHook, Step, Stream, Waiting};
+pub use warm::{Maker, Relay, WarmKey, WarmPolicy, WarmPool, Warmed, drop_all};

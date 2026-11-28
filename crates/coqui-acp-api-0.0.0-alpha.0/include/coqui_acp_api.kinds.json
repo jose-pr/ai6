@@ -2,7 +2,7 @@
   "kinds": [
     {
       "name": "acp_harness",
-      "floor_hash": 3025339842,
+      "floor_hash": 2434889077,
       "object": false,
       "doc": "Drives an Agent Client Protocol agent, and serves it as one ACP connection over a channel.\n\nThe host is the ACP client and the provider the agent: each message on the channel, either way,\nis one whole JSON-RPC 2.0 message as UTF-8 JSON text. The kind never models ACP itself, so a\nprovider in any language implements ACP as the protocol defines it, and the version is agreed by\n`initialize` on the channel.\n\nEvery method answers for the provider as configured: a host builds an instance from the\nprovider's settings and asks it. Every method is synchronous; a host calls them from a thread\nof its own. The methods without a default are the ones a host acts on for every harness; a\ndefault is kept only where it is a true answer for a harness that has nothing to say.\n\nEvery object a method is handed (`spawner`, `sink`) is the provider's\nfrom then on: it destroys each, even when it refuses.",
       "slots": [
@@ -150,6 +150,29 @@
             "type": "value"
           },
           "doc": "Where the harness keeps its own record of the session `query` names (by the session id it\nreported, a UUID), when it keeps one and the file is there. The default, for a harness that\nkeeps none: none."
+        },
+        {
+          "name": "prewarm",
+          "required": false,
+          "fallible": true,
+          "args": [
+            {
+              "name": "cwd",
+              "type": "str"
+            },
+            {
+              "name": "environment",
+              "type": "value",
+              "pass": "borrowed"
+            },
+            {
+              "name": "spawner",
+              "type": "object",
+              "kind": "process_spawner",
+              "pass": "taken"
+            }
+          ],
+          "doc": "Starts the programs a later connection would otherwise start itself, so that its `session/new`\nfinds them ready, for a harness that keeps some ahead (a warm policy of its own settings). A\nconnection started with this `environment`, no account and no requirements, whose session\nworks in `cwd`, takes what this started; `cwd` is empty for a directory the harness does not\nneed. The programs start through `spawner`, which is handed over as `start`'s is. It returns\nonce they are started or starting, and does nothing for a harness that keeps none ahead and\nfor settings that keep none: a host may call it for any harness. The default, for a harness\nwith nothing to warm: nothing."
         },
         {
           "name": "non_defaults",

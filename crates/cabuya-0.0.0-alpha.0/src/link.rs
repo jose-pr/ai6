@@ -233,6 +233,26 @@ pub fn serve_with<'c, C: Channel>(
     host: &Host<'_>,
     opener: impl FnOnce(&Mux<'c, C>) + Send,
 ) {
+    serve_with_terminal(channel, side, options, first, peer, host, opener, || {});
+}
+
+/// As [`serve_with`], with `terminal` called once when the mux reaches a terminal state (the link has ended or been lost), before
+/// this call waits for the stream handlers still running.
+///
+/// A handler that blocks on something other than its stream hears the link end only through `terminal`, so a host wakes it there
+/// and the wait for handlers is bounded. It runs on the thread of this call, so it should return promptly. `serve_with` is this with
+/// a `terminal` that does nothing.
+#[allow(clippy::too_many_arguments)]
+pub fn serve_with_terminal<'c, C: Channel>(
+    channel: &'c C,
+    side: Side,
+    options: Options,
+    first: Option<Vec<u8>>,
+    peer: &str,
+    host: &Host<'_>,
+    opener: impl FnOnce(&Mux<'c, C>) + Send,
+    terminal: impl FnOnce(),
+) {
     let Host {
         store,
         services,
@@ -337,6 +357,7 @@ pub fn serve_with<'c, C: Channel>(
                 }
             }
             // The link has gone. What is still running hears that from its stream, and this scope waits for it.
+            terminal();
             drop(live);
         });
     });
@@ -725,6 +746,71 @@ mod tests {
                 Vec::<String>::new()
             );
         });
+    }
+
+    #[test]
+    fn terminal_wakes_a_handler_that_is_not_reading_its_stream() {
+        let _deadline = crate::deadline::within(60);
+        let store = MemoryPeers::default();
+        store
+            .put(&PeerRecord::new("peer").granting("held"))
+            .unwrap();
+        let (ours, theirs) = wires();
+        let (entered_tx, entered) = queue::<()>();
+        let entered_tx = Mutex::new(entered_tx);
+        let woken = Arc::new(AtomicBool::new(false));
+        let ended = Arc::new(AtomicBool::new(false));
+        // The handler waits on a flag of its own, so only the hook can end it.
+        let services = Services::default().with(
+            "held",
+            Box::new({
+                let woken = Arc::clone(&woken);
+                let ended = Arc::clone(&ended);
+                move |_, _| {
+                    entered_tx.lock().unwrap().send(()).unwrap();
+                    let begun = Instant::now();
+                    while !woken.load(Ordering::SeqCst) && begun.elapsed() < Duration::from_secs(20)
+                    {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    ended.store(woken.load(Ordering::SeqCst), Ordering::SeqCst);
+                }
+            }),
+        );
+        let began = Instant::now();
+        thread::scope(|scope| {
+            let host = scope.spawn(|| {
+                serve_with_terminal(
+                    &theirs,
+                    Side::Answered,
+                    Options::default(),
+                    None,
+                    "peer",
+                    &Host {
+                        store: &store,
+                        services: &services,
+                        events: &NoEvents,
+                    },
+                    |_| {},
+                    || woken.store(true, Ordering::SeqCst),
+                )
+            });
+            Mux::run(&ours, Side::Dialed, Limits::default(), None, |mux| {
+                let _held = mux.open("held").unwrap();
+                entered.recv_timeout(Duration::from_secs(5)).unwrap();
+            });
+            drop(ours);
+            host.join().unwrap();
+        });
+        assert!(
+            ended.load(Ordering::SeqCst),
+            "the handler was not woken by terminal"
+        );
+        assert!(
+            began.elapsed() < Duration::from_secs(10),
+            "{:?}",
+            began.elapsed()
+        );
     }
 
     #[test]

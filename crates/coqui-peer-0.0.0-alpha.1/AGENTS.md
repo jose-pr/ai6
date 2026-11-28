@@ -337,6 +337,11 @@ that only authenticates, session keys, or an encrypted channel.
 `is_complete`, everything it queued sent, without calling `finish`: for a method with a finish
 of its own, such as a TLS server that does not authenticate its client at that layer and so
 has no `PeerId` to put in `Established` (`coqui-peer-tls`'s `TlsHandshake::finish_unauthenticated`).
+A host's own identity is not stored by this crate: each method crate's `Identity` has `read(path)`, `write_new(path)` and
+`open_or_create(path)` (cabuya's `auth::Identity::open_or_create(path, method)` for either), which load the key, or generate and write
+it once with `file::write_new(.., Access::OwnerOnly)` (mode `0600`; of concurrent creators one wins and the others read its key), so a
+restart keeps the same `PeerId`. Call that rather than `generate()`, which makes a new identity every time.
+
 `drive_*` is `complete_*` followed by `finish`. `is_complete` says the exchange is over;
 `finish` succeeds when the method verified a peer.
 
@@ -364,7 +369,13 @@ impl Pairing {
 pub enum PinRole { Typed, Shown }
 pub struct PairingJoiner;      // transmit() -> Option<Vec<u8>>, receive(&[u8]) -> Result<(), PairingError>,
                                // shown() -> Option<&Shown>, is_complete(), finish() -> Result<Paired, PairingError>
-pub struct PairingResponder;   // new(Channel, &TrustStore, &PairingDesk, source: Option<SocketAddr>);
+pub trait PairingStore: Send + Sync {          // what the responder needs of the storage it admits into; impl for TrustStore and Arc<S>
+    fn accept_key(&self, &KeyMaterial) -> Result<PeerId, Error>;   // Err(AlreadyAccepted) is taken as success
+    fn redeem(&self, &[u8; 32]) -> Result<Invitation, Error>;      // atomic: of concurrent redemptions of a single-use one, one wins
+    fn accepted_key(&self, &PeerId) -> Option<KeyMaterial>;        // asked after accept_key: a store that does not hold it fails the pairing (Local(NotAccepted))
+}
+pub struct PairingResponder;   // new<S: PairingStore + Clone + 'static>(Channel, &S, &PairingDesk, source: Option<SocketAddr>) (a TrustStore, or a host's own);
+                               // with_store(Channel, Arc<dyn PairingStore>, &PairingDesk, source) for a shared or non-Clone store;
                                // transmit, receive, awaiting() -> Option<Ticket>, resume(Decision),
                                // joiner() -> Option<&KeyMaterial>, deadline() -> Option<SystemTime>,
                                // time_left() -> Option<Duration>, check_deadline(), is_complete(), finish()

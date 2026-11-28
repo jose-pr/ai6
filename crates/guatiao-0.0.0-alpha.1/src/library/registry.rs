@@ -124,6 +124,19 @@ pub enum LoadError {
         /// The one that arrived second and was refused.
         second: PathBuf,
     },
+    /// It mapped, answered a well-formed descriptor, and listed **no
+    /// providers**: a library that would register nothing. Usually a crate
+    /// that never called `providers!`, or one whose list was emptied. It is
+    /// refused rather than loaded as a healthy library that offers
+    /// nothing, and nothing is recorded.
+    ///
+    /// Not [`Skipped::DeclinedThisHost`], which is a library saying it has
+    /// nothing for this host by answering null: this one answered, with an
+    /// empty list.
+    Empty {
+        /// The file.
+        path: PathBuf,
+    },
 }
 
 impl core::fmt::Display for LoadError {
@@ -142,6 +155,11 @@ impl core::fmt::Display for LoadError {
                 "both {} and {} offer `{key}`",
                 first.display(),
                 second.display()
+            ),
+            LoadError::Empty { path } => write!(
+                f,
+                "{} loaded but lists no providers, so nothing was registered",
+                path.display()
             ),
         }
     }
@@ -1460,6 +1478,12 @@ impl Registry {
         // rest of the library goes on loading. Same key and a DIFFERENT id
         // is the host's template failing, refused before anything is
         // recorded so the registry is left exactly as it was.
+        if views.is_empty() {
+            self.pass_over(origin);
+            return Err(LoadError::Empty {
+                path: path.to_path_buf(),
+            });
+        }
         let mut skipped = Vec::new();
         let mut taken: Vec<(ProviderView, String, String)> = Vec::new();
         for view in views {

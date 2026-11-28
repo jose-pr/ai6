@@ -1,4 +1,4 @@
-# coqui-transport-web/. at c24a35d19df3867e222cb458bce2ad782d98c1eb, with what it inherits written out.
+# coqui-transport-web/. at 51ec0f127dbba5100ea709d36724e49c4829c351, with what it inherits written out.
 example = [{ name = "echo", required-features = ["websocket", "webtransport"] }, { name = "ladder", required-features = ["webrtc"] }]
 test = [{ name = "ladder", required-features = ["webrtc"] }, { name = "ladder_idle", required-features = ["webrtc"] }, { name = "ladder_peers", required-features = ["webrtc"] }]
 [package]

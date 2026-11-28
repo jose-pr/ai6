@@ -24,6 +24,7 @@ mod session;
 mod session_settings;
 mod signin;
 mod tools;
+mod warm;
 
 use alloc::string::String;
 use core::fmt;

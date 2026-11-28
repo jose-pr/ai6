@@ -9,7 +9,7 @@ the package and is self-contained. Development documentation lives with the sour
 | --- | --- | --- | --- |
 | `pin` | `coqui-peer/pin` (SPAKE2, HKDF, HMAC) | PIN pairing (`pair::Pairing::pin`) | off |
 
-MSRV Rust 1.89. A default build depends on `coqui-peer` (by git revision, `984db3d`), `coqui-builder` (by revision), `p256`,
+MSRV Rust 1.89. A default build depends on `coqui-peer` (by git revision, `be72492`, which carries `pair::PairingStore`), `coqui-builder` (by revision), `p256`,
 `aes-gcm`, `hkdf`, `sha2`, `data-encoding`, `serde`, `serde_json`, `getrandom` and `zeroize`. This crate
 is unreleased, with no independent security review: depend on a git revision, and name the same
 `coqui-peer` revision if you use it directly; the wire and API may change at any commit. This is the method named `webcrypto` of `coqui-peer` (`PeerId`, `TrustStore`, the sans-IO
@@ -177,7 +177,7 @@ handshake carries on: there is no rekeying.
 inside the session: **a plain message on the same transport comes from whoever carries it**, even after
 a successful handshake.
 
-## Pairing (`coqui_peer_webcrypto::{PairingMethod, PairingSession, PairDial}`, `pair`)
+## Pairing (`coqui_peer_webcrypto::{PairingMethod, PairingSession, PairDial, PairResponder}`, `pair`)
 
 ```rust
 pub const PAIR_EXPORT_LABEL: &str = "EXPORTER-coqui-pair";
@@ -207,8 +207,22 @@ impl PairingSession {
     pub fn peer_id(&self) -> PeerId;
     pub fn pair_channel(&self) -> Result<pair::Channel, Error>;  // the proved key; no caller names it
     pub fn join<T: MessageTransport>(self, pairing: Pairing, transport: &mut T) -> Result<PairDial<'_, T>, Error>;
-    pub fn respond<T: MessageTransport + ReadTimeout>(self, store: &TrustStore, desk: &PairingDesk,
-        source: Option<SocketAddr>, transport: &mut T) -> Result<Paired, Error>;
+    pub fn respond<S: PairingStore + Clone + 'static, T: MessageTransport + ReadTimeout>(self, store: &S, desk: &PairingDesk,
+        source: Option<SocketAddr>, transport: &mut T) -> Result<Paired, Error>;   // S: a TrustStore, or a host's own store
+    pub fn responder<S: PairingStore + Clone + 'static>(self, store: &S, desk: &PairingDesk, source: Option<SocketAddr>) -> Result<PairResponder, Error>;
+    pub fn responder_with_store(self, store: Arc<dyn PairingStore>, desk: &PairingDesk, source: Option<SocketAddr>) -> Result<PairResponder, Error>;
+}
+pub struct PairResponder;     // Debug; the responder as a step driver over the session, no I/O, every record sealed
+impl PairResponder {
+    pub fn transmit(&mut self) -> Result<Option<Vec<u8>>, Error>;   // the next sealed record; until None. After an error it still gives the refusal
+    pub fn receive(&mut self, record: &[u8]) -> Result<(), Error>;  // Record (bad), Truncated (peer closed early), Pairing(refusal)
+    pub fn awaiting(&self) -> Option<Ticket>;                       // then desk.wait / desk.decided, and resume
+    pub fn resume(&mut self, decision: Decision) -> Result<(), Error>;
+    pub fn deadline(&self) -> Option<SystemTime>;  pub fn time_left(&self) -> Option<Duration>;   // a read's timeout
+    pub fn check_deadline(&mut self) -> Result<(), Error>;          // Pairing(Refused(Expired)) once passed
+    pub fn is_complete(&self) -> bool;
+    pub fn close(&mut self) -> Result<Vec<u8>, Error>;              // the sealed close record, to send last; Closed the second time
+    pub fn finish(self) -> Result<Paired, Error>;                   // the joiner, already accepted in the store
 }
 impl<T: MessageTransport> PairDial<'_, T> {
     pub fn shown(&self) -> Option<&Shown>;    // a PIN with its slot, or a device flow's user code

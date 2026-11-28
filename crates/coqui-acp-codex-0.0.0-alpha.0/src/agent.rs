@@ -113,17 +113,42 @@ impl CodexAgent {
     ) -> Result<(CodexLaunch, CodexSession), HarnessError> {
         let launch = self.launch_for(request)?;
         let sink = events.clone();
-        let session = CodexSession::start(
-            &launch,
-            self.spawn.as_ref(),
-            self.settings.clone(),
-            move |event| sink.send(event),
-        )
-        .map_err(HarnessError::from)?;
+        let deliver = move |event| sink.send(event);
+        // An app server started ahead has done `initialize` and listed the models; the thread is this session's own.
+        let session = match crate::warm::take(&launch, &self.settings) {
+            Some(warm) => warm.adopt(&launch, deliver).map_err(HarnessError::from)?,
+            None => {
+                CodexSession::start(&launch, self.spawn.as_ref(), self.settings.clone(), deliver)
+                    .map_err(HarnessError::from)?
+            }
+        };
+        crate::warm::fill(&launch, &self.defaults.cwd, &self.spawn, &self.settings);
         Ok((launch, session))
     }
 
-    /// Codex's version, from `codex --version`, asked once; `None` when it does not answer within
+    /// Starts Codex app servers, with this agent's defaults, until [`CodexSettings::warm`] says how many are ready or
+    /// starting, so that a `session/new` that asks for nothing more of the process takes one that has done `initialize` and
+    /// listed the models, and only starts its thread. A thread's directory, model, instructions, MCP servers and access are
+    /// its own, so one app server serves a session in any directory. The app servers are shared by every agent of the process
+    /// that would start the same one (same program, arguments and environment), and are stopped when they have waited past
+    /// the policy's idle time or by [`harness::drop_all`](coqui_acp_harness::drop_all). Does nothing while the policy keeps
+    /// none ahead. A `session/new` that finds none ready starts its own and warms its replacement.
+    pub fn prewarm(&self) {
+        if let Ok(launch) = self.launch_for(&OpenRequest::new(self.defaults.cwd.clone())) {
+            crate::warm::fill(&launch, &self.defaults.cwd, &self.spawn, &self.settings);
+        }
+    }
+
+    /// How many started app servers wait for a session: those [`prewarm`](Self::prewarm) and earlier sessions started, not
+    /// counting those still starting and those that have exited.
+    #[must_use]
+    pub fn warm_ready(&self) -> usize {
+        self.launch_for(&OpenRequest::new(self.defaults.cwd.clone()))
+            .map_or(0, |launch| crate::warm::ready(&launch, &self.settings))
+    }
+
+    /// Codex's version, from `codex --version`, asked once for each version of the program in this process, not for each
+    /// agent ([`harness::version::cached`](coqui_acp_harness::version::cached)); `None` when it does not answer within
     /// [`CodexSettings::version_wait`].
     #[must_use]
     pub fn cli_version(&self) -> Option<String> {
@@ -132,28 +157,37 @@ impl CodexAgent {
                 if self.settings.version_wait.is_zero() {
                     return None;
                 }
-                let mut launch = Launch::new(self.defaults.executable.clone())
-                    .arg("--version")
-                    .clear_env(self.defaults.clear_env);
-                launch.env.clone_from(&self.defaults.env);
-                launch.remove_env.clone_from(&self.defaults.remove_env);
-                let spawned = self.spawn.spawn(&launch).ok()?;
-                let (sender, received) = std::sync::mpsc::channel();
-                let mut stdout = spawned.stdout;
-                let limit = self.settings.version_bytes;
-                let _ = std::thread::Builder::new()
-                    .name("coqui-acp-codex-version".into())
-                    .spawn(move || {
-                        let mut text = String::new();
-                        let _ = stdout.by_ref().take(limit).read_to_string(&mut text);
-                        let _ = sender.send(text);
-                    });
-                let text = received.recv_timeout(self.settings.version_wait).ok();
-                let _ = spawned.process.kill();
-                // `codex-cli 0.164.0`
-                text?.split_whitespace().nth(1).map(str::to_string)
+                coqui_acp_harness::version::cached(
+                    &self.settings.warm.scope,
+                    &self.defaults.executable,
+                    || self.probe_version(),
+                )
             })
             .clone()
+    }
+
+    /// Runs `codex --version`.
+    fn probe_version(&self) -> Option<String> {
+        let mut launch = Launch::new(self.defaults.executable.clone())
+            .arg("--version")
+            .clear_env(self.defaults.clear_env);
+        launch.env.clone_from(&self.defaults.env);
+        launch.remove_env.clone_from(&self.defaults.remove_env);
+        let spawned = self.spawn.spawn(&launch).ok()?;
+        let (sender, received) = std::sync::mpsc::channel();
+        let mut stdout = spawned.stdout;
+        let limit = self.settings.version_bytes;
+        let _ = std::thread::Builder::new()
+            .name("coqui-acp-codex-version".into())
+            .spawn(move || {
+                let mut text = String::new();
+                let _ = stdout.by_ref().take(limit).read_to_string(&mut text);
+                let _ = sender.send(text);
+            });
+        let text = received.recv_timeout(self.settings.version_wait).ok();
+        let _ = spawned.process.kill();
+        // `codex-cli 0.164.0`
+        text?.split_whitespace().nth(1).map(str::to_string)
     }
 
     fn launch_for(&self, request: &OpenRequest) -> Result<CodexLaunch, HarnessError> {

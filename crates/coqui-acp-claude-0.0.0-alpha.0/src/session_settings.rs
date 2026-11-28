@@ -47,6 +47,7 @@ impl SessionSettings {
         SessionLimits::count(limits.title_bytes, &mut settings.title_bytes);
         SessionLimits::millis(limits.version_wait_ms, &mut settings.version_wait);
         SessionLimits::bytes(limits.version_bytes, &mut settings.version_bytes);
+        settings.warm = limits.warm();
         SessionLimits::bytes(
             self.max_transcript_bytes,
             &mut settings.max_transcript_bytes,
@@ -87,7 +88,12 @@ mod tests {
         given.limits.version_wait_ms = Some(0);
         given.max_transcript_bytes = Some(9);
         given.max_tasks = Some(10);
+        given.limits.warm_ahead = Some(2);
+        given.limits.warm_idle_ms = Some(11);
         let settings = given.settings();
+        assert_eq!(settings.warm.ahead, 2);
+        assert_eq!(settings.warm.idle, Duration::from_millis(11));
+        assert_eq!(none.warm.ahead, 0, "warming is off until the host asks");
         assert_eq!(settings.initialize_timeout, Duration::from_millis(7));
         assert_eq!(settings.control_timeout, Duration::from_millis(8));
         assert_eq!(settings.version_wait, Duration::ZERO);

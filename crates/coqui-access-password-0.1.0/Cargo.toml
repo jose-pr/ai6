@@ -1,4 +1,4 @@
-# coqui-access/providers/access/password at e0b452292306df7d70b3bb64670c16300bb415f3, with what it inherits written out.
+# coqui-access/providers/access/password at 89e4356e8123b8e4d597094e752344bc476f5084, with what it inherits written out.
 [package]
 name = "coqui-access-password"
 description = "Password accounts with Argon2id passwords in any table: authenticator, directory and account management"

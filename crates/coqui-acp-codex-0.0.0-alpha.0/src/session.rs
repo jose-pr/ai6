@@ -19,7 +19,9 @@ use coqui_acp_harness::event::{Command, Content, Event, Severity, context_block}
 use coqui_acp_harness::lines::{self, Tail};
 use coqui_acp_harness::mode::Mode;
 use coqui_acp_harness::stream::Waiting;
-use coqui_acp_harness::{LineHook, Process, Spawn, Step, Stream, exit_text, line_writer, version};
+use coqui_acp_harness::{
+    LineHook, Process, Spawn, Step, Stream, WarmPolicy, exit_text, line_writer, version,
+};
 use serde_json::{Map, Value, json};
 
 use crate::launch::{CodexLaunch, ThreadStart};
@@ -73,6 +75,9 @@ pub struct CodexSettings {
     pub check_config: Option<AnswerCheck>,
     /// When set, the answer that opened the thread is given to this; a refusal ends Codex and the start fails.
     pub check_thread: Option<AnswerCheck>,
+    /// How many app servers to keep started and initialised ahead of `session/new`, and for how long. Default none. One
+    /// taken from those keeps the settings and the spawner of the agent that started it.
+    pub warm: WarmPolicy,
 }
 
 /// A host's check of one of Codex's answers: its refusal says why.
@@ -101,6 +106,7 @@ impl fmt::Debug for CodexSettings {
             .field("on_line", &self.on_line.is_some())
             .field("check_config", &self.check_config.is_some())
             .field("check_thread", &self.check_thread.is_some())
+            .field("warm", &self.warm)
             .finish()
     }
 }
@@ -130,6 +136,7 @@ impl CodexSettings {
             on_line: None,
             check_config: None,
             check_thread: None,
+            warm: WarmPolicy::new(0, Duration::from_secs(300)),
         }
     }
 }
@@ -262,6 +269,8 @@ pub struct CodexSession {
     /// The skills Codex listed, as (name, path): a prompt that opens with /name of one is sent as that skill.
     skills: Mutex<Vec<(String, String)>>,
     sink: Arc<dyn Fn(Event) -> bool + Send + Sync>,
+    /// Whether `initialize` and the model list are done: a session taken from the warm ones starts after them.
+    prepared: bool,
 }
 
 impl fmt::Debug for CodexSession {
@@ -463,16 +472,63 @@ impl CodexSession {
             thread_effort: None,
             instructions: launch.developer_instructions.clone(),
             plan_told: AtomicBool::new(false),
-            workspace_write: launch
-                .config()
-                .get("sandbox_workspace_write")
-                .and_then(Value::as_object)
-                .cloned()
-                .unwrap_or_default(),
+            workspace_write: workspace_write_of(launch),
             titled: AtomicBool::new(false),
             skills: Mutex::new(Vec::new()),
             sink,
+            prepared: false,
         })
+    }
+
+    /// Starts the app server and does what no thread or directory decides: `initialize` and the model list. The session
+    /// for a thread is made from it with [`CodexSession::adopt`]. For [`crate::warm`]'s processes, whose events wait in
+    /// `sink` until a session takes the process.
+    pub(crate) fn warm_up(
+        launch: &CodexLaunch,
+        spawn: &dyn Spawn,
+        settings: CodexSettings,
+        sink: impl Fn(Event) -> bool + Send + Sync + 'static,
+    ) -> Result<Self, Error> {
+        let mut session = Self::connect(launch, spawn, settings, sink)?;
+        if let Err(error) = session.prepare(launch) {
+            session.close();
+            return Err(error);
+        }
+        Ok(session)
+    }
+
+    /// Makes a session of an app server that [`CodexSession::warm_up`] started, as [`CodexSession::start`] would have: what
+    /// `launch` says of the thread, its model, effort, instructions and directories, then the thread itself.
+    ///
+    /// # Errors
+    ///
+    /// As [`CodexSession::start`] after the app server was started; it has been ended.
+    pub(crate) fn adopt(mut self, launch: &CodexLaunch) -> Result<Self, Error> {
+        self.choice = Mutex::new((launch.model.clone(), launch.effort.clone()));
+        self.instructions.clone_from(&launch.developer_instructions);
+        self.workspace_write = workspace_write_of(launch);
+        if let Err(error) = self.open(launch) {
+            self.close();
+            return Err(error);
+        }
+        Ok(self)
+    }
+
+    /// Whether the app server is still running and the session not closed: a warm one that is not is never handed out.
+    pub(crate) fn alive(&self) -> bool {
+        !self.closed.load(Ordering::SeqCst)
+            && self.ended.get().is_none()
+            && self.process.try_wait().is_ok_and(|exit| exit.is_none())
+    }
+
+    /// `initialize`, and the models when the settings ask for them.
+    fn prepare(&mut self, launch: &CodexLaunch) -> Result<(), Error> {
+        self.handshake(launch)?;
+        if self.settings.list_models {
+            self.list_models();
+        }
+        self.prepared = true;
+        Ok(())
     }
 
     /// Initializes the app server and tells it so.
@@ -497,9 +553,8 @@ impl CodexSession {
     }
 
     fn open(&mut self, launch: &CodexLaunch) -> Result<(), Error> {
-        self.handshake(launch)?;
-        if self.settings.list_models {
-            self.list_models();
+        if !self.prepared {
+            self.prepare(launch)?;
         }
         if let Some(check) = self.settings.check_config.clone() {
             let config = self.request(
@@ -989,6 +1044,16 @@ impl Drop for CodexSession {
 }
 
 /// The skills of a `skills/list` answer, as (name, description, path), those Codex has not turned off.
+/// The thread's `sandbox_workspace_write` table, as `launch` gives it.
+fn workspace_write_of(launch: &CodexLaunch) -> Map<String, Value> {
+    launch
+        .config()
+        .get("sandbox_workspace_write")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default()
+}
+
 fn skills_of(answer: &Value) -> Vec<(String, String, String)> {
     let mut found: Vec<(String, String, String)> = Vec::new();
     let groups = answer.get("data").and_then(Value::as_array);

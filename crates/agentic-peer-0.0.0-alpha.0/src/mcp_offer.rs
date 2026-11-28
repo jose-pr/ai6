@@ -46,11 +46,26 @@ const TOKEN_SUFFIX: &str = "token";
 /// How long a line may wait on an agent that stopped reading, or on a peer whose stream is full.
 const STUCK: Duration = Duration::from_secs(30);
 
-/// Serves `mcp-offer/1`. `command` and `args` start [`shim`], and `command` has to be absolute, as ACP says of a stdio server. Token
-/// files go in `tokens`, which is made private to this user, so whatever the entry starts has to run as this user too.
+/// Serves `mcp-offer/1`. `command` and `args` start [`shim`], and `command` has to be absolute, as ACP says of a stdio server: an
+/// offer with a relative one is refused. Token files go in `tokens`, which is made private to this user, so whatever the entry starts
+/// has to run as this user too.
+///
+/// The offer outlasts the shim: an agent that ends its server may start it again, and each start is a new connection to the same
+/// offer. For a host whose server keeps state that one connection must not hand to the next, use [`handler_once`].
 pub fn handler(command: PathBuf, args: Vec<String>, tokens: PathBuf) -> Handler {
+    serving(command, args, tokens, false)
+}
+
+/// Serves `mcp-offer/1` for exactly one shim connection per offer: when the shim that showed the token ends, the stream is closed
+/// in order, and its port and token file go with it. A second start of the server needs a new offer, so nothing a connection set up
+/// is shared with the next. The arguments are [`handler`]'s.
+pub fn handler_once(command: PathBuf, args: Vec<String>, tokens: PathBuf) -> Handler {
+    serving(command, args, tokens, true)
+}
+
+fn serving(command: PathBuf, args: Vec<String>, tokens: PathBuf, once: bool) -> Handler {
     Box::new(move |stream: &dyn LinkStream, accepted: &Accepted| {
-        if let Err(why) = offer(stream, &command, &args, &tokens, &accepted.metadata) {
+        if let Err(why) = offer(stream, &command, &args, &tokens, &accepted.metadata, once) {
             stream.close_with(CloseReason::Refused, why);
         }
     })
@@ -138,7 +153,11 @@ fn offer(
     args: &[String],
     tokens: &Path,
     metadata: &[u8],
+    once: bool,
 ) -> Result<(), &'static str> {
+    if !command.is_absolute() {
+        return Err("the command that starts the shim is not an absolute path");
+    }
     let name = server_name(metadata)?;
     let command = command.to_str().ok_or("this program's path is not text")?;
     let token = new_token()?;
@@ -192,6 +211,10 @@ fn offer(
         // Over when the agent ends its server, which it may start again, and the stream is still there for that.
         if let Some(Ok(connection)) = shown {
             relay(&connection, stream);
+            if once {
+                stream.close_with(CloseReason::Done, "");
+                break;
+            }
         }
         thread::sleep(POLL);
     }
@@ -561,8 +584,22 @@ mod tests {
         (wire(a_out, a_in), wire(b_out, b_in))
     }
 
+    /// An absolute path on any platform, which nothing runs.
+    fn program() -> PathBuf {
+        env::temp_dir().join("abs-program")
+    }
+
     /// A served link, with the far side's mux handed to `body`.
     fn with_link(body: impl FnOnce(&Mux<'_, Wire>, &MemoryPeers) + Send) {
+        with_handler(handler, program(), body);
+    }
+
+    /// The same, with the handler and the command it starts the shim with chosen.
+    fn with_handler(
+        make: fn(PathBuf, Vec<String>, PathBuf) -> Handler,
+        command: PathBuf,
+        body: impl FnOnce(&Mux<'_, Wire>, &MemoryPeers) + Send,
+    ) {
         let (near, far) = wires();
         let store = MemoryPeers::default();
         store
@@ -571,11 +608,7 @@ mod tests {
         let tokens = Tokens::new();
         let services = Services::default().with(
             OFFER_PROTOCOL,
-            handler(
-                PathBuf::from("/abs/program"),
-                vec!["mcp-shim".to_owned()],
-                tokens.0.clone(),
-            ),
+            make(command, vec!["mcp-shim".to_owned()], tokens.0.clone()),
         );
         thread::scope(|scope| {
             let (near, store_ref, services) = (&near, &store, &services);
@@ -651,7 +684,7 @@ mod tests {
             let offered = read_entry(&stream);
             assert_eq!(offered.entry["type"], "stdio");
             assert_eq!(offered.entry["name"], "canoa-browser");
-            assert_eq!(offered.entry["command"], "/abs/program");
+            assert_eq!(offered.entry["command"], program().to_str().unwrap());
             assert_eq!(offered.entry["args"], json!(["mcp-shim"]));
             assert_eq!(offered.token.len(), TOKEN_BYTES * 2);
             assert!(!offered.entry.to_string().contains(&offered.token));
@@ -720,6 +753,39 @@ mod tests {
                     format!("{{\"round\":{round}}}").as_bytes()
                 );
                 drop(shim);
+            }
+        });
+    }
+
+    #[test]
+    fn a_command_that_is_not_absolute_is_refused() {
+        for make in [handler, handler_once] {
+            with_handler(make, PathBuf::from("relative/program"), |mux, _| {
+                let stream = mux.open(OFFER_PROTOCOL).unwrap();
+                assert!(stream.receive(Some(WAIT)).is_err());
+            });
+        }
+    }
+
+    #[test]
+    fn an_offer_for_one_connection_ends_with_the_shim_that_used_it() {
+        with_handler(handler_once, program(), |mux, _| {
+            let stream = mux.open(OFFER_PROTOCOL).unwrap();
+            let offered = read_entry(&stream);
+            let mut shim = TcpStream::connect(&offered.address).unwrap();
+            writeln!(shim, "{}", offered.token).unwrap();
+            writeln!(shim, "{{\"round\":0}}").unwrap();
+            assert_eq!(
+                stream.receive(Some(WAIT)).unwrap().unwrap(),
+                b"{\"round\":0}"
+            );
+            drop(shim);
+            // Closed in order, not refused: the stream ends with nothing more to read.
+            assert_eq!(stream.receive(Some(WAIT)).unwrap(), None);
+            let until = Instant::now() + WAIT;
+            while TcpStream::connect(&offered.address).is_ok() || offered.file.exists() {
+                assert!(Instant::now() < until, "the port or the file stayed");
+                thread::sleep(POLL);
             }
         });
     }

@@ -1,4 +1,4 @@
-# coqui-peer-tls/. at 7cbd7ee208595c055d74eed79a4dafcd0175883d, with what it inherits written out.
+# coqui-peer-tls/. at 124f700c3d5ce8c335e838aacd2d1d1b42947214, with what it inherits written out.
 [package]
 name = "coqui-peer-tls"
 version = "0.0.0-alpha.1"
@@ -33,7 +33,7 @@ fips = ["aws-lc", "rustls/fips"]
 [dependencies.coqui-peer]
 version = "=0.0.0-alpha.1"
 git = "https://github.com/Boriken-Dev/coqui-peer"
-rev = "984db3d54b73de10c7892b06fe269a259de2d1c5"
+rev = "be72492c89a5a657deb8027aee3c6db27ac14b2f"
 [dependencies.rustls]
 version = "0.23.27"
 default-features = false

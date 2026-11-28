@@ -36,8 +36,8 @@ pub use handshake::{
 pub use identity::Identity;
 pub use message::{DEFAULT_MAX_MESSAGE, PROFILE};
 pub use pairing::{
-    PAIR_EXPORT_LABEL, PairDial, PairingHandshake, PairingMethod, PairingMethodBuilder,
-    PairingMethodParts, PairingSession,
+    PAIR_EXPORT_LABEL, PairDial, PairResponder, PairingHandshake, PairingMethod,
+    PairingMethodBuilder, PairingMethodParts, PairingSession,
 };
 pub use session::{DEFAULT_SESSION_LIMIT, Opener, Sealer, Session};
 pub use settings::{PairingSettings, WebCryptoSettings};

@@ -134,6 +134,24 @@ pub trait AcpHarness: Send + Sync {
         Ok(None)
     }
 
+    /// Starts the programs a later connection would otherwise start itself, so that its `session/new`
+    /// finds them ready, for a harness that keeps some ahead (a warm policy of its own settings). A
+    /// connection started with this `environment`, no account and no requirements, whose session
+    /// works in `cwd`, takes what this started; `cwd` is empty for a directory the harness does not
+    /// need. The programs start through `spawner`, which is handed over as `start`'s is. It returns
+    /// once they are started or starting, and does nothing for a harness that keeps none ahead and
+    /// for settings that keep none: a host may call it for any harness. The default, for a harness
+    /// with nothing to warm: nothing.
+    fn prewarm(
+        &self,
+        cwd: &str,
+        environment: Secret<Environment>,
+        spawner: Object<dyn ProcessSpawner>,
+    ) -> Result<(), ProviderError> {
+        drop((cwd, environment, spawner));
+        Ok(())
+    }
+
     /// Each way this configured harness departs from its defaults that its settings' schema cannot
     /// show (the detail of a rule a setting holds as text), for the host to report beside the
     /// differences it reads from the schema itself. The default, for settings the schema shows in

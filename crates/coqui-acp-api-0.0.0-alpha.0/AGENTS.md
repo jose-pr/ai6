@@ -14,7 +14,7 @@ A kind is a C ABI. Its table carries a hash of every slot as spelled, so adding,
 
 | kind | table | `FLOOR_HASH` | who implements it |
 | --- | --- | --- | --- |
-| `acp_harness` | `AcpHarnessVtable` | `3025339842` | the provider |
+| `acp_harness` | `AcpHarnessVtable` | `2434889077` | the provider |
 | `channel` | `ChannelVtable` | `3787630980` | the provider (Guatiao's, re-exported) |
 | `channel_sink` | `ChannelSinkVtable` | `4115266557` | the host (Guatiao's, re-exported) |
 | `process_spawner` | `ProcessSpawnerVtable` | `4038904472` | the host |
@@ -45,6 +45,8 @@ pub trait AcpHarness: Send + Sync {
     fn export_session(&self, export: SessionExport, spawner: Object<dyn ProcessSpawner>)
         -> Result<ExportPage, ProviderError>;
     fn session_record(&self, query: SessionQuery) -> Result<Option<SessionRecordFile>, ProviderError>; // default: None
+    fn prewarm(&self, cwd: &str, environment: Secret<Environment>, spawner: Object<dyn ProcessSpawner>)
+        -> Result<(), ProviderError>;                                                               // default: nothing
     fn non_defaults(&self) -> Result<Vec<NonDefault>, ProviderError>;                               // default: empty
 }
 ```
@@ -59,6 +61,7 @@ Every method is synchronous; a host calls them from a thread of its own. Every m
 - `import_session`: seeds a session at the host's UUID from a history (below); an empty history seeds a fresh one. A UUID the provider already holds is `GUATIAO_ERR_BAD_VALUE`, never overwritten: a host moving a session back to a harness that still holds it imports at a new UUID or into a fresh store. Answers an `ImportReport`. Refuses `GUATIAO_ERR_UNSUPPORTED`, with the reason, when the harness cannot import at all or does not read the history's version; `GUATIAO_ERR_BAD_VALUE` for an id that is not a UUID or already names a session, or a history it cannot read. Never a session half seeded and never a silent fallback: a harness with no native session to seed (a generic ACP agent) may import by replaying the history as context in its first prompt, and then says so in the report's losses (`replayed_as_prompt`; `ImportReport::replayed()` reads it, so a host tells a native import from a replay). A replay is not a session of the harness: the context reaches the model in the first prompt only, and the report's other losses say what was cut or not carried.
 - `export_session`: one page of the history of a session it reported, by its UUID, in the standard format, as it is. A page is whole lines, each ended by a line feed, never more than `max_bytes`: the caller's memory bound, since one line can hold a whole tool output or an attachment. A next line longer than `max_bytes` (line feed included) is refused `GUATIAO_ERR_BAD_VALUE` with the message `line too large: <N> bytes` (`LINE_TOO_LARGE`, read back with `line_too_large(message) -> Option<u64>`), so the host asks again with a `max_bytes` of at least N or stops and says why. Only the first page starts with the header, which carries the format's version and the digest of the whole body. `next` names the page after; absent, the export is complete; the pages joined are the export of one page as large as the whole. `after` is opaque, the provider's own. `GUATIAO_ERR_NOT_FOUND` for a session it does not have; `GUATIAO_ERR_BAD_VALUE` for an `after` it never gave or one the session has changed since (the host starts again from the first page); `GUATIAO_ERR_UNSUPPORTED`, with the reason, when it cannot export.
 - `session_record`: where the harness keeps its own record of a session, by the UUID it reported.
+- `prewarm`: starts the programs a later connection would otherwise start itself (a harness whose settings keep some ahead, as Claude's and Codex's `warm` does), so that the connection's `session/new` takes one that is ready. A connection started with the same `environment`, no account and no requirements, whose session works in `cwd` (empty when the harness needs none), takes what this started. `spawner` is handed over as `start`'s is, and the programs start through it. It returns once they are started or starting, never waits for them and never fails for a policy that keeps none, so a host calls it for any harness. The default, for a harness with nothing to warm: nothing.
 - `non_defaults`: how a configured harness departs from its defaults in ways its settings' schema cannot show (the detail of a rule a setting holds as text). The rest a host reads from the schema itself, with Guatiao's `schema::differences`.
 
 **Nothing a provider answers carries a value of an environment or a credential**: not an answer, a refusal, an error, a log line or an argument vector. `Secret<Environment>` prints `[redacted]`, and its schema marks it `writeOnly` and `x-sensitive`. The copies Guatiao's proxy makes of an argument while converting it are not wiped.

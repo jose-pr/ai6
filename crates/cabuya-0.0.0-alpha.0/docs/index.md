@@ -3,6 +3,7 @@
 **One proven connection between two peers, and any number of named streams over it.** Pair once, then run whatever protocols an application needs, each as a stream with its own flow control and its own grant. The link adds proof and streams and nothing to the protocols: a stream carries their own messages.
 
 - [The link](link.md): the wire, for any language.
+- [The program](cli.md): `cabuya`, which pairs, serves, connects and forwards from a command line.
 
 Three rules hold the design together:
 

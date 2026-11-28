@@ -27,6 +27,7 @@ mod session_settings;
 pub mod signed_in;
 mod signin;
 mod stored_login;
+mod warm;
 
 use alloc::string::String;
 use core::fmt;

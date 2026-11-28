@@ -1,4 +1,4 @@
-# coqui-access/providers/access/ldap at e0b452292306df7d70b3bb64670c16300bb415f3, with what it inherits written out.
+# coqui-access/providers/access/ldap at 89e4356e8123b8e4d597094e752344bc476f5084, with what it inherits written out.
 [package]
 name = "coqui-access-ldap"
 description = "Authenticate against LDAP or Active Directory and resolve names and groups from it"
@@ -26,13 +26,13 @@ rev = "c1875f8276bd6366c38e9133fdb1181a0ffbaaad"
 features = ["derive", "zeroize"]
 [dependencies.guatiao-builder]
 git = "https://github.com/Boriken-Dev/guatiao"
-rev = "3163647ab70bc19bf24125d30e1dc1ee49b10f94"
+rev = "1cf0f67f0354d18fbc5684a9a36177afbb20a0fa"
 [dependencies.coqui-access-kit]
 path = "crates/coqui-access-kit"
 features = ["cache"]
 [dependencies.coqui-peer-tls]
 git = "https://github.com/Boriken-Dev/coqui-peer-tls"
-rev = "7cbd7ee208595c055d74eed79a4dafcd0175883d"
+rev = "124f700c3d5ce8c335e838aacd2d1d1b42947214"
 [dependencies.ldap3]
 version = "0.12"
 default-features = false

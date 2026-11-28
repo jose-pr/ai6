@@ -4,9 +4,9 @@ Header-file-style reference for the `coqui-acp-harness` crate: every public item
 
 MSRV Rust 1.89. A default build depends on `coqui-acp-api` (for the usage model), `base64`, `serde_json` and `uuid`, and `win32job` on Windows or `rustix` on Unix. Feature `kind` (off by default) adds `spawner`, the `acp_harness` kind's spawner on this machine and `Spawn` through any host's, and `provider`, which serves a harness over the kind's channel (with `guatiao-serde`, for catalogs). Feature `antigravity` (off by default) adds `antigravity`, which reads Antigravity's account and quota from its stored login and Google's service, or from its loopback port, and with it `serde`, `time` (parsing), `ureq` (rustls with ring and webpki roots, no default features), `memchr`, and `keyring-core` with the platform's store (`windows-native-keyring-store`, `apple-native-keyring-store` with `keychain`, or `zbus-secret-service-keyring-store` with `crypto-rust` on other Unix); its tests also use `rcgen` and `rustls`. Version `0.0.0-alpha.0`, not published; the API may change in any release before 1.0.
 
-Imports: the root re-exports `acp`'s `AgentInfo`, `ConfigOption`, `Conversation`, `EventSink`, `Harness`, `HarnessError`, `McpServer`, `McpTransport`, `Open`, `OpenRequest`, `OptionValue`, `Settings`, `Takes`, `UsageTracker` and `serve`; `event`'s `Event`, `Outcome`, `PermissionRequest` and `Responder`; `process`'s `ErrorStream`, `Exit`, `Launch`, `LineWriter`, `PlainSpawn`, `Process`, `Spawn`, `Spawned`, `Starter`, `ending_once`, `exit_text`, `line_writer`, `set_starter` and `watch_exit`; and `stream`'s `Answer`, `LineHook`, `Step`, `Stream` and `Waiting`. The root also re-exports `mode`'s `Mode` and `settings`'s `ConnectionSettings` and `SessionLimits`, and with `kind` `spawner`'s `LocalSpawner` and `ThroughSpawner`. The modules `acp`, `event`, `lines`, `mode`, `process`, `settings`, `stream` and `version` are public, `spawner` and `provider` with `kind` and `antigravity` with `antigravity`.
+Imports: the root re-exports `acp`'s `AgentInfo`, `ConfigOption`, `Conversation`, `EventSink`, `Harness`, `HarnessError`, `McpServer`, `McpTransport`, `Open`, `OpenRequest`, `OptionValue`, `Settings`, `Takes`, `UsageTracker` and `serve`; `event`'s `Event`, `Outcome`, `PermissionRequest` and `Responder`; `process`'s `ErrorStream`, `Exit`, `Launch`, `LineWriter`, `PlainSpawn`, `Process`, `Spawn`, `Spawned`, `Starter`, `ending_once`, `exit_text`, `line_writer`, `set_starter` and `watch_exit`; and `stream`'s `Answer`, `LineHook`, `Step`, `Stream` and `Waiting`; and `warm`'s `Maker`, `Relay`, `WarmKey`, `WarmPolicy`, `WarmPool`, `Warmed` and `drop_all`. The root also re-exports `mode`'s `Mode` and `settings`'s `ConnectionSettings` and `SessionLimits`, and with `kind` `spawner`'s `LocalSpawner` and `ThroughSpawner`. The modules `acp`, `event`, `lines`, `mode`, `process`, `settings`, `stream`, `version` and `warm` are public, `spawner` and `provider` with `kind` and `antigravity` with `antigravity`.
 
-No `unsafe` code but one Windows module (`#![deny(unsafe_code)]`): `antigravity/ports/win32.rs`, which asks `GetExtendedTcpTable` (with `windows-sys`, feature `antigravity`) for the listening sockets. No process-wide state.
+No `unsafe` code but one Windows module (`#![deny(unsafe_code)]`): `antigravity/ports/win32.rs`, which asks `GetExtendedTcpTable` (with `windows-sys`, feature `antigravity`) for the listening sockets. Process-wide state: the starter and program folders `process` takes, the pools `warm::drop_all` reaches, and the answers `version::cached` keeps.
 
 ## Processes (`coqui_acp_harness::process`)
 
@@ -463,7 +463,8 @@ pub fn message_limit(&self) -> usize        // max_message_bytes, for `Serving::
 pub fn serving(&self) -> Settings           // `acp::Settings::new()` with the values given; a provider sets the working roots, the account and `client_mcp_servers` itself
 pub struct SessionLimits { /* every field Option<u64>; absent keeps the translator's own default */
     max_line_bytes, tail_lines, tail_line_bytes, initialize_timeout_ms, request_timeout_ms, exit_wait_ms, exit_poll_ms, close_wait_ms,
-    max_tools, max_queued_writes, title_bytes, version_wait_ms, version_bytes }   // ToValue, FromValue, Schema, Default
+    max_tools, max_queued_writes, title_bytes, version_wait_ms, version_bytes, warm_ahead, warm_idle_ms, warm_scope /* Option<String> */ }   // ToValue, FromValue, Schema, Default
+pub fn SessionLimits::warm(&self) -> WarmPolicy   // `WarmPolicy::default()` with `warm_ahead`, `warm_idle_ms` and `warm_scope` over it
 pub fn SessionLimits::{millis, count, bytes}(value: Option<u64>, slot: &mut Duration | usize | u64)   // sets the slot when a value is given
 ```
 
@@ -476,6 +477,44 @@ pub fn untested(harness: &str, found: &str, tested: &[&str]) -> Option<String>
 ```
 
 The warning for a version a driver was not tested with, or `None`. Nothing is refused for it. A release whose `major.minor` is a tested version's counts as tested (point releases come weekly, and a warning on each is noise); a version that is not dotted numbers is compared whole.
+
+```rust
+pub fn cached(scope: &str, program: &OsStr, probe: impl FnOnce() -> Option<String>) -> Option<String>
+```
+
+`probe`'s answer for a program, asked once per version of the file in this process instead of once per provider instance: the key is `scope`, the file this process finds under the name (the path itself when it names a directory; `set_program_dirs` folders count) and its modification time. A program this process cannot find as a file is asked every time, and `None` (no answer) is never kept. `scope` is the `WarmPolicy`'s: a program a spawner runs elsewhere is not the file here of the same name.
+
+## Warm processes (`coqui_acp_harness::warm`)
+
+Agent processes started and initialised ahead of the session that will use them, shared by every provider instance of the process. The translators (`coqui-acp-claude`, `coqui-acp-codex`) each keep one `WarmPool` in a `static`; a host sets the policy and may drop everything.
+
+```rust
+#[non_exhaustive] pub struct WarmPolicy { pub ahead: usize /* 0: off */, pub idle: Duration /* 300 s */, pub scope: String /* "" */ }   // Clone, Debug, PartialEq, Eq, Default
+pub const fn WarmPolicy::new(ahead: usize, idle: Duration) -> Self;  pub fn scope(self, scope: impl Into<String>) -> Self
+pub struct WarmKey /* Clone, PartialEq, Eq, Hash; Debug names the program and the variables, never their values */;
+pub fn WarmKey::new(policy: &WarmPolicy, launch: &Launch) -> Self      // scope, program, args, cwd, env, remove_env, clear_env
+pub fn without_cwd(self) -> Self;  pub fn part(self, bytes: impl Into<Vec<u8>>) -> Self   // drop the directory; add what else fixes the process
+pub trait Warmed: Send + 'static { fn ready(&self) -> bool; fn stop(&self); }   // ready: false once exited or spoilt; stop ends the process tree
+pub type Maker<T> = Arc<dyn Fn() -> Option<T> + Send + Sync>;           // starts one warm process, through the host's spawner
+pub struct WarmPool<T: Warmed> /* Debug, Default */;
+pub fn WarmPool::new() -> Self                                         // registered, so `drop_all` reaches it
+pub fn take(&self, key: &WarmKey, policy: &WarmPolicy) -> Option<T>    // a ready one, the oldest; None with `ahead` 0; starts nothing
+pub fn fill(&self, key: &WarmKey, policy: &WarmPolicy, make: &Maker<T>) // starts, one thread each, until `ahead` are ready or starting
+pub fn ready(&self, key: &WarmKey) -> usize                            // warm and alive; starting and exited ones are not counted
+pub fn drop_all(&self)                                                 // stops this pool's, and any arriving from a start begun before
+pub fn drop_all()                                                      // the same for every pool of the process
+pub struct Relay /* Clone, Debug, Default */;                           // a sink that holds a warm process's events until a session takes it
+pub fn Relay::new() -> Self;  pub fn sink(&self) -> impl Fn(Event) -> bool + Send + Sync + 'static
+pub fn connect(&self, sink: impl Fn(Event) -> bool + Send + Sync + 'static)   // hands over what was held, in order, then passes the rest on
+pub fn overflowed(&self) -> bool                                       // more than 1024 events held: the process is not one a session expects
+```
+
+- **A key is everything fixed at spawn.** Two keys are equal when a process started for one is the same as one started for the other; whatever is told after the start (a thread's directory, a session's id) is not in it. `scope` separates hosts that start programs through more than one spawner.
+- **`take` and `fill` are apart** so the replacement is started after the session that took one has what it needs, and does not compete with a start someone waits for. A key a `take` finds nothing for is `fill`ed by the translator all the same, so the next session finds one.
+- **Idle and exits.** A thread of the pool stops what has waited past `idle` (the policy of the latest `take`/`fill` for that key) and forgets what has exited, checking about once a second; it ends when nothing is kept or starting. A process that exits is not handed out and not counted.
+- **A `drop_all` is final for what was starting:** a process whose start began before it is stopped when it arrives.
+- **A taken process keeps the spawner and settings of the instance that started it**, so a host whose spawners differ sets `scope`; a host that ends a connection's processes with its spawner gets no hit from a process that outlived it.
+- A warm process holds no session. `ahead` 0 (the default) keeps nothing and `take` answers `None`.
 
 ## Errors
 

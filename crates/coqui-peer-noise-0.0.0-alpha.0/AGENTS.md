@@ -6,7 +6,7 @@ the package and is self-contained. Development documentation lives with the sour
 <https://github.com/Boriken-Dev/coqui-peer-noise>.
 
 One Cargo feature, off by default: `pin`, which is `coqui-peer/pin` (SPAKE2, HKDF, HMAC), for `pair::Pairing::pin`.
-MSRV Rust 1.89. A build depends on `coqui-peer` (by git revision, `984db3d`),
+MSRV Rust 1.89. A build depends on `coqui-peer` (by git revision, `be72492`),
 `coqui-builder` (by revision), `x25519-dalek`, `aes-gcm`, `hkdf`, `sha2`, `data-encoding`, `getrandom` and `zeroize`. This crate is
 unreleased, with one independent review by another AI agent (neither third-party nor formal) and no formal model
 of XX with SPAKE2 inside it: depend on a git revision, and name the same `coqui-peer`

@@ -26,6 +26,7 @@ mod desk;
 mod pin;
 
 use alloc::collections::VecDeque;
+use alloc::sync::Arc;
 use core::fmt;
 use core::net::SocketAddr;
 use core::time::Duration;
@@ -639,12 +640,66 @@ enum Responding {
     Failed,
 }
 
+/// What a [`PairingResponder`] needs of the storage that holds the keys it admits and the invitations it redeems.
+///
+/// [`TrustStore`] is the directory implementation. A host that keeps enrollment in its own durable storage implements this,
+/// so the admission and the redeemed invitation commit together with its other records.
+pub trait PairingStore: Send + Sync {
+    /// Accepts `key` and returns its id.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::AlreadyAccepted`] when it is accepted and current, which the responder takes as success; [`Error::Material`]
+    /// when the key is not valid; [`Error::Io`] or another error when it cannot be written.
+    fn accept_key(&self, key: &KeyMaterial) -> Result<PeerId, Error>;
+
+    /// Uses up one redemption of the open invitation whose secret this is, atomically: of concurrent redemptions of a
+    /// single-use invitation exactly one succeeds.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NotInvited`] when no open invitation has this secret, [`Error::Expired`] when it expired, and a storage error.
+    fn redeem(&self, secret: &[u8; 32]) -> Result<crate::Invitation, Error>;
+
+    /// The key of an accepted, current peer, or `None`. The responder asks after [`accept_key`](PairingStore::accept_key)
+    /// and refuses to report a pairing the store does not hold.
+    fn accepted_key(&self, id: &PeerId) -> Option<KeyMaterial>;
+}
+
+impl PairingStore for TrustStore {
+    fn accept_key(&self, key: &KeyMaterial) -> Result<PeerId, Error> {
+        TrustStore::accept_key(self, key)
+    }
+
+    fn redeem(&self, secret: &[u8; 32]) -> Result<crate::Invitation, Error> {
+        TrustStore::redeem(self, secret)
+    }
+
+    fn accepted_key(&self, id: &PeerId) -> Option<KeyMaterial> {
+        TrustStore::accepted_key(self, id)
+    }
+}
+
+impl<S: PairingStore + ?Sized> PairingStore for Arc<S> {
+    fn accept_key(&self, key: &KeyMaterial) -> Result<PeerId, Error> {
+        (**self).accept_key(key)
+    }
+
+    fn redeem(&self, secret: &[u8; 32]) -> Result<crate::Invitation, Error> {
+        (**self).redeem(secret)
+    }
+
+    fn accepted_key(&self, id: &PeerId) -> Option<KeyMaterial> {
+        (**self).accepted_key(id)
+    }
+}
+
 /// The responder's side of a pairing exchange: it redeems invitations from its
-/// [`TrustStore`], takes PINs and decisions from its [`PairingDesk`], and accepts the joiner's
-/// key in the store when the pairing succeeds.
+/// [`PairingStore`] (a [`TrustStore`], or a host's own), takes PINs and decisions from its
+/// [`PairingDesk`], and accepts the joiner's key in the store when the pairing succeeds.
 pub struct PairingResponder {
     channel: Channel,
-    store: TrustStore,
+    store: Arc<dyn PairingStore>,
     desk: PairingDesk,
     source: Option<SocketAddr>,
     joiner: Option<KeyMaterial>,
@@ -667,16 +722,27 @@ impl fmt::Debug for PairingResponder {
 
 impl PairingResponder {
     /// A responder over `channel`, for a joiner that connected from `source` (used by the
-    /// desk's per-source throttle).
-    pub fn new(
+    /// desk's per-source throttle). `store` is a [`TrustStore`] or a host's own
+    /// [`PairingStore`]; the responder keeps a clone.
+    pub fn new<S: PairingStore + Clone + 'static>(
         channel: Channel,
-        store: &TrustStore,
+        store: &S,
+        desk: &PairingDesk,
+        source: Option<SocketAddr>,
+    ) -> Self {
+        Self::with_store(channel, Arc::new(store.clone()), desk, source)
+    }
+
+    /// As [`new`](PairingResponder::new), over a store that is already shared, or that cannot be cloned.
+    pub fn with_store(
+        channel: Channel,
+        store: Arc<dyn PairingStore>,
         desk: &PairingDesk,
         source: Option<SocketAddr>,
     ) -> Self {
         Self {
             channel,
-            store: store.clone(),
+            store,
             desk: desk.clone(),
             source,
             joiner: None,
@@ -811,6 +877,10 @@ impl PairingResponder {
         match self.store.accept_key(joiner) {
             Ok(_) | Err(Error::AlreadyAccepted) => {}
             Err(error) => return Err(PairingError::Local(error)),
+        }
+        // A store that answered yes holds the key: a pairing it does not hold is not reported.
+        if self.store.accepted_key(&joiner.id()).is_none() {
+            return Err(PairingError::Local(Error::NotAccepted));
         }
         let mut done = Writer::new(DONE);
         done.key(&self.channel.local);

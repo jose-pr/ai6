@@ -226,7 +226,7 @@ class Channel(KindProtocol, Protocol, kind="channel", floor_hash=3787630980, is_
         ...
 
 
-class AcpHarness(KindProtocol, Protocol, kind="acp_harness", floor_hash=3025339842):
+class AcpHarness(KindProtocol, Protocol, kind="acp_harness", floor_hash=2434889077):
     """Drives an Agent Client Protocol agent, and serves it as one ACP connection over a channel.
 
     The host is the ACP client and the provider the agent: each message on the channel, either way,
@@ -348,6 +348,19 @@ class AcpHarness(KindProtocol, Protocol, kind="acp_harness", floor_hash=30253398
         """Where the harness keeps its own record of the session `query` names (by the session id it
         reported, a UUID), when it keeps one and the file is there. The default, for a harness that
         keeps none: none.
+        """
+        ...
+
+    @fallible
+    def prewarm(self, cwd: str, environment: Ref, spawner: Taken[ProcessSpawner]) -> None:
+        """Starts the programs a later connection would otherwise start itself, so that its `session/new`
+        finds them ready, for a harness that keeps some ahead (a warm policy of its own settings). A
+        connection started with this `environment`, no account and no requirements, whose session
+        works in `cwd`, takes what this started; `cwd` is empty for a directory the harness does not
+        need. The programs start through `spawner`, which is handed over as `start`'s is. It returns
+        once they are started or starting, and does nothing for a harness that keeps none ahead and
+        for settings that keep none: a host may call it for any harness. The default, for a harness
+        with nothing to warm: nothing.
         """
         ...
 

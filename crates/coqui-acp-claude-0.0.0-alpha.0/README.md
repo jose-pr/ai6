@@ -27,6 +27,8 @@ wants Claude Code's events in its own terms. Documentation: <https://boriken-dev
 - `ClaudeAgent`: the ACP agent: `initialize`, `session/new`, `session/load`, `session/resume` (version 2's with replay),
   `session/prompt`, `session/cancel`, `session/close`, `request_permission` with Claude Code's own options (allow once, always
   allow applying the rule Claude Code suggested, reject), and model and effort as config options.
+- Warm processes: `ClaudeSettings::warm` (a `WarmPolicy`, off by default) keeps Claude Code processes started and initialised ahead of `session/new`,
+  shared by every `ClaudeAgent` of the process, and `ClaudeAgent::prewarm` starts them for a directory. `coqui_acp_harness::drop_all` stops them.
 - `coqui-acp-claude`, a command that serves it on standard input and output.
 - A Claude Code version it was not tested with runs, with a warning: a notice in version 2, and a line on standard error.
 

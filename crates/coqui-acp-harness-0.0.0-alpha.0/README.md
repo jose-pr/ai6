@@ -29,7 +29,10 @@ and [`coqui-acp-codex`](https://github.com/Boriken-Dev/coqui-acp/tree/main/crate
   and context, usage buckets and limits, commands, notices, compaction, and how a turn ended.
 - `acp::serve`: a `Harness` as an ACP agent over any reader and writer, in version 1's shapes or version 2's. Every limit is a
   `Settings` field with a default.
-- `version::untested`: the warning for a harness version a driver was not tested with. Nothing is refused for it.
+- `version::untested`: the warning for a harness version a driver was not tested with. Nothing is refused for it. `version::cached` asks
+  a program's `--version` once per version of its file in the process, not once per provider instance.
+- `warm`: agent processes started and initialised ahead of `session/new`, shared by every provider instance of the process, with the host's
+  `WarmPolicy` (how many to keep ahead, how long idle, `0` and off by default) and `drop_all` to stop them all.
 
 ## Installation
 
@@ -69,7 +72,8 @@ fn main() -> std::io::Result<()> {
 | `lines` | `read_lines`, `Line`, `Tail`, `cut` |
 | `event` | `Event` and what it carries, `Responder`, `Outcome` |
 | `acp` | `Harness`, `Conversation`, `EventSink`, `OpenRequest`, `Settings`, `serve` |
-| `version` | `untested` |
+| `version` | `untested`, `cached` |
+| `warm` | `WarmPolicy`, `WarmKey`, `WarmPool`, `Warmed`, `Relay`, `drop_all` |
 
 ## Versions
 
