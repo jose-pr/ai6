@@ -9,7 +9,8 @@ use sha2::{Digest, Sha256};
 
 use crate::bounds::Seconds;
 
-/// Default time without provider or terminal activity before a Run is stalled.
+/// Default time without new output (response text, tool calls or terminal lines) before a Run is
+/// stalled; an open connection that sends nothing is silence.
 pub const DEFAULT_STALL_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Default delay before a quiet prompt-shaped Run is marked blocked.
@@ -129,7 +130,8 @@ impl Default for WatchdogConfig {
 }
 
 impl WatchdogConfig {
-    /// Sets the maximum period without provider or terminal activity.
+    /// Sets the maximum period without new output (response text, tool calls or terminal lines);
+    /// an open connection that sends nothing is silence.
     pub fn with_stall_timeout(mut self, timeout: Duration) -> Self {
         self.stall_timeout = timeout;
         self
@@ -185,7 +187,7 @@ impl WatchdogConfig {
         self
     }
 
-    /// Returns the maximum period without provider or terminal activity.
+    /// Returns the maximum period without new output (response text, tool calls or terminal lines).
     pub fn stall_timeout(&self) -> Duration {
         self.stall_timeout
     }

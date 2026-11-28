@@ -628,7 +628,8 @@ pub struct StationRuntime {
     /// Agent Runs it runs at once. Default: 4.
     #[schema(title = "Runs at once")]
     pub max_concurrent_missions: Option<usize>,
-    /// Seconds without provider or terminal activity before a Run stalls. Default: 300.
+    /// Seconds without new output (response text, tool calls or terminal lines) before a Run
+    /// stalls; an open connection that sends nothing is silence. Default: 300.
     #[schema(title = "Stall a silent Run after", format = "seconds")]
     pub stall_timeout: Option<f64>,
     /// Seconds without novel terminal output before repeated output stalls a Run.

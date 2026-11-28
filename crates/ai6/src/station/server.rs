@@ -7866,7 +7866,7 @@ fn spawn_event_pump_with_monitor(
                     )
                 } else {
                     format!(
-                        "no provider or terminal activity for {:.1} seconds",
+                        "no new output for {:.1} seconds",
                         monitor.timeout().as_secs_f64()
                     )
                 };
@@ -13581,6 +13581,85 @@ theater = \"other-box\"
             pop_event(&state, mission_id.as_str()).unwrap().kind,
             "stalled"
         );
+    }
+
+    /// A harness hung on an open connection: every poll answers an event that carries nothing.
+    struct ChattyRun {
+        run_id: RunId,
+    }
+
+    impl AgentSession for ChattyRun {
+        fn session_id(&self) -> Result<Option<String>, ProviderError> {
+            Ok(Some(self.run_id.to_string()))
+        }
+
+        fn send_message(&self, _message: AgentMessage) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        fn next_event(&self, _timeout_ms: i64) -> Result<Option<AgentEvent>, ProviderError> {
+            std::thread::sleep(Duration::from_millis(10));
+            Ok(Some(AgentEvent::new("working", None)))
+        }
+
+        fn interrupt(&self) -> Result<(), ProviderError> {
+            Ok(())
+        }
+
+        fn close(&self) -> Result<(), ProviderError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_run_whose_stream_only_says_working_stalls_at_the_stall_timeout() {
+        let mission_id = MissionId::try_new("mission-chatty").unwrap();
+        let (state, _quiet) = quiet_run_state(mission_id.as_str(), RunGate::default());
+        let chatty = Arc::new(Mutex::new(
+            ChattyRun {
+                run_id: RunId::try_new("provider-id-quiet").unwrap(),
+            }
+            .into_object(),
+        ));
+        // The pump serves only the Run the Station has registered.
+        state
+            .runs
+            .lock()
+            .unwrap()
+            .get_mut(mission_id.as_str())
+            .unwrap()
+            .run = chatty.clone();
+
+        spawn_event_pump_with_monitor(
+            state.clone(),
+            mission_id.to_string(),
+            chatty,
+            Watchdog::new(std::time::Duration::from_secs(3)),
+        );
+        let event_pumps = std::mem::take(&mut *state.event_pumps.lock().unwrap());
+        tokio::time::timeout(std::time::Duration::from_secs(60), async {
+            for event_pump in event_pumps {
+                event_pump.await.unwrap();
+            }
+        })
+        .await
+        .expect("a stream that only says working should reach the stall deadline");
+
+        assert_eq!(
+            state
+                .missions
+                .lock()
+                .unwrap()
+                .get(mission_id.as_str())
+                .unwrap()
+                .state,
+            MissionState::Stalled
+        );
+        let mut kinds = Vec::new();
+        while let Some(event) = pop_event(&state, mission_id.as_str()) {
+            kinds.push(event.kind);
+        }
+        assert!(kinds.iter().any(|kind| kind == "stalled"), "{kinds:?}");
     }
 
     #[test]

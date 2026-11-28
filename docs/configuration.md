@@ -1007,7 +1007,7 @@ tables configure providers.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `max_concurrent_missions` | 4 | **Runs at once.** Agent Runs it runs at once. |
-| `stall_timeout` | 300 | **Stall a silent Run after.** Seconds without provider or terminal activity before a Run stalls. |
+| `stall_timeout` | 300 | **Stall a silent Run after.** Seconds without new output (response text, tool calls or terminal lines) before a Run stalls; an open connection that sends nothing is silence. |
 | `loop_timeout` | 300 | **Stall a repeating Run after.** Seconds without novel terminal output before repeated output stalls a Run. |
 | `loop_min_lines` | 50 | **Repeated lines before a loop counts.** Repeated terminal lines required before loop detection applies. |
 | `blocked_after` | 10 | **Mark a Run blocked after.** Quiet seconds before a prompt-shaped terminal tail marks a Run blocked. |

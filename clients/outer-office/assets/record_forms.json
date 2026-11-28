@@ -8663,7 +8663,7 @@
           ],
           "format": "seconds",
           "title": "Stall a silent Run after",
-          "description": "Seconds without provider or terminal activity before a Run stalls. Default: 300."
+          "description": "Seconds without new output (response text, tool calls or terminal lines) before a Run stalls; an open connection that sends nothing is silence. Default: 300."
         },
         "loop_timeout": {
           "type": [
