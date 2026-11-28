@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A Station keeps `sealing.marks` beside its sealing key: the newest revision it accepted of each scope key record and value, and the key IDs a scope retired. An older record, or a replaced key put back, is refused as a rollback, so a Station dropped from a scope cannot restore the key it holds. A removed secret leaves a tombstone, so revisions never restart. A rotation wraps to each Station's published key only after it verifies against the pin its grant recorded (the new `pins` field of the `registry` provider), a write that overlaps a rotation is encrypted again under the new key, and a rotation over one that cannot be finished is refused.
+
 - A value of a Run's `env` (a loadout's, an Agent's, a route's or a start request's) may write `${overlay.<name>}`, which becomes the directory that overlay is issued in on the Run's site, so a loadout names a tool of a pinned overlay with no hand-staged path. Naming an overlay the Run is not issued, or leaving it open, refuses the Run, naming the variable and the overlay. `examples/config/loadouts.toml` shows a pinned overlay with one program.
 
 - The exposure preset `strict-except-secrets` applies every restriction but `secrets`: an Operation whose exposed Runs still need tracker writes through leased secrets names it, with no hand-built `restrict` list. `strict` stays the default.

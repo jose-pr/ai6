@@ -877,7 +877,22 @@ remain; the revoked Station keeps only what it already opened, so the secret its
 replaced at its source. A Station without a wrap is refused, and the last Station of a scope cannot
 be removed. A Station makes the provider itself, so it needs a Registry and a sealing key and no
 bootstrap file can read from it. A value an earlier build sealed separately to each Station is still
-read and replaced as it was. The Registry holds only ciphertext and wraps. See
+read and replaced as it was. The Registry holds only ciphertext and wraps.
+
+Every Station writes the Registry, so its records are not themselves authenticated, and a Station keeps
+its own check: `sealing.marks`, beside its sealing key, holds the newest revision it accepted of each
+scope key record and each value, and the key IDs a scope has retired. A record older than that, or a key
+put back that was replaced, is refused as a rollback; a removed value leaves a tombstone, so its
+revisions never start again. Restoring the Registry from a backup makes every Station refuse until its
+marks file is removed. A `pins` field (Station to certificate fingerprint) is kept in the key record
+and checked each time the key is wrapped again: a rotation wraps to the key a Station publishes now,
+only after it verifies, and a wrap whose public key is not the opening Station's own is refused. A
+write that overlaps a rotation is encrypted again under the new key before it returns; a rotation that
+cannot be finished (this Station holds no wrap of the previous key) is an error, and nothing starts over it.
+What this does not stop, until scope key records are signed: a Station that is a Registry writer and
+was dropped from a scope can still forge a record a Station has not yet seen, so revoking a Station
+from a scope also means revoking its Registry credentials. ring keeps its own copy of the scope key
+for the length of one call and offers no way to wipe it. See
 [Logins kept in the Registry](#logins-kept-in-the-registry) for the Station's sealing key.
 
 Others load from `[station.plugins]` like any provider, under the same checks. A provider may lease
