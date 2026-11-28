@@ -462,3 +462,52 @@ fn values_are_listed_without_being_opened() {
     assert!(a.remove_value("one").unwrap());
     assert!(a.value_info("one").unwrap().is_none());
 }
+
+use crate::directorates::registry::suite::{Store, backend_tests};
+
+backend_tests!(
+    a_scope_key_serves_every_station_and_a_revoke_shuts_one_out,
+    a_rotation_re_encrypts_every_value_of_the_scope,
+);
+
+/// A fleet of `a`, `b` and `c` on `store`'s Registry, each its own handle.
+fn fleet_on(store: &dyn Store) -> (Vault, Vault, Vault) {
+    let make = |name: &str| {
+        let registry: Arc<dyn RegistryBackend> = store.handle();
+        station(&registry, name)
+    };
+    (make("a"), make("b"), make("c"))
+}
+
+fn a_scope_key_serves_every_station_and_a_revoke_shuts_one_out(store: &dyn Store) {
+    let (a, b, c) = fleet_on(store);
+    a.put_scope_key(&op(), &named(&["a", "b"]), NOW).unwrap();
+    a.write_value("forge", &op(), PLANTED, SealedExpect::Absent, NOW)
+        .unwrap();
+    assert_eq!(b.read_value("forge").unwrap().value.as_str(), PLANTED);
+    assert!(matches!(c.read_value("forge"), Err(VaultError::NotNamed)));
+    a.grant_station(&op(), &Recipient::named("c"), NOW).unwrap();
+    assert_eq!(c.read_value("forge").unwrap().value.as_str(), PLANTED);
+    a.revoke_station(&op(), "b", NOW).unwrap();
+    a.write_value("forge", &op(), "later", SealedExpect::Any, NOW)
+        .unwrap();
+    assert_eq!(c.read_value("forge").unwrap().value.as_str(), "later");
+    assert!(matches!(b.read_value("forge"), Err(VaultError::NotNamed)));
+}
+
+fn a_rotation_re_encrypts_every_value_of_the_scope(store: &dyn Store) {
+    let (a, b, _c) = fleet_on(store);
+    a.put_scope_key(&op(), &named(&["a", "b"]), NOW).unwrap();
+    for name in ["one", "two"] {
+        a.write_value(name, &op(), name, SealedExpect::Absent, NOW)
+            .unwrap();
+    }
+    let before = a.scope_key_info(&op()).unwrap().unwrap();
+    let after = a.rotate_scope_key(&op(), NOW).unwrap();
+    assert_ne!(before.key_id, after.key_id);
+    for name in ["one", "two"] {
+        let opened = b.read_value(name).unwrap();
+        assert_eq!(opened.value.as_str(), name);
+        assert_eq!(opened.key_id, after.key_id);
+    }
+}
