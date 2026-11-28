@@ -14,6 +14,7 @@ mod login;
 mod reports;
 mod resources;
 mod reviews;
+mod secrets;
 
 use clap::{Args, Parser, Subcommand};
 use reqwest::{Client, Method, StatusCode, Url};
@@ -203,6 +204,12 @@ enum Command {
     Delete(resources::Delete),
     /// List the kinds of record this gateway manages and the action each needs.
     ApiResources,
+    /// Secret values and the scope keys that encrypt them: put, rotate, grant a Station, revoke
+    /// one. A value comes from standard input and is never printed.
+    Secret {
+        #[command(subcommand)]
+        command: secrets::SecretCommand,
+    },
     /// List the compartments you may read, or show, change, cover or read into one.
     Compartments {
         #[command(subcommand)]
@@ -2210,6 +2217,10 @@ async fn run() -> Result<(), String> {
         Command::ApiResources => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
             resources::api_resources(&resources::Gateway::new(&client, &server, &token)).await?;
+        }
+        Command::Secret { command } => {
+            let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;
+            secrets::run(&client, &server, &token, command).await?;
         }
         Command::Compartments { command } => {
             let token = access_token(std::env::var(ACCESS_TOKEN_ENV).ok())?;

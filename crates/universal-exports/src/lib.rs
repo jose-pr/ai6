@@ -55,6 +55,8 @@ mod search;
 #[cfg(test)]
 mod search_tests;
 mod second_factor;
+#[cfg(feature = "cli")]
+mod secrets;
 mod sign_in;
 mod source_reads;
 mod timeline;
@@ -897,6 +899,20 @@ struct RunRecord {
 struct WriteLease {
     connection_id: String,
     expires: Instant,
+}
+
+/// The routes that write secrets, which need a build with the Station's sealing (`cli`).
+#[cfg(feature = "cli")]
+fn secret_routes() -> Router<Gateway> {
+    Router::new()
+        .route("/v1/user/secrets", get(secrets::list))
+        .route("/v1/user/secrets/requests", post(secrets::request))
+        .route("/v1/user/secrets/requests/{id}", get(secrets::answer))
+}
+
+#[cfg(not(feature = "cli"))]
+fn secret_routes() -> Router<Gateway> {
+    Router::new()
 }
 
 impl Gateway {
@@ -2466,6 +2482,7 @@ impl Gateway {
             .route("/v1/attach", post(exchange_attach_token))
             .route("/v1/socket/{run_id}", get(websocket_attach))
             .merge(liaison::routes())
+            .merge(secret_routes())
             .layer(axum::extract::DefaultBodyLimit::max(max_frame_bytes))
             .merge(base)
             .with_state(self.clone());
