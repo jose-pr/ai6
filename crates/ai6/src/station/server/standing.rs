@@ -927,8 +927,8 @@ mod tests {
             .store(true, std::sync::atomic::Ordering::Release);
     }
 
-    /// A lease that lapsed after its Mission ended here, recovered and claimed again, is the
-    /// same run: its outcome is filed and nothing runs twice.
+    /// A window whose verdict settles it files its brief at once, so the claim is not left to
+    /// lapse and be claimed again: nothing runs twice.
     #[tokio::test]
     async fn the_same_brief_claimed_again_after_a_lapse_is_filed_and_not_run_again() {
         let root = tempfile::tempdir().unwrap();
@@ -946,27 +946,13 @@ mod tests {
         schedule_queued_once(&state).await;
         wait_for_done(&state, &mission).await;
 
-        assert!(
-            state
-                .intake
-                .renew(&mission, "test", std::time::Duration::from_nanos(1))
-                .unwrap()
-        );
-        let lapsed = loop {
-            if let Some(lease) = state.intake.expired().unwrap().into_iter().next() {
-                break lease;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        };
-        assert_eq!(lapsed.number(), 1);
-        state.intake.recover(&lapsed, 5, "other").unwrap().unwrap();
-
-        assert!(schedule_intake_once(&state));
-        assert!(schedule_intake_once(&state));
         assert_eq!(
             state.intake.filed_brief(&mission).unwrap().unwrap().state,
-            "done"
+            "done",
+            "the settled window's claim is filed, not left to lapse"
         );
+        assert!(state.intake.expired().unwrap().is_empty());
+        schedule_intake_once(&state);
         schedule_queued_once(&state).await;
         assert_eq!(runs(&state, &mission).len(), 1, "it ran once");
         state
