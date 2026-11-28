@@ -74,6 +74,12 @@ who has the first but not the other two sees:
 - otherwise its **ID, scope and markings** alone. Reading it is refused (`403`), and a listing
   shows it that way.
 
+**A Run files only what its Operation's charge can read.** When the Operation has a charge, a
+Report an Agent files above that charge Agent's clearance, or in a compartment the charge is not
+read in to, is refused at filing, and the refusal names the highest classification the charge may
+read; the Run files it lower. Without a charge nothing is added: the filer's own clearance is the
+bound, and a person assesses.
+
 **A link is not access.** Whatever links to a Report (a Mission's Reports, another Report)
 shows it to someone not read in by its ID and markings, never its title or text.
 

@@ -1261,3 +1261,124 @@ fn a_search_of_every_kind_lists_the_shipped_guide_first_and_a_deployments_own_be
     let rules = unfenced(&rules, "reports");
     assert_eq!(rules["reports"][0]["kind"], "rule", "{rules}");
 }
+
+/// Operation G's charge is Agent `licensed` (an Operation's charge holds 00), here cleared only to
+/// `restricted`; Agent 007, who files, is cleared to `confidential`.
+fn with_charge(root: &FsPath) {
+    // (the clearances are set by `lowered`, once the Station exists)
+    std::fs::write(
+        root.join("charges.toml"),
+        "[charge.\"operation:G\"]\nagent = \"licensed\"\nwake_every = \"none\"\n",
+    )
+    .unwrap();
+}
+
+fn lowered(state: &DaemonState) {
+    for (subject, classification) in [
+        ("agent:licensed", "restricted"),
+        ("agent:007", "confidential"),
+    ] {
+        state
+            .intake
+            .put_report_clearance(&ReportClearance::new(
+                subject,
+                classification,
+                "person:chief",
+                2.0,
+            ))
+            .unwrap();
+    }
+}
+
+#[test]
+fn a_filing_above_the_charges_clearance_is_refused_naming_the_ceiling() {
+    let root = tempfile::tempdir().unwrap();
+    with_charge(root.path());
+    let state = station(root.path(), ReportLimits::default());
+    lowered(&state);
+    let filer = reader("007", "G", "mission-1");
+    let desk = ReportDesk::new(state.clone());
+    let refused = desk
+        .file(
+            &filer,
+            None,
+            filing(json!({"title": "Too high", "text": "x", "classification": "confidential"})),
+        )
+        .unwrap_err();
+    assert!(
+        refused.contains("confidential is above restricted"),
+        "names both: {refused}"
+    );
+    assert!(
+        state
+            .intake
+            .reports(&ReportFilter::all())
+            .unwrap()
+            .is_empty(),
+        "nothing was stored"
+    );
+    // Operation B has no charge, so it keeps the filer's own clearance as the only bound.
+    let elsewhere = reader("007", "B", "mission-2");
+    filed(
+        &state,
+        &elsewhere,
+        json!({"title": "Fine", "text": "x", "classification": "confidential"}),
+    );
+}
+
+#[test]
+fn a_filing_at_or_below_the_charges_clearance_is_read_and_assessed_by_the_charge() {
+    let root = tempfile::tempdir().unwrap();
+    with_charge(root.path());
+    compartments(
+        root.path(),
+        &[(
+            "KESTREL",
+            &["mission.status"],
+            "",
+            &["agent:007", "agent:licensed"],
+        )],
+    );
+    let state = station(root.path(), ReportLimits::default());
+    lowered(&state);
+    let filer = reader("007", "G", "mission-1");
+    let id = filed(
+        &state,
+        &filer,
+        json!({
+            "title": "At the ceiling", "text": "x", "classification": "restricted",
+            "compartments": ["KESTREL"],
+        }),
+    );
+    // The charge has no Mission: it reads the report whole, and may assess it.
+    let charge = Reader {
+        agent: "licensed".to_owned(),
+        operation: "G".to_owned(),
+        mission: None,
+        exposure: ExposureGate::default(),
+    };
+    assert_eq!(read(&state, &charge, &id)["sight"], "content");
+}
+
+#[test]
+fn a_filing_in_a_compartment_the_charge_is_not_read_in_to_is_refused() {
+    let root = tempfile::tempdir().unwrap();
+    with_charge(root.path());
+    compartments(
+        root.path(),
+        &[("KESTREL", &["mission.status"], "", &["agent:007"])],
+    );
+    let state = station(root.path(), ReportLimits::default());
+    lowered(&state);
+    let refused = ReportDesk::new(state.clone())
+        .file(
+            &reader("007", "G", "mission-1"),
+            None,
+            filing(json!({"title": "Hidden", "text": "x", "compartments": ["KESTREL"]})),
+        )
+        .unwrap_err();
+    assert!(
+        refused.contains("not read in to compartment KESTREL"),
+        "{refused}"
+    );
+}

@@ -418,6 +418,7 @@ impl ReportDesk {
                 .report_settings()
                 .map_err(|_| UNAVAILABLE.to_owned())?,
         )?;
+        self.within_charge_clearance(reader, &report)?;
         state
             .intake
             .file_report(&report)
@@ -436,6 +437,74 @@ impl ReportDesk {
             eprintln!("ai6: a filed report's event was not recorded: {error}");
         }
         Ok(json!({ "filed": true, "id": report.id, "scope": report.scope.to_string() }))
+    }
+
+    /// Refuses `report` when the Operation's charge could not read it: its classification above
+    /// the charge Agent's clearance, or a compartment the charge is not read in to. What an
+    /// Operation's Runs file is then always one its charge can read and assess; with no charge
+    /// for the Operation, the filer's own clearance is the only bound.
+    fn within_charge_clearance(&self, reader: &Reader, report: &Report) -> Result<(), String> {
+        let state = self.state.current();
+        let Some(charge) = state
+            .roster
+            .charges()
+            .get(&format!("operation:{}", reader.operation))
+        else {
+            return Ok(());
+        };
+        let agent = &charge.settings.agent;
+        let settings = state
+            .config
+            .report_settings()
+            .map_err(|_| UNAVAILABLE.to_owned())?;
+        let clearances = state
+            .intake
+            .report_clearances()
+            .map_err(|_| UNAVAILABLE.to_owned())?;
+        let ceiling =
+            ReportRules::new(&settings, &clearances).clearance(&[format!("agent:{agent}")]);
+        let marks = std::iter::once(report.classification.as_deref()).chain(
+            report
+                .tearline
+                .iter()
+                .map(|tearline| tearline.classification.as_deref()),
+        );
+        for classification in marks {
+            if settings
+                .rank(classification)
+                .is_some_and(|rank| rank > ceiling)
+            {
+                let name = classification.unwrap_or_default();
+                let highest = settings
+                    .classifications
+                    .get(ceiling)
+                    .map_or("the lowest", String::as_str);
+                return Err(format!(
+                    "classification {name} is above {highest}, the highest the Operation's charge may read; file it at {highest} or lower"
+                ));
+            }
+        }
+        if !report.compartments.is_empty() {
+            let clearance = agents::effective(&state, Some(reader.operation.as_str()), agent)
+                .map_err(|_| UNAVAILABLE.to_owned())?
+                .clearance;
+            let principal =
+                FieldPrincipal::new(agent.clone(), reader.operation.clone(), None, clearance);
+            let compiled = state
+                .config
+                .compartments()
+                .map_err(|_| UNAVAILABLE.to_owned())?;
+            if let Some(missing) = report
+                .compartments
+                .iter()
+                .find(|compartment| !compiled.field_read_in(compartment, &principal))
+            {
+                return Err(format!(
+                    "the Operation's charge is not read in to compartment {missing}, so it could not assess the report; file it without that compartment"
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// The Reports of `scope` (the Run's Operation when left out) or tied to `mission`, in

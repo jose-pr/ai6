@@ -282,6 +282,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A Report an Agent files above its Operation charge Agent's clearance, or in a compartment that charge is not read in to, is refused at filing, naming the highest classification the charge may read, instead of being stored where no one could assess it.
+
 - A Mission whose Agent declares a loadout that this Station has not loaded waits, naming the Agent and the missing
   part (catalog, loadout, secret or overlay), instead of starting a Run with no credential and no tool environment.
 
