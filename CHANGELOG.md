@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- M signs scope-key records, and secret requests are signed: a Station pins a root (`sealing.trust`, `ai6 secret-trust`), refuses a record that is unsigned, expired, below its newest (term, revision), signed for another revision or signed by a key no root certified, and a revoked or outside Station can no longer forge or roll back a scope key. A request is signed by a certified key (the gateway's, `AI6_EXPORTS_SECRET_REQUESTER`) and a Station checks it before it opens it.
+
 - Secrets are written through the gateway: `ai6ctl secret put|rotate|rotate-key|grant|revoke|remove|list|status` (`POST /v1/user/secrets/requests`, `GET /v1/user/secrets`, `GET /v1/user/secrets/requests/{id}`, `config.manage` or `config.read` on `config:secrets`). The gateway holds no key: it seals each request to the Stations holding the scope's key, and one of them makes the change and answers; a value is read from standard input and appears in no answer, listing or audit record. A secret of the `registry` provider reads from the scope it names (`global` by default, `any` to weaken it), and a Station moves values sealed separately to each Station under the `global` scope key at start.
 
 - A `mission` assessment of a Source item may name the Agent `role` its first run takes (`ai6ctl reports assess --role`, `role` on `PUT /v1/reports/{id}/assessment` and on the charge's `assess_report`), checked against the roster's roles, and an Operation's `intake_role` is the role an intake brief takes when nothing names one: the assessment's role, then the queued brief's, then `intake_role`, then none.

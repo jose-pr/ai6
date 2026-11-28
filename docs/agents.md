@@ -890,9 +890,12 @@ request (`POST /v1/user/secrets/requests`, `config.manage` on `config:secrets`) 
 the Stations holding the scope's key and leaves in the Registry; the first to take it does it with its own key
 and answers (`GET /v1/user/secrets/requests/ID`; `ai6ctl` waits `--wait` seconds, 30 by default).
 `ai6ctl secret list` shows names, scopes, revisions, key IDs and Stations, never a value. When no listed
-Station has published a sealing key the request is refused, naming that. `revoke` says what the Station keeps
-and that its Registry credentials must be revoked too until scope key records are signed. Requests are
-not authenticated beyond the Registry's own access, as the scope key records are not.
+Station has published a sealing key the request is refused, naming that. `revoke` says what the Station keeps.
+A request is signed by a key the root certified for requests (M's, or the gateway's, which reads
+`AI6_EXPORTS_SECRET_REQUESTER`, a file holding its key and `FILE.cert`; `AI6_EXPORTS_SECRET_REQUEST_LIFETIME`
+sets how many seconds a request stays valid, 3600 by default). A Station refuses a request that is unsigned,
+expired, altered after it was signed or signed by another key, and answers why; a gateway without a key leaves
+them unsigned, which only a Station set to accept that acts on.
 
 Every Station writes the Registry, so its records are not themselves authenticated, and a Station keeps
 its own check: `sealing.marks`, beside its sealing key, holds the newest revision it accepted of each
@@ -904,11 +907,25 @@ and checked each time the key is wrapped again: a rotation wraps to the key a St
 only after it verifies, and a wrap whose public key is not the opening Station's own is refused. A
 write that overlaps a rotation is encrypted again under the new key before it returns; a rotation that
 cannot be finished (this Station holds no wrap of the previous key) is an error, and nothing starts over it.
-What this does not stop, until scope key records are signed: a Station that is a Registry writer and
-was dropped from a scope can still forge a record a Station has not yet seen, so revoking a Station
-from a scope also means revoking its Registry credentials. ring keeps its own copy of the scope key
-for the length of one call and offers no way to wipe it. See
+ring keeps its own copy of the scope key for the length of one call and offers no way to wipe it. See
 [Logins kept in the Registry](#logins-kept-in-the-registry) for the Station's sealing key.
+
+**Who may write a scope key record.** M signs each one (and each rotation step) with Ed25519: the signature covers the
+scope, the Headquarters election term, the Registry revision, the key ID and every wrap, and a Station refuses a record
+that is unsigned, expired, below the newest (term, revision) it accepted, signed for another revision, or signed by a key
+no pinned root certified. A person keeps a root key where no Station runs (`ai6 secret-trust keygen`), certifies M's key
+and the gateway's (`ai6 secret-trust certify --subject m --purpose scope-key-records --purpose secret-requests --serial 1
+--days 90`), and pins the root on each Station (`ai6 secret-trust pin --out sealing.trust --root ed25519:HEX`). The trust
+file is the Station's own, never a Registry record, so a Registry writer cannot weaken it; `--unsigned` is the reported
+weakening that accepts everything unsigned and signs nothing, and a Station with no root refuses every record and says so at
+start. M's key is held in a file a vault or HSM agent writes (`signer_file` in the trust file, its certificate in
+`FILE.cert`), or, as the fallback the Station reports at each start, sealed in the Registry to the Headquarters-eligible
+Stations (`ai6 secret-trust seal-key`), any of which can then sign. A Station signs in the term of the live Headquarters
+lease and not at all without one; when Headquarters moves, the new one opens the same key, so the pinned root and the
+certificate stay and only the term rises, and a former Headquarters still signing in its old term is refused. To replace
+M's key, certify the next one at a higher serial and run `ai6 secret-trust resign`: a Station that saw the higher serial
+refuses the old key from then on, even before its certificate expires. A Station that holds no key M signs with leaves a
+request that changes a scope key record for one that does.
 
 Others load from `[station.plugins]` like any provider, under the same checks. A provider may lease
 (a vault whose leases expire): the Station then asks for a lease of the lease's time and revokes it

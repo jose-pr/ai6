@@ -4545,6 +4545,19 @@ impl Vault { pub fn station(&self) -> &str; pub fn registry(&self) -> &dyn Regis
     pub fn add_station(&self, name, station: &Recipient, now) -> Result<u64, VaultError>;  // holder only
     pub fn remove_station(&self, name, station: &str, now) -> Result<u64, VaultError>; }   // holder only; what it opened stays with it
 pub struct RegistrySecrets;   // ::new(Arc<Vault>): SecretProvider `registry`, read answers a revision, store refuses another with GUATIAO_ERR_BUSY
+// Scope-key records and secret requests are signed (sealing::signing). Strict by default: a Vault with no root refuses every record.
+pub struct SigningKey; pub struct PublicKey;   // Ed25519: SigningKey::generate() ::from_text(pkcs8 base64) .to_text() .public_key(); PublicKey::parse("ed25519:HEX") .to_text()
+pub enum Purpose { ScopeKeyRecords, SecretRequests }
+pub struct Certificate { pub subject, pub key, pub purposes, pub serial, pub not_before, pub not_after, pub issuer, pub signature }   // ::issue(root, subject, key, purposes, serial, (from, until)) .to_json() ::from_json(text); a lower serial than one a Station accepted retires the key
+pub struct Trust;   // ::strict(roots) ::unsigned() (the reported weakening) .weakening(); Default is strict with no root
+pub struct TrustFile { pub roots, pub unsigned, pub signer_file }   // sealing.trust (TRUST_FILE) beside sealing.key: ::open(path) .save(path) .trust(); a Registry writer cannot reach it
+pub struct Signer;   // ::new(Arc<SigningKey>, Certificate) .with_term(|| Option<u64>) ::from_file(path) (key, and FILE.cert); no term, nothing signed
+impl Vault { pub fn with_trust(self, Trust) -> Self; pub fn with_signer(self, Signer) -> Self; pub fn with_clock(self, impl Fn() -> f64) -> Self; pub fn can_sign(&self) -> bool;
+    pub fn seal_m_key(&self, &SigningKey, &Certificate, eligible: &[Recipient], now) -> Result<(), VaultError>;   // the registry fallback: sealed to the Headquarters-eligible Stations
+    pub fn open_m_signer(&self, term: impl Fn() -> Option<u64>) -> Result<Option<Signer>, VaultError>;
+    pub fn resign_scope_keys(&self, now) -> Result<usize, VaultError>; }   // after the root certifies M's next key
+// VaultError also: Rollback(label), Rotating(scope), Unsigned(label), Untrusted(label, why), NoSigner, NoTerm
+// sealing::ask(registry, id, &SecretRequest, stations, signer: Option<(&Signer, lifetime_seconds)>, now); DEFAULT_REQUEST_LIFETIME
 // directorates::q::logins (feature `daemon`): harness logins kept sealed. Only files decide: a copy that
 // lost its tokens or ends sooner is never kept, and exit status proves nothing (Grok exits 0 when refused).
 pub fn sealed_name(account: &AccountRef) -> String;   // "login/<pool>/<account>"
