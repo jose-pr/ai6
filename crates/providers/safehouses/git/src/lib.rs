@@ -56,6 +56,11 @@ pub struct GitConfig {
     /// fills. Default 250.
     #[map(default = 250)]
     pub measure_every_ms: u64,
+    /// Refuse to push work that shares no history with the branch it is based on or saved to,
+    /// which is what a Mission started before a history reset would push back. Set `false` to
+    /// push such work anyway. Default true.
+    #[map(default = true)]
+    pub require_shared_root: bool,
 }
 
 impl Default for GitConfig {
@@ -68,6 +73,7 @@ impl Default for GitConfig {
             checkpoint_secs: 300,
             git_timeout_ms: 120_000,
             measure_every_ms: 250,
+            require_shared_root: true,
         }
     }
 }
@@ -109,6 +115,7 @@ impl SafeHouseProvider for Git {
             Runner {
                 timeout: std::time::Duration::from_millis(self.config.git_timeout_ms),
                 measure_every: std::time::Duration::from_millis(self.config.measure_every_ms),
+                require_shared_root: self.config.require_shared_root,
             },
         )
         .map_err(|error| refuse(Status::GUATIAO_ERR_INTERNAL, error))?;

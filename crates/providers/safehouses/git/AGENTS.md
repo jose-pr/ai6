@@ -20,6 +20,7 @@ them in `[providers.git]`.
 | --- | --- | --- |
 | `git_timeout_ms` | 120000 | Milliseconds one Git command may run before it is killed |
 | `measure_every_ms` | 250 | Milliseconds between measurements of a size-bounded command's directories |
+| `require_shared_root` | true | Refuse a push whose work shares no history with its target branch (`merge-base` finds nothing against the remote's `<base>` at open, and against the branch saved to at each save or checkpoint); a branch that is absent, a remote that cannot be reached and a shallow clone are not refusals. `false` pushes such work |
 
 ## Behaviour of `open(SafeHouseSpec)`
 

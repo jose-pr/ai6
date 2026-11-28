@@ -4,8 +4,9 @@ use std::process::Command;
 
 use ai6::directorates::q::safehouse::{
     ChangeLog, CheckpointSpec, SafeHouseCheckpoint, SafeHouseClone, SafeHouseDiff, SafeHouseInfo,
-    SafeHouseProvider, SafeHouseReport, SafeHouseSpec,
+    SafeHouseProvider, SafeHouseReport, SafeHouseRun, SafeHouseSpec,
 };
+use ai6::guatiao::library::{Object, ProviderError};
 use ai6::guatiao::{FromValue, ToValue};
 use ai6_safehouse_git::{Git, GitConfig};
 
@@ -224,4 +225,169 @@ fn a_mission_change_is_read_through_the_kind_uncommitted_and_new_files_included_
     let cut = read(10);
     assert!(cut.cut);
     assert_eq!(cut.text.len(), 10);
+}
+
+/// A bare remote with one commit on `main`, and a clone of it opened through the kind.
+fn cloned_remote(
+    root: &Path,
+    provider: &Git,
+) -> (
+    std::path::PathBuf,
+    std::path::PathBuf,
+    Object<dyn SafeHouseRun>,
+) {
+    let seed = root.join("seed");
+    fs::create_dir_all(&seed).unwrap();
+    git(&seed, &["init", "--quiet", "--initial-branch=main"]);
+    git(&seed, &["config", "user.name", "Test"]);
+    git(&seed, &["config", "user.email", "test@example.invalid"]);
+    fs::write(seed.join("a.txt"), "a\n").unwrap();
+    git(&seed, &["add", "."]);
+    git(&seed, &["commit", "--quiet", "-m", "first"]);
+    let bare = root.join("remote.git");
+    git(
+        root,
+        &[
+            "clone",
+            "--quiet",
+            "--bare",
+            seed.to_str().unwrap(),
+            bare.to_str().unwrap(),
+        ],
+    );
+    let target = root.join("clone");
+    let spec = SafeHouseSpec {
+        base: "main".to_owned(),
+        clone: Some(SafeHouseClone {
+            path: target.to_string_lossy().into_owned(),
+            create_source: false,
+            git_dir: None,
+            depth: None,
+            timeout_secs: None,
+            max_bytes: None,
+        }),
+        ..spec(&bare, &root.join("state"))
+    };
+    let run = provider.open(&spec.to_value().unwrap()).unwrap();
+    (bare, target, run)
+}
+
+/// Rewrites the remote's `main` to a new root, as a history reset does.
+fn reset_history(bare: &Path) {
+    // Git's well-known empty tree.
+    let tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+    let commit = Command::new("git")
+        .arg("-C")
+        .arg(bare)
+        .args([
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit-tree",
+            tree,
+            "-m",
+            "reset",
+        ])
+        .output()
+        .unwrap();
+    assert!(commit.status.success());
+    let commit = String::from_utf8_lossy(&commit.stdout).trim().to_owned();
+    git(bare, &["update-ref", "refs/heads/main", &commit]);
+}
+
+fn save_main(run: &Object<dyn SafeHouseRun>) -> Result<SafeHouseCheckpoint, ProviderError> {
+    run.checkpoint(
+        &CheckpointSpec {
+            remote: "origin".to_owned(),
+            message: "work".to_owned(),
+            author_name: Some("Eve".to_owned()),
+            author_email: Some("eve@example.invalid".to_owned()),
+            branch: Some("main".to_owned()),
+            fallback: None,
+            files: None,
+            exclude: None,
+            max_bytes: None,
+        }
+        .to_value()
+        .unwrap(),
+    )
+    .map(|saved| SafeHouseCheckpoint::from_value(&saved).unwrap())
+}
+
+#[test]
+fn a_branch_made_before_a_history_reset_is_refused_at_push() {
+    let root = tempfile::tempdir().unwrap();
+    let (bare, target, run) = cloned_remote(root.path(), &Git::default());
+    fs::write(target.join("work.txt"), "work\n").unwrap();
+    reset_history(&bare);
+    let Err(error) = save_main(&run) else {
+        panic!("work from before the reset must not be pushed");
+    };
+    let text = error.to_string();
+    assert!(
+        text.contains("shares no history") && text.contains("require_shared_root"),
+        "{text}"
+    );
+    git(&bare, &["rev-parse", "--verify", "refs/heads/main"]);
+    assert!(
+        !Command::new("git")
+            .arg("-C")
+            .arg(&bare)
+            .args(["cat-file", "-e", "main:work.txt"])
+            .status()
+            .unwrap()
+            .success(),
+        "nothing was pushed"
+    );
+
+    // An operator who weakens the check gets the push.
+    let root = tempfile::tempdir().unwrap();
+    let weak = Git::new(GitConfig {
+        require_shared_root: false,
+        ..GitConfig::default()
+    });
+    let (bare, target, run) = cloned_remote(root.path(), &weak);
+    fs::write(target.join("work.txt"), "work\n").unwrap();
+    reset_history(&bare);
+    save_main(&run).expect("require_shared_root = false pushes");
+}
+
+#[test]
+fn a_branch_that_shares_the_current_root_is_pushed() {
+    let root = tempfile::tempdir().unwrap();
+    let (bare, target, run) = cloned_remote(root.path(), &Git::default());
+    fs::write(target.join("work.txt"), "work\n").unwrap();
+    save_main(&run).unwrap();
+    git(&bare, &["cat-file", "-e", "main:work.txt"]);
+}
+
+#[test]
+fn a_worktree_based_on_a_branch_the_origin_has_reset_is_refused() {
+    let root = tempfile::tempdir().unwrap();
+    let (bare, _target, _run) = cloned_remote(root.path(), &Git::default());
+    let source = root.path().join("checkout");
+    git(
+        root.path(),
+        &[
+            "clone",
+            "--quiet",
+            bare.to_str().unwrap(),
+            source.to_str().unwrap(),
+        ],
+    );
+    reset_history(&bare);
+    let spec = SafeHouseSpec {
+        base: "main".to_owned(),
+        ..spec(&source, &root.path().join("worktree-state"))
+    };
+    let Err(error) = Git::default().open(&spec.to_value().unwrap()) else {
+        panic!("a start from the old root must be refused");
+    };
+    assert!(error.to_string().contains("shares no history"), "{error}");
+    let weak = Git::new(GitConfig {
+        require_shared_root: false,
+        ..GitConfig::default()
+    });
+    assert!(weak.open(&spec.to_value().unwrap()).is_ok());
 }

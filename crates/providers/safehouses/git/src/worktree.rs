@@ -24,6 +24,8 @@ pub(crate) struct Runner {
     pub(crate) timeout: Duration,
     /// How often a command's watched directories are measured.
     pub(crate) measure_every: Duration,
+    /// Whether work that shares no history with its target branch is refused at its push.
+    pub(crate) require_shared_root: bool,
 }
 
 impl Default for Runner {
@@ -31,6 +33,7 @@ impl Default for Runner {
         Self {
             timeout: Duration::from_secs(120),
             measure_every: Duration::from_millis(250),
+            require_shared_root: true,
         }
     }
 }
@@ -59,6 +62,8 @@ pub(crate) struct Worktree {
     pub(crate) branch: Option<String>,
     /// The commit the work started from; empty for a clone of an empty repository.
     pub(crate) base: String,
+    /// The branch the work is based on, when it is one: what a push is checked against.
+    pub(crate) target: Option<String>,
     pub(crate) isolated: bool,
     pub(crate) cloned: bool,
     /// A clone's git directory: every command names it and the working tree outright.
@@ -107,6 +112,15 @@ impl Worktree {
             }
         };
         git(run, &repository, &["check-ref-format", "--branch", &branch])?;
+        let base_branch = target_branch(run, &repository, &spec.base);
+        if spec.checkpoint.is_none()
+            && run.require_shared_root
+            && let Some(target) = &base_branch
+            && git(run, &repository, &["remote", "get-url", "origin"]).is_ok()
+        {
+            let exec = |args: &[&str]| git(run, &repository, args);
+            shares_root_with(&exec, "origin", target, &commit, &branch)?;
+        }
 
         let path = root
             .join("safe-houses")
@@ -115,7 +129,8 @@ impl Worktree {
         // Forget worktrees whose directory is gone, so their branches can be used again.
         git(run, &repository, &["worktree", "prune"])?;
         if path.exists() {
-            if let Some(house) = Self::adopt(run, &repository, &path, &commit)? {
+            if let Some(house) = Self::adopt(run, &repository, &path, &commit, base_branch.clone())?
+            {
                 return Ok(house);
             }
             if !was_worktree_of(run, &repository, &path)? {
@@ -152,6 +167,7 @@ impl Worktree {
             path,
             branch: Some(branch),
             base,
+            target: base_branch,
             isolated: true,
             cloned: false,
             git_dir: None,
@@ -166,6 +182,7 @@ impl Worktree {
         repository: &Path,
         path: &Path,
         commit: &str,
+        target: Option<String>,
     ) -> Result<Option<Self>, Failure> {
         let path = git_path(path.canonicalize().map_err(|error| fail(path, error))?);
         if !registered(run, repository, &path)? {
@@ -182,6 +199,7 @@ impl Worktree {
             path,
             branch: Some(branch.trim().to_owned()),
             base,
+            target,
             isolated: true,
             cloned: false,
             git_dir: None,
@@ -238,6 +256,12 @@ impl Worktree {
             .trim()
             .to_owned()
         };
+        if self.run.require_shared_root
+            && let Some(target) = &self.target
+        {
+            let exec = |args: &[&str]| git(&self.run, &self.path, args);
+            shares_root_with(&exec, &spec.remote, target, &commit, branch)?;
+        }
         // Each checkpoint replaces the last on the branch; it holds everything the last did.
         git(
             &self.run,
@@ -299,6 +323,7 @@ impl Worktree {
         }
         verify_base(run, &path, base)?;
         Ok(Self {
+            target: target_branch(run, &repository, &spec.base),
             repository,
             path,
             branch: Some(branch.clone()),
@@ -328,6 +353,7 @@ impl Worktree {
                 .to_owned(),
         };
         Ok(Self {
+            target: target_branch(run, &path, &spec.base),
             repository: path.clone(),
             path,
             branch: None,
@@ -632,6 +658,77 @@ fn registered(run: &Runner, repository: &Path, path: &Path) -> Result<bool, Fail
 }
 
 /// Whether the local branch `branch` exists in `repository`.
+/// The branch `base` names in `repository`: the branch itself, or the one `HEAD` is on.
+fn target_branch(run: &Runner, repository: &Path, base: &str) -> Option<String> {
+    if branch_exists(run, repository, base) {
+        return Some(base.to_owned());
+    }
+    if base == "HEAD" {
+        let head = git(run, repository, &["symbolic-ref", "--short", "HEAD"]).ok()?;
+        return Some(head.trim().to_owned());
+    }
+    None
+}
+
+/// Refuses `tip` when it shares no commit with `target`: the work descends from a root the
+/// branch no longer has, as after a history reset. The error is empty for that case, so the
+/// caller words it; any other failure is Git's own.
+fn shares_root(
+    exec: &dyn Fn(&[&str]) -> Result<String, Failure>,
+    tip: &str,
+    target: &str,
+) -> Result<(), Failure> {
+    let resolves = |revision: &str| {
+        exec(&[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{revision}^{{commit}}"),
+        ])
+        .is_ok()
+    };
+    match exec(&["merge-base", tip, target]) {
+        Ok(base) if !base.trim().is_empty() => Ok(()),
+        // Exit 1 with no output is "no common ancestor".
+        Err(error) if !(resolves(tip) && resolves(target)) => Err(error),
+        _ => Err(String::new()),
+    }
+}
+
+/// Fetches `branch` of `remote` and runs [`shares_root`] of `tip` against it. A branch the
+/// remote does not have, a remote that cannot be reached and a shallow history, which cannot
+/// show a common root, are not refusals. `label` names the work in the refusal.
+pub(crate) fn shares_root_with(
+    exec: &dyn Fn(&[&str]) -> Result<String, Failure>,
+    remote: &str,
+    branch: &str,
+    tip: &str,
+    label: &str,
+) -> Result<(), Failure> {
+    let head = format!("refs/heads/{branch}");
+    if exec(&["fetch", "--quiet", "--no-tags", remote, &head]).is_err() {
+        return Ok(());
+    }
+    let Ok(target) = exec(&["rev-parse", "--verify", "FETCH_HEAD^{commit}"]) else {
+        return Ok(());
+    };
+    let shallow =
+        exec(&["rev-parse", "--is-shallow-repository"]).is_ok_and(|out| out.trim() == "true");
+    if shallow {
+        return Ok(());
+    }
+    shares_root(exec, tip, target.trim()).map_err(|error| {
+        if !error.is_empty() {
+            return error;
+        }
+        format!(
+            "{label} shares no history with {remote}/{branch}: its base predates the current \
+             root; start the Mission again from the current {branch} (or set \
+             `require_shared_root = false` to push it anyway)"
+        )
+    })
+}
+
 fn branch_exists(run: &Runner, repository: &Path, branch: &str) -> bool {
     git(
         run,

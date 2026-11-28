@@ -26,7 +26,9 @@ use ai6::directorates::q::safehouse::{
     SafeHouseSpec,
 };
 
-use crate::worktree::{Failure, Limits, Runner, Worktree, fail, git, git_limited, git_path};
+use crate::worktree::{
+    Failure, Limits, Runner, Worktree, fail, git, git_limited, git_path, shares_root_with,
+};
 
 /// The settings every command of a clone runs with. `core.hooksPath` names a directory that
 /// is never made, so no hook runs; `core.symlinks=false` checks a link out as a plain file
@@ -493,6 +495,7 @@ impl Worktree {
             path,
             branch: Some(spec.base.clone()),
             base: String::new(),
+            target: Some(spec.base.clone()),
             isolated: true,
             cloned: true,
             git_dir: Some(git_dir),
@@ -615,6 +618,10 @@ impl Worktree {
         let tracking = format!("refs/remotes/{}/{branch}", spec.remote);
         if repo.resolve(&tracking).is_ok_and(|pushed| pushed == head) {
             return saved(branch);
+        }
+        if self.run.require_shared_root {
+            let exec = |args: &[&str]| repo.run(args, &env);
+            shares_root_with(&exec, &spec.remote, branch, &head, branch)?;
         }
         let target = format!("HEAD:refs/heads/{branch}");
         let Err(refused) = run(&["push", "--quiet", &spec.remote, &target]) else {
