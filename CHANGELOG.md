@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The exposure preset `strict-except-secrets` applies every restriction but `secrets`: an Operation whose exposed Runs still need tracker writes through leased secrets names it, with no hand-built `restrict` list. `strict` stays the default.
+
 - `ai6ctl issue-proposals show ID --operation G` prints one issue proposal whole (each spec's tracker, title, labels and body, the exposure, findings and outcome) from the new `GET /v1/user/operations/{operation_id}/issue-proposals/{id}` (`mission.read`; another Operation's proposal answers 404), so an approver reads what they approve.
 
 - A handler compacts and clears a live session: `AgentHandler::session_commands` (a new method of the handler kind: every handler plugin is rebuilt, its floor hash moved) says which, and a

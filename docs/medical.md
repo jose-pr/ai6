@@ -89,7 +89,7 @@ Operation's policy:
 
 ```toml
 [operation.G.exposure]
-preset = "strict"                      # default; "observe" only marks
+preset = "strict"                      # default; "observe" only marks; "strict-except-secrets" leaves leases alone
 restrict = ["proposals", "cables"]     # choose restrictions one by one (optional)
 tools = ["WebFetch", "WebSearch", "Browse"]
 ```
@@ -102,7 +102,9 @@ tools = ["WebFetch", "WebSearch", "Browse"]
 | `secrets` | It is given no new secret leases, except the credential its harness reaches its model with: its pool account, or a loadout secret in a provider credential variable. Without that one it could not run. A loadout's [`env`](agents.md#values-that-are-no-secret) is no secret and stays |
 | `issues` | It posts directly only on the issue whose text exposed it (the source) and the children it created; any other post waits for a person's green ink (`issue-comment`) |
 
-`strict` applies all five; `restrict` replaces that set. The Station enforces `proposals`,
+`strict` applies all five; `strict-except-secrets` applies all but `secrets`, for an Operation whose
+exposed Runs must keep drawing leases (tracker writes from Runs that read untrusted text); `restrict` replaces
+the preset's set. The Station enforces `proposals`,
 `cables` and `approvals` (a [green ink](missions.md#green-ink) request from an exposed
 Run waits for a person even when a class authorisation would cover it) itself;
 `secrets` is carried by `ExposureGate::restricts` for the part of AI6 that issues leases to

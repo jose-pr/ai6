@@ -146,7 +146,7 @@ operation_cost_usd_per_day = 40.0
 # preset = "strict" sets conservative limits for every key you leave out
 
 [operation.G.exposure]
-preset = "strict"   # or "observe": record exposure, restrict nothing
+preset = "strict"   # or "observe" (record exposure, restrict nothing) or "strict-except-secrets"
 tools = ["WebFetch", "WebSearch"]
 
 [operation.G.quarantine]

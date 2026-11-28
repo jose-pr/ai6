@@ -153,6 +153,10 @@ pub enum ExposurePreset {
     /// Exposure is recorded and nothing is restricted.
     #[schema(label = "Observe: only record it")]
     Observe,
+    /// Every restriction applies but `secrets`, for Operations whose exposed Runs need leases.
+    #[map(rename = "strict-except-secrets")]
+    #[schema(label = "Strict except secrets: every restriction but the secrets one")]
+    StrictExceptSecrets,
 }
 
 /// An Operation's response to exposure.
@@ -175,6 +179,10 @@ impl ExposurePolicy {
             restrictions: match preset {
                 ExposurePreset::Strict => Restriction::ALL.into_iter().collect(),
                 ExposurePreset::Observe => BTreeSet::new(),
+                ExposurePreset::StrictExceptSecrets => Restriction::ALL
+                    .into_iter()
+                    .filter(|restriction| *restriction != Restriction::Secrets)
+                    .collect(),
             },
             tools: DEFAULT_EXPOSING_TOOLS.map(str::to_owned).to_vec(),
         }
@@ -396,5 +404,34 @@ mod tests {
                 .and_then(|definition| definition.resolve());
             assert!(read.is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn strict_except_secrets_restricts_everything_but_secrets_and_restrict_replaces_it() {
+        let definition: ExposureDefinition = crate::directorates::m::records::from_toml(
+            "preset = \"strict-except-secrets\"
+",
+        )
+        .unwrap();
+        let policy = definition.resolve().unwrap();
+        for restriction in [
+            Restriction::Proposals,
+            Restriction::Approvals,
+            Restriction::Cables,
+            Restriction::Issues,
+        ] {
+            assert!(policy.restricts(restriction), "{restriction:?}");
+        }
+        assert!(!policy.restricts(Restriction::Secrets));
+        assert!(policy.exposed_by_tool("WebSearch"));
+        let replaced: ExposureDefinition = crate::directorates::m::records::from_toml(
+            "preset = \"strict-except-secrets\"
+restrict = [\"secrets\"]
+",
+        )
+        .unwrap();
+        let policy = replaced.resolve().unwrap();
+        assert!(policy.restricts(Restriction::Secrets) && !policy.restricts(Restriction::Cables));
+        assert!(ExposurePolicy::default().restricts(Restriction::Secrets));
     }
 }
