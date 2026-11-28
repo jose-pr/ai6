@@ -953,6 +953,38 @@ pub(crate) fn forget_run(site: &Site, mission: &str) -> Result<(), String> {
     site.remove(&site.path(&format!("runs/{}", run_key(mission))))
 }
 
+/// What a value of the Run's environment writes to name the directory an overlay is issued in.
+const OVERLAY_REFERENCE: &str = "${overlay.";
+
+/// Replaces each `${overlay.<name>}` in the Run's environment with the directory `<name>` is
+/// issued in on the Run's site, so a loadout names a tool of an overlay without a staged path.
+/// Only an overlay this Run is issued can be named: another, or one that is no overlay, refuses
+/// the Run, naming the variable and the overlay.
+fn expand_overlay_references(
+    environment: &mut BTreeMap<String, String>,
+    roots: &BTreeMap<String, String>,
+) -> Result<(), String> {
+    for (variable, value) in environment.iter_mut() {
+        while let Some(start) = value.find(OVERLAY_REFERENCE) {
+            let named = start + OVERLAY_REFERENCE.len();
+            let end = value[named..]
+                .find('}')
+                .map(|offset| named + offset)
+                .ok_or_else(|| {
+                    format!("environment variable {variable}: `${{overlay.` is not closed by `}}`")
+                })?;
+            let name = &value[named..end];
+            let root = roots.get(&normalize_name(name)).ok_or_else(|| {
+                format!(
+                    "environment variable {variable} names overlay {name:?}, which this Run is                      not issued: list it in the loadout's or the Operation's overlays"
+                )
+            })?;
+            value.replace_range(start..=end, root);
+        }
+    }
+    Ok(())
+}
+
 /// Sets `name` in `environment` back to what `run` holds, or takes it out.
 fn restore(environment: &mut BTreeMap<String, String>, run: &BTreeMap<String, String>, name: &str) {
     let found = environment
@@ -1016,7 +1048,7 @@ impl Prepared {
     pub(crate) fn deliver(
         &self,
         fit: &Fit,
-        run: RunFacts<'_>,
+        mut run: RunFacts<'_>,
         keeper: &Keeper,
     ) -> Result<Delivered, String> {
         let site = &fit.site;
@@ -1035,6 +1067,7 @@ impl Prepared {
             check_outside(&root, run.working_directory)?;
             roots.insert(ready.issued.identity.clone(), root);
         }
+        expand_overlay_references(&mut run.environment, &roots)?;
         let mut weakenings = Vec::new();
         if !site.protection_holds() {
             weakenings.extend(self.overlays.iter().map(|ready| Reported {

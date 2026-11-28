@@ -1168,3 +1168,98 @@ fn an_overlay_with_a_hook_refuses_the_run_naming_it() {
         "{refusal}"
     );
 }
+
+#[test]
+fn a_loadout_value_names_the_directory_an_issued_overlay_is_in() {
+    let case = Case::new();
+    let source = tempfile::tempdir().unwrap();
+    let dir = overlay_dir(
+        source.path(),
+        "team-tools",
+        &[("bin/helper", "#!/bin/sh\necho helper\n")],
+    );
+    let list = records([record("team-tools", &dir)]);
+    let prepared = case.prepare(&["team-tools"], &[], &list).unwrap().unwrap();
+    let delivered = case
+        .deliver(
+            &prepared,
+            &[
+                ("HELPER", "${overlay.Team_Tools}/bin/helper"),
+                ("BOTH", "${overlay.team-tools}:${overlay.team-tools}/lib"),
+                ("PLAIN", "$HOME and ${NOT_AN_OVERLAY}"),
+            ],
+            true,
+            "claude",
+        )
+        .unwrap();
+    let root = delivered.environment["TEAM_TOOLS_OVERLAY_ROOT"].clone();
+    assert_eq!(
+        delivered.environment["HELPER"],
+        format!("{root}/bin/helper")
+    );
+    assert_eq!(delivered.environment["BOTH"], format!("{root}:{root}/lib"));
+    assert_eq!(
+        delivered.environment["PLAIN"],
+        "$HOME and ${NOT_AN_OVERLAY}"
+    );
+    assert!(Path::new(&root).join("bin/helper").is_file());
+}
+
+#[test]
+fn naming_an_overlay_the_run_is_not_issued_refuses_the_run_naming_it() {
+    let case = Case::new();
+    let source = tempfile::tempdir().unwrap();
+    let dir = overlay_dir(source.path(), "team-tools", &[("kb/a.md", "a\n")]);
+    let list = records([record("team-tools", &dir)]);
+    let prepared = case.prepare(&["team-tools"], &[], &list).unwrap().unwrap();
+    let refusal = case
+        .deliver(
+            &prepared,
+            &[("HELPER", "${overlay.other-tools}/bin/helper")],
+            true,
+            "claude",
+        )
+        .err()
+        .unwrap();
+    assert!(
+        refusal.contains("HELPER") && refusal.contains("other-tools"),
+        "{refusal}"
+    );
+    let open = case
+        .deliver(
+            &prepared,
+            &[("HELPER", "${overlay.team-tools")],
+            true,
+            "claude",
+        )
+        .err()
+        .unwrap();
+    assert!(
+        open.contains("HELPER") && open.contains("not closed"),
+        "{open}"
+    );
+}
+
+#[test]
+fn the_store_lives_in_the_state_directory_and_outlasts_a_reinstall_of_the_program() {
+    let case = Case::new();
+    let install = case.state.path().join("install");
+    fs::create_dir_all(&install).unwrap();
+    fs::write(install.join("ai6"), "program").unwrap();
+    let source = tempfile::tempdir().unwrap();
+    let dir = overlay_dir(source.path(), "tools", &[("bin/helper", "#!/bin/sh\n")]);
+    let list = records([record("tools", &dir)]);
+    case.prepare(&["tools"], &[], &list).unwrap().unwrap();
+    let tree = case
+        .state
+        .path()
+        .join("overlays/trees")
+        .join(hex_of(&pin_of(&dir)));
+    assert!(tree.join("bin/helper").is_file());
+    // A release install replaces the install directory and nothing else.
+    fs::remove_dir_all(&install).unwrap();
+    fs::create_dir_all(&install).unwrap();
+    fs::remove_dir_all(&dir).unwrap();
+    assert!(tree.join("bin/helper").is_file());
+    assert!(case.prepare(&["tools"], &[], &list).unwrap().is_some());
+}
