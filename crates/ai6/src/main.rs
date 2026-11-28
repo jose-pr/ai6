@@ -67,6 +67,14 @@ enum Command {
         #[command(subcommand)]
         command: PoolsCommand,
     },
+    /// Who may write the Registry's scope-key records and secret requests: the root a person
+    /// trusts, M's key and the certificates between them.
+    SecretTrust {
+        #[command(flatten)]
+        bootstrap: BootstrapArg,
+        #[command(subcommand)]
+        command: SecretTrustCommand,
+    },
     /// The bootstrap file this command reads.
     Config {
         #[command(subcommand)]
@@ -116,6 +124,71 @@ struct BootstrapArg {
     /// then the system's configuration directory; with none, every setting at its default).
     #[arg(long, value_name = "PATH", global = true)]
     config: Option<PathBuf>,
+}
+
+#[derive(Debug, Subcommand)]
+enum SecretTrustCommand {
+    /// Make an Ed25519 key in a new file and print its public key and nothing of the key. A root
+    /// belongs on a host nobody serves from; M's key and a gateway's are made the same way.
+    Keygen {
+        /// The file to write, which must not exist.
+        #[arg(long, value_name = "PATH")]
+        out: PathBuf,
+    },
+    /// Print a certificate for a key, signed by the root key in a file: what it may sign, from
+    /// when, until when, and a serial that goes up each time the subject's key is replaced.
+    Certify {
+        /// The root's key file.
+        #[arg(long, value_name = "PATH")]
+        root: PathBuf,
+        /// Whose key it is: `m`, `gateway`.
+        #[arg(long)]
+        subject: String,
+        /// The certified public key, `ed25519:HEX`.
+        #[arg(long, value_name = "KEY")]
+        key: String,
+        /// `scope-key-records` (M) and/or `secret-requests` (M, the gateway).
+        #[arg(long = "purpose", required = true)]
+        purposes: Vec<String>,
+        /// Raised each time the subject's key is replaced.
+        #[arg(long)]
+        serial: u64,
+        /// Valid from now for this many days.
+        #[arg(long)]
+        days: f64,
+    },
+    /// Write this Station's trust file: the roots it pins, or that it accepts records unsigned.
+    Pin {
+        /// The file to write (`sealing.trust` in the Station's sealing directory).
+        #[arg(long, value_name = "PATH")]
+        out: PathBuf,
+        /// A root's public key, `ed25519:HEX`; repeat for several.
+        #[arg(long = "root", value_name = "KEY")]
+        roots: Vec<String>,
+        /// Accept scope-key records and secret requests unsigned, and sign none (a weakening
+        /// the Station reports at each start).
+        #[arg(long, conflicts_with = "roots")]
+        unsigned: bool,
+        /// A file holding M's key, with its certificate in FILE.cert, which a vault or HSM agent
+        /// writes, instead of the key sealed in the Registry.
+        #[arg(long, value_name = "PATH")]
+        signer_file: Option<String>,
+    },
+    /// Seal M's key to the Headquarters-eligible Stations in the Registry, with its certificate.
+    /// Any of them can sign, which is the weakening a vault or HSM does not have.
+    SealKey {
+        #[arg(long, value_name = "PATH")]
+        key: PathBuf,
+        /// The certificate JSON `certify` printed, in a file.
+        #[arg(long, value_name = "PATH")]
+        certificate: PathBuf,
+        /// A Headquarters-eligible Station; repeat for each.
+        #[arg(long = "station", required = true)]
+        stations: Vec<String>,
+    },
+    /// Sign every scope key record again with M's key in the Registry, after the root certified
+    /// its next key.
+    Resign,
 }
 
 #[derive(Debug, Subcommand)]
@@ -620,6 +693,18 @@ async fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Command::SecretTrust { bootstrap, command } => {
+            match secret_trust_command(&bootstrap, command) {
+                Ok(output) => {
+                    print!("{output}");
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("ai6: secret-trust failed: {error}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Command::Pools { bootstrap, command } => match pools_command(&bootstrap, command) {
             Ok(output) => {
                 print!("{output}");
@@ -1809,6 +1894,132 @@ fn sleeper_command(bootstrap: &BootstrapArg, command: SleeperCommand) -> Result<
             } else {
                 format!("Sleeper {name} of Operation {operation} was not authorized\n")
             })
+        }
+    }
+}
+
+/// Runs `ai6 secret-trust`. A private key is written to its file and never printed.
+fn secret_trust_command(
+    bootstrap: &BootstrapArg,
+    command: SecretTrustCommand,
+) -> Result<String, String> {
+    use ai6::directorates::q::sealing::{
+        Certificate, Purpose, Recipient, SigningKey, TRUST_FILE, TrustFile,
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |elapsed| elapsed.as_secs_f64());
+    let read_key = |path: &Path| -> Result<SigningKey, String> {
+        let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        SigningKey::from_text(&text)
+            .ok_or_else(|| format!("{} holds no signing key", path.display()))
+    };
+    match command {
+        SecretTrustCommand::Keygen { out } => {
+            let key = SigningKey::generate();
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&out)
+                .map_err(|e| format!("{}: {e}", out.display()))?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                std::fs::set_permissions(&out, std::fs::Permissions::from_mode(0o600))
+                    .map_err(|e| e.to_string())?;
+            }
+            std::io::Write::write_all(&mut file, key.to_text().as_bytes())
+                .map_err(|e| format!("{}: {e}", out.display()))?;
+            Ok(format!("{}\n", key.public_key().to_text()))
+        }
+        SecretTrustCommand::Certify {
+            root,
+            subject,
+            key,
+            purposes,
+            serial,
+            days,
+        } => {
+            let root = read_key(&root)?;
+            let key = ai6::directorates::q::sealing::PublicKey::parse(&key)
+                .ok_or("the key is no ed25519:HEX key")?;
+            let purposes = purposes
+                .iter()
+                .map(|text| match text.as_str() {
+                    "scope-key-records" => Ok(Purpose::ScopeKeyRecords),
+                    "secret-requests" => Ok(Purpose::SecretRequests),
+                    other => Err(format!("{other:?} is no purpose")),
+                })
+                .collect::<Result<_, _>>()?;
+            if !(days.is_finite() && days > 0.0) {
+                return Err("--days must be above zero".to_owned());
+            }
+            let certificate = Certificate::issue(
+                &root,
+                &subject,
+                &key,
+                purposes,
+                serial,
+                (now, now + days * 86_400.0),
+            );
+            Ok(format!("{}\n", certificate.to_json()))
+        }
+        SecretTrustCommand::Pin {
+            out,
+            roots,
+            unsigned,
+            signer_file,
+        } => {
+            let file = TrustFile {
+                roots,
+                unsigned,
+                signer_file,
+            };
+            file.trust().map_err(|e| e.to_string())?;
+            file.save(&out)
+                .map_err(|e| format!("{}: {e}", out.display()))?;
+            Ok(format!(
+                "Wrote {} (the Station reads it at start)\n",
+                out.display()
+            ))
+        }
+        SecretTrustCommand::SealKey {
+            key,
+            certificate,
+            stations,
+        } => {
+            let located = load_bootstrap(bootstrap)?;
+            let opened = open_station(&located)?;
+            let station = station_of(&located, &opened);
+            let key = read_key(&key)?;
+            let certificate = std::fs::read_to_string(&certificate)
+                .map_err(|e| format!("{}: {e}", certificate.display()))?;
+            let certificate = Certificate::from_json(&certificate)
+                .ok_or("the certificate file holds no certificate")?;
+            if certificate.key != key.public_key().to_text() {
+                return Err("the certificate is for another key".to_owned());
+            }
+            let vault = ai6::open_sealing_vault(&opened.identity_dir, &opened.registry, &station)
+                .map_err(|error| format!("this host's sealing key: {error}"))?;
+            let eligible: Vec<Recipient> = stations.iter().map(Recipient::named).collect();
+            vault
+                .seal_m_key(&key, &certificate, &eligible, now)
+                .map_err(|e| e.to_string())?;
+            Ok(format!("M's key is sealed to {}\n", stations.join(", ")))
+        }
+        SecretTrustCommand::Resign => {
+            let located = load_bootstrap(bootstrap)?;
+            let opened = open_station(&located)?;
+            let station = station_of(&located, &opened);
+            let vault = ai6::open_sealing_vault(&opened.identity_dir, &opened.registry, &station)
+                .map_err(|error| format!("this host's sealing key: {error}"))?;
+            if !vault.can_sign() {
+                return Err(format!(
+                    "this host holds no key M signs with (see {TRUST_FILE})"
+                ));
+            }
+            let done = vault.resign_scope_keys(now).map_err(|e| e.to_string())?;
+            Ok(format!("Signed {done} scope key record(s) again\n"))
         }
     }
 }

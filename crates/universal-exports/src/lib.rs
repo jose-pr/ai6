@@ -790,6 +790,10 @@ pub struct Gateway {
     input_tx: mpsc::Sender<AgentInput>,
     input_rx: std::sync::Arc<Mutex<mpsc::Receiver<AgentInput>>>,
     registry: Option<Arc<dyn RegistryBackend>>,
+    #[cfg(feature = "cli")]
+    /// The key that signs the secret requests this gateway leaves for the Stations, and how long
+    /// each stays valid in seconds.
+    secret_requester: Option<(ai6::directorates::q::sealing::Signer, f64)>,
     access: Option<AccessProviders>,
     roster: Option<Arc<dyn ConfigProvider>>,
     access_admin: Option<Arc<access_admin::LiveAccess>>,
@@ -957,6 +961,8 @@ impl Gateway {
             input_tx,
             input_rx: std::sync::Arc::new(Mutex::new(input_rx)),
             registry: None,
+            #[cfg(feature = "cli")]
+            secret_requester: None,
             access: None,
             roster: None,
             access_admin: None,
@@ -995,6 +1001,19 @@ impl Gateway {
             digest,
             stand_ins: self.stand_ins.clone(),
         }
+    }
+
+    #[cfg(feature = "cli")]
+    /// Signs the secret requests this gateway leaves with `signer`, each valid for `lifetime`
+    /// seconds. Without one they are unsigned, and only a Station told to accept that acts on them.
+    #[must_use]
+    pub fn with_secret_requester(
+        mut self,
+        signer: ai6::directorates::q::sealing::Signer,
+        lifetime: f64,
+    ) -> Self {
+        self.secret_requester = Some((signer, lifetime));
+        self
     }
 
     /// Creates a gateway backed by the shared Registry for user access tokens.

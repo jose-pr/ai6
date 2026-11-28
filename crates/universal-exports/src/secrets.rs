@@ -200,10 +200,20 @@ pub(crate) async fn request(
     let id = uuid::Uuid::new_v4().simple().to_string();
     let now = unix_timestamp()?;
     let sent = id.clone();
+    let requester = gateway.secret_requester.clone();
     let planned = tokio::task::spawn_blocking(move || {
         let (recipients, target) = plan(registry.as_ref(), &request)?;
-        sealing::ask(registry.as_ref(), &sent, &request, &recipients, now)
-            .map_err(|error| format!("no Station could be asked: {error}"))?;
+        sealing::ask(
+            registry.as_ref(),
+            &sent,
+            &request,
+            &recipients,
+            requester
+                .as_ref()
+                .map(|(signer, lifetime)| (signer, *lifetime)),
+            now,
+        )
+        .map_err(|error| format!("no Station could be asked: {error}"))?;
         Ok::<_, String>(target)
     })
     .await
@@ -299,7 +309,7 @@ mod tests {
         registry
             .publish_sealing_key(&StationSealingKey::new(name, key.public_key().to_text()))
             .unwrap();
-        Vault::new(registry, name, key)
+        Vault::new(registry, name, key).with_trust(ai6::directorates::q::sealing::Trust::unsigned())
     }
 
     async fn call(
@@ -421,7 +431,8 @@ mod tests {
         let done = answer(&served, &id).await;
         assert_eq!(done["outcome"]["stations"], json!(["a"]));
         let notes = done["outcome"]["notes"].to_string();
-        assert!(notes.contains("Registry credentials"), "{notes}");
+        assert!(notes.contains("keeps every value"), "{notes}");
+        assert!(!notes.contains("Registry credentials"), "{notes}");
         let id = ask(
             &served,
             json!({"verb": "put", "name": "forge", "value": "two"}),

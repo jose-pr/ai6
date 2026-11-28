@@ -290,6 +290,25 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
         None => Gateway::with_registry(config, registry),
     };
+    if let Some(path) = std::env::var_os("AI6_EXPORTS_SECRET_REQUESTER") {
+        let signer = ai6::directorates::q::sealing::Signer::from_file(std::path::Path::new(&path))
+            .map_err(|error| format!("AI6_EXPORTS_SECRET_REQUESTER: {error}"))?;
+        let lifetime = match std::env::var("AI6_EXPORTS_SECRET_REQUEST_LIFETIME") {
+            Ok(text) => text
+                .parse::<f64>()
+                .ok()
+                .filter(|seconds| *seconds > 0.0)
+                .ok_or(
+                    "AI6_EXPORTS_SECRET_REQUEST_LIFETIME is not a number of seconds above zero",
+                )?,
+            Err(_) => ai6::directorates::q::sealing::DEFAULT_REQUEST_LIFETIME,
+        };
+        gateway = gateway.with_secret_requester(signer, lifetime);
+    } else {
+        eprintln!(
+            "universal-exports: secret requests are left unsigned: set AI6_EXPORTS_SECRET_REQUESTER \n             to a certified key, or a Station that pins a root refuses them"
+        );
+    }
     gateway = gateway
         .with_roster(provider.clone())
         .with_degraded(degradations(&settings, &snapshot))
