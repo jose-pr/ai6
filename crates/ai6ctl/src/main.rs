@@ -1165,6 +1165,15 @@ struct ControlStatus {
     status: String,
     state: Option<String>,
     reason: Option<String>,
+    /// When the control expires unacted, as Unix seconds.
+    #[serde(default)]
+    expires_at: f64,
+    /// When the Station asked to act last checked in, as Unix seconds.
+    #[serde(default)]
+    station_seen: Option<f64>,
+    /// How many controls wait ahead of this one for its Station.
+    #[serde(default)]
+    queued_ahead: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -4597,6 +4606,25 @@ fn print_control(status: &ControlStatus) {
             .as_deref()
             .map_or_else(|| "-".to_owned(), plain),
     );
+    if matches!(status.status.as_str(), "queued" | "delivered") {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0.0, |elapsed| elapsed.as_secs_f64());
+        println!("{}", waiting_line(status, now));
+    }
+}
+
+/// What an operator needs to tell a control that waits from one that is lost.
+fn waiting_line(status: &ControlStatus, now: f64) -> String {
+    let seen = status.station_seen.map_or_else(
+        || "Station never seen".to_owned(),
+        |seen| format!("Station last seen {:.0} s ago", (now - seen).max(0.0)),
+    );
+    format!(
+        "waiting: {} ahead, {seen}, expires in {:.0} s",
+        status.queued_ahead,
+        (status.expires_at - now).max(0.0)
+    )
 }
 
 /// Fails the command when the Station rejected the control or no Station took it in time.

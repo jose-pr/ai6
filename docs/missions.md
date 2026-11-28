@@ -260,8 +260,10 @@ holds the Run's lease with its fencing token and, when the request named a
 control and reports `applied` or `rejected` with the Mission's state and a reason. A cancel of a
 Mission no book holds, whose brief has ended, is `applied` with the brief's state; with no Station to
 ask, Universal Exports answers that itself. Follow
-the control with `GET .../actions/{control_id}`; one no Station acts on within two minutes
-is `expired`. Repeating a request with the same `idempotency_key` returns the first one.
+the control with `GET .../actions/{control_id}`: it reports `expires_at` (when it expires unacted,
+`[controls] ttl` after it was asked), `queued_ahead` (controls queued before it for the same Station) and
+`station_seen` (that Station's last check-in), so a queued control is told from a lost one. One no Station acts on
+within `ttl` is `expired`. The queue is kept in the Registry, so a gateway that restarts takes it up where it stood. Repeating a request with the same `idempotency_key` returns the first one.
 
 `ai6ctl mission cancel|retry|resume`, `ai6ctl exec` and `ai6ctl run interrupt` do the same and wait for
 the outcome; Outer Office offers them in each Mission card's menu, with the reason any action

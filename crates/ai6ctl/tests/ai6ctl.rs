@@ -430,6 +430,35 @@ async fn fake_station(server: String, stop: tokio::sync::watch::Receiver<bool>) 
 }
 
 #[tokio::test]
+async fn a_queued_control_prints_its_waiting_line() {
+    let (server, shutdown, access_token, _registry_dir) = start_gateway().await;
+    // No Station polls, so the control stays queued.
+    let cancel = ai6ctl(
+        server,
+        Some(access_token),
+        &["mission", "cancel", "mission-007", "--wait", "0"],
+    )
+    .await;
+    assert!(
+        cancel.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cancel.stderr)
+    );
+    let cancel = String::from_utf8(cancel.stdout).unwrap();
+    assert!(
+        cancel.contains("	cancel	mission-007	station-01	queued	-	-"),
+        "{cancel}"
+    );
+    let waiting = cancel.lines().nth(2).unwrap();
+    assert!(
+        waiting.starts_with("waiting: 0 ahead, Station last seen ")
+            && waiting.contains(" s ago, expires in "),
+        "{waiting}"
+    );
+    let _ = shutdown.send(());
+}
+
+#[tokio::test]
 async fn mission_and_run_controls_reach_the_station_and_report_its_outcome() {
     let (server, shutdown, access_token, _registry_dir) = start_gateway().await;
     let (stop, stopped) = tokio::sync::watch::channel(false);
