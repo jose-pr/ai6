@@ -1722,6 +1722,16 @@
           "x-advanced": true,
           "default": "charge"
         },
+        "intake_role": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "title": "Role an intake brief takes when nothing names one",
+          "description": "The Agent role the first run of a Source item takes when nothing else names one: the role its assessment gives comes first, then one the queued brief already has. It must be a role of the roster. Unset, the run takes none.",
+          "x-section": "sources",
+          "x-advanced": true
+        },
         "sleepers": {
           "type": "object",
           "additionalProperties": {

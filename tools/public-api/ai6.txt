@@ -2438,6 +2438,7 @@ pub ai6::directorates::m::roster::Operation::harness: ai6::directorates::m::harn
 pub ai6::directorates::m::roster::Operation::id: alloc::string::String
 pub ai6::directorates::m::roster::Operation::inherit: bool
 pub ai6::directorates::m::roster::Operation::intake: ai6::directorates::m::intake::SourceIntake
+pub ai6::directorates::m::roster::Operation::intake_role: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::roster::Operation::issues: ai6::directorates::m::issues::IssuePolicy
 pub ai6::directorates::m::roster::Operation::limit_fallback_secs: u64
 pub ai6::directorates::m::roster::Operation::lost_after_secs: u64
@@ -5082,12 +5083,14 @@ pub ai6::directorates::registry::assessments::Assessment::judgement: core::optio
 pub ai6::directorates::registry::assessments::Assessment::priority: core::option::Option<&'a str>
 pub ai6::directorates::registry::assessments::Assessment::reason: &'a str
 pub ai6::directorates::registry::assessments::Assessment::report: &'a str
+pub ai6::directorates::registry::assessments::Assessment::role: core::option::Option<&'a str>
 pub ai6::directorates::registry::assessments::Assessment::verdict: ai6::directorates::registry::assessments::Verdict
 impl<'a> ai6::directorates::registry::assessments::Assessment<'a>
 pub fn ai6::directorates::registry::assessments::Assessment<'a>::believed(self, core::option::Option<u8>) -> Self
 pub fn ai6::directorates::registry::assessments::Assessment<'a>::judged(self, core::option::Option<ai6::directorates::registry::assessments::Judgement>) -> Self
 pub fn ai6::directorates::registry::assessments::Assessment<'a>::new(&'a str, ai6::directorates::registry::assessments::Verdict, &'a str, &'a str, f64) -> Self
 pub fn ai6::directorates::registry::assessments::Assessment<'a>::prioritised(self, core::option::Option<&'a str>) -> Self
+pub fn ai6::directorates::registry::assessments::Assessment<'a>::with_role(self, core::option::Option<&'a str>) -> Self
 pub struct ai6::directorates::registry::assessments::Context<'a>
 pub ai6::directorates::registry::assessments::Context::agent: &'a str
 pub ai6::directorates::registry::assessments::Context::reads: &'a dyn core::ops::function::Fn(&ai6::directorates::registry::reports::ReportScope) -> bool
@@ -5123,6 +5126,7 @@ pub const ai6::directorates::registry::assessments::DECISION_KIND: &str
 pub const ai6::directorates::registry::assessments::OUTCOMES: [&str; 9]
 pub const ai6::directorates::registry::assessments::REOPEN_ACTION: &str
 pub fn ai6::directorates::registry::assessments::assess(&dyn ai6::directorates::registry::backend::RegistryBackend, &ai6::directorates::registry::assessments::Assessment<'_>, &ai6::directorates::registry::assessments::Context<'_>) -> core::io::error::Result<ai6::directorates::registry::reports::Report>
+pub fn ai6::directorates::registry::assessments::known_role(&str, &[alloc::string::String]) -> core::result::Result<(), alloc::string::String>
 pub fn ai6::directorates::registry::assessments::mission_settled(&dyn ai6::directorates::registry::backend::RegistryBackend, &str, f64, &ai6::directorates::m::reports::ReportSettings) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::reports::Report>>
 pub fn ai6::directorates::registry::assessments::rate(&dyn ai6::directorates::registry::backend::RegistryBackend, &ai6::directorates::registry::reports::Report, &str, &ai6::directorates::m::reports::ReportSettings, f64) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::assessments::reliability_of(u32, u32, &[u8]) -> ai6::directorates::registry::reports::Reliability
@@ -5906,18 +5910,21 @@ pub fn ai6::directorates::registry::store::FileRegistry::set_sleeper_disabled(&s
 pub fn ai6::directorates::registry::store::FileRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 pub trait ai6::directorates::registry::backend::SourceStore
 pub fn ai6::directorates::registry::backend::SourceStore::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
+pub fn ai6::directorates::registry::backend::SourceStore::ingest_source_item_as(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str, ai6::directorates::registry::sources::IntakeRoles<'_>) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
 pub fn ai6::directorates::registry::backend::SourceStore::mark_source_reported(&self, &ai6::directorates::registry::sources::FinishedSourceBrief, bool) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::backend::SourceStore::set_source_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::backend::SourceStore::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::backend::SourceStore::unreported_source_briefs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sources::FinishedSourceBrief>>
 impl ai6::directorates::registry::sources::SourceStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
+pub fn ai6::directorates::registry::sql::SqlRegistry::ingest_source_item_as(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str, ai6::directorates::registry::sources::IntakeRoles<'_>) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mark_source_reported(&self, &ai6::directorates::registry::sources::FinishedSourceBrief, bool) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::set_source_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::unreported_source_briefs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sources::FinishedSourceBrief>>
 impl ai6::directorates::registry::sources::SourceStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
+pub fn ai6::directorates::registry::store::FileRegistry::ingest_source_item_as(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str, ai6::directorates::registry::sources::IntakeRoles<'_>) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_source_reported(&self, &ai6::directorates::registry::sources::FinishedSourceBrief, bool) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::set_source_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
@@ -7502,6 +7509,7 @@ pub ai6::directorates::registry::reports::ReportAssessment::at: f64
 pub ai6::directorates::registry::reports::ReportAssessment::by: alloc::string::String
 pub ai6::directorates::registry::reports::ReportAssessment::comment: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::reports::ReportAssessment::judgement: core::option::Option<ai6::directorates::registry::assessments::Judgement>
+pub ai6::directorates::registry::reports::ReportAssessment::role: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::reports::ReportAssessment::until: core::option::Option<f64>
 pub ai6::directorates::registry::reports::ReportAssessment::verdict: alloc::string::String
 pub ai6::directorates::registry::reports::ReportAssessment::waits_for: core::option::Option<alloc::string::String>
@@ -8100,6 +8108,11 @@ pub struct ai6::directorates::registry::sources::FinishedSourceBrief
 pub ai6::directorates::registry::sources::FinishedSourceBrief::brief: ai6::directorates::registry::store::Brief
 pub ai6::directorates::registry::sources::FinishedSourceBrief::ok: bool
 pub ai6::directorates::registry::sources::FinishedSourceBrief::outcome: serde_json::value::Value
+#[non_exhaustive] pub struct ai6::directorates::registry::sources::IntakeRoles<'a>
+pub ai6::directorates::registry::sources::IntakeRoles::assessed: core::option::Option<&'a str>
+pub ai6::directorates::registry::sources::IntakeRoles::default: core::option::Option<&'a str>
+impl<'a> ai6::directorates::registry::sources::IntakeRoles<'a>
+pub fn ai6::directorates::registry::sources::IntakeRoles<'a>::new(core::option::Option<&'a str>, core::option::Option<&'a str>) -> Self
 pub struct ai6::directorates::registry::sources::SourceBatch
 pub ai6::directorates::registry::sources::SourceBatch::cursor: core::option::Option<alloc::string::String>
 pub ai6::directorates::registry::sources::SourceBatch::items: alloc::vec::Vec<ai6::directorates::registry::sources::SourceItem>
@@ -8127,18 +8140,21 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::so
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::sources::Source>::poll(&self, ai6::directorates::registry::sources::SourcePoll) -> core::result::Result<ai6::directorates::registry::sources::SourceBatch, guatiao::library::kind::ProviderError>
 pub trait ai6::directorates::registry::sources::SourceStore
 pub fn ai6::directorates::registry::sources::SourceStore::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
+pub fn ai6::directorates::registry::sources::SourceStore::ingest_source_item_as(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str, ai6::directorates::registry::sources::IntakeRoles<'_>) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
 pub fn ai6::directorates::registry::sources::SourceStore::mark_source_reported(&self, &ai6::directorates::registry::sources::FinishedSourceBrief, bool) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sources::SourceStore::set_source_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sources::SourceStore::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::sources::SourceStore::unreported_source_briefs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sources::FinishedSourceBrief>>
 impl ai6::directorates::registry::sources::SourceStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
+pub fn ai6::directorates::registry::sql::SqlRegistry::ingest_source_item_as(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str, ai6::directorates::registry::sources::IntakeRoles<'_>) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mark_source_reported(&self, &ai6::directorates::registry::sources::FinishedSourceBrief, bool) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::set_source_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::unreported_source_briefs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sources::FinishedSourceBrief>>
 impl ai6::directorates::registry::sources::SourceStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
+pub fn ai6::directorates::registry::store::FileRegistry::ingest_source_item_as(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str, ai6::directorates::registry::sources::IntakeRoles<'_>) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_source_reported(&self, &ai6::directorates::registry::sources::FinishedSourceBrief, bool) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::set_source_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
@@ -8348,6 +8364,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::set_sleeper_disabled(&self
 pub fn ai6::directorates::registry::sql::SqlRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sources::SourceStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
+pub fn ai6::directorates::registry::sql::SqlRegistry::ingest_source_item_as(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str, ai6::directorates::registry::sources::IntakeRoles<'_>) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mark_source_reported(&self, &ai6::directorates::registry::sources::FinishedSourceBrief, bool) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::set_source_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
@@ -8676,6 +8693,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::set_sleeper_disabled(&s
 pub fn ai6::directorates::registry::store::FileRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sources::SourceStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
+pub fn ai6::directorates::registry::store::FileRegistry::ingest_source_item_as(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str, ai6::directorates::registry::sources::IntakeRoles<'_>) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_source_reported(&self, &ai6::directorates::registry::sources::FinishedSourceBrief, bool) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::set_source_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
@@ -12907,6 +12925,7 @@ pub fn ai6::directorates::registry::store::FileRegistry::set_sleeper_disabled(&s
 pub fn ai6::directorates::registry::store::FileRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sources::SourceStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
+pub fn ai6::directorates::registry::store::FileRegistry::ingest_source_item_as(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str, ai6::directorates::registry::sources::IntakeRoles<'_>) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_source_reported(&self, &ai6::directorates::registry::sources::FinishedSourceBrief, bool) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::set_source_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
@@ -13094,6 +13113,11 @@ pub ai6::Incident::at: f64
 pub ai6::Incident::kind: ai6::directorates::medical::quarantine::IncidentKind
 pub ai6::Incident::mission: alloc::string::String
 pub ai6::Incident::operation: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct ai6::IntakeRoles<'a>
+pub ai6::IntakeRoles::assessed: core::option::Option<&'a str>
+pub ai6::IntakeRoles::default: core::option::Option<&'a str>
+impl<'a> ai6::directorates::registry::sources::IntakeRoles<'a>
+pub fn ai6::directorates::registry::sources::IntakeRoles<'a>::new(core::option::Option<&'a str>, core::option::Option<&'a str>) -> Self
 #[non_exhaustive] pub struct ai6::InvalidIdentity
 impl core::error::Error for ai6::directorates::m::identity::InvalidIdentity
 impl core::fmt::Display for ai6::directorates::m::identity::InvalidIdentity
@@ -13422,6 +13446,7 @@ pub ai6::Operation::harness: ai6::directorates::m::harness::HarnessPolicy
 pub ai6::Operation::id: alloc::string::String
 pub ai6::Operation::inherit: bool
 pub ai6::Operation::intake: ai6::directorates::m::intake::SourceIntake
+pub ai6::Operation::intake_role: core::option::Option<alloc::string::String>
 pub ai6::Operation::issues: ai6::directorates::m::issues::IssuePolicy
 pub ai6::Operation::limit_fallback_secs: u64
 pub ai6::Operation::lost_after_secs: u64
@@ -14843,6 +14868,7 @@ pub fn ai6::directorates::registry::sql::SqlRegistry::set_sleeper_disabled(&self
 pub fn ai6::directorates::registry::sql::SqlRegistry::sleeper_authorization(&self, &str, &str) -> core::io::error::Result<core::option::Option<ai6::directorates::registry::sleepers::SleeperAuthorization>>
 impl ai6::directorates::registry::sources::SourceStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
+pub fn ai6::directorates::registry::sql::SqlRegistry::ingest_source_item_as(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str, ai6::directorates::registry::sources::IntakeRoles<'_>) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mark_source_reported(&self, &ai6::directorates::registry::sources::FinishedSourceBrief, bool) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::set_source_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
@@ -16420,18 +16446,21 @@ pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::so
 pub fn guatiao::library::kind::proxy::Remote<dyn ai6::directorates::registry::sources::Source>::poll(&self, ai6::directorates::registry::sources::SourcePoll) -> core::result::Result<ai6::directorates::registry::sources::SourceBatch, guatiao::library::kind::ProviderError>
 pub trait ai6::SourceStore
 pub fn ai6::SourceStore::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
+pub fn ai6::SourceStore::ingest_source_item_as(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str, ai6::directorates::registry::sources::IntakeRoles<'_>) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
 pub fn ai6::SourceStore::mark_source_reported(&self, &ai6::directorates::registry::sources::FinishedSourceBrief, bool) -> core::io::error::Result<()>
 pub fn ai6::SourceStore::set_source_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::SourceStore::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::SourceStore::unreported_source_briefs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sources::FinishedSourceBrief>>
 impl ai6::directorates::registry::sources::SourceStore for ai6::directorates::registry::sql::SqlRegistry
 pub fn ai6::directorates::registry::sql::SqlRegistry::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
+pub fn ai6::directorates::registry::sql::SqlRegistry::ingest_source_item_as(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str, ai6::directorates::registry::sources::IntakeRoles<'_>) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
 pub fn ai6::directorates::registry::sql::SqlRegistry::mark_source_reported(&self, &ai6::directorates::registry::sources::FinishedSourceBrief, bool) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::set_source_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::sql::SqlRegistry::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
 pub fn ai6::directorates::registry::sql::SqlRegistry::unreported_source_briefs(&self) -> core::io::error::Result<alloc::vec::Vec<ai6::directorates::registry::sources::FinishedSourceBrief>>
 impl ai6::directorates::registry::sources::SourceStore for ai6::directorates::registry::store::FileRegistry
 pub fn ai6::directorates::registry::store::FileRegistry::ingest_source_item(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
+pub fn ai6::directorates::registry::store::FileRegistry::ingest_source_item_as(&self, &str, &str, &ai6::directorates::registry::sources::SourceItem, &str, ai6::directorates::registry::sources::IntakeRoles<'_>) -> core::io::error::Result<ai6::directorates::registry::sources::Ingest>
 pub fn ai6::directorates::registry::store::FileRegistry::mark_source_reported(&self, &ai6::directorates::registry::sources::FinishedSourceBrief, bool) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::set_source_cursor(&self, &str, &str, &str) -> core::io::error::Result<()>
 pub fn ai6::directorates::registry::store::FileRegistry::source_cursor(&self, &str, &str) -> core::io::error::Result<core::option::Option<alloc::string::String>>
