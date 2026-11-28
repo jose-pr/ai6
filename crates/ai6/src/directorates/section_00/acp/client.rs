@@ -321,6 +321,8 @@ struct State {
     commands: Vec<Advertised>,
     /// Set while the turn in flight is a compaction this side asked for.
     compacting: bool,
+    /// A prompt was sent and no event has ended its turn yet.
+    turn_open: bool,
 }
 
 /// A command the agent advertises, by the name it is typed with.
@@ -335,6 +337,7 @@ impl State {
     fn push(&mut self, seq: Option<u64>, event: AgentEvent) {
         if ends_turn(&event) {
             self.finished = true;
+            self.turn_open = false;
         }
         self.queue.push_back((seq, event));
     }
@@ -372,6 +375,8 @@ pub struct AcpRun {
     events_capability: bool,
     limit_phrases: Vec<String>,
     extensions: Option<Arc<dyn ExtensionHandler>>,
+    /// How long a clear waits for a running turn to end after its cancel.
+    interrupt_wait: Duration,
 }
 
 impl AcpRun {
@@ -406,12 +411,14 @@ impl AcpRun {
             reader: Mutex::new(()),
             state: Mutex::new(State {
                 provider_id: if events_capability { None } else { run.id() },
+                turn_open: has_prompt,
                 ..State::default()
             }),
             run: Arc::new(run),
             events_capability,
             limit_phrases: options.limit_phrases,
             extensions: options.extensions,
+            interrupt_wait: duration_of(options.abort_wait_ms).unwrap_or(Duration::from_secs(5)),
         };
         if events_capability && waits {
             // A façade starts its operation on the first prompt, and a resumed one says it is
@@ -778,10 +785,52 @@ impl AcpRun {
         })
     }
 
+    /// Interrupts a turn still running and waits for it to end: a new session does not cancel the
+    /// old one's turn. What the interrupted turn reports is dropped, since the clear ends it.
+    fn end_turn(&self) -> Result<(), ProviderError> {
+        let open = |run: &Self| run.state.lock().map(|state| state.turn_open).unwrap_or(false);
+        if !open(self) {
+            return Ok(());
+        }
+        let queued = {
+            let mut state = self
+                .state
+                .lock()
+                .map_err(|_| provider_error("ACP state lock was poisoned"))?;
+            state.cancelling = true;
+            state.queue.len()
+        };
+        self.run
+            .cancel()
+            .map_err(|_| provider_error("the ACP connection is closed"))?;
+        let reader = self
+            .reader
+            .lock()
+            .map_err(|_| provider_error("ACP event lock was poisoned"))?;
+        let deadline = Instant::now() + self.interrupt_wait;
+        while open(self) {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err(ProviderError::new(
+                    Status::GUATIAO_ERR_UNSUPPORTED,
+                    "the agent did not end its running turn to clear the session",
+                ));
+            }
+            self.pump(left.min(START_POLL));
+        }
+        drop(reader);
+        if let Ok(mut state) = self.state.lock() {
+            state.queue.truncate(queued);
+            state.cancelling = false;
+        }
+        Ok(())
+    }
+
     /// A clear: a new session on the connection the agent is already running on. It is a turn
     /// of its own, ended at once.
     fn clear(&self) -> Result<(), ProviderError> {
         self.catch_up();
+        self.end_turn()?;
         let id = self.run.new_session().map_err(|error| {
             ProviderError::new(
                 Status::GUATIAO_ERR_UNSUPPORTED,
@@ -833,6 +882,7 @@ impl AgentSession for AcpRun {
         }
         if let Ok(mut state) = self.state.lock() {
             state.finished = false;
+            state.turn_open = true;
             state.cancelling = false;
         }
         self.run

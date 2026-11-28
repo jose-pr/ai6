@@ -1416,7 +1416,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=40196b12573f062cda1d6d3995d6afb905fe7ea9#40196b12573f062cda1d6d3995d6afb905fe7ea9"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=0f6fbf1d430b56c8d007c96a08270d0524c7c7cb#0f6fbf1d430b56c8d007c96a08270d0524c7c7cb"
 dependencies = [
  "agent-client-protocol",
  "futures",
@@ -1426,7 +1426,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp-api"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=40196b12573f062cda1d6d3995d6afb905fe7ea9#40196b12573f062cda1d6d3995d6afb905fe7ea9"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=0f6fbf1d430b56c8d007c96a08270d0524c7c7cb#0f6fbf1d430b56c8d007c96a08270d0524c7c7cb"
 dependencies = [
  "guatiao",
  "guatiao-channel",
@@ -1438,7 +1438,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp-bridge"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=40196b12573f062cda1d6d3995d6afb905fe7ea9#40196b12573f062cda1d6d3995d6afb905fe7ea9"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=0f6fbf1d430b56c8d007c96a08270d0524c7c7cb#0f6fbf1d430b56c8d007c96a08270d0524c7c7cb"
 dependencies = [
  "agentic-peer",
  "cabuya",
@@ -1459,7 +1459,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp-claude"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=40196b12573f062cda1d6d3995d6afb905fe7ea9#40196b12573f062cda1d6d3995d6afb905fe7ea9"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=0f6fbf1d430b56c8d007c96a08270d0524c7c7cb#0f6fbf1d430b56c8d007c96a08270d0524c7c7cb"
 dependencies = [
  "clap",
  "coqui-acp-api",
@@ -1471,7 +1471,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp-codex"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=40196b12573f062cda1d6d3995d6afb905fe7ea9#40196b12573f062cda1d6d3995d6afb905fe7ea9"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=0f6fbf1d430b56c8d007c96a08270d0524c7c7cb#0f6fbf1d430b56c8d007c96a08270d0524c7c7cb"
 dependencies = [
  "clap",
  "coqui-acp-api",
@@ -1482,7 +1482,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp-harness"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=40196b12573f062cda1d6d3995d6afb905fe7ea9#40196b12573f062cda1d6d3995d6afb905fe7ea9"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=0f6fbf1d430b56c8d007c96a08270d0524c7c7cb#0f6fbf1d430b56c8d007c96a08270d0524c7c7cb"
 dependencies = [
  "apple-native-keyring-store",
  "base64 0.22.1",
@@ -1510,7 +1510,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp-history"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=40196b12573f062cda1d6d3995d6afb905fe7ea9#40196b12573f062cda1d6d3995d6afb905fe7ea9"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=0f6fbf1d430b56c8d007c96a08270d0524c7c7cb#0f6fbf1d430b56c8d007c96a08270d0524c7c7cb"
 dependencies = [
  "agent-client-protocol",
  "data-encoding",
@@ -1525,7 +1525,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp-pool"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=40196b12573f062cda1d6d3995d6afb905fe7ea9#40196b12573f062cda1d6d3995d6afb905fe7ea9"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=0f6fbf1d430b56c8d007c96a08270d0524c7c7cb#0f6fbf1d430b56c8d007c96a08270d0524c7c7cb"
 dependencies = [
  "coqui-acp-api",
  "coqui-acp-history",
@@ -1535,7 +1535,7 @@ dependencies = [
 [[package]]
 name = "coqui-acp-provider"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=40196b12573f062cda1d6d3995d6afb905fe7ea9#40196b12573f062cda1d6d3995d6afb905fe7ea9"
+source = "git+https://github.com/Boriken-Dev/coqui-acp?rev=0f6fbf1d430b56c8d007c96a08270d0524c7c7cb#0f6fbf1d430b56c8d007c96a08270d0524c7c7cb"
 dependencies = [
  "agent-client-protocol",
  "coqui-acp-api",
@@ -5588,7 +5588,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",

@@ -596,3 +596,19 @@ fn a_clear_opens_a_new_session_on_the_same_connection() {
     let said = text(&until(&run, &["completed", "failed"]));
     assert!(said.contains("prompt:after"), "{said}");
 }
+
+/// A new session does not end the turn running on the old one, so a clear interrupts it first, and
+/// what the interrupted turn reported is not the clear's.
+#[test]
+fn a_clear_ends_a_turn_still_running() {
+    let run = handler("")
+        .start(
+            start(environment(&[("FAKE_HOLD", "1"), ("FAKE_COMMANDS", "compact")])),
+            terminal(),
+        )
+        .expect("the agent starts");
+    send_command(&run, ai6::SessionCommand::Clear).unwrap();
+    let events = until(&run, &["completed", "failed"]);
+    let kinds: Vec<_> = events.iter().map(|event| event.kind.as_str()).collect();
+    assert_eq!(kinds, ["cleared", "completed"], "{events:?}");
+}
