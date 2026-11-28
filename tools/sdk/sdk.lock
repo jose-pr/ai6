@@ -35,7 +35,7 @@ app flutter-upstream c0205700e04b127bbfecdeb6c83d1e0c9c564ed6 any - -
 app flutter-version 3.51.0-1.0.pre-291 any - -
 app flutter-engine 89573e968cbf3febdf4f07189cc2bef6cbef830b any - -
 app dart 3.15.0-173.0.dev any - -
-app deps c94555d68c8d7c4124ba85a6615b949b33af5888 any - https://github.com/jose-pr/ai6.git
+app deps 67fd4fe2f1d632fa435190f5983383370b87d17b any - https://github.com/jose-pr/ai6.git
 
 # Public API snapshots.
 api rust nightly-2026-09-21 any - -
