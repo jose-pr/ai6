@@ -298,7 +298,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - `ai6ctl held-briefs` says in its help, and a refused list says in its error, that listing needs `mission.create` on the Operation and `mission.read` is not enough.
 
-- A request made with an API key to a route that needs the person's own sign-in (`/v1/user/keys`, Moneypenny) is refused with 403 and the reason, "an API key cannot do this; sign in with a password or a sign-in token", where it was a bare "request is not authorized".
+- A request made with an API key to a route that needs the person's own sign-in (`/v1/user/keys`, Moneypenny) is refused with 403 and the reason, "an API key cannot do this; sign in with a password or a sign-in token", where it was a bare "request is not authorized"; the account, key, sign-in and second-factor routes answer every refusal as `{"error": TEXT}`, so `ai6ctl` shows the reason of a 401, 403 or 404 as it does a 400.
 
 - A Claude Code Run held to reading until its plan passes reads only under its working directory (`Read(/**)`); an
   answer-only Claude Run loads no `CLAUDE.md`, the user's own included, and an answer-only Codex thread reads no

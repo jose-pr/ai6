@@ -56,7 +56,20 @@ impl From<ApiError> for AdminError {
 impl IntoResponse for AdminError {
     fn into_response(self) -> Response {
         let (status, reason) = match self {
-            Self::Api(error) => return error.into_response(),
+            Self::Api(error) => {
+                // The same `{"error": TEXT}` as every other refusal here, so a client reads
+                // the reason of a 401, 403 or 404 as it reads a 400.
+                let retry = error.retry_after_seconds;
+                let mut response =
+                    (error.status, Json(json!({ "error": error.message }))).into_response();
+                if let Some(seconds) = retry {
+                    response.headers_mut().insert(
+                        axum::http::header::RETRY_AFTER,
+                        axum::http::HeaderValue::from(seconds),
+                    );
+                }
+                return response;
+            }
             Self::Refused(reason) => (StatusCode::BAD_REQUEST, reason),
             Self::Conflict(reason) => (StatusCode::CONFLICT, reason),
             Self::Required => (
