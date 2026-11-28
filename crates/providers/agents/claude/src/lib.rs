@@ -1763,10 +1763,11 @@ impl Shared {
         }
         let kind = value.get("type").and_then(Value::as_str);
         // The clear the Station asked for makes a new session: the next id is the Run's.
-        if kind == Some("conversation_reset") && self.clear_asked.swap(false, Ordering::AcqRel) {
-            if let Ok(mut expected) = self.expected_run_id.lock() {
-                *expected = None;
-            }
+        if kind == Some("conversation_reset")
+            && self.clear_asked.swap(false, Ordering::AcqRel)
+            && let Ok(mut expected) = self.expected_run_id.lock()
+        {
+            *expected = None;
         }
         if kind == Some("control_response") {
             control_answered(value);
