@@ -18,6 +18,7 @@ pub ai6_safehouse_git::GitConfig::checkpoint_secs: u64
 pub ai6_safehouse_git::GitConfig::git_timeout_ms: u64
 pub ai6_safehouse_git::GitConfig::isolate: bool
 pub ai6_safehouse_git::GitConfig::measure_every_ms: u64
+pub ai6_safehouse_git::GitConfig::require_shared_root: bool
 impl core::convert::TryFrom<ai6_safehouse_git::GitConfig> for ai6_safehouse_git::Git
 pub type ai6_safehouse_git::Git::Error = guatiao::library::kind::ProviderError
 pub fn ai6_safehouse_git::Git::try_from(ai6_safehouse_git::GitConfig) -> core::result::Result<Self, Self::Error>
