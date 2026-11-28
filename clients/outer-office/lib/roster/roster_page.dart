@@ -11,6 +11,7 @@ import '../routes/oo_filters.dart';
 import '../routes/oo_route.dart';
 import '../shell/oo_link.dart';
 import 'found_libraries.dart';
+import 'secret_values.dart';
 import 'record_editor.dart';
 
 /// The roster revision a Station runs, what it refused and which changed files wait for a
@@ -749,6 +750,10 @@ class _RosterPageState extends State<RosterPage> {
             board: widget.board,
             onApproved: () => unawaited(_load()),
           ),
+        if (_kind == 'secrets' &&
+            !widget.board.demo &&
+            widget.board.canReadRecords('secrets'))
+          SecretValuesPanel(board: widget.board),
         if (_weakened.isNotEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
