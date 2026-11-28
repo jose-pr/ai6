@@ -677,3 +677,11 @@ CREATE TABLE IF NOT EXISTS ai6_factors (
     revision BIGINT NOT NULL,
     PRIMARY KEY (family, doc_key)
 );
+
+CREATE TABLE IF NOT EXISTS ai6_controls (
+    control_id TEXT NOT NULL PRIMARY KEY,
+    station TEXT NOT NULL,
+    status TEXT NOT NULL,
+    record TEXT NOT NULL,
+    revision BIGINT NOT NULL
+);

@@ -8,7 +8,7 @@ use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
 use ai6::directorates::registry::backend::*;
-use ai6::{AuditRecord, StationSettings};
+use ai6::{AuditRecord, ControlRecord, StationSettings};
 use ai6_diptel::{
     ControlAction, ControlId, MissionControl, MissionId, OperationId, RunId, control_frames,
 };
@@ -71,6 +71,13 @@ pub struct ControlStatus {
     pub requested_at: f64,
     /// When the control was applied, rejected or expired, as Unix seconds.
     pub finished_at: Option<f64>,
+    /// When it expires if no Station has acted by then: `requested_at` plus `[controls] ttl`.
+    pub expires_at: f64,
+    /// When the Station asked to act last checked in, as Unix seconds; `None` for a settled
+    /// control or a Station the Registry has no check-in for.
+    pub station_seen: Option<f64>,
+    /// How many controls queued before this one wait for the same Station; 0 once delivered.
+    pub queued_ahead: usize,
 }
 
 impl ControlStatus {
@@ -114,6 +121,8 @@ pub(crate) struct ControlBook {
     order: VecDeque<String>,
     pending: HashMap<String, VecDeque<String>>,
     keys: HashMap<IdempotencyKey, String>,
+    /// Whether the open controls of the Registry have been read into the book.
+    loaded: bool,
 }
 
 impl Default for ControlBook {
@@ -130,15 +139,102 @@ impl ControlBook {
             order: VecDeque::new(),
             pending: HashMap::new(),
             keys: HashMap::new(),
+            loaded: false,
+        }
+    }
+
+    /// The stored form of control `id`.
+    fn record(&self, id: &str) -> Option<ControlRecord> {
+        let entry = self.entries.get(id)?;
+        let status = &entry.status;
+        Some(ControlRecord {
+            control_id: status.control_id.clone(),
+            operation: status.operation_id.clone(),
+            mission: status.mission_id.clone(),
+            run: status.run_id.clone(),
+            asked_run: entry.asked.run.clone(),
+            action: status.action.clone(),
+            agent: entry.asked.agent.clone(),
+            message: entry.asked.message.clone(),
+            station: status.station_id.clone(),
+            status: status.status.clone(),
+            state: status.state.clone(),
+            reason: status.reason.clone(),
+            requested_by: status.requested_by.clone(),
+            requested_at: status.requested_at,
+            finished_at: status.finished_at,
+            idempotency_key: entry.key.key.clone(),
+            actor: entry.key.actor.clone(),
+        })
+    }
+
+    /// Takes up the controls the Registry holds open, as a restarted gateway does; each keeps
+    /// the time it has already waited.
+    fn load(&mut self, records: Vec<ControlRecord>, wall: f64) -> Result<(), String> {
+        for record in records {
+            let entry = entry_of(record, wall, self.limits.ttl.0)?;
+            let id = entry.status.control_id.clone();
+            if self.entries.contains_key(&id) {
+                continue;
+            }
+            self.keys.insert(entry.key.clone(), id.clone());
+            self.order.push_back(id.clone());
+            if entry.status.status == "queued" {
+                self.pending
+                    .entry(entry.status.station_id.clone())
+                    .or_default()
+                    .push_back(id.clone());
+            }
+            self.entries.insert(id, entry);
+        }
+        self.loaded = true;
+        Ok(())
+    }
+
+    /// Takes a control back out, as when it could not be stored.
+    fn remove(&mut self, id: &str) {
+        if let Some(entry) = self.entries.remove(id) {
+            self.keys.remove(&entry.key);
+        }
+        self.order.retain(|known| known != id);
+        for queue in self.pending.values_mut() {
+            queue.retain(|known| known != id);
+        }
+    }
+
+    /// Puts a control that could not be stored as delivered back at the head of its queue.
+    fn undeliver(&mut self, id: &str) {
+        if let Some(entry) = self.entries.get_mut(id) {
+            entry.status.status = "queued".to_owned();
+            let station = entry.status.station_id.clone();
+            self.pending
+                .entry(station)
+                .or_default()
+                .push_front(id.to_owned());
+        }
+    }
+
+    /// Restores what a report that could not be stored had changed.
+    fn restore(&mut self, before: ControlStatus) {
+        let id = before.control_id.clone();
+        let queued = before.status == "queued";
+        let station = before.station_id.clone();
+        if let Some(entry) = self.entries.get_mut(&id) {
+            entry.status = before;
+        }
+        if queued {
+            self.pending.entry(station).or_default().push_front(id);
         }
     }
 
     /// Marks controls no Station finished in time as expired.
-    fn expire(&mut self, now: Instant, wall: f64) {
+    fn expire(&mut self, now: Instant, wall: f64) -> Vec<ControlRecord> {
+        let mut expired = Vec::new();
         for entry in self.entries.values_mut() {
             if entry.status.is_open() && now.duration_since(entry.created) > self.limits.ttl.0 {
                 entry.status.status = "expired".to_owned();
                 entry.status.finished_at = Some(wall);
+                expired.push(entry.status.control_id.clone());
             }
         }
         for queue in self.pending.values_mut() {
@@ -148,6 +244,7 @@ impl ControlBook {
                     .is_some_and(|entry| entry.status.status == "queued")
             });
         }
+        expired.iter().filter_map(|id| self.record(id)).collect()
     }
 
     /// Forgets the oldest finished control; `false` when every control is still open.
@@ -206,7 +303,7 @@ impl ControlBook {
 
     /// Queues again the controls handed to `station` that it never reported on, as when it
     /// restarted after taking them; each goes ahead of the ones still waiting.
-    fn redeliver(&mut self, station: &str) {
+    fn redeliver(&mut self, station: &str) -> Vec<ControlRecord> {
         let mut back: Vec<&String> = self
             .order
             .iter()
@@ -218,15 +315,18 @@ impl ControlBook {
             .collect();
         back.reverse();
         let back: Vec<String> = back.into_iter().cloned().collect();
+        let mut records = Vec::new();
         for id in back {
             if let Some(entry) = self.entries.get_mut(&id) {
                 entry.status.status = "queued".to_owned();
             }
+            records.extend(self.record(&id));
             self.pending
                 .entry(station.to_owned())
                 .or_default()
                 .push_front(id);
         }
+        records
     }
 
     /// Hands the oldest queued control for `station` over and marks it delivered.
@@ -276,8 +376,51 @@ impl Gateway {
         let now = Instant::now();
         let wall = unix_timestamp()?;
         let mut book = self.controls.lock().map_err(|_| ApiError::internal())?;
-        book.expire(now, wall);
+        if !book.loaded
+            && let Some(registry) = &self.registry
+        {
+            let opened = registry
+                .forget_controls(wall - self.config.unex().controls.ttl.0.as_secs_f64())
+                .and_then(|_| registry.all_open_controls())
+                .map_err(|error| error.to_string())
+                .and_then(|records| book.load(records, wall));
+            if let Err(error) = opened {
+                eprintln!("ai6: the queued controls could not be read from the Registry: {error}");
+                return Err(store_unavailable());
+            }
+        }
+        // A control that expired stays open in the Registry if this write fails; it expires again
+        // when the gateway next reads it.
+        for record in book.expire(now, wall) {
+            self.keep_control(&record);
+        }
         Ok(act(&mut book))
+    }
+
+    /// Writes `record` to the Registry, when the gateway has one.
+    fn store_control(&self, record: Option<ControlRecord>) -> Result<(), ApiError> {
+        let (Some(registry), Some(record)) = (&self.registry, record) else {
+            return Ok(());
+        };
+        registry.put_control(&record).map_err(|error| {
+            eprintln!(
+                "ai6: control {} could not be stored in the Registry: {error}",
+                record.control_id
+            );
+            store_unavailable()
+        })
+    }
+
+    /// As `store_control`, for a change the next read repeats if it is lost.
+    fn keep_control(&self, record: &ControlRecord) {
+        if let Some(registry) = &self.registry
+            && let Err(error) = registry.put_control(record)
+        {
+            eprintln!(
+                "ai6: control {} could not be stored in the Registry: {error}",
+                record.control_id
+            );
+        }
     }
 
     /// Waits up to `wait` for a control queued for `station`, and hands it over.
@@ -288,7 +431,9 @@ impl Gateway {
         fresh: bool,
     ) -> Result<Option<MissionControl>, ApiError> {
         if fresh {
-            self.with_controls(|book| book.redeliver(station))?;
+            for record in self.with_controls(|book| book.redeliver(station))? {
+                self.keep_control(&record);
+            }
         }
         let deadline = tokio::time::Instant::now() + wait;
         loop {
@@ -296,6 +441,12 @@ impl Gateway {
             tokio::pin!(notified);
             notified.as_mut().enable();
             if let Some(control) = self.with_controls(|book| book.take(station))? {
+                let id = control.control_id().to_string();
+                let record = self.with_controls(|book| book.record(&id))?;
+                if let Err(error) = self.store_control(record) {
+                    self.with_controls(|book| book.undeliver(&id))?;
+                    return Err(error);
+                }
                 return Ok(Some(control));
             }
             if tokio::time::timeout_at(deadline, notified).await.is_err() {
@@ -351,17 +502,28 @@ fn control_target(
     operation: &str,
     mission_id: &str,
     on_board: bool,
+    action: ControlAction,
 ) -> std::io::Result<Routing> {
     let live = registry
         .stations(registry.limits().stations.gone_dark_after.0)?
         .into_iter()
         .map(|record| record.station().to_owned())
         .collect::<Vec<_>>();
-    let records: Vec<_> = registry
-        .runs()?
-        .into_iter()
-        .filter(|record| record.mission_id == mission_id)
-        .collect();
+    let records: Vec<_> = match registry.runs() {
+        Ok(runs) => runs
+            .into_iter()
+            .filter(|record| record.mission_id == mission_id)
+            .collect(),
+        // A cancel ends work and starts none, so it must not depend on the record that wedged
+        // the Mission; it goes by the brief's claim.
+        Err(error) if action == ControlAction::Cancel => {
+            eprintln!(
+                "ai6: cancel of Mission {mission_id:?}: Run records unreadable ({error}); routed by its claim"
+            );
+            Vec::new()
+        }
+        Err(error) => return Err(error),
+    };
     let leased = registry.leases()?.into_iter().find(|lease| {
         lease
             .meta()
@@ -544,6 +706,9 @@ pub(crate) async fn request_control(
             requested_by: person.id.clone(),
             requested_at: withdrawn.at,
             finished_at: Some(withdrawn.at),
+            expires_at: withdrawn.at,
+            station_seen: None,
+            queued_ahead: 0,
         };
         let entry = Entry {
             status: status.clone(),
@@ -552,7 +717,11 @@ pub(crate) async fn request_control(
             key,
             created: Instant::now(),
         };
+        let id = status_id(&entry);
         gateway.with_controls(|book| book.settled(entry))?;
+        if let Some(record) = gateway.with_controls(|book| book.record(&id))? {
+            gateway.keep_control(&record);
+        }
         return Ok((StatusCode::ACCEPTED, Json(status)));
     }
     let on_board = {
@@ -585,7 +754,13 @@ pub(crate) async fn request_control(
                 Routing::Unknown
             })
         }
-        None => control_target(lookup.as_ref(), &wanted_operation, &wanted, on_board),
+        None => control_target(
+            lookup.as_ref(),
+            &wanted_operation,
+            &wanted,
+            on_board,
+            action,
+        ),
     })
     .await
     .map_err(|_| ApiError::internal())?
@@ -626,6 +801,9 @@ pub(crate) async fn request_control(
                 requested_by: person.id.clone(),
                 requested_at: at,
                 finished_at: Some(at),
+                expires_at: at,
+                station_seen: None,
+                queued_ahead: 0,
             };
             let entry = Entry {
                 status: status.clone(),
@@ -639,7 +817,11 @@ pub(crate) async fn request_control(
                 key,
                 created: Instant::now(),
             };
+            let id = status_id(&entry);
             gateway.with_controls(|book| book.settled(entry))?;
+            if let Some(record) = gateway.with_controls(|book| book.record(&id))? {
+                gateway.keep_control(&record);
+            }
             crate::timeline::record_control(&gateway, &status).await;
             return Ok((StatusCode::ACCEPTED, Json(status)));
         }
@@ -711,6 +893,9 @@ pub(crate) async fn request_control(
         requested_by: person.id,
         requested_at,
         finished_at: None,
+        expires_at: requested_at + gateway.config.unex().controls.ttl.0.as_secs_f64(),
+        station_seen: None,
+        queued_ahead: 0,
     };
     let entry = Entry {
         status,
@@ -719,11 +904,17 @@ pub(crate) async fn request_control(
         key,
         created: Instant::now(),
     };
+    let id = status_id(&entry);
     let status = gateway
         .with_controls(|book| book.insert(entry))?
         .map_err(ApiError::from)?;
+    let record = gateway.with_controls(|book| book.record(&id))?;
+    if let Err(error) = gateway.store_control(record) {
+        gateway.with_controls(|book| book.remove(&id))?;
+        return Err(error);
+    }
     gateway.control_ready.notify_waiters();
-    Ok((StatusCode::ACCEPTED, Json(status)))
+    Ok((StatusCode::ACCEPTED, Json(gateway.describe(status).await?)))
 }
 
 pub(crate) async fn control_status(
@@ -735,7 +926,7 @@ pub(crate) async fn control_status(
     let person = resolve_user(&gateway, bearer(&headers)?).await?;
     let operation = OperationId::new(operation_id).map_err(|_| ApiError::bad_request())?;
     authorize_operation_action(&gateway, person, &operation, "mission.read").await?;
-    gateway
+    let status = gateway
         .with_controls(|book| {
             book.entries
                 .get(&control_id)
@@ -744,8 +935,8 @@ pub(crate) async fn control_status(
         .filter(|status| {
             status.operation_id == operation.as_str() && status.mission_id == mission_id
         })
-        .map(Json)
-        .ok_or_else(ApiError::not_found)
+        .ok_or_else(ApiError::not_found)?;
+    Ok(Json(gateway.describe(status).await?))
 }
 
 #[derive(Deserialize)]
@@ -827,11 +1018,130 @@ pub(crate) async fn report_station_control(
     });
     let wall = unix_timestamp()?;
     let station = report.station.clone();
+    let before = gateway.with_controls(|book| {
+        book.entries
+            .get(&control_id)
+            .map(|entry| entry.status.clone())
+    })?;
     let finished = gateway
         .with_controls(|book| book.finish(&control_id, &station, &report, wall))?
         .map_err(ApiError::from)?;
+    let record = gateway.with_controls(|book| book.record(&control_id))?;
+    if let Err(error) = gateway.store_control(record) {
+        if let Some(before) = before {
+            gateway.with_controls(|book| book.restore(before))?;
+        }
+        return Err(error);
+    }
     crate::timeline::record_control(&gateway, &finished).await;
     Ok(StatusCode::NO_CONTENT)
+}
+
+impl Gateway {
+    /// `status` with what an operator needs to tell a queued control from a lost one: how many
+    /// wait ahead of it and when its Station last checked in.
+    async fn describe(&self, mut status: ControlStatus) -> Result<ControlStatus, ApiError> {
+        if !status.is_open() {
+            return Ok(status);
+        }
+        let (id, station) = (status.control_id.clone(), status.station_id.clone());
+        status.queued_ahead = self.with_controls(|book| {
+            book.pending
+                .get(&station)
+                .and_then(|queue| queue.iter().position(|queued| *queued == id))
+                .unwrap_or(0)
+        })?;
+        if let Some(registry) = self.registry.clone() {
+            let station = status.station_id.clone();
+            status.station_seen = tokio::task::spawn_blocking(move || {
+                registry
+                    .stations(Duration::MAX)
+                    .ok()?
+                    .iter()
+                    .find(|record| record.station() == station)
+                    .map(ai6::StationRecord::seen)
+            })
+            .await
+            .map_err(|_| ApiError::internal())?;
+        }
+        Ok(status)
+    }
+}
+
+fn status_id(entry: &Entry) -> String {
+    entry.status.control_id.clone()
+}
+
+fn store_unavailable() -> ApiError {
+    ApiError {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        message: std::borrow::Cow::Borrowed("the control queue could not be stored"),
+        retry_after_seconds: Some(5),
+    }
+}
+
+/// A control read back from the Registry, with the time it has already waited.
+fn entry_of(record: ControlRecord, wall: f64, ttl: Duration) -> Result<Entry, String> {
+    let action = ControlAction::parse(&record.action)
+        .ok_or_else(|| format!("control {} names an unknown action", record.control_id))?;
+    let bad = |what: &str| format!("control {} has an invalid {what}", record.control_id);
+    let mut control = MissionControl::new(
+        ControlId::new(record.control_id.clone()).map_err(|_| bad("id"))?,
+        OperationId::new(record.operation.clone()).map_err(|_| bad("Operation"))?,
+        MissionId::new(record.mission.clone()).map_err(|_| bad("Mission"))?,
+        action,
+    );
+    if let Some(run) = &record.run {
+        control = control.with_run(RunId::new(run.clone()).map_err(|_| bad("Run"))?);
+    }
+    if let Some(agent) = &record.agent {
+        control = control
+            .with_agent(agent.clone())
+            .map_err(|_| bad("Agent"))?;
+    }
+    if let Some(message) = &record.message {
+        control = control
+            .with_message(message.clone())
+            .map_err(|_| bad("message"))?;
+    }
+    let waited = Duration::try_from_secs_f64((wall - record.requested_at).max(0.0))
+        .unwrap_or(Duration::ZERO);
+    Ok(Entry {
+        asked: Asked {
+            action,
+            agent: record.agent.clone(),
+            message: record.message.clone(),
+            run: record.asked_run.clone(),
+        },
+        key: IdempotencyKey {
+            actor: record.actor,
+            operation: record.operation.clone(),
+            mission: record.mission.clone(),
+            key: record.idempotency_key,
+        },
+        created: Instant::now()
+            .checked_sub(waited)
+            .unwrap_or_else(Instant::now),
+        control,
+        status: ControlStatus {
+            control_id: record.control_id,
+            operation_id: record.operation,
+            mission_id: record.mission,
+            run_id: record.run,
+            action: record.action,
+            agent: record.agent,
+            station_id: record.station,
+            status: record.status,
+            state: record.state,
+            reason: record.reason,
+            requested_by: record.requested_by,
+            requested_at: record.requested_at,
+            finished_at: record.finished_at,
+            expires_at: record.requested_at + ttl.as_secs_f64(),
+            station_seen: None,
+            queued_ahead: 0,
+        },
+    })
 }
 
 fn no_station() -> ApiError {
@@ -1110,10 +1420,14 @@ pub(crate) mod tests {
     }
 
     pub(crate) async fn take(served: &Served, station: &str) -> Option<MissionControl> {
+        take_at(&served.base, station).await
+    }
+
+    /// As [`take`], from the gateway serving at `base`.
+    pub(crate) async fn take_at(base: &str, station: &str) -> Option<MissionControl> {
         let response = reqwest::Client::new()
             .get(format!(
-                "{}/v1/station/controls/next?station={station}&wait_ms=50",
-                served.base
+                "{base}/v1/station/controls/next?station={station}&wait_ms=50"
             ))
             .bearer_auth(STATION_TOKEN)
             .send()
@@ -1145,11 +1459,17 @@ pub(crate) mod tests {
         control_id: &str,
         body: serde_json::Value,
     ) -> StatusCode {
+        report_at(&served.base, control_id, body).await
+    }
+
+    /// As [`report`], to the gateway serving at `base`.
+    pub(crate) async fn report_at(
+        base: &str,
+        control_id: &str,
+        body: serde_json::Value,
+    ) -> StatusCode {
         reqwest::Client::new()
-            .post(format!(
-                "{}/v1/station/controls/{control_id}/result",
-                served.base
-            ))
+            .post(format!("{base}/v1/station/controls/{control_id}/result"))
             .bearer_auth(STATION_TOKEN)
             .json(&body)
             .send()
@@ -1256,6 +1576,139 @@ pub(crate) mod tests {
             && record.actor == "operator-007"
             && record.target == "mission-g"
             && record.operation == "G"));
+    }
+
+    #[tokio::test]
+    async fn queued_controls_survive_a_gateway_restart() {
+        let served = served().await;
+        let asked = ask(
+            &served,
+            &served.operator,
+            "G",
+            "mission-g",
+            serde_json::json!({"action": "cancel", "idempotency_key": "cancel-r"}),
+        )
+        .await;
+        assert_eq!(asked.status(), StatusCode::ACCEPTED);
+        let queued: serde_json::Value = asked.json().await.unwrap();
+        let control_id = queued["control_id"].as_str().unwrap().to_owned();
+        let handed = take(&served, "worker").await.unwrap();
+        assert_eq!(handed.control_id().as_str(), control_id);
+        let waiting = ask(
+            &served,
+            &served.operator,
+            "G",
+            "mission-g",
+            serde_json::json!({"action": "interrupt", "idempotency_key": "interrupt-r"}),
+        )
+        .await;
+        let waiting: serde_json::Value = waiting.json().await.unwrap();
+        let waiting_id = waiting["control_id"].as_str().unwrap().to_owned();
+
+        // The gateway restarts with a control delivered and one still queued.
+        let restarted = restarted(&served).await;
+        let first = take_at(&restarted.base, "worker").await.unwrap();
+        assert_eq!(
+            first.control_id().as_str(),
+            waiting_id,
+            "the queued one is kept"
+        );
+        assert!(take_at(&restarted.base, "worker").await.is_none());
+        // The Station restarts too and asks afresh: what it never reported on comes again.
+        let again = reqwest::Client::new()
+            .get(format!(
+                "{}/v1/station/controls/next?station=worker&wait_ms=50&fresh=true",
+                restarted.base
+            ))
+            .bearer_auth(STATION_TOKEN)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(again.status(), StatusCode::OK);
+        let outcome = serde_json::json!({"station": "worker", "outcome": "applied", "state": "abandoned", "reason": null});
+        assert_eq!(
+            report_at(&restarted.base, &control_id, outcome).await,
+            StatusCode::NO_CONTENT,
+            "a control taken before the restart still reports"
+        );
+        // A repeated request is still the same control.
+        let replay = reqwest::Client::new()
+            .post(format!(
+                "{}/v1/user/operations/G/missions/mission-g/actions",
+                restarted.base
+            ))
+            .bearer_auth(&served.operator)
+            .json(&serde_json::json!({"action": "cancel", "idempotency_key": "cancel-r"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(replay.status(), StatusCode::OK);
+        let replayed: serde_json::Value = replay.json().await.unwrap();
+        assert_eq!(replayed["control_id"], control_id.as_str());
+    }
+
+    #[tokio::test]
+    async fn a_queued_control_reports_when_it_expires_and_how_many_wait_ahead() {
+        let served = served().await;
+        let mut asked = Vec::new();
+        for (action, key) in [("cancel", "first"), ("interrupt", "second")] {
+            let response = ask(
+                &served,
+                &served.operator,
+                "G",
+                "mission-g",
+                serde_json::json!({"action": action, "idempotency_key": key}),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::ACCEPTED);
+            asked.push(response.json::<serde_json::Value>().await.unwrap());
+        }
+        let ttl = ai6::ControlLimits::default().ttl.0.as_secs_f64();
+        assert_eq!(asked[0]["queued_ahead"], 0);
+        assert_eq!(asked[1]["queued_ahead"], 1);
+        for status in &asked {
+            let requested = status["requested_at"].as_f64().unwrap();
+            assert_eq!(status["expires_at"].as_f64().unwrap(), requested + ttl);
+            assert!(
+                status["station_seen"].as_f64().is_some(),
+                "worker checked in"
+            );
+        }
+        // Read again, the second still has one ahead; once the first is taken, none.
+        let second = asked[1]["control_id"].as_str().unwrap();
+        assert_eq!(status(&served, second).await["queued_ahead"], 1);
+        take(&served, "worker").await.unwrap();
+        assert_eq!(status(&served, second).await["queued_ahead"], 0);
+    }
+
+    #[tokio::test]
+    async fn a_cancel_of_a_mission_with_an_unreadable_run_record_is_queued() {
+        let served = served().await;
+        std::fs::write(served.directory.path().join("runs/record-g.json"), "{").unwrap();
+        let retry = ask(
+            &served,
+            &served.operator,
+            "G",
+            "mission-g",
+            serde_json::json!({"action": "retry", "idempotency_key": "retry-u"}),
+        )
+        .await;
+        assert!(
+            retry.status().is_server_error(),
+            "other actions keep refusing: {}",
+            retry.status()
+        );
+        let cancel = ask(
+            &served,
+            &served.operator,
+            "G",
+            "mission-g",
+            serde_json::json!({"action": "cancel", "idempotency_key": "cancel-u"}),
+        )
+        .await;
+        assert_eq!(cancel.status(), StatusCode::ACCEPTED);
+        let queued: serde_json::Value = cancel.json().await.unwrap();
+        assert_eq!(queued["status"], "queued");
     }
 
     #[tokio::test]
@@ -1507,11 +1960,11 @@ pub(crate) mod tests {
         );
         let registry = alone.registry.as_deref().unwrap();
         assert!(matches!(
-            control_target(registry, "G", "mission-g", true).unwrap(),
+            control_target(registry, "G", "mission-g", true, ControlAction::Cancel).unwrap(),
             Routing::NoStation
         ));
         assert!(matches!(
-            control_target(registry, "G", "mission-g", false).unwrap(),
+            control_target(registry, "G", "mission-g", false, ControlAction::Cancel).unwrap(),
             Routing::Unknown
         ));
     }
@@ -1611,6 +2064,9 @@ pub(crate) mod tests {
                 requested_by: "operator-007".to_owned(),
                 requested_at: 1.0,
                 finished_at: None,
+                expires_at: 121.0,
+                station_seen: None,
+                queued_ahead: 0,
             },
             control: MissionControl::new(
                 ControlId::new(format!("control-{id}")).unwrap(),

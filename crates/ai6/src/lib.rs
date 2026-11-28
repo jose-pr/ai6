@@ -213,6 +213,7 @@ pub use directorates::registry::clearance::{ClearanceGrant, GrantReads};
 pub use directorates::registry::contexts::{
     ContextOwner, ContextSource, EVENTS_FORMAT as CONTEXT_EVENTS_FORMAT, RunContext,
 };
+pub use directorates::registry::controls::{ControlRecord, ControlStore};
 pub use directorates::registry::holds::{AUTOMATIC as AUTOMATIC_HOLD, HoldStore, RosterHold};
 pub use directorates::registry::limits::{
     AccountLimits, AgentLimits, AgentRoleLimits, ApiKeyLimits, ApprovalLimits, AssistantLogLimits,

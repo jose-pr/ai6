@@ -28,6 +28,7 @@ mod api_keys;
 mod approvals;
 mod briefs;
 mod charges;
+mod controls;
 pub(crate) mod db;
 mod factors;
 mod holds;

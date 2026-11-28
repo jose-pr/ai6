@@ -19,6 +19,7 @@ pub mod cables;
 pub mod charges;
 pub mod clearance;
 pub mod contexts;
+pub mod controls;
 pub mod decisions;
 pub mod factors;
 pub mod holds;
