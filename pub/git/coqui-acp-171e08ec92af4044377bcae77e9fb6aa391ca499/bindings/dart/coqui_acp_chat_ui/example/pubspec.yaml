@@ -1,0 +1,25 @@
+name: chat_ui_example
+description: "A scripted agent conversation in coqui_acp_chat_ui, built for the web in JavaScript and WebAssembly."
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+  flutter: ">=3.47.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  coqui_acp:
+    path: ../../coqui_acp
+  coqui_acp_chat:
+    path: ../../coqui_acp_chat
+  coqui_acp_chat_ui:
+    path: ..
+  material_ui: ^1.11.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

@@ -22,7 +22,7 @@ package (the DevTools extension's prebuilt web app, wasm included); the rest of 
 hooks compile guatiao's crates from it. The Flutter SDK's own packages (`flutter`,
 `flutter_test`) come with the SDK and are not here.
 
-Built from `main` with guatiao 0350bae7 for the Dart packages, with the Flutter commit `sdk.lock` names (Dart 3.15 dev).
+Built from `main` with guatiao 1cf0f67f for the Dart packages, with the Flutter commit `sdk.lock` names (Dart 3.15 dev).
 
 ## Use it
 
