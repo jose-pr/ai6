@@ -35,6 +35,8 @@ const KEY_PREFIX: &str = "scope-key/";
 const VALUE_PREFIX: &str = "value/";
 /// How many times a re-encryption retries a value another writer replaced meanwhile.
 const REENCRYPT_ATTEMPTS: usize = 8;
+/// The election term a record carries while records are unsigned.
+const UNSIGNED_TERM: u64 = 0;
 
 /// Who a secret's key belongs to.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -176,6 +178,8 @@ impl ScopeKey {
         Self { id, key }
     }
 
+    /// ring keeps its own copy of the key inside the cipher and offers no way to wipe it; the copy
+    /// lives for one call, and this is a known limit of the library.
     fn cipher(&self) -> Result<LessSafeKey, VaultError> {
         UnboundKey::new(&CHACHA20_POLY1305, self.key.as_ref())
             .map(LessSafeKey::new)
@@ -313,6 +317,8 @@ struct StoredKey {
     previous_id: Option<String>,
     current: BTreeMap<String, SealedCopy>,
     previous: BTreeMap<String, SealedCopy>,
+    /// The certificate fingerprint each pinned Station's sealing key must be signed by.
+    pins: BTreeMap<String, String>,
 }
 
 impl StoredKey {
@@ -323,6 +329,7 @@ impl StoredKey {
             previous_id: None,
             current: BTreeMap::new(),
             previous: BTreeMap::new(),
+            pins: BTreeMap::new(),
         };
         for (label, copy) in &record.copies {
             match label.split_at_checked(2) {
@@ -331,6 +338,9 @@ impl StoredKey {
                 }
                 Some(("p:", station)) => {
                     parsed.previous.insert(station.to_owned(), copy.clone());
+                }
+                Some(("f:", station)) => {
+                    parsed.pins.insert(station.to_owned(), copy.key.clone());
                 }
                 Some(("i:", id)) => parsed.id = id.to_owned(),
                 Some(("j:", id)) => parsed.previous_id = Some(id.to_owned()),
@@ -354,6 +364,15 @@ impl StoredKey {
         }
         for (station, copy) in &self.previous {
             copies.insert(format!("p:{station}"), copy.clone());
+        }
+        for (station, fingerprint) in &self.pins {
+            copies.insert(
+                format!("f:{station}"),
+                SealedCopy {
+                    key: fingerprint.clone(),
+                    sealed: String::new(),
+                },
+            );
         }
         copies.insert(format!("i:{}", self.id), marker());
         if let Some(id) = &self.previous_id {
@@ -403,10 +422,21 @@ impl Vault {
             .registry
             .sealed_value(&key_name(scope))?
             .ok_or_else(|| VaultError::NoScopeKey(scope.to_string()))?;
-        StoredKey::parse(&record)
+        let stored = StoredKey::parse(&record)?;
+        self.marks.accept(
+            &key_name(scope),
+            UNSIGNED_TERM,
+            stored.revision,
+            Some(&stored.id),
+        )?;
+        Ok(stored)
     }
 
     fn open_wrap(&self, scope: &Scope, copy: &SealedCopy) -> Result<ScopeKey, VaultError> {
+        // A wrap says whose key it was made for; the record cannot redirect a later rotation.
+        if copy.key != self.key.public_key().to_text() {
+            return Err(VaultError::Unreadable);
+        }
         let sealed = from_base64(&copy.sealed).ok_or(VaultError::Unreadable)?;
         let plain = self.key.open(&sealed).ok_or(VaultError::Unreadable)?;
         ScopeKey::from_wrap(&plain, scope).ok_or(VaultError::Unreadable)
@@ -440,13 +470,20 @@ impl Vault {
     fn store_key(
         &self,
         scope: &Scope,
-        copies: &BTreeMap<String, SealedCopy>,
+        stored: &StoredKey,
         expect: SealedExpect,
         now: f64,
     ) -> Result<u64, VaultError> {
-        Ok(self
-            .registry
-            .store_sealed(&key_name(scope), copies, &self.station, expect, now)?)
+        let revision = self.registry.store_sealed(
+            &key_name(scope),
+            &stored.copies(),
+            &self.station,
+            expect,
+            now,
+        )?;
+        self.marks
+            .accept(&key_name(scope), UNSIGNED_TERM, revision, Some(&stored.id))?;
+        Ok(revision)
     }
 
     /// Makes the scope's key and wraps it for `stations`; the caller need not be one of them.
@@ -466,9 +503,13 @@ impl Vault {
         }
         let key = ScopeKey::generate();
         let mut current = BTreeMap::new();
+        let mut pins = BTreeMap::new();
         for recipient in stations {
             let public = self.published_key(recipient)?.to_text();
             current.insert(recipient.station.clone(), wrap(&public, &key, scope)?);
+            if let Some(fingerprint) = &recipient.fingerprint {
+                pins.insert(recipient.station.clone(), fingerprint.clone());
+            }
         }
         let stored = StoredKey {
             revision: 0,
@@ -476,8 +517,9 @@ impl Vault {
             previous_id: None,
             current,
             previous: BTreeMap::new(),
+            pins,
         };
-        let revision = self.store_key(scope, &stored.copies(), SealedExpect::Absent, now)?;
+        let revision = self.store_key(scope, &stored, SealedExpect::Absent, now)?;
         Ok(StoredKey { revision, ..stored }.info(scope))
     }
 
@@ -514,12 +556,18 @@ impl Vault {
         stored
             .current
             .insert(station.station.clone(), wrap(&public, &key, scope)?);
-        let revision = self.store_key(
-            scope,
-            &stored.copies(),
-            SealedExpect::Revision(stored.revision),
-            now,
-        )?;
+        match &station.fingerprint {
+            Some(fingerprint) => {
+                stored
+                    .pins
+                    .insert(station.station.clone(), fingerprint.clone());
+            }
+            None => {
+                stored.pins.remove(&station.station);
+            }
+        }
+        let revision =
+            self.store_key(scope, &stored, SealedExpect::Revision(stored.revision), now)?;
         stored.revision = revision;
         Ok(stored.info(scope))
     }
@@ -589,42 +637,54 @@ impl Vault {
             previous_id: Some(stored.id.clone()),
             current: BTreeMap::new(),
             previous: BTreeMap::new(),
+            pins: stored
+                .pins
+                .iter()
+                .filter(|(station, _)| remaining.contains_key(*station))
+                .map(|(station, pin)| (station.clone(), pin.clone()))
+                .collect(),
         };
-        // Wrap to the keys the Stations were wrapped to, never to what the Registry says now.
-        for (name, copy) in &remaining {
+        // Wrapped to the key each Station publishes now, checked against its pin as at the grant,
+        // never to the key the record names: a Station that changed its sealing key is wrapped to
+        // the new one only once it verifies, and the record cannot redirect a rotation.
+        for name in remaining.keys() {
+            let mut recipient = Recipient::named(name.clone());
+            if let Some(pin) = stored.pins.get(name) {
+                recipient = recipient.pinned(pin.clone());
+            }
+            let public = self.published_key(&recipient)?.to_text();
             next.current
-                .insert(name.clone(), wrap(&copy.key, &new, scope)?);
+                .insert(name.clone(), wrap(&public, &new, scope)?);
             next.previous
-                .insert(name.clone(), wrap(&copy.key, &old, scope)?);
+                .insert(name.clone(), wrap(&public, &old, scope)?);
         }
-        next.revision = self.store_key(
-            scope,
-            &next.copies(),
-            SealedExpect::Revision(stored.revision),
-            now,
-        )?;
+        next.revision =
+            self.store_key(scope, &next, SealedExpect::Revision(stored.revision), now)?;
         Ok((next, old, new))
     }
 
     /// Finishes a rotation a crash or a conflict left open: encrypts what is still under the
-    /// previous key again and drops the previous wraps. Does nothing when none is open, and
-    /// when this Station holds no previous wrap leaves it to one that does.
+    /// previous key again and drops the previous wraps. Does nothing when none is open.
     ///
     /// # Errors
     ///
-    /// The Registry's, or [`VaultError::Unreadable`].
+    /// [`VaultError::Rotating`] when one is open and this Station cannot finish it (it holds no
+    /// wrap of the previous key), so nothing starts another over it; the Registry's.
     pub fn finish_rotation(&self, scope: &Scope, now: f64) -> Result<(), VaultError> {
         let stored = match self.load_key(scope) {
             Ok(stored) if stored.rotating() => stored,
             Ok(_) | Err(VaultError::NoScopeKey(_)) => return Ok(()),
             Err(error) => return Err(error),
         };
-        let (Ok(old), Ok(new)) = (
-            self.previous_key(scope, &stored),
-            self.current_key(scope, &stored),
-        ) else {
-            return Ok(());
-        };
+        let new = self.current_key(scope, &stored)?;
+        let old = self
+            .previous_key(scope, &stored)
+            .map_err(|error| match error {
+                VaultError::NotNamed | VaultError::Unreadable => {
+                    VaultError::Rotating(scope.to_string())
+                }
+                other => other,
+            })?;
         self.finish_with(scope, stored, &old, &new, now).map(drop)
     }
 
@@ -639,12 +699,8 @@ impl Vault {
         self.reencrypt(scope, old, new, now)?;
         stored.previous.clear();
         stored.previous_id = None;
-        stored.revision = self.store_key(
-            scope,
-            &stored.copies(),
-            SealedExpect::Revision(stored.revision),
-            now,
-        )?;
+        stored.revision =
+            self.store_key(scope, &stored, SealedExpect::Revision(stored.revision), now)?;
         Ok(stored.info(scope))
     }
 
@@ -664,73 +720,52 @@ impl Vault {
                 let Some(record) = self.registry.sealed_value(&stored_name)? else {
                     break;
                 };
+                self.marks
+                    .accept(&stored_name, UNSIGNED_TERM, record.revision, None)?;
+                if is_gone(&record) {
+                    break;
+                }
                 let value = StoredValue::parse(&record)?;
                 if &value.scope != scope || value.key_id != old_id {
                     break;
                 }
                 let plain = decrypt(old, name, &value)?;
-                let revision = record.revision + 1;
-                let sealed = encrypt(new, name, scope, revision, &plain)?;
-                let copies = BTreeMap::from([(
-                    scope.to_string(),
-                    SealedCopy {
-                        key: hex(&new.id),
-                        sealed,
-                    },
-                )]);
-                match self.registry.store_sealed(
-                    &stored_name,
-                    &copies,
-                    &self.station,
+                match self.store_encrypted(
+                    new,
+                    name,
+                    scope,
+                    &plain,
                     SealedExpect::Revision(record.revision),
                     now,
                 ) {
-                    Ok(_) => break,
-                    Err(crate::directorates::registry::sealed::SealedWriteError::Conflict {
-                        ..
-                    }) => {}
-                    Err(error) => return Err(error.into()),
+                    Ok(revision) => {
+                        self.marks
+                            .accept(&stored_name, UNSIGNED_TERM, revision, None)?;
+                        break;
+                    }
+                    Err(VaultError::Conflict { .. }) => {}
+                    Err(error) => return Err(error),
                 }
             }
         }
         Ok(())
     }
 
-    /// Encrypts `value` under the scope's key and writes it as `name`, when the value is at
-    /// `expect`. The caller must hold the scope's key; a value that exists stays in its scope.
-    ///
-    /// # Errors
-    ///
-    /// [`VaultError::NoScopeKey`], [`VaultError::NotNamed`], [`VaultError::WrongScope`] for a
-    /// value in another scope, [`VaultError::Conflict`], or the Registry's.
-    pub fn write_value(
+    /// Encrypts `plain` under `key` as the next revision `expect` allows, and stores it.
+    fn store_encrypted(
         &self,
+        key: &ScopeKey,
         name: &str,
         scope: &Scope,
-        value: &str,
+        plain: &[u8],
         expect: SealedExpect,
         now: f64,
     ) -> Result<u64, VaultError> {
-        let stored = self.load_key(scope)?;
-        let key = self.current_key(scope, &stored)?;
-        let record_name = value_name(name);
-        let held = self.registry.sealed_value(&record_name)?;
-        if let Some(record) = &held
-            && StoredValue::parse(record)?.scope != *scope
-        {
-            return Err(VaultError::WrongScope);
-        }
-        let held = held.map(|record| record.revision);
-        let expect = match (expect, held) {
-            (SealedExpect::Any, Some(held)) => SealedExpect::Revision(held),
-            (SealedExpect::Any, None) => SealedExpect::Absent,
-            (other, _) => other,
-        };
         let revision = match expect {
             SealedExpect::Revision(held) => held + 1,
             _ => 1,
         };
-        let sealed = encrypt(&key, name, scope, revision, value.as_bytes())?;
+        let sealed = encrypt(key, name, scope, revision, plain)?;
         let copies = BTreeMap::from([(
             scope.to_string(),
             SealedCopy {
@@ -740,7 +775,131 @@ impl Vault {
         )]);
         Ok(self
             .registry
-            .store_sealed(&record_name, &copies, &self.station, expect, now)?)
+            .store_sealed(&value_name(name), &copies, &self.station, expect, now)?)
+    }
+
+    /// Leaves a tombstone at the value's name, so its revisions go on from here and an older record
+    /// put back is refused.
+    fn tombstone(&self, name: &str, revision: u64, now: f64) -> Result<(), VaultError> {
+        let label = value_name(name);
+        let next = self.registry.store_sealed(
+            &label,
+            &BTreeMap::new(),
+            &self.station,
+            SealedExpect::Revision(revision),
+            now,
+        )?;
+        self.marks.accept(&label, UNSIGNED_TERM, next, None)
+    }
+
+    /// Encrypts `value` under the scope's key and writes it as `name`, when the value is at
+    /// `expect`. The caller must hold the scope's key; a value that exists stays in its scope.
+    /// When a rotation moves the key while this writes, the value is encrypted again under the
+    /// new key before this returns, never left under a key only a Station that was dropped holds.
+    ///
+    /// # Errors
+    ///
+    /// [`VaultError::NoScopeKey`], [`VaultError::NotNamed`], [`VaultError::WrongScope`] for a
+    /// value in another scope, [`VaultError::Conflict`], [`VaultError::Rollback`],
+    /// [`VaultError::Stale`] when rotations kept moving the key, or the Registry's.
+    pub fn write_value(
+        &self,
+        name: &str,
+        scope: &Scope,
+        value: &str,
+        expect: SealedExpect,
+        now: f64,
+    ) -> Result<u64, VaultError> {
+        self.write_value_between(name, scope, value, expect, now, &|| {})
+    }
+
+    /// [`write_value`](Self::write_value), calling `between` once the key is open and before the
+    /// value is stored: where a rotation by another Station may land.
+    fn write_value_between(
+        &self,
+        name: &str,
+        scope: &Scope,
+        value: &str,
+        expect: SealedExpect,
+        now: f64,
+        between: &dyn Fn(),
+    ) -> Result<u64, VaultError> {
+        let stored = self.load_key(scope)?;
+        let mut key = self.current_key(scope, &stored)?;
+        let label = value_name(name);
+        let held = self.registry.sealed_value(&label)?;
+        let (held_revision, live) = match &held {
+            Some(record) => {
+                self.marks
+                    .accept(&label, UNSIGNED_TERM, record.revision, None)?;
+                let live = !is_gone(record);
+                if live && StoredValue::parse(record)?.scope != *scope {
+                    return Err(VaultError::WrongScope);
+                }
+                (Some(record.revision), live)
+            }
+            None => (None, false),
+        };
+        // A tombstone is the revision to go on from, and no value to conflict with.
+        let from_held = || held_revision.map_or(SealedExpect::Absent, SealedExpect::Revision);
+        let expect = match expect {
+            SealedExpect::Any => from_held(),
+            SealedExpect::Absent if live => {
+                return Err(VaultError::Conflict {
+                    held: held_revision,
+                });
+            }
+            SealedExpect::Absent => from_held(),
+            SealedExpect::Revision(_) if !live => return Err(VaultError::Conflict { held: None }),
+            SealedExpect::Revision(revision) => SealedExpect::Revision(revision),
+        };
+        between();
+        let mut revision =
+            self.store_encrypted(&key, name, scope, value.as_bytes(), expect, now)?;
+        self.marks.accept(&label, UNSIGNED_TERM, revision, None)?;
+        for _ in 0..REENCRYPT_ATTEMPTS {
+            let after = self.load_key(scope)?;
+            if after.id == hex(&key.id) {
+                return Ok(revision);
+            }
+            // A rotation moved the key while this wrote.
+            match self.current_key(scope, &after) {
+                Ok(new) => key = new,
+                Err(VaultError::NotNamed) => {
+                    // This Station was dropped meanwhile: the value must not stay under a key
+                    // only it holds.
+                    drop(self.tombstone(name, revision, now));
+                    return Err(VaultError::NotNamed);
+                }
+                Err(error) => return Err(error),
+            }
+            let Some(record) = self.registry.sealed_value(&label)? else {
+                return Err(VaultError::Conflict { held: None });
+            };
+            if is_gone(&record) {
+                return Err(VaultError::Conflict { held: None });
+            }
+            if StoredValue::parse(&record)?.key_id == after.id {
+                // The rotation's own pass, or a newer write, already did.
+                return Ok(record.revision);
+            }
+            match self.store_encrypted(
+                &key,
+                name,
+                scope,
+                value.as_bytes(),
+                SealedExpect::Revision(record.revision),
+                now,
+            ) {
+                Ok(next) => {
+                    self.marks.accept(&label, UNSIGNED_TERM, next, None)?;
+                    revision = next;
+                }
+                Err(VaultError::Conflict { .. }) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Err(VaultError::Stale)
     }
 
     /// Opens the value `name`: this Station's wrap opens the scope key, and the key opens the
@@ -750,12 +909,19 @@ impl Vault {
     ///
     /// [`VaultError::NotFound`], [`VaultError::NotNamed`] when this Station holds no wrap,
     /// [`VaultError::Stale`] when a rotation has not reached the value yet,
+    /// [`VaultError::Rollback`] for a record older than one accepted,
     /// [`VaultError::Unreadable`] when anything fails to open, the Registry's.
     pub fn read_value(&self, name: &str) -> Result<OpenedValue, VaultError> {
+        let label = value_name(name);
         let record = self
             .registry
-            .sealed_value(&value_name(name))?
+            .sealed_value(&label)?
             .ok_or(VaultError::NotFound)?;
+        self.marks
+            .accept(&label, UNSIGNED_TERM, record.revision, None)?;
+        if is_gone(&record) {
+            return Err(VaultError::NotFound);
+        }
         let stored = StoredValue::parse(&record)?;
         let keys = match self.load_key(&stored.scope) {
             Ok(keys) => keys,
@@ -772,8 +938,13 @@ impl Vault {
             return Err(VaultError::Stale);
         };
         let plain = decrypt(&key, name, &stored)?;
-        let value =
-            Zeroizing::new(String::from_utf8(plain.to_vec()).map_err(|_| VaultError::Unreadable)?);
+        // Borrowed, so a plaintext that is not text is wiped with `plain` and not copied into an
+        // error.
+        let value = Zeroizing::new(
+            std::str::from_utf8(&plain)
+                .map_err(|_| VaultError::Unreadable)?
+                .to_owned(),
+        );
         Ok(OpenedValue {
             value,
             revision: stored.revision,
@@ -790,6 +961,7 @@ impl Vault {
     pub fn value_info(&self, name: &str) -> Result<Option<ValueInfo>, VaultError> {
         self.registry
             .sealed_value(&value_name(name))?
+            .filter(|record| !is_gone(record))
             .map(|record| {
                 let stored = StoredValue::parse(&record)?;
                 Ok(ValueInfo {
@@ -819,14 +991,37 @@ impl Vault {
         Ok(infos)
     }
 
-    /// Removes the value `name`; whether there was one.
+    /// Removes the value `name`, leaving a tombstone so the name's revisions go on from here;
+    /// whether there was a value.
     ///
     /// # Errors
     ///
-    /// The Registry's.
+    /// [`VaultError::Rollback`] for a record older than one accepted; the Registry's.
     pub fn remove_value(&self, name: &str) -> Result<bool, VaultError> {
-        Ok(self.registry.remove_sealed(&value_name(name))?)
+        let label = value_name(name);
+        let Some(record) = self.registry.sealed_value(&label)? else {
+            return Ok(false);
+        };
+        self.marks
+            .accept(&label, UNSIGNED_TERM, record.revision, None)?;
+        if is_gone(&record) {
+            return Ok(false);
+        }
+        self.tombstone(name, record.revision, unix_now())?;
+        Ok(true)
     }
+}
+
+/// Now, as Unix seconds.
+fn unix_now() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |elapsed| elapsed.as_secs_f64())
+}
+
+/// Whether a value's record is the tombstone a removal left.
+fn is_gone(record: &SealedRecord) -> bool {
+    record.copies.is_empty()
 }
 
 #[cfg(test)]

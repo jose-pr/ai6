@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use super::*;
-use crate::directorates::q::sealing::SealingKey;
+use crate::directorates::q::sealing::{MARKS_FILE, Marks, SealingKey};
 use crate::directorates::registry::backend::RegistryBackend;
 use crate::directorates::registry::sealed::StationSealingKey;
 use crate::directorates::registry::store::FileRegistry;
@@ -510,4 +510,336 @@ fn a_rotation_re_encrypts_every_value_of_the_scope(store: &dyn Store) {
         assert_eq!(opened.value.as_str(), name);
         assert_eq!(opened.key_id, after.key_id);
     }
+}
+
+// Regression tests from the security review: each was an attack that worked and now fails.
+
+/// What the review's first probe did: a Station that was revoked puts the key record from before
+/// the revoke back (the Registry gives it a newer revision), hoping the next write is encrypted
+/// under the key it still holds.
+#[test]
+fn a_key_record_put_back_after_a_revoke_is_refused_and_the_next_write_is_not_under_the_old_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let (registry, a, b, _c) = fleet(dir.path());
+    a.write_value("forge", &op(), "before", SealedExpect::Absent, NOW)
+        .unwrap();
+    let before = registry.sealed_value(&key_name(&op())).unwrap().unwrap();
+    let old_key = b
+        .current_key(&op(), &StoredKey::parse(&before).unwrap())
+        .unwrap();
+    a.revoke_station(&op(), "b", NOW).unwrap();
+    registry
+        .store_sealed(
+            &key_name(&op()),
+            &before.copies,
+            "b",
+            SealedExpect::Any,
+            NOW,
+        )
+        .unwrap();
+    let refused = a
+        .write_value("forge", &op(), PLANTED, SealedExpect::Any, NOW)
+        .unwrap_err();
+    assert!(matches!(refused, VaultError::Rollback(_)), "{refused}");
+    let held = registry
+        .sealed_value(&value_name("forge"))
+        .unwrap()
+        .unwrap();
+    let stored = StoredValue::parse(&held).unwrap();
+    assert!(decrypt(&old_key, "forge", &stored).is_err());
+    assert!(matches!(
+        a.read_value("forge"),
+        Err(VaultError::Rollback(_))
+    ));
+}
+
+/// The review's fifth probe: a value removed from the Registry and put back as it was restarts
+/// its revisions at 1; a Station that accepted a later one refuses it.
+#[test]
+fn a_value_removed_and_put_back_is_refused_by_a_station_that_saw_a_later_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let (registry, a, b, _c) = fleet(dir.path());
+    a.write_value("token", &op(), "old-leaked", SealedExpect::Absent, NOW)
+        .unwrap();
+    let v1 = registry
+        .sealed_value(&value_name("token"))
+        .unwrap()
+        .unwrap();
+    a.write_value("token", &op(), "new", SealedExpect::Revision(1), NOW)
+        .unwrap();
+    assert_eq!(b.read_value("token").unwrap().value.as_str(), "new");
+    registry.remove_sealed(&value_name("token")).unwrap();
+    registry
+        .store_sealed(
+            &value_name("token"),
+            &v1.copies,
+            "c",
+            SealedExpect::Absent,
+            NOW,
+        )
+        .unwrap();
+    assert!(matches!(
+        b.read_value("token"),
+        Err(VaultError::Rollback(_))
+    ));
+}
+
+#[test]
+fn a_removed_value_leaves_a_tombstone_and_its_revisions_go_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let (registry, a, b, _c) = fleet(dir.path());
+    a.write_value("token", &op(), "one", SealedExpect::Absent, NOW)
+        .unwrap();
+    assert!(a.remove_value("token").unwrap());
+    assert!(!a.remove_value("token").unwrap(), "already gone");
+    assert!(matches!(b.read_value("token"), Err(VaultError::NotFound)));
+    assert!(a.value_info("token").unwrap().is_none());
+    assert!(a.value_infos().unwrap().is_empty());
+    assert!(
+        registry
+            .sealed_value(&value_name("token"))
+            .unwrap()
+            .is_some()
+    );
+    // A name that was removed takes a new value as a new revision, never revision 1 again.
+    assert!(matches!(
+        a.write_value("token", &op(), "x", SealedExpect::Revision(1), NOW),
+        Err(VaultError::Conflict { .. })
+    ));
+    let revision = a
+        .write_value("token", &op(), "two", SealedExpect::Absent, NOW)
+        .unwrap();
+    assert_eq!(revision, 3);
+    assert_eq!(b.read_value("token").unwrap().value.as_str(), "two");
+    assert!(matches!(
+        a.write_value("token", &op(), "three", SealedExpect::Absent, NOW),
+        Err(VaultError::Conflict { held: Some(3) })
+    ));
+}
+
+/// The review's fourth probe: a write that opened the key before a revoke and stored after it.
+#[test]
+fn a_write_racing_a_revoke_is_encrypted_again_under_the_new_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let (registry, a, b, _c) = fleet(dir.path());
+    let old = a.current_key(&op(), &a.load_key(&op()).unwrap()).unwrap();
+    a.write_value_between("late", &op(), PLANTED, SealedExpect::Absent, NOW, &|| {
+        a.revoke_station(&op(), "b", NOW).unwrap();
+    })
+    .unwrap();
+    let info = a.scope_key_info(&op()).unwrap().unwrap();
+    let opened = a.read_value("late").unwrap();
+    assert_eq!(opened.value.as_str(), PLANTED);
+    assert_eq!(opened.key_id, info.key_id);
+    let held = registry.sealed_value(&value_name("late")).unwrap().unwrap();
+    assert!(decrypt(&old, "late", &StoredValue::parse(&held).unwrap()).is_err());
+    assert!(matches!(b.read_value("late"), Err(VaultError::NotNamed)));
+}
+
+#[test]
+fn a_writer_dropped_while_it_wrote_leaves_no_value_under_a_key_only_it_holds() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_registry, a, b, _c) = fleet(dir.path());
+    let refused = b
+        .write_value_between("late", &op(), PLANTED, SealedExpect::Absent, NOW, &|| {
+            a.revoke_station(&op(), "b", NOW).unwrap();
+        })
+        .unwrap_err();
+    assert!(matches!(refused, VaultError::NotNamed), "{refused}");
+    assert!(matches!(a.read_value("late"), Err(VaultError::NotFound)));
+}
+
+/// The review's third probe: only the unauthenticated `key` field of a wrap is changed, to
+/// another Station's key; the next rotation used to wrap to it.
+#[test]
+fn a_wrap_whose_public_key_was_changed_is_refused_and_does_not_redirect_a_rotation() {
+    let dir = tempfile::tempdir().unwrap();
+    let (registry, a, b, c) = fleet(dir.path());
+    a.write_value("forge", &op(), PLANTED, SealedExpect::Absent, NOW)
+        .unwrap();
+    let mut record = registry.sealed_value(&key_name(&op())).unwrap().unwrap();
+    record.copies.get_mut("w:b").unwrap().key = c.key.public_key().to_text();
+    registry
+        .store_sealed(
+            &key_name(&op()),
+            &record.copies,
+            "c",
+            SealedExpect::Any,
+            NOW,
+        )
+        .unwrap();
+    assert!(matches!(b.read_value("forge"), Err(VaultError::Unreadable)));
+    a.rotate_scope_key(&op(), NOW).unwrap();
+    let keys =
+        StoredKey::parse(&registry.sealed_value(&key_name(&op())).unwrap().unwrap()).unwrap();
+    assert!(c.open_wrap(&op(), &keys.current["b"]).is_err());
+    assert_eq!(b.read_value("forge").unwrap().value.as_str(), PLANTED);
+}
+
+/// A key published under a Station's name by another is wrapped to only when it verifies against
+/// the pin the grant recorded.
+#[cfg(feature = "station-tls")]
+#[test]
+fn a_rotation_wraps_only_to_a_key_that_verifies_against_the_recorded_pin() {
+    use crate::station::identity::{open_identity, sign_sealing_key};
+    let dir = tempfile::tempdir().unwrap();
+    let registry = registry(dir.path());
+    let (a, c) = (station(&registry, "a"), station(&registry, "c"));
+    let identity_dir = tempfile::tempdir().unwrap();
+    let identity = open_identity(identity_dir.path()).unwrap();
+    let fingerprint = identity.fingerprint().to_string();
+    let publish_b = |key: &SealingKey| {
+        let signed = sign_sealing_key(&identity, "b", &key.public_key().to_text()).unwrap();
+        registry.publish_sealing_key(&signed).unwrap();
+    };
+    let b_key = SealingKey::generate();
+    publish_b(&b_key);
+    a.put_scope_key(
+        &op(),
+        &[
+            Recipient::named("a"),
+            Recipient::named("b").pinned(&fingerprint),
+        ],
+        NOW,
+    )
+    .unwrap();
+    a.write_value("forge", &op(), PLANTED, SealedExpect::Absent, NOW)
+        .unwrap();
+    assert_eq!(a.load_key(&op()).unwrap().pins["b"], fingerprint);
+    // Another Station publishes its own key under b's name.
+    registry
+        .publish_sealing_key(&StationSealingKey::new("b", c.key.public_key().to_text()))
+        .unwrap();
+    let before = a.scope_key_info(&op()).unwrap().unwrap();
+    let refused = a.rotate_scope_key(&op(), NOW).unwrap_err();
+    assert!(
+        matches!(&refused, VaultError::Unverified(station) if station == "b"),
+        "{refused}"
+    );
+    assert_eq!(a.scope_key_info(&op()).unwrap().unwrap(), before);
+    // b changes its key, signed by the same identity: the next rotation wraps to the new one.
+    let new_key = Arc::new(SealingKey::generate());
+    publish_b(&new_key);
+    a.rotate_scope_key(&op(), NOW).unwrap();
+    let b = Vault::new(registry.clone(), "b", new_key);
+    assert_eq!(b.read_value("forge").unwrap().value.as_str(), PLANTED);
+    assert!(c.read_value("forge").is_err());
+}
+
+/// The review's eighth probe: a rotation over one that cannot be finished.
+#[test]
+fn a_rotation_or_grant_over_an_unfinished_one_this_station_cannot_finish_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let (registry, a, _b, _c) = fleet(dir.path());
+    a.write_value("forge", &op(), PLANTED, SealedExpect::Absent, NOW)
+        .unwrap();
+    a.begin_rotation(&op(), None, NOW).unwrap();
+    let mut record = registry.sealed_value(&key_name(&op())).unwrap().unwrap();
+    record.copies.retain(|label, _| !label.starts_with("p:"));
+    registry
+        .store_sealed(
+            &key_name(&op()),
+            &record.copies,
+            "x",
+            SealedExpect::Any,
+            NOW,
+        )
+        .unwrap();
+    let before = a.scope_key_info(&op()).unwrap().unwrap();
+    assert!(matches!(
+        a.finish_rotation(&op(), NOW),
+        Err(VaultError::Rotating(_))
+    ));
+    assert!(matches!(
+        a.rotate_scope_key(&op(), NOW),
+        Err(VaultError::Rotating(_))
+    ));
+    assert!(matches!(
+        a.grant_station(&op(), &Recipient::named("c"), NOW),
+        Err(VaultError::Rotating(_))
+    ));
+    assert_eq!(a.scope_key_info(&op()).unwrap().unwrap(), before);
+}
+
+#[test]
+fn a_plaintext_that_is_not_text_is_refused_without_holding_it_in_the_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_registry, a, b, _c) = fleet(dir.path());
+    let stored = a.load_key(&op()).unwrap();
+    let key = a.current_key(&op(), &stored).unwrap();
+    a.store_encrypted(
+        &key,
+        "bin",
+        &op(),
+        &[0xff, 0xfe, 0x41],
+        SealedExpect::Absent,
+        NOW,
+    )
+    .unwrap();
+    let error = b.read_value("bin").unwrap_err();
+    assert!(matches!(error, VaultError::Unreadable));
+    assert!(!format!("{error:?} {error}").contains("255"));
+}
+
+#[test]
+fn marks_refuse_older_records_other_keys_at_one_revision_and_retired_keys() {
+    let marks = Marks::in_memory();
+    marks.accept("scope-key/x", 0, 3, Some("aa")).unwrap();
+    marks.accept("scope-key/x", 0, 3, Some("aa")).unwrap();
+    assert!(marks.accept("scope-key/x", 0, 2, Some("aa")).is_err());
+    assert!(marks.accept("scope-key/x", 0, 3, Some("bb")).is_err());
+    marks.accept("scope-key/x", 0, 4, Some("bb")).unwrap();
+    // aa was the key before: put back with a newer revision, it is still refused.
+    assert!(marks.accept("scope-key/x", 0, 9, Some("aa")).is_err());
+    // A higher term outranks a higher revision.
+    marks.accept("scope-key/x", 1, 1, Some("bb")).unwrap();
+    assert!(marks.accept("scope-key/x", 0, 99, Some("bb")).is_err());
+    // Names are kept apart.
+    marks.accept("value/x", 0, 1, None).unwrap();
+}
+
+#[test]
+fn marks_are_kept_in_the_state_directory_and_a_restarted_station_still_refuses() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(MARKS_FILE);
+    let registry_dir = tempfile::tempdir().unwrap();
+    let registry = registry(registry_dir.path());
+    let key = Arc::new(SealingKey::generate());
+    registry
+        .publish_sealing_key(&StationSealingKey::new("a", key.public_key().to_text()))
+        .unwrap();
+    let vault = || {
+        Vault::new(registry.clone(), "a", key.clone())
+            .with_marks(Arc::new(Marks::open(&path).unwrap()))
+    };
+    let a = vault();
+    a.put_scope_key(&op(), &[Recipient::named("a")], NOW)
+        .unwrap();
+    a.write_value("v", &op(), "one", SealedExpect::Absent, NOW)
+        .unwrap();
+    let first = registry.sealed_value(&value_name("v")).unwrap().unwrap();
+    a.write_value("v", &op(), "two", SealedExpect::Revision(1), NOW)
+        .unwrap();
+    drop(a);
+    registry.remove_sealed(&value_name("v")).unwrap();
+    registry
+        .store_sealed(
+            &value_name("v"),
+            &first.copies,
+            "x",
+            SealedExpect::Absent,
+            NOW,
+        )
+        .unwrap();
+    // A new process reads the marks the first one kept.
+    assert!(matches!(
+        vault().read_value("v"),
+        Err(VaultError::Rollback(_))
+    ));
+    std::fs::write(&path, "not marks").unwrap();
+    let refused = Marks::open(&path).unwrap_err().to_string();
+    assert!(
+        refused.contains(MARKS_FILE) && !refused.contains("not marks"),
+        "{refused}"
+    );
 }

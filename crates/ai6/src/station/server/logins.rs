@@ -12,7 +12,7 @@ use crate::directorates::q::logins::{
     LoginNotice, NoticeKind, RunLogin, Synced, assign_renewals, login_accounts, run_leases,
     sealed_name,
 };
-use crate::directorates::q::sealing::{SEALING_KEY_FILE, SealingKey, Vault};
+use crate::directorates::q::sealing::{MARKS_FILE, Marks, SEALING_KEY_FILE, SealingKey, Vault};
 use crate::directorates::q::{Account, AccountPool};
 use crate::directorates::registry::accounts::AccountRef;
 use crate::directorates::registry::backend::RegistryBackend;
@@ -68,7 +68,10 @@ pub(crate) fn open_vault(
 ) -> std::io::Result<Arc<Vault>> {
     let key = Arc::new(SealingKey::open_or_create(&dir.join(SEALING_KEY_FILE))?);
     registry.publish_sealing_key(&published(dir, station, &key))?;
-    Ok(Arc::new(Vault::new(registry.clone(), station, key)))
+    let marks = Arc::new(Marks::open(&dir.join(MARKS_FILE))?);
+    Ok(Arc::new(
+        Vault::new(registry.clone(), station, key).with_marks(marks),
+    ))
 }
 
 #[cfg(feature = "station-tls")]

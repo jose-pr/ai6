@@ -15,8 +15,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 mod envelope;
+mod marks;
 
 pub use envelope::{OpenedValue, Scope, ScopeKeyInfo, ValueInfo};
+pub use marks::{MARKS_FILE, Marks};
 
 use base64::Engine as _;
 use crypto_box::aead::OsRng;
@@ -197,6 +199,10 @@ pub enum VaultError {
     WrongScope,
     /// A rotation of the scope's key has not reached the value yet; read again.
     Stale,
+    /// The Registry holds a record older than one this Station already accepted.
+    Rollback(String),
+    /// A rotation of the scope's key is unfinished and this Station cannot finish it.
+    Rotating(String),
 }
 
 impl fmt::Display for VaultError {
@@ -224,6 +230,14 @@ impl fmt::Display for VaultError {
             Self::LastStation => f.write_str("the last Station of a scope cannot be removed"),
             Self::WrongScope => f.write_str("the value exists in another scope"),
             Self::Stale => f.write_str("the scope's key is being rotated; read again"),
+            Self::Rollback(label) => write!(
+                f,
+                "the Registry holds {label:?} older than this Station already accepted"
+            ),
+            Self::Rotating(scope) => write!(
+                f,
+                "a rotation of scope {scope:?} is unfinished and this Station cannot finish it"
+            ),
         }
     }
 }
@@ -314,6 +328,7 @@ pub struct Vault {
     registry: Arc<dyn RegistryBackend>,
     station: String,
     key: Arc<SealingKey>,
+    marks: Arc<Marks>,
 }
 
 impl fmt::Debug for Vault {
@@ -335,7 +350,16 @@ impl Vault {
             registry,
             station: station.into(),
             key,
+            marks: Arc::new(Marks::in_memory()),
         }
+    }
+
+    /// Keeps what this Station accepts of the Registry's secret records in `marks`, so a record
+    /// older than one accepted is refused (see [`Marks`]).
+    #[must_use]
+    pub fn with_marks(mut self, marks: Arc<Marks>) -> Self {
+        self.marks = marks;
+        self
     }
 
     /// The Station.
@@ -558,6 +582,10 @@ pub struct RegistrySecretFields {
     /// `compartment:<id>`. A value that exists stays in its scope.
     #[schema(title = "Scope of a new value")]
     pub scope: Option<String>,
+    /// The certificate fingerprint each Station's sealing key must be signed by, by Station, for a
+    /// scope key made now. It is kept in the key record and checked at every rotation.
+    #[schema(title = "Fingerprints Stations' sealing keys must be signed by")]
+    pub pins: Option<std::collections::BTreeMap<String, String>>,
 }
 
 /// `registry`: values sealed in the Registry to named Stations.
@@ -611,7 +639,12 @@ impl RegistrySecrets {
                 .clone()
                 .unwrap_or_else(|| vec![vault.station.clone()])
                 .into_iter()
-                .map(Recipient::named)
+                .map(
+                    |station| match fields.pins.as_ref().and_then(|pins| pins.get(&station)) {
+                        Some(pin) => Recipient::named(station).pinned(pin.clone()),
+                        None => Recipient::named(station),
+                    },
+                )
                 .collect();
             vault.put_scope_key(&scope, &stations, now)?;
         }
@@ -852,7 +885,7 @@ mod tests {
         let a = Arc::new(station(&registry, "a"));
         let b = station(&registry, "b");
         let keeper = SecretKeeper::new(Box::new(RegistrySecrets::new(a))).unwrap();
-        assert_eq!(keeper.fields(), ["stations", "scope"]);
+        assert_eq!(keeper.fields(), ["stations", "scope", "pins"]);
         let fields = SecretFields::new(
             serde_json::json!({"stations": ["a", "b"]})
                 .as_object()
