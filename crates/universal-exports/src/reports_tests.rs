@@ -1981,3 +1981,68 @@ async fn what_a_reader_may_not_see_is_not_in_their_export_and_a_tearline_reader_
         "a tearline is not a Report to write back: {refused}"
     );
 }
+
+#[tokio::test]
+async fn unassessed_leaves_out_what_the_person_may_not_assess() {
+    let roles = r#"
+        [role.viewer]
+        actions = ["mission.read"]
+
+        [role.controller]
+        actions = ["mission.read", "mission.create", "mission.control"]
+
+        [[rule]]
+        subject = "person:viewer-007"
+        scope = "operation:G"
+        role = "viewer"
+
+        [[rule]]
+        subject = "person:operator-007"
+        scope = "operation:G"
+        role = "controller"
+    "#;
+    let fixture = fixture_with(roles).await;
+    fixture.read_in("KESTREL", &["person:operator-007"]);
+    let open = fixture
+        .file(json!({"title": "Open to assess", "text": "x"}))
+        .await;
+    let held = fixture
+        .file(json!({"title": "Held back", "text": "x", "compartments": ["KESTREL"]}))
+        .await;
+    let ids = |body: &Value| -> Vec<String> {
+        body["reports"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|report| report["id"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let (operator, viewer) = (
+        fixture.served.operator.clone(),
+        fixture.served.viewer.clone(),
+    );
+    let path = "/v1/user/reports/unassessed?operation_id=G";
+    let (status, body) = fixture.call(&operator, Method::GET, path, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let mut both = ids(&body);
+    both.sort();
+    let mut expected = vec![open.clone(), held.clone()];
+    expected.sort();
+    assert_eq!(both, expected, "the operator controls and reads both");
+
+    // A reader without `mission.control` has nothing to act on.
+    let (_, body) = fixture.call(&viewer, Method::GET, path, None).await;
+    assert!(ids(&body).is_empty(), "{body}");
+    assert!(
+        body["coverage"]["checked"]
+            .to_string()
+            .contains("operation:G"),
+        "{body}"
+    );
+
+    // Read out of the compartment, the operator may no longer assess the held Report.
+    fixture.read_in("KESTREL", &["person:someone"]);
+    let (_, body) = fixture.call(&operator, Method::GET, path, None).await;
+    assert_eq!(ids(&body), vec![open], "{body}");
+    assert!(!body.to_string().contains(&held), "not named: {body}");
+}

@@ -282,6 +282,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The attention summary and `GET /v1/user/reports/unassessed` list only the open Reports the person may assess (reads the scope, holds `mission.control` on the Operation or `station.configure` on a Station or M, and reads the content), so no item says "You are not read in to its content" and sits there for good.
+
+- The Report an approval that lapsed unspent raises names when it was approved and when it was valid until.
+
 - A Report an Agent files above its Operation charge Agent's clearance, or in a compartment that charge is not read in to, is refused at filing, naming the highest classification the charge may read, instead of being stored where no one could assess it.
 
 - A Mission whose Agent declares a loadout that this Station has not loaded waits, naming the Agent and the missing

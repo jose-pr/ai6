@@ -432,8 +432,15 @@ The attention bell and the Overview count unassessed Reports: Universal Exports'
 (`GET /v1/user/attention`) has a Reports section that reads each scope the person may read through the
 same listing the page uses, so a compartment's crossing is audited as there, and says which scopes it
 read, which are not the person's to see (M's are left unmentioned unless the person holds them) and which
-could not be read. Each item opens the Reports page on that Report. Moneypenny lists the same Reports
-with her `reports` tool and offers the page to assess them; she assesses nothing herself.
+could not be read. Only Reports the person may assess are listed (they read the scope, hold
+`mission.control` on the Operation or `station.configure` on a Station or M, and read the content), so an
+item is always one they can act on; a Report held back from them is neither counted nor named. Each item
+opens the Reports page on that Report. Moneypenny lists the same Reports with her `reports` tool and
+offers the page to assess them; she assesses nothing herself.
+
+An approval that lapses with no step taken under it files a `green_ink` warning Report naming the signer,
+the request, the Mission and when it was approved and was valid until. It reaches the people who may assess
+it (the Operation's charge, and a person with `mission.control`) as an unassessed Report, as above.
 
 ## What files them
 

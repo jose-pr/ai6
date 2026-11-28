@@ -739,10 +739,7 @@ pub(crate) async fn read(
                         )
                     }),
                 ),
-                None => (
-                    format!("A Report waits for an assessment in {label}"),
-                    Some("You are not read in to its content.".to_owned()),
-                ),
+                None => (format!("A Report waits for an assessment in {label}"), None),
             };
             found.push(item(
                 format!("report:{}", report.id),

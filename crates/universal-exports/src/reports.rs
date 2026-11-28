@@ -712,7 +712,9 @@ pub(crate) struct OpenReports {
 
 /// The Reports in `open` state of each of `scopes` (`operation:ID`, `station:ID`, `m`), read
 /// through the same listing the Reports page uses, so each scope's read, its compartments and
-/// the audit of a crossing are decided there. At most `per_scope` of each are read.
+/// the audit of a crossing are decided there. Only the ones the person may assess are kept: a
+/// Report they cannot read or whose assessment is refused them is not theirs to act on, and is
+/// neither counted nor named. At most `per_scope` of each are read.
 pub(crate) async fn open_reports(
     gateway: &Gateway,
     headers: &HeaderMap,
@@ -720,6 +722,13 @@ pub(crate) async fn open_reports(
     per_scope: usize,
 ) -> OpenReports {
     let mut found = OpenReports::default();
+    let (reader, registry) = match (reader_of(gateway, headers).await, registry_of(gateway)) {
+        (Ok(reader), Ok(registry)) => (Arc::new(reader), registry),
+        _ => {
+            found.unavailable = scopes.to_vec();
+            return found;
+        }
+    };
     for scope in scopes {
         let listing = Listing {
             words: None,
@@ -734,7 +743,40 @@ pub(crate) async fn open_reports(
         match list_reports(gateway, headers, listing).await {
             Ok(Json(body)) => {
                 found.checked.push(scope.clone());
+                let ids: Vec<String> = body["reports"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|report| report["id"].as_str().map(str::to_owned))
+                    .collect();
+                let assessable = {
+                    let (reader, registry) = (reader.clone(), registry.clone());
+                    blocking(move || {
+                        Ok(ids
+                            .into_iter()
+                            .filter(|id| {
+                                registry
+                                    .report(id)
+                                    .ok()
+                                    .flatten()
+                                    .is_some_and(|report| may_assess(&reader, &report))
+                            })
+                            .collect::<BTreeSet<String>>())
+                    })
+                    .await
+                };
+                let Ok(assessable) = assessable else {
+                    found.checked.pop();
+                    found.unavailable.push(scope.clone());
+                    continue;
+                };
                 for report in body["reports"].as_array().into_iter().flatten() {
+                    if !report["id"]
+                        .as_str()
+                        .is_some_and(|id| assessable.contains(id))
+                    {
+                        continue;
+                    }
                     let text = |key: &str| report[key].as_str().map(str::to_owned);
                     found.reports.push(OpenReport {
                         id: text("id").unwrap_or_default(),
@@ -1314,6 +1356,35 @@ pub(crate) async fn assess(
     .await
 }
 
+/// Whether the person holds the action that controls `report`'s scope.
+fn holds_control(
+    reader: &PersonReader,
+    report: &ai6::directorates::registry::reports::Report,
+) -> bool {
+    // What is proposed of a known kind is decided by who may write what is known there.
+    if report.is_known() {
+        reader.assesses(&report.scope)
+    } else {
+        match &report.scope {
+            ReportScope::Operation(operation) => {
+                reader.holds("mission.control", format!("operation:{operation}"))
+            }
+            scope => reader.files_in(scope),
+        }
+    }
+}
+
+/// Whether the person may assess `report`: they read its scope, hold the action that controls
+/// it and read its content. `controlled` refuses an assessment on exactly this.
+pub(crate) fn may_assess(
+    reader: &PersonReader,
+    report: &ai6::directorates::registry::reports::Report,
+) -> bool {
+    reader.reads_report(report)
+        && holds_control(reader, report)
+        && sight(reader, report, &reader.rules()) == ReportSight::Content
+}
+
 /// The Report `id` when the person may assess it: they read its scope, hold the action that
 /// controls it and read its content.
 fn controlled(
@@ -1326,17 +1397,7 @@ fn controlled(
     if !reader.reads_report(&report) {
         return Err(missing());
     }
-    // What is proposed of a known kind is decided by who may write what is known there.
-    let holds = if report.is_known() {
-        reader.assesses(&report.scope)
-    } else {
-        match &report.scope {
-            ReportScope::Operation(operation) => {
-                reader.holds("mission.control", format!("operation:{operation}"))
-            }
-            scope => reader.files_in(scope),
-        }
-    };
+    let holds = holds_control(reader, &report);
     let seen = sight(reader, &report, &reader.rules());
     // What is known and not readable is not there, as everywhere else.
     if report.is_known() && seen != ReportSight::Content {

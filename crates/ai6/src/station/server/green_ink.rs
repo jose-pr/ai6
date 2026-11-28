@@ -770,6 +770,16 @@ pub(super) async fn deliver_decisions(state: &DaemonState) {
     }
 }
 
+/// `at` (Unix seconds) as RFC 3339 UTC, or `-` for none.
+fn utc_text(at: Option<f64>) -> String {
+    at.and_then(|at| time::OffsetDateTime::from_unix_timestamp(at as i64).ok())
+        .and_then(|at| {
+            at.format(&time::format_description::well_known::Rfc3339)
+                .ok()
+        })
+        .unwrap_or_else(|| "-".to_owned())
+}
+
 /// When the last sweep for unspent approvals ran, as `f64` bits of Unix seconds.
 static UNSPENT_SWEPT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -812,14 +822,16 @@ fn report_unspent_since(state: &DaemonState, since: f64, now: f64) {
                         request.scope.kind, request.scope.target
                     ),
                     text: format!(
-                        "{} approved request {} to {} {} for Mission {}, and no step was taken \
-                         under it before it lapsed. The work it was for did not happen; ask \
-                         for it again or do it by hand.",
+                        "{} approved request {} to {} {} for Mission {} at {}, valid until {}, \
+                         and no step was taken under it before it lapsed. The work it was for \
+                         did not happen; ask for it again or do it by hand.",
                         approval.signer,
                         request.id,
                         request.scope.kind,
                         request.scope.target,
-                        request.mission
+                        request.mission,
+                        utc_text(Some(approval.at)),
+                        utc_text(approval.expires_at),
                     ),
                     mission: Some(request.mission.as_str()),
                     links: Vec::new(),
@@ -2289,6 +2301,18 @@ mod tests {
             .unwrap();
         assert_eq!(reports.len(), 1, "{reports:?}");
         assert!(reports[0].title.contains("PR 12"), "{}", reports[0].title);
+        for needed in [
+            "operator-m",
+            two.as_str(),
+            utc_text(Some(at - 100.0)).as_str(),
+            utc_text(Some(at - 10.0)).as_str(),
+        ] {
+            assert!(
+                reports[0].text.contains(needed),
+                "the text names {needed}: {}",
+                reports[0].text
+            );
+        }
         report_unspent_since(&state, 0.0, at);
         assert_eq!(
             state

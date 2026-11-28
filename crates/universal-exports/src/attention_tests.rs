@@ -21,7 +21,7 @@ use crate::controls::tests::{STATION_TOKEN, Served, served_with_roster};
 /// `viewer-007` only reads G.
 const ROLES: &str = r#"
     [role.watcher]
-    actions = ["mission.read", "mission.create", "approval.decide", "audit.read", "station.read", "pool.read"]
+    actions = ["mission.read", "mission.create", "mission.control", "approval.decide", "audit.read", "station.read", "station.configure", "pool.read"]
 
     [role.viewer]
     actions = ["mission.read"]
@@ -534,10 +534,13 @@ async fn reports_a_person_may_not_read_are_named_not_listed_and_m_is_not_mention
     fixture.open_report("report-m", ReportScope::M, "Not for the viewer either");
     let summary = fixture.summary(&fixture.served.viewer).await;
 
-    let reports = items(&summary, "report");
-    assert_eq!(reports.len(), 1, "{summary}");
-    assert_eq!(reports[0]["id"], "report:report-g");
+    // The viewer reads G's Reports but may not assess them, so none is theirs to act on.
+    assert!(items(&summary, "report").is_empty(), "{summary}");
     let read = coverage(&summary, "reports");
+    assert!(
+        read["checked"].to_string().contains("operation:G"),
+        "the scope was read: {read}"
+    );
     assert_eq!(read["status"], "partial");
     assert_eq!(read["not_permitted"], json!(["station:worker"]));
     assert!(!summary.to_string().contains("Not for the viewer"));
@@ -551,7 +554,98 @@ async fn reports_a_person_may_not_read_are_named_not_listed_and_m_is_not_mention
 }
 
 #[tokio::test]
-async fn a_report_read_through_a_compartment_is_listed_and_the_crossing_is_audited() {
+async fn a_lapsed_unspent_approval_report_is_an_attention_item_for_one_who_may_assess_it() {
+    let fixture = fixture().await;
+    fixture.report(json!({"revision": "79"}));
+    // What the Station files when an approval lapses with no step taken under it.
+    fixture
+        .served
+        .registry
+        .file_report(&Report::new(
+            "report-lapsed",
+            ReportScope::Operation("G".to_owned()),
+            "green_ink",
+            ai6::directorates::registry::logbook::Severity::Warning,
+            "Approved push origin:refs/heads/main lapsed unspent",
+            "operator approved request r1 at 2026-11-27T10:00:00Z, valid until 2026-11-27T11:00:00Z.",
+            ReportFiler::Probe {
+                probe: "green-ink".to_owned(),
+            },
+            now() - 60.0,
+        ))
+        .unwrap();
+    let summary = fixture.summary(&fixture.served.operator).await;
+    let reports = items(&summary, "report");
+    assert_eq!(reports.len(), 1, "{summary}");
+    assert_eq!(reports[0]["id"], "report:report-lapsed");
+    assert!(
+        reports[0]["title"]
+            .as_str()
+            .unwrap()
+            .contains("lapsed unspent"),
+        "{summary}"
+    );
+    // Someone who reads G but may not assess is not told.
+    let viewer = fixture.summary(&fixture.served.viewer).await;
+    assert!(items(&viewer, "report").is_empty(), "{viewer}");
+}
+
+#[tokio::test]
+async fn a_report_the_person_cannot_read_or_assess_is_not_an_attention_item() {
+    let fixture = fixture().await;
+    fixture.report(json!({"revision": "79"}));
+    fixture.open_report(
+        "report-g",
+        ReportScope::Operation("G".to_owned()),
+        "Assessable by the operator",
+    );
+    // Held back by a compartment the operator is not read in to.
+    let mut hidden = Report::new(
+        "report-hidden",
+        ReportScope::Operation("G".to_owned()),
+        "finding",
+        ai6::directorates::registry::logbook::Severity::Info,
+        "Held back title",
+        "What was seen.",
+        ReportFiler::Person {
+            person: "someone".to_owned(),
+        },
+        now() - 60.0,
+    );
+    hidden.compartments = vec!["KESTREL".to_owned()];
+    fixture.served.registry.file_report(&hidden).unwrap();
+    fixture
+        .source
+        .put(
+            ConfigRecord::Compartment,
+            &ConfigScope::Global,
+            "KESTREL",
+            &json!({
+                "actions": ["mission.status"],
+                "covers": [],
+                "read_in": [{"subject": "person:someone"}],
+            }),
+        )
+        .unwrap();
+    let summary = fixture.summary(&fixture.served.operator).await;
+    let reports = items(&summary, "report");
+    assert_eq!(reports.len(), 1, "{summary}");
+    assert_eq!(reports[0]["id"], "report:report-g");
+    assert!(
+        !summary.to_string().contains("not read in to its content")
+            && !summary.to_string().contains("report-hidden"),
+        "the held-back report is neither named nor counted: {summary}"
+    );
+    assert!(
+        coverage(&summary, "reports")["checked"]
+            .to_string()
+            .contains("operation:G"),
+        "the scope still counts as read"
+    );
+}
+
+#[tokio::test]
+async fn a_report_read_through_a_compartment_is_not_assessable_and_the_crossing_is_audited() {
     let fixture = fixture().await;
     fixture.report(json!({"revision": "79"}));
     fixture.lifecycle("L", "mission-l", "run-l", "budget").await;
@@ -584,9 +678,9 @@ async fn a_report_read_through_a_compartment_is_listed_and_the_crossing_is_audit
         )
         .unwrap();
     let after = fixture.summary(&fixture.served.viewer).await;
-    let reports = items(&after, "report");
-    assert_eq!(reports.len(), 1, "{after}");
-    assert_eq!(reports[0]["entity"]["operation_id"], "L");
+    // A compartment gives the read, not `mission.control`: the crossing is audited and the
+    // Report, which the viewer may not assess, is not listed.
+    assert!(items(&after, "report").is_empty(), "{after}");
     assert!(crossings(&fixture) > 0, "the crossing is audited");
 }
 

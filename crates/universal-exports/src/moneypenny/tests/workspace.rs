@@ -150,7 +150,8 @@ async fn a_viewer_without_the_scope_is_told_so_by_her_reports_tool() {
         &call_tool(&served, &job.mcp_token, "reports", json!({})).await,
         "reports",
     );
-    assert_eq!(listed["reports"][0]["id"], "report-g");
+    // The viewer reads G's Reports but may not assess them, so none is listed.
+    assert!(listed["reports"].as_array().unwrap().is_empty(), "{listed}");
     assert!(
         listed["coverage"]["not_permitted"]
             .as_array()
