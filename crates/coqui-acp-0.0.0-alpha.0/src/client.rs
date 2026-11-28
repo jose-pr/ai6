@@ -2,6 +2,7 @@
 
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
+use alloc::collections::VecDeque;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
@@ -380,6 +381,7 @@ impl Builder {
             extension: AtomicBool::new(false),
             suppress: AtomicBool::new(false),
             session: Mutex::new(None),
+            early: Mutex::new(VecDeque::new()),
             commands_known: Mutex::new(Vec::new()),
             turn: Mutex::new(
                 Turn::new(self.refuse_kinds.clone())
@@ -494,6 +496,8 @@ struct Shared {
     extension: AtomicBool,
     suppress: AtomicBool,
     session: Mutex<Option<String>>,
+    /// `session/update`s that named no known session when they arrived, newest last, held until [`Shared::adopt`] names one.
+    early: Mutex<VecDeque<Value>>,
     commands_known: Mutex<Vec<AdvertisedCommand>>,
     turn: Mutex<Turn>,
 }
@@ -552,25 +556,54 @@ impl Shared {
         }
     }
 
-    /// Whether a message's `sessionId` names this session. Before the session is known nothing does, so what an agent says of another,
-    /// such as one an earlier connection left running, never reaches this one.
+    /// Whether a message's `sessionId` names this session. Before the session is known nothing does.
     fn is_mine(&self, params: &Value) -> bool {
         let named = params.get("sessionId").and_then(Value::as_str);
         let session = self.session.lock().unwrap_or_else(PoisonError::into_inner);
         named.is_some() && named == session.as_deref()
     }
 
+    /// Makes `id` the session this side speaks for, then plays the updates that named it before it was known: an agent may send
+    /// its commands right behind the `session/new` answer, before that answer has been read. What named any other session, such
+    /// as one an earlier connection left running, is dropped.
+    fn adopt(&self, id: &str) {
+        let mut session = self.session.lock().unwrap_or_else(PoisonError::into_inner);
+        *session = Some(id.to_owned());
+        let held = core::mem::take(&mut *self.early.lock().unwrap_or_else(PoisonError::into_inner));
+        for params in held {
+            if params.get("sessionId").and_then(Value::as_str) == Some(id) {
+                self.update(&params);
+            }
+        }
+    }
+
+    fn update(&self, params: &Value) {
+        if self.suppress.load(Ordering::SeqCst) || self.extension.load(Ordering::SeqCst) {
+            return;
+        }
+        let step = self.turn().update(params);
+        self.apply(step);
+    }
+
     fn notification(&self, message: &UntypedMessage) {
         let method = message.method();
         if method == "session/update" {
-            if self.suppress.load(Ordering::SeqCst)
-                || self.extension.load(Ordering::SeqCst)
-                || !self.is_mine(message.params())
-            {
+            let params = message.params();
+            let Some(named) = params.get("sessionId").and_then(Value::as_str) else {
                 return;
+            };
+            // Checked and held under the one lock `adopt` takes, so an update is either played now or held for it, never lost between.
+            let session = self.session.lock().unwrap_or_else(PoisonError::into_inner);
+            if session.as_deref() == Some(named) {
+                drop(session);
+                self.update(params);
+            } else {
+                let mut early = self.early.lock().unwrap_or_else(PoisonError::into_inner);
+                if early.len() >= self.max_pending {
+                    early.pop_front();
+                }
+                early.push_back(params.clone());
             }
-            let step = self.turn().update(message.params());
-            self.apply(step);
         } else if method == OUTPUT_LOST {
             let count = |key: &str| {
                 message
@@ -1176,10 +1209,7 @@ async fn open(
     };
     // Known before the agent answers, so what it sends of this session meanwhile, a replay or a turn it kept running, is this session's.
     if let Opening::Load(id) | Opening::Resume(id) = &options.opening {
-        *shared
-            .session
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some(id.clone());
+        shared.adopt(id);
     }
     let (session, config) = match &options.opening {
         Opening::New => {
@@ -1248,10 +1278,7 @@ async fn open(
             (named.unwrap_or_else(|| id.clone()), config)
         }
     };
-    *shared
-        .session
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner) = Some(session.clone());
+    shared.adopt(&session);
     apply_options(cx, options, shared, &session, &config).await;
     Ok(session)
 }
@@ -1327,10 +1354,7 @@ async fn new_session(
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .clear();
-    *shared
-        .session
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner) = Some(session.clone());
+    shared.adopt(&session);
     apply_options(
         cx,
         options,

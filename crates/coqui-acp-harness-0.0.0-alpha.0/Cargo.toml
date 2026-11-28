@@ -1,4 +1,4 @@
-# coqui-acp/crates/coqui-acp-harness at 0f6fbf1d430b56c8d007c96a08270d0524c7c7cb, with what it inherits written out.
+# coqui-acp/crates/coqui-acp-harness at 274190d010b2ef2c254f56cbd40aa15adf041c91, with what it inherits written out.
 example = [{ name = "spawner_host", required-features = ["kind"] }, { name = "fake_stdio_cli", required-features = ["kind"] }, { name = "stdio_provider", crate-type = ["cdylib"], required-features = ["kind"] }, { name = "agy_quota", required-features = ["antigravity"] }]
 test = [{ name = "spawner", required-features = ["kind"] }, { name = "account", required-features = ["kind"] }, { name = "opencode", required-features = ["kind"] }, { name = "stdio", required-features = ["kind"] }, { name = "replay", required-features = ["kind"] }, { name = "antigravity", required-features = ["antigravity"] }, { name = "agy_login", required-features = ["antigravity"] }, { name = "login_forms", required-features = ["kind"] }, { name = "signed_in", required-features = ["kind"] }]
 [package]
