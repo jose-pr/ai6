@@ -1314,6 +1314,13 @@ pub(crate) async fn assess(
     let reader = reader_of(&gateway, &headers).await?;
     let registry = registry_of(&gateway)?;
     let at = unix_timestamp()?;
+    // A role is a role of the roster, which this gateway reads from its configuration source.
+    if let Some(role) = request.role.clone()
+        && let Some(known) = roster_roles(&gateway).await
+        && let Err(reason) = ai6::directorates::registry::assessments::known_role(&role, &known)
+    {
+        return Err(refused(StatusCode::BAD_REQUEST, reason));
+    }
     blocking(move || {
         let report = controlled(registry.as_ref(), &reader, &id)?;
         let parts = VerdictParts {
@@ -1334,7 +1341,8 @@ pub(crate) async fn assess(
             Assessment::new(&report.id, verdict, &request.reason, &reader.person.id, at)
                 .believed(request.credibility)
                 .prioritised(request.priority.as_deref())
-                .judged(judgement);
+                .judged(judgement)
+                .with_role(request.role.as_deref());
         let reads = |scope: &ReportScope| {
             if report.is_known() {
                 reader.reads_known_scope(scope)
@@ -1354,6 +1362,24 @@ pub(crate) async fn assess(
         }
     })
     .await
+}
+
+/// The roles of the roster the gateway reads, or `None` when it reads none.
+async fn roster_roles(gateway: &Gateway) -> Option<Vec<String>> {
+    let source = gateway.roster.clone()?;
+    tokio::task::spawn_blocking(move || {
+        let snapshot = source.load("").ok()?;
+        Some(
+            snapshot
+                .roster
+                .roles()
+                .map(|role| role.id.clone())
+                .collect(),
+        )
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 /// Whether the person holds the action that controls `report`'s scope.
@@ -1444,6 +1470,9 @@ pub(crate) struct AssessRequest {
     /// For mission: the Mission proposed or amended for it.
     #[serde(default)]
     mission: Option<String>,
+    /// For mission: the Agent role the first run of a Source item takes, one of the roster's.
+    #[serde(default)]
+    role: Option<String>,
     /// For awaiting or decision: what is asked.
     #[serde(default)]
     question: Option<String>,

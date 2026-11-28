@@ -26,7 +26,7 @@ use crate::directorates::registry::reports::{Report, ReportFiler, ReportLink};
 use crate::directorates::registry::sleepers::{Fire, Sleeper, SleeperMark, window_label};
 use crate::directorates::registry::source_items::{self, Offered};
 use crate::directorates::registry::sources::{
-    FinishedSourceBrief, Ingest, Source, SourcePoll, reportable,
+    FinishedSourceBrief, Ingest, IntakeRoles, Source, SourcePoll, reportable,
 };
 use crate::directorates::registry::timeline::TimelineEvent;
 use crate::directorates::registry::tracker::Tracker;
@@ -451,6 +451,8 @@ pub(crate) struct Intake<'a> {
     /// Tells the charge of an item; `None` when the Operation has no charge Agent, and the items
     /// wait for a person.
     pub notify: Option<&'a Notifier<'a>>,
+    /// The Operation's `intake_role`: the role of an item nothing else names a role for.
+    pub role: Option<&'a str>,
 }
 
 impl Intake<'_> {
@@ -460,6 +462,7 @@ impl Intake<'_> {
         Intake {
             mode: SourceIntake::Direct,
             notify: None,
+            role: None,
         }
     }
 
@@ -469,6 +472,7 @@ impl Intake<'_> {
         Intake {
             mode: SourceIntake::Charge,
             notify: None,
+            role: None,
         }
     }
 }
@@ -566,7 +570,8 @@ pub(crate) fn poll_source(
         }
         let item = &item;
         if intake.mode == SourceIntake::Direct {
-            queue_item(registry, station, ids, item, reopening, &mut summary);
+            let roles = IntakeRoles::new(None, intake.role);
+            queue_item(registry, station, ids, item, reopening, roles, &mut summary);
             continue;
         }
         match source_items::offer(registry, operation, provider, item, unix_seconds() as f64) {
@@ -578,14 +583,16 @@ pub(crate) fn poll_source(
                 summary.reported += 1;
                 tell(intake, provider, "changed", &report);
                 if source_items::is_mission(&report) {
-                    queue_item(registry, station, ids, item, reopening, &mut summary);
+                    let roles = assessed_roles(&report, intake);
+                    queue_item(registry, station, ids, item, reopening, roles, &mut summary);
                     tie_mission(registry, ids, &report);
                 }
             }
             Ok(Offered::Unchanged(report)) => {
                 summary.unchanged += 1;
                 if source_items::is_mission(&report) {
-                    queue_item(registry, station, ids, item, reopening, &mut summary);
+                    let roles = assessed_roles(&report, intake);
+                    queue_item(registry, station, ids, item, reopening, roles, &mut summary);
                     tie_mission(registry, ids, &report);
                 }
             }
@@ -603,6 +610,17 @@ pub(crate) fn poll_source(
     Ok(summary)
 }
 
+/// The roles an item decided `mission` is queued with: its assessment's, else the Operation's.
+fn assessed_roles<'a>(report: &'a Report, intake: &Intake<'a>) -> IntakeRoles<'a> {
+    IntakeRoles::new(
+        report
+            .assessment
+            .as_ref()
+            .and_then(|assessment| assessment.role.as_deref()),
+        intake.role,
+    )
+}
+
 /// Queues `item` as its Mission's brief, or updates the queued brief, and ties the issue it
 /// came from to the Mission.
 fn queue_item(
@@ -611,9 +629,10 @@ fn queue_item(
     (operation, provider): (&str, &str),
     item: &crate::directorates::registry::sources::SourceItem,
     reopening: &Reopening,
+    roles: IntakeRoles<'_>,
     summary: &mut PollSummary,
 ) {
-    match registry.ingest_source_item(operation, provider, item, station) {
+    match registry.ingest_source_item_as(operation, provider, item, station, roles) {
         Ok(Ingest::Queued) => {
             summary.queued += 1;
             link_source(registry, operation, provider, item);
@@ -725,6 +744,7 @@ pub(crate) fn settle_items(
             (operation, source),
             item,
             &setup.reopening(),
+            assessed_roles(&report, intake),
             &mut summary,
         );
         tie_mission(registry, (operation, source), &report);
@@ -1818,6 +1838,7 @@ impl SourceDesk {
             let intake = Intake {
                 mode: operation.intake,
                 notify: notify.as_deref(),
+                role: operation.intake_role.as_deref(),
             };
             let polled: Vec<&SourceSetup> = setups.iter().flatten().collect();
             if intake.mode == SourceIntake::Charge && !polled.is_empty() {

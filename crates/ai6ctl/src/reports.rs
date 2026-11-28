@@ -196,6 +196,9 @@ pub(crate) struct AssessArgs {
     /// For mission: the Mission proposed or amended for it.
     #[arg(long)]
     mission: Option<String>,
+    /// For mission: the Agent role the first run of a Source item takes, one of the roster's.
+    #[arg(long)]
+    role: Option<String>,
     /// For awaiting: what is asked. For decision: what those who sign are asked.
     #[arg(long, required_if_eq_any([("assessment", "awaiting"), ("assessment", "decision")]))]
     question: Option<String>,
@@ -639,6 +642,7 @@ pub(crate) async fn run(
                 reason,
                 of,
                 mission,
+                role,
                 question,
                 ask,
                 via,
@@ -653,6 +657,7 @@ pub(crate) async fn run(
             for (key, value) in [
                 ("of", of),
                 ("mission", mission),
+                ("role", role),
                 ("question", question),
                 ("ask", ask),
                 ("via", via),

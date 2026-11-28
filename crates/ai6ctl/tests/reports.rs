@@ -422,3 +422,62 @@ async fn reports_are_exported_as_markdown_files_and_applied_back() {
     assert!(made.contains("\tcreated\tSeen later"), "{made}");
     let _ = shutdown.send(());
 }
+
+/// What `PUT /v1/reports/{id}/assessment` was sent, from a stand-in gateway that records it.
+#[tokio::test]
+async fn assess_sends_the_role() {
+    use axum::Router;
+    use axum::extract::State;
+    use axum::routing::put;
+
+    let seen: Arc<Mutex<Vec<Value>>> = Arc::default();
+    async fn record(
+        State(seen): State<Arc<Mutex<Vec<Value>>>>,
+        axum::Json(body): axum::Json<Value>,
+    ) -> axum::Json<Value> {
+        seen.lock().unwrap().push(body);
+        axum::Json(json!({"id": "r1", "state": "assessed", "assessment": {"verdict": "mission"}}))
+    }
+    let app = Router::new()
+        .route("/v1/reports/{id}/assessment", put(record))
+        .with_state(seen.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let server = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let with = printed(
+        &ai6ctl(
+            &server,
+            "token",
+            &[
+                "reports",
+                "assess",
+                "r1",
+                "mission",
+                "--reason",
+                "work",
+                "--role",
+                "case-officer",
+            ],
+        )
+        .await,
+    );
+    assert!(with.starts_with("r1\tassessed\tmission"), "{with}");
+    printed(
+        &ai6ctl(
+            &server,
+            "token",
+            &["reports", "assess", "r1", "no_action", "--reason", "noise"],
+        )
+        .await,
+    );
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen[0]["role"], "case-officer", "{seen:?}");
+    assert_eq!(seen[0]["assessment"], "mission");
+    assert!(
+        seen[1].get("role").is_none(),
+        "no role is sent unless asked: {seen:?}"
+    );
+}

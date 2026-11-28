@@ -436,6 +436,8 @@ pub struct Assessment<'a> {
     pub priority: Option<&'a str>,
     /// How likely the assessor judges what the Report says.
     pub judgement: Option<Judgement>,
+    /// The Agent role a `mission` assessment gives the first run of a Source item.
+    pub role: Option<&'a str>,
 }
 
 impl<'a> Assessment<'a> {
@@ -450,7 +452,15 @@ impl<'a> Assessment<'a> {
             credibility: None,
             priority: None,
             judgement: None,
+            role: None,
         }
+    }
+
+    /// Names the Agent role the first run of a Source item takes, with a `mission` assessment.
+    #[must_use]
+    pub fn with_role(mut self, role: Option<&'a str>) -> Self {
+        self.role = role;
+        self
     }
 
     /// Sets the credibility.
@@ -473,6 +483,22 @@ impl<'a> Assessment<'a> {
         self.judgement = judgement;
         self
     }
+}
+
+/// Whether `role` is one of `known`, the roles the roster has; the refusal names them.
+///
+/// # Errors
+///
+/// Why `role` is refused, naming the roles there are.
+pub fn known_role(role: &str, known: &[String]) -> Result<(), String> {
+    if known.iter().any(|each| each == role) {
+        return Ok(());
+    }
+    Err(if known.is_empty() {
+        format!("no role {role:?}: the roster has none")
+    } else {
+        format!("no role {role:?}; the roles are {}", known.join(", "))
+    })
 }
 
 /// What an assessment is judged and carried out against.
@@ -639,6 +665,14 @@ pub fn assess(
     if a.credibility.is_some_and(|value| !(1..=6).contains(&value)) {
         return Err(invalid("credibility is 1 to 6"));
     }
+    if let Some(role) = a.role {
+        if !matches!(a.verdict, Verdict::Mission { .. }) {
+            return Err(invalid("a role is chosen only with a mission assessment"));
+        }
+        if role.trim().is_empty() {
+            return Err(invalid("a role names an Agent role"));
+        }
+    }
     let operation = stored.scope.operation().map(str::to_owned);
     // What the verdict ties the Report to counts toward `1`, so it is read before the change.
     let corroborated = |links: &[ReportLink]| {
@@ -788,6 +822,7 @@ pub fn assess(
         let mut assessment = ReportAssessment::new(word, a.by, a.at);
         assessment.comment = Some(a.reason.to_owned());
         assessment.judgement = a.judgement;
+        assessment.role = a.role.map(str::to_owned);
         report.updated = a.at.max(report.created);
         if let Some(credibility) = a.credibility {
             report.credibility = Some(credibility);

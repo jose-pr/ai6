@@ -692,6 +692,9 @@ pub struct Operation {
     pub sources: toml::Table,
     /// Who decides what a Source item becomes; the Operation's charge unless configured.
     pub intake: SourceIntake,
+    /// The Agent role the first run of a Source item takes when nothing else names one: its
+    /// assessment's, or one an earlier queued brief has come first.
+    pub intake_role: Option<String>,
     /// Standing orders that queue a brief on a schedule, once an operator authorizes them.
     pub sleepers: BTreeMap<String, Sleeper>,
     /// The account pools its Missions may draw from; `None` (the default) is every pool
@@ -1160,6 +1163,7 @@ impl RosterBuilder {
         }
         roster.reviews = self.reviews;
         roster.check_reviews()?;
+        roster.check_intake_roles()?;
         roster.charges = self
             .charges
             .into_iter()
@@ -1367,6 +1371,26 @@ impl Roster {
 
     /// Checks that what names a review policy names one that exists, and that a panel's seats name
     /// Agents and roles the global roster has: a review takes neither from a checkout's files.
+    /// Checks that each Operation's `intake_role` is a role of the roster.
+    fn check_intake_roles(&self) -> Result<(), RosterError> {
+        for operation in self.operations.values() {
+            if let Some(role) = &operation.intake_role
+                && self.role(role).is_err()
+            {
+                return Err(error(format!(
+                    "Operation {:?}: intake_role names role {role:?}, which does not exist; \
+                     the roles are {}",
+                    operation.id,
+                    self.roles()
+                        .map(|role| role.id.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )));
+            }
+        }
+        Ok(())
+    }
+
     fn check_reviews(&self) -> Result<(), RosterError> {
         for (name, policy) in &self.reviews {
             for seat in &policy.panel {
@@ -2264,6 +2288,15 @@ pub(crate) struct OperationDefinition {
     #[schema(title = "Source intake", section = "sources", advanced)]
     #[map(default)]
     intake: SourceIntake,
+    /// The Agent role the first run of a Source item takes when nothing else names one: the role
+    /// its assessment gives comes first, then one the queued brief already has. It must be a role
+    /// of the roster. Unset, the run takes none.
+    #[schema(
+        title = "Role an intake brief takes when nothing names one",
+        section = "sources",
+        advanced
+    )]
+    intake_role: Option<String>,
     /// Briefs queued on a schedule, once an operator authorizes them.
     #[schema(title = "Standing orders", section = "sources", advanced)]
     #[map(default)]
@@ -2311,6 +2344,7 @@ impl Default for OperationDefinition {
             scorecard: ScorecardDefinition::default(),
             sources: toml::Table::new(),
             intake: SourceIntake::default(),
+            intake_role: None,
             sleepers: BTreeMap::new(),
         }
     }
@@ -2490,6 +2524,7 @@ impl OperationDefinition {
             review: self.review,
             sources: self.sources,
             intake: self.intake,
+            intake_role: self.intake_role,
             sleepers: self.sleepers,
             pools: self.pools,
             overlays: self.overlays,

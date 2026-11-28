@@ -12,8 +12,8 @@ use crate::directorates::registry::bona_fides::{self, Provenance, proposal_prove
 use crate::directorates::registry::limits::BriefLimits;
 use crate::directorates::registry::mission_ids::{self, MissionBook, MissionEntry, MissionHandle};
 use crate::directorates::registry::sources::{
-    FinishedSourceBrief, Ingest, SOURCE_BRIEF_PREFIX, SourceItem, SourceStore, refresh_queued,
-    source_brief, source_entry, source_provenance,
+    FinishedSourceBrief, Ingest, IntakeRoles, SOURCE_BRIEF_PREFIX, SourceItem, SourceStore,
+    refresh_queued, source_brief, source_entry, source_provenance,
 };
 use crate::directorates::registry::store::{
     Brief, BriefSearch, BriefStore, FiledBrief, Lease, LeaseRecovery, MissionProposal, Reentry,
@@ -1158,14 +1158,16 @@ impl SourceStore for SqlRegistry {
         })
     }
 
-    fn ingest_source_item(
+    fn ingest_source_item_as(
         &self,
         operation: &str,
         provider: &str,
         item: &SourceItem,
         received_by: &str,
+        roles: IntakeRoles<'_>,
     ) -> io::Result<Ingest> {
-        let brief = source_brief(operation, provider, item, &self.current_limits().sources);
+        let mut brief = source_brief(operation, provider, item, &self.current_limits().sources);
+        brief.role = roles.first();
         brief.validate()?;
         self.write(|tx, revision| {
             let mut brief = brief.clone();
@@ -1190,7 +1192,7 @@ impl SourceStore for SqlRegistry {
                 "claimed" | "held" => return Ok(Ingest::InFlight),
                 _ => {}
             }
-            let outcome = refresh_queued(&mut brief, from_json(&row.text(1)?, "brief")?);
+            let outcome = refresh_queued(&mut brief, from_json(&row.text(1)?, "brief")?, roles);
             if outcome == Ingest::Updated {
                 tx.execute(
                     "UPDATE ai6_briefs SET brief = $2, provenance = $3, revision = $4 WHERE key = $1",

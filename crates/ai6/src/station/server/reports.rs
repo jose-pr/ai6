@@ -279,6 +279,8 @@ pub(super) struct AssessCall {
     pub reason: String,
     pub of: Option<String>,
     pub mission: Option<String>,
+    /// The role the first run of a Source item takes, with a `mission` assessment.
+    pub role: Option<String>,
     pub question: Option<String>,
     pub via: Option<String>,
     pub ask: Option<String>,
@@ -662,10 +664,17 @@ impl ReportDesk {
                     Ok(judgement) => judgement,
                     Err(reason) => return refused(reason),
                 };
+            if let Some(role) = call.role.as_deref() {
+                let known: Vec<String> = state.roster.roles().map(|role| role.id.clone()).collect();
+                if let Err(reason) = assessments::known_role(role, &known) {
+                    return refused(reason);
+                }
+            }
             let assessment = Assessment::new(&report.id, verdict, &call.reason, by, now)
                 .believed(call.credibility)
                 .prioritised(call.priority.as_deref())
-                .judged(judgement);
+                .judged(judgement)
+                .with_role(call.role.as_deref());
             let reads = |scope: &ReportScope| caller.reads_scope(scope);
             let context = Context {
                 settings: &caller.settings,

@@ -326,16 +326,48 @@ fn fingerprint_of(brief: &Brief) -> Option<&str> {
 /// [`Ingest::Unchanged`]; a changed one keeps the queued brief's creation time, priority,
 /// Agent and role, and is [`Ingest::Updated`]. A person's brief queued for the item (a Mission
 /// created with its issue) is never replaced by the item's text.
-pub(super) fn refresh_queued(brief: &mut Brief, existing: Brief) -> Ingest {
-    if fingerprint_of(&existing) == fingerprint_of(brief) || existing.source != brief.source {
+pub(super) fn refresh_queued(brief: &mut Brief, existing: Brief, roles: IntakeRoles<'_>) -> Ingest {
+    if existing.source != brief.source {
+        return Ingest::Unchanged;
+    }
+    // The role the assessment names, else the one the queued brief has, else the default.
+    let role = roles
+        .assessed
+        .map(str::to_owned)
+        .or_else(|| existing.role.clone())
+        .or_else(|| roles.default.map(str::to_owned));
+    if fingerprint_of(&existing) == fingerprint_of(brief) && existing.role == role {
         return Ingest::Unchanged;
     }
     brief.created = existing.created;
     brief.handle = existing.handle;
     brief.priority = existing.priority;
     brief.agent = existing.agent;
-    brief.role = existing.role;
+    brief.role = role;
     Ingest::Updated
+}
+
+/// The Agent role a queued Source item's brief takes: the one its assessment names, else the one
+/// the queued brief already has, else the Operation's default for intake.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct IntakeRoles<'a> {
+    /// What the `mission` assessment of the item names.
+    pub assessed: Option<&'a str>,
+    /// The Operation's `intake_role`, for an item nothing else names a role for.
+    pub default: Option<&'a str>,
+}
+
+impl<'a> IntakeRoles<'a> {
+    /// The roles of an item assessed as `assessed` in an Operation whose default is `default`.
+    pub fn new(assessed: Option<&'a str>, default: Option<&'a str>) -> Self {
+        Self { assessed, default }
+    }
+
+    /// The role of a brief no queued one is there for.
+    pub(crate) fn first(self) -> Option<String> {
+        self.assessed.or(self.default).map(str::to_owned)
+    }
 }
 
 /// `cursor`, an ISO 8601 time as a provider spells it (`2026-11-01T15:56:02Z`,
@@ -428,6 +460,29 @@ pub trait SourceStore {
         provider: &str,
         item: &SourceItem,
         received_by: &str,
+    ) -> io::Result<Ingest> {
+        self.ingest_source_item_as(
+            operation,
+            provider,
+            item,
+            received_by,
+            IntakeRoles::default(),
+        )
+    }
+
+    /// As [`ingest_source_item`](Self::ingest_source_item), the brief taking the role `roles`
+    /// chooses.
+    ///
+    /// # Errors
+    ///
+    /// As [`ingest_source_item`](Self::ingest_source_item).
+    fn ingest_source_item_as(
+        &self,
+        operation: &str,
+        provider: &str,
+        item: &SourceItem,
+        received_by: &str,
+        roles: IntakeRoles<'_>,
     ) -> io::Result<Ingest>;
 
     /// Lists finished source briefs whose outcome has not reached the source yet, each with
@@ -474,14 +529,16 @@ impl SourceStore for FileRegistry {
         self.write_atomic(&self.cursor_path(operation, provider), &bytes)
     }
 
-    fn ingest_source_item(
+    fn ingest_source_item_as(
         &self,
         operation: &str,
         provider: &str,
         item: &SourceItem,
         received_by: &str,
+        roles: IntakeRoles<'_>,
     ) -> io::Result<Ingest> {
         let mut brief = source_brief(operation, provider, item, &self.current_limits().sources);
+        brief.role = roles.first();
         brief.validate()?;
         let _lock = self.lock()?;
         brief.enter_as(self.allot_locked(&source_entry(operation, provider, item))?);
@@ -502,7 +559,7 @@ impl SourceStore for FileRegistry {
             Ok(bytes) => {
                 let existing: Brief = serde_json::from_slice(&bytes)
                     .map_err(|error| invalid_data(error.to_string()))?;
-                let outcome = refresh_queued(&mut brief, existing);
+                let outcome = refresh_queued(&mut brief, existing, roles);
                 if outcome == Ingest::Unchanged {
                     return Ok(outcome);
                 }

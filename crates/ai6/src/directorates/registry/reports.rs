@@ -370,6 +370,9 @@ pub struct ReportAssessment {
     /// When `awaiting` or `later` brings the Report back, as Unix seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub until: Option<f64>,
+    /// The Agent role a `mission` assessment of a Source item gives its first run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
 }
 
 impl ReportAssessment {
@@ -383,6 +386,7 @@ impl ReportAssessment {
             judgement: None,
             waits_for: None,
             until: None,
+            role: None,
         }
     }
 }

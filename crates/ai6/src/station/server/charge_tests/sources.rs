@@ -58,6 +58,7 @@ fn poll(state: &DaemonState, tag: &str, source: &Items) -> PollSummary {
         &Intake {
             mode: SourceIntake::Charge,
             notify: notify.as_deref(),
+            role: None,
         },
     )
     .unwrap()

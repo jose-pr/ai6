@@ -170,6 +170,13 @@ linking and creating only. An item becomes a Mission only when the charge, or a 
 it; the Operation's own `intake = "direct"` queues each item as a brief at once instead (default
 `charge`). See [Sources](missions.md#sources).
 
+An item's first run takes the Agent role its `mission` assessment names (`--role` on
+`ai6ctl reports assess`, `role` on the route and on the charge's `assess_report`), else the role a
+brief already queued for the item has, else the Operation's `intake_role`, else none. `intake_role`
+is a role of the roster and is checked when the roster loads; so is the role of an assessment, which
+is refused with the roles there are. A role goes only with a `mission` assessment. It is how role
+policy and deliverables bind to a first run from intake, instead of being pasted into amendment text.
+
 ```toml
 [operation.G.sources.github]
 repo = "jose-pr/ai6"

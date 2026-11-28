@@ -477,6 +477,83 @@ fn item_report(registry: &dyn RegistryBackend, id: &str) -> String {
 }
 
 #[tokio::test]
+async fn an_assessment_names_a_role_that_exists_and_only_for_a_mission_verdict() {
+    let fixture = fixture_with(CONTROL_ROLES).await;
+    fixture
+        .source
+        .put(
+            ConfigRecord::Role,
+            &ConfigScope::Global,
+            "case-officer",
+            &json!({"purpose": "Runs a Mission end to end.", "policy": "Report to M."}),
+        )
+        .unwrap();
+    let operator = fixture.served.operator.clone();
+    let registry = &fixture.served.registry;
+    let (first, second, third) = (
+        item_report(registry, "o/r#1"),
+        item_report(registry, "o/r#2"),
+        item_report(registry, "o/r#3"),
+    );
+    let path = |id: &str| format!("/v1/reports/{id}/assessment");
+
+    // A role the roster lacks is refused, naming the ones it has; nothing is assessed.
+    let (status, said) = fixture
+        .call(
+            &operator,
+            Method::PUT,
+            &path(&first),
+            Some(json!({"assessment": "mission", "reason": "work", "role": "nobody"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{said}");
+    assert!(
+        said["error"].as_str().unwrap().contains("case-officer"),
+        "the refusal names the roles there are: {said}"
+    );
+    assert_eq!(
+        registry.report(&first).unwrap().unwrap().state.as_str(),
+        "open"
+    );
+
+    // A role goes only with a mission.
+    let (status, said) = fixture
+        .call(
+            &operator,
+            Method::PUT,
+            &path(&second),
+            Some(json!({"assessment": "no_action", "reason": "noise", "role": "case-officer"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{said}");
+    assert!(
+        said["error"]
+            .as_str()
+            .unwrap()
+            .contains("only with a mission"),
+        "{said}"
+    );
+
+    // A role of the roster is kept on the assessment, for the Station that queues the brief.
+    let (status, said) = fixture
+        .call(
+            &operator,
+            Method::PUT,
+            &path(&third),
+            Some(json!({"assessment": "mission", "reason": "work", "role": "case-officer"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{said}");
+    let kept = registry.report(&third).unwrap().unwrap();
+    assert_eq!(
+        kept.assessment
+            .and_then(|assessment| assessment.role)
+            .as_deref(),
+        Some("case-officer")
+    );
+}
+
+#[tokio::test]
 async fn a_person_with_mission_control_decides_a_source_item_once_and_it_is_audited() {
     let fixture = fixture_with(CONTROL_ROLES).await;
     let (operator, viewer) = (

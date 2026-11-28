@@ -58,6 +58,10 @@ struct AssessArgs {
     /// For mission: the Mission proposed or amended for it, by UID or handle. A Source item
     /// needs none: it is queued as a brief.
     mission: Option<String>,
+    /// For mission, of a Source item: the Agent role its first run takes, one of the roster's,
+    /// so its policy and deliverables bind from the start. Left out, the Operation's
+    /// `intake_role` applies, if it has one.
+    role: Option<String>,
     /// For awaiting: what you asked. For decision: what the people who may sign are asked.
     question: Option<String>,
     /// For awaiting: who or what you asked (a Cable channel, a tracker item, a person).
@@ -276,6 +280,7 @@ impl CableTools {
             reason: args.reason,
             of: args.of,
             mission: args.mission,
+            role: args.role,
             question: args.question,
             via: args.via,
             ask: args.ask,

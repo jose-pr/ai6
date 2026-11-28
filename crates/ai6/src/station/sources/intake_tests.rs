@@ -114,6 +114,7 @@ fn a_new_item_is_a_report_the_charge_is_told_of_and_no_brief_exists() {
     let intake = Intake {
         mode: SourceIntake::Charge,
         notify: Some(&notify),
+        role: None,
     };
     let source = Items::of(vec![item("o/r#1", "It fails.")]);
 
@@ -150,6 +151,7 @@ fn a_changed_item_reaches_the_charge_again_and_an_unchanged_one_does_not() {
     let intake = Intake {
         mode: SourceIntake::Charge,
         notify: Some(&notify),
+        role: None,
     };
     let source = Items::of(vec![item("o/r#1", "It fails.")]);
     poll(&registry, &source, &intake);
@@ -180,6 +182,99 @@ fn a_changed_item_reaches_the_charge_again_and_an_unchanged_one_does_not() {
     let keys: BTreeSet<_> = told_now.iter().map(|(_, _, key)| key.clone()).collect();
     assert_eq!(keys.len(), 3, "each version is its own Cable");
     assert!(registry.list_new().unwrap().is_empty());
+}
+
+/// Decides the item Report `report` a `mission`, naming `role` when given.
+fn decide_mission(registry: &FileRegistry, report: &str, role: Option<&str>) {
+    use crate::directorates::registry::assessments::{Assessment, Context, Verdict, assess};
+    let settings = ReportSettings::default();
+    let own = ReportScope::Operation("G".to_owned());
+    let reads = |scope: &ReportScope| *scope == own;
+    assess(
+        registry,
+        &Assessment::new(
+            report,
+            Verdict::Mission { mission: None },
+            "it is work",
+            "charge:operation:G",
+            unix_seconds() as f64,
+        )
+        .with_role(role),
+        &Context::within(&settings, &reads),
+    )
+    .unwrap();
+}
+
+fn queued_role(registry: &FileRegistry, item: &str) -> Option<String> {
+    let found: Vec<_> = registry
+        .list_new()
+        .unwrap()
+        .into_iter()
+        .filter(|brief| brief.id == item)
+        .collect();
+    assert_eq!(found.len(), 1, "{item} is queued once: {found:?}");
+    found[0].role.clone()
+}
+
+#[test]
+fn an_assessed_item_queues_with_the_assessments_role_else_the_operations_intake_role() {
+    let state = tempfile::tempdir().unwrap();
+    let registry = FileRegistry::open(state.path());
+    let intake = Intake {
+        mode: SourceIntake::Charge,
+        notify: None,
+        role: Some("analyst"),
+    };
+    let source = Items::of(vec![item("o/r#1", "Named."), item("o/r#2", "Not named.")]);
+    poll(&registry, &source, &intake);
+    let found = reports(&registry);
+    let id = |item: &str| {
+        found
+            .iter()
+            .find(|report| report.item.as_ref().is_some_and(|i| i.id == item))
+            .unwrap()
+            .id
+            .clone()
+    };
+    decide_mission(&registry, &id("o/r#1"), Some("reviewer"));
+    decide_mission(&registry, &id("o/r#2"), None);
+    poll(&registry, &source, &intake);
+    assert_eq!(
+        queued_role(&registry, "o/r#1").as_deref(),
+        Some("reviewer"),
+        "the assessment's role first"
+    );
+    assert_eq!(
+        queued_role(&registry, "o/r#2").as_deref(),
+        Some("analyst"),
+        "else the Operation's"
+    );
+
+    // A role the queued brief has stays over the default, when the item changes.
+    source.set(vec![
+        item("o/r#1", "Named, and edited."),
+        item("o/r#2", "Not named, and edited."),
+    ]);
+    let other = Intake {
+        mode: SourceIntake::Charge,
+        notify: None,
+        role: Some("someone-else"),
+    };
+    poll(&registry, &source, &other);
+    assert_eq!(queued_role(&registry, "o/r#1").as_deref(), Some("reviewer"));
+    assert_eq!(queued_role(&registry, "o/r#2").as_deref(), Some("analyst"));
+
+    // With neither, the run takes none.
+    let plain = Items::of(vec![item("o/r#3", "Neither.")]);
+    let bare = Intake::held();
+    poll(&registry, &plain, &bare);
+    let three = reports(&registry)
+        .into_iter()
+        .find(|report| report.item.as_ref().is_some_and(|i| i.id == "o/r#3"))
+        .unwrap();
+    decide_mission(&registry, &three.id, None);
+    poll(&registry, &plain, &bare);
+    assert_eq!(queued_role(&registry, "o/r#3"), None);
 }
 
 #[test]
@@ -240,6 +335,7 @@ fn a_mission_decision_is_queued_by_the_desk_and_tied_to_its_report() {
     let intake = Intake {
         mode: SourceIntake::Charge,
         notify: Some(&notify),
+        role: None,
     };
     let source = Items::of(vec![item("o/r#1", "It fails.")]);
     poll(&registry, &source, &intake);
@@ -334,6 +430,7 @@ fn a_deferred_item_is_told_to_the_charge_again_when_it_is_due() {
     let intake = Intake {
         mode: SourceIntake::Charge,
         notify: Some(&notify),
+        role: None,
     };
     let source = Items::of(vec![item("o/r#1", "After the release.")]);
     poll(&registry, &source, &intake);

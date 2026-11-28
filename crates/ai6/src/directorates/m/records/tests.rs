@@ -161,6 +161,7 @@ fn full_example(record: ConfigRecord) -> Value {
             operation["private"] = json!(true);
             operation["overlays"] = json!(["engineering"]);
             operation["intake"] = json!("direct");
+            operation["intake_role"] = json!("case-officer");
             operation["scorecard"] = json!({
                 "window_days": 7,
                 "small_sample": 3,

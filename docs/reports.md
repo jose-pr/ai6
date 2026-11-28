@@ -135,6 +135,7 @@ ai6ctl reports list --scope operation:coqui [--state open]
 ai6ctl reports list --mission coqui-41
 ai6ctl reports show report-0f3c...
 ai6ctl reports assess report-0f3c... duplicate --of coqui-41 --reason "the same fault"
+ai6ctl reports assess report-0f3c... mission --role case-officer --reason "a real fault"
 ai6ctl reports assess report-0f3c... awaiting --question "Which branch?" --wait-seconds 86400 \
     --reason "cannot tell" --likelihood likely --confidence moderate
 ai6ctl reports reopen report-0f3c... --reason "answered: main"
@@ -142,6 +143,12 @@ ai6ctl reports source agent:007
 ```
 
 ## Assessing
+
+A `mission` assessment of a Source item may name the Agent `role` the item's first run takes (`--role`
+on `ai6ctl reports assess`, `role` in the body of the route, `role` on the charge's `assess_report`).
+It must be a role of the roster, and is refused with the roles there are when it is not; it is refused
+with any other assessment. When the assessment names none, the role a queued brief already has stands,
+then the Operation's `intake_role` ([Operations](operations.md#sources)).
 
 An open Report is assessed once, by the Operation's charge with `assess_report` or by a person with
 `ai6ctl reports assess` or the route above. Every assessment is audited before it is recorded, kept
