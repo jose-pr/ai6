@@ -277,6 +277,9 @@ class OoMarkdown extends StatelessWidget {
   /// [text] as Markdown, with this document's references and links.
   Widget _inline(BuildContext context, String text, {bool soft = false}) =>
       AgentMarkdown(
+        // The Markdown body parses again when its text or style changes, not its syntaxes; the
+        // references arrive after the first frame, so a changed set builds the widget anew.
+        key: ValueKey((references.length, trackers.length)),
         text: revealInvisible(text),
         inlineSyntaxes: [
           if (references.isNotEmpty)

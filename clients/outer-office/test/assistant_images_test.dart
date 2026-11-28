@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 // ignore: deprecated_member_use
-import 'package:flutter/material.dart' as flutter show TextField;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:outer_office/assistant/assistant_controller.dart';
@@ -107,10 +106,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(viewer, findsNothing);
 
-      await tester.enterText(
-        find.byType(flutter.TextField),
-        'What is wrong here?',
-      );
+      await tester.enterText(find.byType(TextField), 'What is wrong here?');
       await tester.tap(find.byTooltip('Send'));
       await tester.pumpAndSettle();
       final sent = channel.sent.last;
@@ -135,7 +131,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Remove Image 1'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(flutter.TextField), 'Never mind.');
+    await tester.enterText(find.byType(TextField), 'Never mind.');
     await tester.tap(find.byTooltip('Send'));
     await tester.pumpAndSettle();
     expect(channel.sent.last.containsKey('images'), isFalse);

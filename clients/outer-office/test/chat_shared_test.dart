@@ -5,7 +5,6 @@ import 'package:coqui_acp_chat/coqui_acp_chat.dart' show MessageRole;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart'
     show ChatTranscript, Composer, MessageBox;
 // ignore: deprecated_member_use
-import 'package:flutter/material.dart' as flutter show IconButton, TextField;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
@@ -185,8 +184,7 @@ void main() {
         ]);
         expect(find.byType(ChatTranscript), findsOneWidget);
         expect(find.byType(Composer), findsOneWidget);
-        expect(find.byType(flutter.TextField), findsOneWidget);
-        expect(find.byType(TextField), findsNothing);
+        expect(find.byType(TextField), findsOneWidget);
         expect(
           find.ancestor(
             of: find.text('Which Stations are busy?'),
@@ -206,7 +204,7 @@ void main() {
         expect(find.byTooltip('Stop'), findsOneWidget);
         expect(find.byTooltip('Send'), findsNothing);
         expect(find.byTooltip('Queue'), findsNothing);
-        await tester.enterText(find.byType(flutter.TextField), 'and G?');
+        await tester.enterText(find.byType(TextField), 'and G?');
         await tester.sendKeyEvent(LogicalKeyboardKey.enter);
         await tester.pump();
         expect(
@@ -218,9 +216,7 @@ void main() {
         expect(channel.sent.last, {'type': 'interrupt'});
         expect(
           tester
-              .widget<flutter.IconButton>(
-                find.byKey(const Key('composer-stop')),
-              )
+              .widget<IconButton>(find.byKey(const Key('composer-stop')))
               .onPressed,
           isNull,
           reason: 'one interrupt is enough',
@@ -248,7 +244,7 @@ void main() {
       await tester.drag(find.byType(ChatTranscript), const Offset(0, 2000));
       await tester.pumpAndSettle();
       expect(scroll.position.pixels, lessThan(scroll.position.maxScrollExtent));
-      await tester.enterText(find.byType(flutter.TextField), 'now');
+      await tester.enterText(find.byType(TextField), 'now');
       await tester.tap(find.byTooltip('Send'));
       await tester.pumpAndSettle();
       expect(channel.sent.last['text'], 'now');

@@ -11,7 +11,6 @@ import 'package:outer_office/assistant/chat_talk.dart';
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart'
     show ChatTranscript, Composer, MessageBox, PermissionCard, WorkingRow;
 // ignore: deprecated_member_use
-import 'package:flutter/material.dart' as flutter show IconButton, TextField;
 import 'package:outer_office/assistant/chat_parts.dart';
 import 'package:outer_office/assistant/turns.dart';
 import 'package:outer_office/charges/attach_view.dart';
@@ -255,7 +254,7 @@ Future<FakeAttach> _attach(
 /// The box of the shared composer.
 Finder get _field => find.descendant(
   of: find.byType(Composer),
-  matching: find.byType(flutter.TextField),
+  matching: find.byType(TextField),
 );
 
 Future<void> _say(WidgetTester tester, String words) async {
@@ -446,9 +445,7 @@ void main() {
         await tester.enterText(_field, 'hi');
         expect(
           tester
-              .widget<flutter.IconButton>(
-                find.byKey(const Key('composer-send')),
-              )
+              .widget<IconButton>(find.byKey(const Key('composer-send')))
               .onPressed,
           isNull,
         );
@@ -889,10 +886,7 @@ void main() {
         expect(find.byType(AttachView), findsOneWidget);
         expect(find.text('Hello from G.'), findsOneWidget);
         // Her conversation is under it, out of view, and her draft is not in the Run's box.
-        expect(
-          find.widgetWithText(flutter.TextField, 'half a thought'),
-          findsNothing,
-        );
+        expect(find.widgetWithText(TextField, 'half a thought'), findsNothing);
         expect(find.byTooltip('New conversation'), findsNothing);
 
         await choose(tester, 'moneypenny');
@@ -900,7 +894,7 @@ void main() {
         expect(sockets.single.closed, isTrue);
         expect(find.byType(AttachView), findsNothing);
         expect(
-          find.widgetWithText(flutter.TextField, 'half a thought'),
+          find.widgetWithText(TextField, 'half a thought'),
           findsOneWidget,
         );
         expect(chat.message.text, 'half a thought');
@@ -964,7 +958,7 @@ void main() {
 }
 
 String _textOf(WidgetTester tester, Finder field) =>
-    tester.widget<flutter.TextField>(field).controller!.text;
+    tester.widget<TextField>(field).controller!.text;
 
 /// Lets what the fake socket sent arrive and the page settle: a Run taking a turn shows
 /// a progress bar that never stops, so `pumpAndSettle` would not return.

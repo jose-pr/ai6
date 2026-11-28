@@ -1,6 +1,5 @@
 import 'package:flutter/services.dart';
 // ignore: deprecated_member_use
-import 'package:flutter/material.dart' as flutter show TextField;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatTranscript;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
@@ -222,7 +221,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(chat.scopeMode, ChatScopeMode.none);
       expect(find.text('All accessible Operations'), findsOneWidget);
-      await tester.enterText(find.byType(flutter.TextField).last, 'hello');
+      await tester.enterText(find.byType(TextField).last, 'hello');
       await tester.tap(find.byTooltip('Send'));
       await tester.pump();
       expect(channel.sent.last['route'], isNull);
@@ -244,7 +243,7 @@ void main() {
       await tester.tap(find.text('Operation · G'));
       await tester.pumpAndSettle();
       expect(find.text('Operation · G'), findsOneWidget);
-      await tester.enterText(find.byType(flutter.TextField).last, 'status?');
+      await tester.enterText(find.byType(TextField).last, 'status?');
       await tester.tap(find.byTooltip('Send'));
       await tester.pump();
       expect(channel.sent.last['route'], {
@@ -284,10 +283,7 @@ void main() {
         of: find.byType(ChatTranscript),
         matching: find.byType(Scrollable),
       );
-      await tester.enterText(
-        find.byType(flutter.TextField).last,
-        'half a thought',
-      );
+      await tester.enterText(find.byType(TextField).last, 'half a thought');
       chat.composer.requestFocus();
       await tester.pump();
       await tester.drag(transcript.first, const Offset(0, 300));
@@ -332,7 +328,7 @@ void main() {
 
     final sources = find.byKey(const ValueKey('sources-checked'));
     final scope = find.byKey(const ValueKey('chat-scope'));
-    final composer = find.byType(flutter.TextField).last;
+    final composer = find.byType(TextField).last;
     // Start on the sources row.
     final row = tester.element(find.text('Sources checked (3)'));
     Focus.of(row).requestFocus();

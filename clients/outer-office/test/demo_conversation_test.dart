@@ -1,7 +1,6 @@
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show ChatTranscript;
 import 'package:flutter/services.dart';
 // ignore: deprecated_member_use
-import 'package:flutter/material.dart' as flutter show TextField;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart';
@@ -26,7 +25,7 @@ Future<void> askMoneypenny(WidgetTester tester, String text) async {
   await tester.enterText(
     find.descendant(
       of: find.byType(ChatPanel),
-      matching: find.byType(flutter.TextField),
+      matching: find.byType(TextField),
     ),
     text,
   );
@@ -108,7 +107,7 @@ void main() {
 
     // Anything else gets the fallback.
     await tester.enterText(
-      find.descendant(of: chat, matching: find.byType(flutter.TextField)),
+      find.descendant(of: chat, matching: find.byType(TextField)),
       'Deploy to production',
     );
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);

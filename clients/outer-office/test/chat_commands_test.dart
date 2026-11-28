@@ -1,5 +1,4 @@
 // ignore: deprecated_member_use
-import 'package:flutter/material.dart' as flutter show ListTile, TextField;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
@@ -62,7 +61,7 @@ panel(WidgetTester tester) async {
   return (channel: channel, commands: commands, text: text);
 }
 
-Finder get _field => find.byType(flutter.TextField);
+Finder get _field => find.byType(TextField);
 Finder _row(String name) => find.byKey(ValueKey('command $name'));
 
 void main() {
@@ -212,9 +211,7 @@ void main() {
       await tester.enterText(_field, '/c');
       await tester.pumpAndSettle();
       final order = [
-        for (final tile in tester.widgetList<flutter.ListTile>(
-          find.byType(flutter.ListTile),
-        ))
+        for (final tile in tester.widgetList<ListTile>(find.byType(ListTile)))
           (tile.key! as ValueKey<String>).value,
       ];
       expect(order, ['command charts', 'command compact']);

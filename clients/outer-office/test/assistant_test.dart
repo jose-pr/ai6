@@ -6,7 +6,6 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/services.dart' show SystemChannels;
 import 'package:flutter_svg/flutter_svg.dart';
 // ignore: deprecated_member_use
-import 'package:flutter/material.dart' as flutter show IconButton, TextField;
 import 'package:coqui_acp_chat_ui/coqui_acp_chat_ui.dart' show WorkingRow;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
@@ -615,10 +614,7 @@ void main() {
       reason: 'only her messages carry her avatar',
     );
 
-    await tester.enterText(
-      find.byType(flutter.TextField),
-      'Which Stations are busy?',
-    );
+    await tester.enterText(find.byType(TextField), 'Which Stations are busy?');
     await tester.tap(find.byTooltip('Send'));
     await tester.pump();
     expect(channel.sent.last, {
@@ -784,7 +780,7 @@ void main() {
       expect(find.text('Stopping…'), findsOneWidget);
       expect(
         tester
-            .widget<flutter.IconButton>(find.byKey(const Key('composer-stop')))
+            .widget<IconButton>(find.byKey(const Key('composer-stop')))
             .onPressed,
         isNull,
         reason: 'one interrupt is enough',
