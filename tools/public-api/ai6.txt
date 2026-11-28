@@ -1356,6 +1356,7 @@ pub ai6::directorates::m::config::UnexRecord::proxy_lookup_by: alloc::string::St
 pub ai6::directorates::m::config::UnexRecord::proxy_user_header: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::config::UnexRecord::route_text_bytes: core::option::Option<u64>
 pub ai6::directorates::m::config::UnexRecord::search: ai6::directorates::m::unex_limits::UnexSearchLimits
+pub ai6::directorates::m::config::UnexRecord::secret_fields: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::config::UnexRecord::sign_in_policy: core::option::Option<ai6::directorates::m::config::SignInPolicyProvider>
 pub ai6::directorates::m::config::UnexRecord::text: ai6::directorates::m::unex_limits::TextLimits
 pub ai6::directorates::m::config::UnexRecord::timeline: ai6::directorates::m::unex_limits::UnexTimelineLimits
@@ -2037,6 +2038,17 @@ pub const ai6::directorates::m::promotion::DEFAULT_00_MISSIONS: u64
 pub const ai6::directorates::m::promotion::DEFAULT_00_QUIET_DAYS: u64
 pub const ai6::directorates::m::promotion::DEFAULT_FIELD_MISSIONS: u64
 pub const ai6::directorates::m::promotion::DEFAULT_FIELD_QUIET_DAYS: u64
+pub mod ai6::directorates::m::provider_secrets
+pub use ai6::directorates::m::provider_secrets::Zeroizing
+pub struct ai6::directorates::m::provider_secrets::SecretBearing<'a>
+pub ai6::directorates::m::provider_secrets::SecretBearing::listed: &'a [alloc::string::String]
+pub ai6::directorates::m::provider_secrets::SecretBearing::schema: core::option::Option<&'a serde_json::value::Value>
+impl ai6::directorates::m::provider_secrets::SecretBearing<'_>
+pub fn ai6::directorates::m::provider_secrets::SecretBearing<'_>::keep_redacted(&self, &mut serde_json::map::Map<alloc::string::String, serde_json::value::Value>, &serde_json::map::Map<alloc::string::String, serde_json::value::Value>)
+pub fn ai6::directorates::m::provider_secrets::SecretBearing<'_>::literals(&self, &serde_json::map::Map<alloc::string::String, serde_json::value::Value>) -> alloc::collections::btree::set::BTreeSet<alloc::string::String>
+pub fn ai6::directorates::m::provider_secrets::SecretBearing<'_>::redact(&self, &mut serde_json::map::Map<alloc::string::String, serde_json::value::Value>)
+pub fn ai6::directorates::m::provider_secrets::SecretBearing<'_>::resolve(&self, &mut serde_json::map::Map<alloc::string::String, serde_json::value::Value>, &dyn core::ops::function::Fn(&ai6::bootstrap::SecretRef) -> core::result::Result<zeroize::Zeroizing<alloc::string::String>, alloc::string::String>) -> core::result::Result<(), alloc::string::String>
+pub const ai6::directorates::m::provider_secrets::REDACTED: &str
 pub mod ai6::directorates::m::records
 #[non_exhaustive] pub struct ai6::directorates::m::records::RecordForm
 pub ai6::directorates::m::records::RecordForm::form: serde_json::value::Value
@@ -15321,6 +15333,7 @@ pub ai6::UnexRecord::proxy_lookup_by: alloc::string::String
 pub ai6::UnexRecord::proxy_user_header: core::option::Option<alloc::string::String>
 pub ai6::UnexRecord::route_text_bytes: core::option::Option<u64>
 pub ai6::UnexRecord::search: ai6::directorates::m::unex_limits::UnexSearchLimits
+pub ai6::UnexRecord::secret_fields: alloc::vec::Vec<alloc::string::String>
 pub ai6::UnexRecord::sign_in_policy: core::option::Option<ai6::directorates::m::config::SignInPolicyProvider>
 pub ai6::UnexRecord::text: ai6::directorates::m::unex_limits::TextLimits
 pub ai6::UnexRecord::timeline: ai6::directorates::m::unex_limits::UnexTimelineLimits

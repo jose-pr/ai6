@@ -46,6 +46,29 @@ bursts: a person found or an action granted 5 s, "no such person" or a denial 1 
 grant can pass for up to the first; passwords and keys are always checked at the provider (a personal key's scopes and its person's grants, at every use).
 A longer lifetime is reported at start.
 
+### Credentials in a provider's configuration
+
+A field that holds a credential, such as the LDAP provider's `bind_password`, takes a secret
+reference instead of the value, so the shared configuration holds none:
+
+```toml
+directory = "coqui_access_ldap"
+secret_fields = ["bind_password"]        # fields besides those a provider's schema marks sensitive
+directory_config = { url = "ldaps://dc.example", bind = "cn=svc", bind_password = { provider = "file", key = "/run/secrets/ldap-bind" } }
+```
+
+The reference is `{ provider = "file", key = "..." }` (also `env`, and any loaded secret provider) or
+`{ secret = "name" }` for a `[secret.<name>]`. The gateway reads it when it builds the provider and
+holds the value in memory only, wiped as it is handed over; it never writes it back. A secret kept
+in the Registry is sealed to Stations and the gateway is none, so name another provider. Which fields
+are credentials is the provider's own schema (a field it marks `x-sensitive`) and the `unex` record's
+`secret_fields`; no name is assumed, so a field neither names is read as written. A literal in such a
+field still works and is reported as a weakening that names the reference as the fix.
+
+Wherever the `unex` record is shown (`GET /v1/user/roster/unex`, so `ai6ctl` and Outer Office) a credential
+literal in `secret_fields` reads `<redacted>` and a reference is shown as it is. A record read and written
+back keeps the stored literal where it sends `<redacted>`.
+
 ## Several sign-in providers
 
 The `unex` record's `authenticators` is an ordered list; each entry is a provider and its
