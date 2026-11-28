@@ -3487,9 +3487,8 @@ mod tests {
     /// A session id that differs with no clear asked for is still the wrong Run.
     #[test]
     fn another_session_without_a_clear_is_still_refused() {
-        let stream = concat!(
-            "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"claude-session-99\"}\n",
-        );
+        let stream =
+            "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"claude-session-99\"}\n";
         let (run, _writes) = resumed_on(stream);
         let error = loop {
             match run.next_event(400) {
