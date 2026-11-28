@@ -842,7 +842,7 @@ impl AcpRun {
         let id = self.run.new_session().map_err(|error| {
             ProviderError::new(
                 Status::GUATIAO_ERR_UNSUPPORTED,
-                format!("the agent opened no new session: {error}"),
+                &format!("the agent opened no new session: {error}"),
             )
         })?;
         let mut state = self
@@ -881,7 +881,7 @@ impl AgentSession for AcpRun {
         let mut text = message.text;
         if !self.events_capability {
             match SessionCommand::parse(&text)
-                .map_err(|why| ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, why))?
+                .map_err(|why| ProviderError::new(Status::GUATIAO_ERR_BAD_VALUE, &why))?
             {
                 Some(SessionCommand::Clear) => return self.clear(),
                 Some(SessionCommand::Compact { focus }) => text = self.compaction(focus)?,
