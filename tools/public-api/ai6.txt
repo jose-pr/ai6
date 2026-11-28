@@ -3640,6 +3640,8 @@ pub ai6::directorates::q::sealing::VaultError::NoScopeKey(alloc::string::String)
 pub ai6::directorates::q::sealing::VaultError::NotFound
 pub ai6::directorates::q::sealing::VaultError::NotNamed
 pub ai6::directorates::q::sealing::VaultError::Registry(core::io::error::Error)
+pub ai6::directorates::q::sealing::VaultError::Rollback(alloc::string::String)
+pub ai6::directorates::q::sealing::VaultError::Rotating(alloc::string::String)
 pub ai6::directorates::q::sealing::VaultError::Sealing
 pub ai6::directorates::q::sealing::VaultError::Stale
 pub ai6::directorates::q::sealing::VaultError::Unreadable
@@ -3656,6 +3658,10 @@ pub fn ai6::directorates::q::sealing::VaultError::from(core::io::error::Error) -
 impl core::error::Error for ai6::directorates::q::sealing::VaultError
 impl core::fmt::Display for ai6::directorates::q::sealing::VaultError
 pub fn ai6::directorates::q::sealing::VaultError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct ai6::directorates::q::sealing::Marks
+impl ai6::directorates::q::sealing::Marks
+pub fn ai6::directorates::q::sealing::Marks::in_memory() -> Self
+pub fn ai6::directorates::q::sealing::Marks::open(&std::path::Path) -> core::io::error::Result<Self>
 pub struct ai6::directorates::q::sealing::Opened
 pub ai6::directorates::q::sealing::Opened::revision: u64
 pub ai6::directorates::q::sealing::Opened::stations: alloc::collections::btree::set::BTreeSet<alloc::string::String>
@@ -3675,6 +3681,7 @@ pub fn ai6::directorates::q::sealing::Recipient::named(impl core::convert::Into<
 pub fn ai6::directorates::q::sealing::Recipient::pinned(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn ai6::directorates::q::sealing::Recipient::station(&self) -> &str
 pub struct ai6::directorates::q::sealing::RegistrySecretFields
+pub ai6::directorates::q::sealing::RegistrySecretFields::pins: core::option::Option<alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>>
 pub ai6::directorates::q::sealing::RegistrySecretFields::scope: core::option::Option<alloc::string::String>
 pub ai6::directorates::q::sealing::RegistrySecretFields::stations: core::option::Option<alloc::vec::Vec<alloc::string::String>>
 pub struct ai6::directorates::q::sealing::RegistrySecrets
@@ -3736,6 +3743,7 @@ pub fn ai6::directorates::q::sealing::Vault::remove_station(&self, &str, &str, f
 pub fn ai6::directorates::q::sealing::Vault::replace(&self, &str, &str, u64, f64) -> core::result::Result<u64, ai6::directorates::q::sealing::VaultError>
 pub fn ai6::directorates::q::sealing::Vault::seal_to(&self, &str, &str, &[ai6::directorates::q::sealing::Recipient], ai6::directorates::registry::sealed::SealedExpect, f64) -> core::result::Result<u64, ai6::directorates::q::sealing::VaultError>
 pub fn ai6::directorates::q::sealing::Vault::station(&self) -> &str
+pub fn ai6::directorates::q::sealing::Vault::with_marks(self, alloc::sync::Arc<ai6::directorates::q::sealing::Marks>) -> Self
 impl ai6::directorates::q::sealing::Vault
 pub fn ai6::directorates::q::sealing::Vault::finish_rotation(&self, &ai6::directorates::q::sealing::Scope, f64) -> core::result::Result<(), ai6::directorates::q::sealing::VaultError>
 pub fn ai6::directorates::q::sealing::Vault::grant_station(&self, &ai6::directorates::q::sealing::Scope, &ai6::directorates::q::sealing::Recipient, f64) -> core::result::Result<ai6::directorates::q::sealing::ScopeKeyInfo, ai6::directorates::q::sealing::VaultError>
@@ -3750,6 +3758,7 @@ pub fn ai6::directorates::q::sealing::Vault::value_infos(&self) -> core::result:
 pub fn ai6::directorates::q::sealing::Vault::write_value(&self, &str, &ai6::directorates::q::sealing::Scope, &str, ai6::directorates::registry::sealed::SealedExpect, f64) -> core::result::Result<u64, ai6::directorates::q::sealing::VaultError>
 impl core::fmt::Debug for ai6::directorates::q::sealing::Vault
 pub fn ai6::directorates::q::sealing::Vault::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub const ai6::directorates::q::sealing::MARKS_FILE: &str
 pub const ai6::directorates::q::sealing::REGISTRY_PROVIDER: &str
 pub const ai6::directorates::q::sealing::SEALING_KEY_FILE: &str
 pub mod ai6::directorates::q::secret_kind
