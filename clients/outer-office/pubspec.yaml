@@ -15,17 +15,17 @@ dependencies:
   coqui_acp:
     git:
       url: https://github.com/Boriken-Dev/coqui-acp.git
-      ref: f019375eef0b8ca13e29eccb36a7e8b3108c3c8d
+      ref: 171e08ec92af4044377bcae77e9fb6aa391ca499
       path: bindings/dart/coqui_acp
   coqui_acp_chat:
     git:
       url: https://github.com/Boriken-Dev/coqui-acp.git
-      ref: f019375eef0b8ca13e29eccb36a7e8b3108c3c8d
+      ref: 171e08ec92af4044377bcae77e9fb6aa391ca499
       path: bindings/dart/coqui_acp_chat
   coqui_acp_chat_ui:
     git:
       url: https://github.com/Boriken-Dev/coqui-acp.git
-      ref: f019375eef0b8ca13e29eccb36a7e8b3108c3c8d
+      ref: 171e08ec92af4044377bcae77e9fb6aa391ca499
       path: bindings/dart/coqui_acp_chat_ui
   # Reads the frontmatter of a document by the Agent Overlay Specification's rule, which refuses
   # anchors and aliases.
@@ -39,17 +39,17 @@ dependencies:
   guatiao:
     git:
       url: https://github.com/Boriken-Dev/guatiao.git
-      ref: 0350bae7fef4cef2aa46ce73f1ef6be15983d83b
+      ref: 1cf0f67f0354d18fbc5684a9a36177afbb20a0fa
       path: bindings/dart/guatiao
   guatiao_intake:
     git:
       url: https://github.com/Boriken-Dev/guatiao.git
-      ref: 0350bae7fef4cef2aa46ce73f1ef6be15983d83b
+      ref: 1cf0f67f0354d18fbc5684a9a36177afbb20a0fa
       path: bindings/dart/guatiao_intake
   guatiao_flutter:
     git:
       url: https://github.com/Boriken-Dev/guatiao.git
-      ref: 0350bae7fef4cef2aa46ce73f1ef6be15983d83b
+      ref: 1cf0f67f0354d18fbc5684a9a36177afbb20a0fa
       path: bindings/dart/guatiao_flutter
   http: ^1.6.0
   # Draws the provisioning link of a one-time code app as a QR code.
@@ -73,12 +73,12 @@ dependency_overrides:
   guatiao:
     git:
       url: https://github.com/Boriken-Dev/guatiao.git
-      ref: 0350bae7fef4cef2aa46ce73f1ef6be15983d83b
+      ref: 1cf0f67f0354d18fbc5684a9a36177afbb20a0fa
       path: bindings/dart/guatiao
   guatiao_intake:
     git:
       url: https://github.com/Boriken-Dev/guatiao.git
-      ref: 0350bae7fef4cef2aa46ce73f1ef6be15983d83b
+      ref: 1cf0f67f0354d18fbc5684a9a36177afbb20a0fa
       path: bindings/dart/guatiao_intake
 
 dev_dependencies:

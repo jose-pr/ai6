@@ -69,8 +69,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp"
-      ref: f019375eef0b8ca13e29eccb36a7e8b3108c3c8d
-      resolved-ref: f019375eef0b8ca13e29eccb36a7e8b3108c3c8d
+      ref: "171e08ec92af4044377bcae77e9fb6aa391ca499"
+      resolved-ref: "171e08ec92af4044377bcae77e9fb6aa391ca499"
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -78,8 +78,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp_chat"
-      ref: f019375eef0b8ca13e29eccb36a7e8b3108c3c8d
-      resolved-ref: f019375eef0b8ca13e29eccb36a7e8b3108c3c8d
+      ref: "171e08ec92af4044377bcae77e9fb6aa391ca499"
+      resolved-ref: "171e08ec92af4044377bcae77e9fb6aa391ca499"
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -87,8 +87,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/coqui_acp_chat_ui"
-      ref: f019375eef0b8ca13e29eccb36a7e8b3108c3c8d
-      resolved-ref: f019375eef0b8ca13e29eccb36a7e8b3108c3c8d
+      ref: "171e08ec92af4044377bcae77e9fb6aa391ca499"
+      resolved-ref: "171e08ec92af4044377bcae77e9fb6aa391ca499"
       url: "https://github.com/Boriken-Dev/coqui-acp.git"
     source: git
     version: "0.0.0-alpha.0"
@@ -213,8 +213,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/guatiao"
-      ref: "0350bae7fef4cef2aa46ce73f1ef6be15983d83b"
-      resolved-ref: "0350bae7fef4cef2aa46ce73f1ef6be15983d83b"
+      ref: "1cf0f67f0354d18fbc5684a9a36177afbb20a0fa"
+      resolved-ref: "1cf0f67f0354d18fbc5684a9a36177afbb20a0fa"
       url: "https://github.com/Boriken-Dev/guatiao.git"
     source: git
     version: "0.0.0-alpha.1"
@@ -222,8 +222,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/guatiao_flutter"
-      ref: "0350bae7fef4cef2aa46ce73f1ef6be15983d83b"
-      resolved-ref: "0350bae7fef4cef2aa46ce73f1ef6be15983d83b"
+      ref: "1cf0f67f0354d18fbc5684a9a36177afbb20a0fa"
+      resolved-ref: "1cf0f67f0354d18fbc5684a9a36177afbb20a0fa"
       url: "https://github.com/Boriken-Dev/guatiao.git"
     source: git
     version: "0.0.0-alpha.1"
@@ -231,8 +231,8 @@ packages:
     dependency: "direct main"
     description:
       path: "bindings/dart/guatiao_intake"
-      ref: "0350bae7fef4cef2aa46ce73f1ef6be15983d83b"
-      resolved-ref: "0350bae7fef4cef2aa46ce73f1ef6be15983d83b"
+      ref: "1cf0f67f0354d18fbc5684a9a36177afbb20a0fa"
+      resolved-ref: "1cf0f67f0354d18fbc5684a9a36177afbb20a0fa"
       url: "https://github.com/Boriken-Dev/guatiao.git"
     source: git
     version: "0.0.0-alpha.1"
@@ -344,10 +344,10 @@ packages:
     dependency: "direct main"
     description:
       name: material_ui
-      sha256: e4031746f96c8316864d9b92bce375f1320a36ed56e166307e1e1bda9d90b4ab
+      sha256: a6b19012df437a356cbc01f8ea22a105e07194c47c9a6009da0032a0ce35c4ab
       url: "https://pub.dev"
     source: hosted
-    version: "1.8.0"
+    version: "1.11.1"
   meta:
     dependency: transitive
     description:
