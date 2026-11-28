@@ -5539,6 +5539,11 @@ The daemon's
 `/internal/missions` routes expose Mission state to local control components, each request with
 `Authorization: Bearer TOKEN` from `<state dir>/api-token` (`server::API_TOKEN_FILE`; 401
 otherwise, from loopback too; `/healthz` is open); Universal Exports remains the public API.
+`ai6 api-token rotate [--config PATH]` renames a new token over that file
+(`runner::rotate_token_at`); the Station's `Bearer` checks the file's size, modification time and
+inode on each request and reads it again only when they changed, so the old token is refused from
+the next request. A file that is gone or empty leaves the held token as it was. The command prints
+the path, never the token.
 
 ## Deliverables and verifying (`ai6::directorates::m::deliverables`)
 

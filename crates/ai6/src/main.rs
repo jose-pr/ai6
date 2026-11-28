@@ -38,6 +38,13 @@ enum Command {
         #[command(subcommand)]
         command: PeerCommand,
     },
+    /// The token every request to this Station's `/internal` API carries.
+    ApiToken {
+        #[command(flatten)]
+        bootstrap: BootstrapArg,
+        #[command(subcommand)]
+        command: ApiTokenCommand,
+    },
     /// Authorize or revoke standing orders (sleepers) of the configured Operations.
     Sleeper {
         #[command(flatten)]
@@ -503,6 +510,16 @@ struct ServeArgs {
 }
 
 #[derive(Debug, Subcommand)]
+enum ApiTokenCommand {
+    /// Replace the token with a new one. The old token stops working at once, and a running
+    /// Station honors the new one from its next request, with no restart. Every client of
+    /// `/internal` (the harness gate, the cables tunnel, tools of yours) reads the `api-token`
+    /// file in the state directory again; that file holds the only copy, and this prints its
+    /// path, never the token.
+    Rotate,
+}
+
+#[derive(Debug, Subcommand)]
 enum PeerCommand {
     /// Accept a certificate shown in the waiting peer list.
     Accept {
@@ -580,6 +597,16 @@ async fn main() -> ExitCode {
             }
             Err(error) => {
                 eprintln!("ai6: peer operation failed: {error}");
+                ExitCode::FAILURE
+            }
+        },
+        Command::ApiToken { bootstrap, command } => match api_token_command(&bootstrap, command) {
+            Ok(output) => {
+                print!("{output}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("ai6: api-token operation failed: {error}");
                 ExitCode::FAILURE
             }
         },
@@ -1692,6 +1719,24 @@ fn station_identity(bootstrap: &BootstrapArg) -> Result<identity::Identity, Stri
     let located = load_bootstrap(bootstrap)?;
     let dir = located.identity_dir().map_err(|error| error.to_string())?;
     identity::open_identity(&dir).map_err(|error| error.to_string())
+}
+
+fn api_token_command(bootstrap: &BootstrapArg, command: ApiTokenCommand) -> Result<String, String> {
+    let located = load_bootstrap(bootstrap)?;
+    let path = located
+        .state_dir()
+        .map_err(|error| error.to_string())?
+        .join(ai6::station::server::API_TOKEN_FILE);
+    match command {
+        ApiTokenCommand::Rotate => {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            }
+            ai6::station::runner::rotate_token_at(&path)
+                .map_err(|error| format!("{}: {error}", path.display()))?;
+            Ok(format!("the API token was rotated: {}\n", path.display()))
+        }
+    }
 }
 
 fn sleeper_command(bootstrap: &BootstrapArg, command: SleeperCommand) -> Result<String, String> {

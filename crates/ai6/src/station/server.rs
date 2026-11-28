@@ -1104,8 +1104,9 @@ where
     state
         .cables
         .set_compartments(Arc::new(compartments::CableAnswers::new(state.clone())));
-    let token = crate::station::runner::ensure_token_at(&state_dir.join(API_TOKEN_FILE))?;
-    let app = api(state.clone(), token);
+    let token_file = state_dir.join(API_TOKEN_FILE);
+    let token = crate::station::runner::ensure_token_at(&token_file)?;
+    let app = api(state.clone(), token, Some(&token_file));
     let declaring = state.clone();
     let _ = tokio::task::spawn_blocking(move || {
         reload::declare(&declaring);
@@ -1162,12 +1163,13 @@ where
 
 /// The file in the Station's state directory holding the token every `/internal` request
 /// carries as `Authorization: Bearer TOKEN`, created on first start and readable only by the
-/// Station's user.
+/// Station's user. `ai6 api-token rotate` replaces it, and the running Station honors the new
+/// token from its next request.
 pub const API_TOKEN_FILE: &str = "api-token";
 
 /// The Station API: `/healthz` open, every `/internal` route only with `token` as a bearer
 /// token, whatever address the request comes from.
-fn api(state: DaemonState, token: String) -> Router {
+fn api(state: DaemonState, token: String, token_file: Option<&std::path::Path>) -> Router {
     let app = Router::new()
         .route("/internal/agent-handlers", get(list_agent_handlers))
         .route("/internal/agent-roles", get(list_agent_roles))
@@ -1234,7 +1236,10 @@ fn api(state: DaemonState, token: String) -> Router {
         );
     #[cfg(feature = "publisher")]
     let app = app.route("/internal/publisher", get(publisher_health));
-    let bearer = crate::station::runner::Bearer::new(token, &state.station.limits().api);
+    let mut bearer = crate::station::runner::Bearer::new(token, &state.station.limits().api);
+    if let Some(file) = token_file {
+        bearer = bearer.following(file);
+    }
     state.config.follow_api_drain(bearer.drain_handle());
     app.route_layer(axum::middleware::from_fn_with_state(
         bearer,
@@ -11008,7 +11013,7 @@ queue = 1
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let served = tokio::spawn(async move {
-            axum::serve(listener, api(state, "t".repeat(64)))
+            axum::serve(listener, api(state, "t".repeat(64), None))
                 .await
                 .unwrap()
         });

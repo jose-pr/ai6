@@ -368,6 +368,22 @@ refused. Applying a Theater's provisioning is refused while a Mission of this St
 it, and a failed step's output is withheld from the charge (`ai6 theater provision` shows it). Every removal is audited (`head_of_station.caches_removed`,
 `head_of_station.removed`) with the Station as its resource.
 
+## The `/internal` token
+
+Every request to a Station's `/internal` API carries `Authorization: Bearer TOKEN`, the token in
+the `api-token` file of its state directory (made on first start, readable only by its user on
+Unix). To replace a leaked or aged one:
+
+```bash
+ai6 api-token rotate --config /etc/ai6/ai6.cfg
+```
+
+The command writes a new 256-bit token beside the file and renames it over `api-token`, so the old
+token is refused from that moment, and a running Station follows the file on its next request:
+nothing restarts. It prints the file's path and never the token. Every client of `/internal` (the
+harness gate, the Cable tunnel, a script of yours) must read the file again; the file is the only
+copy. The gateway's own credential for a Station is a separate matter and is not rotated here.
+
 ## Station identity
 
 Stations do not connect to each other: they coordinate through the Registry, and each publishes to

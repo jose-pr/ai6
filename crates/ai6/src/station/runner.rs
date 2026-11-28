@@ -570,11 +570,22 @@ pub(crate) fn ensure_token_at(path: &Path) -> io::Result<String> {
     {
         return Ok(token.trim().to_owned());
     }
-    let token = format!(
+    let token = new_token();
+    write_token(path, &token)?;
+    Ok(token)
+}
+
+/// A new bearer token: 256 random bits.
+fn new_token() -> String {
+    format!(
         "{}{}",
         uuid::Uuid::new_v4().simple(),
         uuid::Uuid::new_v4().simple()
-    );
+    )
+}
+
+/// Writes `token` to `path`, readable only by this user on Unix.
+fn write_token(path: &Path, token: &str) -> io::Result<()> {
     let mut options = OpenOptions::new();
     options.create(true).write(true).truncate(true);
     #[cfg(unix)]
@@ -582,8 +593,25 @@ pub(crate) fn ensure_token_at(path: &Path) -> io::Result<String> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    options.open(path)?.write_all(token.as_bytes())?;
-    Ok(token)
+    let mut file = options.open(path)?;
+    file.write_all(token.as_bytes())?;
+    file.sync_all()
+}
+
+/// Replaces the token kept in the file `path` with a new one: the new token is written to a file
+/// beside it and renamed over it, so the old token stops being the file's from that rename and the
+/// file is never seen empty. A Station serving with it follows the file at its next request.
+///
+/// # Errors
+///
+/// When the directory cannot be written.
+pub fn rotate_token_at(path: &Path) -> io::Result<()> {
+    let partial = path.with_extension("rotating");
+    let _ = fs::remove_file(&partial);
+    write_token(&partial, &new_token())?;
+    fs::rename(&partial, path).inspect_err(|_| {
+        let _ = fs::remove_file(&partial);
+    })
 }
 
 fn valid_key(key: &str) -> bool {
@@ -792,11 +820,41 @@ impl Hosted {
     }
 }
 
+/// What tells that the token file was replaced: its size, modification time and, on Unix, its
+/// inode (a rename over it gives it a new one, even within one clock tick).
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct FileMark {
+    len: u64,
+    modified: Option<SystemTime>,
+    #[cfg(unix)]
+    inode: u64,
+}
+
+impl FileMark {
+    fn of(path: &Path) -> Option<Self> {
+        let meta = fs::metadata(path).ok()?;
+        Some(Self {
+            len: meta.len(),
+            modified: meta.modified().ok(),
+            #[cfg(unix)]
+            inode: std::os::unix::fs::MetadataExt::ino(&meta),
+        })
+    }
+}
+
+/// The token being honored, and the state of the file it was read from.
+struct HeldToken {
+    token: String,
+    seen: Option<FileMark>,
+}
+
 /// The bearer token an API takes, and how much of a refused request's body it reads before
-/// answering.
+/// answering. Given a file with [`Bearer::following`], it honors what the file holds now: a
+/// request checks the file's metadata, and reads it again only when it changed.
 #[derive(Clone)]
 pub(crate) struct Bearer {
-    token: String,
+    held: std::sync::Arc<Mutex<HeldToken>>,
+    file: Option<std::sync::Arc<PathBuf>>,
     drain: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
@@ -804,11 +862,40 @@ impl Bearer {
     /// `token`, draining refused bodies up to `limits.refused_body_drain_bytes`.
     pub(crate) fn new(token: String, limits: &ApiLimits) -> Self {
         Self {
-            token,
+            held: std::sync::Arc::new(Mutex::new(HeldToken { token, seen: None })),
+            file: None,
             drain: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(
                 limits.refused_body_drain_bytes.or_max(),
             )),
         }
+    }
+
+    /// Honors the token in `path` from now on, as it changes.
+    #[must_use]
+    pub(crate) fn following(mut self, path: &Path) -> Self {
+        lock_of(&self.held).seen = FileMark::of(path);
+        self.file = Some(std::sync::Arc::new(path.to_path_buf()));
+        self
+    }
+
+    /// Whether `supplied` is the token now, compared in constant time. A file that cannot be read,
+    /// or holds nothing, leaves the token as it was: rotation never opens the API.
+    pub(crate) fn admits(&self, supplied: &str) -> bool {
+        use subtle::ConstantTimeEq as _;
+        let mut held = lock_of(&self.held);
+        if let Some(path) = &self.file {
+            let mark = FileMark::of(path);
+            if mark.is_some()
+                && mark != held.seen
+                && let Ok(text) = fs::read_to_string(path.as_path())
+                && !text.trim().is_empty()
+            {
+                held.token = text.trim().to_owned();
+                held.seen = mark;
+            }
+        }
+        supplied.len() == held.token.len()
+            && bool::from(supplied.as_bytes().ct_eq(held.token.as_bytes()))
     }
 
     /// The drain size, which whoever holds it may change for the requests that follow.
@@ -820,20 +907,19 @@ impl Bearer {
 /// Lets an HTTP request through only with `Authorization: Bearer TOKEN`, compared in constant
 /// time. The Station's own HTTP service uses it; a runner authenticates ACP connections itself.
 pub(crate) async fn authorize(
-    axum::extract::State(Bearer { token, drain }): axum::extract::State<Bearer>,
+    axum::extract::State(bearer): axum::extract::State<Bearer>,
     request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
     use axum::response::IntoResponse as _;
-    use subtle::ConstantTimeEq as _;
-    let drain = drain.load(std::sync::atomic::Ordering::Relaxed);
+    let drain = bearer.drain.load(std::sync::atomic::Ordering::Relaxed);
     let supplied = request
         .headers()
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
         .unwrap_or_default();
-    if supplied.len() != token.len() || !bool::from(supplied.as_bytes().ct_eq(token.as_bytes())) {
+    if !bearer.admits(supplied) {
         // Read a small body before answering: a socket closed with unread data is reset, and
         // a Windows client then sees an aborted connection instead of the 401.
         let _ = axum::body::to_bytes(request.into_body(), drain).await;
@@ -1047,6 +1133,50 @@ impl Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rotated_token_file_invalidates_the_old_bearer_on_the_next_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("api-token");
+        let old = ensure_token_at(&path).unwrap();
+        let bearer = Bearer::new(old.clone(), &ApiLimits::default()).following(&path);
+        assert!(bearer.admits(&old));
+        assert!(!bearer.admits("not the token"));
+
+        rotate_token_at(&path).unwrap();
+        let new = fs::read_to_string(&path).unwrap();
+        assert_eq!(new.trim().len(), 64, "256 bits, as a new token is");
+        assert_ne!(new.trim(), old, "a different token");
+        assert!(!bearer.admits(&old), "the old token stops with the rename");
+        assert!(bearer.admits(new.trim()));
+        assert!(
+            !dir.path().join("api-token.rotating").exists(),
+            "no partial file is left"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o077, 0, "readable only by its user: {mode:o}");
+        }
+
+        // A file that is gone or empty never opens the API: the held token stays.
+        fs::write(&path, "").unwrap();
+        assert!(bearer.admits(new.trim()) && !bearer.admits(""));
+        fs::remove_file(&path).unwrap();
+        assert!(bearer.admits(new.trim()) && !bearer.admits(&old));
+        // Rotating again after that is followed too.
+        rotate_token_at(&path).unwrap();
+        let again = fs::read_to_string(&path).unwrap();
+        assert!(!bearer.admits(new.trim()) && bearer.admits(again.trim()));
+    }
+
+    #[test]
+    fn a_bearer_with_no_file_keeps_its_token() {
+        let bearer = Bearer::new("a".repeat(64), &ApiLimits::default());
+        assert!(bearer.admits(&"a".repeat(64)));
+        assert!(!bearer.admits(&"b".repeat(64)));
+    }
 
     fn run_on_disk(state_dir: &Path, key: &str, ended: bool, created_at: u64) -> PathBuf {
         let dir = state_dir.join(RUNS_DIR).join(key);

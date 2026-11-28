@@ -209,6 +209,10 @@ Exit status is `0` on success and `1` on a configuration, listener or identity f
 Every `/internal` request carries `Authorization: Bearer TOKEN`, the token the Station keeps
 in `api-token` under its state directory (made on first start, readable only by its user on
 Unix); a request without it gets 401 whatever address it comes from. `/healthz` needs none.
+`ai6 api-token rotate` replaces the token (a new 256-bit value, renamed over the file): the old
+one is refused from the next request and a running Station follows the file with no restart. It
+prints the file's path, never the token; every client of `/internal` reads the file again, and
+the file is the only copy.
 The service lists providers (`GET /internal/agent-handlers`, `/internal/terminals`,
 `/internal/plugins`), creates and inspects Missions (`/internal/missions`), and starts,
 messages, interrupts and resumes them. A start resolves the Operation and Agent, then runs

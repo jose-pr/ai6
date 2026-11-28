@@ -1636,3 +1636,67 @@ fn a_login_is_added_from_a_host_shared_with_a_station_and_forgotten_and_never_pr
         "{listed}"
     );
 }
+
+#[test]
+fn api_token_rotate_replaces_the_token_and_the_running_station_refuses_the_old_one() {
+    let root = tempfile::tempdir().unwrap();
+    let config = bootstrap(root.path(), "");
+    let state = root.path().join("state");
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let log = std::fs::File::create(root.path().join("station.log")).unwrap();
+    let _station = Running(
+        ai6()
+            .args(["serve", "--listen"])
+            .arg(format!("127.0.0.1:{port}"))
+            .arg("--config")
+            .arg(&config)
+            .stdin(std::process::Stdio::null())
+            .stdout(log.try_clone().unwrap())
+            .stderr(log)
+            .spawn()
+            .expect("the AI6 command should start"),
+    );
+    let url = format!("http://127.0.0.1:{port}/internal/plugins");
+    let status = |token: &str| {
+        ureq::get(url.clone())
+            .config()
+            .http_status_as_error(false)
+            .build()
+            .header("Authorization", format!("Bearer {token}"))
+            .call()
+            .map(|response| response.status().as_u16())
+            .ok()
+    };
+    let old = until("the Station to answer with its token", || {
+        let token = std::fs::read_to_string(state.join("api-token")).ok()?;
+        (status(token.trim())? == 200).then(|| token.trim().to_owned())
+    });
+
+    let rotated = ai6()
+        .args(["api-token", "rotate", "--config"])
+        .arg(&config)
+        .output()
+        .unwrap();
+    assert!(rotated.status.success(), "{rotated:?}");
+    let said = text(&rotated.stdout);
+    assert!(said.contains("api-token"), "it names the file: {said}");
+    let new = std::fs::read_to_string(state.join("api-token")).unwrap();
+    let new = new.trim();
+    assert_ne!(new, old);
+    assert!(
+        !said.contains(new) && !text(&rotated.stderr).contains(new),
+        "the token is never printed"
+    );
+
+    assert_eq!(status(&old), Some(401), "the old token is refused at once");
+    assert_eq!(
+        status(new),
+        Some(200),
+        "the new one is honored with no restart"
+    );
+    assert_eq!(status("nothing"), Some(401));
+}
