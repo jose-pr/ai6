@@ -1,0 +1,3 @@
+#!/bin/sh
+# A helper every Station gets by pinning this overlay, with nothing staged by hand.
+echo "team-helper ran in $(pwd)"

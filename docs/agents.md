@@ -1511,6 +1511,23 @@ directory. A Git source's bytes are its blobs, with no checkout filter. `secrets
 `[overlay.<name>]` names the secret a private HTTPS source is fetched with, in the environment of that
 one `git`.
 
+### Distributing helper tools
+
+A helper program, an interpreter or a script every Mission needs is an overlay with the program under
+`bin/`, pinned, and named by the loadout or the Operation: each Station fetches it from its Git source
+or directory, verifies the tree digest, and gives each Run a read-only copy with `bin/` first on its
+`PATH`. The store is `overlays/` under the Station's own state directory, never the install directory,
+so a release install leaves it, and a Station that already holds a pin fetches nothing. To change a
+tool, publish the new tree and change the pin; every Station follows at its next Run, and a Run
+that is resumed with a changed pin says so on its timeline. `examples/config/loadouts.toml` is a
+complete one.
+
+A value of a loadout's, an Agent's or a start request's `env` may write `${overlay.<name>}`, which
+is replaced by the directory that overlay is issued in on the Run's site, for a program that is not
+looked up on `PATH` (`TEAM_HELPER = "${overlay.team-tools}/bin/team-helper"`). Only an overlay the Run is issued
+can be named, compared by identity as everywhere; naming another, or leaving the `${overlay.` open, refuses the Run
+with the variable and the overlay named. The overlay's own `<NAME>_OVERLAY_ROOT` is set too.
+
 ### Code in an overlay
 
 Code needs what runs it where the Run runs. Text does not: an overlay with only text goes anywhere.

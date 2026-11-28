@@ -1,0 +1,14 @@
+# What each Agent's Runs are given besides the Agent itself: environment values that are no secret,
+# and overlays. An overlay is a pinned directory every Station fetches and verifies by its digest
+# (docs/agents.md, "Overlays"), so a helper program needs no staging by hand and no install wipes it.
+# `ai6 overlay pin DIR` prints the pin.
+
+[overlay.team-tools]
+path = "overlays/team-tools"
+pin = "sha256:438695303c3297fd5a81f54a42d1c1816d7b19cd75622addfa8a7ea751ffa6b4"
+
+# `bin/` of an issued overlay is on the Run's PATH; `${overlay.<name>}` in a value names the directory
+# the overlay is issued in, for a program that is not looked up on PATH.
+[loadout.007]
+overlays = ["team-tools"]
+env = { TEAM_HELPER = "${overlay.team-tools}/bin/team-helper" }

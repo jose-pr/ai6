@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A value of a Run's `env` (a loadout's, an Agent's, a route's or a start request's) may write `${overlay.<name>}`, which becomes the directory that overlay is issued in on the Run's site, so a loadout names a tool of a pinned overlay with no hand-staged path. Naming an overlay the Run is not issued, or leaving it open, refuses the Run, naming the variable and the overlay. `examples/config/loadouts.toml` shows a pinned overlay with one program.
+
 - The exposure preset `strict-except-secrets` applies every restriction but `secrets`: an Operation whose exposed Runs still need tracker writes through leased secrets names it, with no hand-built `restrict` list. `strict` stays the default.
 
 - Fleet secrets use envelope encryption: the `registry` secret provider encrypts a value under a scope key (`global`, `operation:<id>` or `compartment:<id>`, field `scope`), and the key is wrapped once for each Station that may use it, so one write reaches every Station holding a wrap. The `Vault` gains `put_scope_key`, `grant_station`, `revoke_station` (drops the wrap, replaces the key and encrypts the scope's values again), `rotate_scope_key`, `write_value` and `read_value`. Values sealed separately to each Station before are still read.
