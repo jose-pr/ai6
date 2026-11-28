@@ -124,7 +124,7 @@ pub(super) async fn apply(state: &DaemonState, control: &MissionControl) -> Cont
         control.action(),
         ControlAction::Drop | ControlAction::Reload
     );
-    if !own_queue && let Err(reason) = check_lease(state, mission_id) {
+    if !own_queue && let Err(reason) = check_lease(state, mission_id, control.action()) {
         return ControlOutcome::rejected(current, reason);
     }
     if let Some(expected) = control.run_id()
@@ -198,7 +198,9 @@ struct Applied {
 
 /// Refuses a control while another Station holds the Mission's Run, or this one's
 /// fencing token is stale.
-fn check_lease(state: &DaemonState, mission_id: &str) -> Result<(), String> {
+///
+/// A cancel ends work and starts none, so it goes ahead when the Run's record cannot be read.
+fn check_lease(state: &DaemonState, mission_id: &str, action: ControlAction) -> Result<(), String> {
     let Some(hold) = run_hold(state, mission_id) else {
         return Ok(());
     };
@@ -211,6 +213,12 @@ fn check_lease(state: &DaemonState, mission_id: &str) -> Result<(), String> {
             Err("this Station's lease on the Run is stale".to_owned())
         }
         Ok(_) => Ok(()),
+        Err(error) if action == ControlAction::Cancel => {
+            eprintln!(
+                "ai6: cancel of Mission {mission_id:?}: the Run record could not be read ({error}); applying it without the lease check"
+            );
+            Ok(())
+        }
         Err(_) => Err("the Registry could not be read".to_owned()),
     }
 }
@@ -735,6 +743,31 @@ mod tests {
         let queued = apply(&state, &control("mission-2", ControlAction::Cancel)).await;
         assert_eq!(queued, ControlOutcome::applied("abandoned"));
         assert!(mission_state(&state, "mission-2").run_ids.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_cancel_applies_when_the_run_record_is_unreadable() {
+        let root = tempfile::tempdir().unwrap();
+        let state = state_in(root.path(), TWO_AGENTS);
+        blocked_mission(&state).await;
+        let hold = run_hold(&state, "mission-1").unwrap();
+        std::fs::write(
+            root.path()
+                .join("registry/runs")
+                .join(format!("{}.json", hold.id)),
+            "{",
+        )
+        .unwrap();
+
+        let retry = apply(&state, &control("mission-1", ControlAction::Retry)).await;
+        assert_eq!(retry.outcome, "rejected", "other actions keep refusing");
+        let outcome = apply(&state, &on_run(control("mission-1", ControlAction::Cancel))).await;
+        assert_eq!(outcome, ControlOutcome::applied("abandoned"));
+        assert_eq!(
+            mission_state(&state, "mission-1").state,
+            MissionState::Abandoned
+        );
+        stop(&state);
     }
 
     #[tokio::test]
