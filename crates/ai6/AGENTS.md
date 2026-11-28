@@ -2831,6 +2831,18 @@ pub fn roles_left_empty(agents: &[AgentFacts], holding: &str, route: Option<&Rou
 impl RosterHold { pub fn new(operation, agent, route, reason, by, at) -> Self;
     pub fn signed_through(self, approval) -> Self; pub fn holds_agent(&self) -> bool;
     pub fn covers(&self, route: &RouteRef) -> bool; pub fn validate(&self, &HoldLimits) -> io::Result<()> }
+#[derive(Serialize, Deserialize)] pub struct ControlRecord { pub control_id: String, pub operation: String,
+    pub mission: String, pub run: Option<String>, pub asked_run: Option<String>, pub action: String,
+    pub agent: Option<String>, pub message: Option<String>, pub station: String, pub status: String,
+    pub state: Option<String>, pub reason: Option<String>, pub requested_by: String,
+    pub requested_at: f64, pub finished_at: Option<f64>, pub idempotency_key: String, pub actor: String }
+pub trait ControlStore {   // part of RegistryBackend; `controls/CONTROL_ID.json`, table ai6_controls; the gateway's queue of operator controls
+    fn put_control(&self, control: &ControlRecord) -> io::Result<()>;   // replaces the same control_id
+    fn open_controls(&self, station: &str) -> io::Result<Vec<ControlRecord>>;   // queued or delivered, oldest first
+    fn all_open_controls(&self) -> io::Result<Vec<ControlRecord>>;
+    fn control(&self, id: &str) -> io::Result<Option<ControlRecord>>;
+    fn forget_controls(&self, finished_before: f64) -> io::Result<usize>;
+}
 pub trait HoldStore {   // part of RegistryBackend; `holds/OPERATION/AGENT--ROUTE.json`, table ai6_roster_holds
     fn put_hold(&self, hold: &RosterHold) -> io::Result<()>;          // replaces the same Agent/route
     fn holds(&self, operation: &str) -> io::Result<Vec<RosterHold>>;

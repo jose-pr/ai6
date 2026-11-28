@@ -395,9 +395,13 @@ pub struct ControlStatus {
     pub requested_by: String,        // person ID
     pub requested_at: f64,
     pub finished_at: Option<f64>,
+    pub expires_at: f64,             // requested_at + [controls] ttl
+    pub station_seen: Option<f64>,   // the Station's last check-in; None once settled
+    pub queued_ahead: usize,         // controls queued before this one for its Station
 }
 ```
 
+The queue is kept in the Registry (`ai6::ControlStore`), so a gateway that restarts takes up the controls still queued or delivered.
 Returned by the control routes below. A resume's `message` is never in a status or an
 audit record; it travels only in the control frame to the Station.
 

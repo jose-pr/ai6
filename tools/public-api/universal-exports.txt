@@ -286,15 +286,18 @@ pub universal_exports::BoardWindow::used_permille: core::option::Option<u16>
 pub universal_exports::ControlStatus::action: alloc::string::String
 pub universal_exports::ControlStatus::agent: core::option::Option<alloc::string::String>
 pub universal_exports::ControlStatus::control_id: alloc::string::String
+pub universal_exports::ControlStatus::expires_at: f64
 pub universal_exports::ControlStatus::finished_at: core::option::Option<f64>
 pub universal_exports::ControlStatus::mission_id: alloc::string::String
 pub universal_exports::ControlStatus::operation_id: alloc::string::String
+pub universal_exports::ControlStatus::queued_ahead: usize
 pub universal_exports::ControlStatus::reason: core::option::Option<alloc::string::String>
 pub universal_exports::ControlStatus::requested_at: f64
 pub universal_exports::ControlStatus::requested_by: alloc::string::String
 pub universal_exports::ControlStatus::run_id: core::option::Option<alloc::string::String>
 pub universal_exports::ControlStatus::state: core::option::Option<alloc::string::String>
 pub universal_exports::ControlStatus::station_id: alloc::string::String
+pub universal_exports::ControlStatus::station_seen: core::option::Option<f64>
 pub universal_exports::ControlStatus::status: alloc::string::String
 #[non_exhaustive] pub struct universal_exports::EffectiveOperation
 pub universal_exports::EffectiveOperation::definition: serde_json::map::Map<alloc::string::String, serde_json::value::Value>
