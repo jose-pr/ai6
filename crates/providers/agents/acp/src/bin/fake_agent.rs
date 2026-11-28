@@ -241,6 +241,21 @@ fn update(cx: &ConnectionTo<Client>, update: Value) {
     }
 }
 
+/// Sends `FAKE_COMMANDS` as the agent's command list. Grok sends its list at session start and again
+/// with the first prompt, and the fake does the same.
+fn advertise(cx: &ConnectionTo<Client>) {
+    if let Some(names) = var("FAKE_COMMANDS") {
+        let commands: Vec<Value> = names
+            .split(',')
+            .map(|name| json!({"name": name, "description": format!("the fake {name}")}))
+            .collect();
+        update(
+            cx,
+            json!({"sessionUpdate": "available_commands_update", "availableCommands": commands}),
+        );
+    }
+}
+
 fn handle(
     message: UntypedMessage,
     responder: Responder<Value>,
@@ -280,17 +295,7 @@ fn handle(
                 SESSIONS.load(Ordering::SeqCst).max(1)
             };
             let _ = responder.respond(json!({"sessionId": format!("fake-{opened}")}));
-            if let Some(names) = var("FAKE_COMMANDS") {
-                let commands: Vec<Value> = names
-                    .split(',')
-                    .map(|name| json!({"name": name, "description": format!("the fake {name}")}))
-                    .collect();
-                update(
-                    &cx,
-                    json!({"sessionUpdate": "available_commands_update",
-                           "availableCommands": commands}),
-                );
-            }
+            advertise(&cx);
         }
         "session/close" => {
             let _ = responder.respond(json!({}));
@@ -317,6 +322,7 @@ fn handle(
             let servers = servers.lock().unwrap().clone();
             std::thread::spawn(move || {
                 let prompt = params["prompt"][0]["text"].as_str().unwrap_or_default();
+                advertise(&cx);
                 if let Some(data) = var("FAKE_ERROR_DATA")
                     .and_then(|data| serde_json::from_str::<Value>(&data).ok())
                 {
