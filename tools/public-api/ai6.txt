@@ -3010,6 +3010,7 @@ pub mod ai6::directorates::medical::exposure
 #[non_exhaustive] pub enum ai6::directorates::medical::exposure::ExposurePreset
 pub ai6::directorates::medical::exposure::ExposurePreset::Observe
 pub ai6::directorates::medical::exposure::ExposurePreset::Strict
+pub ai6::directorates::medical::exposure::ExposurePreset::StrictExceptSecrets
 #[non_exhaustive] pub enum ai6::directorates::medical::exposure::Restriction
 pub ai6::directorates::medical::exposure::Restriction::Approvals
 pub ai6::directorates::medical::exposure::Restriction::Cables
@@ -10623,6 +10624,7 @@ pub fn ai6::directorates::m::placement::ExecutionMode::as_str(self) -> &'static 
 #[non_exhaustive] pub enum ai6::ExposurePreset
 pub ai6::ExposurePreset::Observe
 pub ai6::ExposurePreset::Strict
+pub ai6::ExposurePreset::StrictExceptSecrets
 #[non_exhaustive] pub enum ai6::FindingKind
 pub ai6::FindingKind::Budget
 pub ai6::FindingKind::Duplicate
