@@ -14,6 +14,7 @@ mod attention_tests;
 mod board_tests;
 mod charges;
 mod compartments;
+mod config_secrets;
 mod controls;
 mod documents;
 #[cfg(test)]

@@ -1051,6 +1051,15 @@ pub struct UnexRecord {
     /// The page authenticator's configuration. Default: none.
     #[schema(title = "Page viewers' authenticator's configuration", sensitive)]
     pub page_authenticator_config: Option<ProviderConfig>,
+    /// Names of fields in the provider configurations above (and in `authenticators` and
+    /// `sign_in_policy`) that hold a credential, besides those a provider's own schema marks
+    /// sensitive. Such a field takes a secret reference (`{ provider = "file", key = "..." }`
+    /// or `{ secret = "name" }`) read when the provider is built; a literal still works, is
+    /// reported as a weakening, and is shown as `<redacted>` wherever the record is shown. Default:
+    /// none; no name is assumed.
+    #[schema(title = "Credential fields of the provider configurations")]
+    #[map(default)]
+    pub secret_fields: Vec<String>,
     /// Password or key tries a minute from one client address. Default: 5.
     #[schema(title = "Tries a minute per client address")]
     pub login_tries_per_address: Option<u32>,
@@ -1134,6 +1143,7 @@ impl Default for UnexRecord {
             proxy_lookup_by: Self::default_lookup_by(),
             page_authenticator: None,
             page_authenticator_config: None,
+            secret_fields: Vec::new(),
             login_tries_per_address: None,
             login_tries_per_name: None,
             client_address_header: None,
@@ -1194,8 +1204,26 @@ impl UnexRecord {
     /// `secret`, `token`, `key`) and that is written inline rather than as a file, worded for a
     /// log line.
     pub fn weakenings(&self) -> Vec<String> {
-        fn inline(path: &str, value: &serde_json::Value, found: &mut Vec<String>) {
+        fn inline(
+            path: &str,
+            value: &serde_json::Value,
+            listed: &[String],
+            found: &mut Vec<String>,
+        ) {
             if let serde_json::Value::Object(entries) = value {
+                // A secret reference names where a credential is; it is no credential itself.
+                let reference = (entries.len() == 2
+                    && entries
+                        .get("provider")
+                        .is_some_and(serde_json::Value::is_string)
+                    && entries.get("key").is_some_and(serde_json::Value::is_string))
+                    || (entries.len() == 1
+                        && entries
+                            .get("secret")
+                            .is_some_and(serde_json::Value::is_string));
+                if reference {
+                    return;
+                }
                 for (key, value) in entries {
                     let lower = key.to_ascii_lowercase();
                     let credential = [
@@ -1212,13 +1240,14 @@ impl UnexRecord {
                         || lower == "key"
                         || lower.ends_with("_key");
                     let names_file = lower.ends_with("_file") || lower.ends_with("_path");
-                    if credential && !names_file && value.is_string() {
+                    let named = listed.iter().any(|name| name == key);
+                    if (credential && !names_file || named) && value.is_string() {
                         found.push(format!(
                             "unex.{path}.{key} is a credential written inline in the shared \
-                             configuration; name a file instead"
+                             configuration; write a secret reference instead, \n                             `{{ provider = \"file\", key = \"...\" }}`"
                         ));
                     }
-                    inline(&format!("{path}.{key}"), value, found);
+                    inline(&format!("{path}.{key}"), value, listed, found);
                 }
             }
         }
@@ -1231,6 +1260,7 @@ impl UnexRecord {
             inline(
                 "sign_in_policy.config",
                 &serde_json::Value::Object(config.0.clone()),
+                &self.secret_fields,
                 &mut found,
             );
         }
@@ -1239,6 +1269,7 @@ impl UnexRecord {
                 inline(
                     &format!("authenticators[{index}].config"),
                     &serde_json::Value::Object(config.0.clone()),
+                    &self.secret_fields,
                     &mut found,
                 );
             }
@@ -1259,6 +1290,7 @@ impl UnexRecord {
                 inline(
                     name,
                     &serde_json::Value::Object(config.0.clone()),
+                    &self.secret_fields,
                     &mut found,
                 );
             }

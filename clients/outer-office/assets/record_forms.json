@@ -7248,6 +7248,15 @@
           "x-sensitive": true,
           "writeOnly": true
         },
+        "secret_fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Credential fields of the provider configurations",
+          "description": "Names of fields in the provider configurations above (and in `authenticators` and `sign_in_policy`) that hold a credential, besides those a provider's own schema marks sensitive. Such a field takes a secret reference (`{ provider = \"file\", key = \"...\" }` or `{ secret = \"name\" }`) read when the provider is built; a literal still works, is reported as a weakening, and is shown as `<redacted>` wherever the record is shown. Default: none; no name is assumed.",
+          "default": []
+        },
         "login_tries_per_address": {
           "type": [
             "integer",

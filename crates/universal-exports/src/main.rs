@@ -886,20 +886,20 @@ fn configured_access(
         &plugin_policy(settings, snapshot),
     ));
     ai6::station::plugins::log_scan(plugins.scan_summary());
-    let config = |value: &Option<ai6::ProviderConfig>| {
-        value
-            .clone()
-            .map(|object| {
-                json_to_provider_value(
-                    JsonValue::Object(object.into_inner()),
-                    0,
-                    record.provider_config_depth,
-                )
-            })
-            .transpose()
+    let config = |provider: &str, value: &Option<ai6::ProviderConfig>| {
+        provider_config(
+            &plugins,
+            &snapshot.settings.loadouts,
+            record,
+            provider,
+            value,
+        )
     };
-    let directory_config = config(&record.directory_config)?;
-    let authorizer_config = config(&record.authorizer_config)?;
+    let directory_config = config(directory_id, &record.directory_config)?;
+    let authorizer_config = config(
+        record.authorizer.as_deref().unwrap_or_default(),
+        &record.authorizer_config,
+    )?;
     let sealer = Arc::new(factor_sealer(settings)?);
     let (people, keys, first_accounts, second) =
         sign_in_providers(&plugins, record, &config, registry, &sealer)?;
@@ -922,7 +922,7 @@ fn configured_access(
     };
     let accounts: Option<Arc<dyn ai6::Accounts>> = match record.accounts.as_deref() {
         Some(id) => {
-            let wanted = config(&record.accounts_config)?;
+            let wanted = config(id, &record.accounts_config)?;
             Some(
                 plugins
                     .accounts(id, wanted.as_ref())
@@ -968,7 +968,7 @@ fn configured_access(
     };
     let access = match record.page_authenticator.as_deref() {
         Some(id) => {
-            let page_config = config(&record.page_authenticator_config)?;
+            let page_config = config(id, &record.page_authenticator_config)?;
             let page_authenticator = plugins
                 .authenticator(id, page_config.as_ref())
                 .map_err(|error| format!("unex.page_authenticator: {error}"))?;
@@ -1015,7 +1015,8 @@ type SignIn = (
 );
 
 /// Reads a provider's configuration from the record as a value.
-type ConfigReader<'a> = dyn Fn(&Option<ai6::ProviderConfig>) -> Result<Option<Value>, String> + 'a;
+type ConfigReader<'a> =
+    dyn Fn(&str, &Option<ai6::ProviderConfig>) -> Result<Option<Value>, String> + 'a;
 
 /// Builds each of `record.authenticators`, its configuration checked against the provider's own
 /// schema. A provider that takes keys is the key provider, and answers only bearer keys; the
@@ -1043,7 +1044,7 @@ fn sign_in_providers(
             second.push((id.to_owned(), totp));
             continue;
         }
-        let value = config(&entry.config).map_err(at)?;
+        let value = config(id, &entry.config).map_err(at)?;
         if let Some(value) = &value {
             plugins.check_settings(id, value).map_err(at)?;
         }
@@ -1139,6 +1140,71 @@ fn proxy_secret(settings: &Settings) -> Result<String, String> {
         .map_err(|error| format!("[unex] proxy_secret: {error}"))
 }
 
+/// A provider's configuration from the record as a value, each credential field that holds a
+/// secret reference replaced by what the reference reads. The literal exists in memory only,
+/// wiped as the value is built. A field is a credential when the provider's schema marks it
+/// sensitive or the record's `secret_fields` names it.
+fn provider_config(
+    plugins: &ai6::station::plugins::Plugins,
+    catalog: &ai6::LoadoutCatalog,
+    record: &UnexRecord,
+    provider: &str,
+    value: &Option<ai6::ProviderConfig>,
+) -> Result<Option<Value>, String> {
+    value
+        .clone()
+        .map(|object| {
+            let mut map = object.into_inner();
+            let schema = plugins.config_schema(provider);
+            ai6::directorates::m::provider_secrets::SecretBearing {
+                schema: schema.as_ref(),
+                listed: &record.secret_fields,
+            }
+            .resolve(&mut map, &|reference| {
+                read_reference(plugins, catalog, reference)
+            })?;
+            json_to_provider_value(JsonValue::Object(map), 0, record.provider_config_depth)
+        })
+        .transpose()
+}
+
+/// What a secret reference reads. The gateway holds no Station's sealing key, so a `registry`
+/// secret is refused; the reason it cannot be read is the gateway's own text, never a provider's.
+fn read_reference(
+    plugins: &ai6::station::plugins::Plugins,
+    catalog: &ai6::LoadoutCatalog,
+    reference: &ai6::bootstrap::SecretRef,
+) -> Result<ai6::directorates::m::provider_secrets::Zeroizing<String>, String> {
+    let source = match reference {
+        ai6::bootstrap::SecretRef::Provider(source) => source.clone(),
+        ai6::bootstrap::SecretRef::Named(name) => catalog.secret(name).source().clone(),
+        _ => return Err("this kind of secret reference is not one the gateway reads".to_owned()),
+    };
+    if source.provider == ai6::directorates::q::secret_kind::REGISTRY_PROVIDER {
+        return Err(
+            "a secret kept in the Registry is sealed to Stations, and the gateway is none; name \
+             a file, an environment variable or a loaded provider"
+                .to_owned(),
+        );
+    }
+    let built = plugins
+        .secret_provider(&source.provider, None)
+        .map_err(|_| format!("secret provider {:?} could not be built", source.provider))?;
+    let keeper = ai6::SecretKeeper::new(built)?;
+    keeper.check_fields(&source.fields)?;
+    keeper
+        .read(&source.key, &source.fields)
+        .map(|read| {
+            ai6::directorates::m::provider_secrets::Zeroizing::new(read.value.expose().clone())
+        })
+        .map_err(|_| {
+            format!(
+                "it could not be read from {:?}; the provider's reason is withheld",
+                source.provider
+            )
+        })
+}
+
 fn json_to_provider_value(
     value: JsonValue,
     depth: usize,
@@ -1157,7 +1223,11 @@ fn json_to_provider_value(
                 .map_err(|_| "provider configuration contains an invalid number".to_owned())?;
             encode_provider_value(&number)
         }
-        JsonValue::String(value) => encode_provider_value(&value),
+        JsonValue::String(value) => {
+            // A credential read from a reference is wiped once it is handed over.
+            let value = ai6::directorates::m::provider_secrets::Zeroizing::new(value);
+            encode_provider_value(&*value)
+        }
         JsonValue::Array(values) => {
             let mut converted = VecDeque::with_capacity(values.len());
             for value in values {
@@ -1509,6 +1579,78 @@ assistant_agent = \"second\"
     }
 
     #[test]
+    fn a_secret_reference_in_a_directory_record_is_read_and_a_literal_still_works() {
+        use ai6::guatiao::FromValue;
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("ldap-bind");
+        std::fs::write(&file, "from-the-file\n").unwrap();
+        let record: UnexRecord = ai6::directorates::m::records::from_json(&serde_json::json!({
+            "secret_fields": ["bind_password", "token"],
+            "directory_config": {
+                "url": "ldaps://dc",
+                "bind_password": {"provider": "file", "key": file.to_string_lossy()},
+                "token": "a-literal-token",
+            },
+        }))
+        .unwrap();
+        let plugins = ai6::station::plugins::Plugins::scan(&[]);
+        let catalog = ai6::LoadoutCatalog::default();
+        let built = provider_config(
+            &plugins,
+            &catalog,
+            &record,
+            "ldap",
+            &record.directory_config,
+        )
+        .unwrap()
+        .unwrap();
+        let fields = BTreeMap::<String, Value>::from_value(&built).unwrap();
+        assert_eq!(
+            String::from_value(&fields["bind_password"]).unwrap(),
+            "from-the-file"
+        );
+        assert_eq!(
+            String::from_value(&fields["token"]).unwrap(),
+            "a-literal-token"
+        );
+        assert_eq!(String::from_value(&fields["url"]).unwrap(), "ldaps://dc");
+
+        // A reference that cannot be read refuses, naming the field and no value.
+        let missing: UnexRecord = ai6::directorates::m::records::from_json(&serde_json::json!({
+            "secret_fields": ["bind_password"],
+            "directory_config": {
+                "bind_password": {"provider": "file", "key": dir.path().join("none").to_string_lossy()},
+            },
+        }))
+        .unwrap();
+        let refused = provider_config(
+            &plugins,
+            &catalog,
+            &missing,
+            "ldap",
+            &missing.directory_config,
+        )
+        .unwrap_err();
+        assert!(refused.contains("bind_password"), "{refused}");
+        // The Registry's own secrets are sealed to Stations; the gateway is none.
+        let sealed: UnexRecord = ai6::directorates::m::records::from_json(&serde_json::json!({
+            "secret_fields": ["bind_password"],
+            "directory_config": {"bind_password": {"provider": "registry", "key": "ldap"}},
+        }))
+        .unwrap();
+        let refused = provider_config(
+            &plugins,
+            &catalog,
+            &sealed,
+            "ldap",
+            &sealed.directory_config,
+        )
+        .unwrap_err();
+        assert!(refused.contains("sealed to Stations"), "{refused}");
+    }
+
+    #[test]
     fn an_inline_credential_in_a_provider_config_is_a_weakening() {
         let record: UnexRecord = ai6::directorates::m::records::from_json(&serde_json::json!({
             "directory_config": {"url": "ldaps://dc", "bind_password": "hunter2",
@@ -1518,6 +1660,17 @@ assistant_agent = \"second\"
         let weakenings = record.weakenings();
         assert_eq!(weakenings.len(), 1, "{weakenings:?}");
         assert!(weakenings[0].contains("directory_config.bind_password"));
+        assert!(weakenings[0].contains("secret reference"));
         assert!(!weakenings[0].contains("hunter2"));
+        // A reference is no weakening, and a field the operator lists is one whatever its name.
+        let referenced: UnexRecord = ai6::directorates::m::records::from_json(&serde_json::json!({
+            "secret_fields": ["pin"],
+            "directory_config": {"bind_password": {"provider": "file", "key": "ldap-bind"},
+                                 "pin": "1234"},
+        }))
+        .unwrap();
+        let weakenings = referenced.weakenings();
+        assert_eq!(weakenings.len(), 1, "{weakenings:?}");
+        assert!(weakenings[0].contains("directory_config.pin"));
     }
 }

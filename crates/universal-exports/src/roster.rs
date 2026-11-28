@@ -330,10 +330,16 @@ pub(crate) async fn records(
         records: definitions
             .records
             .into_iter()
-            .map(|(key, definition)| RosterRecord {
+            .map(|(key, mut definition)| RosterRecord {
+                // The revision is of what is stored; what is shown holds no credential.
                 revision: token(Some(&definition)),
                 key,
-                definition,
+                definition: {
+                    if record == ConfigRecord::Unex {
+                        crate::config_secrets::redact_unex(&mut definition);
+                    }
+                    definition
+                },
             })
             .collect(),
     }))
@@ -543,7 +549,7 @@ pub(crate) async fn put_record(
     headers: HeaderMap,
     Path((kind, key)): Path<(String, String)>,
     Query(scoped): Query<Scoped>,
-    Json(definition): Json<serde_json::Value>,
+    Json(mut definition): Json<serde_json::Value>,
 ) -> Result<Response, ApiError> {
     let person = resolve_user(&gateway, bearer(&headers)?).await?;
     let family = family_of(&kind)?;
@@ -570,6 +576,13 @@ pub(crate) async fn put_record(
     let expected = expected_revision(&headers);
     let confirm = scoped.confirm;
     let outcome = tokio::task::spawn_blocking(move || {
+        // A record read and written back sends `<redacted>` where a credential was: that leaves
+        // the stored one as it was.
+        if record == ConfigRecord::Unex
+            && let Some(stored) = stored_record(source.as_ref(), record, &scope, &key)?
+        {
+            crate::config_secrets::keep_redacted_unex(&mut definition, &stored);
+        }
         if !confirm {
             let held = loosened(
                 source.as_ref(),
@@ -1719,6 +1732,87 @@ mod tests {
     }
 
     #[cfg(feature = "cli")]
+    /// The `unex` record's credentials are shown as `<redacted>` wherever it is read, a reference
+    /// as it is, and a record read and written back keeps what it stored.
+    #[tokio::test]
+    async fn a_unex_record_is_shown_without_its_credentials_and_written_back_keeps_them() {
+        use ai6::{ConfigProvider, ConfigRecord, ConfigScope, SqlProvider};
+
+        let roles = CONFIG_ROLES.replace("config:charge", "config:unex");
+        let directory = tempfile::tempdir().unwrap();
+        let location = format!("sqlite:{}", directory.path().join("roster.db").display());
+        let source = Arc::new(SqlProvider::open(&location).unwrap());
+        let served = served_with_roster(&roles, Some(source.clone())).await;
+        let planted = "hunter2-planted";
+        let stored = json!({
+            "secret_fields": ["bind_password"],
+            "directory_config": {"url": "ldaps://dc", "bind_password": planted},
+            "authorizer_config": {"bind_password": {"provider": "file", "key": "ldap-bind"}},
+        });
+        let set = call(
+            &served,
+            &served.operator,
+            reqwest::Method::PUT,
+            "roster/unex/settings?confirm=true",
+            Some(stored.clone()),
+        )
+        .await;
+        assert_eq!(
+            set.status(),
+            StatusCode::OK,
+            "{}",
+            set.text().await.unwrap()
+        );
+        let shown: serde_json::Value = call(
+            &served,
+            &served.viewer,
+            reqwest::Method::GET,
+            "roster/unex",
+            None,
+        )
+        .await
+        .json()
+        .await
+        .unwrap();
+        let definition = shown["records"][0]["definition"].clone();
+        assert!(!shown.to_string().contains(planted), "{shown}");
+        assert_eq!(
+            definition["directory_config"]["bind_password"], "<redacted>",
+            "{shown}"
+        );
+        assert_eq!(definition["directory_config"]["url"], "ldaps://dc");
+        assert_eq!(
+            definition["authorizer_config"]["bind_password"],
+            stored["authorizer_config"]["bind_password"]
+        );
+
+        // The person changes the URL and writes the record back as shown.
+        let mut edited = definition;
+        edited["directory_config"]["url"] = json!("ldaps://other");
+        let set = call(
+            &served,
+            &served.operator,
+            reqwest::Method::PUT,
+            "roster/unex/settings?confirm=true",
+            Some(edited),
+        )
+        .await;
+        assert_eq!(
+            set.status(),
+            StatusCode::OK,
+            "{}",
+            set.text().await.unwrap()
+        );
+        let held = source
+            .definitions(ConfigRecord::Unex, &ConfigScope::Global)
+            .unwrap()
+            .records
+            .remove(0)
+            .1;
+        assert_eq!(held["directory_config"]["bind_password"], planted);
+        assert_eq!(held["directory_config"]["url"], "ldaps://other");
+    }
+
     #[tokio::test]
     async fn the_registry_record_is_listed_set_and_audited_under_its_own_action() {
         use ai6::{ConfigProvider, SqlProvider};

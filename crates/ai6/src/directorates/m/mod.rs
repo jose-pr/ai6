@@ -21,6 +21,7 @@ pub mod limits;
 pub mod mission;
 pub mod placement;
 pub mod promotion;
+pub mod provider_secrets;
 pub mod records;
 pub mod recovery;
 pub mod report_document;
