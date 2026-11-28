@@ -1828,6 +1828,7 @@ pub ai6::directorates::m::mission::Mission::denials: alloc::vec::Vec<ai6::direct
 pub ai6::directorates::m::mission::Mission::exposure: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::mission::Mission::failure: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::mission::Mission::handle: core::option::Option<alloc::string::String>
+pub ai6::directorates::m::mission::Mission::minted_exposure: alloc::vec::Vec<alloc::string::String>
 pub ai6::directorates::m::mission::Mission::mission_id: ai6::directorates::m::identity::MissionId
 pub ai6::directorates::m::mission::Mission::name: core::option::Option<alloc::string::String>
 pub ai6::directorates::m::mission::Mission::operation_id: core::option::Option<alloc::string::String>
@@ -1863,6 +1864,7 @@ pub fn ai6::directorates::m::mission::MissionStore::forget_queued(&mut self, &st
 pub fn ai6::directorates::m::mission::MissionStore::get(&self, &str) -> core::option::Option<&ai6::directorates::m::mission::Mission>
 pub fn ai6::directorates::m::mission::MissionStore::hold_for(&mut self, &str, &str) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::list(&self) -> alloc::vec::Vec<ai6::directorates::m::mission::Mission>
+pub fn ai6::directorates::m::mission::MissionStore::mint_exposure(&mut self, &str, &[alloc::string::String]) -> core::result::Result<(), ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::note_denials(&mut self, &str, alloc::vec::Vec<ai6::directorates::m::mission::Denial>) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
 pub fn ai6::directorates::m::mission::MissionStore::open(impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<Self>
 pub fn ai6::directorates::m::mission::MissionStore::park(&mut self, &str, i64) -> core::result::Result<ai6::directorates::m::mission::Mission, ai6::directorates::m::mission::MissionError>
