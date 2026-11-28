@@ -845,7 +845,7 @@ fn marks_are_kept_in_the_state_directory_and_a_restarted_station_still_refuses()
     );
 }
 
-// Phase 2: the scope a reader means, the move off per-Station seals, and requests answered by a
+// The scope a reader means, the move off per-Station seals, and requests answered by a
 // Station for a gateway that holds no key.
 
 use crate::directorates::q::sealing::{RequestStatus, SecretRequest, ask, status};
